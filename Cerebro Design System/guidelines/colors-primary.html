@@ -1,0 +1,25 @@
+<!-- @dsCard group="Colors" viewport="700x150" subtitle="Cortex ultramarine — the one decisive accent" name="Primary · Cortex" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>body{padding:16px;display:flex;flex-direction:column;gap:12px}
+.ramp{display:flex;border-radius:var(--r-md);overflow:hidden;box-shadow:var(--shadow-xs)}
+.ramp div{flex:1;height:56px;position:relative}
+.ramp span{position:absolute;left:8px;bottom:6px;font-family:var(--font-mono);font-size:10px}
+.use{display:flex;gap:8px;align-items:center}
+.btn{height:32px;padding:0 14px;border-radius:var(--r-md);background:var(--accent);color:#fff;font:inherit;font-weight:600;border:none;display:inline-flex;align-items:center}
+.btn.h{background:var(--accent-hover)}.btn.p{background:var(--accent-press)}
+.sel{height:32px;padding:0 12px;display:inline-flex;align-items:center;gap:8px;background:var(--surface-selected);border:1px solid var(--cortex-200);border-radius:var(--r-md);color:var(--cortex-700);font-weight:500}
+.lnk{font-weight:500}</style></head><body>
+<div class="ramp">
+<div style="background:var(--cortex-50)"><span style="color:var(--cortex-700)">50</span></div>
+<div style="background:var(--cortex-100)"><span style="color:var(--cortex-700)">100</span></div>
+<div style="background:var(--cortex-200)"><span style="color:var(--cortex-700)">200</span></div>
+<div style="background:var(--cortex-300)"><span style="color:var(--cortex-800)">300</span></div>
+<div style="background:var(--cortex-400)"><span style="color:#fff">400</span></div>
+<div style="background:var(--cortex-500)"><span style="color:#fff">500</span></div>
+<div style="background:var(--cortex-600)"><span style="color:#fff">600</span></div>
+<div style="background:var(--cortex-700)"><span style="color:#fff">700</span></div>
+<div style="background:var(--cortex-800)"><span style="color:#fff">800</span></div>
+<div style="background:var(--cortex-900)"><span style="color:#fff">900</span></div>
+</div>
+<div class="use"><button class="btn">Create objective</button><button class="btn h">Hover 600</button><button class="btn p">Press 700</button><span class="sel">Selected · cortex-50</span><a class="lnk" href="#">Text link</a></div>
+</body></html>

@@ -1,0 +1,20 @@
+:root{
+--font-ui:'Instrument Sans',-apple-system,'Segoe UI',sans-serif;
+--font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',monospace;
+/* size/line pairs */
+--text-2xs:11px;--leading-2xs:16px;
+--text-xs:12px;--leading-xs:16px;
+--text-sm:13px;--leading-sm:20px; /* base UI */
+--text-md:14px;--leading-md:20px;
+--text-lg:16px;--leading-lg:24px;
+--text-xl:20px;--leading-xl:28px; /* page titles */
+--text-2xl:24px;--leading-2xl:32px;
+--text-3xl:32px;--leading-3xl:40px; /* display */
+/* weights */
+--w-regular:400; /* @kind font */
+--w-medium:500; /* @kind font */
+--w-semibold:600; /* @kind font */
+--w-bold:700; /* @kind font */
+/* tracking */
+--track-tight:-0.01em;--track-display:-0.02em;--track-caps:0.06em;
+}

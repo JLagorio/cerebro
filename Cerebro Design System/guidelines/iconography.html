@@ -1,0 +1,13 @@
+<!-- @dsCard group="Foundations" viewport="700x170" subtitle="Lucide (CDN substitution) · 1.75 stroke · currentColor" name="Iconography" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>body{padding:16px 20px}
+.grid{display:grid;grid-template-columns:repeat(9,1fr);gap:6px}
+.i{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;border-radius:var(--r-sm)}
+.i svg{width:18px;height:18px;color:var(--n-700)}
+.i span{font-family:var(--font-mono);font-size:9px;color:var(--text-muted);white-space:nowrap}</style></head><body>
+<div class="grid" id="g"></div>
+<script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"></script>
+<script>const icons=[['target','objective'],['trending-up','key result'],['diamond','initiative'],['package','product'],['layout-grid','component'],['flag','release'],['building-2','company'],['circle-user','user'],['sparkles','AI'],['message-square-text','signal'],['radar','finding'],['lightbulb','opportunity'],['table-2','grid'],['calendar-range','timeline'],['kanban','columns'],['layers','spaces'],['sliders-horizontal','controls'],['bookmark','status']];
+document.getElementById('g').innerHTML=icons.map(([n,l])=>`<div class="i"><i data-lucide="${n}"></i><span>${l}</span></div>`).join('');
+lucide.createIcons({attrs:{'stroke-width':1.75}});</script>
+</body></html>

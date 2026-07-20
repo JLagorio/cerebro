@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="Cerebro app shell" description="Full internal product-system app: OKR grid, roadmap timeline, delivery kanban, knowledge, and agent views" -->
+<helmet><script src="./ds-base.js"></script><style>html,body{margin:0;height:100%;overflow:hidden}</style></helmet>
+<x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.CerebroApp" initial-view="{{ initialView }}" hint-size="100%,100vh"></x-import>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;initialView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;okr&quot;,&quot;options&quot;:[&quot;okr&quot;,&quot;roadmap&quot;,&quot;delivery&quot;,&quot;knowledge&quot;,&quot;agenthome&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;description&quot;:&quot;Which view the shell opens on&quot;}}"></script>
+</body>
+</html>

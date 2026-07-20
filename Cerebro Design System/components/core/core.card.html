@@ -1,0 +1,50 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Core controls" subtitle="Buttons, inputs, selection, segments" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{padding:16px;display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}</style></head><body>
+<div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Input, Select, Checkbox, Radio, Switch, SegmentedControl } = window.CerebroDesignSystem_d5fb9b;
+function Demo() {
+  const [layout, setLayout] = React.useState("grid");
+  const [chk, setChk] = React.useState(true);
+  const [sw, setSw] = React.useState(true);
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <div className="row">
+        <Button variant="primary" icon="plus">Create objective</Button>
+        <Button>Cancel</Button>
+        <Button variant="ghost" icon="sliders-horizontal">Board controls</Button>
+        <Button variant="danger">Delete view</Button>
+        <Button variant="primary" size="sm">Save</Button>
+        <Button variant="primary" disabled>Disabled</Button>
+        <IconButton icon="search" label="Search" />
+        <IconButton icon="settings-2" label="Settings" variant="outline" />
+        <IconButton icon="star" label="Favorite" active />
+      </div>
+      <div className="row">
+        <Input icon="search" placeholder="Search features…" width={220} />
+        <Input placeholder="Disabled" width={120} disabled />
+        <Select width={190} options={[{value:"s",label:"Initiative status"},{value:"o",label:"Owner"},{value:"t",label:"Team"}]} />
+      </div>
+      <div className="row" style={{gap:20}}>
+        <Checkbox checked={chk} onChange={setChk} label="Hide empty items" />
+        <Checkbox indeterminate label="All rows" />
+        <Radio name="r" checked label="My items" />
+        <Radio name="r" label="Team items" />
+        <Switch checked={sw} onChange={setSw} label="Enabled" />
+      </div>
+      <div className="row">
+        <SegmentedControl value={layout} onChange={setLayout} options={[{value:"grid",label:"Grid",icon:"table-2"},{value:"timeline",label:"Timeline",icon:"calendar-range"},{value:"columns",label:"Columns",icon:"kanban"}]} />
+        <SegmentedControl size="md" value="daily" options={[{value:"manual",label:"Manual"},{value:"hourly",label:"Hourly"},{value:"daily",label:"Daily"},{value:"weekly",label:"Weekly"}]} />
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body></html>

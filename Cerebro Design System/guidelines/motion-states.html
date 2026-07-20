@@ -1,0 +1,15 @@
+<!-- @dsCard group="Foundations" viewport="700x160" subtitle="Hover wash · press · selection · focus ring" name="Interaction states" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
+<style>body{padding:16px 20px;display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:10px}
+.it{flex:1;height:36px;border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);font-weight:500;color:var(--text-secondary);border:1px solid transparent}
+.note{font-size:var(--text-2xs);color:var(--text-muted)}</style></head><body>
+<div class="row">
+<div class="it">Rest</div>
+<div class="it" style="background:var(--n-50)">Hover · n-50</div>
+<div class="it" style="background:var(--n-100)">Press · n-100</div>
+<div class="it" style="background:var(--surface-selected);color:var(--cortex-700);border-color:var(--cortex-200)">Selected</div>
+<div class="it" style="border:2px solid var(--border-focus);box-shadow:var(--ring)">Focus</div>
+</div>
+<div class="note">Motion: hovers 120ms ease-out · panels 180ms slide+fade (8px) · no bounces, no scaling. Text never changes color on hover; backgrounds wash instead.</div>
+</body></html>
