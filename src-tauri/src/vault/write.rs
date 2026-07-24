@@ -1,8 +1,10 @@
 //! Disk writes: frontmatter patching, note bodies, note creation, views.
 //! All writes go through `write_file` so the watcher (Task 8) can register
-//! own-writes for suppression in one place.
+//! own-writes for suppression in one place. All caller-supplied paths are
+//! validated by `safe_join`/`safe_component` — Task 7 exposes these functions
+//! over IPC, so vault containment is enforced here, not in the callers.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use super::parse;
 
@@ -22,8 +24,38 @@ fn write_file(abs: &Path, content: &str) -> Result<(), String> {
     std::fs::write(abs, content).map_err(|e| e.to_string())
 }
 
+/// Join a vault-relative path onto the vault root, rejecting empty paths,
+/// absolute paths (`Path::join` would replace the base!), and any `..`
+/// traversal, so no read or write can escape the vault.
+fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
+    let contained = !rel.is_empty()
+        && Path::new(rel)
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    if contained {
+        Ok(vault.join(rel))
+    } else {
+        Err(format!("path escapes the vault: {rel:?}"))
+    }
+}
+
+/// Require a single normal path component: non-empty, no separators, no
+/// traversal. Used for note slugs and view ids.
+fn safe_component(kind: &str, value: &str) -> Result<(), String> {
+    let mut components = Path::new(value).components();
+    let single_normal = matches!(
+        (components.next(), components.next()),
+        (Some(Component::Normal(_)), None)
+    );
+    if single_normal && !value.contains(['/', '\\']) {
+        Ok(())
+    } else {
+        Err(format!("invalid {kind}: {value:?}"))
+    }
+}
+
 fn read_file(vault: &Path, rel: &str) -> Result<String, String> {
-    std::fs::read_to_string(vault.join(rel)).map_err(|e| format!("{rel}: {e}"))
+    std::fs::read_to_string(safe_join(vault, rel)?).map_err(|e| format!("{rel}: {e}"))
 }
 
 /// Recompose a file from a raw frontmatter block (with trailing newline) and
@@ -71,6 +103,8 @@ fn json_to_yaml(value: &serde_json::Value) -> serde_yaml::Value {
 /// CRLF/BOM/trailing-whitespace-fence files (see the round-trip caveat at the
 /// top of parse.rs) are normalized: the frontmatter block is reserialized and
 /// the fences rewritten in LF form. The body is preserved byte-for-byte.
+/// YAML comments and the original scalar quoting style inside the frontmatter
+/// block are not preserved through reserialization.
 pub fn update_frontmatter(
     vault: &Path,
     rel: &str,
@@ -92,14 +126,14 @@ pub fn update_frontmatter(
         }
     }
     let new_block = serialize_mapping(&mapping)?;
-    write_file(&vault.join(rel), &compose(new_block.as_deref(), body))
+    write_file(&safe_join(vault, rel)?, &compose(new_block.as_deref(), body))
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
 pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
     let content = read_file(vault, rel)?;
     let (block, _) = parse::split_frontmatter(&content);
-    write_file(&vault.join(rel), &compose(block, body))
+    write_file(&safe_join(vault, rel)?, &compose(block, body))
 }
 
 /// Return the note body only (frontmatter stripped).
@@ -134,6 +168,8 @@ pub fn create_note(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<String, String> {
+    safe_join(vault, folder)?; // folder must stay inside the vault
+    safe_component("slug", slug)?;
     let rel = unique_rel_path(vault, folder, slug);
     let mut mapping = serde_yaml::Mapping::new();
     for (k, v) in frontmatter {
@@ -156,17 +192,22 @@ pub fn create_note(
     Ok(rel)
 }
 
+/// Replace the H1 line that `parse::extract_h1_title` would read the title
+/// from (fenced/indented code lines are never the H1), or prepend one when
+/// the body has no real H1. Only the H1 line itself is spliced; every other
+/// byte of the body (including CRLF line endings) is preserved.
 fn replace_h1(body: &str, title: &str) -> String {
     let h1_line = format!("# {title}");
-    let mut lines: Vec<&str> = body.lines().collect();
-    match lines.iter().position(|l| l.trim_start().starts_with("# ")) {
-        Some(idx) => {
-            lines[idx] = &h1_line;
-            let mut out = lines.join("\n");
-            if body.ends_with('\n') {
-                out.push('\n');
-            }
-            out
+    match parse::first_h1_line_start(body) {
+        Some(start) => {
+            let rest = &body[start..];
+            // End of the H1 text, excluding the line terminator (LF or CRLF).
+            let end = match rest.find('\n') {
+                Some(i) if rest[..i].ends_with('\r') => start + i - 1,
+                Some(i) => start + i,
+                None => body.len(),
+            };
+            format!("{}{h1_line}{}", &body[..start], &body[end..])
         }
         None => format!("{h1_line}\n\n{body}"),
     }
@@ -177,7 +218,7 @@ pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String
     let content = read_file(vault, rel)?;
     let (block, body) = parse::split_frontmatter(&content);
     let new_body = replace_h1(body, title);
-    write_file(&vault.join(rel), &compose(block, &new_body))
+    write_file(&safe_join(vault, rel)?, &compose(block, &new_body))
 }
 
 /// List `views/*.yml` as raw strings, sorted by id (filename stem).
@@ -205,6 +246,7 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
 
 /// Write `views/<id>.yml` verbatim, creating `views/` if needed.
 pub fn save_view(vault: &Path, id: &str, yaml: &str) -> Result<(), String> {
+    safe_component("view id", id)?;
     write_file(&vault.join("views").join(format!("{id}.yml")), yaml)
 }
 
@@ -359,6 +401,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // set_note_title must agree with parse::extract_h1_title about which line
+    // is the H1: fenced/indented code lines are never the title.
+    #[test]
+    fn set_note_title_skips_h1_inside_code_fences() {
+        let vault = testutil::temp_vault("wfm-title-fence");
+        testutil::write(
+            &vault,
+            "items/fenced.md",
+            "---\ntype: Work item\n---\n\nintro\n\n```bash\n# a comment in code\necho hi\n```\n\n# Real title\n\nBody stays.\n",
+        );
+        set_note_title(&vault, "items/fenced.md", "Renamed").unwrap();
+        assert_eq!(
+            read(&vault, "items/fenced.md"),
+            "---\ntype: Work item\n---\n\nintro\n\n```bash\n# a comment in code\necho hi\n```\n\n# Renamed\n\nBody stays.\n"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn set_note_title_prepends_h1_when_only_fenced_h1_exists() {
+        let vault = testutil::temp_vault("wfm-title-fence-only");
+        testutil::write(&vault, "items/code.md", "```\n# only in code\n```\n");
+        set_note_title(&vault, "items/code.md", "Now titled").unwrap();
+        assert_eq!(read(&vault, "items/code.md"), "# Now titled\n\n```\n# only in code\n```\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn set_note_title_preserves_crlf_body_bytes_outside_the_h1_line() {
+        let vault = testutil::temp_vault("wfm-title-crlf");
+        testutil::write(&vault, "items/crlf-title.md", "# Old title\r\n\r\nBody stays.\r\n");
+        set_note_title(&vault, "items/crlf-title.md", "New title").unwrap();
+        assert_eq!(read(&vault, "items/crlf-title.md"), "# New title\r\n\r\nBody stays.\r\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn views_round_trip_as_raw_yaml() {
         let vault = testutil::temp_vault("wfm-views");
@@ -370,6 +448,57 @@ mod tests {
         assert_eq!(views[0].id, "all-items");
         assert_eq!(views[0].yaml, "name: All items\npresentation:\n  type: list\n");
         assert_eq!(views[1].id, "board");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Containment: rel paths, folders, slugs, and view ids reach Tauri IPC
+    // unchanged (Task 7), so escapes must be rejected here.
+    #[test]
+    fn writes_reject_paths_that_escape_the_vault() {
+        let vault = vault_with_note("wfm-escape");
+        // A real file one level above the vault root: without containment,
+        // "../<name>" reaches and modifies it.
+        let victim = vault.parent().unwrap().join(format!("cerebro-victim-{}.md", std::process::id()));
+        const VICTIM: &str = "---\nsafe: true\n---\nUntouched.\n";
+        std::fs::write(&victim, VICTIM).unwrap();
+        let victim_rel = format!("../{}", victim.file_name().unwrap().to_str().unwrap());
+        let hacked = patch(&[("hacked", serde_json::json!(true))]);
+
+        assert!(update_frontmatter(&vault, &victim_rel, &hacked).is_err());
+        assert!(save_note(&vault, &victim_rel, "hacked\n").is_err());
+        assert!(set_note_title(&vault, &victim_rel, "Hacked").is_err());
+        assert!(read_note(&vault, &victim_rel).is_err());
+        // Absolute paths must be rejected too: Path::join replaces the base.
+        let abs = victim.to_str().unwrap();
+        assert!(update_frontmatter(&vault, abs, &hacked).is_err());
+        assert!(read_note(&vault, abs).is_err());
+        // Traversal buried mid-path is still traversal.
+        assert!(read_note(&vault, "items/../../x.md").is_err());
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), VICTIM);
+        let _ = std::fs::remove_file(&victim);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn create_note_rejects_escaping_folder_and_non_component_slug() {
+        let vault = testutil::temp_vault("wfm-create-escape");
+        let fm = patch(&[]);
+        assert!(create_note(&vault, "../escaped", "note", &fm, "x\n").is_err());
+        assert!(create_note(&vault, "/tmp", "note", &fm, "x\n").is_err());
+        assert!(create_note(&vault, "items", "../sneaky", &fm, "x\n").is_err());
+        assert!(create_note(&vault, "items", "a/../b", &fm, "x\n").is_err());
+        assert!(create_note(&vault, "items", "a/b", &fm, "x\n").is_err());
+        assert!(create_note(&vault, "items", "", &fm, "x\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn save_view_rejects_non_component_ids() {
+        let vault = testutil::temp_vault("wfm-view-escape");
+        assert!(save_view(&vault, "../../evil-view", "name: Evil\n").is_err());
+        assert!(save_view(&vault, "nested/id", "name: Evil\n").is_err());
+        assert!(save_view(&vault, "", "name: Evil\n").is_err());
         let _ = std::fs::remove_dir_all(&vault);
     }
 

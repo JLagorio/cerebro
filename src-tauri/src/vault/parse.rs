@@ -103,12 +103,19 @@ pub fn extract_outgoing_links(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Text of the first H1 (`# ...`) line anywhere in the body. Lines inside
-/// ``` fenced code blocks and indented code lines (>= 4 leading spaces) are
-/// skipped so code comments are never mistaken for a title.
-pub fn extract_h1_title(body: &str) -> Option<String> {
+/// Byte offset of the start of the line `extract_h1_title` reads the title
+/// from: the first H1 (`# ...`) line with non-empty text, skipping lines
+/// inside ``` fenced code blocks and indented code lines (>= 4 leading
+/// spaces). Shared with `write::replace_h1` so reading and rewriting the
+/// title always agree on which line is the H1.
+pub fn first_h1_line_start(body: &str) -> Option<usize> {
     let mut in_fence = false;
-    for line in body.lines() {
+    let mut offset = 0;
+    for raw in body.split_inclusive('\n') {
+        let start = offset;
+        offset += raw.len();
+        let line = raw.strip_suffix('\n').unwrap_or(raw);
+        let line = line.strip_suffix('\r').unwrap_or(line);
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
             in_fence = !in_fence;
@@ -118,13 +125,21 @@ pub fn extract_h1_title(body: &str) -> Option<String> {
             continue;
         }
         if let Some(title) = trimmed.strip_prefix("# ") {
-            let title = title.trim();
-            if !title.is_empty() {
-                return Some(title.to_string());
+            if !title.trim().is_empty() {
+                return Some(start);
             }
         }
     }
     None
+}
+
+/// Text of the first H1 (`# ...`) line anywhere in the body. Lines inside
+/// ``` fenced code blocks and indented code lines (>= 4 leading spaces) are
+/// skipped so code comments are never mistaken for a title.
+pub fn extract_h1_title(body: &str) -> Option<String> {
+    let start = first_h1_line_start(body)?;
+    let line = body[start..].lines().next()?;
+    Some(line.trim().strip_prefix("# ")?.trim().to_string())
 }
 
 /// Humanize a filename stem: `fix-login-flow` → `Fix login flow`.
@@ -310,6 +325,14 @@ mod tests {
         assert_eq!(extract_h1_title(body), Some("Real title".to_string()));
         // A fence-only body with no real H1 yields no title.
         assert_eq!(extract_h1_title("```\n# only in code\n```\n"), None);
+    }
+
+    #[test]
+    fn first_h1_line_start_returns_byte_offset_of_the_title_line() {
+        assert_eq!(first_h1_line_start("\n# Ship it\n"), Some(1));
+        // "```\n" (4) + "# code\n" (7) + "```\n" (4) = 15.
+        assert_eq!(first_h1_line_start("```\n# code\n```\n# Real\n"), Some(15));
+        assert_eq!(first_h1_line_start("no title\n"), None);
     }
 
     #[test]
