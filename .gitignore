@@ -2,3 +2,9 @@
 
 # Vendored reference copy of the Tolaria OSS repo (architecture reference only)
 tolaria-main/
+
+# App build artifacts
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
