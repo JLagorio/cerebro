@@ -22,8 +22,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 9 Demo vault generator | 3558–4057 | ✅ done, combined review ✓ (scanner probe: 57/57 parse clean, 68/68 wikilinks resolve, deterministic) | 00fe705 |
 | 10 ipc/mockParse/mockIpc | 4058–4763 | ✅ done, combined review ✓ (parity matrix 17/17 after fixes: createNote writes, 64 KB cap boundary, fence-aware setNoteTitle; re-verified byte-identical vs Rust) | e381405 + f86eaf3 + 58c7d9d |
 | 11 vaultStore | 4764–5079 | ✅ done, combined review ✓ (1 Important fixed: createItem now rescans unconditionally — Tauri own-write suppression discards create events; + undefined→null normalization, watcher bind latch; re-verified) | 50f6b22 + 66b3d25 |
-| 12 wikilink/normalize | 5080–5429 | ⬜ next | |
-| 13 schema | 5430–6008 | ⬜ | |
+| 12 wikilink/normalize | 5080–5429 | ✅ done, combined review ✓ (clean; 3-way classifier parity verified) | 10cac1a |
+| 13 schema | 5430–6008 | ⬜ next | |
 | 14 grouping | 6009–6311 | ⬜ | |
 | 15 views/viewFilters | 6312–6805 | ⬜ | |
 | 16 itemKeys/quickOpenScore | 6806–7026 | ⬜ | |
@@ -63,3 +63,4 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 - IPC layer (spec-verbatim, Task 7 review): sync commands (scan_vault etc.) run on main thread — stalls UI on large vaults, consider `#[tauri::command(async)]`; pick_vault discards picked folder if config persist fails; `to_string_lossy` on picked path
 - Watcher (Task 8 review, minors): own-write registration races event delivery (worst case one spurious idempotent rescan); `.MD`/`.YML` case-sensitive; mutex poisoning silently disables suppression; no logging on emit/callback Err; ≤100ms double-emit window on watcher replace
 - vaultStore (Task 11 review, minors): patchFrontmatter failures resolve silently — Task 17+ should surface write errors via toasts; interleaved slow-write transient clobber (self-healing, mock-unreachable); concurrent openVault calls could double-bind the vault-changed listener (duplicate idempotent rescans only)
+- wikilink/normalize (Task 12 review, minors, plan-verbatim): normalizeFrontmatter flattens nested non-wikilink arrays to [null]; resolveTarget("x.md") never matches (targets are stems) — Task 13+ authors take note
