@@ -1,35 +1,23 @@
 import { Icon } from '@/components/ui/Icon';
-import { Tooltip } from '@/components/ui/Tooltip';
 import { useNavStore } from '@/stores/navStore';
-
-const COMING_SOON = [
-  { icon: 'files', label: 'Docs' },
-  { icon: 'zap', label: 'Agent' },
-  { icon: 'library', label: 'Library' },
-];
 
 function RailButton({
   icon,
   label,
   active = false,
-  disabled = false,
   onClick,
 }: {
   icon: string;
   label: string;
   active?: boolean;
-  disabled?: boolean;
   onClick?: () => void;
 }) {
-  const tone = disabled
-    ? 'cursor-default text-[var(--n-300)]'
-    : active
-      ? 'bg-[var(--cortex-50)] text-[var(--cortex-600)]'
-      : 'text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]';
+  const tone = active
+    ? 'bg-[var(--cortex-50)] text-[var(--cortex-600)]'
+    : 'text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]';
   return (
     <button
       type="button"
-      disabled={disabled}
       onClick={onClick}
       className={`flex w-11 flex-col items-center gap-[3px] rounded-lg border-0 bg-transparent pb-[5px] pt-1.5 text-[10px] font-medium ${tone}`}
     >
@@ -50,16 +38,11 @@ export function Rail() {
         c.
       </div>
       <RailButton
-        icon="home"
+        icon="house"
         label="Home"
         active={!settingsActive}
         onClick={() => navigate({ kind: 'home' })}
       />
-      {COMING_SOON.map((item) => (
-        <Tooltip key={item.label} content="Coming soon">
-          <RailButton icon={item.icon} label={item.label} disabled />
-        </Tooltip>
-      ))}
       <div className="flex-1" />
       <RailButton
         icon="settings"
