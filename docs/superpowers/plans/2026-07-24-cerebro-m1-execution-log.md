@@ -15,8 +15,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 3 DS primitives (17) | 829–1580 | ✅ done, spec ✓, quality ✓ | 5d36fe0 |
 | — vitest glob infra fix | — | ✅ | 3901f1e |
 | 4 Rust parser | 1581–2202 | ✅ done, spec ✓, quality ✓ (review found 2 Important + 6 Minor; 7 fixed, 1 deferred; fixes re-verified) | da50e24 + 8db3664 |
-| 5 Rust scanner | 2203–2467 | ⬜ next | |
-| 6 Rust writes | 2468–2938 | ⬜ | |
+| 5 Rust scanner | 2203–2467 | ✅ done, combined review ✓ (all findings minor, deferred) | 2ef3226 |
+| 6 Rust writes | 2468–2938 | ⬜ next | |
 | 7 Config + command wiring | 2939–3214 | ⬜ | |
 | 8 Watcher | 3215–3557 | ⬜ | |
 | 9 Demo vault generator | 3558–4057 | ⬜ | |
@@ -56,3 +56,4 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 - Consider @testing-library/jest-dom for later tests; App.test.tsx tautological assertion note
 - Parser: non-string `type` frontmatter value (e.g. `type: 123`) is silently dropped from both entry_type and properties (plan-verbatim; Task 4 quality finding 6, deferred) — consider keeping it in properties
 - Parser: within-cap YAML flow-nesting bombs (~40 KB) can still take ~3 s before erroring (bounded, acceptable)
+- Scanner (spec-verbatim, Task 5 review): one unreadable/non-UTF8 .md aborts the whole scan (consider degrading to per-file parse_error); `.MD` uppercase skipped; symlinked notes skipped; `views/`/`attachments/` skipped at any depth; testutil temp dirs leak on failed asserts
