@@ -1,1 +1,4 @@
 .DS_Store
+
+# Vendored reference copy of the Tolaria OSS repo (architecture reference only)
+tolaria-main/
