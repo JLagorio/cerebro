@@ -65,7 +65,23 @@ pub fn is_suppressed(path: &Path) -> bool {
         .is_some_and(|t| own_write_active(*t, Instant::now(), OWN_WRITE_WINDOW))
 }
 
+/// True when notify reports the OS event queue overflowed and changes were
+/// lost (`Flag::Rescan`). Such events carry a directory path (macOS FSEvents)
+/// or no path at all (Linux inotify), so per-path relevance checks would drop
+/// them; they must force a `vault-changed` emit instead.
+pub fn is_forced_rescan(event: &notify::Event) -> bool {
+    event.need_rescan()
+}
+
 const POLL: Duration = Duration::from_millis(100);
+
+/// Signal from the notify callback to the debounce thread.
+enum WatchSignal {
+    /// Changed paths, subject to relevance and own-write suppression checks.
+    Paths(Vec<PathBuf>),
+    /// OS events were lost (overflow); emit unconditionally after debounce.
+    Force,
+}
 
 /// Managed Tauri state holding the active watcher. Replacing it drops the
 /// previous watcher, which disconnects its channel and ends its thread.
@@ -78,13 +94,17 @@ pub fn start(app: tauri::AppHandle, state: &WatcherState, vault: PathBuf) -> Res
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
     }
-    let (tx, rx) = mpsc::channel::<Vec<PathBuf>>();
+    let (tx, rx) = mpsc::channel::<WatchSignal>();
     let mut watcher = recommended_watcher(move |result: Result<notify::Event, notify::Error>| {
         if let Ok(event) = result {
+            if is_forced_rescan(&event) {
+                let _ = tx.send(WatchSignal::Force);
+                return;
+            }
             if matches!(event.kind, EventKind::Access(_)) {
                 return;
             }
-            let _ = tx.send(event.paths);
+            let _ = tx.send(WatchSignal::Paths(event.paths));
         }
     })
     .map_err(|e| e.to_string())?;
@@ -109,12 +129,16 @@ fn relevant_change(vault: &Path, path: &Path) -> bool {
 
 /// Collect change events; after 350 ms of quiet, emit one `vault-changed`.
 /// Exits when the watcher (and thus the channel sender) is dropped.
-fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Vec<PathBuf>>) {
+fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<WatchSignal>) {
     let mut pending = false;
     let mut last_event: Option<Instant> = None;
     loop {
         match rx.recv_timeout(POLL) {
-            Ok(paths) => {
+            Ok(WatchSignal::Force) => {
+                pending = true;
+                last_event = Some(Instant::now());
+            }
+            Ok(WatchSignal::Paths(paths)) => {
                 if paths.iter().any(|p| relevant_change(&vault, p)) {
                     pending = true;
                     last_event = Some(Instant::now());
@@ -167,6 +191,23 @@ mod tests {
         note_own_write(&file);
         assert!(is_suppressed(&file));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn overflow_rescan_events_force_an_emit() {
+        use notify::event::{CreateKind, Flag};
+        // Linux inotify overflow: EventKind::Other, no path, Flag::Rescan.
+        let linux_overflow = notify::Event::new(EventKind::Other).set_flag(Flag::Rescan);
+        assert!(is_forced_rescan(&linux_overflow));
+        // macOS FSEvents overflow: directory path attached, Flag::Rescan.
+        let mac_overflow = notify::Event::new(EventKind::Other)
+            .add_path(PathBuf::from("/some/vault"))
+            .set_flag(Flag::Rescan);
+        assert!(is_forced_rescan(&mac_overflow));
+        // Ordinary file events never force an unconditional emit.
+        let plain = notify::Event::new(EventKind::Create(CreateKind::File))
+            .add_path(PathBuf::from("/some/vault/items/a.md"));
+        assert!(!is_forced_rescan(&plain));
     }
 
     #[test]
