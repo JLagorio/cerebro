@@ -16,6 +16,7 @@ import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import * as mockBackend from '@/lib/mockIpc';
 import { resetMockFs } from '@/lib/mockIpc';
+import { useUiStore } from '@/stores/uiStore';
 import { getSchema, useEntry, useVaultStore } from '@/stores/vaultStore';
 
 function findEntry(path: string) {
@@ -71,6 +72,18 @@ describe('vaultStore', () => {
     await useVaultStore.getState().openVault('/demo-vault');
     await useVaultStore.getState().patchFrontmatter('items/fld-1.md', { due: null });
     expect(findEntry('items/fld-1.md')?.properties).not.toHaveProperty('due');
+  });
+
+  it('patchFrontmatter surfaces a failed disk write as a toast and reverts', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    useUiStore.setState({ toasts: [] });
+    vi.mocked(ipc.updateFrontmatter).mockRejectedValueOnce(new Error('disk full'));
+    await useVaultStore.getState().patchFrontmatter('items/fld-1.md', { status: 'done' });
+    // Disk truth wins: the optimistic update is reverted by the rescan.
+    expect(findEntry('items/fld-1.md')?.properties.status).toBe('progress');
+    const toasts = useUiStore.getState().toasts;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].message).toBe("Couldn't save changes to items/fld-1.md");
   });
 
   it('createItem returns the new path and the entry appears after rescan', async () => {

@@ -4,6 +4,7 @@ import type { Entry, Scalar, Schema, ViewFile } from '@/engine/types';
 import { parseViewYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
 import { extractWikilinks } from '@/lib/mockParse';
+import { useUiStore } from '@/stores/uiStore';
 
 export interface VaultState {
   vaultPath: string | null;
@@ -109,6 +110,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       // classifies values exactly like the parser will on the next scan.
       if (!inTauri()) await get().rescan();
     } catch {
+      // Deviation (Task 17, per execution-log deferred note from Task 11
+      // review): surface silent write failures to the user via a toast.
+      useUiStore.getState().toast(`Couldn't save changes to ${path}`);
       await get().rescan(); // disk truth wins: revert the optimistic update
     }
   },
