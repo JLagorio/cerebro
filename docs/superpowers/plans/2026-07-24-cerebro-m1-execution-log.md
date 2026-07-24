@@ -25,7 +25,7 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 12 wikilink/normalize | 5080–5429 | ✅ done, combined review ✓ (clean; 3-way classifier parity verified) | 10cac1a |
 | 13 schema | 5430–6008 | ✅ done, combined review ✓ (clean; real-vault probe 24/24, cycle-safe) | 71c97b7 |
 | 14 grouping | 6009–6311 | ✅ done, combined review ✓ (verbatim; real-vault probes conserve all entries) | 57d11fc |
-| 15 views/viewFilters | 6312–6805 | ⬜ next | |
+| 15 views/viewFilters | 6312–6805 | 🟡 implemented (178 TS tests green, placeholder swapped, vaultStore green), **combined review NOT run** (session limit hit at review launch — re-run the combined review first on resume) | 4c874fb |
 | 16 itemKeys/quickOpenScore | 6806–7026 | ⬜ | |
 | 17 stores + shell | 7027–7599 | ⬜ | |
 | 18 Sidebar + HomePage | 7600–8365 | ⬜ | |
