@@ -2,3 +2,7 @@
 
 pub mod entry;
 pub mod parse;
+pub mod scan;
+
+#[cfg(test)]
+pub mod testutil;
