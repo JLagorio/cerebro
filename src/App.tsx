@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
 import { HomePage } from '@/pages/HomePage';
+import { ProjectPage } from '@/pages/ProjectPage';
+import { SpacePage } from '@/pages/SpacePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { getLastVault, pickVault } from '@/lib/ipc';
@@ -22,9 +24,9 @@ function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
     case 'home': return <HomePage />;
-    case 'space': return <CanvasPlaceholder label="Space" />;
-    case 'project': return <CanvasPlaceholder label="Project" />;
-    case 'view': return <CanvasPlaceholder label="View" />;
+    case 'space': return <SpacePage path={selection.path} />;
+    case 'project': return <ProjectPage selection={selection} />;
+    case 'view': return <ProjectPage selection={selection} />;
     case 'settings': return <CanvasPlaceholder label="Settings" />;
   }
 }
