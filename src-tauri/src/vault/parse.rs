@@ -4,28 +4,32 @@
 ///
 /// The block is the raw text between the opening `---` fence and the closing
 /// fence line, including its trailing newline. The body is everything after
-/// the closing fence line (one newline after the fence is consumed), so
-/// `format!("---\n{block}---\n{body}")` reproduces the original bytes.
+/// the closing fence line (one newline after the fence is consumed).
+///
+/// Round-trip caveat: only for LF-only files with no BOM and a bare `---`
+/// closing fence does `format!("---\n{block}---\n{body}")` reproduce the
+/// original bytes. CRLF files do NOT round-trip (the fence lines' `\r` is
+/// consumed here and would be rewritten as LF); likewise a stripped leading
+/// BOM and any trailing whitespace on the closing fence are not preserved.
+/// `update_frontmatter` (Task 6) must handle these cases deliberately rather
+/// than assuming byte-for-byte reconstruction.
 pub fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
+    let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let Some(rest) = content
         .strip_prefix("---\n")
         .or_else(|| content.strip_prefix("---\r\n"))
     else {
         return (None, content);
     };
-    if let Some(body) = rest.strip_prefix("---\n") {
+    // Fast path: closing fence immediately follows (empty frontmatter).
+    if let Some(body) = closing_fence_body(rest) {
         return (Some(""), body);
     }
     let mut search = 0;
     while let Some(pos) = rest[search..].find("\n---") {
         let idx = search + pos;
-        let after = &rest[idx + 4..];
-        if after.is_empty() || after.starts_with('\n') || after.starts_with("\r\n") {
+        if let Some(body) = closing_fence_body(&rest[idx + 1..]) {
             let block = &rest[..idx + 1];
-            let body = after
-                .strip_prefix("\r\n")
-                .or_else(|| after.strip_prefix('\n'))
-                .unwrap_or(after);
             return (Some(block), body);
         }
         search = idx + 1;
@@ -33,11 +37,35 @@ pub fn split_frontmatter(content: &str) -> (Option<&str>, &str) {
     (None, content)
 }
 
+/// If `s` starts with a closing fence line — `---`, optional trailing
+/// spaces/tabs, then a newline or end of input — return the body after it.
+fn closing_fence_body(s: &str) -> Option<&str> {
+    let after = s.strip_prefix("---")?;
+    let trimmed = after.trim_start_matches([' ', '\t']);
+    if trimmed.is_empty() {
+        Some(trimmed)
+    } else {
+        trimmed.strip_prefix("\r\n").or_else(|| trimmed.strip_prefix('\n'))
+    }
+}
+
+/// Frontmatter blocks larger than this are rejected without parsing.
+/// Guards against pathological flow-nested YAML that stalls serde_yaml
+/// quadratically; real frontmatter is orders of magnitude smaller.
+const MAX_FRONTMATTER_LEN: usize = 64 * 1024;
+
 /// Parse a frontmatter block into a YAML mapping. Empty block → empty
-/// mapping. Malformed YAML or non-mapping YAML → Err with the message.
+/// mapping. Malformed YAML, non-mapping YAML, or a block over
+/// `MAX_FRONTMATTER_LEN` bytes → Err with the message.
 pub fn parse_frontmatter(block: &str) -> Result<serde_yaml::Mapping, String> {
     if block.trim().is_empty() {
         return Ok(serde_yaml::Mapping::new());
+    }
+    if block.len() > MAX_FRONTMATTER_LEN {
+        return Err(format!(
+            "frontmatter too large ({} bytes, max {MAX_FRONTMATTER_LEN})",
+            block.len()
+        ));
     }
     let value: serde_yaml::Value = serde_yaml::from_str(block).map_err(|e| e.to_string())?;
     match value {
@@ -75,15 +103,28 @@ pub fn extract_outgoing_links(body: &str) -> Vec<String> {
         .collect()
 }
 
-/// Text of the first H1 (`# ...`) line anywhere in the body.
+/// Text of the first H1 (`# ...`) line anywhere in the body. Lines inside
+/// ``` fenced code blocks and indented code lines (>= 4 leading spaces) are
+/// skipped so code comments are never mistaken for a title.
 pub fn extract_h1_title(body: &str) -> Option<String> {
-    body.lines().find_map(|line| {
-        line.trim()
-            .strip_prefix("# ")
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(str::to_string)
-    })
+    let mut in_fence = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence || line.starts_with("    ") {
+            continue;
+        }
+        if let Some(title) = trimmed.strip_prefix("# ") {
+            let title = title.trim();
+            if !title.is_empty() {
+                return Some(title.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Humanize a filename stem: `fix-login-flow` → `Fix login flow`.
@@ -105,14 +146,28 @@ pub fn humanize_stem(stem: &str) -> String {
 }
 
 /// First 160 chars of the body with markdown syntax roughly stripped.
+/// Content inside ``` fenced code blocks is excluded, as are lines that are
+/// empty after stripping (e.g. `***` thematic breaks).
 pub fn extract_snippet(body: &str) -> String {
-    let text: String = body
+    let mut in_fence = false;
+    let text = body
         .lines()
-        .map(str::trim)
-        .filter(|l| {
-            !l.is_empty() && !l.starts_with('#') && !l.starts_with("```") && !l.starts_with("---")
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.starts_with("```") {
+                in_fence = !in_fence;
+                return None;
+            }
+            if in_fence || line.is_empty() || line.starts_with('#') || line.starts_with("---") {
+                return None;
+            }
+            let stripped = strip_inline_markdown(line);
+            if stripped.trim().is_empty() {
+                None
+            } else {
+                Some(stripped)
+            }
         })
-        .map(strip_inline_markdown)
         .collect::<Vec<_>>()
         .join(" ");
     text.trim().chars().take(160).collect()
@@ -250,6 +305,55 @@ mod tests {
     }
 
     #[test]
+    fn h1_ignores_headings_inside_code_fences() {
+        let body = "intro\n\n```bash\n# a comment in code\necho hi\n```\n\n# Real title\n";
+        assert_eq!(extract_h1_title(body), Some("Real title".to_string()));
+        // A fence-only body with no real H1 yields no title.
+        assert_eq!(extract_h1_title("```\n# only in code\n```\n"), None);
+    }
+
+    #[test]
+    fn h1_ignores_indented_code_lines() {
+        let body = "intro\n\n    # indented code comment\n\n# Real title\n";
+        assert_eq!(extract_h1_title(body), Some("Real title".to_string()));
+        assert_eq!(extract_h1_title("    # only indented code\n"), None);
+    }
+
+    #[test]
+    fn bom_is_stripped_before_frontmatter_detection() {
+        let content = "\u{feff}---\ntype: Work item\n---\nBody.\n";
+        let (block, body) = split_frontmatter(content);
+        assert_eq!(block, Some("type: Work item\n"));
+        assert_eq!(body, "Body.\n");
+    }
+
+    #[test]
+    fn crlf_empty_frontmatter_fast_path() {
+        let (block, body) = split_frontmatter("---\r\n---\r\n# Title\r\n");
+        assert_eq!(block, Some(""));
+        assert_eq!(body, "# Title\r\n");
+    }
+
+    #[test]
+    fn closing_fence_tolerates_trailing_whitespace() {
+        let (block, body) = split_frontmatter("---\ntype: Work item\n--- \nBody.\n");
+        assert_eq!(block, Some("type: Work item\n"));
+        assert_eq!(body, "Body.\n");
+        let (block, body) = split_frontmatter("---\ntype: Work item\n---\t\nBody.\n");
+        assert_eq!(block, Some("type: Work item\n"));
+        assert_eq!(body, "Body.\n");
+    }
+
+    #[test]
+    fn oversized_frontmatter_is_rejected_before_yaml_parse() {
+        let block = format!("key: {}\n", "x".repeat(65 * 1024));
+        let err = parse_frontmatter(&block).unwrap_err();
+        assert!(err.contains("frontmatter too large"), "unexpected error: {err}");
+        // At the boundary (or below) parsing still proceeds normally.
+        assert!(parse_frontmatter("key: value\n").is_ok());
+    }
+
+    #[test]
     fn humanizes_filename_stems() {
         // Sentence case, matching mockParse.ts `humanize` (cross-language
         // parity; see the parity fixtures in entry.rs and mockParse.test.ts).
@@ -264,6 +368,17 @@ mod tests {
         assert_eq!(extract_snippet(body), "Some bold text with a nice link.");
         let long = format!("# H\n\n{}", "x".repeat(400));
         assert_eq!(extract_snippet(&long).chars().count(), 160);
+    }
+
+    #[test]
+    fn snippet_skips_fenced_code_content() {
+        let body = "intro\n\n```\n# comment in code\ncode line\n```\n\noutro\n";
+        assert_eq!(extract_snippet(body), "intro outro");
+    }
+
+    #[test]
+    fn snippet_drops_lines_empty_after_stripping() {
+        assert_eq!(extract_snippet("alpha\n***\nbeta\n"), "alpha beta");
     }
 
     #[test]

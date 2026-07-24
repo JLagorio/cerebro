@@ -171,6 +171,17 @@ mod tests {
     }
 
     #[test]
+    fn crlf_file_extracts_type_and_title() {
+        let content = "---\r\ntype: Work item\r\nstatus: todo\r\n---\r\n\r\n# CRLF title\r\n\r\nBody line with [[atlas]].\r\n";
+        let e = build("items/crlf.md", content);
+        assert_eq!(e.entry_type.as_deref(), Some("Work item"));
+        assert_eq!(e.properties["status"], "todo");
+        assert_eq!(e.title, "CRLF title");
+        assert_eq!(e.outgoing_links, vec!["atlas"]);
+        assert!(e.parse_error.is_none());
+    }
+
+    #[test]
     fn serializes_to_camel_case_json() {
         let e = build("items/x.md", "# X\n");
         let json = serde_json::to_value(&e).unwrap();
