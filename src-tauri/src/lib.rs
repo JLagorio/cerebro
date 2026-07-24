@@ -8,6 +8,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use vault::entry::Entry;
 use vault::write::ViewYaml;
+use vault::watcher::WatcherState;
 
 fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
@@ -86,10 +87,20 @@ fn save_view(vault: String, id: String, yaml: String) -> Result<(), String> {
     vault::write::save_view(Path::new(&vault), &id, &yaml)
 }
 
+#[tauri::command]
+fn start_watcher(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, WatcherState>,
+    vault: String,
+) -> Result<(), String> {
+    vault::watcher::start(app, state.inner(), PathBuf::from(vault))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(WatcherState::default())
         .invoke_handler(tauri::generate_handler![
             pick_vault,
             get_last_vault,
@@ -100,7 +111,8 @@ pub fn run() {
             create_note,
             set_note_title,
             list_views,
-            save_view
+            save_view,
+            start_watcher
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

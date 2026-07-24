@@ -15,13 +15,15 @@ pub struct ViewYaml {
     pub yaml: String,
 }
 
-/// Single funnel for all vault file writes. Task 8 hooks the watcher's
-/// own-write suppression in here.
+/// Single funnel for all vault file writes; registers each write with the
+/// watcher so our own saves don't bounce back as `vault-changed` events.
 fn write_file(abs: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = abs.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(abs, content).map_err(|e| e.to_string())
+    std::fs::write(abs, content).map_err(|e| e.to_string())?;
+    super::watcher::note_own_write(abs);
+    Ok(())
 }
 
 /// Join a vault-relative path onto the vault root, rejecting empty paths,

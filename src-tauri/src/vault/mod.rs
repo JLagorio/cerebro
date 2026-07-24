@@ -3,6 +3,7 @@
 pub mod entry;
 pub mod parse;
 pub mod scan;
+pub mod watcher;
 pub mod write;
 
 #[cfg(test)]
