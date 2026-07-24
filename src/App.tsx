@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
+import { HomePage } from '@/pages/HomePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { getLastVault, pickVault } from '@/lib/ipc';
@@ -20,7 +21,7 @@ function CanvasPlaceholder({ label }: { label: string }) {
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
-    case 'home': return <CanvasPlaceholder label="Home" />;
+    case 'home': return <HomePage />;
     case 'space': return <CanvasPlaceholder label="Space" />;
     case 'project': return <CanvasPlaceholder label="Project" />;
     case 'view': return <CanvasPlaceholder label="View" />;
@@ -91,7 +92,7 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar />
+      <Sidebar onNewProject={() => { /* CreateMenu wiring lands in Task 23 */ }} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onNew={() => { /* CreateMenu wiring lands in Task 23 */ }} />
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
