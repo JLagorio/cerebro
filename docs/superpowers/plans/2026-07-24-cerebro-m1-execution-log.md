@@ -17,8 +17,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 4 Rust parser | 1581–2202 | ✅ done, spec ✓, quality ✓ (review found 2 Important + 6 Minor; 7 fixed, 1 deferred; fixes re-verified) | da50e24 + 8db3664 |
 | 5 Rust scanner | 2203–2467 | ✅ done, combined review ✓ (all findings minor, deferred) | 2ef3226 |
 | 6 Rust writes | 2468–2938 | ✅ done, combined review ✓ (2 Important fixed: fence-aware replace_h1 shared with parser; safe_join/safe_component path containment; fixes re-verified) | 02c59d4 + 9bc09c4 |
-| 7 Config + command wiring | 2939–3214 | ⬜ next | |
-| 8 Watcher | 3215–3557 | ⬜ | |
+| 7 Config + command wiring | 2939–3214 | ✅ done, combined review ✓ (3 minors deferred) | 2608d1f |
+| 8 Watcher | 3215–3557 | ⬜ next | |
 | 9 Demo vault generator | 3558–4057 | ⬜ | |
 | 10 ipc/mockParse/mockIpc | 4058–4763 | ⬜ | |
 | 11 vaultStore | 4764–5079 | ⬜ | |
@@ -58,3 +58,4 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 - Parser: non-string `type` frontmatter value (e.g. `type: 123`) is silently dropped from both entry_type and properties (plan-verbatim; Task 4 quality finding 6, deferred) — consider keeping it in properties
 - Parser: within-cap YAML flow-nesting bombs (~40 KB) can still take ~3 s before erroring (bounded, acceptable)
 - Scanner (spec-verbatim, Task 5 review): one unreadable/non-UTF8 .md aborts the whole scan (consider degrading to per-file parse_error); `.MD` uppercase skipped; symlinked notes skipped; `views/`/`attachments/` skipped at any depth; testutil temp dirs leak on failed asserts
+- IPC layer (spec-verbatim, Task 7 review): sync commands (scan_vault etc.) run on main thread — stalls UI on large vaults, consider `#[tauri::command(async)]`; pick_vault discards picked folder if config persist fails; `to_string_lossy` on picked path
