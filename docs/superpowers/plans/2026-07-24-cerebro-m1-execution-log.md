@@ -16,8 +16,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | — vitest glob infra fix | — | ✅ | 3901f1e |
 | 4 Rust parser | 1581–2202 | ✅ done, spec ✓, quality ✓ (review found 2 Important + 6 Minor; 7 fixed, 1 deferred; fixes re-verified) | da50e24 + 8db3664 |
 | 5 Rust scanner | 2203–2467 | ✅ done, combined review ✓ (all findings minor, deferred) | 2ef3226 |
-| 6 Rust writes | 2468–2938 | ⬜ next | |
-| 7 Config + command wiring | 2939–3214 | ⬜ | |
+| 6 Rust writes | 2468–2938 | ✅ done, combined review ✓ (2 Important fixed: fence-aware replace_h1 shared with parser; safe_join/safe_component path containment; fixes re-verified) | 02c59d4 + 9bc09c4 |
+| 7 Config + command wiring | 2939–3214 | ⬜ next | |
 | 8 Watcher | 3215–3557 | ⬜ | |
 | 9 Demo vault generator | 3558–4057 | ⬜ | |
 | 10 ipc/mockParse/mockIpc | 4058–4763 | ⬜ | |
@@ -45,7 +45,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 5. Working tree has an uncommitted user edit appending `docs/` to `.gitignore` — leave it alone; flagged to user (it hides new files under docs/ from git, including future specs/plans).
 6. Tauri icon `src-tauri/icons/icon.png` is required by `generate_context!` (plan gap, added in Task 1).
 7. **Task 6:** `split_frontmatter`'s byte-reproduction round-trip invariant holds ONLY for LF-only, BOM-free files with a bare `---` closing fence (see doc comment at parse.rs:9-15). `update_frontmatter` must handle CRLF/BOM/trailing-whitespace-fence files deliberately (commit 8db3664 hardened the parser to accept them on read).
-8. **Task 10:** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
+8. **Tasks 7/8:** vault writes are contained via `write.rs` `safe_join`/`safe_component` (rejects `..`/absolute/multi-segment); containment is LEXICAL — no canonicalization, so a user symlink inside the vault writes through to its target (accepted, standard for vault tools). The IPC command layer need not re-validate paths but must route ALL fs access through write.rs/scan.rs. `read_note` already exists in write.rs.
+9. **Task 10:** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
 
 ## Deferred polish (end of M1, after Task 24)
 
