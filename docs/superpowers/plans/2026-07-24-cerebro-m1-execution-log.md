@@ -14,8 +14,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 2 Tokens/fonts/@theme | 632–828 | ✅ done, spec ✓, quality ✓ | 2e72d31 |
 | 3 DS primitives (17) | 829–1580 | ✅ done, spec ✓, quality ✓ | 5d36fe0 |
 | — vitest glob infra fix | — | ✅ | 3901f1e |
-| 4 Rust parser | 1581–2202 | ✅ done, spec ✓, **quality review not completed** (was in flight at session end — re-run it first) | da50e24 |
-| 5 Rust scanner | 2203–2467 | ⬜ next after Task 4 quality gate | |
+| 4 Rust parser | 1581–2202 | ✅ done, spec ✓, quality ✓ (review found 2 Important + 6 Minor; 7 fixed, 1 deferred; fixes re-verified) | da50e24 + 8db3664 |
+| 5 Rust scanner | 2203–2467 | ⬜ next | |
 | 6 Rust writes | 2468–2938 | ⬜ | |
 | 7 Config + command wiring | 2939–3214 | ⬜ | |
 | 8 Watcher | 3215–3557 | ⬜ | |
@@ -44,6 +44,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 4. Rust parity fixtures live in `src-tauri/src/vault/entry.rs` (not parse.rs); Task 10's mockParse.test.ts comment should point there.
 5. Working tree has an uncommitted user edit appending `docs/` to `.gitignore` — leave it alone; flagged to user (it hides new files under docs/ from git, including future specs/plans).
 6. Tauri icon `src-tauri/icons/icon.png` is required by `generate_context!` (plan gap, added in Task 1).
+7. **Task 6:** `split_frontmatter`'s byte-reproduction round-trip invariant holds ONLY for LF-only, BOM-free files with a bare `---` closing fence (see doc comment at parse.rs:9-15). `update_frontmatter` must handle CRLF/BOM/trailing-whitespace-fence files deliberately (commit 8db3664 hardened the parser to accept them on read).
+8. **Task 10:** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
 
 ## Deferred polish (end of M1, after Task 24)
 
@@ -52,3 +54,5 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 - SegmentedControl ARIA (`role="tab"` + `aria-selected`); FilterChip remove-× keyboard access
 - `bundle.icon` entry in tauri.conf.json; CSP hardening (`"csp": null` currently) before anything ships
 - Consider @testing-library/jest-dom for later tests; App.test.tsx tautological assertion note
+- Parser: non-string `type` frontmatter value (e.g. `type: 123`) is silently dropped from both entry_type and properties (plan-verbatim; Task 4 quality finding 6, deferred) — consider keeping it in properties
+- Parser: within-cap YAML flow-nesting bombs (~40 KB) can still take ~3 s before erroring (bounded, acceptable)
