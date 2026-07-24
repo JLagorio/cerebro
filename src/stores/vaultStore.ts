@@ -61,11 +61,18 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml));
       await ipc.startWatcher(path);
       if (inTauri() && !watcherBound) {
-        watcherBound = true;
         const { listen } = await import('@tauri-apps/api/event');
         await listen('vault-changed', () => {
-          void get().rescan();
+          get()
+            .rescan()
+            .catch((err) => {
+              set({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+            });
         });
+        // Only latch after listen resolves: a failed bind must leave the
+        // next openVault free to retry, or the watcher is dead for the whole
+        // app lifetime.
+        watcherBound = true;
       }
       set({ entries, views, status: 'ready' });
     } catch (err) {
@@ -84,12 +91,22 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   async patchFrontmatter(path, patch) {
     const vault = get().vaultPath;
     if (vault === null) return;
+    // Normalize once for both the optimistic update and the disk write:
+    // undefined means delete, but JSON serialization to Tauri drops
+    // undefined keys silently and the mock's yaml doc.set would write
+    // `key: null` — null is the one delete spelling every backend honors.
+    const normalized = Object.fromEntries(
+      Object.entries(patch).map(([key, value]) => [key, value === undefined ? null : value]),
+    );
     // Optimistic: local state updates synchronously, before the disk write.
-    set({ entries: get().entries.map((e) => (e.path === path ? applyPatch(e, patch) : e)) });
+    set({ entries: get().entries.map((e) => (e.path === path ? applyPatch(e, normalized) : e)) });
     try {
-      await ipc.updateFrontmatter(vault, path, patch);
-      // In Tauri the watcher's vault-changed event reconciles; the mock has
-      // no watcher, so reconcile on write completion.
+      await ipc.updateFrontmatter(vault, path, normalized);
+      // The mock backend has no watcher, so reconcile by rescanning after
+      // the write. In Tauri no reconcile pass runs at all — the watcher
+      // DISCARDS our own write's event (own-write suppression) — so the
+      // optimistic entry stands; that is correct because applyPatch
+      // classifies values exactly like the parser will on the next scan.
       if (!inTauri()) await get().rescan();
     } catch {
       await get().rescan(); // disk truth wins: revert the optimistic update
@@ -100,7 +117,11 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const vault = get().vaultPath;
     if (vault === null) throw new Error('No vault open');
     const path = await ipc.createNote(vault, folder, slug, frontmatter, body);
-    if (!inTauri()) await get().rescan();
+    // Rescan unconditionally: the watcher never reports our own writes (its
+    // own-write suppression discards the event), so without this the created
+    // note would exist on disk but never enter the store in Tauri. Safe — a
+    // create has no optimistic state to clobber.
+    await get().rescan();
     return path;
   },
 }));

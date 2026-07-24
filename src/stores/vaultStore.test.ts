@@ -2,11 +2,19 @@
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const { listenMock } = vi.hoisted(() => ({ listenMock: vi.fn() }));
+
 vi.mock('@/engine/schema', () => ({
   buildSchema: vi.fn(() => ({ types: new Map() })),
 }));
+// Spy mode: implementations stay intact (delegating to mockIpc in the
+// browser); individual tests override them to simulate the Tauri backend.
+vi.mock('@/lib/ipc', { spy: true });
+vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }));
 
 import { buildSchema } from '@/engine/schema';
+import * as ipc from '@/lib/ipc';
+import * as mockBackend from '@/lib/mockIpc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { getSchema, useEntry, useVaultStore } from '@/stores/vaultStore';
 
@@ -14,9 +22,21 @@ function findEntry(path: string) {
   return useVaultStore.getState().entries.find((e) => e.path === path);
 }
 
+/** Make inTauri() report true; callers must exitTauri() in a finally block. */
+function enterTauri(): void {
+  (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+}
+function exitTauri(): void {
+  delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+}
+
+function mockFsDisk(): Map<string, string> {
+  return (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+}
+
 beforeEach(() => {
   resetMockFs();
-  vi.mocked(buildSchema).mockClear();
+  vi.clearAllMocks();
   useVaultStore.setState({ vaultPath: null, entries: [], views: [], status: 'idle', error: null });
 });
 
@@ -69,6 +89,78 @@ describe('vaultStore', () => {
     const entry = findEntry(path);
     expect(entry?.properties.key).toBe('FLD-99');
     expect(entry?.relationships.project).toEqual(['guided-onboarding-ga']);
+  });
+
+  it('createItem rescans even inside Tauri, where the watcher suppresses own writes', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    // Route IPC to the mock backend, then flip on Tauri detection: the store
+    // must not rely on a vault-changed event (own-write suppression discards
+    // it) and has to rescan itself.
+    vi.mocked(ipc.createNote).mockImplementation(mockBackend.createNote);
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    enterTauri();
+    try {
+      const path = await useVaultStore.getState().createItem({
+        folder: 'items',
+        slug: 'fld-77',
+        frontmatter: { type: 'Work item', key: 'FLD-77', status: 'todo' },
+      });
+      expect(path).toBe('items/fld-77.md');
+      expect(findEntry(path)?.properties.key).toBe('FLD-77');
+    } finally {
+      exitTauri();
+      vi.mocked(ipc.createNote).mockReset();
+      vi.mocked(ipc.scanVault).mockReset();
+      vi.mocked(ipc.listViews).mockReset();
+    }
+  });
+
+  it('patchFrontmatter treats undefined exactly like null: the key is deleted on disk', async () => {
+    await useVaultStore.getState().openVault('/demo-vault');
+    await useVaultStore.getState().patchFrontmatter('items/fld-1.md', { due: undefined });
+    // Normalized to null before the IPC call: JSON serialization to Tauri
+    // silently drops undefined keys, and the mock's yaml doc.set would write
+    // `due: null` instead of deleting.
+    expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalledWith('/demo-vault', 'items/fld-1.md', {
+      due: null,
+    });
+    expect(findEntry('items/fld-1.md')?.properties).not.toHaveProperty('due');
+    expect(mockFsDisk().get('items/fld-1.md')).not.toMatch(/^due:/m);
+  });
+
+  it('rebinds the vault-changed listener after a failed bind and contains rescan errors', async () => {
+    vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
+    vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    vi.mocked(ipc.startWatcher).mockImplementation(mockBackend.startWatcher);
+    enterTauri();
+    try {
+      // First bind fails: openVault errors, but must NOT latch watcherBound.
+      listenMock.mockRejectedValueOnce(new Error('listen failed'));
+      await useVaultStore.getState().openVault('/demo-vault');
+      expect(useVaultStore.getState().status).toBe('error');
+
+      // Second openVault retries the bind and succeeds.
+      listenMock.mockResolvedValue(() => {});
+      await useVaultStore.getState().openVault('/demo-vault');
+      expect(useVaultStore.getState().status).toBe('ready');
+      expect(listenMock).toHaveBeenCalledTimes(2);
+
+      // A failing rescan inside the listener lands in store error state
+      // instead of becoming an unhandled rejection.
+      const handler = listenMock.mock.calls[1][1] as () => void;
+      vi.mocked(ipc.scanVault).mockRejectedValueOnce(new Error('scan failed'));
+      handler();
+      await vi.waitFor(() => {
+        expect(useVaultStore.getState().status).toBe('error');
+        expect(useVaultStore.getState().error).toBe('scan failed');
+      });
+    } finally {
+      exitTauri();
+      vi.mocked(ipc.scanVault).mockReset();
+      vi.mocked(ipc.listViews).mockReset();
+      vi.mocked(ipc.startWatcher).mockReset();
+    }
   });
 
   it('getSchema memoizes buildSchema per entries reference', async () => {
