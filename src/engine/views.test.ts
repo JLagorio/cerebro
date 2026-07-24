@@ -106,6 +106,50 @@ describe('parseViewYaml', () => {
   it('a filters value that is not a group becomes null', () => {
     expect(parseViewYaml('junk', 'filters: nonsense').definition.filters).toBeNull();
   });
+
+  // Note 13 hardening: a self-referencing YAML alias inside filters: used to
+  // recurse forever in parseFilterNode (stack overflow) — views/*.yml is
+  // user-editable, so cyclic nodes must be dropped like any malformed node.
+  it('a self-referencing flow alias inside filters does not throw', () => {
+    const view = parseViewYaml('cyclic-flow', 'filters: &a { all: [ *a ] }');
+    expect(view.definition.filters).toEqual({ all: [] });
+  });
+
+  it('a self-referencing block alias inside filters does not throw', () => {
+    const view = parseViewYaml('cyclic-block', 'filters: &a\n  all:\n    - *a\n');
+    expect(view.definition.filters).toEqual({ all: [] });
+  });
+
+  it('drops only the cyclic node and keeps valid siblings', () => {
+    const view = parseViewYaml(
+      'cyclic-mixed',
+      'filters: &a { all: [ *a, { field: status, op: equals, value: done } ] }',
+    );
+    expect(view.definition.filters).toEqual({
+      all: [{ field: 'status', op: 'equals', value: 'done' }],
+    });
+  });
+
+  it('an indirect cycle through a nested group is dropped', () => {
+    const view = parseViewYaml(
+      'cyclic-nested',
+      'filters:\n  all:\n    - &g\n      any:\n        - *g\n',
+    );
+    expect(view.definition.filters).toEqual({ all: [{ any: [] }] });
+  });
+
+  it('non-cyclic alias reuse is kept', () => {
+    const view = parseViewYaml(
+      'shared-alias',
+      'filters:\n  all:\n    - &r { field: status, op: equals, value: done }\n    - *r\n',
+    );
+    expect(view.definition.filters).toEqual({
+      all: [
+        { field: 'status', op: 'equals', value: 'done' },
+        { field: 'status', op: 'equals', value: 'done' },
+      ],
+    });
+  });
 });
 
 describe('serializeView', () => {
