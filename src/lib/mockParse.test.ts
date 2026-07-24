@@ -159,6 +159,16 @@ describe('post-plan parity: frontmatter fences', () => {
     expect(e.title).toBe('Big');
   });
 
+  it('caps frontmatter at the same byte boundary as Rust (block incl. trailing newline)', () => {
+    // Rust measures the raw block INCLUDING the trailing newline that
+    // splitFrontmatter strips: 'key: ' (5) + N x's + '\n' (1) = N + 6 bytes.
+    const over = `---\nkey: ${'x'.repeat(65531)}\n---\n\n# Big\n`; // 65537-byte block
+    const eOver = parseNote('big.md', over, T, T);
+    expect(eOver.parseError).toBe('frontmatter too large (65537 bytes, max 65536)');
+    const at = `---\nkey: ${'x'.repeat(65530)}\n---\n\n# Ok\n`; // exactly 65536 → parses
+    expect(parseNote('ok.md', at, T, T).parseError).toBeNull();
+  });
+
   it('sets parseError for non-mapping frontmatter', () => {
     const e = parseNote('list.md', '---\n- just\n- a list\n---\n\n# List front\n', T, T);
     expect(e.parseError).toBe('frontmatter is not a mapping');

@@ -108,7 +108,9 @@ function parseFrontmatterBlock(block: string): {
   error: string | null;
 } {
   if (block.trim() === '') return { mapping: {}, error: null };
-  const bytes = new TextEncoder().encode(block).length;
+  // Parity with parse.rs: the Rust cap measures the raw block INCLUDING the
+  // trailing newline that splitFrontmatter strips, so count it back in.
+  const bytes = new TextEncoder().encode(block).length + 1;
   if (bytes > MAX_FRONTMATTER_LEN) {
     return {
       mapping: {},
@@ -128,26 +130,39 @@ function parseFrontmatterBlock(block: string): {
 }
 
 /**
- * Text of the first H1 (`# ...`) line anywhere in the body. Lines inside
- * ``` fenced code blocks and indented code lines (>= 4 leading spaces) are
- * skipped — parity with `extract_h1_title` in parse.rs.
+ * Index (into `body.split('\n')`) of the line the parser reads the title
+ * from: the first H1 (`# ...`) line with non-empty text, skipping lines
+ * inside ``` fenced code blocks and indented code lines (>= 4 leading
+ * spaces; up to 3 are allowed). -1 when the body has no real H1. Parity
+ * with `first_h1_line_start` in parse.rs; shared with mockIpc.setNoteTitle
+ * so reading and rewriting the title always agree on which line is the H1.
  */
-function extractH1Title(body: string): string | null {
+export function firstH1LineIndex(body: string): number {
   let inFence = false;
-  for (const rawLine of body.split('\n')) {
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+  const lines = body.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
     const trimmed = line.trim();
     if (trimmed.startsWith('```')) {
       inFence = !inFence;
       continue;
     }
     if (inFence || line.startsWith('    ')) continue;
-    if (trimmed.startsWith('# ')) {
-      const title = trimmed.slice(2).trim();
-      if (title !== '') return title;
-    }
+    if (trimmed.startsWith('# ') && trimmed.slice(2).trim() !== '') return i;
   }
-  return null;
+  return -1;
+}
+
+/**
+ * Text of the first H1 (`# ...`) line anywhere in the body — parity with
+ * `extract_h1_title` in parse.rs (fence/indent-aware via firstH1LineIndex).
+ */
+function extractH1Title(body: string): string | null {
+  const index = firstH1LineIndex(body);
+  if (index === -1) return null;
+  const line = body.split('\n')[index];
+  const noCr = line.endsWith('\r') ? line.slice(0, -1) : line;
+  return noCr.trim().slice(2).trim();
 }
 
 /** Wikilink targets in the body, deduplicated preserving first-seen order

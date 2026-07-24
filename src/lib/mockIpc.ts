@@ -6,7 +6,7 @@
 // no-op and writers trigger rescans directly (see vaultStore).
 import YAML, { type Document } from 'yaml';
 import type { Entry } from '@/engine/types';
-import { parseNote, splitFrontmatter } from './mockParse';
+import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 
 const SEED_TIME = '2026-07-24T00:00:00.000Z';
 
@@ -107,23 +107,35 @@ export async function createNote(
   let finalSlug = slug;
   for (let n = 2; files.has(`${folder}/${finalSlug}.md`); n++) finalSlug = `${slug}-${n}`;
   const path = `${folder}/${finalSlug}.md`;
-  files.set(path, `---\n${YAML.stringify(frontmatter)}---\n\n${body}`);
+  // Parity with write.rs create_note: null-valued keys are skipped, an empty
+  // mapping omits the fence block, and an empty body gets a humanized H1.
+  const kept = Object.entries(frontmatter).filter(([, value]) => value !== null);
+  const finalBody = body.trim() === '' ? `# ${humanize(slug)}\n` : body;
+  files.set(
+    path,
+    kept.length > 0
+      ? `---\n${YAML.stringify(Object.fromEntries(kept))}---\n\n${finalBody}`
+      : finalBody,
+  );
   touch(path);
   return path;
 }
 
 export async function setNoteTitle(_vault: string, path: string, title: string): Promise<void> {
   const { yaml, body } = splitFrontmatter(mustGet(path));
-  const lines = body.split('\n');
-  const h1Index = lines.findIndex((line) => /^#\s+/.test(line));
+  // Parity with write.rs replace_h1: rewrite exactly the line the parser
+  // reads the title from (fence/indent-aware, shared firstH1LineIndex);
+  // when the body has no real H1, prepend one at the very start.
+  const h1Index = firstH1LineIndex(body);
+  let newBody: string;
   if (h1Index >= 0) {
-    lines[h1Index] = `# ${title}`;
+    const lines = body.split('\n');
+    const hadCr = lines[h1Index].endsWith('\r');
+    lines[h1Index] = `# ${title}${hadCr ? '\r' : ''}`;
+    newBody = lines.join('\n');
   } else {
-    let insertAt = 0;
-    while (insertAt < lines.length && lines[insertAt].trim() === '') insertAt++;
-    lines.splice(insertAt, 0, `# ${title}`, '');
+    newBody = `# ${title}\n\n${body}`;
   }
-  const newBody = lines.join('\n');
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n${newBody}` : newBody);
   touch(path);
 }

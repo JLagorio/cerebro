@@ -71,6 +71,60 @@ describe('mockIpc', () => {
     expect(entries.find((e) => e.path === 'items/fld-1.md')?.title).toBe('Renamed walkthrough');
   });
 
+  // Parity with write.rs create_note: default H1 for empty bodies, no fence
+  // block for an empty mapping, null-valued keys skipped on create.
+  it('createNote defaults an empty body to a humanized H1 (exact bytes)', async () => {
+    await mock.createNote('/demo-vault', 'items', 'empty-note', { type: 'Work item' }, '');
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    expect(fs.get('items/empty-note.md')).toBe('---\ntype: Work item\n---\n\n# Empty note\n');
+  });
+
+  it('createNote omits the fence block when the frontmatter map is empty', async () => {
+    await mock.createNote('/demo-vault', 'items', 'no-fm', {}, 'Some body\n');
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    expect(fs.get('items/no-fm.md')).toBe('Some body\n');
+  });
+
+  it('createNote skips null-valued frontmatter keys', async () => {
+    await mock.createNote(
+      '/demo-vault',
+      'items',
+      'with-null',
+      { type: 'Work item', due: null },
+      'Body.\n',
+    );
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    expect(fs.get('items/with-null.md')).toBe('---\ntype: Work item\n---\n\nBody.\n');
+  });
+
+  // Parity with write.rs replace_h1 (fence/indent-aware via first_h1_line_start).
+  it('setNoteTitle skips H1-looking lines inside code fences', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set(
+      'items/fenced.md',
+      '---\ntype: Work item\n---\n\n```bash\n# comment in code\n```\n\n# Real title\n\nBody.\n',
+    );
+    await mock.setNoteTitle('/demo-vault', 'items/fenced.md', 'New title');
+    const raw = fs.get('items/fenced.md') as string;
+    expect(raw).toContain('# comment in code'); // fenced line untouched
+    expect(raw).toContain('# New title');
+    expect(raw).not.toContain('# Real title');
+  });
+
+  it('setNoteTitle prepends when the only H1 is inside a fence', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set('items/only-fenced.md', '```\n# only in code\n```\n');
+    await mock.setNoteTitle('/demo-vault', 'items/only-fenced.md', 'Prepended');
+    expect(fs.get('items/only-fenced.md')).toBe('# Prepended\n\n```\n# only in code\n```\n');
+  });
+
+  it('setNoteTitle replaces an H1 with up to 3 leading spaces', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set('items/indent.md', '  # Indented title\n\nBody.\n');
+    await mock.setNoteTitle('/demo-vault', 'items/indent.md', 'Fixed');
+    expect(fs.get('items/indent.md')).toBe('# Fixed\n\nBody.\n');
+  });
+
   it('listViews is empty for the demo vault and saveView round-trips', async () => {
     expect(await mock.listViews('/demo-vault')).toEqual([]);
     await mock.saveView('/demo-vault', 'my-view', 'name: My view\n');
