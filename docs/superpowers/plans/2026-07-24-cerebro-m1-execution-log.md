@@ -20,8 +20,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 7 Config + command wiring | 2939–3214 | ✅ done, combined review ✓ (3 minors deferred) | 2608d1f |
 | 8 Watcher | 3215–3557 | ✅ done, combined review ✓ (1 Important fixed: need_rescan overflow events now force emit; re-verified) | b952642 + 3fa722e |
 | 9 Demo vault generator | 3558–4057 | ✅ done, combined review ✓ (scanner probe: 57/57 parse clean, 68/68 wikilinks resolve, deterministic) | 00fe705 |
-| 10 ipc/mockParse/mockIpc | 4058–4763 | ⬜ next | |
-| 11 vaultStore | 4764–5079 | ⬜ | |
+| 10 ipc/mockParse/mockIpc | 4058–4763 | ✅ done, combined review ✓ (parity matrix 17/17 after fixes: createNote writes, 64 KB cap boundary, fence-aware setNoteTitle; re-verified byte-identical vs Rust) | e381405 + f86eaf3 + 58c7d9d |
+| 11 vaultStore | 4764–5079 | ⬜ next | |
 | 12 wikilink/normalize | 5080–5429 | ⬜ | |
 | 13 schema | 5430–6008 | ⬜ | |
 | 14 grouping | 6009–6311 | ⬜ | |
@@ -47,7 +47,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 7. **Task 6:** `split_frontmatter`'s byte-reproduction round-trip invariant holds ONLY for LF-only, BOM-free files with a bare `---` closing fence (see doc comment at parse.rs:9-15). `update_frontmatter` must handle CRLF/BOM/trailing-whitespace-fence files deliberately (commit 8db3664 hardened the parser to accept them on read).
 8. **Tasks 7/8:** vault writes are contained via `write.rs` `safe_join`/`safe_component` (rejects `..`/absolute/multi-segment); containment is LEXICAL — no canonicalization, so a user symlink inside the vault writes through to its target (accepted, standard for vault tools). The IPC command layer need not re-validate paths but must route ALL fs access through write.rs/scan.rs. `read_note` already exists in write.rs.
 9. **Task 13:** demo-vault space status entries carry only `{id, group, color, hollow?}` — the seed `name` labels ("In progress", "Won't do") are dropped per the spec'd shape. `statusSetForSpace`/StatusDef labels must therefore be humanized from ids (e.g. `wontdo` → "Wontdo"); this is by design, not a generator bug.
-10. **Task 10:** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
+10. **Task 22:** `readNote` leading-whitespace differs per backend: mock strips leading newlines (plan-spec'd), Rust `read_note` returns the body verbatim incl. the blank line after the fence. The description editor must tolerate both (e.g. trimStart on display) or Rust `read_note` gets aligned as deferred polish. Also `firstH1LineIndex` is exported from mockParse.ts (fence-aware H1 finder mirroring Rust `first_h1_line_start`).
+11. **Task 10 (done):** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
 
 ## Deferred polish (end of M1, after Task 24)
 
