@@ -26,7 +26,7 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 13 schema | 5430–6008 | ✅ done, combined review ✓ (clean; real-vault probe 24/24, cycle-safe) | 71c97b7 |
 | 14 grouping | 6009–6311 | ✅ done, combined review ✓ (verbatim; real-vault probes conserve all entries) | 57d11fc |
 | 15 views/viewFilters | 6312–6805 | ✅ done, combined review ✓ (byte-verbatim vs plan; 24/24 round-trip, 59/59 adversarial no-throw, 9/9 demo-vault filter counts hand-verified; 1 Important plan-verbatim alias-cycle throw → note 13; minors deferred) | 4c874fb |
-| 16 itemKeys/quickOpenScore | 6806–7026 | ⬜ | |
+| 16 itemKeys/quickOpenScore | 6806–7026 | ✅ done, combined review ✓ (byte-verbatim; demo-vault next-keys hand-verified FLD-13/LNC-8/OPS-9/SYN-6; 3 minors deferred) | 1559cef |
 | 17 stores + shell | 7027–7599 | ⬜ | |
 | 18 Sidebar + HomePage | 7600–8365 | ⬜ | |
 | 19 Space/Project/ViewToolbar | 8366–9059 | ⬜ | |
@@ -67,3 +67,4 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 - vaultStore (Task 11 review, minors): patchFrontmatter failures resolve silently — Task 17+ should surface write errors via toasts; interleaved slow-write transient clobber (self-healing, mock-unreachable); concurrent openVault calls could double-bind the vault-changed listener (duplicate idempotent rescans only)
 - wikilink/normalize (Task 12 review, minors, plan-verbatim): normalizeFrontmatter flattens nested non-wikilink arrays to [null]; resolveTarget("x.md") never matches (targets are stems) — Task 13+ authors take note
 - views/viewFilters (Task 15 review, minors, plan-verbatim): alias-cycle throw in parseViewYaml (see binding note 13 — fix due by Task 19); `obj.value as Scalar | Scalar[]` admits YAML maps/cyclic arrays into FilterRule.value (inert at eval time but poisons later JSON.stringify); before/after on array-valued fields compares only the first element; parseFilters/DEFAULT_PRESENTATION exported with no consumer yet (expected Tasks 19/collections)
+- itemKeys/quickOpenScore (Task 16 review, minors, plan-verbatim): parseInt precision loss above 2^53 could yield a duplicate key (unreachable — keys are app-generated small ints); KEY_SHAPE `/^[a-z]+-\d+$/i` excludes digit-bearing prefixes (e.g. `A1-2`) from hyphen-less quick-open matching; stale `// substring` comment at quickOpenScore.test.ts:39 (case actually scores word-boundary tier)
