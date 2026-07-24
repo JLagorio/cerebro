@@ -1,0 +1,77 @@
+// IPC facade: every vault operation in the app goes through these functions.
+// Inside Tauri (detected via __TAURI_INTERNALS__) they invoke the Rust
+// commands; in the browser (pnpm dev, vitest, Playwright) they delegate to
+// the in-memory mock in mockIpc.ts. Signatures follow the plan's IPC table.
+import type { Entry } from '@/engine/types';
+import * as mock from './mockIpc';
+
+function inTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+async function invokeTauri<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
+}
+
+export function pickVault(): Promise<string | null> {
+  return inTauri() ? invokeTauri('pick_vault') : mock.pickVault();
+}
+
+export function getLastVault(): Promise<string | null> {
+  return inTauri() ? invokeTauri('get_last_vault') : mock.getLastVault();
+}
+
+export function scanVault(vault: string): Promise<Entry[]> {
+  return inTauri() ? invokeTauri('scan_vault', { vault }) : mock.scanVault(vault);
+}
+
+export function readNote(vault: string, path: string): Promise<string> {
+  return inTauri() ? invokeTauri('read_note', { vault, path }) : mock.readNote(vault, path);
+}
+
+export function saveNote(vault: string, path: string, body: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('save_note', { vault, path, body })
+    : mock.saveNote(vault, path, body);
+}
+
+export function updateFrontmatter(
+  vault: string,
+  path: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  return inTauri()
+    ? invokeTauri('update_frontmatter', { vault, path, patch })
+    : mock.updateFrontmatter(vault, path, patch);
+}
+
+export function createNote(
+  vault: string,
+  folder: string,
+  slug: string,
+  frontmatter: Record<string, unknown>,
+  body: string,
+): Promise<string> {
+  return inTauri()
+    ? invokeTauri('create_note', { vault, folder, slug, frontmatter, body })
+    : mock.createNote(vault, folder, slug, frontmatter, body);
+}
+
+export function setNoteTitle(vault: string, path: string, title: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_note_title', { vault, path, title })
+    : mock.setNoteTitle(vault, path, title);
+}
+
+export function listViews(vault: string): Promise<{ id: string; yaml: string }[]> {
+  return inTauri() ? invokeTauri('list_views', { vault }) : mock.listViews(vault);
+}
+
+export function saveView(vault: string, id: string, yaml: string): Promise<void> {
+  return inTauri() ? invokeTauri('save_view', { vault, id, yaml }) : mock.saveView(vault, id, yaml);
+}
+
+export function startWatcher(vault: string): Promise<void> {
+  return inTauri() ? invokeTauri('start_watcher', { vault }) : mock.startWatcher(vault);
+}
