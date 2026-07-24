@@ -23,8 +23,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 10 ipc/mockParse/mockIpc | 4058–4763 | ✅ done, combined review ✓ (parity matrix 17/17 after fixes: createNote writes, 64 KB cap boundary, fence-aware setNoteTitle; re-verified byte-identical vs Rust) | e381405 + f86eaf3 + 58c7d9d |
 | 11 vaultStore | 4764–5079 | ✅ done, combined review ✓ (1 Important fixed: createItem now rescans unconditionally — Tauri own-write suppression discards create events; + undefined→null normalization, watcher bind latch; re-verified) | 50f6b22 + 66b3d25 |
 | 12 wikilink/normalize | 5080–5429 | ✅ done, combined review ✓ (clean; 3-way classifier parity verified) | 10cac1a |
-| 13 schema | 5430–6008 | ⬜ next | |
-| 14 grouping | 6009–6311 | ⬜ | |
+| 13 schema | 5430–6008 | ✅ done, combined review ✓ (clean; real-vault probe 24/24, cycle-safe) | 71c97b7 |
+| 14 grouping | 6009–6311 | ⬜ next | |
 | 15 views/viewFilters | 6312–6805 | ⬜ | |
 | 16 itemKeys/quickOpenScore | 6806–7026 | ⬜ | |
 | 17 stores + shell | 7027–7599 | ⬜ | |
