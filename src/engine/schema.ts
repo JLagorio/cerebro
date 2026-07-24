@@ -1,24 +1,210 @@
-// PLACEHOLDER — created in Task 11 so vaultStore can link against the schema
-// module. Task 13 REPLACES this file with the full implementation. Do not
-// build on the bodies below; only the exported names and signatures matter.
-import type { Entry, ResolvedField, Schema, StatusDef } from './types';
+import type {
+  Entry,
+  FieldDef,
+  FieldKind,
+  FieldOption,
+  ResolvedField,
+  Schema,
+  StatusDef,
+  TypeDef,
+} from './types';
+import { resolveTarget } from './wikilink';
 
+/** Spec "simple" status template — fallback when an item has no resolvable space. */
 export const DEFAULT_STATUSES: StatusDef[] = [
   { id: 'backlog', label: 'Backlog', color: '#A8AFC2', group: 'active' },
   { id: 'todo', label: 'Todo', color: '#3D8BE8', group: 'active' },
   { id: 'in-progress', label: 'In progress', color: '#EFB428', group: 'active' },
   { id: 'done', label: 'Done', color: '#34B764', group: 'done' },
-  { id: 'cancelled', label: 'Cancelled', color: '#A8AFC2', group: 'closed', hollow: true },
+  { id: 'cancelled', label: 'Cancelled', color: '#A8AFC2', hollow: true, group: 'closed' },
 ];
 
-export function buildSchema(_entries: Entry[]): Schema {
-  return {
-    types: new Map(),
-    spaceForEntry: () => null,
-    statusSetForSpace: () => DEFAULT_STATUSES,
-    resolveField: (e: Entry, field: string): ResolvedField => {
-      const raw = e.properties[field] ?? null;
-      return { def: null, raw, display: raw === null ? '' : String(raw), color: null, ghost: false };
-    },
+const FIELD_KINDS: FieldKind[] = [
+  'text', 'number', 'checkbox', 'date', 'daterange',
+  'select', 'multiselect', 'status', 'person', 'relation',
+];
+
+const STATUS_GROUPS = ['active', 'done', 'closed'] as const;
+
+/** 'in-progress' → 'In progress' (sentence case, DS rule). */
+function humanize(id: string): string {
+  const words = id.replace(/[-_]+/g, ' ').trim();
+  if (words === '') return id;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function asFieldKind(value: unknown): FieldKind {
+  return FIELD_KINDS.includes(value as FieldKind) ? (value as FieldKind) : 'text';
+}
+
+function parseOption(raw: unknown): FieldOption | null {
+  if (typeof raw === 'string') {
+    return { id: raw, label: humanize(raw), color: null };
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== 'string' && typeof o.id !== 'number') return null;
+  const id = String(o.id);
+  const option: FieldOption = {
+    id,
+    label: typeof o.label === 'string' ? o.label : humanize(id),
+    color: typeof o.color === 'string' ? o.color : null,
   };
+  if (o.hollow === true) option.hollow = true;
+  return option;
+}
+
+function parseFieldDef(name: string, spec: unknown): FieldDef {
+  if (typeof spec === 'string') return { name, kind: asFieldKind(spec) };
+  if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
+    return { name, kind: 'text' };
+  }
+  const s = spec as Record<string, unknown>;
+  const def: FieldDef = { name, kind: asFieldKind(s.kind) };
+  if (Array.isArray(s.options)) {
+    def.options = s.options
+      .map(parseOption)
+      .filter((o): o is FieldOption => o !== null);
+  }
+  if (typeof s.target === 'string') def.target = s.target;
+  return def;
+}
+
+function parseFields(raw: unknown): FieldDef[] {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  return Object.entries(raw as Record<string, unknown>).map(([name, spec]) =>
+    parseFieldDef(name, spec),
+  );
+}
+
+function parseStatuses(raw: unknown): StatusDef[] {
+  if (!Array.isArray(raw)) return [];
+  const out: StatusDef[] = [];
+  for (const item of raw) {
+    const option = parseOption(item);
+    if (option === null) continue;
+    const groupRaw =
+      item !== null && typeof item === 'object'
+        ? (item as Record<string, unknown>).group
+        : undefined;
+    const group: StatusDef['group'] =
+      typeof groupRaw === 'string' && (STATUS_GROUPS as readonly string[]).includes(groupRaw)
+        ? (groupRaw as StatusDef['group'])
+        : 'active';
+    out.push({ ...option, group });
+  }
+  return out;
+}
+
+function isEmptyValue(raw: unknown): boolean {
+  return (
+    raw === undefined ||
+    raw === null ||
+    raw === '' ||
+    (Array.isArray(raw) && raw.length === 0)
+  );
+}
+
+export function buildSchema(entries: Entry[]): Schema {
+  const types = new Map<string, TypeDef>();
+  for (const e of entries) {
+    if (e.type !== 'Type') continue;
+    types.set(e.title, {
+      name: e.title,
+      icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
+      color: typeof e.properties.color === 'string' ? e.properties.color : null,
+      fields: parseFields((e.properties as Record<string, unknown>).fields),
+    });
+  }
+
+  const byPath = new Map(entries.map((e) => [e.path, e]));
+
+  function firstTarget(e: Entry, key: string): string | null {
+    const targets = e.relationships[key];
+    return targets !== undefined && targets.length > 0 ? targets[0] : null;
+  }
+
+  function spaceForEntry(e: Entry): Entry | null {
+    if (e.type === 'Space') return e;
+    const ownSpace = firstTarget(e, 'space');
+    if (ownSpace !== null) {
+      const found = resolveTarget(ownSpace, entries);
+      return found !== null && found.type === 'Space' ? found : null;
+    }
+    const projectTarget = firstTarget(e, 'project');
+    if (projectTarget === null) return null;
+    const project = resolveTarget(projectTarget, entries);
+    if (project === null) return null;
+    const spaceTarget = firstTarget(project, 'space');
+    if (spaceTarget === null) return null;
+    const found = resolveTarget(spaceTarget, entries);
+    return found !== null && found.type === 'Space' ? found : null;
+  }
+
+  function statusSetForSpace(spacePath: string | null): StatusDef[] {
+    if (spacePath === null) return DEFAULT_STATUSES;
+    const space = byPath.get(spacePath);
+    if (space === undefined) return DEFAULT_STATUSES;
+    const parsed = parseStatuses((space.properties as Record<string, unknown>).statuses);
+    return parsed.length > 0 ? parsed : DEFAULT_STATUSES;
+  }
+
+  function resolveField(e: Entry, field: string): ResolvedField {
+    const typeDef = e.type !== null ? types.get(e.type) : undefined;
+    const def = typeDef?.fields.find((f) => f.name === field) ?? null;
+    const relTargets = e.relationships[field];
+    const raw: unknown = relTargets !== undefined ? relTargets : e.properties[field];
+
+    if (isEmptyValue(raw)) {
+      return { def, raw, display: '', color: null, ghost: false };
+    }
+
+    const kind: FieldKind = def?.kind ?? (relTargets !== undefined ? 'relation' : 'text');
+
+    if (kind === 'person' || kind === 'relation') {
+      const targets = Array.isArray(raw) ? raw.map(String) : [String(raw)];
+      const display = targets
+        .map((t) => resolveTarget(t, entries)?.title ?? t)
+        .join(', ');
+      return { def, raw, display, color: null, ghost: false };
+    }
+
+    if (kind === 'status') {
+      const space = spaceForEntry(e);
+      const statuses = statusSetForSpace(space !== null ? space.path : null);
+      const id = String(Array.isArray(raw) ? raw[0] : raw);
+      const match = statuses.find((s) => s.id === id);
+      if (match !== undefined) {
+        return { def, raw, display: match.label, color: match.color, ghost: false };
+      }
+      return { def, raw, display: id, color: null, ghost: true };
+    }
+
+    if (kind === 'select' || kind === 'multiselect') {
+      const values = Array.isArray(raw) ? raw.map(String) : [String(raw)];
+      const options = def?.options ?? [];
+      let ghost = false;
+      let color: string | null = null;
+      const labels = values.map((v) => {
+        const match = options.find((o) => o.id === v);
+        if (match === undefined) {
+          ghost = true;
+          return v; // ghost values keep their raw form (advisory schema)
+        }
+        if (color === null) color = match.color;
+        return match.label;
+      });
+      return { def, raw, display: labels.join(', '), color, ghost };
+    }
+
+    if (kind === 'checkbox') {
+      return { def, raw, display: raw === true ? 'Yes' : 'No', color: null, ghost: false };
+    }
+
+    // text / number / date / daterange and undeclared fields
+    const display = Array.isArray(raw) ? raw.map(String).join(', ') : String(raw);
+    return { def, raw, display, color: null, ghost: false };
+  }
+
+  return { types, spaceForEntry, statusSetForSpace, resolveField };
 }
