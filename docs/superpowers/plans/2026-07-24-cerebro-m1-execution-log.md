@@ -24,8 +24,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 | 11 vaultStore | 4764–5079 | ✅ done, combined review ✓ (1 Important fixed: createItem now rescans unconditionally — Tauri own-write suppression discards create events; + undefined→null normalization, watcher bind latch; re-verified) | 50f6b22 + 66b3d25 |
 | 12 wikilink/normalize | 5080–5429 | ✅ done, combined review ✓ (clean; 3-way classifier parity verified) | 10cac1a |
 | 13 schema | 5430–6008 | ✅ done, combined review ✓ (clean; real-vault probe 24/24, cycle-safe) | 71c97b7 |
-| 14 grouping | 6009–6311 | ⬜ next | |
-| 15 views/viewFilters | 6312–6805 | ⬜ | |
+| 14 grouping | 6009–6311 | ✅ done, combined review ✓ (verbatim; real-vault probes conserve all entries) | 57d11fc |
+| 15 views/viewFilters | 6312–6805 | ⬜ next | |
 | 16 itemKeys/quickOpenScore | 6806–7026 | ⬜ | |
 | 17 stores + shell | 7027–7599 | ⬜ | |
 | 18 Sidebar + HomePage | 7600–8365 | ⬜ | |
@@ -48,7 +48,8 @@ Subagent-driven development (superpowers:subagent-driven-development): per task 
 8. **Tasks 7/8:** vault writes are contained via `write.rs` `safe_join`/`safe_component` (rejects `..`/absolute/multi-segment); containment is LEXICAL — no canonicalization, so a user symlink inside the vault writes through to its target (accepted, standard for vault tools). The IPC command layer need not re-validate paths but must route ALL fs access through write.rs/scan.rs. `read_note` already exists in write.rs.
 9. **Task 13:** demo-vault space status entries carry only `{id, group, color, hollow?}` — the seed `name` labels ("In progress", "Won't do") are dropped per the spec'd shape. `statusSetForSpace`/StatusDef labels must therefore be humanized from ids (e.g. `wontdo` → "Wontdo"); this is by design, not a generator bug.
 10. **Task 22:** `readNote` leading-whitespace differs per backend: mock strips leading newlines (plan-spec'd), Rust `read_note` returns the body verbatim incl. the blank line after the fence. The description editor must tolerate both (e.g. trimStart on display) or Rust `read_note` gets aligned as deferred polish. Also `firstH1LineIndex` is exported from mockParse.ts (fence-aware H1 finder mirroring Rust `first_h1_line_start`).
-11. **Task 10 (done):** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
+11. **Tasks 15/20/21 (grouping advisories, spec-mandated):** (a) groupEntries' status column set comes from the FIRST entry's space (`statusSetForSpace(spaceForEntry(entries[0]))`) — cross-space view collections can flip board columns when sort order changes, and an unresolvable first entry falls back to DEFAULT_STATUSES demoting real statuses to ghosts; single-space project/space pages are safe. (b) The `__none__` group is emitted ONLY when non-empty — Board/ListView must rely on its trailing/pinned position only when present. (c) Multiselect groups by first value only; empty-string-in-array yields a blank-labeled group.
+12. **Task 10 (done):** `mockParse.ts` must mirror parser behaviors added in 8db3664: fence-aware H1 extraction (skip ``` fenced regions and ≥4-space-indented lines), fence-aware snippet with post-strip-empty lines dropped (no double spaces), leading-BOM strip, CRLF tolerance (incl. empty frontmatter `---\r\n---\r\n`), trailing spaces/tabs allowed on the closing fence, and a 64 KB frontmatter cap → parse error. The 3 shared parity fixtures are unchanged.
 
 ## Deferred polish (end of M1, after Task 24)
 
