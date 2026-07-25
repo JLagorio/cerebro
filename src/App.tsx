@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
+import { DetailPanel } from '@/detail/DetailPanel';
 import { HomePage } from '@/pages/HomePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SpacePage } from '@/pages/SpacePage';
@@ -101,6 +102,7 @@ function App() {
           <CanvasOutlet />
         </div>
       </div>
+      <DetailPanel />
     </div>
   );
 }
