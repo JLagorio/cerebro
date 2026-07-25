@@ -8,3 +8,9 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/schemas/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+
+docs/
