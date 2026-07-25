@@ -1,0 +1,117 @@
+import { parse, stringify } from 'yaml';
+import type {
+  FilterGroup,
+  FilterOp,
+  FilterRule,
+  Presentation,
+  Scalar,
+  ViewDefinition,
+  ViewFile,
+} from './types';
+
+/** Project default: list grouped by status, modified desc (spec "Collections and views"). */
+export const DEFAULT_PRESENTATION: Presentation = {
+  type: 'list',
+  groupBy: 'status',
+  orderBy: { field: 'modifiedAt', dir: 'desc' },
+  visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
+};
+
+const FILTER_OPS: FilterOp[] = [
+  'equals', 'not_equals', 'contains', 'any_of', 'none_of',
+  'is_empty', 'is_not_empty', 'before', 'after',
+];
+
+function asRecord(raw: unknown): Record<string, unknown> {
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+}
+
+function parsePresentation(raw: unknown): Presentation {
+  const obj = asRecord(raw);
+  const orderBy = asRecord(obj.orderBy);
+  return {
+    type: obj.type === 'board' ? 'board' : 'list',
+    groupBy:
+      typeof obj.groupBy === 'string'
+        ? obj.groupBy
+        : obj.groupBy === null
+          ? null
+          : DEFAULT_PRESENTATION.groupBy,
+    orderBy: {
+      field:
+        typeof orderBy.field === 'string' ? orderBy.field : DEFAULT_PRESENTATION.orderBy.field,
+      dir: orderBy.dir === 'asc' ? 'asc' : 'desc',
+    },
+    visibleFields: Array.isArray(obj.visibleFields)
+      ? obj.visibleFields.map(String)
+      : [...DEFAULT_PRESENTATION.visibleFields],
+  };
+}
+
+function parseFilterNode(raw: unknown, path: Set<unknown>): FilterRule | FilterGroup | null {
+  const obj = asRecord(raw);
+  if (Array.isArray(obj.all) || Array.isArray(obj.any)) return parseGroupNode(raw, path);
+  if (typeof obj.field === 'string' && FILTER_OPS.includes(obj.op as FilterOp)) {
+    const rule: FilterRule = { field: obj.field, op: obj.op as FilterOp };
+    if (obj.value !== undefined) rule.value = obj.value as Scalar | Scalar[];
+    return rule;
+  }
+  return null;
+}
+
+// Cycle guard (note 13): YAML aliases can make a group node contain itself
+// (`filters: &a { all: [ *a ] }`) — recursing into it again would never
+// terminate. `path` tracks the group nodes on the current descent; a node
+// already on the path is a cycle and is dropped like any malformed node.
+// Nodes are removed on the way out so non-cyclic alias reuse still parses.
+function parseGroupNode(raw: unknown, path: Set<unknown>): FilterGroup | null {
+  const obj = asRecord(raw);
+  const branch = Array.isArray(obj.all) ? 'all' : Array.isArray(obj.any) ? 'any' : null;
+  if (branch === null) return null;
+  if (path.has(obj)) return null;
+  path.add(obj);
+  const children = (obj[branch] as unknown[])
+    .map((node) => parseFilterNode(node, path))
+    .filter((node): node is FilterRule | FilterGroup => node !== null);
+  path.delete(obj);
+  return branch === 'all' ? { all: children } : { any: children };
+}
+
+export function parseFilters(raw: unknown): FilterGroup | null {
+  return parseGroupNode(raw, new Set());
+}
+
+/** Tolerant by design: a saved view file never fails to load (advisory schema rule). */
+export function parseViewYaml(id: string, yamlText: string): ViewFile {
+  let raw: unknown = null;
+  try {
+    raw = parse(yamlText);
+  } catch {
+    raw = null;
+  }
+  const obj = asRecord(raw);
+  return {
+    id,
+    definition: {
+      name: typeof obj.name === 'string' && obj.name.trim() !== '' ? obj.name : id,
+      icon: typeof obj.icon === 'string' ? obj.icon : null,
+      color: typeof obj.color === 'string' ? obj.color : null,
+      order: typeof obj.order === 'number' ? obj.order : null,
+      filters: parseFilters(obj.filters),
+      presentation: parsePresentation(obj.presentation),
+    },
+  };
+}
+
+export function serializeView(def: ViewDefinition): string {
+  return stringify({
+    name: def.name,
+    icon: def.icon,
+    color: def.color,
+    order: def.order,
+    filters: def.filters,
+    presentation: def.presentation,
+  });
+}

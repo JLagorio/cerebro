@@ -1,0 +1,167 @@
+//! Walk a vault folder and produce an Entry per markdown file.
+
+use std::path::Path;
+
+use walkdir::WalkDir;
+
+use super::entry::{build_entry, Entry};
+
+const SKIPPED_DIRS: [&str; 2] = ["views", "attachments"];
+
+fn is_skipped_dir(name: &str) -> bool {
+    name.starts_with('.') || SKIPPED_DIRS.contains(&name)
+}
+
+fn keep(item: &walkdir::DirEntry) -> bool {
+    if !item.file_type().is_dir() {
+        return true;
+    }
+    !is_skipped_dir(&item.file_name().to_string_lossy())
+}
+
+fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
+    let rel = path.strip_prefix(vault).map_err(|e| e.to_string())?;
+    Ok(rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+fn iso_or_now(t: Option<std::time::SystemTime>) -> String {
+    let t = t.unwrap_or_else(std::time::SystemTime::now);
+    chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+fn timestamps(path: &Path) -> (String, String) {
+    let meta = std::fs::metadata(path).ok();
+    let modified = meta.as_ref().and_then(|m| m.modified().ok());
+    let created = meta.as_ref().and_then(|m| m.created().ok()).or(modified);
+    (iso_or_now(created), iso_or_now(modified))
+}
+
+/// Scan every `.md` file in the vault (skipping dot-directories, `views/`,
+/// and `attachments/`) into Entries with vault-relative forward-slash paths,
+/// sorted by path.
+pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
+    if !vault.is_dir() {
+        return Err(format!("not a directory: {}", vault.display()));
+    }
+    let mut entries = Vec::new();
+    let walker = WalkDir::new(vault)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || keep(e));
+    for item in walker {
+        let item = item.map_err(|e| e.to_string())?;
+        if !item.file_type().is_file() {
+            continue;
+        }
+        if item.path().extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let rel = rel_path(vault, item.path())?;
+        let content = std::fs::read_to_string(item.path()).map_err(|e| format!("{rel}: {e}"))?;
+        let (created, modified) = timestamps(item.path());
+        entries.push(build_entry(&rel, &content, created, modified));
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::testutil;
+    use std::path::PathBuf;
+
+    /// A small but representative vault: a type note, a space with statuses,
+    /// a project, two items, one malformed item — plus files that must be
+    /// skipped (views/, attachments/, dot-dir, non-md).
+    fn fixture_vault(label: &str) -> PathBuf {
+        let vault = testutil::temp_vault(label);
+        testutil::write(&vault, "type/work-item.md", "---\ntype: Type\nicon: check-square\nfields:\n  status: { kind: status }\n  priority: { kind: select }\n---\n\n# Work item\n");
+        testutil::write(&vault, "spaces/fielding.md", "---\ntype: Space\ncolor: '#3D8BE8'\nstatuses:\n  - { id: todo, group: active, color: '#3D8BE8' }\n  - { id: done, group: done, color: '#34B764' }\n---\n\n# Fielding\n");
+        testutil::write(&vault, "projects/atlas.md", "---\ntype: Project\nkey: ATL\nspace: \"[[fielding]]\"\n---\n\n# Atlas\n");
+        testutil::write(&vault, "items/atl-1.md", "---\ntype: Work item\nkey: ATL-1\nstatus: todo\nproject: \"[[atlas]]\"\n---\n\n# Ship the scanner\n");
+        testutil::write(&vault, "items/atl-2.md", "---\ntype: Work item\nkey: ATL-2\nstatus: done\nproject: \"[[atlas]]\"\n---\n\n# Parse frontmatter\n");
+        testutil::write(&vault, "items/broken.md", "---\nstatus: [unclosed\n---\n\n# Broken item\n");
+        testutil::write(&vault, "views/all-items.yml", "name: All items\n");
+        testutil::write(&vault, "attachments/readme.md", "# Not scanned\n");
+        testutil::write(&vault, ".obsidian/workspace.md", "# Hidden\n");
+        testutil::write(&vault, "notes.txt", "not markdown\n");
+        vault
+    }
+
+    #[test]
+    fn scans_only_markdown_files_sorted_by_relative_path() {
+        let vault = fixture_vault("scan-paths");
+        let entries = scan_vault(&vault).unwrap();
+        let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "items/atl-1.md",
+                "items/atl-2.md",
+                "items/broken.md",
+                "projects/atlas.md",
+                "spaces/fielding.md",
+                "type/work-item.md",
+            ]
+        );
+        assert!(entries.iter().all(|e| !e.path.contains('\\')));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn skips_views_attachments_and_dot_dirs() {
+        let vault = fixture_vault("scan-skips");
+        let entries = scan_vault(&vault).unwrap();
+        assert!(entries.iter().all(|e| {
+            !e.path.starts_with("views/")
+                && !e.path.starts_with("attachments/")
+                && !e.path.starts_with(".obsidian/")
+                && e.path.ends_with(".md")
+        }));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn malformed_file_yields_parse_error_entry_and_scan_succeeds() {
+        let vault = fixture_vault("scan-broken");
+        let entries = scan_vault(&vault).unwrap();
+        let broken = entries.iter().find(|e| e.path == "items/broken.md").unwrap();
+        assert!(broken.parse_error.is_some());
+        assert_eq!(broken.title, "Broken item");
+        assert!(entries.iter().filter(|e| e.parse_error.is_some()).count() == 1);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn extracts_relationships_and_complex_properties() {
+        let vault = fixture_vault("scan-props");
+        let entries = scan_vault(&vault).unwrap();
+        let project = entries.iter().find(|e| e.path == "projects/atlas.md").unwrap();
+        assert_eq!(project.relationships["space"], vec!["fielding"]);
+        let space = entries.iter().find(|e| e.path == "spaces/fielding.md").unwrap();
+        assert_eq!(space.properties["statuses"].as_array().unwrap().len(), 2);
+        let type_note = entries.iter().find(|e| e.path == "type/work-item.md").unwrap();
+        assert_eq!(type_note.properties["fields"]["status"]["kind"], "status");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn timestamps_are_iso_8601() {
+        let vault = fixture_vault("scan-times");
+        let entries = scan_vault(&vault).unwrap();
+        for e in &entries {
+            assert!(chrono::DateTime::parse_from_rfc3339(&e.created_at).is_ok(), "{}", e.created_at);
+            assert!(chrono::DateTime::parse_from_rfc3339(&e.modified_at).is_ok(), "{}", e.modified_at);
+        }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn nonexistent_vault_errors() {
+        assert!(scan_vault(Path::new("/definitely/not/a/real/vault")).is_err());
+    }
+}
