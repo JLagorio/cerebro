@@ -48,9 +48,23 @@ describe('ViewToolbar', () => {
     render(
       <ViewToolbar presentation={presentation} onChange={onChange} onSaveView={vi.fn()} />,
     );
-    const groupSelect = screen.getByDisplayValue('Group: status');
-    fireEvent.change(groupSelect, { target: { value: 'none' } });
+    // M2 Task 2: the group control is a DS Dropdown, not a native select.
+    fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
+    fireEvent.click(screen.getByRole('option', { name: 'No grouping' }));
     expect(onChange).toHaveBeenCalledWith({ ...presentation, groupBy: null });
+  });
+
+  it('changing order reports the decoded orderBy', () => {
+    const onChange = vi.fn();
+    render(
+      <ViewToolbar presentation={presentation} onChange={onChange} onSaveView={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Order by' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Due date' }));
+    expect(onChange).toHaveBeenCalledWith({
+      ...presentation,
+      orderBy: { field: 'due', dir: 'asc' },
+    });
   });
 
   it('save view dialog collects a name and calls onSaveView', () => {

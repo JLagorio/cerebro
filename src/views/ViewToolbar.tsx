@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import { Select } from '@/components/ui/Select';
 import type { Presentation } from '@/engine/types';
 
 export const GROUP_OPTIONS = [
@@ -70,22 +70,25 @@ export function ViewToolbar({ presentation, onChange, onSaveView }: ViewToolbarP
           onChange({ ...presentation, type: value as Presentation['type'] })
         }
       />
-      <Select
+      {/* M2 Task 2: DS Dropdown replaces the native selects. */}
+      <Dropdown
         size="sm"
+        label="Group by"
         options={GROUP_OPTIONS}
         value={presentation.groupBy ?? 'none'}
-        onChange={(e) =>
+        onChange={(value) =>
           onChange({
             ...presentation,
-            groupBy: e.target.value === 'none' ? null : e.target.value,
+            groupBy: value === 'none' ? null : value,
           })
         }
       />
-      <Select
+      <Dropdown
         size="sm"
+        label="Order by"
         options={ORDER_OPTIONS}
         value={orderToValue(presentation.orderBy)}
-        onChange={(e) => onChange({ ...presentation, orderBy: valueToOrder(e.target.value) })}
+        onChange={(value) => onChange({ ...presentation, orderBy: valueToOrder(value) })}
       />
       <span className="flex-1" />
       <Button variant="secondary" size="sm" icon="bookmark" onClick={() => setDialogOpen(true)}>
