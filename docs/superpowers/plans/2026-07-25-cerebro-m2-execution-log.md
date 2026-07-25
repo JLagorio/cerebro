@@ -18,12 +18,20 @@ Plan: [2026-07-25-cerebro-m2-markdown-first.md](2026-07-25-cerebro-m2-markdown-f
 | 10 | Doc surface + project file tree | ✅ done | 11ba22d |
 | 11 | Docs rail surface | ✅ done | 57b3bdf |
 | 12 | DetailPanel body → BlockNote | ✅ done | 90d262a |
-| 13 | Smoke v2 + regression sweep | pending | |
+| 13 | Smoke v2 + regression sweep | ✅ done | ffa72ca |
 
 ## Binding notes
 
 1. PR #1 found already merged at M2 start; `main` in sync with origin. Two tracked files under `docs/cerebro-with-teams/` carry uncommitted local modifications (user/design-tool edits) — left untouched, not staged by any M2 commit.
 2. Task 1 scope is the (B) list verbatim from the M1 log line 44. The `.gitignore test-results/playwright-report` item was already done pre-M2 (commit 082892a) — verify, don't redo.
+
+## M2 status: code-complete
+
+All 13 tasks landed. Final sweep (at ffa72ca): 384 vitest / 40 files, 72 cargo, tsc clean, `pnpm build` green, 2/2 Playwright, full `cargo build` zero warnings, zero space references in src/, src-tauri/, demo-vault/ (Rust fixtures modernized to v2 in ffa72ca).
+
+**Remaining DoD item (needs a human at the GUI):** the first real `pnpm tauri dev` shakeout on a non-demo vault. Shakeout checklist from the task notes: BlockNote feel in the detail panel (compact CSS, Escape-closes-panel behavior), delete-to-Trash happy path (deliberately untested in cargo — files would land in the developer's Trash), watcher behavior on external edits, and real-vault scan performance.
+
+**Bundle note:** BlockNote+shiki sit in a lazy chunk (~1.4 MB, loaded on first editor mount; shiki languages split further per-language); the boot bundle stays ~888 KB, dominated by lucide-react — an M3 optimization candidate.
 
 ## Deviations
 
@@ -50,5 +58,7 @@ Plan: [2026-07-25-cerebro-m2-markdown-first.md](2026-07-25-cerebro-m2-markdown-f
 **Task 11 (57b3bdf):** Selection gains `docs`; DocsPage = recents (latest-modified documents; work items + project.md excluded) + vault-wide FileTree; Rail Docs item lands (no-dead-chrome rule satisfied — the surface exists now). One open rule everywhere (project tree, QuickOpen, docs tree): project.md → project canvas, Work item → detail panel on its project, anything else → DocPage. Rail actives: Docs owns doc/docs, Home owns home/project/view. Baselines: 384 vitest / 40 files, tsc clean, smoke green.
 
 **Task 12 (90d262a):** textarea → NoteBodyEditor `compact` (28px gutter, scaled headings for the 420px panel). Rename race policy translated to blocks: `spliceTitleIntoBlocks` (markdown.ts) rewrites/inserts the first H1 block in the live editor after a successful rename — fence-aware by construction. String `spliceTitle` deleted with its suite; block-level suite in markdown.test.ts. Two behavior notes: (a) the splice triggers one save that matches what replace_h1 already wrote — harmless identical write; (b) Escape inside the editor closes the panel (same as the M1 textarea) — flag for the tauri-dev shakeout if BlockNote's own Escape handling (menu dismiss) makes this annoying. Bare fences normalize to ```` ```text ```` (pinned). Baselines: 384 vitest, tsc clean, smoke green.
+
+**Task 13 (ffa72ca):** smoke v2 journey: New view from the tab row → auto-persist verified on disk after a toolbar edit → Pages tab → new folder → new page inside it (file asserted byte-exact `# Smoke Notes\n`, no frontmatter) → BlockNote edit → debounced write asserted → Home → Docs rail → recents → content back through the full disk round trip. **Deviation 4:** the plan's "reload persists" step is navigate-away-and-back instead — the mock fs is in-memory per page load, so a browser reload reseeds it; true cross-reload persistence is exactly what the tauri-dev shakeout covers. Rust fixture modernization folded in (spaces → v2 project statuses override / lead relation) to satisfy the zero-space-references DoD line.
 
 **Task 1 (8314898):** all 11 (B) items landed. Baselines: 308 vitest (was 296), 67 cargo (was 66), smoke green, tsc clean. Notes: (a) `.gitignore` item was already done pre-M2 (082892a) — verified, not redone. (b) CreateMenu dialogs already had `submitting` guards from the M1 fix round; the quick-add row was the missing site. (c) stale-body policy chosen: local H1 splice into body/savedBody after successful rename (mirrors `replace_h1`, keeps dirty description edits, no extra IPC round-trip); general refetch-on-external-change remains out of scope. (d) `#[tauri::command(async)]` applied to all 10 sync IO commands; `pick_vault` already `async fn`. (e) @theme stock reset verified safe: only `text-white` used stock palette (5 sites swapped to `var(--n-0)`); `*-transparent` are static utilities in TW4, unaffected.
