@@ -85,8 +85,8 @@ fn list_views(vault: String) -> Result<Vec<ViewYaml>, String> {
 }
 
 #[tauri::command(async)]
-fn save_view(vault: String, id: String, yaml: String) -> Result<(), String> {
-    vault::write::save_view(Path::new(&vault), &id, &yaml)
+fn save_view(vault: String, id: String, yaml: String, folder: Option<String>) -> Result<(), String> {
+    vault::write::save_view(Path::new(&vault), &id, &yaml, folder.as_deref())
 }
 
 #[tauri::command(async)]

@@ -37,11 +37,15 @@ export function Sidebar({ onNewProject }: SidebarProps) {
 
   const sortedViews = useMemo(
     () =>
-      [...views].sort(
-        (a, b) =>
-          (a.definition.order ?? 0) - (b.definition.order ?? 0) ||
-          a.definition.name.localeCompare(b.definition.name),
-      ),
+      views
+        // Project-scoped views render as tabs on their project page (Task 8),
+        // not in the sidebar — only vault-global views list here.
+        .filter((v) => v.project === null)
+        .sort(
+          (a, b) =>
+            (a.definition.order ?? 0) - (b.definition.order ?? 0) ||
+            a.definition.name.localeCompare(b.definition.name),
+        ),
     [views],
   );
 

@@ -170,16 +170,43 @@ export async function setNoteTitle(_vault: string, path: string, title: string):
   touch(path);
 }
 
-export async function listViews(_vault: string): Promise<{ id: string; yaml: string }[]> {
-  return [...files.keys()]
-    .filter((p) => p.startsWith('views/') && p.endsWith('.yml'))
-    .sort()
-    .map((p) => ({ id: p.slice('views/'.length, -'.yml'.length), yaml: files.get(p) ?? '' }));
+export async function listViews(
+  _vault: string,
+): Promise<{ id: string; yaml: string; project: string | null }[]> {
+  // Parity with write.rs list_views: root views/ is global; a views/ dir next
+  // to a project.md is scoped to that project. Sorted by (project, id).
+  const projectDirs = [...files.keys()]
+    .filter((p) => p.endsWith('/project.md'))
+    .map((p) => p.slice(0, -'/project.md'.length));
+  const views: { id: string; yaml: string; project: string | null }[] = [];
+  for (const p of [...files.keys()].sort()) {
+    if (!p.endsWith('.yml')) continue;
+    if (p.startsWith('views/') && !p.slice('views/'.length).includes('/')) {
+      views.push({ id: p.slice('views/'.length, -'.yml'.length), yaml: files.get(p) ?? '', project: null });
+      continue;
+    }
+    const dir = projectDirs.find((d) => p.startsWith(`${d}/views/`) && !p.slice(`${d}/views/`.length).includes('/'));
+    if (dir !== undefined) {
+      views.push({
+        id: p.slice(`${dir}/views/`.length, -'.yml'.length),
+        yaml: files.get(p) ?? '',
+        project: `${dir}/project.md`,
+      });
+    }
+  }
+  views.sort((a, b) => (a.project ?? '').localeCompare(b.project ?? '') || a.id.localeCompare(b.id));
+  return views;
 }
 
-export async function saveView(_vault: string, id: string, yaml: string): Promise<void> {
-  files.set(`views/${id}.yml`, yaml);
-  touch(`views/${id}.yml`);
+export async function saveView(
+  _vault: string,
+  id: string,
+  yaml: string,
+  folder: string | null = null,
+): Promise<void> {
+  const path = folder === null ? `views/${id}.yml` : `${folder}/views/${id}.yml`;
+  files.set(path, yaml);
+  touch(path);
 }
 
 export async function startWatcher(_vault: string): Promise<void> {

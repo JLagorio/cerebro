@@ -101,6 +101,7 @@ function mkView(partial: Partial<ViewFile['definition']> & { id: string }): View
   const { id, ...definition } = partial;
   return {
     id,
+    project: null,
     definition: {
       name: id,
       icon: null,

@@ -59,7 +59,11 @@ export interface ViewDefinition {
   name: string; icon: string | null; color: string | null; order: number | null;
   filters: FilterGroup | null; presentation: Presentation;
 }
-export interface ViewFile { id: string; definition: ViewDefinition }
+export interface ViewFile {
+  id: string;                          // filename stem; unique within its scope's views/ dir
+  definition: ViewDefinition;
+  project: string | null;              // owning project.md path (projects/x/views/*.yml), null = vault-global
+}
 
 export interface Group { key: string; label: string; color: string | null; ghost: boolean; entries: Entry[] }
 // groupEntries emits empty declared option/status groups (boards need the columns) and a trailing

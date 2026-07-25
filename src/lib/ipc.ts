@@ -64,12 +64,22 @@ export function setNoteTitle(vault: string, path: string, title: string): Promis
     : mock.setNoteTitle(vault, path, title);
 }
 
-export function listViews(vault: string): Promise<{ id: string; yaml: string }[]> {
+export function listViews(
+  vault: string,
+): Promise<{ id: string; yaml: string; project: string | null }[]> {
   return inTauri() ? invokeTauri('list_views', { vault }) : mock.listViews(vault);
 }
 
-export function saveView(vault: string, id: string, yaml: string): Promise<void> {
-  return inTauri() ? invokeTauri('save_view', { vault, id, yaml }) : mock.saveView(vault, id, yaml);
+/** folder scopes the view to a project dir (writes <folder>/views/<id>.yml). */
+export function saveView(
+  vault: string,
+  id: string,
+  yaml: string,
+  folder: string | null = null,
+): Promise<void> {
+  return inTauri()
+    ? invokeTauri('save_view', { vault, id, yaml, folder })
+    : mock.saveView(vault, id, yaml, folder);
 }
 
 export function startWatcher(vault: string): Promise<void> {

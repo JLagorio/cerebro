@@ -48,10 +48,14 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
 
   const handleSaveView = async (name: string) => {
     if (!vaultPath) return;
-    // Dedupe against existing view ids (M1.x): a name that slugifies to a
-    // taken id must not silently overwrite that view's file.
+    // Task 6: saving from a project page scopes the view to that project
+    // (<project dir>/views/); saving from a global view stays vault-global.
+    const scope = project?.path ?? null;
+    const folder = project === null ? null : project.path.replace(/\/project\.md$/, '');
+    // Dedupe against existing view ids IN THIS SCOPE (M1.x): a name that
+    // slugifies to a taken id must not silently overwrite that view's file.
     const base = slugifyViewId(name) || 'view';
-    const taken = new Set(views.map((v) => v.id));
+    const taken = new Set(views.filter((v) => v.project === scope).map((v) => v.id));
     let id = base;
     for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
     const yaml = serializeView({
@@ -63,7 +67,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       presentation,
     });
     try {
-      await saveView(vaultPath, id, yaml);
+      await saveView(vaultPath, id, yaml, folder);
       await rescan(); // the watcher rescan also picks the new view up for the sidebar
       toast(`View "${name}" saved`);
     } catch {

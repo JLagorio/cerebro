@@ -111,7 +111,10 @@ export function resolveCollection(
       };
     }
     case 'view': {
-      const view = views.find((v) => v.id === sel.id) ?? null;
+      // Sidebar view selections are vault-global; project-scoped views are
+      // rendered by their project's tabs, not by id lookup here (ids are only
+      // unique within a scope).
+      const view = views.find((v) => v.id === sel.id && v.project === null) ?? null;
       if (view === null) return { title: sel.id, entries: [], presentation: defaultPresentation() };
       const { name, filters, presentation } = view.definition;
       const matched =

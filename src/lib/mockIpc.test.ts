@@ -131,7 +131,22 @@ describe('mockIpc', () => {
     expect(await mock.listViews('/demo-vault')).toEqual([]);
     await mock.saveView('/demo-vault', 'my-view', 'name: My view\n');
     expect(await mock.listViews('/demo-vault')).toEqual([
-      { id: 'my-view', yaml: 'name: My view\n' },
+      { id: 'my-view', yaml: 'name: My view\n', project: null },
+    ]);
+  });
+
+  // Task 6 parity with write.rs: a views/ dir next to a project.md is scoped.
+  it('listViews scopes project views and sorts globals first', async () => {
+    await mock.saveView('/demo-vault', 'global', 'name: G\n');
+    await mock.saveView('/demo-vault', 'delivery', 'name: D\n', 'projects/guided-onboarding-ga');
+    const views = await mock.listViews('/demo-vault');
+    expect(views).toEqual([
+      { id: 'global', yaml: 'name: G\n', project: null },
+      {
+        id: 'delivery',
+        yaml: 'name: D\n',
+        project: 'projects/guided-onboarding-ga/project.md',
+      },
     ]);
   });
 

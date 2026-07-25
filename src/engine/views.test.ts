@@ -30,6 +30,7 @@ describe('parseViewYaml', () => {
   it('parses a complete view file', () => {
     expect(parseViewYaml('active-work', ACTIVE_WORK_YAML)).toEqual({
       id: 'active-work',
+      project: null,
       definition: {
         name: 'Active work',
         icon: 'flame',
@@ -54,6 +55,12 @@ describe('parseViewYaml', () => {
         },
       },
     });
+  });
+
+  it('carries the project scope through (Task 6)', () => {
+    const scoped = parseViewYaml('delivery', 'name: Delivery\n', 'projects/atlas/project.md');
+    expect(scoped.project).toBe('projects/atlas/project.md');
+    expect(parseViewYaml('global', 'name: G\n').project).toBeNull();
   });
 
   it('bad yaml falls back to name = id and the default list presentation', () => {

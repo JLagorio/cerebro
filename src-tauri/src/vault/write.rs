@@ -8,11 +8,13 @@ use std::path::{Component, Path, PathBuf};
 
 use super::parse;
 
-/// Raw saved-view file: `views/<id>.yml`.
+/// Raw saved-view file: `views/<id>.yml` at the vault root (project None) or
+/// `<project dir>/views/<id>.yml` (project = that dir's project.md path).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ViewYaml {
     pub id: String,
     pub yaml: String,
+    pub project: Option<String>,
 }
 
 /// Single funnel for all vault file writes; registers each write with the
@@ -223,14 +225,15 @@ pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String
     write_file(&safe_join(vault, rel)?, &compose(block, &new_body))
 }
 
-/// List `views/*.yml` as raw strings, sorted by id (filename stem).
-pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
-    let dir = vault.join("views");
+fn collect_views_dir(
+    dir: &Path,
+    project: Option<&str>,
+    views: &mut Vec<ViewYaml>,
+) -> Result<(), String> {
     if !dir.is_dir() {
-        return Ok(Vec::new());
+        return Ok(());
     }
-    let mut views = Vec::new();
-    for item in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+    for item in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
         let item = item.map_err(|e| e.to_string())?;
         let path = item.path();
         if path.extension().and_then(|e| e.to_str()) != Some("yml") {
@@ -240,16 +243,61 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
             continue;
         };
         let yaml = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        views.push(ViewYaml { id: id.to_string(), yaml });
+        views.push(ViewYaml {
+            id: id.to_string(),
+            yaml,
+            project: project.map(str::to_string),
+        });
     }
-    views.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(())
+}
+
+/// List saved views: `views/*.yml` at the vault root (global) plus each
+/// project folder's `views/*.yml` (M2 Task 6). Sorted by (project, id).
+pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
+    let mut views = Vec::new();
+    collect_views_dir(&vault.join("views"), None, &mut views)?;
+    // Project views: a views/ dir next to any project.md. Reuse the scanner's
+    // walk semantics (skips dot/views/attachments dirs) to find project docs.
+    let walker = walkdir::WalkDir::new(vault)
+        .into_iter()
+        .filter_entry(|e| {
+            e.depth() == 0
+                || e.file_type().is_file()
+                || !{
+                    let name = e.file_name().to_string_lossy();
+                    name.starts_with('.') || name == "views" || name == "attachments"
+                }
+        });
+    for item in walker {
+        let Ok(item) = item else { continue };
+        if !item.file_type().is_file() || item.file_name().to_string_lossy() != "project.md" {
+            continue;
+        }
+        let Some(project_dir) = item.path().parent() else { continue };
+        let rel_project = item
+            .path()
+            .strip_prefix(vault)
+            .map_err(|e| e.to_string())?
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        collect_views_dir(&project_dir.join("views"), Some(&rel_project), &mut views)?;
+    }
+    views.sort_by(|a, b| a.project.cmp(&b.project).then(a.id.cmp(&b.id)));
     Ok(views)
 }
 
-/// Write `views/<id>.yml` verbatim, creating `views/` if needed.
-pub fn save_view(vault: &Path, id: &str, yaml: &str) -> Result<(), String> {
+/// Write `<folder>/views/<id>.yml` verbatim (vault-root `views/` when folder
+/// is None), creating the directory if needed.
+pub fn save_view(vault: &Path, id: &str, yaml: &str, folder: Option<&str>) -> Result<(), String> {
     safe_component("view id", id)?;
-    write_file(&vault.join("views").join(format!("{id}.yml")), yaml)
+    let base = match folder {
+        Some(f) => safe_join(vault, f)?,
+        None => vault.to_path_buf(),
+    };
+    write_file(&base.join("views").join(format!("{id}.yml")), yaml)
 }
 
 // --- Vault format v2 file operations (M2 Task 3) ---
@@ -481,13 +529,34 @@ mod tests {
     fn views_round_trip_as_raw_yaml() {
         let vault = testutil::temp_vault("wfm-views");
         assert!(list_views(&vault).unwrap().is_empty());
-        save_view(&vault, "all-items", "name: All items\npresentation:\n  type: list\n").unwrap();
-        save_view(&vault, "board", "name: Board\n").unwrap();
+        save_view(&vault, "all-items", "name: All items\npresentation:\n  type: list\n", None)
+            .unwrap();
+        save_view(&vault, "board", "name: Board\n", None).unwrap();
         let views = list_views(&vault).unwrap();
         assert_eq!(views.len(), 2);
         assert_eq!(views[0].id, "all-items");
         assert_eq!(views[0].yaml, "name: All items\npresentation:\n  type: list\n");
+        assert_eq!(views[0].project, None);
         assert_eq!(views[1].id, "board");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M2 Task 6: views/ dirs inside project folders are project-scoped.
+    #[test]
+    fn project_views_carry_their_project_and_sort_after_globals() {
+        let vault = testutil::temp_vault("wfm-project-views");
+        testutil::write(&vault, "projects/atlas/project.md", "---\ntype: Project\n---\n\n# Atlas\n");
+        save_view(&vault, "global", "name: Global\n", None).unwrap();
+        save_view(&vault, "delivery", "name: Delivery\n", Some("projects/atlas")).unwrap();
+        let views = list_views(&vault).unwrap();
+        assert_eq!(views.len(), 2);
+        assert_eq!(views[0].id, "global");
+        assert_eq!(views[0].project, None);
+        assert_eq!(views[1].id, "delivery");
+        assert_eq!(views[1].project.as_deref(), Some("projects/atlas/project.md"));
+        assert!(vault.join("projects/atlas/views/delivery.yml").is_file());
+        // Escaping folders are rejected.
+        assert!(save_view(&vault, "evil", "name: E\n", Some("../outside")).is_err());
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -536,9 +605,9 @@ mod tests {
     #[test]
     fn save_view_rejects_non_component_ids() {
         let vault = testutil::temp_vault("wfm-view-escape");
-        assert!(save_view(&vault, "../../evil-view", "name: Evil\n").is_err());
-        assert!(save_view(&vault, "nested/id", "name: Evil\n").is_err());
-        assert!(save_view(&vault, "", "name: Evil\n").is_err());
+        assert!(save_view(&vault, "../../evil-view", "name: Evil\n", None).is_err());
+        assert!(save_view(&vault, "nested/id", "name: Evil\n", None).is_err());
+        assert!(save_view(&vault, "", "name: Evil\n", None).is_err());
         let _ = std::fs::remove_dir_all(&vault);
     }
 

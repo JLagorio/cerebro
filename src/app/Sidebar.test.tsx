@@ -40,6 +40,7 @@ describe('Sidebar', () => {
       views: [
         {
           id: 'urgent-work',
+          project: null,
           definition: {
             name: 'Urgent work',
             icon: null,
@@ -95,5 +96,19 @@ describe('Sidebar', () => {
     useVaultStore.setState({ entries: [] });
     render(<Sidebar onNewProject={vi.fn()} />);
     expect(screen.getByText('No projects yet')).toBeTruthy();
+  });
+
+  // Task 6: project-scoped views belong to their project's tabs, not here.
+  it('hides project-scoped views from the Views section', () => {
+    const scoped = {
+      ...useVaultStore.getState().views[0],
+      id: 'delivery',
+      project: 'projects/foundations/project.md',
+      definition: { ...useVaultStore.getState().views[0].definition, name: 'Delivery' },
+    };
+    useVaultStore.setState({ views: [...useVaultStore.getState().views, scoped] });
+    render(<Sidebar onNewProject={vi.fn()} />);
+    expect(screen.getByText('Urgent work')).toBeTruthy();
+    expect(screen.queryByText('Delivery')).toBeNull();
   });
 });

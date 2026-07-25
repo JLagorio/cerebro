@@ -84,7 +84,7 @@ export function parseFilters(raw: unknown): FilterGroup | null {
 }
 
 /** Tolerant by design: a saved view file never fails to load (advisory schema rule). */
-export function parseViewYaml(id: string, yamlText: string): ViewFile {
+export function parseViewYaml(id: string, yamlText: string, project: string | null = null): ViewFile {
   let raw: unknown = null;
   try {
     raw = parse(yamlText);
@@ -94,6 +94,7 @@ export function parseViewYaml(id: string, yamlText: string): ViewFile {
   const obj = asRecord(raw);
   return {
     id,
+    project,
     definition: {
       name: typeof obj.name === 'string' && obj.name.trim() !== '' ? obj.name : id,
       icon: typeof obj.icon === 'string' ? obj.icon : null,

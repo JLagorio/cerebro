@@ -59,7 +59,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     set({ vaultPath: path, status: 'scanning', error: null });
     try {
       const entries = await ipc.scanVault(path);
-      const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml));
+      const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
       await ipc.startWatcher(path);
       if (inTauri() && !watcherBound) {
         const { listen } = await import('@tauri-apps/api/event');
@@ -91,7 +91,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const vault = get().vaultPath;
     if (vault === null) return;
     const entries = await ipc.scanVault(vault);
-    const views = (await ipc.listViews(vault)).map((v) => parseViewYaml(v.id, v.yaml));
+    const views = (await ipc.listViews(vault)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
     set({ entries, views, status: 'ready' });
   },
 
