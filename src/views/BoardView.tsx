@@ -8,6 +8,7 @@ import {
 } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { Avatar } from '@/components/ui/Avatar';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusFlag } from '@/components/ui/StatusFlag';
 import { groupEntries } from '@/engine/grouping';
 import { formatWikilink } from '@/engine/wikilink';
@@ -152,16 +153,27 @@ export function BoardView({ entries, presentation, schema }: BoardViewProps) {
       data-testid="board-view"
       className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--n-25)] px-5 py-4"
     >
-      <DndContext
-        sensors={sensors}
-        onDragEnd={(event) => handleDragEnd(event, { groupBy, groups, schema, patchFrontmatter, toast })}
-      >
-        <div className="flex items-start gap-3 overflow-x-auto">
-          {groups.map((g) => (
-            <BoardColumn key={g.key || g.label} group={g} schema={schema} />
-          ))}
-        </div>
-      </DndContext>
+      {groups.length === 0 ? (
+        // Fix (execution-log note 17a): groupEntries([], …) returns [] — an
+        // empty project rendered a blank canvas with no columns and no empty
+        // state.
+        <EmptyState
+          icon="square-kanban"
+          title="No items yet"
+          description="Create an item to see it here as a card."
+        />
+      ) : (
+        <DndContext
+          sensors={sensors}
+          onDragEnd={(event) => handleDragEnd(event, { groupBy, groups, schema, patchFrontmatter, toast })}
+        >
+          <div className="flex items-start gap-3 overflow-x-auto">
+            {groups.map((g) => (
+              <BoardColumn key={g.key || g.label} group={g} schema={schema} />
+            ))}
+          </div>
+        </DndContext>
+      )}
       {hiddenCount > 0 && (
         <div className="pt-3 text-[12px] text-[var(--n-400)]">
           {hiddenCount} unparseable item{hiddenCount === 1 ? '' : 's'} hidden

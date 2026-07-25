@@ -103,6 +103,39 @@ describe('ListView', () => {
     expect(within(section).queryByRole('textbox')).toBeNull();
     expect(createItem).not.toHaveBeenCalled();
   });
+
+  // Fix tests (execution-log note 17a): an empty project rendered a blank
+  // canvas — groupEntries([], …) returns [] so there were no headers, no
+  // Add-item row, and no empty state, leaving quick-add unreachable the
+  // moment CreateMenu can create fresh projects.
+  it('falls back to the flat all-items group when grouping yields no groups', () => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const project = entries.find((e) => e.path === 'projects/onboarding.md')!;
+    render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
+    const headers = screen.getAllByTestId('group-header');
+    expect(headers).toHaveLength(1);
+    expect(headers[0].textContent).toContain('All items');
+    expect(screen.getByText('Add item')).toBeTruthy();
+  });
+
+  it('quick-add via the empty-project fallback group does not preset the group field', async () => {
+    const user = userEvent.setup();
+    const createItem = vi.fn().mockResolvedValue('items/first-item.md');
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries, createItem });
+    const schema = buildSchema(entries);
+    const project = entries.find((e) => e.path === 'projects/onboarding.md')!;
+    render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
+    await user.click(screen.getByText('Add item'));
+    await user.type(screen.getByRole('textbox'), 'First item{Enter}');
+    // No `status: ''` leak from the fallback group's empty key.
+    expect(createItem).toHaveBeenCalledWith({
+      folder: 'items',
+      slug: 'first-item',
+      frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
+    });
+  });
 });
 
 describe('FieldChip', () => {

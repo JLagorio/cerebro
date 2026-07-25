@@ -34,7 +34,9 @@ function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: strin
       key: nextItemKey(prefix, allEntries),
       project: formatWikilink(pathStem(project.path)),
     };
-    if (groupBy && group.key !== '__none__') frontmatter[groupBy] = group.key;
+    // The empty-key check covers the flat "All items" fallback group (note
+    // 17a): a grouped-but-empty list must not preset `field: ''`.
+    if (groupBy && group.key !== '__none__' && group.key !== '') frontmatter[groupBy] = group.key;
     try {
       await createItem({ folder: 'items', slug: slugify(trimmed), frontmatter });
     } catch {
@@ -130,9 +132,14 @@ function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: 
 
 export function ListView({ entries, presentation, schema, project }: ListViewProps) {
   const groupBy = presentation.groupBy;
-  const groups: Group[] = groupBy
-    ? groupEntries(entries, groupBy, schema)
-    : [{ key: '', label: 'All items', color: null, ghost: false, entries }];
+  // Fix (execution-log note 17a): groupEntries([], …) returns [] — an empty
+  // project rendered a blank canvas with no headers and no Add-item row. Fall
+  // back to the flat "All items" group so quick-add stays reachable.
+  const grouped: Group[] = groupBy ? groupEntries(entries, groupBy, schema) : [];
+  const groups: Group[] =
+    grouped.length > 0
+      ? grouped
+      : [{ key: '', label: 'All items', color: null, ghost: false, entries }];
 
   return (
     // Deviation from the plan's verbatim root (reported): the shared contract

@@ -28,6 +28,17 @@ describe('BoardView', () => {
     expect(screen.getByText('1 unparseable item hidden')).toBeTruthy();
     expect(screen.queryByText('broken.md')).toBeNull();
   });
+
+  // Fix test (execution-log note 17a): an empty project rendered a blank
+  // canvas — groupEntries([], …) returns [] so the board had no columns and
+  // no empty state.
+  it('renders an empty state instead of a blank canvas for an empty project', () => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(<BoardView entries={[]} presentation={presentation} schema={schema} />);
+    expect(screen.getByTestId('board-view')).toBeTruthy();
+    expect(screen.getByText('No items yet')).toBeTruthy();
+  });
 });
 
 describe('handleDragEnd', () => {
