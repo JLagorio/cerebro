@@ -154,6 +154,31 @@ describe('ProjectPage', () => {
     });
   });
 
+  // Task 10: page tabs — Overview edits project.md, Pages hosts the file tree.
+  it('the Overview tab replaces the item canvas with the project.md editor', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set(FOUNDATIONS, '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n\nMission text.\n');
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.queryByTestId('list-view')).toBeNull();
+    expect(screen.queryByText('Board')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+    await waitFor(() => expect(screen.getByText('Mission text.')).toBeTruthy(), {
+      timeout: 5_000,
+    });
+  });
+
+  it('the Pages tab shows the project file tree without project.md', () => {
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Pages' }));
+    expect(screen.getByTestId('file-tree')).toBeTruthy();
+    expect(screen.queryByTestId('list-view')).toBeNull();
+    const files = screen.queryAllByTestId('tree-file').map((el) => el.textContent);
+    expect(files).not.toContain('project');
+  });
+
   // Task 8: toolbar edits on a saved-view tab auto-persist to the view file.
   it('auto-persists presentation edits on a scoped view tab', async () => {
     const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;

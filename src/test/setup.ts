@@ -36,6 +36,25 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
   })) as unknown as typeof window.matchMedia;
 }
 
+// Node 22 ships an experimental global localStorage that is undefined
+// without --localstorage-file and shadows jsdom's implementation (window is
+// globalThis in the vitest jsdom env). Back it with a Map so store
+// persistence code runs for real in tests.
+if (typeof window !== 'undefined' && window.localStorage === undefined) {
+  const backing = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return backing.size;
+    },
+    clear: () => backing.clear(),
+    getItem: (key) => backing.get(key) ?? null,
+    key: (index) => [...backing.keys()][index] ?? null,
+    removeItem: (key) => void backing.delete(key),
+    setItem: (key, value) => void backing.set(key, String(value)),
+  };
+  Object.defineProperty(window, 'localStorage', { value: storage, configurable: true });
+}
+
 // ProseMirror touches these DOM APIs that jsdom leaves unimplemented.
 if (typeof Range !== 'undefined' && !Range.prototype.getClientRects) {
   Range.prototype.getClientRects = () => ({ length: 0, item: () => null }) as unknown as DOMRectList;

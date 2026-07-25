@@ -53,6 +53,9 @@ describe('vaultStore', () => {
     expect(item?.title).toBe('First-run walkthrough GA');
     // v2 containment: the owning project comes from the folder, not a link.
     expect(item?.project).toBe('projects/guided-onboarding-ga/project.md');
+    // Task 10: directories load alongside entries for the file trees.
+    expect(s.folders).toContain('projects/guided-onboarding-ga/items');
+    expect(s.folders).toContain('inbox');
   });
 
   it('patchFrontmatter applies optimistically before the write resolves', async () => {
@@ -129,6 +132,7 @@ describe('vaultStore', () => {
     vi.mocked(ipc.createNote).mockImplementation(mockBackend.createNote);
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    vi.mocked(ipc.listFolders).mockImplementation(mockBackend.listFolders);
     enterTauri();
     try {
       const path = await useVaultStore.getState().createItem({
@@ -143,6 +147,7 @@ describe('vaultStore', () => {
       vi.mocked(ipc.createNote).mockReset();
       vi.mocked(ipc.scanVault).mockReset();
       vi.mocked(ipc.listViews).mockReset();
+      vi.mocked(ipc.listFolders).mockReset();
     }
   });
 
@@ -162,6 +167,7 @@ describe('vaultStore', () => {
   it('rebinds the vault-changed listener after a failed bind and contains rescan errors', async () => {
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    vi.mocked(ipc.listFolders).mockImplementation(mockBackend.listFolders);
     vi.mocked(ipc.startWatcher).mockImplementation(mockBackend.startWatcher);
     enterTauri();
     try {
@@ -189,6 +195,7 @@ describe('vaultStore', () => {
       exitTauri();
       vi.mocked(ipc.scanVault).mockReset();
       vi.mocked(ipc.listViews).mockReset();
+      vi.mocked(ipc.listFolders).mockReset();
       vi.mocked(ipc.startWatcher).mockReset();
     }
   });

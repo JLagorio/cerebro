@@ -51,9 +51,14 @@ export function QuickOpen() {
       navigate({ kind: 'project', path: entry.path });
       return;
     }
-    // v2 containment: jump to the owning project (if any), then open detail.
-    if (entry.project !== null) navigate({ kind: 'project', path: entry.project });
-    openDetail(entry.path);
+    // Work items open in the detail panel on their project canvas (v2
+    // containment); every other markdown file is a document (Task 10).
+    if (entry.type === 'Work item') {
+      if (entry.project !== null) navigate({ kind: 'project', path: entry.project });
+      openDetail(entry.path);
+      return;
+    }
+    navigate({ kind: 'doc', path: entry.path });
   };
 
   if (!visible) return null;

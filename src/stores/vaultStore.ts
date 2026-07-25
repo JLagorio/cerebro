@@ -10,6 +10,7 @@ export interface VaultState {
   vaultPath: string | null;
   entries: Entry[];
   views: ViewFile[];
+  folders: string[];   // all vault directories incl. empty ones (M2 Task 10 file trees)
   status: 'idle' | 'scanning' | 'ready' | 'error';
   error: string | null;
   openVault(path: string): Promise<void>;
@@ -52,6 +53,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   vaultPath: null,
   entries: [],
   views: [],
+  folders: [],
   status: 'idle',
   error: null,
 
@@ -60,6 +62,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     try {
       const entries = await ipc.scanVault(path);
       const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
+      const folders = await ipc.listFolders(path);
       await ipc.startWatcher(path);
       if (inTauri() && !watcherBound) {
         const { listen } = await import('@tauri-apps/api/event');
@@ -75,7 +78,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
         // app lifetime.
         watcherBound = true;
       }
-      set({ entries, views, status: 'ready' });
+      set({ entries, views, folders, status: 'ready' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ status: 'error', error: message });
@@ -92,7 +95,8 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     if (vault === null) return;
     const entries = await ipc.scanVault(vault);
     const views = (await ipc.listViews(vault)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
-    set({ entries, views, status: 'ready' });
+    const folders = await ipc.listFolders(vault);
+    set({ entries, views, folders, status: 'ready' });
   },
 
   async patchFrontmatter(path, patch) {

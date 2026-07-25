@@ -1,16 +1,28 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FileTree } from '@/components/FileTree';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { resolveCollection, sortEntries } from '@/engine/collections';
 import type { Presentation, Selection, ViewFile } from '@/engine/types';
 import { serializeView } from '@/engine/views';
 import { saveView } from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { BoardView } from '@/views/BoardView';
 import { ListView } from '@/views/ListView';
 import { slugifyViewId, ViewToolbar } from '@/views/ViewToolbar';
+
+// Task 10: the project header carries two tab groups — saved views (Items +
+// per-project views) and page tabs (Overview = project.md body, Pages = the
+// project folder's file tree).
+type ProjectTab =
+  | { kind: 'items' }
+  | { kind: 'view'; id: string }
+  | { kind: 'overview' }
+  | { kind: 'pages' };
 
 export type ProjectSelection = Extract<Selection, { kind: 'project' | 'view' }>;
 
@@ -61,6 +73,16 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   const rescan = useVaultStore((s) => s.rescan);
   const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
+  const openDetail = useUiStore((s) => s.openDetail);
+  const navigate = useNavStore((s) => s.navigate);
+
+  // Work items open in their canonical editor (the detail panel); every
+  // other markdown file is a document and opens full-page.
+  const openFromTree = (path: string) => {
+    const opened = entries.find((e) => e.path === path);
+    if (opened !== undefined && opened.type === 'Work item') openDetail(path);
+    else navigate({ kind: 'doc', path });
+  };
 
   const collection = useMemo(
     () => resolveCollection(selection, entries, schema, views),
@@ -72,9 +94,9 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       ? entries.find((e) => e.path === selection.path) ?? null
       : null;
 
-  // Task 8: saved-view tabs. null = the built-in "Items" tab (ephemeral
-  // presentation); an id = that project-scoped view, whose edits auto-persist.
-  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  // Task 8: saved-view tabs — "Items" is ephemeral, scoped-view tab edits
+  // auto-persist. Task 10 adds the Overview and Pages tabs.
+  const [tab, setTab] = useState<ProjectTab>({ kind: 'items' });
   const projectViews = useMemo<ViewFile[]>(
     () =>
       project === null
@@ -94,13 +116,16 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   const activeView =
     selection.kind === 'view'
       ? views.find((v) => v.id === selection.id && v.project === null) ?? null
-      : projectViews.find((v) => v.id === activeViewId) ?? null;
+      : tab.kind === 'view'
+        ? projectViews.find((v) => v.id === tab.id) ?? null
+        : null;
 
   // Local presentation state, re-initialized when the selection or tab changes.
   const selectionKey = selection.kind === 'project' ? selection.path : selection.id;
+  const tabKey = tab.kind === 'view' ? `view:${tab.id}` : tab.kind;
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
   useEffect(() => {
-    setActiveViewId(null);
+    setTab({ kind: 'items' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey]);
   useEffect(() => {
@@ -110,7 +135,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
         : collection.presentation,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionKey, activeViewId]);
+  }, [selectionKey, tabKey]);
 
   // Deviation from the plan's verbatim body (reported): re-sort by the LIVE
   // orderBy so the toolbar's order select works — resolveCollection sorts by
@@ -163,7 +188,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       await rescan();
       setNewViewOpen(false);
       setNewViewName('');
-      setActiveViewId(id);
+      setTab({ kind: 'view', id });
       toast(`View "${name}" saved`);
     } catch {
       // Surface the failed write instead of an unhandled rejection (M1.x).
@@ -198,18 +223,18 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
             className="flex items-end gap-1 border-b border-[var(--n-200)]"
           >
             <ViewTab
-              active={activeViewId === null}
+              active={tab.kind === 'items'}
               icon="list"
               label="Items"
-              onClick={() => setActiveViewId(null)}
+              onClick={() => setTab({ kind: 'items' })}
             />
             {projectViews.map((v) => (
               <ViewTab
                 key={v.id}
-                active={activeViewId === v.id}
+                active={tab.kind === 'view' && tab.id === v.id}
                 icon={v.definition.icon ?? 'layout-list'}
                 label={v.definition.name}
-                onClick={() => setActiveViewId(v.id)}
+                onClick={() => setTab({ kind: 'view', id: v.id })}
               />
             ))}
             <button
@@ -220,14 +245,44 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
               <Icon name="plus" size={13} />
               New view
             </button>
+            {/* Task 10: page tabs — the project folder's document surfaces. */}
+            <span aria-hidden className="mx-1.5 mb-1.5 h-4 w-px bg-[var(--n-200)]" />
+            <ViewTab
+              active={tab.kind === 'overview'}
+              icon="file-text"
+              label="Overview"
+              onClick={() => setTab({ kind: 'overview' })}
+            />
+            <ViewTab
+              active={tab.kind === 'pages'}
+              icon="folder-tree"
+              label="Pages"
+              onClick={() => setTab({ kind: 'pages' })}
+            />
           </div>
         )}
       </div>
-      <ViewToolbar presentation={presentation} onChange={handlePresentationChange} />
-      {presentation.type === 'board' ? (
-        <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
+      {tab.kind === 'overview' && project !== null && selection.kind === 'project' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-3">
+          <NoteBodyEditor path={project.path} />
+        </div>
+      ) : tab.kind === 'pages' && project !== null && selection.kind === 'project' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-3">
+          <FileTree
+            root={projectDir(project.path)}
+            hide={(p) => p === project.path}
+            onOpen={openFromTree}
+          />
+        </div>
       ) : (
-        <ListView entries={sortedEntries} presentation={presentation} schema={schema} project={project} />
+        <>
+          <ViewToolbar presentation={presentation} onChange={handlePresentationChange} />
+          {presentation.type === 'board' ? (
+            <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
+          ) : (
+            <ListView entries={sortedEntries} presentation={presentation} schema={schema} project={project} />
+          )}
+        </>
       )}
       <Dialog
         open={newViewOpen}

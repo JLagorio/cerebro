@@ -49,4 +49,18 @@ describe('QuickOpen', () => {
     });
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-2.md');
   });
+
+  // Task 10: non-work-item files are documents and open full-page.
+  it('picking a doc navigates to its page instead of the detail panel', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ detailPath: null });
+    render(<QuickOpen />);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'ana');
+    await user.click(screen.getAllByRole('option')[0]);
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'people/ana-rios.md',
+    });
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
 });

@@ -5,6 +5,7 @@ import { NewProjectDialog } from '@/app/CreateMenu';
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { DocPage } from '@/pages/DocPage';
 import { HomePage } from '@/pages/HomePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
@@ -22,6 +23,7 @@ function CanvasOutlet() {
   switch (selection.kind) {
     case 'home': return <HomePage />;
     case 'project': return <ProjectPage selection={selection} />;
+    case 'doc': return <DocPage selection={selection} />;
     case 'view': return <ProjectPage selection={selection} />;
     case 'settings': return <SettingsPage />;
   }
