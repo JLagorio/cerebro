@@ -1,0 +1,31 @@
+/* DS theme for BlockNote (M2 Task 9): map the mantine flavor's CSS
+   variables onto Cerebro tokens, scoped under our wrapper. */
+.cerebro-editor .bn-container {
+  --bn-colors-editor-text: var(--n-900);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--n-700);
+  --bn-colors-menu-background: var(--n-0);
+  --bn-colors-tooltip-text: var(--n-0);
+  --bn-colors-tooltip-background: var(--n-800);
+  --bn-colors-hovered-text: var(--n-900);
+  --bn-colors-hovered-background: var(--n-50);
+  --bn-colors-selected-text: var(--n-0);
+  --bn-colors-selected-background: var(--cortex-500);
+  --bn-colors-disabled-text: var(--n-400);
+  --bn-colors-disabled-background: var(--n-50);
+  --bn-colors-side-menu: var(--n-400);
+  --bn-colors-border: var(--n-200);
+  --bn-colors-shadow: var(--n-200);
+  --bn-font-family: var(--font-ui);
+  --bn-border-radius-medium: 8px;
+}
+
+.cerebro-editor .bn-editor {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.cerebro-editor .bn-inline-content code,
+.cerebro-editor .bn-block-content[data-content-type='codeBlock'] pre {
+  font-family: var(--font-mono);
+}
