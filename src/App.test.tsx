@@ -20,7 +20,7 @@ import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import { fixtureVault, makeEntry } from '@/test/factories';
+import { fixtureVault } from '@/test/factories';
 
 describe('App boot flow', () => {
   beforeEach(() => {
@@ -90,24 +90,13 @@ describe('App boot flow', () => {
     expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
   });
 
-  // Fix test (fix round D8): plan line 7618 promises the Sidebar seam opens
-  // the project dialog "prefilled with the space"; Task 23's spec never wired
-  // it, leaving dead chrome (note-14 violation).
-  it('sidebar new-project row opens the dialog preselected with the clicked space', async () => {
+  it('sidebar new-project row opens the project dialog (v2: no spaces)', async () => {
     const user = userEvent.setup();
-    vi.mocked(ipc.scanVault).mockResolvedValueOnce([
-      // A space that sorts first in the sidebar AND lists first in the
-      // dialog's default, so preselection is distinguishable from both.
-      makeEntry({ path: 'spaces/aaa-ops.md', title: 'AAA ops', type: 'Space' }),
-      ...fixtureVault(),
-    ]);
+    vi.mocked(ipc.scanVault).mockResolvedValueOnce(fixtureVault());
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });
-    const rows = screen.getAllByRole('button', { name: 'New project' });
-    await user.click(rows[1]); // Field platform's row (sidebar sorts spaces by title)
+    await user.click(screen.getByRole('button', { name: 'New project' }));
     const dialog = await screen.findByRole('dialog');
-    expect((within(dialog).getByLabelText('Space') as HTMLSelectElement).value).toBe(
-      'spaces/field-platform.md',
-    );
+    expect(within(dialog).getByPlaceholderText('Project name')).toBeTruthy();
   });
 });

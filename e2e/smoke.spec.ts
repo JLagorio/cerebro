@@ -21,20 +21,17 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
   // vault"; if the mock IPC restored a last vault it boots straight to the
   // shell. Handle both.
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarSpaces = page.getByTestId('sidebar-space');
-  await expect(demoButton.or(sidebarSpaces.first())).toBeVisible({ timeout: 10_000 });
+  const sidebarProjects = page.getByTestId('sidebar-project');
+  await expect(demoButton.or(sidebarProjects.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
 
-  // -- Sidebar lists at least one space --------------------------------
-  await expect(sidebarSpaces.first()).toBeVisible({ timeout: 10_000 });
-  expect(await sidebarSpaces.count()).toBeGreaterThanOrEqual(1);
+  // -- Sidebar lists top-level projects (v2: no spaces) -----------------
+  await expect(sidebarProjects.first()).toBeVisible({ timeout: 10_000 });
+  expect(await sidebarProjects.count()).toBeGreaterThanOrEqual(1);
 
-  // -- Expand the first space, open its first project -------------------
-  await sidebarSpaces.first().click();
-  const sidebarProjects = page.getByTestId('sidebar-project');
-  await expect(sidebarProjects.first()).toBeVisible();
+  // -- Open the first project -------------------------------------------
   await sidebarProjects.first().click();
 
   // -- List view: grouped section headers visible ----------------------

@@ -19,16 +19,23 @@ export function makeEntry(partial: Partial<Entry> & { path: string }): Entry {
   };
 }
 
-/** Minimal Meridian-style vault: type notes, one space (todo/doing/done), one project (FLD), one person, three items. */
+/** Minimal v2 vault: type notes (statuses on the Work item type doc), one
+ * project folder (FLD) with contained items, one person, one broken item. */
 export function fixtureVault(): Entry[] {
+  const PROJECT = 'projects/onboarding/project.md';
   return [
     makeEntry({
-      path: 'type/work-item.md',
+      path: 'types/work-item.md',
       title: 'Work item',
       type: 'Type',
       properties: {
         icon: 'circle-check',
         color: 'var(--cortex-500)',
+        statuses: [
+          { id: 'todo', group: 'active', color: 'var(--n-500)', hollow: true },
+          { id: 'doing', group: 'active', color: 'var(--warn-500)' },
+          { id: 'done', group: 'done', color: 'var(--success-500)' },
+        ],
         fields: {
           status: { kind: 'status' },
           priority: {
@@ -37,48 +44,40 @@ export function fixtureVault(): Entry[] {
           },
           assignee: { kind: 'person' },
           due: { kind: 'date' },
-          project: { kind: 'relation', target: 'Project' },
         },
       } as unknown as Entry['properties'],
     }),
-    makeEntry({ path: 'type/project.md', title: 'Project', type: 'Type', properties: { icon: 'folder', color: 'var(--n-600)' } }),
-    makeEntry({ path: 'type/space.md', title: 'Space', type: 'Type', properties: { icon: 'box', color: 'var(--n-600)' } }),
-    makeEntry({ path: 'type/person.md', title: 'Person', type: 'Type', properties: { icon: 'user', color: 'var(--n-600)' } }),
+    makeEntry({ path: 'types/project.md', title: 'Project', type: 'Type', properties: { icon: 'folder', color: 'var(--n-600)' } }),
+    makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type', properties: { icon: 'user', color: 'var(--n-600)' } }),
     makeEntry({
-      path: 'spaces/field-platform.md',
-      title: 'Field platform',
-      type: 'Space',
-      properties: {
-        color: 'var(--swatch-teal)',
-        statuses: [
-          { id: 'todo', group: 'active', color: 'var(--n-500)', hollow: true },
-          { id: 'doing', group: 'active', color: 'var(--warn-500)' },
-          { id: 'done', group: 'done', color: 'var(--success-500)' },
-        ],
-      } as unknown as Entry['properties'],
-    }),
-    makeEntry({
-      path: 'projects/onboarding.md',
+      path: PROJECT,
+      project: PROJECT,
       title: 'Guided onboarding',
       type: 'Project',
       properties: { key: 'FLD' },
-      relationships: { space: ['field-platform'] },
     }),
     makeEntry({ path: 'people/ana-rios.md', title: 'Ana Rios', type: 'Person' }),
     makeEntry({
-      path: 'items/fld-1.md',
+      path: 'projects/onboarding/items/fld-1.md',
+      project: PROJECT,
       title: 'Design first-run flow',
       type: 'Work item',
       properties: { key: 'FLD-1', status: 'todo', priority: 'high', channel: 'field-ops' },
-      relationships: { project: ['onboarding'], assignee: ['ana-rios'] },
+      relationships: { assignee: ['ana-rios'] },
     }),
     makeEntry({
-      path: 'items/fld-2.md',
+      path: 'projects/onboarding/items/fld-2.md',
+      project: PROJECT,
       title: 'Wire field sync banner',
       type: 'Work item',
       properties: { key: 'FLD-2', status: 'doing', priority: 'low' },
-      relationships: { project: ['onboarding'] },
     }),
-    makeEntry({ path: 'items/broken.md', title: 'broken', type: null, parseError: 'bad yaml: line 2' }),
+    makeEntry({
+      path: 'projects/onboarding/items/broken.md',
+      project: PROJECT,
+      title: 'broken',
+      type: null,
+      parseError: 'bad yaml: line 2',
+    }),
   ];
 }

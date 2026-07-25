@@ -10,7 +10,7 @@ import type {
 } from './types';
 import { resolveTarget } from './wikilink';
 
-/** Spec "simple" status template — fallback when an item has no resolvable space. */
+/** Spec "simple" status template — fallback when no type/project declares statuses. */
 export const DEFAULT_STATUSES: StatusDef[] = [
   { id: 'backlog', label: 'Backlog', color: '#A8AFC2', group: 'active' },
   { id: 'todo', label: 'Todo', color: '#3D8BE8', group: 'active' },
@@ -119,34 +119,28 @@ export function buildSchema(entries: Entry[]): Schema {
 
   const byPath = new Map(entries.map((e) => [e.path, e]));
 
-  function firstTarget(e: Entry, key: string): string | null {
-    const targets = e.relationships[key];
-    return targets !== undefined && targets.length > 0 ? targets[0] : null;
+  // Vault-level default statuses live on the Work item Type doc (locked
+  // decision 4); parsed once per schema build.
+  const workItemTypeEntry = entries.find((e) => e.type === 'Type' && e.title === 'Work item');
+  const vaultStatuses =
+    workItemTypeEntry !== undefined
+      ? parseStatuses((workItemTypeEntry.properties as Record<string, unknown>).statuses)
+      : [];
+
+  function projectForEntry(e: Entry): Entry | null {
+    if (e.project === null) return null;
+    return byPath.get(e.project) ?? null;
   }
 
-  function spaceForEntry(e: Entry): Entry | null {
-    if (e.type === 'Space') return e;
-    const ownSpace = firstTarget(e, 'space');
-    if (ownSpace !== null) {
-      const found = resolveTarget(ownSpace, entries);
-      return found !== null && found.type === 'Space' ? found : null;
+  function statusSetForProject(projectPath: string | null): StatusDef[] {
+    if (projectPath !== null) {
+      const project = byPath.get(projectPath);
+      if (project !== undefined) {
+        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        if (override.length > 0) return override;
+      }
     }
-    const projectTarget = firstTarget(e, 'project');
-    if (projectTarget === null) return null;
-    const project = resolveTarget(projectTarget, entries);
-    if (project === null) return null;
-    const spaceTarget = firstTarget(project, 'space');
-    if (spaceTarget === null) return null;
-    const found = resolveTarget(spaceTarget, entries);
-    return found !== null && found.type === 'Space' ? found : null;
-  }
-
-  function statusSetForSpace(spacePath: string | null): StatusDef[] {
-    if (spacePath === null) return DEFAULT_STATUSES;
-    const space = byPath.get(spacePath);
-    if (space === undefined) return DEFAULT_STATUSES;
-    const parsed = parseStatuses((space.properties as Record<string, unknown>).statuses);
-    return parsed.length > 0 ? parsed : DEFAULT_STATUSES;
+    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
   }
 
   function resolveField(e: Entry, field: string): ResolvedField {
@@ -170,8 +164,7 @@ export function buildSchema(entries: Entry[]): Schema {
     }
 
     if (kind === 'status') {
-      const space = spaceForEntry(e);
-      const statuses = statusSetForSpace(space !== null ? space.path : null);
+      const statuses = statusSetForProject(e.project);
       const id = String(Array.isArray(raw) ? raw[0] : raw);
       const match = statuses.find((s) => s.id === id);
       if (match !== undefined) {
@@ -206,5 +199,5 @@ export function buildSchema(entries: Entry[]): Schema {
     return { def, raw, display, color: null, ghost: false };
   }
 
-  return { types, spaceForEntry, statusSetForSpace, resolveField };
+  return { types, projectForEntry, statusSetForProject, resolveField };
 }

@@ -3,10 +3,7 @@ import { Icon } from '@/components/ui/Icon';
 import { resolveCollection, sortEntries } from '@/engine/collections';
 import type { Presentation, Selection } from '@/engine/types';
 import { serializeView } from '@/engine/views';
-import { resolveTarget } from '@/engine/wikilink';
 import { saveView } from '@/lib/ipc';
-import { swatchColor } from '@/lib/swatch';
-import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { BoardView } from '@/views/BoardView';
@@ -21,7 +18,6 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const schema = useSchema();
-  const navigate = useNavStore((s) => s.navigate);
   const toast = useUiStore((s) => s.toast);
 
   const collection = useMemo(
@@ -49,8 +45,6 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     selection.kind === 'project'
       ? entries.find((e) => e.path === selection.path) ?? null
       : null;
-  const spaceTarget = project?.relationships.space?.[0];
-  const space = spaceTarget ? resolveTarget(spaceTarget, entries) : null;
 
   const handleSaveView = async (name: string) => {
     if (!vaultPath) return;
@@ -84,24 +78,6 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
         <div className="mb-2.5 flex min-w-0 items-center gap-2">
           {project ? (
             <>
-              {space ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => navigate({ kind: 'space', path: space.path })}
-                    className="inline-flex items-center gap-[7px] border-0 bg-transparent text-[15px] font-medium text-[var(--n-700)] hover:text-[var(--n-900)]"
-                  >
-                    <span
-                      className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-[10px] font-bold text-[var(--n-0)]"
-                      style={{ background: swatchColor(space.properties.color) }}
-                    >
-                      {space.title.charAt(0).toUpperCase()}
-                    </span>
-                    {space.title}
-                  </button>
-                  <span className="px-0.5 text-[14px] text-[var(--n-400)]">/</span>
-                </>
-              ) : null}
               <Icon name="folder-kanban" size={16} color="var(--n-600)" />
               <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">
                 {project.title}

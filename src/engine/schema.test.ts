@@ -3,13 +3,20 @@ import { DEFAULT_STATUSES, buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 
 const typeNote = makeEntry({
-  path: 'type/work-item.md',
+  path: 'types/work-item.md',
   filename: 'work-item.md',
+  folder: 'types',
   title: 'Work item',
   type: 'Type',
   properties: {
     icon: 'check-square',
     color: '#3D8BE8',
+    // v2 (locked decision 4): the vault-default status set lives here.
+    statuses: [
+      { id: 'triage', group: 'active', color: '#A8AFC2' },
+      { id: 'doing', group: 'active', color: '#EFB428' },
+      { id: 'shipped', group: 'done', color: '#34B764' },
+    ],
     // raw frontmatter shape, exactly as the Rust parser delivers it
     fields: {
       status: { kind: 'status' },
@@ -32,35 +39,31 @@ const typeNote = makeEntry({
   },
 });
 
-const space = makeEntry({
-  path: 'spaces/fieldwork.md',
-  filename: 'fieldwork.md',
-  title: 'Fieldwork',
-  type: 'Space',
-  properties: {
-    color: '#3D8BE8',
-    statuses: [
-      { id: 'triage', group: 'active', color: '#A8AFC2' },
-      { id: 'doing', group: 'active', color: '#EFB428' },
-      { id: 'shipped', group: 'done', color: '#34B764' },
-    ],
-  },
-});
-
-const bareSpace = makeEntry({
-  path: 'spaces/bare.md',
-  filename: 'bare.md',
-  title: 'Bare',
-  type: 'Space',
-});
-
 const project = makeEntry({
-  path: 'projects/flight-deck.md',
-  filename: 'flight-deck.md',
+  path: 'projects/flight-deck/project.md',
+  filename: 'project.md',
+  folder: 'projects/flight-deck',
+  project: 'projects/flight-deck/project.md',
   title: 'Flight deck',
   type: 'Project',
   properties: { key: 'FLD' },
-  relationships: { space: ['fieldwork'] },
+});
+
+// A project with its own `statuses:` override (locked decision 4).
+const labsProject = makeEntry({
+  path: 'projects/labs/project.md',
+  filename: 'project.md',
+  folder: 'projects/labs',
+  project: 'projects/labs/project.md',
+  title: 'Labs',
+  type: 'Project',
+  properties: {
+    key: 'LAB',
+    statuses: [
+      { id: 'poc', group: 'active', color: '#8250DC' },
+      { id: 'proven', group: 'done', color: '#34B764' },
+    ],
+  },
 });
 
 const ana = makeEntry({
@@ -71,8 +74,10 @@ const ana = makeEntry({
 });
 
 const item = makeEntry({
-  path: 'items/fld-1.md',
+  path: 'projects/flight-deck/items/fld-1.md',
   filename: 'fld-1.md',
+  folder: 'projects/flight-deck/items',
+  project: 'projects/flight-deck/project.md',
   title: 'Fix the door',
   type: 'Work item',
   properties: {
@@ -83,35 +88,40 @@ const item = makeEntry({
     blocked: true,
     notes: 'hello', // undeclared field
   },
-  relationships: { project: ['flight-deck'], assignee: ['ana-marte'] },
+  relationships: { assignee: ['ana-marte'] },
 });
 
 const ghostItem = makeEntry({
-  path: 'items/fld-2.md',
+  path: 'projects/flight-deck/items/fld-2.md',
   filename: 'fld-2.md',
+  folder: 'projects/flight-deck/items',
+  project: 'projects/flight-deck/project.md',
   title: 'Odd one',
   type: 'Work item',
   properties: { status: 'qa', priority: 'blocker' },
-  relationships: { project: ['flight-deck'], assignee: ['ghost-person'] },
+  relationships: { assignee: ['ghost-person'] },
 });
 
 const floating = makeEntry({
-  path: 'items/floating.md',
+  path: 'inbox/floating.md',
   filename: 'floating.md',
+  folder: 'inbox',
   title: 'Floating',
   type: 'Work item',
   properties: { status: 'todo' },
 });
 
+// Entry.project pointing at a path with no entry (deleted project.md).
 const orphan = makeEntry({
-  path: 'items/orphan.md',
+  path: 'projects/nowhere/items/orphan.md',
   filename: 'orphan.md',
+  folder: 'projects/nowhere/items',
+  project: 'projects/nowhere/project.md',
   title: 'Orphan',
   type: 'Work item',
-  relationships: { project: ['nowhere'] },
 });
 
-const entries = [typeNote, space, bareSpace, project, ana, item, ghostItem, floating, orphan];
+const entries = [typeNote, project, labsProject, ana, item, ghostItem, floating, orphan];
 const schema = buildSchema(entries);
 
 describe('DEFAULT_STATUSES', () => {
@@ -175,47 +185,52 @@ describe('buildSchema — types', () => {
   });
 });
 
-describe('spaceForEntry', () => {
-  it('resolves item → project → space', () => {
-    expect(schema.spaceForEntry(item)).toBe(space);
+describe('projectForEntry', () => {
+  it('resolves the containing project.md entry', () => {
+    expect(schema.projectForEntry(item)).toBe(project);
   });
 
-  it('resolves a project via its own space relationship', () => {
-    expect(schema.spaceForEntry(project)).toBe(space);
+  it('a project doc resolves to itself', () => {
+    expect(schema.projectForEntry(project)).toBe(project);
   });
 
-  it('a space resolves to itself', () => {
-    expect(schema.spaceForEntry(space)).toBe(space);
+  it('returns null outside any project', () => {
+    expect(schema.projectForEntry(floating)).toBeNull();
   });
 
-  it('returns null when the entry has no project relationship', () => {
-    expect(schema.spaceForEntry(floating)).toBeNull();
-  });
-
-  it('returns null when the project target does not resolve', () => {
-    expect(schema.spaceForEntry(orphan)).toBeNull();
+  it('returns null when the project.md entry is missing', () => {
+    expect(schema.projectForEntry(orphan)).toBeNull();
   });
 });
 
-describe('statusSetForSpace', () => {
-  it('null path falls back to DEFAULT_STATUSES', () => {
-    expect(schema.statusSetForSpace(null)).toBe(DEFAULT_STATUSES);
-  });
-
-  it('parses the statuses property with humanized labels', () => {
-    expect(schema.statusSetForSpace('spaces/fieldwork.md')).toEqual([
+describe('statusSetForProject', () => {
+  it('null path uses the Work item Type doc statuses with humanized labels', () => {
+    expect(schema.statusSetForProject(null)).toEqual([
       { id: 'triage', label: 'Triage', color: '#A8AFC2', group: 'active' },
       { id: 'doing', label: 'Doing', color: '#EFB428', group: 'active' },
       { id: 'shipped', label: 'Shipped', color: '#34B764', group: 'done' },
     ]);
   });
 
-  it('a space without a statuses property falls back to DEFAULT_STATUSES', () => {
-    expect(schema.statusSetForSpace('spaces/bare.md')).toBe(DEFAULT_STATUSES);
+  it('a project statuses override wins over the type-doc default', () => {
+    expect(schema.statusSetForProject('projects/labs/project.md')).toEqual([
+      { id: 'poc', label: 'Poc', color: '#8250DC', group: 'active' },
+      { id: 'proven', label: 'Proven', color: '#34B764', group: 'done' },
+    ]);
   });
 
-  it('an unknown path falls back to DEFAULT_STATUSES', () => {
-    expect(schema.statusSetForSpace('spaces/nope.md')).toBe(DEFAULT_STATUSES);
+  it('a project without an override uses the type-doc default', () => {
+    expect(schema.statusSetForProject('projects/flight-deck/project.md')[0].id).toBe('triage');
+  });
+
+  it('an unknown project path uses the type-doc default', () => {
+    expect(schema.statusSetForProject('projects/nowhere/project.md')[0].id).toBe('triage');
+  });
+
+  it('falls back to DEFAULT_STATUSES when no type doc declares statuses', () => {
+    const bare = buildSchema([project, item]);
+    expect(bare.statusSetForProject('projects/flight-deck/project.md')).toBe(DEFAULT_STATUSES);
+    expect(bare.statusSetForProject(null)).toBe(DEFAULT_STATUSES);
   });
 });
 
@@ -237,11 +252,11 @@ describe('resolveField', () => {
     expect(resolved.color).toBeNull();
   });
 
-  it('status falls back to DEFAULT_STATUSES when the item has no space', () => {
+  it('status outside any project resolves against the type-doc default set', () => {
+    // floating carries status 'todo', which the type-doc set doesn't declare.
     const resolved = schema.resolveField(floating, 'status');
-    expect(resolved.display).toBe('Todo');
-    expect(resolved.color).toBe('#3D8BE8');
-    expect(resolved.ghost).toBe(false);
+    expect(resolved.display).toBe('todo');
+    expect(resolved.ghost).toBe(true);
   });
 
   it('select resolves label and color from the options list', () => {
@@ -269,7 +284,16 @@ describe('resolveField', () => {
   });
 
   it('relation displays the resolved entry title', () => {
-    expect(schema.resolveField(item, 'project').display).toBe('Flight deck');
+    // v2: project files are all named project.md, so wikilinks to projects
+    // resolve by exact title (resolveTarget's second pass), not stem.
+    const linked = makeEntry({
+      ...item,
+      path: 'projects/flight-deck/items/fld-9.md',
+      relationships: { ...item.relationships, project: ['Flight deck'] },
+    });
+    expect(buildSchema([...entries, linked]).resolveField(linked, 'project').display).toBe(
+      'Flight deck',
+    );
   });
 
   it('date values pass through as strings', () => {

@@ -25,27 +25,22 @@ function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   };
 }
 
-const space = mkEntry({
-  path: 'spaces/product.md',
-  filename: 'product.md',
-  title: 'Product',
-  type: 'Space',
-  properties: { color: '#3D8BE8' },
-});
+const FOUNDATIONS = 'projects/foundations/project.md';
 const project = mkEntry({
-  path: 'projects/foundations.md',
-  filename: 'foundations.md',
+  path: FOUNDATIONS,
+  filename: 'project.md',
+  project: FOUNDATIONS,
   title: 'Foundations',
   type: 'Project',
   properties: { key: 'FLD' },
-  relationships: { space: ['product'] },
 });
 const item = mkEntry({
-  path: 'items/fld-1.md',
+  path: 'projects/foundations/items/fld-1.md',
   filename: 'fld-1.md',
+  project: FOUNDATIONS,
   title: 'Ship tokens',
+  type: 'Work item',
   properties: { status: 'todo', key: 'FLD-1' },
-  relationships: { project: ['foundations'] },
 });
 
 const boardView: ViewFile = {
@@ -69,13 +64,13 @@ describe('ProjectPage', () => {
   beforeEach(() => {
     useVaultStore.setState({
       vaultPath: '/demo-vault',
-      entries: [space, project, item],
+      entries: [project, item],
       views: [boardView],
       status: 'ready',
       error: null,
     });
     useNavStore.setState({
-      selection: { kind: 'project', path: 'projects/foundations.md' },
+      selection: { kind: 'project', path: FOUNDATIONS },
       history: [{ kind: 'home' }],
       historyIndex: 0,
     });
@@ -83,16 +78,15 @@ describe('ProjectPage', () => {
 
   afterEach(cleanup);
 
-  it('renders breadcrumb and defaults to the list view', () => {
-    render(<ProjectPage selection={{ kind: 'project', path: 'projects/foundations.md' }} />);
-    expect(screen.getByText('Product')).toBeTruthy();
+  it('renders the project header and defaults to the list view', () => {
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
     expect(screen.getByText('Foundations')).toBeTruthy();
     expect(screen.getByTestId('list-view')).toBeTruthy();
     expect(screen.queryByTestId('board-view')).toBeNull();
   });
 
   it('switching the toolbar flips list to board', () => {
-    render(<ProjectPage selection={{ kind: 'project', path: 'projects/foundations.md' }} />);
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
     fireEvent.click(screen.getByText('Board'));
     expect(screen.getByTestId('board-view')).toBeTruthy();
     expect(screen.queryByTestId('list-view')).toBeNull();
@@ -106,7 +100,7 @@ describe('ProjectPage', () => {
   // M1.x: a view name that slugifies to a taken id must not silently
   // overwrite that view's file — dedupe with a -2 suffix.
   it('deduplicates the saved-view id against existing views', async () => {
-    render(<ProjectPage selection={{ kind: 'project', path: 'projects/foundations.md' }} />);
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
     fireEvent.click(screen.getByText('Save view'));
     fireEvent.change(screen.getByPlaceholderText('View name'), { target: { value: 'All board' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

@@ -3,7 +3,6 @@ import { Icon } from '@/components/ui/Icon';
 import { FieldChip } from '@/views/FieldChip';
 import { groupEntries } from '@/engine/grouping';
 import { nextItemKey } from '@/engine/itemKeys';
-import { formatWikilink } from '@/engine/wikilink';
 import { slugify } from '@/lib/slug';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -17,7 +16,6 @@ export interface ListViewProps {
   project: Entry | null;
 }
 
-const pathStem = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '');
 
 function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: string | null; project: Entry }) {
   const [editing, setEditing] = useState(false);
@@ -34,11 +32,9 @@ function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: strin
     setSubmitting(true);
     const prefix = typeof project.properties.key === 'string' ? project.properties.key : 'WRK';
     const key = nextItemKey(prefix, allEntries);
-    const frontmatter: Record<string, unknown> = {
-      type: 'Work item',
-      key,
-      project: formatWikilink(pathStem(project.path)),
-    };
+    // v2 containment: no `project:` wikilink — membership comes from the file
+    // landing inside the project's folder.
+    const frontmatter: Record<string, unknown> = { type: 'Work item', key };
     // The empty-key check covers the flat "All items" fallback group (note
     // 17a): a grouped-but-empty list must not preset `field: ''`.
     if (groupBy && group.key !== '__none__' && group.key !== '') frontmatter[groupBy] = group.key;
@@ -47,7 +43,7 @@ function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: strin
       // create_note rejects); body carries the typed title verbatim so the H1
       // keeps its capitalization instead of the humanized slug (M1.x).
       await createItem({
-        folder: 'items',
+        folder: `${project.path.replace(/\/project\.md$/, '')}/items`,
         slug: slugify(trimmed) || key.toLowerCase(),
         frontmatter,
         body: `# ${trimmed}\n`,

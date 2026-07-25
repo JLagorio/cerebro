@@ -24,26 +24,19 @@ function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   };
 }
 
-const space = mkEntry({
-  path: 'spaces/product.md',
-  filename: 'product.md',
-  title: 'Product',
-  type: 'Space',
-  properties: { color: 'blue' },
-});
 const project = mkEntry({
-  path: 'projects/foundations.md',
-  filename: 'foundations.md',
+  path: 'projects/foundations/project.md',
+  filename: 'project.md',
+  project: 'projects/foundations/project.md',
   title: 'Foundations',
   type: 'Project',
-  relationships: { space: ['product'] },
 });
 
 describe('Sidebar', () => {
   beforeEach(() => {
     useVaultStore.setState({
       vaultPath: '/demo-vault',
-      entries: [space, project],
+      entries: [project],
       views: [
         {
           id: 'urgent-work',
@@ -74,36 +67,33 @@ describe('Sidebar', () => {
 
   afterEach(cleanup);
 
-  it('renders spaces with nested project rows and saved views', () => {
+  it('renders top-level project rows and saved views (v2: no spaces)', () => {
     render(<Sidebar onNewProject={vi.fn()} />);
-    expect(screen.getByText('Product')).toBeTruthy();
     expect(screen.getByText('Foundations')).toBeTruthy();
     expect(screen.getByText('Urgent work')).toBeTruthy();
   });
 
-  it('collapsing a space hides its projects', () => {
-    render(<Sidebar onNewProject={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle Product' }));
-    expect(screen.queryByText('Foundations')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle Product' }));
-    expect(screen.getByText('Foundations')).toBeTruthy();
-  });
-
-  it('clicking rows navigates to space, project, and view', () => {
+  it('clicking rows navigates to project and view', () => {
     render(<Sidebar onNewProject={vi.fn()} />);
     fireEvent.click(screen.getByText('Foundations'));
     expect(useNavStore.getState().selection).toEqual({
       kind: 'project',
-      path: 'projects/foundations.md',
+      path: 'projects/foundations/project.md',
     });
     fireEvent.click(screen.getByText('Urgent work'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'view', id: 'urgent-work' });
   });
 
-  it('new project row calls onNewProject with the space path', () => {
+  it('the new project row calls onNewProject', () => {
     const onNewProject = vi.fn();
     render(<Sidebar onNewProject={onNewProject} />);
     fireEvent.click(screen.getByText('New project'));
-    expect(onNewProject).toHaveBeenCalledWith('spaces/product.md');
+    expect(onNewProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an empty hint when the vault has no projects', () => {
+    useVaultStore.setState({ entries: [] });
+    render(<Sidebar onNewProject={vi.fn()} />);
+    expect(screen.getByText('No projects yet')).toBeTruthy();
   });
 });

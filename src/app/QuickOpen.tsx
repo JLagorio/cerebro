@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { quickOpenScore } from '@/lib/quickOpenScore';
-import { resolveTarget } from '@/engine/wikilink';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -48,17 +47,12 @@ export function QuickOpen() {
 
   const pick = (entry: Entry) => {
     close();
-    if (entry.type === 'Space') {
-      navigate({ kind: 'space', path: entry.path });
-      return;
-    }
     if (entry.type === 'Project') {
       navigate({ kind: 'project', path: entry.path });
       return;
     }
-    const target = entry.relationships.project?.[0];
-    const project = target ? resolveTarget(target, entries) : null;
-    if (project) navigate({ kind: 'project', path: project.path });
+    // v2 containment: jump to the owning project (if any), then open detail.
+    if (entry.project !== null) navigate({ kind: 'project', path: entry.project });
     openDetail(entry.path);
   };
 
@@ -70,7 +64,7 @@ export function QuickOpen() {
         autoFocus
         testId="quick-open-input"
         icon="search"
-        placeholder="Search items, projects, and spaces…"
+        placeholder="Search items, projects, and docs…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {

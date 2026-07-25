@@ -1,7 +1,6 @@
 import type { Entry, Presentation, Schema, Selection, ViewFile } from './types';
 import { evaluateFilters } from './viewFilters';
 import { DEFAULT_PRESENTATION } from './views';
-import { resolveTarget } from './wikilink';
 
 export interface Collection {
   title: string;
@@ -43,8 +42,7 @@ function optionOrder(entries: Entry[], field: string, schema: Schema): string[] 
     const def = schema.resolveField(e, field).def;
     if (def === null) continue;
     if (def.kind === 'status') {
-      const space = schema.spaceForEntry(e);
-      return schema.statusSetForSpace(space !== null ? space.path : null).map((s) => s.id);
+      return schema.statusSetForProject(e.project).map((s) => s.id);
     }
     if (def.options !== undefined && def.options.length > 0) {
       return def.options.map((o) => o.id);
@@ -86,19 +84,11 @@ export function sortEntries(
   });
 }
 
+/** Vault format v2: project membership is containment — Entry.project points
+ * at the owning project.md. The item canvas shows the project's Work items
+ * only; docs inside the folder belong to the Pages surface, not the board. */
 function itemsOfProject(project: Entry, entries: Entry[]): Entry[] {
-  return entries.filter((e) =>
-    (e.relationships.project ?? []).some((t) => resolveTarget(t, entries)?.path === project.path),
-  );
-}
-
-function itemsOfSpace(spacePath: string, entries: Entry[], schema: Schema): Entry[] {
-  return entries.filter(
-    (e) =>
-      e.type !== 'Space' &&
-      e.type !== 'Project' &&
-      schema.spaceForEntry(e)?.path === spacePath,
-  );
+  return entries.filter((e) => e.project === project.path && e.type === 'Work item');
 }
 
 /** Map a sidebar selection to what the canvas renders: a titled, filtered,
@@ -117,16 +107,6 @@ export function resolveCollection(
       return {
         title: project.title,
         entries: sortEntries(itemsOfProject(project, entries), presentation.orderBy, schema),
-        presentation,
-      };
-    }
-    case 'space': {
-      const space = entries.find((e) => e.path === sel.path) ?? null;
-      const presentation = defaultPresentation();
-      if (space === null) return { title: stem(sel.path), entries: [], presentation };
-      return {
-        title: space.title,
-        entries: sortEntries(itemsOfSpace(sel.path, entries, schema), presentation.orderBy, schema),
         presentation,
       };
     }

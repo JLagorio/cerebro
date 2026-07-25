@@ -20,7 +20,7 @@ describe('BoardView', () => {
   it('renders one column per group and a muted footer counting unparseable entries', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
-    const items = entries.filter((e) => e.path.startsWith('items/'));
+    const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
     render(<BoardView entries={items} presentation={presentation} schema={schema} />);
     expect(screen.getByText('Todo')).toBeTruthy();
     expect(screen.getByText('Doing')).toBeTruthy();
@@ -44,22 +44,22 @@ describe('BoardView', () => {
 describe('handleDragEnd', () => {
   const entries = fixtureVault();
   const schema = buildSchema(entries);
-  const items = entries.filter((e) => e.path.startsWith('items/') && e.path !== 'items/broken.md');
+  const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/') && e.path !== 'projects/onboarding/items/broken.md');
   const groups = groupEntries(items, 'status', schema);
 
   it('patches the dragged entry frontmatter and toasts the target label', () => {
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     const toast = vi.fn();
-    const event = { active: { id: 'items/fld-1.md' }, over: { id: 'doing' } } as unknown as DragEndEvent;
+    const event = { active: { id: 'projects/onboarding/items/fld-1.md' }, over: { id: 'doing' } } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast });
-    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { status: 'doing' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: 'doing' });
     expect(toast).toHaveBeenCalledWith('Moved to Doing');
   });
 
   it('is a no-op when dropped on the source column', () => {
     const patchFrontmatter = vi.fn();
     const toast = vi.fn();
-    const event = { active: { id: 'items/fld-1.md' }, over: { id: 'todo' } } as unknown as DragEndEvent;
+    const event = { active: { id: 'projects/onboarding/items/fld-1.md' }, over: { id: 'todo' } } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast });
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
@@ -73,16 +73,16 @@ describe('handleDragEnd', () => {
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     const toast = vi.fn();
     const event = {
-      active: { id: 'items/fld-1.md' },
+      active: { id: 'projects/onboarding/items/fld-1.md' },
       over: { id: NO_VALUE_COLUMN_ID },
     } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups: [...groups, noneGroup], schema, patchFrontmatter, toast });
-    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { status: null });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: null });
   });
 
   it('is a no-op when dropped outside any column', () => {
     const patchFrontmatter = vi.fn();
-    const event = { active: { id: 'items/fld-1.md' }, over: null } as unknown as DragEndEvent;
+    const event = { active: { id: 'projects/onboarding/items/fld-1.md' }, over: null } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast: vi.fn() });
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
@@ -119,11 +119,11 @@ describe('handleDragEnd', () => {
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     const toast = vi.fn();
     const event = {
-      active: { id: 'items/fld-2.md' },
+      active: { id: 'projects/onboarding/items/fld-2.md' },
       over: { id: 'ana-rios' },
     } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'assignee', groups: personGroups, schema, patchFrontmatter, toast });
-    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-2.md', { assignee: '[[ana-rios]]' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-2.md', { assignee: '[[ana-rios]]' });
     expect(toast).toHaveBeenCalledWith('Moved to Ana Rios');
   });
 });

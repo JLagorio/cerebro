@@ -20,8 +20,8 @@ function setup(overrides: Partial<ReturnType<typeof useVaultStore.getState>> = {
   const entries = fixtureVault();
   useVaultStore.setState({ entries, ...overrides });
   const schema = buildSchema(entries);
-  const items = entries.filter((e) => e.path.startsWith('items/'));
-  const project = entries.find((e) => e.path === 'projects/onboarding.md')!;
+  const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
+  const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
   render(<ListView entries={items} presentation={presentation} schema={schema} project={project} />);
 }
 
@@ -56,13 +56,13 @@ describe('ListView', () => {
     const section = doingHeader.parentElement as HTMLElement;
     await user.click(within(section).getByText('Add item'));
     await user.type(within(section).getByRole('textbox'), 'Ship the fix{Enter}');
+    // v2: containment membership — no `project:` wikilink in the frontmatter.
     expect(createItem).toHaveBeenCalledWith({
-      folder: 'items',
+      folder: 'projects/onboarding/items',
       slug: 'ship-the-fix',
       frontmatter: {
         type: 'Work item',
         key: 'FLD-3',
-        project: '[[onboarding]]',
         status: 'doing',
       },
       // The typed title becomes the H1 verbatim (M1.x capitalization fix).
@@ -144,7 +144,7 @@ describe('ListView', () => {
   it('falls back to the flat all-items group when grouping yields no groups', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
-    const project = entries.find((e) => e.path === 'projects/onboarding.md')!;
+    const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
     render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
     const headers = screen.getAllByTestId('list-group-header');
     expect(headers).toHaveLength(1);
@@ -158,15 +158,15 @@ describe('ListView', () => {
     const entries = fixtureVault();
     useVaultStore.setState({ entries, createItem });
     const schema = buildSchema(entries);
-    const project = entries.find((e) => e.path === 'projects/onboarding.md')!;
+    const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
     render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
     await user.click(screen.getByText('Add item'));
     await user.type(screen.getByRole('textbox'), 'First item{Enter}');
     // No `status: ''` leak from the fallback group's empty key.
     expect(createItem).toHaveBeenCalledWith({
-      folder: 'items',
+      folder: 'projects/onboarding/items',
       slug: 'first-item',
-      frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
+      frontmatter: { type: 'Work item', key: 'FLD-3' },
       body: '# First item\n',
     });
   });

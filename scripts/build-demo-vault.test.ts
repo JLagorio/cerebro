@@ -58,10 +58,11 @@ describe('seedItemToFrontmatter', () => {
       },
       projectSlugById,
     );
+    // v2: no `project:` wikilink — membership is containment (the file's
+    // location inside the project folder decides).
     expect(fm).toEqual({
       type: 'Work item',
       key: 'FLD-7',
-      project: '[[guided-onboarding-ga]]',
       status: 'progress',
       priority: 'urgent',
       assignee: '[[sam-ito]]',

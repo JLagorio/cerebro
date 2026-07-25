@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreateMenu, NewProjectDialog } from '@/app/CreateMenu';
-import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import { fixtureVault, makeEntry } from '@/test/factories';
+import { fixtureVault } from '@/test/factories';
 
 afterEach(cleanup);
 
@@ -23,11 +22,12 @@ describe('CreateMenu', () => {
     await user.click(screen.getByRole('button', { name: 'New item' }));
     await user.type(screen.getByPlaceholderText('What needs doing?'), 'Ship the fix');
     await user.click(screen.getByRole('button', { name: 'Create item' }));
+    // v2: the item lands inside the project folder (containment membership,
+    // no `project:` wikilink); the typed title becomes the H1 verbatim.
     expect(createItem).toHaveBeenCalledWith({
-      folder: 'items',
+      folder: 'projects/onboarding/items',
       slug: 'ship-the-fix',
-      frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
-      // The typed title becomes the H1 verbatim (M1.x capitalization fix).
+      frontmatter: { type: 'Work item', key: 'FLD-3' },
       body: '# Ship the fix\n',
     });
   });
@@ -42,9 +42,9 @@ describe('CreateMenu', () => {
     await user.type(screen.getByPlaceholderText('What needs doing?'), '???');
     await user.click(screen.getByRole('button', { name: 'Create item' }));
     expect(createItem).toHaveBeenCalledWith({
-      folder: 'items',
+      folder: 'projects/onboarding/items',
       slug: 'fld-3', // slugify('???') === '' would be rejected by create_note
-      frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
+      frontmatter: { type: 'Work item', key: 'FLD-3' },
       body: '# ???\n',
     });
   });
@@ -63,34 +63,13 @@ describe('CreateMenu', () => {
     ).toBe(true);
     await user.type(screen.getByPlaceholderText('e.g. FLD'), 'TL');
     await user.click(screen.getByRole('button', { name: 'Create project' }));
+    // v2: a project is projects/<slug>/project.md.
     expect(createItem).toHaveBeenCalledWith({
-      folder: 'projects',
-      slug: 'atlas',
-      frontmatter: { type: 'Project', key: 'ATL', space: '[[field-platform]]' },
+      folder: 'projects/atlas',
+      slug: 'project',
+      frontmatter: { type: 'Project', key: 'ATL' },
       body: '# Atlas\n',
     });
-  });
-
-  it('creates a space seeded with the selected status template', async () => {
-    const user = userEvent.setup();
-    const createItem = vi.fn().mockResolvedValue('spaces/growth.md');
-    useVaultStore.setState({ createItem });
-    render(<CreateMenu />);
-    await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New space' }));
-    await user.type(screen.getByPlaceholderText('Space name'), 'Growth');
-    await user.selectOptions(screen.getByLabelText('Status template'), 'simple');
-    await user.click(screen.getByRole('button', { name: 'Create space' }));
-    const args = createItem.mock.calls[0][0];
-    expect(args.folder).toBe('spaces');
-    expect(args.slug).toBe('growth');
-    expect(args.frontmatter.type).toBe('Space');
-    expect(args.frontmatter.statuses).toEqual([
-      { id: 'todo', label: 'Todo', group: 'active', color: 'var(--n-500)', hollow: true },
-      { id: 'doing', label: 'Doing', group: 'active', color: 'var(--warn-500)' },
-      { id: 'done', label: 'Done', group: 'done', color: 'var(--success-500)' },
-      { id: 'dropped', label: 'Dropped', group: 'closed', color: 'var(--n-400)' },
-    ]);
   });
 });
 
@@ -121,64 +100,31 @@ describe('CreateMenu write guards', () => {
     expect(screen.getByPlaceholderText('What needs doing?')).toBeTruthy();
   });
 
-  it('surfaces a failed space create via toast without navigating', async () => {
-    const user = userEvent.setup();
-    const createItem = vi.fn().mockRejectedValue(new Error('disk full'));
-    useVaultStore.setState({ createItem });
-    const before = useNavStore.getState().selection;
-    render(<CreateMenu />);
-    await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New space' }));
-    await user.type(screen.getByPlaceholderText('Space name'), 'Doomed space');
-    await user.click(screen.getByRole('button', { name: 'Create space' }));
-    await vi.waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        'Couldn\'t create "Doomed space"',
-      );
-    });
-    expect(useNavStore.getState().selection).toEqual(before);
-    expect(screen.getByPlaceholderText('Space name')).toBeTruthy();
-  });
 });
 
-// Fix tests (fix round D8): the Sidebar's per-space "New project" rows open
-// this dialog prefilled with the clicked space (plan line 7618's stated
-// intent), so it is exported with an optional initialSpacePath.
 describe('NewProjectDialog', () => {
   beforeEach(() => {
-    useVaultStore.setState({
-      entries: [
-        // A space that lists first in the dialog's default, so preselection
-        // is distinguishable from spaces[0].
-        makeEntry({ path: 'spaces/aaa-ops.md', title: 'AAA ops', type: 'Space' }),
-        ...fixtureVault(),
-        makeEntry({ path: 'spaces/growth.md', title: 'Growth', type: 'Space' }),
-      ],
-    });
+    useVaultStore.setState({ entries: fixtureVault() });
     useUiStore.setState({ toasts: [] });
   });
 
-  it('preselects the initialSpacePath space and writes its wikilink', async () => {
+  // v2: create_note dedupes the file slug only, so the dialog must dedupe the
+  // project FOLDER against existing projects.
+  it('dedupes the project folder against existing projects', async () => {
     const user = userEvent.setup();
-    const createItem = vi.fn().mockResolvedValue('projects/atlas.md');
+    const createItem = vi.fn().mockResolvedValue('projects/guided-onboarding-2/project.md');
     useVaultStore.setState({ createItem });
-    render(<NewProjectDialog initialSpacePath="spaces/growth.md" onClose={vi.fn()} />);
-    expect((screen.getByLabelText('Space') as HTMLSelectElement).value).toBe('spaces/growth.md');
-    await user.type(screen.getByPlaceholderText('Project name'), 'Atlas');
-    await user.type(screen.getByPlaceholderText('e.g. FLD'), 'ATL');
+    render(<NewProjectDialog onClose={vi.fn()} />);
+    // The fixture already has projects/onboarding/ — same slug collides.
+    await user.type(screen.getByPlaceholderText('Project name'), 'Onboarding');
+    await user.type(screen.getByPlaceholderText('e.g. FLD'), 'ONB');
     await user.click(screen.getByRole('button', { name: 'Create project' }));
     expect(createItem).toHaveBeenCalledWith({
-      folder: 'projects',
-      slug: 'atlas',
-      frontmatter: { type: 'Project', key: 'ATL', space: '[[growth]]' },
-      body: '# Atlas\n',
+      folder: 'projects/onboarding-2',
+      slug: 'project',
+      frontmatter: { type: 'Project', key: 'ONB' },
+      body: '# Onboarding\n',
     });
-  });
-
-  it('falls back to the first space when initialSpacePath is unknown', () => {
-    useVaultStore.setState({ createItem: vi.fn() });
-    render(<NewProjectDialog initialSpacePath="spaces/deleted.md" onClose={vi.fn()} />);
-    expect((screen.getByLabelText('Space') as HTMLSelectElement).value).toBe('spaces/aaa-ops.md');
   });
 
   // Coverage gap flagged in review: the project dialog's failure guard had no
@@ -245,17 +191,4 @@ describe('CreateMenu busy guard', () => {
     expect(createItem).toHaveBeenCalledTimes(1);
   });
 
-  it('a second click while the space create is pending does not create twice', async () => {
-    const user = userEvent.setup();
-    const createItem = vi.fn(pendingForever);
-    useVaultStore.setState({ createItem });
-    render(<CreateMenu />);
-    await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New space' }));
-    await user.type(screen.getByPlaceholderText('Space name'), 'Once only');
-    const create = screen.getByRole('button', { name: 'Create space' });
-    await user.click(create);
-    await user.click(create);
-    expect(createItem).toHaveBeenCalledTimes(1);
-  });
 });

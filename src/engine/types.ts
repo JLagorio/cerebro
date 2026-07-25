@@ -38,8 +38,7 @@ export interface ResolvedField {
 
 export type Selection =
   | { kind: 'home' }
-  | { kind: 'space'; path: string }
-  | { kind: 'project'; path: string }
+  | { kind: 'project'; path: string }  // path of the project.md (vault format v2)
   | { kind: 'view'; id: string }       // id = filename stem in views/
   | { kind: 'settings' };
 
@@ -68,7 +67,9 @@ export interface Group { key: string; label: string; color: string | null; ghost
 
 export interface Schema {
   types: Map<string, TypeDef>;
-  spaceForEntry(e: Entry): Entry | null;                    // item → project → space (via relationships)
-  statusSetForSpace(spacePath: string | null): StatusDef[]; // null/space w/o statuses → DEFAULT_STATUSES
+  projectForEntry(e: Entry): Entry | null;                      // containment: Entry.project → project.md entry
+  // Status resolution chain (v2, locked decision 4): project.md `statuses:`
+  // override → Work item Type doc `statuses:` → DEFAULT_STATUSES.
+  statusSetForProject(projectPath: string | null): StatusDef[];
   resolveField(e: Entry, field: string): ResolvedField;
 }

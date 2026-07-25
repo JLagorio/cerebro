@@ -4,8 +4,6 @@ import { Icon } from '@/components/ui/Icon';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Tag } from '@/components/ui/Tag';
 import type { Entry, Schema } from '@/engine/types';
-import { resolveTarget } from '@/engine/wikilink';
-import { swatchColor } from '@/lib/swatch';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -15,19 +13,16 @@ export function greetingForHour(hour: number): string {
   return 'Good evening';
 }
 
-/** Items belonging to the project, and how many sit in a done-group status. */
+/** Items belonging to the project (containment, v2), done-group count. */
 export function projectProgress(
   project: Entry,
   entries: Entry[],
   schema: Schema,
 ): { total: number; done: number } {
-  const items = entries.filter((e) =>
-    (e.relationships.project ?? []).some((t) => resolveTarget(t, entries)?.path === project.path),
-  );
+  const items = entries.filter((e) => e.project === project.path && e.type === 'Work item');
   let done = 0;
   for (const item of items) {
-    const itemSpace = schema.spaceForEntry(item);
-    const statuses = schema.statusSetForSpace(itemSpace?.path ?? null);
+    const statuses = schema.statusSetForProject(item.project);
     const def = statuses.find((s) => s.id === item.properties.status);
     if (def?.group === 'done') done += 1;
   }
@@ -76,17 +71,16 @@ export function ProjectCard({ project, subtitle }: { project: Entry; subtitle: s
   );
 }
 
+/** 'execution' → 'Execution' — light display casing for project states. */
+function humanizeState(value: unknown): string | null {
+  if (typeof value !== 'string' || value === '') return null;
+  const words = value.replace(/[-_]+/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function HomePage() {
   const entries = useVaultStore((s) => s.entries);
-  const navigate = useNavStore((s) => s.navigate);
 
-  const spaces = useMemo(
-    () =>
-      entries
-        .filter((e) => e.type === 'Space')
-        .sort((a, b) => a.title.localeCompare(b.title)),
-    [entries],
-  );
   const projects = useMemo(
     () =>
       entries
@@ -94,20 +88,6 @@ export function HomePage() {
         .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
     [entries],
   );
-  const projectCountBySpace = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const project of entries.filter((e) => e.type === 'Project')) {
-      const target = project.relationships.space?.[0];
-      const space = target ? resolveTarget(target, entries) : null;
-      if (space) map.set(space.path, (map.get(space.path) ?? 0) + 1);
-    }
-    return map;
-  }, [entries]);
-  const spaceTitleFor = (project: Entry): string => {
-    const target = project.relationships.space?.[0];
-    const space = target ? resolveTarget(target, entries) : null;
-    return space?.title ?? '—';
-  };
 
   const greeting = greetingForHour(new Date().getHours());
 
@@ -119,64 +99,30 @@ export function HomePage() {
             {greeting}
           </h1>
           <span className="text-[12px] text-[var(--n-500)]">
-            {spaces.length} {spaces.length === 1 ? 'space' : 'spaces'} · {projects.length}{' '}
-            {projects.length === 1 ? 'project' : 'projects'}
+            {projects.length} {projects.length === 1 ? 'project' : 'projects'}
           </span>
         </div>
 
-        {spaces.length === 0 && projects.length === 0 && (
-          // Fresh-vault empty state (M1.x): a brand-new vault rendered two
-          // bare section headings with nothing actionable under them.
+        {projects.length === 0 && (
+          // Fresh-vault empty state (M1.x): a brand-new vault rendered a bare
+          // section heading with nothing actionable under it.
           <EmptyState
-            icon="box"
+            icon="folder-kanban"
             title="Nothing here yet"
-            description="Use New to create a space, then add projects inside it."
+            description="Use New to create your first project."
           />
         )}
 
         <div className="mb-2.5 flex items-center gap-2">
-          <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Spaces</h2>
-        </div>
-        <div className="mb-[30px] grid grid-cols-3 gap-2.5">
-          {spaces.map((space) => {
-            const count = projectCountBySpace.get(space.path) ?? 0;
-            return (
-              <button
-                key={space.path}
-                type="button"
-                onClick={() => navigate({ kind: 'space', path: space.path })}
-                className="flex min-w-0 flex-col gap-[9px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-[14px] py-[13px] text-left hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)]"
-              >
-                <div className="flex min-w-0 items-center gap-[9px]">
-                  <span
-                    className="inline-flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[7px] text-[12px] font-bold text-[var(--n-0)]"
-                    style={{ background: swatchColor(space.properties.color) }}
-                  >
-                    {space.title.charAt(0).toUpperCase()}
-                  </span>
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-[var(--n-900)]">
-                    {space.title}
-                  </span>
-                </div>
-                {space.snippet ? (
-                  <div className="overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-[var(--n-500)]">
-                    {space.snippet}
-                  </div>
-                ) : null}
-                <div className="text-[12px] text-[var(--n-500)]">
-                  {count === 1 ? '1 project' : `${count} projects`}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mb-2.5 flex items-center gap-2">
-          <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Active projects</h2>
+          <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Projects</h2>
         </div>
         <div className="grid grid-cols-2 gap-2.5">
           {projects.map((project) => (
-            <ProjectCard key={project.path} project={project} subtitle={spaceTitleFor(project)} />
+            <ProjectCard
+              key={project.path}
+              project={project}
+              subtitle={humanizeState(project.properties.state) ?? project.folder}
+            />
           ))}
         </div>
       </div>

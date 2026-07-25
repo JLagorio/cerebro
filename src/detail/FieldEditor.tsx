@@ -39,7 +39,7 @@ export function FieldEditor({ entry, def, schema }: FieldEditorProps) {
     const options: FieldPopoverOption[] =
       def.kind === 'status'
         ? schema
-            .statusSetForSpace(schema.spaceForEntry(entry)?.path ?? null)
+            .statusSetForProject(entry.project)
             .map((s) => ({ id: s.id, label: s.label, color: s.color, hollow: s.hollow }))
         : (def.options ?? []).map((o) => ({ id: o.id, label: o.label, color: o.color, hollow: o.hollow }));
     return (

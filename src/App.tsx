@@ -8,7 +8,6 @@ import { DetailPanel } from '@/detail/DetailPanel';
 import { HomePage } from '@/pages/HomePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { SpacePage } from '@/pages/SpacePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { getLastVault, pickVault } from '@/lib/ipc';
@@ -22,7 +21,6 @@ function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
     case 'home': return <HomePage />;
-    case 'space': return <SpacePage path={selection.path} />;
     case 'project': return <ProjectPage selection={selection} />;
     case 'view': return <ProjectPage selection={selection} />;
     case 'settings': return <SettingsPage />;
@@ -64,7 +62,7 @@ function VaultChooser() {
         </span>
         <h1 className="m-0 text-[16px] font-semibold text-[var(--n-900)]">Open a vault</h1>
         <p className="m-0 text-[13px] leading-[19px] text-[var(--n-600)]">
-          A vault is a folder of markdown files — spaces, projects, and work items live there as
+          A vault is a folder of markdown files — projects, docs, and work items live there as
           plain text.
         </p>
         {(error ?? pickError) ? (
@@ -83,9 +81,8 @@ function App() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const [booted, setBooted] = useState(false);
-  // Fix (fix round D8): the Sidebar's per-space "New project" rows open the
-  // project dialog prefilled with the clicked space (plan line 7618).
-  const [newProjectSpace, setNewProjectSpace] = useState<string | null>(null);
+  // The Sidebar's "New project" row opens the project dialog (v2: no spaces).
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -125,19 +122,14 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar onNewProject={setNewProjectSpace} />
+      <Sidebar onNewProject={() => setNewProjectOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
         </div>
       </div>
-      {newProjectSpace !== null && (
-        <NewProjectDialog
-          initialSpacePath={newProjectSpace}
-          onClose={() => setNewProjectSpace(null)}
-        />
-      )}
+      {newProjectOpen && <NewProjectDialog onClose={() => setNewProjectOpen(false)} />}
       <DetailPanel />
       <QuickOpen />
       <ToastHost />

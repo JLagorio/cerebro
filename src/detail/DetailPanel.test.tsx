@@ -28,7 +28,7 @@ afterEach(cleanup);
 describe('DetailPanel', () => {
   beforeEach(() => {
     useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
-    useUiStore.setState({ detailPath: 'items/fld-1.md' });
+    useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
   });
 
   it('writes a frontmatter patch when a status option is picked', async () => {
@@ -38,7 +38,7 @@ describe('DetailPanel', () => {
     render(<DetailPanel />);
     await user.click(screen.getByRole('button', { name: 'Todo' }));
     await user.click(screen.getByRole('option', { name: 'Doing' }));
-    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { status: 'doing' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: 'doing' });
   });
 
   it('shows undeclared frontmatter keys as advisory text', () => {
@@ -143,7 +143,7 @@ describe('DetailPanel', () => {
     await waitFor(() => {
       expect(vi.mocked(ipc.saveNote)).toHaveBeenCalledWith(
         '/vault',
-        'items/fld-1.md',
+        'projects/onboarding/items/fld-1.md',
         '# Renamed flow\n\nBody text\n\nMore.\n',
       );
     });
@@ -177,7 +177,7 @@ describe('FieldEditor number guard', () => {
   function setupNumberEditor() {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
-    const entry = entries.find((e) => e.path === 'items/fld-1.md')!;
+    const entry = entries.find((e) => e.path === 'projects/onboarding/items/fld-1.md')!;
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     useVaultStore.setState({ entries, patchFrontmatter });
     render(
@@ -202,6 +202,6 @@ describe('FieldEditor number guard', () => {
     await user.click(screen.getByRole('button'));
     await user.type(screen.getByLabelText('Effort'), '5');
     fireEvent.blur(screen.getByLabelText('Effort'));
-    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { effort: 5 });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { effort: 5 });
   });
 });
