@@ -103,6 +103,7 @@ export function DetailPanel() {
 
   return (
     <aside
+      data-testid="detail-panel"
       aria-label="Detail panel"
       className="cb-panel-in fixed right-0 top-0 z-30 flex h-full w-[420px] flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
     >
@@ -117,6 +118,7 @@ export function DetailPanel() {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">
         <input
+          data-testid="detail-title"
           aria-label="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}

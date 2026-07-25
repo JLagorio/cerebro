@@ -74,6 +74,8 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
   return (
     <div
       ref={setNodeRef}
+      data-testid="board-card"
+      data-path={entry.path}
       {...listeners}
       {...attributes}
       onClick={() => openDetail(entry.path)}
@@ -86,7 +88,7 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
       className="relative cursor-pointer rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-[11px] py-[9px] shadow-[var(--shadow-xs)] hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)]"
     >
       <div className="mb-1 flex items-center gap-1.5">
-        <span className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">{key}</span>
+        <span data-testid="card-key" className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">{key}</span>
       </div>
       <div className="mb-2 text-[13px] font-medium leading-[18px] text-[var(--n-900)]">{entry.title}</div>
       <div className="flex items-center gap-[7px]">
@@ -107,7 +109,7 @@ function BoardColumn({ group, schema }: { group: Group; schema: Schema }) {
   const { setNodeRef, isOver } = useDroppable({ id: droppableId });
 
   return (
-    <div className="w-[280px] flex-none">
+    <div data-testid="board-column" data-group-key={group.key} className="w-[280px] flex-none">
       <div className="flex items-center gap-[7px] px-1 pb-[9px]">
         <span
           className="box-border h-2.5 w-2.5 rounded-full"

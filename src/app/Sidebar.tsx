@@ -85,6 +85,7 @@ export function Sidebar({ onNewProject }: SidebarProps) {
             <div key={space.path}>
               <button
                 type="button"
+                data-testid="sidebar-space"
                 onClick={() => navigate({ kind: 'space', path: space.path })}
                 className={rowClass(spaceActive)}
               >
@@ -118,6 +119,7 @@ export function Sidebar({ onNewProject }: SidebarProps) {
                       <button
                         key={project.path}
                         type="button"
+                        data-testid="sidebar-project"
                         onClick={() => navigate({ kind: 'project', path: project.path })}
                         className={`${rowClass(projectActive)} pl-[26px]`}
                       >

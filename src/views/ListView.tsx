@@ -152,7 +152,7 @@ export function ListView({ entries, presentation, schema, project }: ListViewPro
         {groups.map((g) => (
           <section key={g.key || g.label}>
             <header
-              data-testid="group-header"
+              data-testid="list-group-header"
               className="sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] px-5"
             >
               <span

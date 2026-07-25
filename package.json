@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest",
+    "e2e": "playwright test",
     "tauri": "tauri"
   },
   "dependencies": {

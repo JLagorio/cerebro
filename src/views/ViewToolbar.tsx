@@ -62,8 +62,8 @@ export function ViewToolbar({ presentation, onChange, onSaveView }: ViewToolbarP
       <SegmentedControl
         size="sm"
         options={[
-          { value: 'list', label: 'List', icon: 'list' },
-          { value: 'board', label: 'Board', icon: 'columns-3' },
+          { value: 'list', label: 'List', icon: 'list', testId: 'view-switch-list' },
+          { value: 'board', label: 'Board', icon: 'columns-3', testId: 'view-switch-board' },
         ]}
         value={presentation.type}
         onChange={(value) =>

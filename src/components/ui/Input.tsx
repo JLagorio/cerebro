@@ -34,6 +34,8 @@ export interface InputProps {
   width?: number | string;
   style?: React.CSSProperties;
   className?: string;
+  /** forwarded as data-testid on the inner <input> (Task 24 smoke hooks) */
+  testId?: string;
 }
 
 export function Input({
@@ -49,6 +51,7 @@ export function Input({
   width,
   style,
   className = '',
+  testId,
 }: InputProps) {
   const h = size === 'sm' ? 'var(--control-h-sm)' : size === 'lg' ? 'var(--control-h-lg)' : 'var(--control-h)';
   return (
@@ -58,6 +61,7 @@ export function Input({
     >
       {icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} /> : null}
       <input
+        data-testid={testId}
         placeholder={placeholder}
         value={value}
         onChange={onChange}

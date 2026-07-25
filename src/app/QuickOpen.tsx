@@ -68,6 +68,7 @@ export function QuickOpen() {
     <Dialog open onClose={close} title="Quick open" width={580}>
       <Input
         autoFocus
+        testId="quick-open-input"
         icon="search"
         placeholder="Search items, projects, and spaces…"
         value={query}
@@ -91,6 +92,7 @@ export function QuickOpen() {
           <button
             key={r.entry.path}
             type="button"
+            data-testid="quick-open-result"
             role="option"
             aria-selected={i === activeIndex}
             onClick={() => pick(r.entry)}

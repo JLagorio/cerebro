@@ -34,7 +34,7 @@ describe('ListView', () => {
 
   it('renders group headers in the schema status order, including empty groups', () => {
     setup();
-    const labels = screen.getAllByTestId('group-header').map((h) => h.textContent ?? '');
+    const labels = screen.getAllByTestId('list-group-header').map((h) => h.textContent ?? '');
     expect(labels[0]).toContain('Todo');
     expect(labels[1]).toContain('Doing');
     expect(labels[2]).toContain('Done'); // empty group still renders, proving schema order
@@ -51,7 +51,7 @@ describe('ListView', () => {
     const createItem = vi.fn().mockResolvedValue('items/ship-the-fix.md');
     setup({ createItem });
     const doingHeader = screen
-      .getAllByTestId('group-header')
+      .getAllByTestId('list-group-header')
       .find((h) => h.textContent?.includes('Doing'))!;
     const section = doingHeader.parentElement as HTMLElement;
     await user.click(within(section).getByText('Add item'));
@@ -77,7 +77,7 @@ describe('ListView', () => {
     useUiStore.setState({ toasts: [] });
     setup({ createItem });
     const todoHeader = screen
-      .getAllByTestId('group-header')
+      .getAllByTestId('list-group-header')
       .find((h) => h.textContent?.includes('Todo'))!;
     const section = todoHeader.parentElement as HTMLElement;
     await user.click(within(section).getByText('Add item'));
@@ -95,7 +95,7 @@ describe('ListView', () => {
     const createItem = vi.fn();
     setup({ createItem });
     const todoHeader = screen
-      .getAllByTestId('group-header')
+      .getAllByTestId('list-group-header')
       .find((h) => h.textContent?.includes('Todo'))!;
     const section = todoHeader.parentElement as HTMLElement;
     await user.click(within(section).getByText('Add item'));
@@ -113,7 +113,7 @@ describe('ListView', () => {
     const schema = buildSchema(entries);
     const project = entries.find((e) => e.path === 'projects/onboarding.md')!;
     render(<ListView entries={[]} presentation={presentation} schema={schema} project={project} />);
-    const headers = screen.getAllByTestId('group-header');
+    const headers = screen.getAllByTestId('list-group-header');
     expect(headers).toHaveLength(1);
     expect(headers[0].textContent).toContain('All items');
     expect(screen.getByText('Add item')).toBeTruthy();
