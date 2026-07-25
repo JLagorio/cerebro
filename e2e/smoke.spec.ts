@@ -99,8 +99,12 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
     .toMatch(new RegExp(`status:\\s*['"]?${targetKey}['"]?`));
 
   // -- Detail panel: rename the title ----------------------------------
-  await movedCard.click();
-  await expect(page.getByTestId('detail-panel')).toBeVisible();
+  // dnd-kit suppresses the click that immediately follows a drag on the
+  // dragged element — retry the click until the panel opens.
+  await expect(async () => {
+    await movedCard.click();
+    await expect(page.getByTestId('detail-panel')).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   const titleInput = page.getByTestId('detail-title');
   await expect(titleInput).toBeVisible();
   await titleInput.fill('Renamed by smoke');
