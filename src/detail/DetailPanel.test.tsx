@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DetailPanel } from '@/detail/DetailPanel';
+import { DetailPanel, spliceTitle } from '@/detail/DetailPanel';
+import { FieldEditor } from '@/detail/FieldEditor';
+import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -111,5 +113,95 @@ describe('DetailPanel', () => {
         "Couldn't load description",
       );
     });
+  });
+
+  // M1.x stale-body-after-rename: the readNote effect keys on entry.path,
+  // which a rename doesn't change — without the splice, a later description
+  // save writes the OLD H1 back over the renamed file.
+  it('splices the new H1 into the loaded body after a rename', async () => {
+    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
+    vi.mocked(ipc.scanVault).mockResolvedValue(fixtureVault());
+    render(<DetailPanel />);
+    await waitFor(() => {
+      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe(
+        '# Design first-run flow\n\nBody text\n',
+      );
+    });
+    const input = screen.getByLabelText('Title') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Renamed flow' } });
+    fireEvent.blur(input);
+    await waitFor(() => {
+      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe(
+        '# Renamed flow\n\nBody text\n',
+      );
+    });
+    // A later description edit + save writes the new title, not the stale one.
+    fireEvent.change(screen.getByLabelText('Description'), {
+      target: { value: '# Renamed flow\n\nBody text\n\nMore.\n' },
+    });
+    fireEvent.blur(screen.getByLabelText('Description'));
+    await waitFor(() => {
+      expect(vi.mocked(ipc.saveNote)).toHaveBeenCalledWith(
+        '/vault',
+        'items/fld-1.md',
+        '# Renamed flow\n\nBody text\n\nMore.\n',
+      );
+    });
+  });
+});
+
+describe('spliceTitle', () => {
+  it('replaces the H1 line in place', () => {
+    expect(spliceTitle('# Old title\n\nBody stays.\n', 'New title')).toBe(
+      '# New title\n\nBody stays.\n',
+    );
+  });
+
+  it('skips pseudo-H1s inside code fences (parity with replace_h1)', () => {
+    expect(spliceTitle('```\n# in code\n```\n\n# Real\n\nBody.\n', 'New')).toBe(
+      '```\n# in code\n```\n\n# New\n\nBody.\n',
+    );
+  });
+
+  it('prepends an H1 when the body has none', () => {
+    expect(spliceTitle('Just prose.\n', 'Now titled')).toBe('# Now titled\n\nJust prose.\n');
+  });
+});
+
+// M1.x .nan guard: Number('junk') is NaN and serde_yaml writes it as `.nan`.
+describe('FieldEditor number guard', () => {
+  beforeEach(() => {
+    useUiStore.setState({ toasts: [] });
+  });
+
+  function setupNumberEditor() {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const entry = entries.find((e) => e.path === 'items/fld-1.md')!;
+    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    useVaultStore.setState({ entries, patchFrontmatter });
+    render(
+      <FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />,
+    );
+    return patchFrontmatter;
+  }
+
+  it('refuses a non-numeric draft with a toast instead of writing .nan', async () => {
+    const user = userEvent.setup();
+    const patchFrontmatter = setupNumberEditor();
+    await user.click(screen.getByRole('button'));
+    await user.type(screen.getByLabelText('Effort'), 'abc');
+    fireEvent.blur(screen.getByLabelText('Effort'));
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Enter a number');
+  });
+
+  it('commits a numeric draft as a number', async () => {
+    const user = userEvent.setup();
+    const patchFrontmatter = setupNumberEditor();
+    await user.click(screen.getByRole('button'));
+    await user.type(screen.getByLabelText('Effort'), '5');
+    fireEvent.blur(screen.getByLabelText('Effort'));
+    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { effort: 5 });
   });
 });

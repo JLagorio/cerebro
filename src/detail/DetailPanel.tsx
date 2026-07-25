@@ -3,8 +3,24 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { readNote, saveNote, setNoteTitle } from '@/lib/ipc';
+import { firstH1LineIndex } from '@/lib/mockParse';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
+
+/**
+ * Mirror of write.rs replace_h1 / mockIpc.setNoteTitle: rewrite the H1 line
+ * (fence/indent-aware) or prepend one. Applied to the LOCAL body state after
+ * a successful rename so a later description save can't write the old title
+ * back over the renamed file (M1.x stale-body-after-rename).
+ */
+export function spliceTitle(body: string, title: string): string {
+  const h1Index = firstH1LineIndex(body);
+  if (h1Index < 0) return `# ${title}\n\n${body}`;
+  const lines = body.split('\n');
+  const hadCr = lines[h1Index].endsWith('\r');
+  lines[h1Index] = `# ${title}${hadCr ? '\r' : ''}`;
+  return lines.join('\n');
+}
 
 export function DetailPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
@@ -74,16 +90,25 @@ export function DetailPanel() {
       setTitle(entry.title);
       return;
     }
-    // Deviation (execution-log note 16a, reported): the plan left this
-    // direct ipc call unguarded — onBlur fire-and-forgets it, so a failed
-    // rename was an unhandled rejection the user never saw. Catch → toast
-    // (Task 17/20 precedent) and revert the input to disk truth.
+    // Failed rename: toast and revert the input to disk truth (16a guard
+    // discipline). The rescan is caught separately — after a successful
+    // rename the disk already holds the new name, so a refresh failure must
+    // not claim the rename failed.
     try {
       await setNoteTitle(vaultPath, entry.path, trimmed);
-      await rescan();
     } catch {
       toast("Couldn't rename item");
       setTitle(entry.title);
+      return;
+    }
+    if (body !== null) {
+      setBody(spliceTitle(body, trimmed));
+      setSavedBody(spliceTitle(savedBody, trimmed));
+    }
+    try {
+      await rescan();
+    } catch {
+      toast("Couldn't refresh vault");
     }
   };
 

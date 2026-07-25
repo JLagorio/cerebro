@@ -134,4 +134,15 @@ describe('HomePage', () => {
     expect(screen.getByText('FLD')).toBeTruthy();
     expect(screen.getByText('1/2 done')).toBeTruthy();
   });
+
+  // M1.x fresh-vault empty state: a brand-new vault rendered two bare section
+  // headings with nothing actionable under them.
+  it('shows an empty state when the vault has no spaces and no projects', () => {
+    useVaultStore.setState({ entries: [] });
+    render(<HomePage />);
+    expect(screen.getByText('Nothing here yet')).toBeTruthy();
+    expect(
+      screen.getByText('Use New to create a space, then add projects inside it.'),
+    ).toBeTruthy();
+  });
 });

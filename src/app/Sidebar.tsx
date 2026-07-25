@@ -102,7 +102,7 @@ export function Sidebar({ onNewProject }: SidebarProps) {
                   <Icon name="chevron-right" size={13} />
                 </span>
                 <span
-                  className="inline-flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[5px] text-[10px] font-bold text-white"
+                  className="inline-flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[5px] text-[10px] font-bold text-[var(--n-0)]"
                   style={{ background: swatchColor(space.properties.color) }}
                 >
                   {space.title.charAt(0).toUpperCase()}

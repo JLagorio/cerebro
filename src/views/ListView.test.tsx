@@ -65,7 +65,40 @@ describe('ListView', () => {
         project: '[[onboarding]]',
         status: 'doing',
       },
+      // The typed title becomes the H1 verbatim (M1.x capitalization fix).
+      body: '# Ship the fix\n',
     });
+  });
+
+  // M1.x guard: double-Enter while the write is pending must not create two
+  // items with identical keys (same guard as the CreateMenu dialogs).
+  it('quick-add ignores a second Enter while the first create is pending', async () => {
+    const user = userEvent.setup();
+    const createItem = vi.fn(() => new Promise<string>(() => {}));
+    setup({ createItem });
+    const todoHeader = screen
+      .getAllByTestId('list-group-header')
+      .find((h) => h.textContent?.includes('Todo'))!;
+    const section = todoHeader.parentElement as HTMLElement;
+    await user.click(within(section).getByText('Add item'));
+    await user.type(within(section).getByRole('textbox'), 'Once only{Enter}{Enter}');
+    expect(createItem).toHaveBeenCalledTimes(1);
+  });
+
+  // M1.x fallback: slugify('???') === '' and create_note rejects empty slugs —
+  // fall back to the generated key.
+  it('quick-add falls back to the item key as slug for all-symbol titles', async () => {
+    const user = userEvent.setup();
+    const createItem = vi.fn().mockResolvedValue('items/fld-3.md');
+    setup({ createItem });
+    const todoHeader = screen
+      .getAllByTestId('list-group-header')
+      .find((h) => h.textContent?.includes('Todo'))!;
+    const section = todoHeader.parentElement as HTMLElement;
+    await user.click(within(section).getByText('Add item'));
+    await user.type(within(section).getByRole('textbox'), '!!!{Enter}');
+    expect(createItem.mock.calls[0][0].slug).toBe('fld-3');
+    expect(createItem.mock.calls[0][0].body).toBe('# !!!\n');
   });
 
   // Deviation test (execution-log binding note 16a): createItem throws to
@@ -134,6 +167,7 @@ describe('ListView', () => {
       folder: 'items',
       slug: 'first-item',
       frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
+      body: '# First item\n',
     });
   });
 });

@@ -54,6 +54,13 @@ export function handleDragEnd(
   // '__none__' drop keeps writing plain null (delete).
   const dragged = source?.entries.find((e) => e.path === path);
   const kind = dragged ? args.schema.resolveField(dragged, args.groupBy).def?.kind : undefined;
+  // Multi-select fields group one entry into several columns; a drop would
+  // overwrite the whole array with one scalar. Refuse with a toast until a
+  // real add/remove treatment exists (M1.x interim).
+  if (kind === 'multiselect') {
+    args.toast("Can't move cards grouped by a multi-select field");
+    return;
+  }
   const value =
     target.key === '__none__'
       ? null
@@ -124,7 +131,6 @@ function BoardColumn({ group, schema }: { group: Group; schema: Schema }) {
       </div>
       <div
         ref={setNodeRef}
-        data-testid={`board-column-${droppableId}`}
         className="flex min-h-[60px] flex-col gap-2 rounded-[10px] p-0.5"
         style={{ background: isOver ? 'var(--cortex-50)' : 'transparent' }}
       >

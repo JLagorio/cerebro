@@ -27,6 +27,25 @@ describe('CreateMenu', () => {
       folder: 'items',
       slug: 'ship-the-fix',
       frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
+      // The typed title becomes the H1 verbatim (M1.x capitalization fix).
+      body: '# Ship the fix\n',
+    });
+  });
+
+  it('falls back to the item key as slug when the title slugifies to nothing', async () => {
+    const user = userEvent.setup();
+    const createItem = vi.fn().mockResolvedValue('items/fld-3.md');
+    useVaultStore.setState({ createItem });
+    render(<CreateMenu />);
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    await user.click(screen.getByRole('button', { name: 'New item' }));
+    await user.type(screen.getByPlaceholderText('What needs doing?'), '???');
+    await user.click(screen.getByRole('button', { name: 'Create item' }));
+    expect(createItem).toHaveBeenCalledWith({
+      folder: 'items',
+      slug: 'fld-3', // slugify('???') === '' would be rejected by create_note
+      frontmatter: { type: 'Work item', key: 'FLD-3', project: '[[onboarding]]' },
+      body: '# ???\n',
     });
   });
 
@@ -48,6 +67,7 @@ describe('CreateMenu', () => {
       folder: 'projects',
       slug: 'atlas',
       frontmatter: { type: 'Project', key: 'ATL', space: '[[field-platform]]' },
+      body: '# Atlas\n',
     });
   });
 
@@ -151,6 +171,7 @@ describe('NewProjectDialog', () => {
       folder: 'projects',
       slug: 'atlas',
       frontmatter: { type: 'Project', key: 'ATL', space: '[[growth]]' },
+      body: '# Atlas\n',
     });
   });
 

@@ -22,33 +22,46 @@ const pathStem = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '');
 function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: string | null; project: Entry }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState('');
+  // Double-Enter while the write is pending must not create two files with
+  // the same key (M1.x, same guard as the CreateMenu dialogs).
+  const [submitting, setSubmitting] = useState(false);
   const createItem = useVaultStore((s) => s.createItem);
   const allEntries = useVaultStore((s) => s.entries);
 
   const submit = async () => {
     const trimmed = title.trim();
-    if (trimmed === '') return;
+    if (trimmed === '' || submitting) return;
+    setSubmitting(true);
     const prefix = typeof project.properties.key === 'string' ? project.properties.key : 'WRK';
+    const key = nextItemKey(prefix, allEntries);
     const frontmatter: Record<string, unknown> = {
       type: 'Work item',
-      key: nextItemKey(prefix, allEntries),
+      key,
       project: formatWikilink(pathStem(project.path)),
     };
     // The empty-key check covers the flat "All items" fallback group (note
     // 17a): a grouped-but-empty list must not preset `field: ''`.
     if (groupBy && group.key !== '__none__' && group.key !== '') frontmatter[groupBy] = group.key;
     try {
-      await createItem({ folder: 'items', slug: slugify(trimmed), frontmatter });
+      // slug falls back to the key for all-symbol titles (slugify → '', which
+      // create_note rejects); body carries the typed title verbatim so the H1
+      // keeps its capitalization instead of the humanized slug (M1.x).
+      await createItem({
+        folder: 'items',
+        slug: slugify(trimmed) || key.toLowerCase(),
+        frontmatter,
+        body: `# ${trimmed}\n`,
+      });
     } catch {
-      // Deviation from the plan's verbatim body (execution-log binding note
-      // 16a, mirroring the accepted Task 17 pattern in vaultStore): createItem
-      // throws to callers by design — surface the failure and keep the draft
-      // instead of leaving an unhandled rejection.
+      // createItem throws to callers by design — surface the failure and keep
+      // the draft instead of leaving an unhandled rejection (16a).
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
+      setSubmitting(false); // draft stays editable for retry
       return;
     }
     setTitle('');
     setEditing(false);
+    setSubmitting(false);
   };
 
   if (!editing) {

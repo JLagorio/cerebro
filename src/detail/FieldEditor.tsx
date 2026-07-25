@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/Switch';
 import { FieldPopover } from '@/detail/FieldPopover';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import { formatWikilink } from '@/engine/wikilink';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { Entry, FieldDef, Schema } from '@/engine/types';
 
@@ -129,6 +130,13 @@ export function FieldEditor({ entry, def, schema }: FieldEditorProps) {
   if (draft !== null) {
     const commit = () => {
       const trimmed = draft.trim();
+      // Number('junk') is NaN, which serde_yaml serializes as `.nan` on disk
+      // (M1.x): refuse the commit instead of poisoning the frontmatter.
+      if (def.kind === 'number' && trimmed !== '' && Number.isNaN(Number(trimmed))) {
+        useUiStore.getState().toast('Enter a number');
+        setDraft(null);
+        return;
+      }
       patch(trimmed === '' ? null : def.kind === 'number' ? Number(trimmed) : trimmed);
       setDraft(null);
     };

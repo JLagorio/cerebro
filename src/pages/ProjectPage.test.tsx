@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Entry, ViewFile } from '@/engine/types';
+import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { ProjectPage } from './ProjectPage';
@@ -98,5 +99,18 @@ describe('ProjectPage', () => {
   it('a view selection uses the saved presentation', () => {
     render(<ProjectPage selection={{ kind: 'view', id: 'all-board' }} />);
     expect(screen.getByTestId('board-view')).toBeTruthy();
+  });
+
+  // M1.x: a view name that slugifies to a taken id must not silently
+  // overwrite that view's file — dedupe with a -2 suffix.
+  it('deduplicates the saved-view id against existing views', async () => {
+    render(<ProjectPage selection={{ kind: 'project', path: 'projects/foundations.md' }} />);
+    fireEvent.click(screen.getByText('Save view'));
+    fireEvent.change(screen.getByPlaceholderText('View name'), { target: { value: 'All board' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(async () => {
+      const views = await ipc.listViews('/demo-vault');
+      expect(views.some((v) => v.id === 'all-board-2')).toBe(true);
+    });
   });
 });

@@ -7,6 +7,12 @@
 @import './tokens/base.css';
 
 @theme inline {
+  /* M1.x: reset the stock Tailwind palette and radii so only the DS tokens
+     below yield utilities — off-DS classes (text-red-500, text-white, …)
+     produce no CSS instead of silently shipping non-DS styling. */
+  --color-*: initial;
+  --radius-*: initial;
+
   /* fonts — literal mirrors of --font-ui / --font-mono in tokens/typography.css */
   --font-sans: 'Instrument Sans', -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;

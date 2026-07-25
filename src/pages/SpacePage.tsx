@@ -44,7 +44,7 @@ export function SpacePage({ path }: { path: string }) {
       <div className="mx-auto max-w-[1080px] px-8 pb-14 pt-7">
         <div className="mb-1.5 flex items-center gap-3">
           <span
-            className="inline-flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] text-[15px] font-bold text-white"
+            className="inline-flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] text-[15px] font-bold text-[var(--n-0)]"
             style={{ background: swatchColor(space.properties.color) }}
           >
             {space.title.charAt(0).toUpperCase()}

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Tag } from '@/components/ui/Tag';
@@ -123,6 +124,16 @@ export function HomePage() {
           </span>
         </div>
 
+        {spaces.length === 0 && projects.length === 0 && (
+          // Fresh-vault empty state (M1.x): a brand-new vault rendered two
+          // bare section headings with nothing actionable under them.
+          <EmptyState
+            icon="box"
+            title="Nothing here yet"
+            description="Use New to create a space, then add projects inside it."
+          />
+        )}
+
         <div className="mb-2.5 flex items-center gap-2">
           <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Spaces</h2>
         </div>
@@ -138,7 +149,7 @@ export function HomePage() {
               >
                 <div className="flex min-w-0 items-center gap-[9px]">
                   <span
-                    className="inline-flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[7px] text-[12px] font-bold text-white"
+                    className="inline-flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[7px] text-[12px] font-bold text-[var(--n-0)]"
                     style={{ background: swatchColor(space.properties.color) }}
                   >
                     {space.title.charAt(0).toUpperCase()}

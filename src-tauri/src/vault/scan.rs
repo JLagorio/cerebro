@@ -52,7 +52,9 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
         .into_iter()
         .filter_entry(|e| e.depth() == 0 || keep(e));
     for item in walker {
-        let item = item.map_err(|e| e.to_string())?;
+        // M1.x per-file degrade: an unreadable directory entry must not abort
+        // the whole scan.
+        let Ok(item) = item else { continue };
         if !item.file_type().is_file() {
             continue;
         }
@@ -60,9 +62,18 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
             continue;
         }
         let rel = rel_path(vault, item.path())?;
-        let content = std::fs::read_to_string(item.path()).map_err(|e| format!("{rel}: {e}"))?;
         let (created, modified) = timestamps(item.path());
-        entries.push(build_entry(&rel, &content, created, modified));
+        // M1.x per-file degrade: one unreadable/non-UTF-8 .md used to abort
+        // the whole scan — degrade to a parse_error entry the UI can show.
+        let entry = match std::fs::read_to_string(item.path()) {
+            Ok(content) => build_entry(&rel, &content, created, modified),
+            Err(e) => {
+                let mut entry = build_entry(&rel, "", created, modified);
+                entry.parse_error = Some(format!("unreadable: {e}"));
+                entry
+            }
+        };
+        entries.push(entry);
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(entries)
@@ -163,5 +174,18 @@ mod tests {
     #[test]
     fn nonexistent_vault_errors() {
         assert!(scan_vault(Path::new("/definitely/not/a/real/vault")).is_err());
+    }
+
+    #[test]
+    fn non_utf8_file_degrades_to_parse_error_entry_and_scan_succeeds() {
+        let vault = fixture_vault("scan-nonutf8");
+        std::fs::write(vault.join("items/bad.md"), [0xFF, 0xFE, 0x00, 0x80]).unwrap();
+        let entries = scan_vault(&vault).unwrap();
+        let bad = entries.iter().find(|e| e.path == "items/bad.md").unwrap();
+        assert!(bad.parse_error.as_deref().unwrap().starts_with("unreadable:"));
+        assert_eq!(bad.title, "Bad");
+        // The rest of the vault still scanned normally.
+        assert!(entries.iter().any(|e| e.path == "items/atl-1.md" && e.parse_error.is_none()));
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

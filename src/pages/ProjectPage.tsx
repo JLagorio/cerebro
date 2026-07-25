@@ -54,7 +54,12 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
 
   const handleSaveView = async (name: string) => {
     if (!vaultPath) return;
-    const id = slugifyViewId(name) || 'view';
+    // Dedupe against existing view ids (M1.x): a name that slugifies to a
+    // taken id must not silently overwrite that view's file.
+    const base = slugifyViewId(name) || 'view';
+    const taken = new Set(views.map((v) => v.id));
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
     const yaml = serializeView({
       name,
       icon: null,
@@ -63,9 +68,14 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       filters: null,
       presentation,
     });
-    await saveView(vaultPath, id, yaml);
-    await rescan(); // the watcher rescan also picks the new view up for the sidebar
-    toast(`View "${name}" saved`);
+    try {
+      await saveView(vaultPath, id, yaml);
+      await rescan(); // the watcher rescan also picks the new view up for the sidebar
+      toast(`View "${name}" saved`);
+    } catch {
+      // Surface the failed write instead of an unhandled rejection (M1.x).
+      toast(`Couldn't save view "${name}"`);
+    }
   };
 
   return (
@@ -82,7 +92,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
                     className="inline-flex items-center gap-[7px] border-0 bg-transparent text-[15px] font-medium text-[var(--n-700)] hover:text-[var(--n-900)]"
                   >
                     <span
-                      className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-[10px] font-bold text-white"
+                      className="inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] text-[10px] font-bold text-[var(--n-0)]"
                       style={{ background: swatchColor(space.properties.color) }}
                     >
                       {space.title.charAt(0).toUpperCase()}

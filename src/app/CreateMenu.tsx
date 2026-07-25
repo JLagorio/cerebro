@@ -118,22 +118,24 @@ function NewItemDialog({ onClose }: { onClose: () => void }) {
     if (trimmed === '' || !project || submitting) return;
     setSubmitting(true);
     const prefix = typeof project.properties.key === 'string' ? project.properties.key : 'WRK';
+    const key = nextItemKey(prefix, entries);
     let path: string;
     try {
+      // Slug falls back to the key for all-symbol titles; the body carries the
+      // typed title so the H1 keeps its capitalization (M1.x).
       path = await createItem({
         folder: 'items',
-        slug: slugify(trimmed),
+        slug: slugify(trimmed) || key.toLowerCase(),
         frontmatter: {
           type: 'Work item',
-          key: nextItemKey(prefix, entries),
+          key,
           project: formatWikilink(pathStem(project.path)),
         },
+        body: `# ${trimmed}\n`,
       });
     } catch {
-      // Deviation from the plan's verbatim body (execution-log notes 16a/17b,
-      // reported): createItem throws to callers by design — surface the
-      // failure and keep the dialog open instead of leaving an unhandled
-      // rejection.
+      // createItem throws to callers by design — surface the failure and keep
+      // the dialog open instead of leaving an unhandled rejection (16a/17b).
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
       setSubmitting(false); // draft stays editable for retry
       return;
@@ -167,6 +169,12 @@ function NewItemDialog({ onClose }: { onClose: () => void }) {
             onChange={(e) => setProjectPath(e.target.value)}
             width="100%"
           />
+          {projects.length === 0 && (
+            // Fresh-vault dead-end (M1.x): explain why Create stays disabled.
+            <span className="text-[11px] text-[var(--n-500)]">
+              No projects yet — create a project first.
+            </span>
+          )}
         </label>
       </div>
     </Dialog>
@@ -208,14 +216,15 @@ export function NewProjectDialog({
     setSubmitting(true);
     let path: string;
     try {
+      // Slug/body fixes as in NewItemDialog (M1.x).
       path = await createItem({
         folder: 'projects',
-        slug: slugify(trimmed),
+        slug: slugify(trimmed) || prefix.toLowerCase(),
         frontmatter: { type: 'Project', key: prefix, space: formatWikilink(pathStem(spacePath)) },
+        body: `# ${trimmed}\n`,
       });
     } catch {
-      // Deviation (execution-log notes 16a/17b, reported): surface the failed
-      // write and keep the dialog open.
+      // Surface the failed write and keep the dialog open (16a/17b).
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
       setSubmitting(false); // draft stays editable for retry
       return;
@@ -261,6 +270,12 @@ export function NewProjectDialog({
             onChange={(e) => setSpacePath(e.target.value)}
             width="100%"
           />
+          {spaces.length === 0 && (
+            // Fresh-vault dead-end (M1.x): explain why Create stays disabled.
+            <span className="text-[11px] text-[var(--n-500)]">
+              No spaces yet — create a space first.
+            </span>
+          )}
         </label>
       </div>
     </Dialog>
@@ -282,18 +297,19 @@ function NewSpaceDialog({ onClose }: { onClose: () => void }) {
     setSubmitting(true);
     let path: string;
     try {
+      // Slug/body fixes as in NewItemDialog (M1.x).
       path = await createItem({
         folder: 'spaces',
-        slug: slugify(trimmed),
+        slug: slugify(trimmed) || 'space',
         frontmatter: {
           type: 'Space',
           color: swatch,
           statuses: STATUS_TEMPLATES[template].map((s) => ({ ...s })),
         },
+        body: `# ${trimmed}\n`,
       });
     } catch {
-      // Deviation (execution-log notes 16a/17b, reported): surface the failed
-      // write and keep the dialog open.
+      // Surface the failed write and keep the dialog open (16a/17b).
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
       setSubmitting(false); // draft stays editable for retry
       return;
