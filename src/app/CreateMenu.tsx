@@ -108,11 +108,15 @@ function NewItemDialog({ onClose }: { onClose: () => void }) {
   const projects = entries.filter((e) => e.type === 'Project');
   const [title, setTitle] = useState('');
   const [projectPath, setProjectPath] = useState(projects[0]?.path ?? '');
+  // Fix (fix round M1): a double-click while the write was pending called
+  // createItem twice with identical keys — two files, duplicate `key:`.
+  const [submitting, setSubmitting] = useState(false);
 
   const create = async () => {
     const trimmed = title.trim();
     const project = entries.find((e) => e.path === projectPath);
-    if (trimmed === '' || !project) return;
+    if (trimmed === '' || !project || submitting) return;
+    setSubmitting(true);
     const prefix = typeof project.properties.key === 'string' ? project.properties.key : 'WRK';
     let path: string;
     try {
@@ -131,6 +135,7 @@ function NewItemDialog({ onClose }: { onClose: () => void }) {
       // failure and keep the dialog open instead of leaving an unhandled
       // rejection.
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
+      setSubmitting(false); // draft stays editable for retry
       return;
     }
     onClose();
@@ -145,7 +150,7 @@ function NewItemDialog({ onClose }: { onClose: () => void }) {
       primaryAction={{
         label: 'Create item',
         onClick: () => void create(),
-        disabled: title.trim() === '' || projectPath === '',
+        disabled: title.trim() === '' || projectPath === '' || submitting,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
@@ -168,19 +173,39 @@ function NewItemDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function NewProjectDialog({ onClose }: { onClose: () => void }) {
+/**
+ * Exported (fix round D8): the Sidebar's per-space "New project" rows open
+ * this dialog prefilled with the clicked space — plan line 7618's stated
+ * intent, unwired by Task 23's spec (dead chrome, note-14 violation).
+ */
+export function NewProjectDialog({
+  onClose,
+  initialSpacePath,
+}: {
+  onClose: () => void;
+  /** Preselects this space when it exists; falls back to the first space. */
+  initialSpacePath?: string;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const createItem = useVaultStore((s) => s.createItem);
   const navigate = useNavStore((s) => s.navigate);
   const spaces = entries.filter((e) => e.type === 'Space');
   const [name, setName] = useState('');
   const [prefix, setPrefix] = useState('');
-  const [spacePath, setSpacePath] = useState(spaces[0]?.path ?? '');
+  const [spacePath, setSpacePath] = useState(
+    () =>
+      (initialSpacePath !== undefined && spaces.some((s) => s.path === initialSpacePath)
+        ? initialSpacePath
+        : spaces[0]?.path) ?? '',
+  );
+  // Fix (fix round M1): see NewItemDialog.
+  const [submitting, setSubmitting] = useState(false);
   const prefixValid = /^[A-Z]{2,4}$/.test(prefix);
 
   const create = async () => {
     const trimmed = name.trim();
-    if (trimmed === '' || !prefixValid || spacePath === '') return;
+    if (trimmed === '' || !prefixValid || spacePath === '' || submitting) return;
+    setSubmitting(true);
     let path: string;
     try {
       path = await createItem({
@@ -192,6 +217,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
       // Deviation (execution-log notes 16a/17b, reported): surface the failed
       // write and keep the dialog open.
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
+      setSubmitting(false); // draft stays editable for retry
       return;
     }
     onClose();
@@ -206,7 +232,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
       primaryAction={{
         label: 'Create project',
         onClick: () => void create(),
-        disabled: name.trim() === '' || !prefixValid || spacePath === '',
+        disabled: name.trim() === '' || !prefixValid || spacePath === '' || submitting,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
@@ -247,10 +273,13 @@ function NewSpaceDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
   const [swatch, setSwatch] = useState(USER_SWATCHES[0]);
   const [template, setTemplate] = useState<keyof typeof STATUS_TEMPLATES>('cerebro');
+  // Fix (fix round M1): see NewItemDialog.
+  const [submitting, setSubmitting] = useState(false);
 
   const create = async () => {
     const trimmed = name.trim();
-    if (trimmed === '') return;
+    if (trimmed === '' || submitting) return;
+    setSubmitting(true);
     let path: string;
     try {
       path = await createItem({
@@ -266,6 +295,7 @@ function NewSpaceDialog({ onClose }: { onClose: () => void }) {
       // Deviation (execution-log notes 16a/17b, reported): surface the failed
       // write and keep the dialog open.
       useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
+      setSubmitting(false); // draft stays editable for retry
       return;
     }
     onClose();
@@ -277,7 +307,11 @@ function NewSpaceDialog({ onClose }: { onClose: () => void }) {
       open
       onClose={onClose}
       title="New space"
-      primaryAction={{ label: 'Create space', onClick: () => void create(), disabled: name.trim() === '' }}
+      primaryAction={{
+        label: 'Create space',
+        onClick: () => void create(),
+        disabled: name.trim() === '' || submitting,
+      }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
       <div className="flex flex-col gap-3">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
+import { NewProjectDialog } from '@/app/CreateMenu';
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
@@ -82,6 +83,9 @@ function App() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const [booted, setBooted] = useState(false);
+  // Fix (fix round D8): the Sidebar's per-space "New project" rows open the
+  // project dialog prefilled with the clicked space (plan line 7618).
+  const [newProjectSpace, setNewProjectSpace] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -121,13 +125,19 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar onNewProject={() => { /* not wired in M1 — project creation lives in the topbar CreateMenu (reported) */ }} />
+      <Sidebar onNewProject={setNewProjectSpace} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
         </div>
       </div>
+      {newProjectSpace !== null && (
+        <NewProjectDialog
+          initialSpacePath={newProjectSpace}
+          onClose={() => setNewProjectSpace(null)}
+        />
+      )}
       <DetailPanel />
       <QuickOpen />
       <ToastHost />

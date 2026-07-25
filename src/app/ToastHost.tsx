@@ -32,7 +32,10 @@ export function ToastHost() {
 
   if (toasts.length === 0) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 z-[80] flex w-[360px] -translate-x-1/2 flex-col gap-2">
+    // z-[1100] sits above the DS Dialog scrim (z-index 1000) so failure
+    // toasts fired while a dialog stays open remain visible and dismissable
+    // (fix round I1).
+    <div className="fixed bottom-4 left-1/2 z-[1100] flex w-[360px] -translate-x-1/2 flex-col gap-2">
       {toasts.map((t) => (
         <Toast key={t.id} title={t.message} onDismiss={() => dismissToast(t.id)} />
       ))}
