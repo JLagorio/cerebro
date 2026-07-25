@@ -63,6 +63,18 @@ describe('NoteBodyEditor', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('raw HTML'));
   });
 
+  it('toasts when a save fails instead of rejecting silently', async () => {
+    const { editor } = await renderReady(PAGE);
+    // Force the write to fail: a read-only file map stand-in — drop the
+    // path so mock saveNote's mustGet throws.
+    fs().delete(PAGE);
+    const last = editor.document[editor.document.length - 1];
+    editor.insertBlocks([{ type: 'paragraph', content: 'doomed edit' }], last, 'after');
+    await waitFor(() => {
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't save page");
+    });
+  });
+
   it('surfaces a load failure instead of an empty editor', async () => {
     render(<NoteBodyEditor path="nope/missing.md" debounceMs={20} />);
     await waitFor(() => expect(screen.getByText("This page couldn't be loaded.")).toBeTruthy());

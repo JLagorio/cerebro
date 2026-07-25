@@ -6,6 +6,7 @@ import {
   isLossyImport,
   markdownToBlocks,
   normalizeParsedBlocks,
+  spliceTitleIntoBlocks,
 } from './markdown';
 
 let editor: BlockNoteEditor;
@@ -163,6 +164,35 @@ describe('normalizeParsedBlocks', () => {
       content: { rows: { cells: { text: string }[][] }[] };
     };
     expect(table.content.rows[0].cells[0][0].text).toBe('a\nb');
+  });
+});
+
+describe('spliceTitleIntoBlocks', () => {
+  const load = async (ed: BlockNoteEditor, md: string) => {
+    ed.replaceBlocks(ed.document, await markdownToBlocks(ed, md));
+  };
+
+  it('rewrites the first H1 block in place, keeping the rest', async () => {
+    const ed = BlockNoteEditor.create();
+    await load(ed, '# Old title\n\nBody stays.\n');
+    spliceTitleIntoBlocks(ed, 'New title');
+    expect(await blocksToMarkdown(ed)).toBe('# New title\n\nBody stays.\n');
+  });
+
+  it('ignores pseudo-H1s inside code fences (parity with replace_h1)', async () => {
+    const ed = BlockNoteEditor.create();
+    await load(ed, '```\n# not a heading\n```\n\n# Real title\n');
+    spliceTitleIntoBlocks(ed, 'Renamed');
+    // Bare fences pick up BlockNote's default `text` language tag — the same
+    // accepted formatting normalization as bullets and table padding.
+    expect(await blocksToMarkdown(ed)).toBe('```text\n# not a heading\n```\n\n# Renamed\n');
+  });
+
+  it('inserts an H1 at the top when the document has none', async () => {
+    const ed = BlockNoteEditor.create();
+    await load(ed, 'Just a paragraph.\n');
+    spliceTitleIntoBlocks(ed, 'Added title');
+    expect(await blocksToMarkdown(ed)).toBe('# Added title\n\nJust a paragraph.\n');
   });
 });
 

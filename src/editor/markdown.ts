@@ -61,6 +61,31 @@ export async function blocksToMarkdown(
   return editor.blocksToMarkdownLossy(blocks ?? editor.document);
 }
 
+/**
+ * Mirror of write.rs replace_h1 at the block level: rewrite the first H1
+ * block in the LIVE editor, or insert one at the top when the document has
+ * none. Applied after a successful rename so a later body save can't write
+ * the old title back over the renamed file (M1.x stale-body-after-rename
+ * policy). Fence-awareness is inherent — code fences are codeBlock blocks,
+ * never headings.
+ */
+export function spliceTitleIntoBlocks(editor: BlockNoteEditor, title: string): void {
+  const h1 = editor.document.find(
+    (b) => b.type === 'heading' && (b.props as { level?: number }).level === 1,
+  );
+  if (h1 !== undefined) {
+    editor.updateBlock(h1, { content: title });
+    return;
+  }
+  const first = editor.document[0];
+  if (first === undefined) return; // live editors always hold >= 1 block
+  editor.insertBlocks(
+    [{ type: 'heading', props: { level: 1 }, content: title }],
+    first,
+    'before',
+  );
+}
+
 const significantChars = (s: string): string => s.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '');
 
 /**

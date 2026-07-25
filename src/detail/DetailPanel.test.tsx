@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DetailPanel, spliceTitle } from '@/detail/DetailPanel';
+import { DetailPanel } from '@/detail/DetailPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
@@ -21,6 +21,10 @@ vi.mock('@/lib/ipc', () => ({
   listViews: vi.fn().mockResolvedValue([]),
   saveView: vi.fn(),
   startWatcher: vi.fn().mockResolvedValue(undefined),
+  listFolders: vi.fn().mockResolvedValue([]),
+  createFolder: vi.fn(),
+  renameNote: vi.fn(),
+  deleteNote: vi.fn(),
 }));
 
 afterEach(cleanup);
@@ -61,32 +65,16 @@ describe('DetailPanel', () => {
 
   // --- Tests below cover reported deviations from the plan's verbatim code ---
 
-  it('strips the leading blank line a Rust-backend body carries (note 10)', async () => {
-    // Mock readNote strips leading newlines; Rust read_note returns the body
-    // verbatim including the blank line after the frontmatter fence. The
-    // panel must display both identically.
+  // Task 12: the body renders in the rich editor; NoteBodyEditor covers
+  // save-failure toasts and the note-10 newline normalization at its level.
+  it('renders the note body in the rich markdown editor', async () => {
     vi.mocked(ipc.readNote).mockResolvedValueOnce('\n# Design first-run flow\n\nBody text\n');
     render(<DetailPanel />);
-    await waitFor(() => {
-      const textarea = screen.getByLabelText('Description') as HTMLTextAreaElement;
-      expect(textarea.value).toBe('# Design first-run flow\n\nBody text\n');
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
     });
-  });
-
-  it('toasts when the description save fails instead of rejecting silently (note 16a)', async () => {
-    useUiStore.setState({ toasts: [] });
-    vi.mocked(ipc.saveNote).mockRejectedValueOnce(new Error('disk full'));
-    render(<DetailPanel />);
-    await waitFor(() => {
-      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).disabled).toBe(false);
-    });
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Edited body' } });
-    fireEvent.blur(screen.getByLabelText('Description'));
-    await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't save description",
-      );
-    });
+    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy());
+    expect(screen.queryByRole('textbox', { name: 'Description' })).toBeNull();
   });
 
   it('toasts and reverts the title when the H1 rename fails (note 16a)', async () => {
@@ -109,64 +97,39 @@ describe('DetailPanel', () => {
     vi.mocked(ipc.readNote).mockRejectedValueOnce(new Error('gone'));
     render(<DetailPanel />);
     await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't load description",
-      );
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't load page");
     });
   });
 
-  // M1.x stale-body-after-rename: the readNote effect keys on entry.path,
-  // which a rename doesn't change — without the splice, a later description
-  // save writes the OLD H1 back over the renamed file.
-  it('splices the new H1 into the loaded body after a rename', async () => {
+  // M1.x stale-body-after-rename, block edition: the editor keeps its
+  // document across a rename (the file path doesn't change) — without the
+  // splice, its next debounced save writes the OLD H1 back over the renamed
+  // file. spliceTitleIntoBlocks unit coverage lives in markdown.test.ts.
+  it('splices the new H1 into the live editor after a rename', async () => {
     vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
     vi.mocked(ipc.scanVault).mockResolvedValue(fixtureVault());
     render(<DetailPanel />);
-    await waitFor(() => {
-      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe(
-        '# Design first-run flow\n\nBody text\n',
-      );
-    });
+    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy(), { timeout: 5_000 });
     const input = screen.getByLabelText('Title') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'Renamed flow' } });
     fireEvent.blur(input);
+    // The editor's H1 block now carries the new title...
     await waitFor(() => {
-      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe(
-        '# Renamed flow\n\nBody text\n',
-      );
+      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed flow');
     });
-    // A later description edit + save writes the new title, not the stale one.
-    fireEvent.change(screen.getByLabelText('Description'), {
-      target: { value: '# Renamed flow\n\nBody text\n\nMore.\n' },
-    });
-    fireEvent.blur(screen.getByLabelText('Description'));
-    await waitFor(() => {
-      expect(vi.mocked(ipc.saveNote)).toHaveBeenCalledWith(
-        '/vault',
-        'projects/onboarding/items/fld-1.md',
-        '# Renamed flow\n\nBody text\n\nMore.\n',
-      );
-    });
+    // ...and the splice-triggered debounced save writes it to disk.
+    await waitFor(
+      () => {
+        const bodies = vi.mocked(ipc.saveNote).mock.calls.map((c) => c[2]);
+        expect(bodies.some((b) => b.startsWith('# Renamed flow'))).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
   });
 });
 
-describe('spliceTitle', () => {
-  it('replaces the H1 line in place', () => {
-    expect(spliceTitle('# Old title\n\nBody stays.\n', 'New title')).toBe(
-      '# New title\n\nBody stays.\n',
-    );
-  });
-
-  it('skips pseudo-H1s inside code fences (parity with replace_h1)', () => {
-    expect(spliceTitle('```\n# in code\n```\n\n# Real\n\nBody.\n', 'New')).toBe(
-      '```\n# in code\n```\n\n# New\n\nBody.\n',
-    );
-  });
-
-  it('prepends an H1 when the body has none', () => {
-    expect(spliceTitle('Just prose.\n', 'Now titled')).toBe('# Now titled\n\nJust prose.\n');
-  });
-});
+// spliceTitle (string splice) was replaced by spliceTitleIntoBlocks in Task
+// 12 — equivalent coverage lives in src/editor/markdown.test.ts.
 
 // M1.x .nan guard: Number('junk') is NaN and serde_yaml writes it as `.nan`.
 describe('FieldEditor number guard', () => {

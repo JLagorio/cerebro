@@ -1,26 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { BlockNoteEditor } from '@blocknote/core';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
-import { readNote, saveNote, setNoteTitle } from '@/lib/ipc';
-import { firstH1LineIndex } from '@/lib/mockParse';
+import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
+import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { setNoteTitle } from '@/lib/ipc';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
-
-/**
- * Mirror of write.rs replace_h1 / mockIpc.setNoteTitle: rewrite the H1 line
- * (fence/indent-aware) or prepend one. Applied to the LOCAL body state after
- * a successful rename so a later description save can't write the old title
- * back over the renamed file (M1.x stale-body-after-rename).
- */
-export function spliceTitle(body: string, title: string): string {
-  const h1Index = firstH1LineIndex(body);
-  if (h1Index < 0) return `# ${title}\n\n${body}`;
-  const lines = body.split('\n');
-  const hadCr = lines[h1Index].endsWith('\r');
-  lines[h1Index] = `# ${title}${hadCr ? '\r' : ''}`;
-  return lines.join('\n');
-}
 
 export function DetailPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
@@ -32,39 +19,16 @@ export function DetailPanel() {
   const rescan = useVaultStore((s) => s.rescan);
 
   const [title, setTitle] = useState('');
-  const [body, setBody] = useState<string | null>(null);
-  const [savedBody, setSavedBody] = useState('');
+  // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
+  // load/save). The handle is only needed for the rename splice below.
+  const editorRef = useRef<BlockNoteEditor | null>(null);
 
   useEffect(() => {
     setTitle(entry?.title ?? '');
+    // The keyed NoteBodyEditor remounts on path change; drop the stale
+    // handle until the new editor reports ready.
+    editorRef.current = null;
   }, [entry?.path, entry?.title]);
-
-  useEffect(() => {
-    setBody(null);
-    if (!entry || !vaultPath) return;
-    let cancelled = false;
-    readNote(vaultPath, entry.path)
-      .then((text) => {
-        if (!cancelled) {
-          // Deviation (execution-log note 10, reported): Rust read_note
-          // returns the body verbatim including the blank line after the
-          // frontmatter fence, while the mock strips leading newlines —
-          // normalize here so both backends display identically.
-          const display = text.replace(/^\n+/, '');
-          setBody(display);
-          setSavedBody(display);
-        }
-      })
-      .catch(() => {
-        // Deviation (execution-log note 16a guard discipline, reported): the
-        // plan's bare .then left a read failure as an unhandled rejection
-        // with the textarea disabled forever and no explanation.
-        if (!cancelled) toast("Couldn't load description");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [entry?.path, vaultPath]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -101,28 +65,14 @@ export function DetailPanel() {
       setTitle(entry.title);
       return;
     }
-    if (body !== null) {
-      setBody(spliceTitle(body, trimmed));
-      setSavedBody(spliceTitle(savedBody, trimmed));
-    }
+    // M1.x stale-body-after-rename, block edition: splice the new H1 into
+    // the LIVE editor so its next debounced save writes the renamed title
+    // (and keeps any dirty description edits).
+    if (editorRef.current !== null) spliceTitleIntoBlocks(editorRef.current, trimmed);
     try {
       await rescan();
     } catch {
       toast("Couldn't refresh vault");
-    }
-  };
-
-  const commitBody = async () => {
-    if (!vaultPath || body === null || body === savedBody) return;
-    // Deviation (execution-log note 16a, reported): same guard discipline as
-    // commitTitle — a failed save must surface; savedBody stays stale so the
-    // next blur retries.
-    try {
-      await saveNote(vaultPath, entry.path, body);
-      setSavedBody(body);
-      toast('Saved');
-    } catch {
-      toast("Couldn't save description");
     }
   };
 
@@ -176,14 +126,15 @@ export function DetailPanel() {
           ))}
         </div>
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">Description</div>
-        <textarea
-          aria-label="Description"
-          placeholder="Add a description…"
-          value={body ?? ''}
-          disabled={body === null}
-          onChange={(e) => setBody(e.target.value)}
-          onBlur={() => void commitBody()}
-          className="mb-4 block min-h-[96px] w-full resize-y rounded-lg border border-[var(--n-200)] px-2.5 py-2 text-[13px] leading-5 text-[var(--n-700)] outline-none focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]"
+        {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
+            path so switching items reloads cleanly. */}
+        <NoteBodyEditor
+          key={entry.path}
+          path={entry.path}
+          compact
+          onReady={({ editor }) => {
+            editorRef.current = editor;
+          }}
         />
       </div>
       <footer className="flex items-center gap-3 border-t border-[var(--n-100)] px-4 py-2.5 [font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">

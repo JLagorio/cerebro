@@ -13,11 +13,14 @@ import { LazyMarkdownEditor } from './LazyMarkdownEditor';
 export function NoteBodyEditor({
   path,
   autoFocus = false,
+  compact = false,
   debounceMs,
   onReady,
 }: {
   path: string;
   autoFocus?: boolean;
+  /** Narrow contexts (detail panel): smaller gutter and heading scale. */
+  compact?: boolean;
   debounceMs?: number;
   onReady?: (info: { editor: BlockNoteEditor; lossyImport: boolean }) => void;
 }) {
@@ -81,7 +84,7 @@ export function NoteBodyEditor({
   if (body === null) return <div data-testid="note-body-loading" />;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={`flex min-h-0 flex-1 flex-col${compact ? ' cerebro-editor-compact' : ''}`}>
       {lossy && (
         <div
           role="alert"

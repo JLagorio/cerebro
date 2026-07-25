@@ -29,3 +29,19 @@
 .cerebro-editor .bn-block-content[data-content-type='codeBlock'] pre {
   font-family: var(--font-mono);
 }
+
+/* Narrow contexts (detail panel): shrink the side-menu gutter and scale
+   headings down so an H1 doesn't dwarf a 420px panel. */
+.cerebro-editor-compact .bn-editor {
+  padding-inline: 28px 8px;
+  font-size: 13px;
+}
+.cerebro-editor-compact .bn-block-content[data-content-type='heading'] h1 {
+  font-size: 18px;
+}
+.cerebro-editor-compact .bn-block-content[data-content-type='heading'] h2 {
+  font-size: 16px;
+}
+.cerebro-editor-compact .bn-block-content[data-content-type='heading'] h3 {
+  font-size: 14px;
+}
