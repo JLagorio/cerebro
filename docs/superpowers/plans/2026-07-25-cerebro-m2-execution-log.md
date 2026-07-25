@@ -11,9 +11,9 @@ Plan: [2026-07-25-cerebro-m2-markdown-first.md](2026-07-25-cerebro-m2-markdown-f
 | 3 | Rust vault format v2 | ✅ done | 25d97d2 |
 | 4 | Demo vault v2 + migration script | ✅ done | a0c6106 |
 | 5 | Engine schema v2 | ✅ done | a0c6106 |
-| 6 | Engine per-project views | in progress | |
+| 6 | Engine per-project views | ✅ done | 5494d84 |
 | 7 | Shell v2 | ✅ done | a0c6106 |
-| 8 | Project header tabs + toolbar rework | pending | |
+| 8 | Project header tabs + toolbar rework | ✅ done | 6951102 |
 | 9 | BlockNote editor component | pending | |
 | 10 | Doc surface + project file tree | pending | |
 | 11 | Docs rail surface | pending | |
@@ -38,5 +38,9 @@ Plan: [2026-07-25-cerebro-m2-markdown-first.md](2026-07-25-cerebro-m2-markdown-f
 **Task 3 (25d97d2):** Entry gains `folder` + containment `project` on both backends; create_folder/rename_note (notes + folders, no clobber)/delete_note (trash crate); list_folders incl. empty dirs; mock parity + tests. delete_note happy path is deliberately untested (would put files in the developer's Trash) — covered by the tauri-dev shakeout.
 
 **Tasks 4+5+7 (a0c6106):** see Deviations 1-3. Baselines after: 315 vitest / 32 files, 71 cargo, smoke green, tsc clean. The first smoke run after the sweep failed against the long-lived dev server (stale vite state — exactly the M1 log's operational warning); rerun green.
+
+**Task 6 (5494d84):** per-project views: `<project>/views/*.yml` discovered and tagged with the owning project.md (Rust + mock parity); save_view gains a folder scope; ViewFile.project; sidebar/global lookups filter to global; project saves scope + dedupe within scope. Plus smoke hardening (separate commit 63b7…/`test:`): post-drag click retried — dnd-kit suppresses the click after a drag; was 1-in-3 flaky, 4/4 green after.
+
+**Task 8 (6951102):** saved-view tab row on project headers (Items + scoped tabs + New view), tab switch loads the view's presentation, toolbar edits auto-persist to the active view's YAML (plan open-item 3 resolved: immediate write + failure toast, no dirty-dot), ViewToolbar reduced to presentation controls. Baselines: 321 vitest, 72 cargo, smoke green.
 
 **Task 1 (8314898):** all 11 (B) items landed. Baselines: 308 vitest (was 296), 67 cargo (was 66), smoke green, tsc clean. Notes: (a) `.gitignore` item was already done pre-M2 (082892a) — verified, not redone. (b) CreateMenu dialogs already had `submitting` guards from the M1 fix round; the quick-add row was the missing site. (c) stale-body policy chosen: local H1 splice into body/savedBody after successful rename (mirrors `replace_h1`, keeps dirty description edits, no extra IPC round-trip); general refetch-on-external-change remains out of scope. (d) `#[tauri::command(async)]` applied to all 10 sync IO commands; `pick_vault` already `async fn`. (e) @theme stock reset verified safe: only `text-white` used stock palette (5 sites swapped to `var(--n-0)`); `*-transparent` are static utilities in TW4, unaffected.
