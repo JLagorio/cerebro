@@ -40,7 +40,7 @@ describe('handleDragEnd', () => {
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     const toast = vi.fn();
     const event = { active: { id: 'items/fld-1.md' }, over: { id: 'doing' } } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', groups, patchFrontmatter, toast });
+    handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast });
     expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { status: 'doing' });
     expect(toast).toHaveBeenCalledWith('Moved to Doing');
   });
@@ -49,7 +49,7 @@ describe('handleDragEnd', () => {
     const patchFrontmatter = vi.fn();
     const toast = vi.fn();
     const event = { active: { id: 'items/fld-1.md' }, over: { id: 'todo' } } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', groups, patchFrontmatter, toast });
+    handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast });
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
   });
@@ -65,14 +65,29 @@ describe('handleDragEnd', () => {
       active: { id: 'items/fld-1.md' },
       over: { id: NO_VALUE_COLUMN_ID },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', groups: [...groups, noneGroup], patchFrontmatter, toast });
+    handleDragEnd(event, { groupBy: 'status', groups: [...groups, noneGroup], schema, patchFrontmatter, toast });
     expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { status: null });
   });
 
   it('is a no-op when dropped outside any column', () => {
     const patchFrontmatter = vi.fn();
     const event = { active: { id: 'items/fld-1.md' }, over: null } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', groups, patchFrontmatter, toast: vi.fn() });
+    handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast: vi.fn() });
     expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+
+  it('wraps the written value as a wikilink when the grouped field is person/relation-kind', () => {
+    // Execution-log note 18: a bare-stem write (`assignee: ana-rios`) destroys
+    // the wikilink on disk — relationships.assignee is gone after rescan.
+    const personGroups = groupEntries(items, 'assignee', schema);
+    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    const toast = vi.fn();
+    const event = {
+      active: { id: 'items/fld-2.md' },
+      over: { id: 'ana-rios' },
+    } as unknown as DragEndEvent;
+    handleDragEnd(event, { groupBy: 'assignee', groups: personGroups, schema, patchFrontmatter, toast });
+    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-2.md', { assignee: '[[ana-rios]]' });
+    expect(toast).toHaveBeenCalledWith('Moved to Ana Rios');
   });
 });

@@ -10,6 +10,7 @@ import type { DragEndEvent } from '@dnd-kit/core';
 import { Avatar } from '@/components/ui/Avatar';
 import { StatusFlag } from '@/components/ui/StatusFlag';
 import { groupEntries } from '@/engine/grouping';
+import { formatWikilink } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { Entry, Group, Presentation, Schema } from '@/engine/types';
@@ -28,6 +29,7 @@ export function handleDragEnd(
   args: {
     groupBy: string;
     groups: Group[];
+    schema: Schema;
     patchFrontmatter: (path: string, patch: Record<string, unknown>) => Promise<void>;
     toast: (message: string) => void;
   },
@@ -45,7 +47,19 @@ export function handleDragEnd(
   if (!target) return;
   const source = args.groups.find((g) => g.entries.some((e) => e.path === path));
   if (source && source.key === target.key) return;
-  void args.patchFrontmatter(path, { [args.groupBy]: target.key === '__none__' ? null : target.key });
+  // Fix (execution-log note 18): person/relation groups key by wikilink stem,
+  // so a bare-stem write would destroy the wikilink on disk (the field leaves
+  // relationships after rescan). Wrap those writes as [[wikilinks]]; the
+  // '__none__' drop keeps writing plain null (delete).
+  const dragged = source?.entries.find((e) => e.path === path);
+  const kind = dragged ? args.schema.resolveField(dragged, args.groupBy).def?.kind : undefined;
+  const value =
+    target.key === '__none__'
+      ? null
+      : kind === 'person' || kind === 'relation'
+        ? formatWikilink(target.key)
+        : target.key;
+  void args.patchFrontmatter(path, { [args.groupBy]: value });
   args.toast(`Moved to ${target.label}`);
 }
 
@@ -140,7 +154,7 @@ export function BoardView({ entries, presentation, schema }: BoardViewProps) {
     >
       <DndContext
         sensors={sensors}
-        onDragEnd={(event) => handleDragEnd(event, { groupBy, groups, patchFrontmatter, toast })}
+        onDragEnd={(event) => handleDragEnd(event, { groupBy, groups, schema, patchFrontmatter, toast })}
       >
         <div className="flex items-start gap-3 overflow-x-auto">
           {groups.map((g) => (
