@@ -1,9 +1,9 @@
 import { Avatar } from '@/components/ui/Avatar';
-import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
+import { CreateMenu } from '@/app/CreateMenu';
 import { useUiStore } from '@/stores/uiStore';
 
-export function Topbar({ onNew }: { onNew: () => void }) {
+export function Topbar() {
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
 
   return (
@@ -24,9 +24,7 @@ export function Topbar({ onNew }: { onNew: () => void }) {
           </kbd>
         </button>
       </div>
-      <Button variant="primary" size="sm" icon="plus" onClick={onNew}>
-        New
-      </Button>
+      <CreateMenu />
       <Avatar name="You" size={28} />
     </div>
   );

@@ -1,25 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
+import { QuickOpen } from '@/app/QuickOpen';
+import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { HomePage } from '@/pages/HomePage';
 import { ProjectPage } from '@/pages/ProjectPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { SpacePage } from '@/pages/SpacePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { getLastVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-
-function CanvasPlaceholder({ label }: { label: string }) {
-  return (
-    <div className="flex flex-1 items-center justify-center text-[13px] text-[var(--n-400)]">
-      {label}
-    </div>
-  );
-}
 
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
@@ -28,13 +24,18 @@ function CanvasOutlet() {
     case 'space': return <SpacePage path={selection.path} />;
     case 'project': return <ProjectPage selection={selection} />;
     case 'view': return <ProjectPage selection={selection} />;
-    case 'settings': return <CanvasPlaceholder label="Settings" />;
+    case 'settings': return <SettingsPage />;
   }
 }
 
 function VaultChooser() {
   const openVault = useVaultStore((s) => s.openVault);
   const error = useVaultStore((s) => s.error);
+  // Deviation (Task 23, execution-log note 15c, reported): the async click
+  // handlers were unguarded — a pickVault rejection was a silent unhandled
+  // rejection with no feedback. Failures land in this local slot; the store
+  // error stays for openVault failures.
+  const [pickError, setPickError] = useState<string | null>(null);
 
   const openDemo = async () => {
     if (isTauri) {
@@ -50,6 +51,10 @@ function VaultChooser() {
     if (path) await openVault(path);
   };
 
+  const guarded = (task: () => Promise<void>) => () => {
+    task().catch((err) => setPickError(err instanceof Error ? err.message : String(err)));
+  };
+
   return (
     <div className="flex h-screen items-center justify-center bg-[var(--n-25)]">
       <div className="flex w-[380px] flex-col gap-3 rounded-[14px] border border-[var(--n-200)] bg-[var(--n-0)] p-7 shadow-[var(--shadow-md)]">
@@ -61,10 +66,12 @@ function VaultChooser() {
           A vault is a folder of markdown files — spaces, projects, and work items live there as
           plain text.
         </p>
-        {error ? <p className="m-0 text-[12px] text-[var(--danger-500)]">{error}</p> : null}
+        {(error ?? pickError) ? (
+          <p className="m-0 text-[12px] text-[var(--danger-500)]">{error ?? pickError}</p>
+        ) : null}
         <div className="mt-1 flex gap-2">
-          <Button variant="primary" onClick={openDemo}>Open demo vault</Button>
-          <Button variant="secondary" onClick={chooseFolder}>Choose folder…</Button>
+          <Button variant="primary" onClick={guarded(openDemo)}>Open demo vault</Button>
+          <Button variant="secondary" onClick={guarded(chooseFolder)}>Choose folder…</Button>
         </div>
       </div>
     </div>
@@ -77,12 +84,31 @@ function App() {
   const [booted, setBooted] = useState(false);
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        useUiStore.getState().setQuickOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
-      const last = await getLastVault();
-      if (last && !cancelled) await openVault(last);
-      if (!cancelled) setBooted(true);
-    })();
+      // Deviation (Task 23, execution-log note 15b, reported): without the
+      // try/finally + catch, a getLastVault rejection left `booted` false
+      // forever — a permanently blank screen instead of the chooser.
+      try {
+        const last = await getLastVault();
+        if (last && !cancelled) await openVault(last);
+      } finally {
+        if (!cancelled) setBooted(true);
+      }
+    })().catch(() => {
+      // getLastVault rejected: fall through to the vault chooser.
+    });
     return () => {
       cancelled = true;
     };
@@ -95,14 +121,16 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar onNewProject={() => { /* CreateMenu wiring lands in Task 23 */ }} />
+      <Sidebar onNewProject={() => { /* not wired in M1 — project creation lives in the topbar CreateMenu (reported) */ }} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onNew={() => { /* CreateMenu wiring lands in Task 23 */ }} />
+        <Topbar />
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
         </div>
       </div>
       <DetailPanel />
+      <QuickOpen />
+      <ToastHost />
     </div>
   );
 }

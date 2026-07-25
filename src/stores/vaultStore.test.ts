@@ -86,6 +86,22 @@ describe('vaultStore', () => {
     expect(toasts[0].message).toBe("Couldn't save changes to items/fld-1.md");
   });
 
+  // Deviation test (Task 23, execution-log note 15a, reported): a stale
+  // last-vault boot landed in a dead empty shell — status:'error' was
+  // displayed nowhere. openVault failures now also enqueue a toast so the
+  // ToastHost surfaces them the moment the shell renders.
+  it('openVault surfaces a failed scan via toast alongside the error status', async () => {
+    useUiStore.setState({ toasts: [] });
+    vi.mocked(ipc.scanVault).mockRejectedValueOnce(new Error('not a vault'));
+    await useVaultStore.getState().openVault('/bad-vault');
+    const s = useVaultStore.getState();
+    expect(s.status).toBe('error');
+    expect(s.error).toBe('not a vault');
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
+      "Couldn't open vault: not a vault",
+    );
+  });
+
   it('createItem returns the new path and the entry appears after rescan', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
     const path = await useVaultStore.getState().createItem({

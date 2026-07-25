@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/ipc', async (importOriginal) => {
@@ -17,6 +18,7 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
 import App from '@/App';
 import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 describe('App boot flow', () => {
@@ -33,6 +35,7 @@ describe('App boot flow', () => {
       history: [{ kind: 'home' }],
       historyIndex: 0,
     });
+    useUiStore.setState({ quickOpenVisible: false, toasts: [], detailPath: null });
   });
 
   afterEach(cleanup);
@@ -49,5 +52,40 @@ describe('App boot flow', () => {
     render(<App />);
     expect(await screen.findByRole('button', { name: 'Open demo vault' })).toBeTruthy();
     expect(screen.queryByRole('navigation', { name: 'Sidebar' })).toBeNull();
+  });
+
+  // Deviation test (Task 23, execution-log note 15b, reported): a
+  // getLastVault rejection left `booted` false forever — a permanently blank
+  // screen instead of the vault chooser.
+  it('still shows the vault chooser when reading the last vault fails', async () => {
+    vi.mocked(ipc.getLastVault).mockRejectedValueOnce(new Error('config unreadable'));
+    render(<App />);
+    expect(await screen.findByRole('button', { name: 'Open demo vault' })).toBeTruthy();
+  });
+
+  // Deviation test (Task 23, execution-log note 15c, reported): the chooser's
+  // async click handlers were unguarded — a picker rejection was a silent
+  // unhandled rejection with no feedback.
+  it('shows the picker error in the chooser when choosing a folder fails', async () => {
+    const user = userEvent.setup();
+    vi.mocked(ipc.getLastVault).mockResolvedValueOnce(null);
+    vi.mocked(ipc.pickVault).mockRejectedValueOnce(new Error('dialog crashed'));
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Choose folder…' }));
+    expect(await screen.findByText('dialog crashed')).toBeTruthy();
+  });
+
+  it('opens the quick-open palette on cmd+k', async () => {
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    expect(useUiStore.getState().quickOpenVisible).toBe(true);
+  });
+
+  it('routes the settings selection to the settings page', async () => {
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    act(() => useNavStore.getState().navigate({ kind: 'settings' }));
+    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
   });
 });

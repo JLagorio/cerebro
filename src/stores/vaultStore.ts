@@ -77,7 +77,13 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       }
       set({ entries, views, status: 'ready' });
     } catch (err) {
-      set({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      set({ status: 'error', error: message });
+      // Deviation (Task 23, execution-log note 15a, reported): status:'error'
+      // was displayed nowhere — a stale last-vault boot landed in a dead
+      // empty shell. Toast the failure so the ToastHost surfaces it; recovery
+      // lives in Settings ("Change vault…"), which also shows this error.
+      useUiStore.getState().toast(`Couldn't open vault: ${message}`);
     }
   },
 
