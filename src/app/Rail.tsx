@@ -30,6 +30,8 @@ function RailButton({
 export function Rail() {
   const selection = useNavStore((s) => s.selection);
   const navigate = useNavStore((s) => s.navigate);
+  // Task 11: Docs owns the document surfaces; Home keeps the item world.
+  const docsActive = selection.kind === 'docs' || selection.kind === 'doc';
   const settingsActive = selection.kind === 'settings';
 
   return (
@@ -40,8 +42,14 @@ export function Rail() {
       <RailButton
         icon="house"
         label="Home"
-        active={!settingsActive}
+        active={!settingsActive && !docsActive}
         onClick={() => navigate({ kind: 'home' })}
+      />
+      <RailButton
+        icon="library"
+        label="Docs"
+        active={docsActive}
+        onClick={() => navigate({ kind: 'docs' })}
       />
       <div className="flex-1" />
       <RailButton

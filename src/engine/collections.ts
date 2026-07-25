@@ -130,6 +130,8 @@ export function resolveCollection(
     case 'doc':
       // Docs render in the editor surface (DocPage); they have no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
+    case 'docs':
+      return { title: 'Docs', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }
