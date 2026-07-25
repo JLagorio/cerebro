@@ -1,8 +1,4 @@
-import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
-import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import type { Presentation } from '@/engine/types';
 
@@ -42,21 +38,11 @@ export function slugifyViewId(name: string): string {
 export interface ViewToolbarProps {
   presentation: Presentation;
   onChange: (presentation: Presentation) => void;
-  onSaveView: (name: string) => void;
 }
 
-export function ViewToolbar({ presentation, onChange, onSaveView }: ViewToolbarProps) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [viewName, setViewName] = useState('');
-
-  const save = () => {
-    const name = viewName.trim();
-    if (!name) return;
-    onSaveView(name);
-    setDialogOpen(false);
-    setViewName('');
-  };
-
+// Task 8: the Save-view button is gone — saved-view tabs auto-persist edits
+// and new views are created from the tab row's "New view" affordance.
+export function ViewToolbar({ presentation, onChange }: ViewToolbarProps) {
   return (
     <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
       <SegmentedControl
@@ -91,25 +77,6 @@ export function ViewToolbar({ presentation, onChange, onSaveView }: ViewToolbarP
         onChange={(value) => onChange({ ...presentation, orderBy: valueToOrder(value) })}
       />
       <span className="flex-1" />
-      <Button variant="secondary" size="sm" icon="bookmark" onClick={() => setDialogOpen(true)}>
-        Save view
-      </Button>
-      <Dialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        title="Save view"
-        width={420}
-        primaryAction={{ label: 'Save', onClick: save, disabled: viewName.trim() === '' }}
-        secondaryAction={{ label: 'Cancel', onClick: () => setDialogOpen(false) }}
-      >
-        <Input
-          autoFocus
-          placeholder="View name"
-          value={viewName}
-          onChange={(e) => setViewName(e.target.value)}
-          width="100%"
-        />
-      </Dialog>
     </div>
   );
 }

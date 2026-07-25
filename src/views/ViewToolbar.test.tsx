@@ -37,7 +37,7 @@ describe('ViewToolbar', () => {
   it('switching the segmented control reports a board presentation', () => {
     const onChange = vi.fn();
     render(
-      <ViewToolbar presentation={presentation} onChange={onChange} onSaveView={vi.fn()} />,
+      <ViewToolbar presentation={presentation} onChange={onChange} />,
     );
     fireEvent.click(screen.getByText('Board'));
     expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'board' });
@@ -46,7 +46,7 @@ describe('ViewToolbar', () => {
   it('changing group-by to none reports groupBy null', () => {
     const onChange = vi.fn();
     render(
-      <ViewToolbar presentation={presentation} onChange={onChange} onSaveView={vi.fn()} />,
+      <ViewToolbar presentation={presentation} onChange={onChange} />,
     );
     // M2 Task 2: the group control is a DS Dropdown, not a native select.
     fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
@@ -57,7 +57,7 @@ describe('ViewToolbar', () => {
   it('changing order reports the decoded orderBy', () => {
     const onChange = vi.fn();
     render(
-      <ViewToolbar presentation={presentation} onChange={onChange} onSaveView={vi.fn()} />,
+      <ViewToolbar presentation={presentation} onChange={onChange} />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Order by' }));
     fireEvent.click(screen.getByRole('option', { name: 'Due date' }));
@@ -67,16 +67,10 @@ describe('ViewToolbar', () => {
     });
   });
 
-  it('save view dialog collects a name and calls onSaveView', () => {
-    const onSaveView = vi.fn();
-    render(
-      <ViewToolbar presentation={presentation} onChange={vi.fn()} onSaveView={onSaveView} />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Save view' }));
-    fireEvent.change(screen.getByPlaceholderText('View name'), {
-      target: { value: 'My board' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSaveView).toHaveBeenCalledWith('My board');
+  // Task 8: the Save-view button moved to the project tab row ("New view");
+  // the toolbar is presentation controls only.
+  it('has no save-view affordance', () => {
+    render(<ViewToolbar presentation={presentation} onChange={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Save view' })).toBeNull();
   });
 });

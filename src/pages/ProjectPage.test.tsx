@@ -98,30 +98,80 @@ describe('ProjectPage', () => {
     expect(screen.getByTestId('board-view')).toBeTruthy();
   });
 
-  // Task 6: saving from a project page scopes the view to that project's
-  // views/ dir; M1.x: ids dedupe within the scope instead of overwriting.
-  it('saves project-scoped views and dedupes ids within the scope', async () => {
-    // handleSaveView rescans from the mock fs, so the fixture project must
+  // Task 8: saved-view tabs on the project header.
+  it('renders the Items tab plus project-scoped view tabs, not globals', () => {
+    const scoped: ViewFile = {
+      ...boardView,
+      id: 'delivery',
+      project: FOUNDATIONS,
+      definition: { ...boardView.definition, name: 'Delivery' },
+    };
+    useVaultStore.setState({ views: [boardView, scoped] });
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
+    expect(screen.getByRole('tab', { name: 'Items' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Delivery' })).toBeTruthy();
+    // The global 'All board' view is a sidebar concern, not a project tab.
+    expect(screen.queryByRole('tab', { name: 'All board' })).toBeNull();
+  });
+
+  it('switching to a scoped view tab applies its presentation', () => {
+    const scoped: ViewFile = {
+      ...boardView,
+      id: 'delivery',
+      project: FOUNDATIONS,
+      definition: { ...boardView.definition, name: 'Delivery' },
+    };
+    useVaultStore.setState({ views: [scoped] });
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
+    expect(screen.getByTestId('list-view')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Delivery' }));
+    expect(screen.getByTestId('board-view')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Items' }));
+    expect(screen.getByTestId('list-view')).toBeTruthy();
+  });
+
+  // Task 6+8: "New view" writes into the project's views/ dir (scope-deduped)
+  // and activates the new tab.
+  it('creates a project-scoped view from the New view affordance', async () => {
+    // The create flow rescans from the mock fs, so the fixture project must
     // exist there too (listViews scopes by the presence of project.md).
     (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs.set(
       FOUNDATIONS,
       '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n',
     );
     render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
-    const save = async (name: string) => {
-      fireEvent.click(screen.getByText('Save view'));
-      fireEvent.change(screen.getByPlaceholderText('View name'), { target: { value: name } });
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    };
-    await save('All board');
+    fireEvent.click(screen.getByText('New view'));
+    fireEvent.change(screen.getByPlaceholderText('View name'), { target: { value: 'My board' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(async () => {
       const views = await ipc.listViews('/demo-vault');
-      expect(views.some((v) => v.id === 'all-board' && v.project === FOUNDATIONS)).toBe(true);
+      expect(views.some((v) => v.id === 'my-board' && v.project === FOUNDATIONS)).toBe(true);
     });
-    await save('All board'); // same name again → -2 within the project scope
-    await waitFor(async () => {
-      const views = await ipc.listViews('/demo-vault');
-      expect(views.some((v) => v.id === 'all-board-2' && v.project === FOUNDATIONS)).toBe(true);
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'My board' }).getAttribute('aria-selected')).toBe(
+        'true',
+      );
+    });
+  });
+
+  // Task 8: toolbar edits on a saved-view tab auto-persist to the view file.
+  it('auto-persists presentation edits on a scoped view tab', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set(FOUNDATIONS, '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n');
+    fs.set('projects/foundations/views/delivery.yml', 'name: Delivery\n');
+    const scoped: ViewFile = {
+      ...boardView,
+      id: 'delivery',
+      project: FOUNDATIONS,
+      definition: { ...boardView.definition, name: 'Delivery' },
+    };
+    useVaultStore.setState({ views: [scoped] });
+    render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Delivery' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
+    fireEvent.click(screen.getByRole('option', { name: 'No grouping' }));
+    await waitFor(() => {
+      expect(fs.get('projects/foundations/views/delivery.yml')).toContain('groupBy: null');
     });
   });
 });
