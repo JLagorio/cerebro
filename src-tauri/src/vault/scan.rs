@@ -129,16 +129,16 @@ mod tests {
     use crate::vault::testutil;
     use std::path::PathBuf;
 
-    /// A small but representative vault: a type note, a space with statuses,
-    /// a project, two items, one malformed item — plus files that must be
-    /// skipped (views/, attachments/, dot-dir, non-md).
+    /// A small but representative v2 vault: a type note, a project carrying
+    /// a statuses override, two items, one malformed item — plus files that
+    /// must be skipped (views/, attachments/, dot-dir, non-md).
     fn fixture_vault(label: &str) -> PathBuf {
         let vault = testutil::temp_vault(label);
         testutil::write(&vault, "type/work-item.md", "---\ntype: Type\nicon: check-square\nfields:\n  status: { kind: status }\n  priority: { kind: select }\n---\n\n# Work item\n");
-        testutil::write(&vault, "spaces/fielding.md", "---\ntype: Space\ncolor: '#3D8BE8'\nstatuses:\n  - { id: todo, group: active, color: '#3D8BE8' }\n  - { id: done, group: done, color: '#34B764' }\n---\n\n# Fielding\n");
-        testutil::write(&vault, "projects/atlas.md", "---\ntype: Project\nkey: ATL\nspace: \"[[fielding]]\"\n---\n\n# Atlas\n");
-        testutil::write(&vault, "items/atl-1.md", "---\ntype: Work item\nkey: ATL-1\nstatus: todo\nproject: \"[[atlas]]\"\n---\n\n# Ship the scanner\n");
-        testutil::write(&vault, "items/atl-2.md", "---\ntype: Work item\nkey: ATL-2\nstatus: done\nproject: \"[[atlas]]\"\n---\n\n# Parse frontmatter\n");
+        testutil::write(&vault, "people/maya-chen.md", "---\ntype: Person\n---\n\n# Maya Chen\n");
+        testutil::write(&vault, "projects/atlas.md", "---\ntype: Project\nkey: ATL\nlead: \"[[maya-chen]]\"\nstatuses:\n  - { id: todo, group: active, color: '#3D8BE8' }\n  - { id: done, group: done, color: '#34B764' }\n---\n\n# Atlas\n");
+        testutil::write(&vault, "items/atl-1.md", "---\ntype: Work item\nkey: ATL-1\nstatus: todo\n---\n\n# Ship the scanner\n");
+        testutil::write(&vault, "items/atl-2.md", "---\ntype: Work item\nkey: ATL-2\nstatus: done\n---\n\n# Parse frontmatter\n");
         testutil::write(&vault, "items/broken.md", "---\nstatus: [unclosed\n---\n\n# Broken item\n");
         testutil::write(&vault, "views/all-items.yml", "name: All items\n");
         testutil::write(&vault, "attachments/readme.md", "# Not scanned\n");
@@ -158,8 +158,8 @@ mod tests {
                 "items/atl-1.md",
                 "items/atl-2.md",
                 "items/broken.md",
+                "people/maya-chen.md",
                 "projects/atlas.md",
-                "spaces/fielding.md",
                 "type/work-item.md",
             ]
         );
@@ -196,9 +196,9 @@ mod tests {
         let vault = fixture_vault("scan-props");
         let entries = scan_vault(&vault).unwrap();
         let project = entries.iter().find(|e| e.path == "projects/atlas.md").unwrap();
-        assert_eq!(project.relationships["space"], vec!["fielding"]);
-        let space = entries.iter().find(|e| e.path == "spaces/fielding.md").unwrap();
-        assert_eq!(space.properties["statuses"].as_array().unwrap().len(), 2);
+        assert_eq!(project.relationships["lead"], vec!["maya-chen"]);
+        // v2: the statuses override is nested YAML on the project itself.
+        assert_eq!(project.properties["statuses"].as_array().unwrap().len(), 2);
         let type_note = entries.iter().find(|e| e.path == "type/work-item.md").unwrap();
         assert_eq!(type_note.properties["fields"]["status"]["kind"], "status");
         let _ = std::fs::remove_dir_all(&vault);

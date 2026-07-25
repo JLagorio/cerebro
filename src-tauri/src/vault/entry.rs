@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn wikilink_arrays_become_relationships() {
         let content = "---\nmembers:\n  - \"[[maya-chen]]\"\n  - \"[[joss-b|Joss]]\"\n---\n\n# Team\n";
-        let e = build("spaces/team.md", content);
+        let e = build("people/team.md", content);
         assert_eq!(e.relationships["members"], vec!["maya-chen", "joss-b"]);
         assert!(!e.properties.contains_key("members"));
     }
