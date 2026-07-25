@@ -4,6 +4,8 @@ export function makeEntry(partial: Partial<Entry> & { path: string }): Entry {
   const filename = partial.path.split('/').pop() ?? partial.path;
   return {
     filename,
+    folder: partial.path.includes('/') ? partial.path.slice(0, partial.path.lastIndexOf('/')) : '',
+    project: null,
     title: filename.replace(/\.md$/, ''),
     type: null,
     properties: {},

@@ -23,11 +23,15 @@ const seededViews = import.meta.glob('/demo-vault/views/*.yml', {
 
 const files = new Map<string, string>();
 const times = new Map<string, { createdAt: string; modifiedAt: string }>();
+// Directories created explicitly (create_folder) — the file map alone can't
+// represent an empty folder. Parity with real dirs on disk.
+const folders = new Set<string>();
 
 /** Re-seed the mock filesystem from demo-vault/. Exported for test isolation. */
 export function resetMockFs(): void {
   files.clear();
   times.clear();
+  folders.clear();
   for (const [absPath, raw] of Object.entries({ ...seededNotes, ...seededViews })) {
     const rel = absPath.replace(/^\/demo-vault\//, '');
     files.set(rel, raw);
@@ -35,6 +39,26 @@ export function resetMockFs(): void {
   }
 }
 resetMockFs();
+
+/**
+ * Vault format v2 containment (parity with the scan.rs post-pass): an
+ * entry's project is the nearest ancestor directory holding a `project.md`.
+ * A vault-root project.md is ignored — it would own every file.
+ */
+export function assignProjects(entries: Entry[]): Entry[] {
+  const projectDirs = entries
+    .filter((e) => e.path.endsWith('/project.md'))
+    .map((e) => e.path.slice(0, -'/project.md'.length));
+  return entries.map((entry) => {
+    let best: string | null = null;
+    for (const dir of projectDirs) {
+      if (entry.path.startsWith(`${dir}/`) && (best === null || dir.length > best.length)) {
+        best = dir;
+      }
+    }
+    return { ...entry, project: best === null ? null : `${best}/project.md` };
+  });
+}
 
 if (typeof window !== 'undefined') {
   (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs = files;
@@ -61,11 +85,17 @@ export async function getLastVault(): Promise<string | null> {
 }
 
 export async function scanVault(_vault: string): Promise<Entry[]> {
-  const paths = [...files.keys()].filter((p) => p.endsWith('.md')).sort();
-  return paths.map((p) => {
+  // Parity with scan.rs: views/ and attachments/ and dot-dirs are skipped at
+  // any depth (v2 project folders carry their own views/).
+  const skipped = /(^|\/)(views|attachments|\.[^/]*)\//;
+  const paths = [...files.keys()]
+    .filter((p) => p.endsWith('.md') && !skipped.test(p))
+    .sort();
+  const entries = paths.map((p) => {
     const t = times.get(p) ?? { createdAt: SEED_TIME, modifiedAt: SEED_TIME };
     return parseNote(p, files.get(p) ?? '', t.createdAt, t.modifiedAt);
   });
+  return assignProjects(entries);
 }
 
 export async function readNote(_vault: string, path: string): Promise<string> {
@@ -154,4 +184,71 @@ export async function saveView(_vault: string, id: string, yaml: string): Promis
 
 export async function startWatcher(_vault: string): Promise<void> {
   // No-op: the mock has no file watcher; writers trigger rescans directly.
+}
+
+// --- Vault format v2 file operations (M2 Task 3) ---
+
+export async function createFolder(_vault: string, path: string): Promise<void> {
+  folders.add(path);
+}
+
+/** Move a note — or a whole folder prefix — within the vault. */
+export async function renameNote(_vault: string, from: string, to: string): Promise<void> {
+  if (files.has(to) || folders.has(to)) throw new Error(`target already exists: ${to}`);
+  if (files.has(from)) {
+    files.set(to, files.get(from)!);
+    files.delete(from);
+    const t = times.get(from);
+    if (t) {
+      times.set(to, t);
+      times.delete(from);
+    }
+    touch(to);
+    return;
+  }
+  // Folder move: rewrite every key under the prefix.
+  const prefix = `${from}/`;
+  const moved = [...files.keys()].filter((p) => p.startsWith(prefix));
+  if (moved.length === 0 && !folders.has(from)) throw new Error(`Note not found: ${from}`);
+  for (const p of moved) {
+    const dest = `${to}/${p.slice(prefix.length)}`;
+    files.set(dest, files.get(p)!);
+    files.delete(p);
+    const t = times.get(p);
+    if (t) {
+      times.set(dest, t);
+      times.delete(p);
+    }
+  }
+  if (folders.delete(from)) folders.add(to);
+}
+
+/** Delete a note or folder (the real backend moves it to the OS trash). */
+export async function deleteNote(_vault: string, path: string): Promise<void> {
+  const prefix = `${path}/`;
+  const hadFile = files.delete(path);
+  times.delete(path);
+  let hadChildren = false;
+  for (const p of [...files.keys()]) {
+    if (p.startsWith(prefix)) {
+      files.delete(p);
+      times.delete(p);
+      hadChildren = true;
+    }
+  }
+  const hadFolder = folders.delete(path);
+  if (!hadFile && !hadChildren && !hadFolder) throw new Error(`Note not found: ${path}`);
+}
+
+/** All directories in the vault (derived from file paths + explicit folders). */
+export async function listFolders(_vault: string): Promise<string[]> {
+  const skipped = /(^|\/)(views|attachments|\.[^/]*)(\/|$)/;
+  const dirs = new Set<string>(folders);
+  for (const p of files.keys()) {
+    const parts = p.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      dirs.add(parts.slice(0, i).join('/'));
+    }
+  }
+  return [...dirs].filter((d) => !skipped.test(d)).sort();
 }

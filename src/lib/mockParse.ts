@@ -250,6 +250,10 @@ export function parseNote(path: string, raw: string, createdAt: string, modified
   return {
     path,
     filename,
+    // Containment (`project`) is a whole-vault property — the scanner's
+    // post-pass (assignProjects in mockIpc / scan.rs) fills it in.
+    folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+    project: null,
     title: h1 !== null ? h1 : humanize(stem),
     type: entryType,
     properties,

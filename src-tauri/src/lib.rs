@@ -90,6 +90,26 @@ fn save_view(vault: String, id: String, yaml: String) -> Result<(), String> {
 }
 
 #[tauri::command(async)]
+fn create_folder(vault: String, path: String) -> Result<(), String> {
+    vault::write::create_folder(Path::new(&vault), &path)
+}
+
+#[tauri::command(async)]
+fn rename_note(vault: String, from: String, to: String) -> Result<(), String> {
+    vault::write::rename_note(Path::new(&vault), &from, &to)
+}
+
+#[tauri::command(async)]
+fn delete_note(vault: String, path: String) -> Result<(), String> {
+    vault::write::delete_note(Path::new(&vault), &path)
+}
+
+#[tauri::command(async)]
+fn list_folders(vault: String) -> Result<Vec<String>, String> {
+    vault::scan::list_folders(Path::new(&vault))
+}
+
+#[tauri::command(async)]
 fn start_watcher(
     app: tauri::AppHandle,
     state: tauri::State<'_, WatcherState>,
@@ -114,6 +134,10 @@ pub fn run() {
             set_note_title,
             list_views,
             save_view,
+            create_folder,
+            rename_note,
+            delete_note,
+            list_folders,
             start_watcher
         ])
         .run(tauri::generate_context!())

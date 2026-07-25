@@ -75,3 +75,28 @@ export function saveView(vault: string, id: string, yaml: string): Promise<void>
 export function startWatcher(vault: string): Promise<void> {
   return inTauri() ? invokeTauri('start_watcher', { vault }) : mock.startWatcher(vault);
 }
+
+// --- Vault format v2 file operations (M2 Task 3) ---
+
+export function createFolder(vault: string, path: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('create_folder', { vault, path })
+    : mock.createFolder(vault, path);
+}
+
+/** Move a note or folder within the vault. Fails if the target exists. */
+export function renameNote(vault: string, from: string, to: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('rename_note', { vault, from, to })
+    : mock.renameNote(vault, from, to);
+}
+
+/** Move a note or folder to the OS trash (never a hard delete). */
+export function deleteNote(vault: string, path: string): Promise<void> {
+  return inTauri() ? invokeTauri('delete_note', { vault, path }) : mock.deleteNote(vault, path);
+}
+
+/** All vault directories (for folder trees, including empty folders). */
+export function listFolders(vault: string): Promise<string[]> {
+  return inTauri() ? invokeTauri('list_folders', { vault }) : mock.listFolders(vault);
+}

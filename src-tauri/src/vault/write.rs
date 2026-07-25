@@ -252,6 +252,44 @@ pub fn save_view(vault: &Path, id: &str, yaml: &str) -> Result<(), String> {
     write_file(&vault.join("views").join(format!("{id}.yml")), yaml)
 }
 
+// --- Vault format v2 file operations (M2 Task 3) ---
+
+/// Create a directory (and parents) inside the vault.
+pub fn create_folder(vault: &Path, rel: &str) -> Result<(), String> {
+    let abs = safe_join(vault, rel)?;
+    std::fs::create_dir_all(&abs).map_err(|e| e.to_string())
+}
+
+/// Move a note — or a whole folder — within the vault. Refuses to clobber an
+/// existing target. Both paths register as own-writes so the watcher doesn't
+/// bounce our move back as external changes.
+pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
+    let src = safe_join(vault, from)?;
+    let dst = safe_join(vault, to)?;
+    if dst.exists() {
+        return Err(format!("target already exists: {to}"));
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&src, &dst).map_err(|e| format!("{from}: {e}"))?;
+    super::watcher::note_own_write(&src);
+    super::watcher::note_own_write(&dst);
+    Ok(())
+}
+
+/// Move a note or folder to the OS trash — user markdown is never
+/// hard-deleted.
+pub fn delete_note(vault: &Path, rel: &str) -> Result<(), String> {
+    let abs = safe_join(vault, rel)?;
+    if !abs.exists() {
+        return Err(format!("not found: {rel}"));
+    }
+    trash::delete(&abs).map_err(|e| e.to_string())?;
+    super::watcher::note_own_write(&abs);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,6 +539,41 @@ mod tests {
         assert!(save_view(&vault, "../../evil-view", "name: Evil\n").is_err());
         assert!(save_view(&vault, "nested/id", "name: Evil\n").is_err());
         assert!(save_view(&vault, "", "name: Evil\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn create_folder_and_rename_note_move_notes_and_folders_within_the_vault() {
+        let vault = vault_with_note("wfm-rename");
+        create_folder(&vault, "projects/atlas/items").unwrap();
+        assert!(vault.join("projects/atlas/items").is_dir());
+        rename_note(&vault, "items/atl-1.md", "projects/atlas/items/atl-1.md").unwrap();
+        assert!(!vault.join("items/atl-1.md").exists());
+        assert_eq!(read(&vault, "projects/atlas/items/atl-1.md"), NOTE);
+        // Refuses to clobber an existing target.
+        testutil::write(&vault, "items/atl-2.md", NOTE);
+        assert!(rename_note(&vault, "items/atl-2.md", "projects/atlas/items/atl-1.md").is_err());
+        // Whole folders move too.
+        rename_note(&vault, "items", "archive").unwrap();
+        assert_eq!(read(&vault, "archive/atl-2.md"), NOTE);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // delete_note's happy path routes through the OS trash (trash::delete) —
+    // exercised manually in the tauri-dev shakeout rather than polluting the
+    // developer's Trash on every test run. Guards are covered here.
+    #[test]
+    fn v2_ops_reject_escapes_and_missing_paths() {
+        let vault = vault_with_note("wfm-v2-escape");
+        assert!(create_folder(&vault, "../evil").is_err());
+        assert!(create_folder(&vault, "/tmp/evil").is_err());
+        assert!(rename_note(&vault, "items/atl-1.md", "../stolen.md").is_err());
+        assert!(rename_note(&vault, "../victim.md", "items/x.md").is_err());
+        assert!(rename_note(&vault, "items/nope.md", "items/still-nope.md").is_err());
+        assert!(delete_note(&vault, "../victim.md").is_err());
+        assert!(delete_note(&vault, "items/nope.md").is_err());
+        // The escape attempts must not have touched the real note.
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
         let _ = std::fs::remove_dir_all(&vault);
     }
 

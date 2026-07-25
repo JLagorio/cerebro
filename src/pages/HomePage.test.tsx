@@ -9,6 +9,8 @@ import { greetingForHour, HomePage, projectProgress } from './HomePage';
 function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   return {
     filename: partial.path.split('/').pop() ?? '',
+    folder: partial.path.includes('/') ? partial.path.slice(0, partial.path.lastIndexOf('/')) : '',
+    project: null,
     title: 'Untitled',
     type: null,
     properties: {},

@@ -3,6 +3,9 @@ export type Scalar = string | number | boolean | null;
 export interface Entry {
   path: string;                 // vault-relative, e.g. "items/fld-7.md"
   filename: string;             // "fld-7.md"
+  folder: string;               // vault-relative parent dir ('' at the root) — vault format v2
+  project: string | null;       // owning project.md path via containment (nearest ancestor
+                                // directory holding a project.md), null outside any project
   title: string;                // first H1, else humanized filename stem
   type: string | null;          // frontmatter `type`
   properties: Record<string, Scalar | Scalar[]>;   // scalar frontmatter (non-wikilink); nested YAML

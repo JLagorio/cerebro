@@ -132,4 +132,56 @@ describe('mockIpc', () => {
       { id: 'my-view', yaml: 'name: My view\n' },
     ]);
   });
+
+  // --- Vault format v2 (M2 Task 3) — parity with scan.rs / write.rs ---
+
+  it('scanVault resolves containment: nearest ancestor project.md wins', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set('projects/atlas/project.md', '---\ntype: Project\n---\n\n# Atlas\n');
+    fs.set('projects/atlas/items/a1.md', '---\ntype: Work item\n---\n\n# One\n');
+    fs.set('projects/atlas/sub/project.md', '---\ntype: Project\n---\n\n# Sub\n');
+    fs.set('projects/atlas/sub/notes.md', '# Notes\n');
+    fs.set('inbox/loose.md', '# Loose\n');
+    const entries = await mock.scanVault('/demo-vault');
+    const get = (p: string) => entries.find((e) => e.path === p)!;
+    expect(get('projects/atlas/items/a1.md').project).toBe('projects/atlas/project.md');
+    expect(get('projects/atlas/items/a1.md').folder).toBe('projects/atlas/items');
+    expect(get('projects/atlas/sub/notes.md').project).toBe('projects/atlas/sub/project.md');
+    expect(get('projects/atlas/project.md').project).toBe('projects/atlas/project.md');
+    expect(get('inbox/loose.md').project).toBeNull();
+  });
+
+  it('renameNote moves a note, refuses to clobber, and moves folders', async () => {
+    await mock.createFolder('/demo-vault', 'projects/atlas/items');
+    await mock.renameNote('/demo-vault', 'items/fld-1.md', 'projects/atlas/items/fld-1.md');
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    expect(fs.has('items/fld-1.md')).toBe(false);
+    expect(fs.has('projects/atlas/items/fld-1.md')).toBe(true);
+    await expect(
+      mock.renameNote('/demo-vault', 'items/fld-2.md', 'projects/atlas/items/fld-1.md'),
+    ).rejects.toThrow('already exists');
+    // Folder move: every key under the prefix relocates.
+    await mock.renameNote('/demo-vault', 'items', 'archive');
+    expect([...fs.keys()].some((p) => p.startsWith('items/'))).toBe(false);
+    expect(fs.has('archive/fld-2.md')).toBe(true);
+  });
+
+  it('deleteNote removes notes or whole folders, throwing on unknown paths', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    await mock.deleteNote('/demo-vault', 'items/fld-1.md');
+    expect(fs.has('items/fld-1.md')).toBe(false);
+    await mock.deleteNote('/demo-vault', 'items');
+    expect([...fs.keys()].some((p) => p.startsWith('items/'))).toBe(false);
+    await expect(mock.deleteNote('/demo-vault', 'items/nope.md')).rejects.toThrow('not found');
+  });
+
+  it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
+    await mock.createFolder('/demo-vault', 'projects/empty-folder');
+    await mock.saveView('/demo-vault', 'v', 'name: V\n');
+    const dirs = await mock.listFolders('/demo-vault');
+    expect(dirs).toContain('items');
+    expect(dirs).toContain('projects/empty-folder');
+    expect(dirs.some((d) => d === 'views' || d.startsWith('views/'))).toBe(false);
+    expect([...dirs].sort()).toEqual(dirs);
+  });
 });

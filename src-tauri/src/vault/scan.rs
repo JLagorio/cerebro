@@ -76,7 +76,51 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
         entries.push(entry);
     }
     entries.sort_by(|a, b| a.path.cmp(&b.path));
+    assign_projects(&mut entries);
     Ok(entries)
+}
+
+/// Vault format v2 containment post-pass: an entry's project is the nearest
+/// ancestor directory holding a `project.md` (parity with assignProjects in
+/// mockIpc.ts). A vault-root project.md is ignored — it would own every file.
+fn assign_projects(entries: &mut [Entry]) {
+    let project_dirs: Vec<String> = entries
+        .iter()
+        .filter(|e| e.path.ends_with("/project.md"))
+        .map(|e| e.path.trim_end_matches("/project.md").to_string())
+        .collect();
+    for entry in entries.iter_mut() {
+        let mut best: Option<&String> = None;
+        for dir in &project_dirs {
+            if entry.path.starts_with(&format!("{dir}/"))
+                && best.map_or(true, |b| dir.len() > b.len())
+            {
+                best = Some(dir);
+            }
+        }
+        entry.project = best.map(|d| format!("{d}/project.md"));
+    }
+}
+
+/// All directories in the vault (vault-relative, sorted), skipping the same
+/// dirs the scanner skips. Feeds folder trees — empty folders included.
+pub fn list_folders(vault: &Path) -> Result<Vec<String>, String> {
+    if !vault.is_dir() {
+        return Err(format!("not a directory: {}", vault.display()));
+    }
+    let mut dirs = Vec::new();
+    let walker = WalkDir::new(vault)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || keep(e));
+    for item in walker {
+        let Ok(item) = item else { continue };
+        if item.depth() == 0 || !item.file_type().is_dir() {
+            continue;
+        }
+        dirs.push(rel_path(vault, item.path())?);
+    }
+    dirs.sort();
+    Ok(dirs)
 }
 
 #[cfg(test)]
@@ -174,6 +218,58 @@ mod tests {
     #[test]
     fn nonexistent_vault_errors() {
         assert!(scan_vault(Path::new("/definitely/not/a/real/vault")).is_err());
+    }
+
+    #[test]
+    fn v2_containment_resolves_nearest_project_and_folder() {
+        let vault = testutil::temp_vault("scan-v2");
+        testutil::write(&vault, "projects/atlas/project.md", "---\ntype: Project\nkey: ATL\n---\n\n# Atlas\n");
+        testutil::write(&vault, "projects/atlas/items/atl-1.md", "---\ntype: Work item\n---\n\n# One\n");
+        testutil::write(&vault, "projects/atlas/meetings/kickoff.md", "# Kickoff\n");
+        testutil::write(&vault, "projects/atlas/sub/project.md", "---\ntype: Project\n---\n\n# Sub\n");
+        testutil::write(&vault, "projects/atlas/sub/notes.md", "# Notes\n");
+        testutil::write(&vault, "inbox/loose.md", "# Loose\n");
+        let entries = scan_vault(&vault).unwrap();
+        let get = |p: &str| entries.iter().find(|e| e.path == p).unwrap();
+        assert_eq!(
+            get("projects/atlas/items/atl-1.md").project.as_deref(),
+            Some("projects/atlas/project.md")
+        );
+        assert_eq!(get("projects/atlas/items/atl-1.md").folder, "projects/atlas/items");
+        assert_eq!(
+            get("projects/atlas/meetings/kickoff.md").project.as_deref(),
+            Some("projects/atlas/project.md")
+        );
+        // Nearest ancestor project wins for nested projects.
+        assert_eq!(
+            get("projects/atlas/sub/notes.md").project.as_deref(),
+            Some("projects/atlas/sub/project.md")
+        );
+        // The project doc belongs to its own project.
+        assert_eq!(
+            get("projects/atlas/project.md").project.as_deref(),
+            Some("projects/atlas/project.md")
+        );
+        assert_eq!(get("inbox/loose.md").project, None);
+        assert_eq!(get("inbox/loose.md").folder, "inbox");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn list_folders_returns_sorted_dirs_including_empty_skipping_special() {
+        let vault = fixture_vault("scan-folders");
+        std::fs::create_dir_all(vault.join("projects/empty-folder")).unwrap();
+        let dirs = list_folders(&vault).unwrap();
+        assert!(dirs.contains(&"items".to_string()));
+        assert!(dirs.contains(&"projects".to_string()));
+        assert!(dirs.contains(&"projects/empty-folder".to_string()));
+        assert!(!dirs
+            .iter()
+            .any(|d| d.starts_with("views") || d.starts_with(".obsidian") || d.starts_with("attachments")));
+        let mut sorted = dirs.clone();
+        sorted.sort();
+        assert_eq!(dirs, sorted);
+        let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]
