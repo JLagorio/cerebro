@@ -29,16 +29,37 @@ fn write_file(abs: &Path, content: &str) -> Result<(), String> {
 /// Join a vault-relative path onto the vault root, rejecting empty paths,
 /// absolute paths (`Path::join` would replace the base!), and any `..`
 /// traversal, so no read or write can escape the vault.
+///
+/// Lexical containment is not enough: a symlink planted inside the vault
+/// (e.g. `items` -> `~/somewhere`) would route a lexically-contained path
+/// outside it. So every component that already exists as a symlink must
+/// resolve back inside the (resolved) vault root; dangling symlinks are
+/// rejected outright, since `fs::write` would follow one and create a file
+/// at its target.
 fn safe_join(vault: &Path, rel: &str) -> Result<PathBuf, String> {
     let contained = !rel.is_empty()
         && Path::new(rel)
             .components()
             .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
-    if contained {
-        Ok(vault.join(rel))
-    } else {
-        Err(format!("path escapes the vault: {rel:?}"))
+    if !contained {
+        return Err(format!("path escapes the vault: {rel:?}"));
     }
+    let vault_real = std::fs::canonicalize(vault)
+        .map_err(|e| format!("vault root {}: {e}", vault.display()))?;
+    let mut real = vault_real.clone();
+    for component in Path::new(rel).components() {
+        let Component::Normal(name) = component else { continue };
+        real.push(name);
+        if matches!(std::fs::symlink_metadata(&real), Ok(m) if m.file_type().is_symlink()) {
+            real = std::fs::canonicalize(&real).map_err(|e| format!("{rel}: {e}"))?;
+            if !real.starts_with(&vault_real) {
+                return Err(format!("path escapes the vault: {rel:?}"));
+            }
+        }
+        // Not a symlink, or doesn't exist yet (created fresh by write_file,
+        // so it can't be one) — keep walking.
+    }
+    Ok(vault.join(rel))
 }
 
 /// Require a single normal path component: non-empty, no separators, no
@@ -190,7 +211,7 @@ pub fn create_note(
         Some(b) => format!("---\n{b}---\n\n{body}"),
         None => body,
     };
-    write_file(&vault.join(&rel), &content)?;
+    write_file(&safe_join(vault, &rel)?, &content)?;
     Ok(rel)
 }
 
@@ -249,7 +270,7 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
 /// Write `views/<id>.yml` verbatim, creating `views/` if needed.
 pub fn save_view(vault: &Path, id: &str, yaml: &str) -> Result<(), String> {
     safe_component("view id", id)?;
-    write_file(&vault.join("views").join(format!("{id}.yml")), yaml)
+    write_file(&safe_join(vault, &format!("views/{id}.yml"))?, yaml)
 }
 
 #[cfg(test)]
@@ -492,6 +513,52 @@ mod tests {
         assert!(create_note(&vault, "items", "a/../b", &fm, "x\n").is_err());
         assert!(create_note(&vault, "items", "a/b", &fm, "x\n").is_err());
         assert!(create_note(&vault, "items", "", &fm, "x\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Lexical containment isn't enough: a symlink planted inside the vault
+    // routes contained-looking paths outside it (agentic review finding).
+    #[cfg(unix)]
+    #[test]
+    fn writes_reject_symlinked_segments_that_leave_the_vault() {
+        let vault = vault_with_note("wfm-symlink");
+        let outside = vault
+            .parent()
+            .unwrap()
+            .join(format!("cerebro-symlink-out-{}", std::process::id()));
+        std::fs::create_dir_all(&outside).unwrap();
+        const VICTIM: &str = "Untouched.\n";
+        std::fs::write(outside.join("victim.md"), VICTIM).unwrap();
+        std::os::unix::fs::symlink(&outside, vault.join("linked")).unwrap();
+        let hacked = patch(&[("hacked", serde_json::json!(true))]);
+
+        assert!(save_note(&vault, "linked/victim.md", "hacked\n").is_err());
+        assert!(update_frontmatter(&vault, "linked/victim.md", &hacked).is_err());
+        assert!(set_note_title(&vault, "linked/victim.md", "Hacked").is_err());
+        assert!(read_note(&vault, "linked/victim.md").is_err());
+        assert!(create_note(&vault, "linked", "evil", &hacked, "x\n").is_err());
+        assert_eq!(std::fs::read_to_string(outside.join("victim.md")).unwrap(), VICTIM);
+
+        // A dangling symlink is just as dangerous: fs::write would follow it
+        // and create the target file outside the vault.
+        let planted = outside.join("planted.md");
+        std::os::unix::fs::symlink(&planted, vault.join("items/dangling.md")).unwrap();
+        assert!(create_note(&vault, "items", "dangling", &hacked, "x\n").is_err());
+        assert!(!planted.exists());
+
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // Symlinks that resolve back inside the vault are a legitimate way to
+    // organize notes and must keep working.
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_resolving_inside_the_vault_still_work() {
+        let vault = vault_with_note("wfm-symlink-ok");
+        std::os::unix::fs::symlink(vault.join("items"), vault.join("alias")).unwrap();
+        save_note(&vault, "alias/atl-1.md", "\n# Ship the scanner\n\nVia alias.\n").unwrap();
+        assert!(read(&vault, "items/atl-1.md").contains("Via alias."));
         let _ = std::fs::remove_dir_all(&vault);
     }
 
