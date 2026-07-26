@@ -31,6 +31,11 @@ describe('DocPage', () => {
     await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
       timeout: 5_000,
     });
+    // Task 15: the floating outline appears once the editor is ready (the
+    // doc's H1 is its first item).
+    await waitFor(() => expect(screen.getByTestId('doc-outline')).toBeTruthy(), {
+      timeout: 5_000,
+    });
   });
 
   it('falls back gracefully when the doc no longer exists', () => {

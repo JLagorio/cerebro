@@ -1,6 +1,9 @@
+import { useEffect, useRef, useState } from 'react';
+import type { BlockNoteEditor } from '@blocknote/core';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { DocOutline } from '@/editor/DocOutline';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import type { Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
@@ -17,6 +20,13 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const entry = useEntry(selection.path);
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
+
+  // Task 15: the outline needs the live editor and the scroll container.
+  const [editor, setEditor] = useState<BlockNoteEditor | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setEditor(null); // the keyed editor remounts per doc; wait for onReady
+  }, [selection.path]);
 
   if (entry === null) {
     return (
@@ -62,8 +72,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           {entry.title}
         </h1>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
-        <NoteBodyEditor path={entry.path} />
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} className="h-full overflow-y-auto px-5 pb-6">
+          <NoteBodyEditor path={entry.path} onReady={({ editor: e }) => setEditor(e)} />
+        </div>
+        {editor !== null && <DocOutline editor={editor} scrollRef={scrollRef} />}
       </div>
     </div>
   );
