@@ -8,10 +8,13 @@ import {
   normalizeParsedBlocks,
   spliceTitleIntoBlocks,
 } from './markdown';
+import { cerebroSchema, type CerebroEditor } from './MarkdownEditor';
 
-let editor: BlockNoteEditor;
+// The app schema, not the default one: markdownToBlocks promotes chip text
+// (wikilinks, 📅 dates) into custom inline nodes that only exist there.
+let editor: CerebroEditor;
 beforeAll(() => {
-  editor = BlockNoteEditor.create();
+  editor = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
 });
 
 const roundTrip = async (md: string) => blocksToMarkdown(editor, await markdownToBlocks(editor, md));
@@ -36,6 +39,13 @@ const CORPUS: { name: string; md: string; out: string }[] = [
     name: 'checkboxes with nesting and a due-date emoji',
     md: '- [ ] open task\n- [x] done task\n  - [ ] nested task 📅 2026-08-01\n',
     out: '* [ ] open task\n* [x] done task\n  * [ ] nested task 📅 2026-08-01\n',
+  },
+  {
+    // M2.x chips: wikilinks / assignees / due dates become inline nodes in
+    // the editor but must land on disk as the exact plain-text form.
+    name: 'wikilinks and task chips',
+    md: 'See [[kickoff]] and [[kickoff|the kickoff]].\n\n- [ ] follow up @[[maya-chen]] 📅 2026-08-01\n',
+    out: 'See [[kickoff]] and [[kickoff|the kickoff]].\n\n* [ ] follow up @[[maya-chen]] 📅 2026-08-01\n',
   },
   {
     name: 'code fence (byte-identical)',

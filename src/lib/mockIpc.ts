@@ -134,9 +134,12 @@ export async function createNote(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<string> {
+  // '' means the vault root — no separator, or the path grows a leading '/'
+  // (parity with unique_rel_path in write.rs).
+  const prefix = folder === '' ? '' : `${folder}/`;
   let finalSlug = slug;
-  for (let n = 2; files.has(`${folder}/${finalSlug}.md`); n++) finalSlug = `${slug}-${n}`;
-  const path = `${folder}/${finalSlug}.md`;
+  for (let n = 2; files.has(`${prefix}${finalSlug}.md`); n++) finalSlug = `${slug}-${n}`;
+  const path = `${prefix}${finalSlug}.md`;
   // Parity with write.rs create_note: null-valued keys are skipped, an empty
   // mapping omits the fence block, and an empty body gets a humanized H1.
   const kept = Object.entries(frontmatter).filter(([, value]) => value !== null);

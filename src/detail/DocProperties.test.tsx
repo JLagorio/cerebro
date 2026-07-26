@@ -40,7 +40,7 @@ function setup(docPartial: Partial<Entry> = {}) {
 describe('DocProperties', () => {
   beforeEach(() => {
     window.localStorage.clear();
-    useUiStore.setState({ toasts: [], docPropsCollapsed: false });
+    useUiStore.setState({ toasts: [] });
   });
   afterEach(cleanup);
 
@@ -109,10 +109,4 @@ describe('DocProperties', () => {
     );
   });
 
-  it('the header collapse control persists the panel state', () => {
-    setup();
-    fireEvent.click(screen.getByRole('button', { name: 'Hide properties' }));
-    expect(useUiStore.getState().docPropsCollapsed).toBe(true);
-    expect(window.localStorage.getItem('cerebro.docPropsCollapsed')).toBe('true');
-  });
 });

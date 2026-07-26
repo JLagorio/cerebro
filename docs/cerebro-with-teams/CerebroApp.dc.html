@@ -2381,166 +2381,368 @@
               <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="primary" size="sm" icon="plus" onClick="{{ pjAddItem }}" hint-size="92px,28px">New item</x-import>
             </div>
             <div style="display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--n-200)">
-              <sc-for list="{{ pjTabs }}" as="pt" hint-placeholder-count="4">
-                <button onClick="{{ pt.go }}" style="border:none;background:none;font-family:var(--font-ui);font-size:13px;font-weight:{{ pt.weight }};color:{{ pt.color }};padding:7px 10px 9px;cursor:pointer;border-bottom:2px solid {{ pt.line }};margin-bottom:-1px">{{ pt.label }}</button>
+              <sc-for list="{{ pjViewTabs }}" as="vt" hint-placeholder-count="3">
+                <span style="display:inline-flex;align-items:center;border-bottom:2px solid {{ vt.line }};margin-bottom:-1px">
+                  <sc-if value="{{ vt.renaming }}" hint-placeholder-val="{{ false }}">
+                    <input ref="{{ vt.renRef }}" defaultValue="{{ vt.label }}" onKeyDown="{{ vt.renKey }}" onBlur="{{ vt.renBlur }}" style="width:110px;height:24px;margin:4px 2px 6px;border:1px solid var(--cortex-400);border-radius:6px;padding:0 8px;font-family:var(--font-ui);font-size:12.5px;color:var(--n-900);outline:none;box-shadow:0 0 0 3px var(--cortex-100)">
+                  </sc-if>
+                  <sc-if value="{{ vt.normal }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ vt.go }}" title="{{ vt.tip }}" style="border:none;background:none;display:inline-flex;align-items:center;gap:6px;font-family:var(--font-ui);font-size:13px;font-weight:{{ vt.weight }};color:{{ vt.color }};padding:7px 4px 9px 9px;cursor:pointer" style-hover="color:var(--n-900)">
+                      <span style="display:inline-flex;color:{{ vt.iconColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ vt.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>{{ vt.label }}
+                      <sc-if value="{{ vt.lockOn }}" hint-placeholder-val="{{ false }}"><span title="Personal view — only you can see it" style="display:inline-flex;color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="lock" size="{{ 10 }}" hint-size="10px,10px"></x-import></span></sc-if>
+                      <sc-if value="{{ vt.dirty }}" hint-placeholder-val="{{ false }}"><span title="Unsaved changes" style="width:6px;height:6px;border-radius:999px;background:var(--warn-500);flex:none"></span></sc-if>
+                    </button>
+                    <sc-if value="{{ vt.active }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ vt.menu }}" title="View settings" style="width:18px;height:20px;border:none;background:none;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer;border-radius:5px;margin:0 3px 2px 0" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-down" size="{{ 12 }}" hint-size="12px,12px"></x-import></button>
+                    </sc-if>
+                  </sc-if>
+                </span>
               </sc-for>
+              <button onClick="{{ pjNewView }}" title="New view" style="width:24px;height:24px;border:none;background:none;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer;margin:0 0 4px 2px" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 14 }}" hint-size="14px,14px"></x-import></button>
+              <sc-if value="{{ pjHasPages }}" hint-placeholder-val="{{ true }}">
+                <span style="width:1px;height:16px;background:var(--n-200);margin:0 8px 4px"></span>
+                <sc-for list="{{ pjPageTabs }}" as="pt" hint-placeholder-count="2">
+                  <button onClick="{{ pt.go }}" style="border:none;background:none;font-family:var(--font-ui);font-size:13px;font-weight:{{ pt.weight }};color:{{ pt.color }};padding:7px 10px 9px;cursor:pointer;border-bottom:2px solid {{ pt.line }};margin-bottom:-1px" style-hover="color:var(--n-900)">{{ pt.label }}</button>
+                </sc-for>
+              </sc-if>
               <span style="flex:1"></span>
-              <sc-if value="{{ pjTabItems }}" hint-placeholder-val="{{ true }}">
-                <span style="display:inline-flex;align-items:center;gap:2px;border:1px solid var(--n-200);border-radius:8px;padding:2px;background:var(--n-25);margin-bottom:6px">
-                  <sc-for list="{{ wlOpts }}" as="wo" hint-placeholder-count="5">
+              <span style="font-size:11px;color:var(--n-400);margin-bottom:4px;padding-right:2px">{{ pjViewsMeta }}</span>
+            </div>
+            <sc-if value="{{ pjTabItems }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:6px;padding:7px 0;flex-wrap:wrap">
+                <span style="display:inline-flex;align-items:center;gap:2px;border:1px solid var(--n-200);border-radius:8px;padding:2px;background:var(--n-25);flex:none">
+                  <sc-for list="{{ wvLayoutOpts }}" as="wo" hint-placeholder-count="6">
                     <button onClick="{{ wo.go }}" title="{{ wo.label }}" style="width:26px;height:22px;border:none;border-radius:6px;background:{{ wo.bg }};color:{{ wo.color }};display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:{{ wo.shadow }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ wo.icon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></button>
                   </sc-for>
                 </span>
-                <span onClick="{{ wlGroupPick }}" title="Group by" class="cb-edt" style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;margin:0 0 6px 8px;font-size:12px;font-weight:500;color:var(--n-600)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="rows-3" size="{{ 13 }}" hint-size="13px,13px"></x-import>{{ wlGroupLabel }}<span class="cb-fldi" style="display:inline-flex;color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-down" size="{{ 12 }}" hint-size="12px,12px"></x-import></span></span>
-              </sc-if>
-            </div>
+                <span style="width:1px;height:18px;background:var(--n-200);margin:0 3px;flex:none"></span>
+                <sc-for list="{{ wvChips }}" as="ch" hint-placeholder-count="0">
+                  <span style="display:inline-flex;align-items:center">
+                    <sc-if value="{{ ch.joiner }}" hint-placeholder-val="{{ false }}"><button onClick="{{ wvMatchToggle }}" title="Toggle between matching all filters and any filter" style="border:none;background:none;font-family:var(--font-ui);font-size:11px;color:var(--n-400);cursor:pointer;padding:0 6px;border-radius:4px" style-hover="color:var(--cortex-600);background:var(--cortex-50)">{{ wvMatchWord }}</button></sc-if>
+                    <span onClick="{{ ch.edit }}" style="display:inline-flex;align-items:center;height:26px;border:1px solid var(--cortex-200);background:var(--cortex-50);border-radius:8px;cursor:pointer;overflow:hidden" style-hover="border-color:var(--cortex-300)">
+                      <span style="display:inline-flex;align-items:center;gap:5px;padding:0 4px 0 8px;font-size:12px;color:var(--n-600)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ ch.icon }}" size="{{ 12 }}" hint-size="12px,12px"></x-import>{{ ch.field }}</span>
+                      <span style="font-size:11.5px;color:var(--n-400);padding:0 4px;flex:none">{{ ch.op }}</span>
+                      <span style="font-size:12px;font-weight:500;color:var(--cortex-700);padding:0 2px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ch.val }}</span>
+                      <button onClick="{{ ch.del }}" title="Remove filter" style="border:none;background:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:26px;color:var(--n-400);cursor:pointer" style-hover="color:var(--danger-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="x" size="{{ 12 }}" hint-size="12px,12px"></x-import></button>
+                    </span>
+                  </span>
+                </sc-for>
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.FilterChip" icon="list-filter" label="Filter" onClick="{{ wvFilterAdd }}" hint-size="76px,26px"></x-import>
+                <span style="flex:1"></span>
+                <span title="Items shown in this view" style="font-family:var(--font-mono);font-size:11px;color:{{ wvCountColor }};flex:none">{{ wvCount }}</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;height:26px;border:1px solid var(--n-200);border-radius:8px;padding:0 8px;background:var(--n-25);flex:none">
+                  <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="search" size="{{ 12 }}" color="var(--n-400)" hint-size="12px,12px"></x-import>
+                  <input value="{{ wvQ }}" onChange="{{ wvQChange }}" placeholder="Search this view…" style="width:108px;border:none;outline:none;background:none;font-family:var(--font-ui);font-size:12px;color:var(--n-900)">
+                </span>
+                <button onClick="{{ wvSortOpen }}" title="Sort order for this view" style="display:inline-flex;align-items:center;gap:5px;height:26px;border:1px solid {{ wvSortBd }};border-radius:8px;padding:0 9px;background:{{ wvSortBg }};font-family:var(--font-ui);font-size:12px;font-weight:500;color:{{ wvSortColor }};cursor:pointer;flex:none" style-hover="border-color:var(--n-300)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="arrow-down-up" size="{{ 12 }}" hint-size="12px,12px"></x-import>{{ wvSortLabel }}</button>
+                <button onClick="{{ wvGroupOpen }}" title="Grouping for this view" style="display:inline-flex;align-items:center;gap:5px;height:26px;border:1px solid {{ wvGroupBd }};border-radius:8px;padding:0 9px;background:{{ wvGroupBg }};font-family:var(--font-ui);font-size:12px;font-weight:500;color:{{ wvGroupColor }};cursor:pointer;flex:none" style-hover="border-color:var(--n-300)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="rows-3" size="{{ 12 }}" hint-size="12px,12px"></x-import>{{ wvGroupLabel }}</button>
+                <button onClick="{{ wvDisplayOpen }}" title="Layout and visible properties" style="display:inline-flex;align-items:center;gap:5px;height:26px;border:1px solid var(--n-200);border-radius:8px;padding:0 9px;background:var(--n-0);font-family:var(--font-ui);font-size:12px;font-weight:500;color:var(--n-600);cursor:pointer;flex:none" style-hover="border-color:var(--n-300)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sliders-horizontal" size="{{ 12 }}" hint-size="12px,12px"></x-import>Display</button>
+                <sc-if value="{{ wvDirty }}" hint-placeholder-val="{{ false }}">
+                  <span style="width:1px;height:18px;background:var(--n-200);margin:0 3px;flex:none"></span>
+                  <button onClick="{{ wvReset }}" title="Discard unsaved changes" style="border:none;background:none;height:26px;padding:0 8px;border-radius:8px;font-family:var(--font-ui);font-size:12px;font-weight:500;color:var(--n-500);cursor:pointer;flex:none" style-hover="background:var(--n-100);color:var(--n-700)">Reset</button>
+                  <button onClick="{{ wvSaveOpen }}" style="display:inline-flex;align-items:center;gap:5px;height:26px;border:1px solid var(--cortex-500);border-radius:8px;padding:0 10px;background:var(--cortex-500);font-family:var(--font-ui);font-size:12px;font-weight:600;color:#fff;cursor:pointer;flex:none" style-hover="background:var(--cortex-600)">Save view<x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-down" size="{{ 12 }}" hint-size="12px,12px"></x-import></button>
+                </sc-if>
+              </div>
+            </sc-if>
           </div>
           <sc-if value="{{ pjTabItems }}" hint-placeholder-val="{{ true }}">
             <div style="flex:1;overflow:auto;min-height:0">
-              <sc-if value="{{ wlList }}" hint-placeholder-val="{{ true }}">
+              <sc-if value="{{ wvList }}" hint-placeholder-val="{{ true }}">
                 <div style="min-width:980px">
-                  <sc-for list="{{ wlGroups }}" as="g" hint-placeholder-count="4">
+                  <sc-for list="{{ wvGroups }}" as="g" hint-placeholder-count="4">
                     <div>
-                      <div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 20px;background:var(--n-25);border-bottom:1px solid var(--n-100)">
-                        <span style="width:11px;height:11px;border-radius:999px;background:{{ g.bg }};border:1.5px solid {{ g.bd }};box-sizing:border-box"></span>
-                        <span style="font-size:12.5px;font-weight:600;color:var(--n-800)">{{ g.label }}</span>
-                        <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ g.count }}</span>
-                        <span style="flex:1"></span>
-                        <button onClick="{{ g.add }}" title="Add item here" style="width:22px;height:22px;border:none;background:none;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 14 }}" hint-size="14px,14px"></x-import></button>
-                      </div>
-                      <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="3">
-                        <div onClick="{{ r.open }}" class="cb-row" style="display:flex;align-items:center;gap:9px;height:38px;padding:0 20px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ r.bg }};min-width:0" style-hover="background:var(--n-50)">
-                          <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ r.key }}</span>
-                          <span title="{{ r.typeName }}" style="display:inline-flex;flex:none;color:{{ r.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.typeIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
-                          <span style="font-size:13px;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
-                          <sc-if value="{{ r.subMeta }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--n-400);flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="git-branch" size="{{ 11 }}" hint-size="11px,11px"></x-import>{{ r.subMeta }}</span></sc-if>
+                      <sc-if value="{{ g.hasHeader }}" hint-placeholder-val="{{ true }}">
+                        <div onClick="{{ g.toggle }}" style="display:flex;align-items:center;gap:8px;height:36px;padding:0 20px;background:var(--n-25);border-bottom:1px solid var(--n-100);cursor:pointer">
+                          <span style="display:inline-flex;color:var(--n-400);transform:rotate({{ g.rot }}deg);transition:transform 120ms cubic-bezier(.2,.6,.2,1)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ 12 }}" hint-size="12px,12px"></x-import></span>
+                          <sc-if value="{{ g.avatarOn }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ g.label }}" size="{{ 18 }}" hint-size="18px,18px"></x-import></sc-if>
+                          <sc-if value="{{ g.dotOn }}" hint-placeholder-val="{{ true }}"><span style="width:11px;height:11px;border-radius:999px;background:{{ g.bg }};border:1.5px solid {{ g.bd }};box-sizing:border-box"></span></sc-if>
+                          <span style="font-size:12.5px;font-weight:600;color:var(--n-800)">{{ g.label }}</span>
+                          <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ g.count }}</span>
                           <span style="flex:1"></span>
-                          <sc-if value="{{ r.featName }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--n-500);flex:none;max-width:180px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.EntityIcon" type="feature" swatch="{{ r.featSwatch }}" size="{{ 12 }}" hint-size="12px,12px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.featName }}</span></span></sc-if>
-                          <span onClick="{{ r.stPick }}" title="Set status" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;width:104px;flex:none"><span style="width:9px;height:9px;border-radius:999px;background:{{ r.stBg }};border:1.5px solid {{ r.stBd }};box-sizing:border-box;flex:none"></span><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.stName }}</span><span class="cb-fldi" style="display:inline-flex;color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-down" size="{{ 11 }}" hint-size="11px,11px"></x-import></span></span>
-                          <span onClick="{{ r.prPick }}" title="Set priority — {{ r.prName }}" class="cb-edt" style="display:inline-flex;flex:none;color:{{ r.prColor }};padding:3px 5px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.prIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
-                          <span onClick="{{ r.asgPick }}" title="Assign — {{ r.assignee }}" class="cb-edt" style="display:inline-flex;flex:none;padding:2px 4px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ r.assignee }}" size="{{ 20 }}" hint-size="20px,20px"></x-import></span>
-                          <span onClick="{{ r.duePick }}" title="Set due date" class="cb-edt" style="display:inline-flex;padding:3px 6px;font-family:var(--font-mono);font-size:11px;color:{{ r.dueColor }};flex:none;width:50px;justify-content:flex-end">{{ r.due }}</span>
+                          <button onClick="{{ g.add }}" title="Add item here" style="width:22px;height:22px;border:none;background:none;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 14 }}" hint-size="14px,14px"></x-import></button>
                         </div>
-                      </sc-for>
-                      <div onClick="{{ g.add }}" style="display:flex;align-items:center;gap:8px;height:34px;padding:0 20px;color:var(--n-400);cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--n-100)" style-hover="color:var(--n-700);background:var(--n-25)">
-                        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import>New item
-                      </div>
+                      </sc-if>
+                      <sc-if value="{{ g.open }}" hint-placeholder-val="{{ true }}">
+                        <div>
+                          <sc-for list="{{ g.rows }}" as="r" hint-placeholder-count="3">
+                            <div onClick="{{ r.open }}" class="cb-row" style="display:flex;align-items:center;gap:9px;height:38px;padding:0 20px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ r.bg }};min-width:0" style-hover="background:var(--n-50)">
+                              <sc-if value="{{ wvfKey }}" hint-placeholder-val="{{ true }}"><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ r.key }}</span></sc-if>
+                              <sc-if value="{{ wvfType }}" hint-placeholder-val="{{ true }}"><span title="{{ r.typeName }}" style="display:inline-flex;flex:none;color:{{ r.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.typeIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span></sc-if>
+                              <span style="font-size:13px;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+                              <sc-if value="{{ r.subMeta }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:var(--n-400);flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="git-branch" size="{{ 11 }}" hint-size="11px,11px"></x-import>{{ r.subMeta }}</span></sc-if>
+                              <span style="flex:1"></span>
+                              <sc-if value="{{ r.wsChip }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--n-500);flex:none;border:1px solid var(--n-200);border-radius:6px;padding:1px 7px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="boxes" size="{{ 10 }}" hint-size="10px,10px"></x-import>{{ r.wsChip }}</span></sc-if>
+                              <sc-if value="{{ r.featChip }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--n-500);flex:none;max-width:180px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.EntityIcon" type="feature" swatch="{{ r.featSwatch }}" size="{{ 12 }}" hint-size="12px,12px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.featChip }}</span></span></sc-if>
+                              <sc-for list="{{ r.cfChips }}" as="cfc" hint-placeholder-count="0"><span onClick="{{ cfc.edit }}" title="{{ cfc.tip }}" class="cb-edt" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--n-600);flex:none;border:1px solid var(--n-200);border-radius:6px;padding:1px 7px;max-width:160px"><sc-if value="{{ cfc.dot }}" hint-placeholder-val="{{ false }}"><span style="width:7px;height:7px;border-radius:999px;background:{{ cfc.dot }};flex:none"></span></sc-if><sc-if value="{{ cfc.mono }}" hint-placeholder-val="{{ false }}"><span style="font-family:var(--font-mono);font-size:10.5px;white-space:nowrap">{{ cfc.label }}</span></sc-if><sc-if value="{{ cfc.plain }}" hint-placeholder-val="{{ true }}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ cfc.label }}</span></sc-if></span></sc-for>
+                              <sc-if value="{{ wvfEstimate }}" hint-placeholder-val="{{ false }}"><span onClick="{{ r.estPick }}" title="Estimate" class="cb-edt" style="display:inline-flex;padding:2px 6px;font-family:var(--font-mono);font-size:10.5px;color:var(--n-500);flex:none">{{ r.estimate }}</span></sc-if>
+                              <sc-if value="{{ wvfStatus }}" hint-placeholder-val="{{ true }}"><span onClick="{{ r.stPick }}" title="Set status" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;width:104px;flex:none"><span style="width:9px;height:9px;border-radius:999px;background:{{ r.stBg }};border:1.5px solid {{ r.stBd }};box-sizing:border-box;flex:none"></span><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.stName }}</span><span class="cb-fldi" style="display:inline-flex;color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-down" size="{{ 11 }}" hint-size="11px,11px"></x-import></span></span></sc-if>
+                              <sc-if value="{{ wvfPriority }}" hint-placeholder-val="{{ true }}"><span onClick="{{ r.prPick }}" title="Set priority — {{ r.prName }}" class="cb-edt" style="display:inline-flex;flex:none;color:{{ r.prColor }};padding:3px 5px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.prIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span></sc-if>
+                              <sc-if value="{{ wvfAssignee }}" hint-placeholder-val="{{ true }}"><span onClick="{{ r.asgPick }}" title="Assign — {{ r.assignee }}" class="cb-edt" style="display:inline-flex;flex:none;padding:2px 4px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ r.assignee }}" size="{{ 20 }}" hint-size="20px,20px"></x-import></span></sc-if>
+                              <sc-if value="{{ wvfDue }}" hint-placeholder-val="{{ true }}"><span onClick="{{ r.duePick }}" title="Set due date" class="cb-edt" style="display:inline-flex;padding:3px 6px;font-family:var(--font-mono);font-size:11px;color:{{ r.dueColor }};flex:none;width:50px;justify-content:flex-end">{{ r.due }}</span></sc-if>
+                            </div>
+                          </sc-for>
+                          <div onClick="{{ g.add }}" style="display:flex;align-items:center;gap:8px;height:34px;padding:0 20px;color:var(--n-400);cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--n-100)" style-hover="color:var(--n-700);background:var(--n-25)">
+                            <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import>New item
+                          </div>
+                        </div>
+                      </sc-if>
                     </div>
                   </sc-for>
                 </div>
               </sc-if>
-              <sc-if value="{{ wlBoard }}" hint-placeholder-val="{{ false }}">
-                <div style="display:flex;gap:12px;align-items:flex-start;padding:16px 20px;background:var(--n-25);min-height:100%;box-sizing:border-box">
-                  <sc-for list="{{ wlCols }}" as="c" hint-placeholder-count="4">
-                    <div style="width:272px;flex:none">
-                      <div style="display:flex;align-items:center;gap:7px;padding:0 4px 9px">
-                        <span style="width:10px;height:10px;border-radius:999px;background:{{ c.bg }};border:1.5px solid {{ c.bd }};box-sizing:border-box"></span>
-                        <span style="font-size:12.5px;font-weight:600;color:var(--n-800)">{{ c.label }}</span>
-                        <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ c.count }}</span>
-                        <span style="flex:1"></span>
-                        <button onClick="{{ c.add }}" title="Add item" style="width:20px;height:20px;border:none;background:none;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import></button>
-                      </div>
-                      <div style="display:flex;flex-direction:column;gap:8px">
-                        <sc-for list="{{ c.cards }}" as="k" hint-placeholder-count="2">
-                          <div onClick="{{ k.open }}" style="background:var(--n-0);border:1px solid var(--n-200);border-left:3px solid {{ k.bar }};border-radius:10px;box-shadow:var(--shadow-xs);padding:9px 11px;cursor:pointer" style-hover="box-shadow:var(--shadow-sm);border-color:var(--n-300);border-left-color:{{ k.bar }}">
-                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                              <span style="font-family:var(--font-mono);font-size:10px;color:var(--n-400)">{{ k.key }}</span>
-                              <span title="{{ k.typeName }}" style="display:inline-flex;color:{{ k.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ k.typeIcon }}" size="{{ 12 }}" hint-size="12px,12px"></x-import></span>
-                            </div>
-                            <div style="font-size:13px;line-height:18px;font-weight:500;color:var(--n-900);margin-bottom:8px;text-wrap:pretty">{{ k.name }}</div>
-                            <div style="display:flex;align-items:center;gap:7px">
-                              <span title="{{ k.prName }}" style="display:inline-flex;color:{{ k.prColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ k.prIcon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
-                              <span style="font-family:var(--font-mono);font-size:10.5px;color:{{ k.dueColor }}">{{ k.due }}</span>
+              <sc-if value="{{ wvBoard }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:16px 20px 4px;background:var(--n-25);min-height:100%;box-sizing:border-box">
+                  <sc-for list="{{ wvSwims }}" as="sw" hint-placeholder-count="1">
+                    <div>
+                      <sc-if value="{{ sw.hasLabel }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;align-items:center;gap:8px;margin:4px 0 10px">
+                          <sc-if value="{{ sw.avatarOn }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ sw.label }}" size="{{ 18 }}" hint-size="18px,18px"></x-import></sc-if>
+                          <sc-if value="{{ sw.dotOn }}" hint-placeholder-val="{{ false }}"><span style="width:10px;height:10px;border-radius:999px;background:{{ sw.bg }};border:1.5px solid {{ sw.bd }};box-sizing:border-box"></span></sc-if>
+                          <span style="font-size:11.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--n-600)">{{ sw.label }}</span>
+                          <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ sw.count }}</span>
+                          <span style="flex:1;height:1px;background:var(--n-200)"></span>
+                        </div>
+                      </sc-if>
+                      <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px">
+                        <sc-for list="{{ sw.cols }}" as="c" hint-placeholder-count="4">
+                          <div style="width:272px;flex:none">
+                            <div style="display:flex;align-items:center;gap:7px;padding:0 4px 9px">
+                              <span style="width:10px;height:10px;border-radius:999px;background:{{ c.bg }};border:1.5px solid {{ c.bd }};box-sizing:border-box"></span>
+                              <span style="font-size:12.5px;font-weight:600;color:var(--n-800)">{{ c.label }}</span>
+                              <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ c.count }}</span>
                               <span style="flex:1"></span>
-                              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ k.assignee }}" size="{{ 18 }}" hint-size="18px,18px"></x-import>
+                              <button onClick="{{ c.add }}" title="Add item" style="width:20px;height:20px;border:none;background:none;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import></button>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:8px">
+                              <sc-for list="{{ c.cards }}" as="k" hint-placeholder-count="2">
+                                <div onClick="{{ k.open }}" style="background:var(--n-0);border:1px solid var(--n-200);border-left:3px solid {{ k.bar }};border-radius:10px;box-shadow:var(--shadow-xs);padding:{{ wvCardPad }};cursor:pointer" style-hover="box-shadow:var(--shadow-sm);border-color:var(--n-300);border-left-color:{{ k.bar }}">
+                                  <sc-if value="{{ wvCardHdr }}" hint-placeholder-val="{{ true }}">
+                                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                                      <sc-if value="{{ wvfKey }}" hint-placeholder-val="{{ true }}"><span style="font-family:var(--font-mono);font-size:10px;color:var(--n-400)">{{ k.key }}</span></sc-if>
+                                      <sc-if value="{{ wvfType }}" hint-placeholder-val="{{ true }}"><span title="{{ k.typeName }}" style="display:inline-flex;color:{{ k.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ k.typeIcon }}" size="{{ 12 }}" hint-size="12px,12px"></x-import></span></sc-if>
+                                      <span style="flex:1"></span>
+                                      <sc-if value="{{ k.estChip }}" hint-placeholder-val="{{ false }}"><span title="Estimate" style="font-family:var(--font-mono);font-size:10px;color:var(--n-400);border:1px solid var(--n-100);border-radius:4px;padding:0 4px">{{ k.estChip }}</span></sc-if>
+                                    </div>
+                                  </sc-if>
+                                  <div style="font-size:13px;line-height:18px;font-weight:500;color:var(--n-900);margin-bottom:8px;text-wrap:pretty">{{ k.name }}</div>
+                                  <sc-if value="{{ k.featChip }}" hint-placeholder-val="{{ false }}">
+                                    <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--n-500);margin-bottom:8px;min-width:0"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.EntityIcon" type="feature" swatch="{{ k.featSwatch }}" size="{{ 12 }}" hint-size="12px,12px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ k.featChip }}</span></div>
+                                  </sc-if>
+                                  <sc-if value="{{ k.cfOn }}" hint-placeholder-val="{{ false }}">
+                                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+                                      <sc-for list="{{ k.cfChips }}" as="cfc" hint-placeholder-count="0"><span title="{{ cfc.tip }}" style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--n-200);border-radius:6px;padding:1px 6px;font-size:10.5px;color:var(--n-600);white-space:nowrap"><span style="width:6px;height:6px;border-radius:999px;background:{{ cfc.dot }};flex:none"></span>{{ cfc.label }}</span></sc-for>
+                                    </div>
+                                  </sc-if>
+                                  <div style="display:flex;align-items:center;gap:7px">
+                                    <sc-if value="{{ wvfPriority }}" hint-placeholder-val="{{ true }}"><span title="{{ k.prName }}" style="display:inline-flex;color:{{ k.prColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ k.prIcon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span></sc-if>
+                                    <sc-if value="{{ wvfDue }}" hint-placeholder-val="{{ true }}"><span style="font-family:var(--font-mono);font-size:10.5px;color:{{ k.dueColor }}">{{ k.due }}</span></sc-if>
+                                    <span style="flex:1"></span>
+                                    <sc-if value="{{ wvfAssignee }}" hint-placeholder-val="{{ true }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ k.assignee }}" size="{{ 18 }}" hint-size="18px,18px"></x-import></sc-if>
+                                  </div>
+                                </div>
+                              </sc-for>
+                              <button onClick="{{ c.add }}" style="border:1px dashed var(--n-300);background:none;border-radius:10px;height:32px;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--n-400);font-family:var(--font-ui);font-size:12px;cursor:pointer" style-hover="color:var(--n-600);border-color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import>New item</button>
                             </div>
                           </div>
                         </sc-for>
-                        <button onClick="{{ c.add }}" style="border:1px dashed var(--n-300);background:none;border-radius:10px;height:32px;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--n-400);font-family:var(--font-ui);font-size:12px;cursor:pointer" style-hover="color:var(--n-600);border-color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import>New item</button>
                       </div>
                     </div>
                   </sc-for>
                 </div>
               </sc-if>
-              <sc-if value="{{ wlTimeline }}" hint-placeholder-val="{{ false }}">
+              <sc-if value="{{ wvTimeline }}" hint-placeholder-val="{{ false }}">
                 <div style="min-width:1100px">
                   <div style="display:flex;height:40px;border-bottom:1px solid var(--n-200);background:var(--n-25);position:sticky;top:0;z-index:2">
-                    <div style="width:300px;flex:none;display:flex;align-items:center;padding:0 20px;border-right:1px solid var(--n-200);font-size:12px;font-weight:500;color:var(--n-600)">Items</div>
-                    <div style="flex:1;display:grid;grid-template-columns:repeat(8,1fr)">
-                      <sc-for list="{{ wlMonths }}" as="m" hint-placeholder-count="8">
+                    <div style="width:250px;flex:none;display:flex;align-items:center;padding:0 20px;border-right:1px solid var(--n-200);font-size:12px;font-weight:500;color:var(--n-600)">{{ wvLaneTitle }}</div>
+                    <div style="flex:1;display:grid;grid-template-columns:repeat(8,1fr);position:relative">
+                      <sc-for list="{{ wvMonths }}" as="m" hint-placeholder-count="8">
                         <div style="display:flex;align-items:center;padding:0 10px;border-right:1px solid var(--n-100);font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--n-500)">{{ m.m }}</div>
                       </sc-for>
+                      <span style="position:absolute;left:{{ wvTodayLeft }}%;top:25px;transform:translateX(-50%);font-family:var(--font-mono);font-size:8.5px;color:var(--cortex-600);background:var(--cortex-50);border-radius:4px;padding:0 4px">TODAY</span>
                     </div>
                   </div>
-                  <sc-for list="{{ wlTlRows }}" as="r" hint-placeholder-count="6">
-                    <div onClick="{{ r.open }}" class="cb-row" style="display:flex;height:38px;border-bottom:1px solid var(--n-100);cursor:pointer" style-hover="background:var(--n-50)">
-                      <div style="width:300px;flex:none;display:flex;align-items:center;gap:8px;padding:0 20px;border-right:1px solid var(--n-200);min-width:0">
-                        <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ r.key }}</span>
-                        <span style="display:inline-flex;flex:none;color:{{ r.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.typeIcon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
-                        <span style="font-size:12.5px;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+                  <sc-for list="{{ wvLanes }}" as="ln" hint-placeholder-count="4">
+                    <div style="display:flex;border-bottom:1px solid var(--n-100)">
+                      <div style="width:250px;flex:none;padding:9px 20px;border-right:1px solid var(--n-200);display:flex;flex-direction:column;gap:1px;justify-content:center;min-width:0;box-sizing:border-box">
+                        <span style="display:flex;align-items:center;gap:6px;min-width:0">
+                          <sc-if value="{{ ln.avatarOn }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ ln.label }}" size="{{ 16 }}" hint-size="16px,16px"></x-import></sc-if>
+                          <sc-if value="{{ ln.dotOn }}" hint-placeholder-val="{{ true }}"><span style="width:9px;height:9px;border-radius:999px;background:{{ ln.bg }};border:1.5px solid {{ ln.bd }};box-sizing:border-box;flex:none"></span></sc-if>
+                          <span style="font-size:12.5px;font-weight:600;color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ln.label }}</span>
+                        </span>
+                        <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400)">{{ ln.meta }}</span>
                       </div>
-                      <div style="flex:1;display:grid;grid-template-columns:repeat(8,1fr);align-items:center">
-                        <span style="grid-column:{{ r.col }};height:8px;border-radius:999px;background:{{ r.barColor }};margin:0 6px"></span>
+                      <div style="flex:1;position:relative;height:{{ ln.h }}px">
+                        <div style="position:absolute;inset:0;display:grid;grid-template-columns:repeat(8,1fr)">
+                          <sc-for list="{{ wvMonths }}" as="m" hint-placeholder-count="8"><div style="border-right:1px solid var(--n-50)"></div></sc-for>
+                        </div>
+                        <div style="position:absolute;top:0;bottom:0;left:{{ wvTodayLeft }}%;width:1px;background:var(--cortex-300)"></div>
+                        <sc-for list="{{ ln.bars }}" as="b" hint-placeholder-count="2">
+                          <sc-if value="{{ b.mile }}" hint-placeholder-val="{{ false }}">
+                            <span onClick="{{ b.open }}" title="{{ b.title }}" style="position:absolute;left:{{ b.left }}%;top:{{ b.mtop }}px;width:12px;height:12px;transform:rotate(45deg);background:var(--swatch-amber);border:1.5px solid var(--n-0);box-shadow:var(--shadow-xs);cursor:pointer;border-radius:2px"></span>
+                          </sc-if>
+                          <sc-if value="{{ b.bar }}" hint-placeholder-val="{{ true }}">
+                            <span onClick="{{ b.open }}" title="{{ b.title }}" style="position:absolute;left:{{ b.left }}%;width:{{ b.w }}%;top:{{ b.top }}px;height:20px;border-radius:5px;background:color-mix(in srgb, {{ b.color }} 15%, var(--n-0));border:1px solid color-mix(in srgb, {{ b.color }} 42%, var(--n-0));border-left:3px solid {{ b.color }};display:flex;align-items:center;padding:0 7px;font-size:10.5px;font-weight:500;color:var(--n-800);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;box-sizing:border-box" style-hover="box-shadow:var(--shadow-xs)">{{ b.name }}</span>
+                          </sc-if>
+                        </sc-for>
                       </div>
                     </div>
                   </sc-for>
-                  <div style="padding:12px 20px;font-size:12px;color:var(--n-400)">Bars follow each item's start and due dates. Drag support arrives with the next milestone.</div>
+                  <div style="padding:12px 20px;font-size:12px;color:var(--n-400)">Bars span each item's planned window · diamonds are milestones · lanes come from this view's grouping.</div>
                 </div>
               </sc-if>
-              <sc-if value="{{ wlTable }}" hint-placeholder-val="{{ false }}">
+              <sc-if value="{{ wvTable }}" hint-placeholder-val="{{ false }}">
                 <div style="min-width:1240px">
                   <div style="display:flex;align-items:center;height:36px;border-bottom:1px solid var(--n-200);background:var(--n-25);font-size:12px;font-weight:500;color:var(--n-600);position:sticky;top:0;z-index:2">
-                    <div style="flex:1;min-width:300px;display:flex;align-items:center;gap:6px;padding:0 20px;border-right:1px solid var(--n-100);height:100%">Item</div>
-                    <div style="width:130px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;height:100%">Status</div>
-                    <div style="width:110px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;height:100%">Priority</div>
-                    <div style="width:160px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;height:100%">Assignee</div>
-                    <div style="width:90px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;height:100%">Due</div>
-                    <div style="width:80px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;height:100%">Estimate</div>
-                    <div style="width:150px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;height:100%">Workstream</div>
-                    <div style="width:190px;flex:none;padding:0 12px;display:flex;align-items:center;height:100%">Feature</div>
+                    <div onClick="{{ wvNameSort }}" title="Sort by name" style="flex:1;min-width:300px;display:flex;align-items:center;gap:6px;padding:0 20px;border-right:1px solid var(--n-100);height:100%;cursor:pointer;box-sizing:border-box" style-hover="color:var(--n-800)">Item
+                      <sc-if value="{{ wvNameSi }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ wvNameSi }}" size="{{ 11 }}" color="var(--cortex-600)" hint-size="11px,11px"></x-import></sc-if>
+                    </div>
+                    <sc-for list="{{ wvCols }}" as="col" hint-placeholder-count="5">
+                      <div onClick="{{ col.sort }}" title="{{ col.tip }}" style="width:{{ col.w }}px;flex:none;padding:0 12px;border-right:1px solid var(--n-100);display:flex;align-items:center;gap:5px;height:100%;cursor:{{ col.cursor }};box-sizing:border-box" style-hover="color:var(--n-800)">{{ col.label }}
+                        <sc-if value="{{ col.si }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ col.si }}" size="{{ 11 }}" color="var(--cortex-600)" hint-size="11px,11px"></x-import></sc-if>
+                      </div>
+                    </sc-for>
+                    <div style="width:44px;flex:none;display:flex;align-items:center;justify-content:center;height:100%">
+                      <button onClick="{{ wvCfOpen }}" title="Add or hide fields" style="width:22px;height:22px;border:none;background:none;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer" style-hover="background:var(--n-100);color:var(--n-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ 13 }}" hint-size="13px,13px"></x-import></button>
+                    </div>
                   </div>
-                  <sc-for list="{{ wlRows }}" as="r" hint-placeholder-count="7">
-                    <div onClick="{{ r.open }}" class="cb-row" style="display:flex;align-items:center;height:40px;border-bottom:1px solid var(--n-100);cursor:pointer" style-hover="background:var(--n-50)">
-                      <div style="flex:1;min-width:300px;padding:0 20px;display:flex;align-items:center;gap:8px;min-width:0">
-                        <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ r.key }}</span>
-                        <span style="display:inline-flex;flex:none;color:{{ r.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.typeIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
-                        <span style="font-size:13px;font-weight:500;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
-                      </div>
-                      <div style="width:130px;flex:none;padding:0 6px;overflow:hidden"><span onClick="{{ r.stPick }}" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;max-width:100%"><span style="width:9px;height:9px;border-radius:999px;background:{{ r.stBg }};border:1.5px solid {{ r.stBd }};box-sizing:border-box;flex:none"></span><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.stName }}</span></span></div>
-                      <div style="width:110px;flex:none;padding:0 6px"><span onClick="{{ r.prPick }}" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px"><span style="display:inline-flex;color:{{ r.prColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.prIcon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span><span style="font-size:12px;color:var(--n-700)">{{ r.prName }}</span></span></div>
-                      <div style="width:160px;flex:none;padding:0 6px;overflow:hidden"><span onClick="{{ r.asgPick }}" class="cb-edt" style="display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:3px 6px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ r.assignee }}" size="{{ 20 }}" hint-size="20px,20px"></x-import><span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.assignee }}</span></span></div>
-                      <div style="width:90px;flex:none;padding:0 6px"><span onClick="{{ r.duePick }}" class="cb-edt" style="display:inline-flex;padding:3px 7px;font-family:var(--font-mono);font-size:11px;color:{{ r.dueColor }}">{{ r.due }}</span></div>
-                      <div style="width:80px;flex:none;padding:0 6px"><span onClick="{{ r.estPick }}" class="cb-edt" style="display:inline-flex;padding:3px 7px;font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ r.estimate }}</span></div>
-                      <div style="width:150px;flex:none;padding:0 12px;font-size:12px;color:var(--n-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.wsName }}</div>
-                      <div style="width:190px;flex:none;padding:0 12px;overflow:hidden">
-                        <sc-if value="{{ r.featName }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--n-600);max-width:100%"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.EntityIcon" type="feature" swatch="{{ r.featSwatch }}" size="{{ 12 }}" hint-size="12px,12px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.featName }}</span></span></sc-if>
-                      </div>
+                  <sc-for list="{{ wvGroups }}" as="g" hint-placeholder-count="1">
+                    <div>
+                      <sc-if value="{{ g.hasHeader }}" hint-placeholder-val="{{ false }}">
+                        <div onClick="{{ g.toggle }}" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 20px;background:var(--n-25);border-bottom:1px solid var(--n-100);cursor:pointer">
+                          <span style="display:inline-flex;color:var(--n-400);transform:rotate({{ g.rot }}deg);transition:transform 120ms cubic-bezier(.2,.6,.2,1)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ 12 }}" hint-size="12px,12px"></x-import></span>
+                          <sc-if value="{{ g.avatarOn }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ g.label }}" size="{{ 16 }}" hint-size="16px,16px"></x-import></sc-if>
+                          <sc-if value="{{ g.dotOn }}" hint-placeholder-val="{{ true }}"><span style="width:10px;height:10px;border-radius:999px;background:{{ g.bg }};border:1.5px solid {{ g.bd }};box-sizing:border-box"></span></sc-if>
+                          <span style="font-size:12px;font-weight:600;color:var(--n-800)">{{ g.label }}</span>
+                          <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ g.count }}</span>
+                        </div>
+                      </sc-if>
+                      <sc-if value="{{ g.open }}" hint-placeholder-val="{{ true }}">
+                        <div>
+                          <sc-for list="{{ g.trows }}" as="r" hint-placeholder-count="6">
+                            <div onClick="{{ r.open }}" class="cb-row" style="display:flex;align-items:center;height:{{ wvRowH }}px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ r.bg }}" style-hover="background:var(--n-50)">
+                              <div style="flex:1;min-width:300px;padding:0 20px;display:flex;align-items:center;gap:8px;box-sizing:border-box">
+                                <sc-if value="{{ wvfKey }}" hint-placeholder-val="{{ true }}"><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ r.key }}</span></sc-if>
+                                <sc-if value="{{ wvfType }}" hint-placeholder-val="{{ true }}"><span title="{{ r.typeName }}" style="display:inline-flex;flex:none;color:{{ r.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.typeIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span></sc-if>
+                                <span style="font-size:13px;font-weight:500;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+                              </div>
+                              <sc-for list="{{ r.cells }}" as="cl" hint-placeholder-count="5">
+                                <div style="width:{{ cl.w }}px;flex:none;padding:0 6px;border-right:1px solid var(--n-50);overflow:hidden;display:flex;align-items:center;height:100%;box-sizing:border-box">
+                                  <sc-if value="{{ cl.kStatus }}" hint-placeholder-val="{{ true }}"><span onClick="{{ cl.pick }}" title="Set status" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;max-width:100%"><span style="width:9px;height:9px;border-radius:999px;background:{{ cl.bg }};border:1.5px solid {{ cl.bd }};box-sizing:border-box;flex:none"></span><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ cl.label }}</span></span></sc-if>
+                                  <sc-if value="{{ cl.kPrio }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Set priority" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px"><span style="display:inline-flex;color:{{ cl.color }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ cl.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span><span style="font-size:12px;color:var(--n-700)">{{ cl.label }}</span></span></sc-if>
+                                  <sc-if value="{{ cl.kPerson }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Assign" class="cb-edt" style="display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:3px 6px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ cl.label }}" size="{{ 20 }}" hint-size="20px,20px"></x-import><span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ cl.label }}</span></span></sc-if>
+                                  <sc-if value="{{ cl.kDue }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Set due date" class="cb-edt" style="display:inline-flex;padding:3px 7px;font-family:var(--font-mono);font-size:11px;color:{{ cl.color }}">{{ cl.label }}</span></sc-if>
+                                  <sc-if value="{{ cl.kEst }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Set estimate" class="cb-edt" style="display:inline-flex;padding:3px 7px;font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ cl.label }}</span></sc-if>
+                                  <sc-if value="{{ cl.kText }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--n-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 6px">{{ cl.label }}</span></sc-if>
+                                  <sc-if value="{{ cl.kFeat }}" hint-placeholder-val="{{ false }}"><sc-if value="{{ cl.label }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--n-600);max-width:100%;padding:0 6px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.EntityIcon" type="feature" swatch="{{ cl.swatch }}" size="{{ 12 }}" hint-size="12px,12px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ cl.label }}</span></span></sc-if></sc-if>
+                                  <sc-if value="{{ cl.kCfDrop }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Set value" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;max-width:100%"><sc-if value="{{ cl.dot }}" hint-placeholder-val="{{ false }}"><span style="width:9px;height:9px;border-radius:999px;background:{{ cl.dot }};flex:none"></span></sc-if><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ cl.label }}</span></span></sc-if>
+                                  <sc-if value="{{ cl.kCfLabels }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Edit labels" class="cb-edt" style="display:inline-flex;align-items:center;gap:4px;padding:3px 6px;max-width:100%"><sc-for list="{{ cl.tags }}" as="tg" hint-placeholder-count="0"><span style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--n-200);border-radius:6px;padding:0 6px;font-size:11px;color:var(--n-700);white-space:nowrap"><span style="width:6px;height:6px;border-radius:999px;background:{{ tg.dot }};flex:none"></span>{{ tg.label }}</span></sc-for><sc-if value="{{ cl.more }}" hint-placeholder-val="{{ false }}"><span style="font-size:10.5px;color:var(--n-400)">{{ cl.more }}</span></sc-if><sc-if value="{{ cl.empty }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--n-400)">{{ cl.empty }}</span></sc-if></span></sc-if>
+                                  <sc-if value="{{ cl.kCfRating }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;gap:3px;padding:3px 6px"><sc-for list="{{ cl.dots }}" as="dt" hint-placeholder-count="5"><span onClick="{{ dt.set }}" title="Set rating" style="width:10px;height:10px;border-radius:999px;background:{{ dt.bg }};border:1px solid {{ dt.bd }};box-sizing:border-box;cursor:pointer"></span></sc-for></span></sc-if>
+                                  <sc-if value="{{ cl.kCfProg }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Set progress" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 6px;width:100%;box-sizing:border-box"><span style="flex:1;height:4px;border-radius:999px;background:var(--n-100);overflow:hidden"><span style="display:block;height:100%;width:{{ cl.pct }}%;background:var(--cortex-500);border-radius:999px"></span></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-600);flex:none;width:34px;text-align:right">{{ cl.label }}</span></span></sc-if>
+                                  <sc-if value="{{ cl.kCfCheck }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Toggle" style="display:inline-flex;padding:3px 6px;cursor:pointer"><span style="width:14px;height:14px;border-radius:4px;border:1.5px solid {{ cl.bd }};background:{{ cl.bg }};display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box"><sc-if value="{{ cl.on }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="check" size="{{ 10 }}" color="#fff" hint-size="10px,10px"></x-import></sc-if></span></span></sc-if>
+                                  <sc-if value="{{ cl.kCfTxt }}" hint-placeholder-val="{{ false }}"><span onClick="{{ cl.pick }}" title="Edit value" class="cb-edt" style="display:inline-flex;padding:3px 7px;max-width:100%"><sc-if value="{{ cl.mono }}" hint-placeholder-val="{{ false }}"><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-600);white-space:nowrap">{{ cl.label }}</span></sc-if><sc-if value="{{ cl.plain }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ cl.label }}</span></sc-if></span></sc-if>
+                                </div>
+                              </sc-for>
+                              <div style="width:44px;flex:none"></div>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </sc-if>
                     </div>
                   </sc-for>
                 </div>
               </sc-if>
-              <sc-if value="{{ wlCal }}" hint-placeholder-val="{{ false }}">
+              <sc-if value="{{ wvGantt }}" hint-placeholder-val="{{ false }}">
+                <div style="min-width:1140px">
+                  <div style="display:flex;height:40px;border-bottom:1px solid var(--n-200);background:var(--n-25);position:sticky;top:0;z-index:2">
+                    <div style="width:300px;flex:none;display:flex;align-items:center;padding:0 20px;border-right:1px solid var(--n-200);font-size:12px;font-weight:500;color:var(--n-600);box-sizing:border-box">Work item</div>
+                    <div style="flex:1;display:grid;grid-template-columns:repeat(8,1fr);position:relative">
+                      <sc-for list="{{ wvMonths }}" as="m" hint-placeholder-count="8">
+                        <div style="display:flex;align-items:center;padding:0 10px;border-right:1px solid var(--n-100);font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--n-500)">{{ m.m }}</div>
+                      </sc-for>
+                      <span style="position:absolute;left:{{ wvTodayLeft }}%;top:25px;transform:translateX(-50%);font-family:var(--font-mono);font-size:8.5px;color:var(--cortex-600);background:var(--cortex-50);border-radius:4px;padding:0 4px">TODAY</span>
+                    </div>
+                  </div>
+                  <div style="position:relative">
+                    <div style="position:absolute;top:0;bottom:0;left:300px;right:0;display:grid;grid-template-columns:repeat(8,1fr);pointer-events:none">
+                      <sc-for list="{{ wvMonths }}" as="m" hint-placeholder-count="8"><div style="border-right:1px solid var(--n-50)"></div></sc-for>
+                    </div>
+                    <sc-for list="{{ wvGRows }}" as="gr" hint-placeholder-count="8">
+                      <div>
+                        <sc-if value="{{ gr.head }}" hint-placeholder-val="{{ false }}">
+                          <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 20px;background:var(--n-25);border-bottom:1px solid var(--n-100);position:relative">
+                            <sc-if value="{{ gr.avatarOn }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ gr.label }}" size="{{ 16 }}" hint-size="16px,16px"></x-import></sc-if>
+                            <sc-if value="{{ gr.dotOn }}" hint-placeholder-val="{{ true }}"><span style="width:10px;height:10px;border-radius:999px;background:{{ gr.bg }};border:1.5px solid {{ gr.bd }};box-sizing:border-box"></span></sc-if>
+                            <span style="font-size:12px;font-weight:600;color:var(--n-800)">{{ gr.label }}</span>
+                            <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ gr.count }}</span>
+                          </div>
+                        </sc-if>
+                        <sc-if value="{{ gr.row }}" hint-placeholder-val="{{ true }}">
+                          <div onClick="{{ gr.open }}" class="cb-row" style="display:flex;height:38px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ gr.rowBg }}" style-hover="background:var(--n-50)">
+                            <div style="width:300px;flex:none;display:flex;align-items:center;gap:8px;padding:0 14px 0 20px;border-right:1px solid var(--n-200);min-width:0;box-sizing:border-box">
+                              <sc-if value="{{ wvfKey }}" hint-placeholder-val="{{ true }}"><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ gr.key }}</span></sc-if>
+                              <sc-if value="{{ wvfType }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;flex:none;color:{{ gr.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ gr.typeIcon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span></sc-if>
+                              <span style="font-size:12.5px;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ gr.name }}</span>
+                              <sc-if value="{{ wvfAssignee }}" hint-placeholder-val="{{ true }}"><span title="{{ gr.assignee }}" style="flex:none;display:inline-flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ gr.assignee }}" size="{{ 18 }}" hint-size="18px,18px"></x-import></span></sc-if>
+                            </div>
+                            <div style="flex:1;position:relative">
+                              <sc-if value="{{ gr.mile }}" hint-placeholder-val="{{ false }}">
+                                <span title="{{ gr.title }}" style="position:absolute;left:{{ gr.left }}%;top:13px;width:12px;height:12px;transform:rotate(45deg);background:var(--swatch-amber);border:1.5px solid var(--n-0);box-shadow:var(--shadow-xs);border-radius:2px"></span>
+                                <span style="position:absolute;left:{{ gr.left }}%;top:11px;margin-left:20px;font-family:var(--font-mono);font-size:10px;color:var(--n-500);white-space:nowrap">{{ gr.due }}</span>
+                              </sc-if>
+                              <sc-if value="{{ gr.barOn }}" hint-placeholder-val="{{ true }}">
+                                <span title="{{ gr.title }}" style="position:absolute;left:{{ gr.left }}%;width:{{ gr.w }}%;top:11px;height:16px;border-radius:4px;background:color-mix(in srgb, {{ gr.color }} 22%, var(--n-0));overflow:hidden;box-sizing:border-box">
+                                  <sc-if value="{{ wvGProg }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ gr.prog }}%;background:{{ gr.color }};border-radius:4px 0 0 4px"></span></sc-if>
+                                </span>
+                              </sc-if>
+                            </div>
+                          </div>
+                        </sc-if>
+                      </div>
+                    </sc-for>
+                    <div style="position:absolute;top:0;bottom:0;left:300px;right:0;pointer-events:none">
+                      <div style="position:absolute;top:0;bottom:0;left:{{ wvTodayLeft }}%;width:1px;background:var(--cortex-300)"></div>
+                      <sc-if value="{{ wvGDeps }}" hint-placeholder-val="{{ true }}">
+                        <sc-for list="{{ wvGSegs }}" as="sg" hint-placeholder-count="0"><span style="position:absolute;left:{{ sg.l }}%;top:{{ sg.t }}px;width:{{ sg.w }};height:{{ sg.h }};background:{{ sg.bg }};border-radius:1px"></span></sc-for>
+                        <sc-for list="{{ wvGArrows }}" as="ar" hint-placeholder-count="0"><span style="position:absolute;left:{{ ar.l }}%;top:{{ ar.t }}px;margin-left:-5px;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid {{ ar.color }}"></span></sc-for>
+                      </sc-if>
+                    </div>
+                  </div>
+                  <div style="padding:12px 20px;font-size:12px;color:var(--n-400)">{{ wvGanttHint }}</div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ wvCal }}" hint-placeholder-val="{{ false }}">
                 <div style="padding:14px 20px 20px;min-width:980px">
                   <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-                    <span style="font-size:14px;font-weight:600">{{ calTitle }}</span>
+                    <span style="font-size:14px;font-weight:600;width:130px">{{ wvCalTitle }}</span>
+                    <button onClick="{{ wvCalPrev }}" title="Previous month" style="width:24px;height:24px;border:1px solid var(--n-200);background:var(--n-0);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:{{ wvCalPrevC }};cursor:pointer" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-left" size="{{ 13 }}" hint-size="13px,13px"></x-import></button>
+                    <button onClick="{{ wvCalNext }}" title="Next month" style="width:24px;height:24px;border:1px solid var(--n-200);background:var(--n-0);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:{{ wvCalNextC }};cursor:pointer" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ 13 }}" hint-size="13px,13px"></x-import></button>
                     <span style="font-size:11.5px;color:var(--n-500)">Items land on their due date</span>
                   </div>
                   <div style="display:grid;grid-template-columns:repeat(7,1fr);border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
                     <sc-for list="{{ calDays }}" as="cd" hint-placeholder-count="7">
                       <div style="height:30px;display:flex;align-items:center;padding:0 10px;background:var(--n-25);border-bottom:1px solid var(--n-200);border-right:1px solid var(--n-100);font-size:10.5px;text-transform:uppercase;letter-spacing:0.05em;color:var(--n-500)">{{ cd.d }}</div>
                     </sc-for>
-                    <sc-for list="{{ calCells }}" as="cc" hint-placeholder-count="14">
+                    <sc-for list="{{ wvCalCells }}" as="cc" hint-placeholder-count="14">
                       <div style="min-height:94px;border-bottom:1px solid var(--n-100);border-right:1px solid var(--n-100);padding:6px;background:{{ cc.bg }};display:flex;flex-direction:column;gap:3px;min-width:0">
                         <span style="align-self:flex-end;font-family:var(--font-mono);font-size:10.5px;color:{{ cc.numColor }};width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:{{ cc.numBg }}">{{ cc.day }}</span>
                         <sc-for list="{{ cc.items }}" as="ci" hint-placeholder-count="0">
-                          <span onClick="{{ ci.open }}" style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--n-200);border-radius:6px;padding:2px 6px;background:var(--n-0);cursor:pointer;min-width:0" style-hover="border-color:var(--n-300);box-shadow:var(--shadow-xs)">
-                            <span style="display:inline-flex;flex:none;color:{{ ci.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ ci.typeIcon }}" size="{{ 11 }}" hint-size="11px,11px"></x-import></span>
+                          <span onClick="{{ ci.open }}" title="{{ ci.title }}" style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--n-200);border-left:3px solid {{ ci.bar }};border-radius:6px;padding:2px 6px;background:var(--n-0);cursor:pointer;min-width:0" style-hover="border-color:var(--n-300);box-shadow:var(--shadow-xs)">
+                            <sc-if value="{{ wvfType }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;flex:none;color:{{ ci.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ ci.typeIcon }}" size="{{ 11 }}" hint-size="11px,11px"></x-import></span></sc-if>
                             <span style="font-size:11px;color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ci.name }}</span>
+                            <sc-if value="{{ ci.avatarOn }}" hint-placeholder-val="{{ false }}"><span style="margin-left:auto;flex:none;display:inline-flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ ci.assignee }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span></sc-if>
                           </span>
                         </sc-for>
                       </div>
                     </sc-for>
                   </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ wvEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:70px 20px;display:flex;flex-direction:column;align-items:center;gap:8px">
+                  <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="list-filter" size="{{ 26 }}" color="var(--n-300)" hint-size="26px,26px"></x-import>
+                  <div style="font-size:13.5px;font-weight:600;color:var(--n-700)">Nothing matches this view</div>
+                  <div style="font-size:12.5px;color:var(--n-500)">{{ wvEmptyMeta }}</div>
+                  <div style="margin-top:6px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="secondary" size="sm" icon="x" onClick="{{ wvClearFilters }}" hint-size="110px,28px">Clear filters</x-import></div>
                 </div>
               </sc-if>
             </div>
@@ -2604,44 +2806,6 @@
                   </div>
                 </sc-for>
                 <div style="font-size:12px;color:var(--n-400);padding:6px 2px">Cycles time-box execution. Items roll into the next cycle when one closes.</div>
-              </div>
-            </div>
-          </sc-if>
-          <sc-if value="{{ pjTabWs }}" hint-placeholder-val="{{ false }}">
-            <div style="flex:1;overflow:auto;min-height:0">
-              <div style="min-width:980px">
-                <sc-for list="{{ pjWsGroups }}" as="w" hint-placeholder-count="3">
-                  <div>
-                    <div style="display:flex;align-items:center;gap:9px;height:46px;padding:0 20px;background:var(--n-25);border-bottom:1px solid var(--n-100)">
-                      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="boxes" size="{{ 15 }}" color="var(--n-500)" hint-size="15px,15px"></x-import>
-                      <span style="font-size:13px;font-weight:600;color:var(--n-900)">{{ w.name }}</span>
-                      <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-400)">{{ w.count }}</span>
-                      <sc-if value="{{ w.hasMeta }}" hint-placeholder-val="{{ true }}">
-                        <span style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--n-200);border-radius:999px;padding:2px 8px;font-size:11px;font-weight:500;color:var(--n-700);flex:none"><span style="width:7px;height:7px;border-radius:999px;background:{{ w.stateBg }};border:1.5px solid {{ w.stateBd }};box-sizing:border-box"></span>{{ w.stateName }}</span>
-                        <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-500)">{{ w.timeframe }}</span>
-                      </sc-if>
-                      <span style="flex:1"></span>
-                      <sc-if value="{{ w.hasMeta }}" hint-placeholder-val="{{ true }}">
-                        <span style="width:120px;height:4px;border-radius:999px;background:var(--n-100);overflow:hidden;display:block"><span style="display:block;height:100%;width:{{ w.progress }}%;border-radius:999px;background:var(--cortex-500)"></span></span>
-                        <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-600);width:34px;text-align:right">{{ w.progress }}%</span>
-                        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ w.lead }}" size="{{ 18 }}" hint-size="18px,18px"></x-import>
-                      </sc-if>
-                    </div>
-                    <sc-for list="{{ w.rows }}" as="r" hint-placeholder-count="3">
-                      <div onClick="{{ r.open }}" class="cb-row" style="display:flex;align-items:center;gap:9px;height:38px;padding:0 20px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ r.bg }};min-width:0" style-hover="background:var(--n-50)">
-                        <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400);width:52px;flex:none">{{ r.key }}</span>
-                        <span title="{{ r.typeName }}" style="display:inline-flex;flex:none;color:{{ r.typeColor }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.typeIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
-                        <span style="font-size:13px;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
-                        <span style="flex:1"></span>
-                        <span onClick="{{ r.stPick }}" title="Set status" class="cb-edt" style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;width:104px;flex:none"><span style="width:9px;height:9px;border-radius:999px;background:{{ r.stBg }};border:1.5px solid {{ r.stBd }};box-sizing:border-box;flex:none"></span><span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.stName }}</span></span>
-                        <span onClick="{{ r.prPick }}" title="Set priority — {{ r.prName }}" class="cb-edt" style="display:inline-flex;flex:none;color:{{ r.prColor }};padding:3px 5px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.prIcon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
-                        <span onClick="{{ r.asgPick }}" title="Assign — {{ r.assignee }}" class="cb-edt" style="display:inline-flex;flex:none;padding:2px 4px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ r.assignee }}" size="{{ 20 }}" hint-size="20px,20px"></x-import></span>
-                        <span onClick="{{ r.duePick }}" title="Set due date" class="cb-edt" style="display:inline-flex;padding:3px 6px;font-family:var(--font-mono);font-size:11px;color:{{ r.dueColor }};flex:none;width:50px;justify-content:flex-end">{{ r.due }}</span>
-                      </div>
-                    </sc-for>
-                  </div>
-                </sc-for>
-                <div style="padding:12px 20px;font-size:12px;color:var(--n-400)">Workstreams chunk this project's items — the equivalent of modules. The same grouping is available inside the Items view.</div>
               </div>
             </div>
           </sc-if>
@@ -3406,6 +3570,300 @@
         </div>
       </sc-if>
 
+      <sc-if value="{{ wvPopOn }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div onClick="{{ wvPopClose }}" style="position:fixed;inset:0;z-index:70"></div>
+          <div data-screen-label="View controls popover" style="position:fixed;left:{{ wvPopLeft }}px;top:{{ wvPopTop }}px;width:{{ wvPopW }}px;background:var(--n-0);border:1px solid var(--n-200);border-radius:12px;box-shadow:var(--shadow-lg);z-index:71;animation:cbFadeIn 120ms cubic-bezier(.2,.6,.2,1);display:flex;flex-direction:column;max-height:540px">
+            <sc-if value="{{ wvPopTitle }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;font-weight:600;color:var(--n-500);padding:10px 14px 4px;text-transform:uppercase;letter-spacing:0.05em;flex:none">{{ wvPopTitle }}</div></sc-if>
+            <sc-if value="{{ wvPopFields }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:2px 6px 8px;overflow-y:auto">
+                <sc-for list="{{ wvFieldRows }}" as="fr" hint-placeholder-count="6">
+                  <div onClick="{{ fr.go }}" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="display:inline-flex;color:var(--n-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ fr.icon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
+                    <span style="font-size:13px;color:var(--n-800)">{{ fr.name }}</span>
+                    <span style="flex:1"></span>
+                    <span style="font-size:11px;color:var(--n-400)">{{ fr.meta }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopVals }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:6px;padding:6px 14px 8px;flex:none">
+                <sc-for list="{{ wvValOps }}" as="op" hint-placeholder-count="2">
+                  <button onClick="{{ op.go }}" style="height:24px;border:1px solid {{ op.bd }};border-radius:7px;background:{{ op.bg }};color:{{ op.color }};font-family:var(--font-ui);font-size:11.5px;font-weight:500;padding:0 10px;cursor:pointer">{{ op.label }}</button>
+                </sc-for>
+              </div>
+              <div style="padding:0 6px;overflow-y:auto">
+                <sc-for list="{{ wvValRows }}" as="vr" hint-placeholder-count="5">
+                  <div onClick="{{ vr.go }}" style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="width:14px;height:14px;border-radius:4px;border:1.5px solid {{ vr.checkBd }};background:{{ vr.checkBg }};display:inline-flex;align-items:center;justify-content:center;flex:none;box-sizing:border-box">
+                      <sc-if value="{{ vr.on }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="check" size="{{ 10 }}" color="#fff" hint-size="10px,10px"></x-import></sc-if>
+                    </span>
+                    <sc-if value="{{ vr.avatarOn }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ vr.avatar }}" size="{{ 18 }}" hint-size="18px,18px"></x-import></sc-if>
+                    <sc-if value="{{ vr.dotOn }}" hint-placeholder-val="{{ false }}"><span style="width:9px;height:9px;border-radius:999px;background:{{ vr.dotBg }};border:1.5px solid {{ vr.dotBd }};box-sizing:border-box;flex:none"></span></sc-if>
+                    <span style="font-size:12.5px;color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ vr.label }}</span>
+                    <span style="flex:1"></span>
+                    <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--n-400)">{{ vr.count }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-top:1px solid var(--n-100);margin-top:6px;flex:none">
+                <button onClick="{{ wvValRemove }}" style="border:none;background:none;font-family:var(--font-ui);font-size:12px;color:var(--n-500);cursor:pointer;padding:4px 6px;border-radius:6px" style-hover="color:var(--danger-600);background:var(--danger-50)">Remove filter</button>
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" onClick="{{ wvValDone }}" hint-size="58px,28px">Done</x-import>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopSort }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:2px 10px 8px;overflow-y:auto">
+                <sc-if value="{{ wvSortEmpty }}" hint-placeholder-val="{{ false }}"><div style="font-size:12px;color:var(--n-400);padding:6px 4px 8px">No sorts applied — items keep their manual order.</div></sc-if>
+                <sc-for list="{{ wvSortRows }}" as="sr" hint-placeholder-count="1">
+                  <div style="display:flex;align-items:center;gap:7px;padding:5px 0">
+                    <span style="font-size:11px;color:var(--n-400);width:46px;flex:none">{{ sr.nth }}</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--n-200);border-radius:7px;height:26px;padding:0 9px;font-size:12px;font-weight:500;color:var(--n-800);flex:1;min-width:0"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ sr.icon }}" size="{{ 12 }}" hint-size="12px,12px"></x-import>{{ sr.label }}</span>
+                    <button onClick="{{ sr.dirToggle }}" title="Flip direction" style="display:inline-flex;align-items:center;gap:5px;height:26px;border:1px solid var(--n-200);border-radius:7px;background:var(--n-25);padding:0 8px;font-family:var(--font-ui);font-size:11.5px;color:var(--n-600);cursor:pointer;flex:none" style-hover="border-color:var(--n-300)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ sr.dirIcon }}" size="{{ 12 }}" hint-size="12px,12px"></x-import>{{ sr.dirLabel }}</button>
+                    <button onClick="{{ sr.del }}" title="Remove sort" style="width:24px;height:24px;border:none;background:none;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer;flex:none" style-hover="background:var(--n-100);color:var(--danger-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="x" size="{{ 12 }}" hint-size="12px,12px"></x-import></button>
+                  </div>
+                </sc-for>
+                <div style="border-top:1px solid var(--n-100);margin:6px 0 4px"></div>
+                <div style="font-size:11px;font-weight:600;color:var(--n-500);padding:2px 0 3px;text-transform:uppercase;letter-spacing:0.05em">Add sort</div>
+                <sc-for list="{{ wvSortAddRows }}" as="sa" hint-placeholder-count="3">
+                  <div onClick="{{ sa.go }}" style="display:flex;align-items:center;gap:9px;padding:6px 4px;border-radius:7px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="display:inline-flex;color:var(--n-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ sa.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
+                    <span style="font-size:12.5px;color:var(--n-800)">{{ sa.name }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopGroup }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:2px 6px 6px;overflow-y:auto">
+                <sc-for list="{{ wvGroupRows }}" as="gp" hint-placeholder-count="6">
+                  <div onClick="{{ gp.go }}" style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer;background:{{ gp.bg }}" style-hover="background:var(--n-50)">
+                    <span style="display:inline-flex;color:var(--n-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ gp.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
+                    <span style="font-size:12.5px;color:var(--n-800)">{{ gp.name }}</span>
+                    <span style="flex:1"></span>
+                    <sc-if value="{{ gp.on }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="check" size="{{ 13 }}" color="var(--cortex-600)" hint-size="13px,13px"></x-import></sc-if>
+                  </div>
+                </sc-for>
+                <div onClick="{{ wvHideEmptyToggle }}" style="display:flex;align-items:center;gap:9px;padding:8px;border-top:1px solid var(--n-100);margin-top:5px;cursor:pointer" style-hover="background:var(--n-50)">
+                  <span style="font-size:12.5px;color:var(--n-700)">Hide empty groups</span>
+                  <span style="flex:1"></span>
+                  <span style="width:28px;height:16px;border-radius:999px;background:{{ wvHideEmptyBg }};position:relative;transition:background 120ms;flex:none"><span style="position:absolute;top:2px;left:{{ wvHideEmptyKnob }}px;width:12px;height:12px;border-radius:999px;background:#fff;box-shadow:var(--shadow-xs);transition:left 120ms"></span></span>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopDisplay }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:2px 12px 10px;overflow-y:auto">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding-bottom:10px">
+                  <sc-for list="{{ wvDispLayouts }}" as="dl" hint-placeholder-count="6">
+                    <button onClick="{{ dl.go }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px 7px;border:1px solid {{ dl.bd }};border-radius:9px;background:{{ dl.bg }};cursor:pointer;font-family:var(--font-ui)" style-hover="border-color:var(--cortex-300)">
+                      <span style="display:inline-flex;color:{{ dl.color }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ dl.icon }}" size="{{ 16 }}" hint-size="16px,16px"></x-import></span>
+                      <span style="font-size:10.5px;font-weight:500;color:{{ dl.color }}">{{ dl.label }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--n-100);padding-top:8px">
+                  <div onClick="{{ wvDispGroupGo }}" style="display:flex;align-items:center;gap:8px;height:30px;border-radius:7px;padding:0 6px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="font-size:12.5px;color:var(--n-600)">{{ wvDispGroupWord }}</span><span style="flex:1"></span>
+                    <span style="font-size:12.5px;font-weight:500;color:var(--n-800)">{{ wvDispGroupVal }}</span>
+                    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ 12 }}" color="var(--n-400)" hint-size="12px,12px"></x-import>
+                  </div>
+                  <div onClick="{{ wvDispSortGo }}" style="display:flex;align-items:center;gap:8px;height:30px;border-radius:7px;padding:0 6px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="font-size:12.5px;color:var(--n-600)">Ordering</span><span style="flex:1"></span>
+                    <span style="font-size:12.5px;font-weight:500;color:var(--n-800)">{{ wvDispSortVal }}</span>
+                    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ 12 }}" color="var(--n-400)" hint-size="12px,12px"></x-import>
+                  </div>
+                </div>
+                <sc-if value="{{ wvDispBoard }}" hint-placeholder-val="{{ false }}">
+                  <div style="border-top:1px solid var(--n-100);margin-top:8px;padding-top:8px">
+                    <div style="font-size:11px;font-weight:600;color:var(--n-500);text-transform:uppercase;letter-spacing:0.05em;padding-bottom:6px">Board options</div>
+                    <div style="display:flex;align-items:center;gap:5px;height:30px">
+                      <span style="font-size:12.5px;color:var(--n-600)">Card size</span><span style="flex:1"></span>
+                      <sc-for list="{{ wvBoardSizeOpts }}" as="bo" hint-placeholder-count="2"><button onClick="{{ bo.go }}" style="height:24px;border:1px solid {{ bo.bd }};border-radius:7px;background:{{ bo.bg }};color:{{ bo.color }};font-family:var(--font-ui);font-size:11.5px;font-weight:500;padding:0 9px;cursor:pointer">{{ bo.label }}</button></sc-for>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:5px;min-height:30px;flex-wrap:wrap;padding:2px 0">
+                      <span style="font-size:12.5px;color:var(--n-600)">Swimlanes</span><span style="flex:1"></span>
+                      <sc-for list="{{ wvSwimOpts }}" as="so" hint-placeholder-count="3"><button onClick="{{ so.go }}" style="height:24px;border:1px solid {{ so.bd }};border-radius:7px;background:{{ so.bg }};color:{{ so.color }};font-family:var(--font-ui);font-size:11.5px;font-weight:500;padding:0 9px;cursor:pointer">{{ so.label }}</button></sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ wvDispTable }}" hint-placeholder-val="{{ false }}">
+                  <div style="border-top:1px solid var(--n-100);margin-top:8px;padding-top:8px">
+                    <div style="font-size:11px;font-weight:600;color:var(--n-500);text-transform:uppercase;letter-spacing:0.05em;padding-bottom:6px">Table options</div>
+                    <div style="display:flex;align-items:center;gap:5px;height:30px">
+                      <span style="font-size:12.5px;color:var(--n-600)">Row height</span><span style="flex:1"></span>
+                      <sc-for list="{{ wvRowHOpts }}" as="ro" hint-placeholder-count="2"><button onClick="{{ ro.go }}" style="height:24px;border:1px solid {{ ro.bd }};border-radius:7px;background:{{ ro.bg }};color:{{ ro.color }};font-family:var(--font-ui);font-size:11.5px;font-weight:500;padding:0 9px;cursor:pointer">{{ ro.label }}</button></sc-for>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ wvDispGantt }}" hint-placeholder-val="{{ false }}">
+                  <div style="border-top:1px solid var(--n-100);margin-top:8px;padding-top:8px">
+                    <div style="font-size:11px;font-weight:600;color:var(--n-500);text-transform:uppercase;letter-spacing:0.05em;padding-bottom:2px">Gantt options</div>
+                    <div onClick="{{ wvGDepsToggle }}" style="display:flex;align-items:center;height:30px;cursor:pointer;border-radius:7px;padding:0 2px" style-hover="background:var(--n-50)">
+                      <span style="font-size:12.5px;color:var(--n-600)">Dependency arrows</span><span style="flex:1"></span>
+                      <span style="width:28px;height:16px;border-radius:999px;background:{{ wvGDepsBg }};position:relative;transition:background 120ms;flex:none"><span style="position:absolute;top:2px;left:{{ wvGDepsKnob }}px;width:12px;height:12px;border-radius:999px;background:#fff;box-shadow:var(--shadow-xs);transition:left 120ms"></span></span>
+                    </div>
+                    <div onClick="{{ wvGProgToggle }}" style="display:flex;align-items:center;height:30px;cursor:pointer;border-radius:7px;padding:0 2px" style-hover="background:var(--n-50)">
+                      <span style="font-size:12.5px;color:var(--n-600)">Progress fill</span><span style="flex:1"></span>
+                      <span style="width:28px;height:16px;border-radius:999px;background:{{ wvGProgBg }};position:relative;transition:background 120ms;flex:none"><span style="position:absolute;top:2px;left:{{ wvGProgKnob }}px;width:12px;height:12px;border-radius:999px;background:#fff;box-shadow:var(--shadow-xs);transition:left 120ms"></span></span>
+                    </div>
+                  </div>
+                </sc-if>
+                <div style="border-top:1px solid var(--n-100);margin-top:8px;padding-top:8px">
+                  <div style="font-size:11px;font-weight:600;color:var(--n-500);text-transform:uppercase;letter-spacing:0.05em;padding-bottom:7px">Properties</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:5px">
+                    <sc-for list="{{ wvDispProps }}" as="pp" hint-placeholder-count="8">
+                      <button onClick="{{ pp.toggle }}" style="height:24px;border:1px solid {{ pp.bd }};border-radius:999px;background:{{ pp.bg }};color:{{ pp.color }};font-family:var(--font-ui);font-size:11.5px;font-weight:500;padding:0 10px;cursor:pointer" style-hover="border-color:var(--cortex-300)">{{ pp.label }}</button>
+                    </sc-for>
+                  </div>
+                  <div onClick="{{ wvCfManage }}" style="display:flex;align-items:center;gap:8px;height:30px;border-radius:7px;padding:0 6px;cursor:pointer;margin-top:6px" style-hover="background:var(--n-50)">
+                    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="pencil-ruler" size="{{ 13 }}" color="var(--n-500)" hint-size="13px,13px"></x-import>
+                    <span style="font-size:12.5px;color:var(--n-700)">Manage fields</span><span style="flex:1"></span>
+                    <span style="font-size:11px;color:var(--n-400)">{{ wvCfCountMeta }}</span>
+                    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ 12 }}" color="var(--n-400)" hint-size="12px,12px"></x-import>
+                  </div>
+                  <div style="font-size:11px;color:var(--n-400);padding-top:6px">Visibility is per view — custom field values follow items everywhere.</div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopCf }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:2px;padding:0 12px;flex:none;border-bottom:1px solid var(--n-100)">
+                <sc-for list="{{ wvCfTabs }}" as="ct" hint-placeholder-count="2">
+                  <button onClick="{{ ct.go }}" style="border:none;background:none;font-family:var(--font-ui);font-size:12.5px;font-weight:{{ ct.weight }};color:{{ ct.color }};padding:6px 8px 8px;cursor:pointer;border-bottom:2px solid {{ ct.line }};margin-bottom:-1px">{{ ct.label }}</button>
+                </sc-for>
+              </div>
+              <sc-if value="{{ wvCfExisting }}" hint-placeholder-val="{{ true }}">
+                <div style="padding:6px;overflow-y:auto">
+                  <sc-for list="{{ wvCfExistRows }}" as="er" hint-placeholder-count="8">
+                    <div style="display:flex;align-items:center;gap:9px;padding:5px 8px;border-radius:7px" style-hover="background:var(--n-50)">
+                      <span style="display:inline-flex;color:var(--n-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ er.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
+                      <span style="font-size:12.5px;color:var(--n-800);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ er.name }}</span>
+                      <sc-if value="{{ er.typeLabel }}" hint-placeholder-val="{{ false }}"><span style="font-size:10.5px;color:var(--n-400)">{{ er.typeLabel }}</span></sc-if>
+                      <sc-if value="{{ er.custom }}" hint-placeholder-val="{{ false }}"><button onClick="{{ er.del }}" title="Delete field and its values" style="width:20px;height:20px;border:none;background:none;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:var(--n-400);cursor:pointer" style-hover="background:var(--danger-50);color:var(--danger-600)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="trash-2" size="{{ 12 }}" hint-size="12px,12px"></x-import></button></sc-if>
+                      <span onClick="{{ er.go }}" style="width:28px;height:16px;border-radius:999px;background:{{ er.tgBg }};position:relative;transition:background 120ms;flex:none;cursor:pointer"><span style="position:absolute;top:2px;left:{{ er.tgKnob }}px;width:12px;height:12px;border-radius:999px;background:#fff;box-shadow:var(--shadow-xs);transition:left 120ms"></span></span>
+                    </div>
+                  </sc-for>
+                  <div style="font-size:11px;color:var(--n-400);padding:8px 8px 4px">Toggles set visibility for this view. Custom fields belong to {{ wvCfContName }}; values follow items into every view.</div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ wvCfPicking }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:6px 6px 8px;overflow-y:auto">
+                  <sc-if value="{{ wvCfSugOn }}" hint-placeholder-val="{{ true }}">
+                    <div style="display:flex;align-items:center;gap:6px;padding:4px 8px 3px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sparkles" size="{{ 12 }}" color="var(--synapse-500)" hint-size="12px,12px"></x-import><span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--synapse-600)">Cerebro suggests</span></div>
+                    <sc-for list="{{ wvCfSugRows }}" as="sg" hint-placeholder-count="3">
+                      <div onClick="{{ sg.go }}" style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer" style-hover="background:var(--synapse-50)">
+                        <span style="display:inline-flex;color:var(--synapse-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ sg.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
+                        <span style="font-size:12.5px;color:var(--n-800);flex:1">{{ sg.name }}</span>
+                        <span style="font-size:10.5px;color:var(--n-400)">{{ sg.typeLabel }}</span>
+                      </div>
+                    </sc-for>
+                    <div style="font-size:10.5px;color:var(--n-400);padding:2px 8px 8px">From this container's items and existing fields.</div>
+                  </sc-if>
+                  <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:4px 8px 3px">Field types</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px">
+                    <sc-for list="{{ wvCfTypeRows }}" as="ft" hint-placeholder-count="10">
+                      <div onClick="{{ ft.go }}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;cursor:pointer" style-hover="background:var(--n-50)">
+                        <span style="display:inline-flex;color:var(--n-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ ft.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
+                        <span style="font-size:12.5px;color:{{ ft.color }}">{{ ft.label }}</span>
+                        <sc-if value="{{ ft.soon }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--n-400);border:1px solid var(--n-200);border-radius:4px;padding:0 4px">Soon</span></sc-if>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ wvCfNaming }}" hint-placeholder-val="{{ false }}">
+                <div style="padding:8px 12px 12px">
+                  <div style="font-size:11px;color:var(--n-500);padding-bottom:6px">New {{ wvCfTypeLabel }} field on {{ wvCfContName }}</div>
+                  <input ref="{{ wvCfNameRef }}" defaultValue="{{ wvCfNameDefault }}" placeholder="Field name" onKeyDown="{{ wvCfNameKey }}" style="width:100%;box-sizing:border-box;height:30px;border:1px solid var(--n-200);border-radius:8px;padding:0 10px;font-family:var(--font-ui);font-size:12.5px;color:var(--n-900);outline:none;background:var(--n-25);margin-bottom:10px" style-focus="border-color:var(--cortex-500);box-shadow:0 0 0 3px var(--cortex-100);background:var(--n-0)">
+                  <sc-if value="{{ wvCfOptHint }}" hint-placeholder-val="{{ false }}"><div style="font-size:11px;color:var(--n-400);padding-bottom:10px">{{ wvCfOptHint }}</div></sc-if>
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <button onClick="{{ wvCfCancel }}" style="border:none;background:none;font-family:var(--font-ui);font-size:12px;color:var(--n-500);cursor:pointer;padding:4px 6px;border-radius:6px" style-hover="background:var(--n-100)">Back</button>
+                    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="plus" onClick="{{ wvCfCreate }}" hint-size="104px,28px">Create field</x-import>
+                  </div>
+                </div>
+              </sc-if>
+            </sc-if>
+            <sc-if value="{{ wvPopCfIn }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:6px 12px 12px">
+                <input ref="{{ wvCfInRef }}" defaultValue="{{ wvCfInVal }}" placeholder="{{ wvCfInPh }}" onKeyDown="{{ wvCfInKey }}" style="width:100%;box-sizing:border-box;height:30px;border:1px solid var(--n-200);border-radius:8px;padding:0 10px;font-family:var(--font-mono);font-size:12.5px;color:var(--n-900);outline:none;background:var(--n-25);margin-bottom:8px" style-focus="border-color:var(--cortex-500);box-shadow:0 0 0 3px var(--cortex-100);background:var(--n-0)">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font-size:11px;color:var(--n-400)">{{ wvCfInHint }}</span>
+                  <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" onClick="{{ wvCfInSave }}" hint-size="58px,28px">Save</x-import>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopCfLbl }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:2px 6px;overflow-y:auto">
+                <sc-for list="{{ wvCfLblRows }}" as="lr" hint-placeholder-count="3">
+                  <div onClick="{{ lr.go }}" style="display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="width:14px;height:14px;border-radius:4px;border:1.5px solid {{ lr.checkBd }};background:{{ lr.checkBg }};display:inline-flex;align-items:center;justify-content:center;flex:none;box-sizing:border-box">
+                      <sc-if value="{{ lr.on }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="check" size="{{ 10 }}" color="#fff" hint-size="10px,10px"></x-import></sc-if>
+                    </span>
+                    <span style="width:8px;height:8px;border-radius:999px;background:{{ lr.dot }};flex:none"></span>
+                    <span style="font-size:12.5px;color:var(--n-800)">{{ lr.label }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;justify-content:flex-end;padding:8px 10px;border-top:1px solid var(--n-100);margin-top:4px;flex:none">
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" onClick="{{ wvCfLblDone }}" hint-size="58px,28px">Done</x-import>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopNew }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:4px 12px 12px">
+                <input ref="{{ wvNewRef }}" placeholder="View name" style="width:100%;box-sizing:border-box;height:30px;border:1px solid var(--n-200);border-radius:8px;padding:0 10px;font-family:var(--font-ui);font-size:12.5px;color:var(--n-900);outline:none;background:var(--n-25);margin-bottom:10px" style-focus="border-color:var(--cortex-500);box-shadow:0 0 0 3px var(--cortex-100);background:var(--n-0)">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding-bottom:8px">
+                  <sc-for list="{{ wvNewLayouts }}" as="nl" hint-placeholder-count="6">
+                    <button onClick="{{ nl.go }}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px 7px;border:1px solid {{ nl.bd }};border-radius:9px;background:{{ nl.bg }};cursor:pointer;font-family:var(--font-ui)" style-hover="border-color:var(--cortex-300)">
+                      <span style="display:inline-flex;color:{{ nl.color }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ nl.icon }}" size="{{ 16 }}" hint-size="16px,16px"></x-import></span>
+                      <span style="font-size:10.5px;font-weight:500;color:{{ nl.color }}">{{ nl.label }}</span>
+                    </button>
+                  </sc-for>
+                </div>
+                <div onClick="{{ wvNewSharedToggle }}" style="display:flex;align-items:center;gap:9px;padding:6px 0 12px;cursor:pointer">
+                  <span style="width:28px;height:16px;border-radius:999px;background:{{ wvNewSharedBg }};position:relative;transition:background 120ms;flex:none"><span style="position:absolute;top:2px;left:{{ wvNewSharedKnob }}px;width:12px;height:12px;border-radius:999px;background:#fff;box-shadow:var(--shadow-xs);transition:left 120ms"></span></span>
+                  <span style="min-width:0">
+                    <span style="display:block;font-size:12.5px;font-weight:500;color:var(--n-800)">{{ wvNewSharedLabel }}</span>
+                    <span style="display:block;font-size:11px;color:var(--n-500)">{{ wvNewSharedDesc }}</span>
+                  </span>
+                </div>
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="plus" onClick="{{ wvNewCreate }}" hint-size="100%,28px">Create view</x-import>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopMenu }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:4px 6px 6px">
+                <div style="padding:4px 8px 8px;border-bottom:1px solid var(--n-100);margin-bottom:4px">
+                  <div style="font-size:12.5px;font-weight:600;color:var(--n-900)">{{ wvMenuName }}</div>
+                  <div style="font-size:11px;color:var(--n-500)">{{ wvMenuMeta }}</div>
+                </div>
+                <sc-for list="{{ wvMenuRows }}" as="mr" hint-placeholder-count="4">
+                  <div onClick="{{ mr.go }}" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="display:inline-flex;color:var(--n-500)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ mr.icon }}" size="{{ 13 }}" hint-size="13px,13px"></x-import></span>
+                    <span style="font-size:12.5px;color:var(--n-800)">{{ mr.label }}</span>
+                    <span style="flex:1"></span>
+                    <sc-if value="{{ mr.check }}" hint-placeholder-val="{{ false }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="check" size="{{ 13 }}" color="var(--cortex-600)" hint-size="13px,13px"></x-import></sc-if>
+                  </div>
+                </sc-for>
+                <div onClick="{{ wvMenuDel }}" style="display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;cursor:pointer;border-top:1px solid var(--n-100);margin-top:4px;color:{{ wvMenuDelColor }}" style-hover="background:var(--danger-50)">
+                  <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="trash-2" size="{{ 13 }}" hint-size="13px,13px"></x-import>
+                  <span style="font-size:12.5px">Delete view</span>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ wvPopSave }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:4px 6px 6px">
+                <sc-for list="{{ wvSaveRows }}" as="sv" hint-placeholder-count="3">
+                  <div onClick="{{ sv.go }}" style="display:flex;align-items:flex-start;gap:9px;padding:8px;border-radius:8px;cursor:pointer" style-hover="background:var(--n-50)">
+                    <span style="display:inline-flex;color:var(--n-500);margin-top:1px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ sv.icon }}" size="{{ 14 }}" hint-size="14px,14px"></x-import></span>
+                    <span style="min-width:0">
+                      <span style="display:block;font-size:12.5px;font-weight:500;color:var(--n-900)">{{ sv.label }}</span>
+                      <span style="display:block;font-size:11px;color:var(--n-500)">{{ sv.desc }}</span>
+                    </span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
       <sc-if value="{{ featPick }}" hint-placeholder-val="{{ false }}">
         <div>
           <div onClick="{{ featPickClose }}" style="position:fixed;inset:0;z-index:44"></div>
@@ -3814,7 +4272,8 @@ class Component extends DCLogic {
     slashDoc: null, blockMenu: null, docMenu: null, statusMenu: null, tplFilter: "All", docBlankHint: false,
     railTab: "details", commentSel: null, cDraft: { tid: null, text: "" }, selTb: null, aiSuggest: null, mention: null, liveCursors: [], treeDrag: null, dragBlk: null,
     myTab: "todo", myQuick: "", taskDlg: null, taskPanel: null, tpDraft: "", dueDlg: null,
-    spaceSel: "sp-field", projSel: "pj-onb", pjTab: "items", wlLayout: "list", wlGroup: "status", wiSel: null,
+    spaceSel: "sp-field", projSel: "pj-onb", pjTab: null, wiSel: null,
+    wvQ: "", wvPop: null, wvColl: {}, wvRen: null, wvCalM: 7, wvNewLay: "list", wvNewShared: true, wvCfTab: "existing", wvCfNew: null,
     spaceOpen: { "sp-field": true, "sp-org": false, "sp-ops": false, "sp-launch": false, "sp-maya": false },
     mwWeek: false, mwDone: false, stSpace: null, stAdd: null,
     pinnedDocs: { "d-prd-firstrun": true, "d-strategy-q3": true },
@@ -4204,6 +4663,7 @@ class Component extends DCLogic {
       const sp2 = this.wSpaceById(pop.extra && pop.extra.spaceId);
       items = (sp2 ? sp2.statuses : []).map((st) => mk(st.id, st.name, { dot: st.color }));
     }
+    else if (pop.kind === "cfopts") items = ((pop.extra && pop.extra.opts) || []).map((o) => mk(o.v, o.label, o.dot ? { dot: o.dot } : {}));
     else if (pop.kind === "priority") items = (this.WD ? this.WD.PRIORITIES : []).map((p2) => mk(p2.id, p2.name, { dot: p2.color }));
     else if (pop.kind === "itemtype") items = (this.WD ? this.WD.ITEM_TYPES : []).map((t2) => mk(t2.id, t2.name, { dot: t2.color }));
     else if (pop.kind === "pstate") items = (this.WD ? this.WD.PROJECT_STATES : []).map((p2) => mk(p2.id, p2.name, { dot: p2.color }));
@@ -4271,7 +4731,7 @@ class Component extends DCLogic {
   }
   krById(id) { let hit = null; (this.DB ? this.DB.OBJECTIVES : []).forEach((o) => o.krs.forEach((kr) => { if (kr.id === id) hit = kr; })); return hit; }
   goSpace(id) { this.setState((s) => ({ view: "space", spaceSel: id, railCtx: null, sel: null, controls: false, wiSel: null, createOpen: false, spaceOpen: { ...s.spaceOpen, [id]: true } })); }
-  goProject(id) { this.setState({ view: "project", projSel: id, railCtx: null, sel: null, controls: false, wiSel: null, createOpen: false }); }
+  goProject(id) { this.setState({ view: "project", projSel: id, pjTab: null, wvPop: null, wvQ: "", wvRen: null, railCtx: null, sel: null, controls: false, wiSel: null, createOpen: false }); }
   openItem(id) { this.setState({ wiSel: id, controls: false, sel: null, askOpen: false, cardCustom: false }); }
   wNextKey(cont) { const pre = cont.key || "IT"; const n = this.wItems().filter((i) => (i.key || "").indexOf(pre + "-") === 0).length + 1; return pre + "-" + n; }
   openWorkItemDlg(cont, seed) {
@@ -4326,6 +4786,7 @@ class Component extends DCLogic {
     const fx = it.featureId ? this.findFeature(it.featureId) : null;
     const p = it.projectId ? this.wProjectById(it.projectId) : null;
     const ws = p && it.wsId ? (p.workstreams || []).find((w) => w.id === it.wsId) : null;
+    const cycW = it.cycleId ? this.WD.CYCLES.find((c) => c.id === it.cycleId) : null;
     const subs = this.wItems().filter((x) => x.parentId === it.id);
     const done = this.wIsDone(sp, it);
     const up = () => this.forceUpdate();
@@ -4337,7 +4798,7 @@ class Component extends DCLogic {
       dueColor: !done && it.dueN && it.dueN < 721 ? "var(--danger-500)" : "var(--n-500)",
       estimate: it.estimate || "—",
       featName: fx ? fx.f.name : null, featSwatch: fx ? fx.f.swatch : null,
-      wsName: ws ? ws.name : "—",
+      wsName: ws ? ws.name : "—", wsTag: ws ? ws.name : null, cycName: cycW ? cycW.name : null,
       container: (sp ? sp.name + " / " : "") + (cont.name || ""),
       subMeta: subs.length ? "" + subs.length : null,
       bg: S.wiSel === it.id ? "var(--surface-selected)" : "transparent",
@@ -4351,7 +4812,7 @@ class Component extends DCLogic {
   }
   buildWork() {
     const S = this.state, me = this.me(), TODAY = 721;
-    if (!this.WD) return { wip: null, homeHi: "Good morning, " + me.split(" ")[0], homeMeta: "Tuesday, Jul 21", homeWorkCount: 0, homeDigestOn: false, mwMeta: "", spName: "", spDesc: "", spMembersMeta: "", spPermLabel: "", spAccessNote: "", pjName: "", pjDesc: "", pjSpaceName: "", wlGroupLabel: "Group: Status", calTitle: "July 2026", stTitle: "Edit statuses", spNewName: "", spPermDesc: "", spTilePrev: "S", homeSpaces: [], homeProjects: [], homeWork: [], homeDigest: [], mwGroups: [], pjTabs: [], wlOpts: [], wlGroups: [], wlCols: [], wlTlRows: [], wlRows: [], wlMonths: [], calCells: [], calDays: [], cycRows: [], pjWsRows: [], spProjects: [], spLists: [], spAvatars: [], spStatusStrip: [], stGroups: [], spShareOpts: [], spPresets: [], spPresetStatuses: [] };
+    if (!this.WD) return { wip: null, homeHi: "Good morning, " + me.split(" ")[0], homeMeta: "Tuesday, Jul 21", homeWorkCount: 0, homeDigestOn: false, mwMeta: "", spName: "", spDesc: "", spMembersMeta: "", spPermLabel: "", spAccessNote: "", pjName: "", pjDesc: "", pjSpaceName: "", stTitle: "Edit statuses", spNewName: "", spPermDesc: "", spTilePrev: "S", homeSpaces: [], homeProjects: [], homeWork: [], homeDigest: [], mwGroups: [], pjViewTabs: [], pjPageTabs: [], pjHasPages: false, pjViewsMeta: "", pjTabItems: true, wvLayoutOpts: [], wvChips: [], wvGroups: [], wvSwims: [], wvLanes: [], wvCols: [], wvGRows: [], wvGSegs: [], wvGArrows: [], wvCalCells: [], wvMonths: [], wvCount: "", wvQ: "", wvSortLabel: "Sort", wvGroupLabel: "Group", wvCalTitle: "July 2026", wvLaneTitle: "", wvGanttHint: "", calDays: [], cycRows: [], spProjects: [], spLists: [], spAvatars: [], spStatusStrip: [], stGroups: [], spShareOpts: [], spPresets: [], spPresetStatuses: [] };
     const spaces = this.wSpaces(), f = S.f;
     const projCard = (p) => {
       const stt = this.wStateOf(p.state), d = this.wDot(stt), psp = this.wSpaceById(p.spaceId) || {};
@@ -4384,32 +4845,9 @@ class Component extends DCLogic {
     const pInit = !isList && cont.initiativeId ? this.initById(cont.initiativeId) : null;
     const pObj = pInit && pInit.objectiveId ? this.objById(pInit.objectiveId) : null;
     const itemsHere = this.wItemsIn(cont.id);
-    const tab = isList ? "items" : S.pjTab;
+    const tab = isList ? "view" : (S.pjTab === "cycles" || S.pjTab === "overview") ? S.pjTab : "view";
     const wsList = (!isList && cont.workstreams) || [];
-    const grp = S.wlGroup === "workstream" && !wsList.length ? "status" : S.wlGroup;
-    let groupDefs;
-    if (grp === "priority") groupDefs = this.WD.PRIORITIES.map((p) => ({ label: p.name, color: p.color, hollow: false, match: (i) => i.priority === p.id, seed: { priority: p.id } }));
-    else if (grp === "assignee") groupDefs = [...new Set(itemsHere.map((i) => i.assignee))].map((n) => ({ label: n, color: "var(--n-400)", hollow: false, match: (i) => i.assignee === n, seed: {} }));
-    else if (grp === "workstream") groupDefs = wsList.map((w) => ({ label: w.name, color: "var(--n-400)", hollow: false, match: (i) => i.wsId === w.id, seed: {} })).concat([{ label: "No workstream", color: "var(--n-300)", hollow: true, match: (i) => !i.wsId, seed: {} }]);
-    else if (grp === "type") groupDefs = this.WD.ITEM_TYPES.map((t) => ({ label: t.name, color: t.color, hollow: false, match: (i) => i.type === t.id, seed: { type: t.id } }));
-    else groupDefs = pjSp.statuses.map((st) => ({ label: st.name, color: st.color, hollow: !!st.hollow, match: (i) => i.status === st.id, seed: { wstatus: st.id } }));
-    const wGroups = groupDefs.map((g) => {
-      const rows = itemsHere.filter(g.match);
-      return { label: g.label, count: rows.length, bg: g.hollow ? "transparent" : g.color, bd: g.color,
-        add: () => this.openWorkItemDlg(cont, g.seed),
-        rows: rows.map((i) => this.wiRow(i)),
-        cards: rows.map((i) => { const r = this.wiRow(i); return { key: r.key, typeIcon: r.typeIcon, typeColor: r.typeColor, typeName: r.typeName, name: r.name, prIcon: r.prIcon, prColor: r.prColor, prName: r.prName, due: r.due, dueColor: r.dueColor, assignee: r.assignee, bar: r.prColor, open: r.open }; }) };
-    }).filter((g) => grp !== "assignee" || g.count);
-    const calCells = [];
-    const mkCell = (mm, d, dim) => {
-      const dn = mm * 100 + d;
-      calCells.push({ day: d, bg: dim ? "var(--n-25)" : "var(--n-0)",
-        numBg: dn === TODAY ? "var(--cortex-500)" : "transparent", numColor: dn === TODAY ? "#fff" : dim ? "var(--n-300)" : "var(--n-500)",
-        items: itemsHere.filter((i) => i.dueN === dn).map((i) => { const t = this.wTypeOf(i.type); return { typeIcon: t.icon, typeColor: t.color, name: i.name, open: () => this.openItem(i.id) }; }) });
-    };
-    mkCell(6, 29, true); mkCell(6, 30, true);
-    for (let d = 1; d <= 31; d++) mkCell(7, d, false);
-    mkCell(8, 1, true); mkCell(8, 2, true);
+    const WV = this.buildWV(cont, pjSp, isList, itemsHere, wsList, tab);
     // cycles
     const cys = !isList ? this.WD.CYCLES.filter((c) => c.projectId === cont.id) : [];
     const act = cys.find((c) => c.status === "active") || null;
@@ -4534,29 +4972,8 @@ class Component extends DCLogic {
       pjInitPick: (e) => this.openPick(e, "initiative", cont.initiativeId || "", (v) => { cont.initiativeId = v || null; this.forceUpdate(); this.toast(v ? "Initiative linked" : "Initiative unlinked", v ? "This project now rolls up to the roadmap." : "Removed the strategy link.", "success"); }, { title: "Link initiative", width: 340 }),
       pjObjective: pObj ? pObj.name : null, pjNoObjective: !pObj,
       pjAddItem: () => this.openWorkItemDlg(cont, {}),
-      pjTabs: (isList ? ["items"] : ["items", "cycles", "workstreams", "overview"]).map((t) => ({
-        label: t === "items" ? "Items" : t === "cycles" ? "Cycles" : t === "workstreams" ? "Workstreams" : "Overview",
-        weight: tab === t ? 600 : 400, color: tab === t ? "var(--n-900)" : "var(--n-500)", line: tab === t ? "var(--cortex-500)" : "transparent",
-        go: () => this.setState({ pjTab: t }) })),
-      pjTabItems: tab === "items", pjTabCycles: tab === "cycles", pjTabWs: tab === "workstreams", pjTabOverview: tab === "overview",
-      wlOpts: [["list", "list", "List"], ["board", "kanban", "Board"], ["timeline", "calendar-range", "Timeline"], ["table", "table-2", "Table"], ["calendar", "calendar", "Calendar"]].map(([v, icon, label]) => ({
-        icon, label, bg: S.wlLayout === v ? "var(--n-0)" : "transparent", color: S.wlLayout === v ? "var(--n-800)" : "var(--n-500)",
-        shadow: S.wlLayout === v ? "var(--shadow-xs)" : "none", go: () => this.setState({ wlLayout: v }) })),
-      wlGroupLabel: "Group: " + ({ status: "Status", priority: "Priority", assignee: "Assignee", workstream: "Workstream", type: "Item type" }[grp]),
-      wlGroupPick: (e) => this.openPick(e, "wgroup", grp, (v) => this.setState({ wlGroup: v }), { title: "Group by", width: 190, extra: { opts: wsList.length ? ["status", "priority", "assignee", "workstream", "type"] : ["status", "priority", "assignee", "type"] } }),
-      wlList: S.wlLayout === "list", wlBoard: S.wlLayout === "board", wlTimeline: S.wlLayout === "timeline", wlTable: S.wlLayout === "table", wlCal: S.wlLayout === "calendar",
-      wlGroups: wGroups, wlCols: wGroups,
-      wlMonths: (this.DB ? this.DB.MONTHS : []).map((m) => ({ m })),
-      wlTlRows: itemsHere.slice().sort((a, b) => (a.startM || 0) - (b.startM || 0)).map((i) => { const r = this.wiRow(i); const s1 = Math.min((i.startM || 0) + 1, 8); return { key: r.key, name: r.name, typeIcon: r.typeIcon, typeColor: r.typeColor, col: s1 + " / " + Math.min(s1 + (i.lenM || 1), 9), barColor: r.stBd, open: r.open }; }),
-      wlRows: itemsHere.map((i) => this.wiRow(i)),
-      calTitle: "July 2026", calDays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => ({ d })), calCells,
+      ...WV,
       cycActive, cycRows,
-      pjWsGroups: (!isList && wsList.length ? wsList.map((w) => ({ w, rows: itemsHere.filter((i) => i.wsId === w.id) })).concat([{ w: null, rows: itemsHere.filter((i) => !i.wsId) }]) : []).map((g) => {
-        const w = g.w, wst = w ? this.wStateOf(w.state) : null, wd = wst ? this.wDot(wst) : null;
-        return { name: w ? w.name : "No workstream", hasMeta: !!w, stateName: wst ? wst.name : "", stateBg: wd ? wd.bg : "transparent", stateBd: wd ? wd.bd : "transparent",
-          timeframe: w ? w.timeframe : "", progress: w ? w.progress : 0, lead: w ? w.lead : "", count: g.rows.length,
-          rows: g.rows.map((i) => this.wiRow(i)) };
-      }).filter((g) => g.hasMeta || g.rows.length),
       goSettings: () => this.navCtx("settings", null),
       cfgTeams: (this.DB ? this.DB.TEAMS : []).map((t) => { const ls = spaces.find((s2) => (s2.teams || []).indexOf(t.name) >= 0); return {
         name: t.name, kind: t.kind, lead: t.lead, members: t.members, space: ls ? ls.name : null, noSpace: !ls,
@@ -4644,6 +5061,642 @@ class Component extends DCLogic {
       priorityOptions: (this.WD.PRIORITIES || []).map((p) => ({ value: p.id, label: p.name })),
       fPriority: this.setF("priority"), fDue: this.setF("due"),
       createItemAction: { label: "Create item", onClick: () => this.wCreateItem() },
+    };
+  }
+  // ---------- saved-view infrastructure ----------
+  // A view = { id, name, shared, createdBy, config, draft? }. config holds the full
+  // recipe: layout + filters + match + sort[] + group + hideEmpty + fields[] + layout options.
+  // Editing writes to view.draft (dirty); Save promotes draft -> config.
+  wvLayoutDefs() {
+    return [["list", "list", "List"], ["table", "table-2", "Table"], ["board", "kanban", "Board"], ["calendar", "calendar", "Calendar"], ["timeline", "calendar-range", "Timeline"], ["gantt", "chart-gantt", "Gantt"]];
+  }
+  wvSortDefs() {
+    return [
+      { id: "priority", name: "Priority", icon: "signal-high", asc: "Urgent first", desc: "Calm first" },
+      { id: "due", name: "Due date", icon: "calendar", asc: "Soonest first", desc: "Latest first" },
+      { id: "status", name: "Status", icon: "loader-circle", asc: "Workflow order", desc: "Reverse workflow" },
+      { id: "name", name: "Name", icon: "text", asc: "A → Z", desc: "Z → A" },
+      { id: "estimate", name: "Estimate", icon: "ruler", asc: "Smallest first", desc: "Largest first" },
+      { id: "assignee", name: "Assignee", icon: "user-round", asc: "A → Z", desc: "Z → A" },
+      { id: "created", name: "Created", icon: "clock", asc: "Oldest first", desc: "Newest first" },
+    ];
+  }
+  wvDefCfg(layout) {
+    return { layout: layout || "list", filters: [], match: "all", sort: [], group: layout === "gantt" || layout === "timeline" ? "workstream" : "status", hideEmpty: false,
+      fields: ["key", "type", "status", "priority", "assignee", "due", "estimate", "feature"],
+      board: { size: "cozy", swim: "none" }, table: { rowH: 40 }, gantt: { deps: true, progress: true } };
+  }
+  wvNorm(cfg) {
+    const d = this.wvDefCfg(cfg.layout);
+    return { ...d, ...cfg, board: { ...d.board, ...(cfg.board || {}) }, table: { ...d.table, ...(cfg.table || {}) }, gantt: { ...d.gantt, ...(cfg.gantt || {}) } };
+  }
+  wvStore(cont) {
+    if (!this.WVS) this.WVS = {};
+    let st = this.WVS[cont.id];
+    if (!st) {
+      const seed = (this.WD.SAVED_VIEWS || {})[cont.id];
+      if (seed) st = { defaultId: seed.defaultId, views: seed.views.map((v) => ({ ...v, config: this.wvNorm(JSON.parse(JSON.stringify(v.config))) })) };
+      else st = { defaultId: "v-" + cont.id + "-all", views: [
+        { id: "v-" + cont.id + "-all", name: "All work", shared: true, createdBy: this.me(), config: this.wvDefCfg("list") },
+        { id: "v-" + cont.id + "-board", name: "Board", shared: true, createdBy: this.me(), config: this.wvDefCfg("board") },
+      ] };
+      this.WVS[cont.id] = st;
+    }
+    return st;
+  }
+  wvCFs(cont) {
+    if (!this.CFS) this.CFS = {};
+    if (!this.CFS[cont.id]) this.CFS[cont.id] = JSON.parse(JSON.stringify((this.WD.CUSTOM_FIELDS || {})[cont.id] || []));
+    return this.CFS[cont.id];
+  }
+  wvActive(cont) {
+    const st = this.wvStore(cont), t = this.state.pjTab || "";
+    const id = t.indexOf("wv:") === 0 ? t.slice(3) : st.defaultId;
+    return st.views.find((v) => v.id === id) || st.views.find((v) => v.id === st.defaultId) || st.views[0];
+  }
+  wvMut(cont, fn) {
+    const v = this.wvActive(cont);
+    if (!v.draft) v.draft = JSON.parse(JSON.stringify(v.config));
+    fn(v.draft);
+    if (JSON.stringify(v.draft) === JSON.stringify(v.config)) delete v.draft;
+    this.forceUpdate();
+  }
+  wvPopOpen(e, kind, extra) {
+    e.stopPropagation();
+    const W = { fields: 250, fvals: 274, sort: 316, group: 240, display: 320, new: 300, menu: 250, save: 290, cf: 304, cfinput: 240, cflabels: 250 };
+    const r = e.currentTarget.getBoundingClientRect();
+    const w = W[kind] || 260;
+    this.setState({ wvPop: { kind, width: w, left: Math.max(8, Math.min(r.left, window.innerWidth - w - 16)), top: Math.min(r.bottom + 6, window.innerHeight - 460), ...(extra || {}) } });
+  }
+  wvPopClean(cont) {
+    const v = this.wvActive(cont);
+    if (v && v.draft) {
+      v.draft.filters = (v.draft.filters || []).filter((f) => f.vals && f.vals.length);
+      if (JSON.stringify(v.draft) === JSON.stringify(v.config)) delete v.draft;
+    }
+    this.setState({ wvPop: null });
+  }
+  wvDueBucket(i) {
+    const dn = i.dueN;
+    if (!dn || dn >= 998) return "none";
+    if (dn < 721) return "overdue";
+    if (dn === 721) return "today";
+    if (dn <= 726) return "week";
+    if (dn <= 804) return "next2";
+    return "later";
+  }
+  wvFieldDefs(cont, sp, wsList, items) {
+    const me = this.me();
+    const defs = [
+      { id: "status", name: "Status", icon: "loader-circle", opts: (sp.statuses || []).map((s) => ({ v: s.id, label: s.name, dot: s.color, hollow: !!s.hollow })), of: (i) => i.status, seedKey: "wstatus" },
+      { id: "priority", name: "Priority", icon: "signal-high", opts: this.WD.PRIORITIES.map((p) => ({ v: p.id, label: p.name, dot: p.color })), of: (i) => i.priority, seedKey: "priority" },
+      { id: "assignee", name: "Assignee", icon: "user-round", opts: [{ v: "__me", label: "Me (" + me + ")", avatar: me, meOnly: true }].concat([...new Set(items.map((i) => i.assignee))].map((n) => ({ v: n, label: n, avatar: n }))), of: (i) => i.assignee },
+      { id: "type", name: "Item type", icon: "shapes", opts: this.WD.ITEM_TYPES.map((t) => ({ v: t.id, label: t.name, dot: t.color })), of: (i) => i.type, seedKey: "type" },
+      { id: "estimate", name: "Estimate", icon: "ruler", opts: ["XS", "S", "M", "L", "XL"].map((v) => ({ v, label: v })), of: (i) => i.estimate },
+      { id: "due", name: "Due date", icon: "calendar", opts: [["overdue", "Overdue"], ["today", "Today"], ["week", "This week"], ["next2", "Next 2 weeks"], ["later", "Later"], ["none", "No due date"]].map(([v, label]) => ({ v, label })), of: (i) => this.wvDueBucket(i) },
+    ];
+    if (wsList.length) defs.push({ id: "workstream", name: "Workstream", icon: "boxes", opts: wsList.map((w) => ({ v: w.id, label: w.name })).concat([{ v: "__none", label: "No workstream" }]), of: (i) => i.wsId || "__none" });
+    const cys = this.WD.CYCLES.filter((c) => c.projectId === cont.id);
+    if (cys.length) defs.push({ id: "cycle", name: "Cycle", icon: "iteration-cw", opts: cys.map((c) => ({ v: c.id, label: c.name })).concat([{ v: "__none", label: "No cycle" }]), of: (i) => i.cycleId || "__none" });
+    const fids = [...new Set(items.map((i) => i.featureId).filter(Boolean))];
+    if (fids.length) defs.push({ id: "feature", name: "Feature", icon: "hexagon", opts: fids.map((fid) => { const fx = this.findFeature(fid); return { v: fid, label: fx ? fx.f.name : fid }; }).concat([{ v: "__none", label: "No feature" }]), of: (i) => i.featureId || "__none" });
+    return defs;
+  }
+  wvPasses(i, cfg, defs) {
+    const q = (this.state.wvQ || "").trim().toLowerCase();
+    if (q && ((i.name || "") + " " + (i.key || "")).toLowerCase().indexOf(q) < 0) return false;
+    const fs = (cfg.filters || []).filter((f) => f.vals && f.vals.length);
+    if (!fs.length) return true;
+    const me = this.me();
+    const test = (flt) => {
+      const def = defs.find((d) => d.id === flt.f);
+      if (!def) return true;
+      const val = def.of(i);
+      const hit = def.multi
+        ? flt.vals.some((v) => v === "__none" ? !(val || []).length : (val || []).indexOf(v) >= 0)
+        : flt.vals.some((v) => v === val || (v === "__me" && val === me));
+      return flt.op === "isnot" ? !hit : hit;
+    };
+    return cfg.match === "any" ? fs.some(test) : fs.every(test);
+  }
+  wvSortKey(fid, i, sp) {
+    if (fid === "priority") return ["urgent", "high", "medium", "low", "none"].indexOf(i.priority);
+    if (fid === "due") return i.dueN || 999;
+    if (fid === "status") return (sp.statuses || []).findIndex((s) => s.id === i.status);
+    if (fid === "name") return (i.name || "").toLowerCase();
+    if (fid === "estimate") { const ix = ["XS", "S", "M", "L", "XL"].indexOf(i.estimate); return ix < 0 ? 99 : ix; }
+    if (fid === "assignee") return (i.assignee || "").toLowerCase();
+    return parseInt((i.key || "0-0").split("-")[1], 10) || 0;
+  }
+  wvProgOf(sp, i) {
+    const st = this.wStatusOf(sp, i.status);
+    if (st.group === "done") return 100;
+    if (st.group === "closed") return 0;
+    const m = { review: 72, progress: 48, doing: 48, drafting: 40, blocked: 30, scheduled: 60, todo: 8, idea: 0, backlog: 0 };
+    return m[i.status] != null ? m[i.status] : 15;
+  }
+  buildWV(cont, sp, isList, itemsAll, wsList, tab) {
+    const S = this.state, me = this.me();
+    const st = this.wvStore(cont);
+    const view = this.wvActive(cont);
+    const cfg = this.wvNorm(view.draft || view.config);
+    const defs = this.wvFieldDefs(cont, sp, wsList, itemsAll);
+    const LAYOUTS = this.wvLayoutDefs();
+    const layIcon = {}, layName = {};
+    LAYOUTS.forEach(([v, ic, l]) => { layIcon[v] = ic; layName[v] = l; });
+    const spName = (this.wSpaceById(cont.spaceId) || {}).name || "this space";
+    const mut = (fn) => this.wvMut(cont, fn);
+    const pop = (e, kind, extra) => this.wvPopOpen(e, kind, extra);
+    const F = (id) => cfg.fields.indexOf(id) >= 0;
+    const dirty = !!view.draft;
+    const onView = tab === "view";
+    // ---- custom fields (per container; values keyed by item id) ----
+    const cfs = this.wvCFs(cont);
+    const CFI = { text: "text", number: "hash", money: "circle-dollar-sign", dropdown: "circle-chevron-down", labels: "tags", checkbox: "square-check", date: "calendar", rating: "star", progress: "percent", person: "user-round" };
+    const CFTL = { text: "Text", number: "Number", money: "Money", dropdown: "Dropdown", labels: "Labels", checkbox: "Checkbox", date: "Date", rating: "Rating", progress: "Progress", person: "Person" };
+    const cfById = {};
+    cfs.forEach((cf) => {
+      cfById[cf.id] = cf;
+      if (cf.type === "dropdown") defs.push({ id: cf.id, name: cf.name, icon: CFI.dropdown, custom: true, opts: cf.options.map((o) => ({ v: o.v, label: o.label, dot: o.color })).concat([{ v: "__none", label: "Not set" }]), of: (i) => cf.values[i.id] || "__none" });
+      else if (cf.type === "labels") defs.push({ id: cf.id, name: cf.name, icon: CFI.labels, custom: true, multi: true, opts: cf.options.map((o) => ({ v: o.v, label: o.label, dot: o.color })).concat([{ v: "__none", label: "No label" }]), of: (i) => cf.values[i.id] });
+      else if (cf.type === "rating") defs.push({ id: cf.id, name: cf.name, icon: CFI.rating, custom: true, opts: [5, 4, 3, 2, 1].map((n) => ({ v: n, label: n + " of 5" })).concat([{ v: "__none", label: "Unrated" }]), of: (i) => cf.values[i.id] == null ? "__none" : cf.values[i.id] });
+      else if (cf.type === "checkbox") defs.push({ id: cf.id, name: cf.name, icon: CFI.checkbox, custom: true, opts: [{ v: "__yes", label: "Checked" }, { v: "__no", label: "Not checked" }], of: (i) => cf.values[i.id] ? "__yes" : "__no" });
+    });
+    const CFW = { text: 150, number: 96, money: 110, dropdown: 140, labels: 180, checkbox: 90, date: 100, rating: 118, progress: 140, person: 150 };
+    const cfFmt = (cf, v) => v == null || v === "" ? null : cf.type === "money" ? "$" + Number(v).toLocaleString() : cf.type === "number" ? v + (cf.unit ? " " + cf.unit : "") : cf.type === "progress" ? v + "%" : cf.type === "rating" ? v + "/5" : String(v);
+    const cfOptOf = (cf, v) => (cf.options || []).find((o) => o.v === v) || null;
+    const up = () => this.forceUpdate();
+    const keyOf = (fid, i) => {
+      const cf = cfById[fid];
+      if (!cf) return this.wvSortKey(fid, i, sp);
+      const v = cf.values[i.id];
+      if (cf.type === "text") return v ? String(v).toLowerCase() : "zzzz";
+      return v == null ? 1e9 : +v;
+    };
+    // ---- shared pipeline: filter -> sort -> group ----
+    const filtered = itemsAll.filter((i) => this.wvPasses(i, cfg, defs));
+    const sorted = (cfg.sort || []).length ? filtered.slice().sort((a, b) => {
+      for (const s of cfg.sort) {
+        const ka = keyOf(s.f, a), kb = keyOf(s.f, b);
+        if (ka < kb) return s.dir === "desc" ? 1 : -1;
+        if (ka > kb) return s.dir === "desc" ? -1 : 1;
+      }
+      return 0;
+    }) : filtered.slice();
+    let gField = cfg.group === "workstream" && !wsList.length ? "status" : cfg.group || "none";
+    if (cfg.layout === "board" && gField === "none") gField = "status";
+    const gDef = defs.find((d) => d.id === gField) || null;
+    const hideAlways = gField === "assignee" || gField === "feature" || gField === "cycle";
+    const mkGroups = (items) => {
+      if (!gDef) return [{ key: "all", label: "All items", hasHeader: false, dotOn: false, avatarOn: false, bg: "", bd: "", seed: {}, items }];
+      return gDef.opts.filter((o) => !o.meOnly).map((o) => {
+        const d = o.dot ? this.wDot({ color: o.dot, hollow: o.hollow }) : null;
+        return { key: String(o.v), label: o.label, hasHeader: true, dotOn: !!o.dot, avatarOn: !!o.avatar && !o.dot,
+          bg: d ? d.bg : "", bd: d ? d.bd : "", seed: gDef.seedKey ? { [gDef.seedKey]: o.v } : {},
+          items: items.filter((i) => { const val = gDef.of(i); return gDef.multi ? (o.v === "__none" ? !(val || []).length : (val || []).indexOf(o.v) >= 0) : val === o.v; }) };
+      }).filter((g) => g.items.length || !(cfg.hideEmpty || hideAlways));
+    };
+    const collKey = (g) => view.id + ":" + g.key;
+    const deco = (g) => {
+      const open = !S.wvColl[collKey(g)];
+      return { ...g, count: g.items.length, open: g.hasHeader ? open : true, rot: open ? 90 : 0,
+        toggle: () => this.setState((s) => ({ wvColl: { ...s.wvColl, [collKey(g)]: open } })),
+        add: () => this.openWorkItemDlg(cont, g.seed) };
+    };
+    const groups = mkGroups(sorted).map(deco);
+    const row = (i) => {
+      const r = this.wiRow(i);
+      r.wsChip = F("workstream") ? r.wsTag : null;
+      r.featChip = F("feature") ? r.featName : null;
+      r.cfChips = [];
+      this.wvCFs(cont).forEach((cf) => {
+        if (!F(cf.id)) return;
+        const v = cf.values[i.id], edit = cfEdit2(cf, i);
+        if (cf.type === "labels") (v || []).slice(0, 2).forEach((lv) => { const o = (cf.options || []).find((x) => x.v === lv); if (o) r.cfChips.push({ label: o.label, dot: o.color, plain: true, tip: cf.name, edit }); });
+        else if (cf.type === "dropdown") { const o = (cf.options || []).find((x) => x.v === v); if (o) r.cfChips.push({ label: o.label, dot: o.color, plain: true, tip: cf.name, edit }); }
+        else if (cf.type === "checkbox") { if (v) r.cfChips.push({ label: cf.name, dot: "var(--success-500)", plain: true, tip: cf.name, edit }); }
+        else if (cf.type === "person") { if (v) r.cfChips.push({ label: v, plain: true, tip: cf.name, edit }); }
+        else { const f2 = cf.type === "money" ? (v == null ? null : "$" + Number(v).toLocaleString()) : cf.type === "number" ? (v == null ? null : v + (cf.unit ? " " + cf.unit : "")) : cf.type === "progress" ? (v == null ? null : v + "%") : cf.type === "rating" ? (v == null ? null : v + "/5") : v; if (f2 != null && f2 !== "") r.cfChips.push({ label: String(f2), mono: true, tip: cf.name, edit }); }
+      });
+      return r;
+    };
+    let cfEdit2 = () => () => {};
+    // ---- table columns ----
+    const COLW = { status: 130, priority: 116, assignee: 160, due: 90, estimate: 84, workstream: 150, cycle: 110, feature: 190 };
+    const hasCycles = !!defs.find((d) => d.id === "cycle"), hasFeats = !!defs.find((d) => d.id === "feature");
+    const colIds = ["status", "priority", "assignee", "due", "estimate", "workstream", "cycle", "feature"].filter((id) => F(id) && (id !== "workstream" || wsList.length) && (id !== "cycle" || hasCycles) && (id !== "feature" || hasFeats));
+    const cellsOf = (r) => colIds.map((id) => {
+      if (id === "status") return { w: COLW[id], kStatus: true, label: r.stName, bg: r.stBg, bd: r.stBd, pick: r.stPick };
+      if (id === "priority") return { w: COLW[id], kPrio: true, label: r.prName, icon: r.prIcon, color: r.prColor, pick: r.prPick };
+      if (id === "assignee") return { w: COLW[id], kPerson: true, label: r.assignee, pick: r.asgPick };
+      if (id === "due") return { w: COLW[id], kDue: true, label: r.due, color: r.dueColor, pick: r.duePick };
+      if (id === "estimate") return { w: COLW[id], kEst: true, label: r.estimate, pick: r.estPick };
+      if (id === "workstream") return { w: COLW[id], kText: true, label: r.wsName };
+      if (id === "cycle") return { w: COLW[id], kText: true, label: r.cycName || "—" };
+      return { w: COLW[id], kFeat: true, label: r.featName, swatch: r.featSwatch };
+    });
+    const sortDefs = this.wvSortDefs().concat(cfs.filter((cf) => ["number", "money", "progress", "rating", "text"].indexOf(cf.type) >= 0).map((cf) => ({
+      id: cf.id, name: cf.name, icon: CFI[cf.type], asc: cf.type === "text" ? "A → Z" : "Low first", desc: cf.type === "text" ? "Z → A" : "High first" })));
+    const sorts = cfg.sort || [];
+    const s0 = sorts[0] || null;
+    const hdrSort = (fid) => (e) => { e.stopPropagation(); mut((c) => { const cur = (c.sort || [])[0];
+      c.sort = cur && cur.f === fid ? (cur.dir === "asc" ? [{ f: fid, dir: "desc" }] : []) : [{ f: fid, dir: "asc" }]; }); };
+    const sortableCols = ["status", "priority", "assignee", "due", "estimate"];
+    const wvCols = colIds.map((id) => {
+      const fd = defs.find((d) => d.id === id) || { name: id.charAt(0).toUpperCase() + id.slice(1) };
+      const canSort = sortableCols.indexOf(id) >= 0;
+      return { label: fd.name, w: COLW[id], si: s0 && s0.f === id ? (s0.dir === "asc" ? "arrow-up" : "arrow-down") : null,
+        tip: canSort ? "Sort by " + fd.name.toLowerCase() : fd.name, cursor: canSort ? "pointer" : "default", sort: canSort ? hdrSort(id) : () => {} };
+    });
+    const cfVis = cfs.filter((cf) => F(cf.id));
+    cfVis.forEach((cf) => {
+      const canSort = ["number", "money", "progress", "rating", "text"].indexOf(cf.type) >= 0;
+      wvCols.push({ label: cf.name, w: CFW[cf.type] || 130, si: s0 && s0.f === cf.id ? (s0.dir === "asc" ? "arrow-up" : "arrow-down") : null,
+        tip: canSort ? "Sort by " + cf.name : cf.name + " · custom field", cursor: canSort ? "pointer" : "default", sort: canSort ? hdrSort(cf.id) : () => {} });
+    });
+    const cfEdit = (cf, it) => (e) => {
+      if (cf.type === "dropdown") this.openPick(e, "cfopts", cf.values[it.id] || "", (v) => { if (v) cf.values[it.id] = v; else delete cf.values[it.id]; up(); }, { title: cf.name, width: 230, extra: { opts: cf.options.map((o) => ({ v: o.v, label: o.label, dot: o.color })).concat([{ v: "", label: "Not set" }]) } });
+      else if (cf.type === "person") this.openPick(e, "owner", cf.values[it.id] || "", (v) => { cf.values[it.id] = v; up(); }, { title: cf.name, width: 280 });
+      else if (cf.type === "date") this.openPick(e, "due", cf.values[it.id] || "", (v) => { if (v) cf.values[it.id] = v; else delete cf.values[it.id]; up(); }, { title: cf.name, width: 190 });
+      else if (cf.type === "labels") pop(e, "cflabels", { cfId: cf.id, itemId: it.id });
+      else if (cf.type === "checkbox") { e.stopPropagation(); if (cf.values[it.id]) delete cf.values[it.id]; else cf.values[it.id] = true; up(); }
+      else pop(e, "cfinput", { cfId: cf.id, itemId: it.id });
+    };
+    const cfCellOf = (cf, i) => {
+      const v = cf.values[i.id], w = CFW[cf.type] || 130, edit = cfEdit(cf, i);
+      if (cf.type === "dropdown") { const o = cfOptOf(cf, v); return { w, kCfDrop: true, label: o ? o.label : "—", dot: o ? o.color : null, pick: edit }; }
+      if (cf.type === "labels") { const arr = v || []; return { w, kCfLabels: true, pick: edit, tags: arr.slice(0, 2).map((lv) => { const o = cfOptOf(cf, lv); return { label: o ? o.label : lv, dot: o ? o.color : "var(--n-300)" }; }), more: arr.length > 2 ? "+" + (arr.length - 2) : null, empty: arr.length ? null : "—" }; }
+      if (cf.type === "rating") return { w, kCfRating: true, dots: [1, 2, 3, 4, 5].map((n) => ({ bg: v >= n ? "var(--swatch-amber)" : "var(--n-100)", bd: v >= n ? "var(--swatch-amber)" : "var(--n-300)", set: (e) => { e.stopPropagation(); if (v === n) delete cf.values[i.id]; else cf.values[i.id] = n; up(); } })) };
+      if (cf.type === "progress") return { w, kCfProg: true, pct: Math.min(100, v || 0), label: v == null ? "—" : v + "%", pick: edit };
+      if (cf.type === "checkbox") return { w, kCfCheck: true, on: !!v, bg: v ? "var(--cortex-500)" : "var(--n-0)", bd: v ? "var(--cortex-500)" : "var(--n-300)", pick: edit };
+      if (cf.type === "person") return v ? { w, kPerson: true, label: v, pick: edit } : { w, kCfTxt: true, plain: true, label: "—", pick: edit };
+      const f2 = cfFmt(cf, v);
+      return { w, kCfTxt: true, mono: cf.type !== "text", plain: cf.type === "text", label: f2 == null ? "—" : f2, pick: edit };
+    };
+    cfEdit2 = cfEdit;
+    const wvGroups = groups.map((g) => ({ ...g,
+      rows: cfg.layout === "list" ? g.items.map(row) : [],
+      trows: cfg.layout === "table" ? g.items.map((i) => { const r = row(i); r.cells = cellsOf(r).concat(cfVis.map((cf) => cfCellOf(cf, i))); return r; }) : [] }));
+    // ---- board (columns x swimlanes) ----
+    let wvSwims = [];
+    if (cfg.layout === "board") {
+      const swimId = cfg.board.swim && cfg.board.swim !== "none" && cfg.board.swim !== gField ? cfg.board.swim : null;
+      const swDef = swimId ? defs.find((d) => d.id === swimId) : null;
+      const lanes = swDef ? swDef.opts.filter((o) => !o.meOnly).map((o) => { const d = o.dot ? this.wDot({ color: o.dot, hollow: o.hollow }) : null;
+        return { label: o.label, hasLabel: true, dotOn: !!o.dot, avatarOn: !!o.avatar && !o.dot, bg: d ? d.bg : "", bd: d ? d.bd : "", match: (i) => swDef.of(i) === o.v }; })
+        : [{ label: null, hasLabel: false, dotOn: false, avatarOn: false, bg: "", bd: "", match: () => true }];
+      wvSwims = lanes.map((sw) => {
+        const swItems = sorted.filter(sw.match);
+        const cols = mkGroups(swItems).map(deco).map((g) => ({ ...g,
+          cards: g.items.map((i) => { const r = row(i); return { key: r.key, typeIcon: r.typeIcon, typeColor: r.typeColor, typeName: r.typeName, name: r.name,
+            prIcon: r.prIcon, prColor: r.prColor, prName: r.prName, due: r.due, dueColor: r.dueColor, assignee: r.assignee, bar: r.prColor, open: r.open,
+            estChip: F("estimate") && r.estimate !== "—" ? r.estimate : null, featChip: cfg.board.size !== "compact" ? r.featChip : null, featSwatch: r.featSwatch,
+            cfChips: cfg.board.size !== "compact" ? r.cfChips.filter((x) => x.dot) : [], cfOn: cfg.board.size !== "compact" && r.cfChips.some((x) => x.dot) }; }) }));
+        return { ...sw, count: swItems.length, cols };
+      }).filter((sw) => !sw.hasLabel || sw.count);
+    }
+    // ---- timeline (packed lanes) ----
+    let wvLanes = [];
+    if (cfg.layout === "timeline") {
+      wvLanes = groups.map((g) => {
+        const ends = [], bars = [];
+        g.items.slice().sort((a, b) => (a.startM || 0) - (b.startM || 0)).forEach((i) => {
+          const r = this.wiRow(i);
+          const mile = i.type === "milestone";
+          const s0m = i.startM || 0, len = i.lenM || 1;
+          const mm = Math.floor((i.dueN || 721) / 100), dd = (i.dueN || 721) % 100;
+          const mileLeft = (mm - 5 + dd / 31) / 8 * 100;
+          const bs = mile ? mileLeft : s0m / 8 * 100;
+          const be = mile ? mileLeft + 2 : (s0m + len) / 8 * 100;
+          let ri = ends.findIndex((en) => en <= bs + 0.01);
+          if (ri < 0) { ri = ends.length; ends.push(0); }
+          ends[ri] = be;
+          bars.push({ bar: !mile, mile, left: (mile ? mileLeft - 0.55 : bs).toFixed(2), w: (len / 8 * 100).toFixed(2),
+            top: 7 + ri * 27, mtop: 11 + ri * 27, color: r.stBd,
+            name: (F("key") ? i.key + "  " : "") + i.name, title: i.key + " — " + i.name + " · " + r.stName + " · due " + r.due, open: r.open });
+        });
+        return { label: g.hasHeader ? g.label : "All items", dotOn: g.dotOn, avatarOn: g.avatarOn, bg: g.bg, bd: g.bd,
+          meta: g.count + (g.count === 1 ? " item" : " items"), h: Math.max(1, ends.length) * 27 + 14, bars };
+      });
+    }
+    // ---- gantt (rows + progress + dependency elbows) ----
+    let wvGRows = [], wvGSegs = [], wvGArrows = [];
+    if (cfg.layout === "gantt") {
+      const idx = {}, heights = [];
+      groups.forEach((g) => {
+        if (g.hasHeader) { wvGRows.push({ head: true, row: false, label: g.label, count: g.count, dotOn: g.dotOn, avatarOn: g.avatarOn, bg: g.bg, bd: g.bd }); heights.push(34); }
+        g.items.forEach((i) => {
+          const r = this.wiRow(i);
+          const mile = i.type === "milestone";
+          const mm = Math.floor((i.dueN || 721) / 100), dd = (i.dueN || 721) % 100;
+          const mileLeft = (mm - 5 + dd / 31) / 8 * 100;
+          idx[i.id] = wvGRows.length;
+          wvGRows.push({ head: false, row: true, key: r.key, name: r.name, typeIcon: r.typeIcon, typeColor: r.typeColor, assignee: r.assignee,
+            open: r.open, rowBg: r.bg, mile, barOn: !mile, due: r.due,
+            left: (mile ? mileLeft - 0.55 : (i.startM || 0) / 8 * 100).toFixed(2), w: ((i.lenM || 1) / 8 * 100).toFixed(2),
+            color: r.stBd, prog: this.wvProgOf(sp, i), title: r.key + " — " + r.name + " · " + r.stName + " · due " + r.due,
+            x1: mile ? mileLeft + 0.7 : ((i.startM || 0) + (i.lenM || 1)) / 8 * 100, x2: mile ? mileLeft - 0.7 : (i.startM || 0) / 8 * 100 });
+          heights.push(38);
+        });
+      });
+      let acc = 0;
+      const rowY = heights.map((h) => { const c = acc + h / 2; acc += h; return c; });
+      if (cfg.gantt.deps) Object.keys(idx).forEach((iid) => {
+        const it = this.wItemById(iid);
+        (it && it.deps ? it.deps : []).forEach((did) => {
+          if (idx[did] == null) return;
+          const y1 = rowY[idx[did]], y2 = rowY[idx[iid]];
+          const x1 = wvGRows[idx[did]].x1, x2 = wvGRows[idx[iid]].x2, xm = x1 + 0.9;
+          const pred = this.wItemById(did);
+          const colr = pred && pred.status === "blocked" ? "color-mix(in srgb, var(--danger-500) 75%, var(--n-0))" : "var(--n-300)";
+          wvGSegs.push({ l: x1.toFixed(2), t: (y1 - 0.75).toFixed(1), w: "0.9%", h: "1.5px", bg: colr });
+          wvGSegs.push({ l: xm.toFixed(2), t: (Math.min(y1, y2) - 0.75).toFixed(1), w: "1.5px", h: Math.abs(y2 - y1).toFixed(1) + "px", bg: colr });
+          wvGSegs.push({ l: Math.min(xm, x2).toFixed(2), t: (y2 - 0.75).toFixed(1), w: Math.abs(x2 - xm).toFixed(2) + "%", h: "1.5px", bg: colr });
+          wvGArrows.push({ l: x2.toFixed(2), t: (y2 - 4).toFixed(1), color: colr });
+        });
+      });
+    }
+    // ---- calendar ----
+    let wvCalCells = [], wvCalTitle = "July 2026";
+    const calM = Math.max(7, Math.min(9, S.wvCalM || 7));
+    if (cfg.layout === "calendar") {
+      const NAME = { 7: "July 2026", 8: "August 2026", 9: "September 2026" };
+      const LEN = { 6: 30, 7: 31, 8: 31, 9: 30 };
+      const LEAD = { 7: 2, 8: 5, 9: 1 };
+      wvCalTitle = NAME[calM];
+      const mk = (mm, d, dim) => {
+        const dn = mm * 100 + d;
+        wvCalCells.push({ day: d, bg: dim ? "var(--n-25)" : "var(--n-0)",
+          numBg: dn === 721 ? "var(--cortex-500)" : "transparent", numColor: dn === 721 ? "#fff" : dim ? "var(--n-300)" : "var(--n-500)",
+          items: sorted.filter((i) => i.dueN === dn).map((i) => { const r = this.wiRow(i); return { typeIcon: r.typeIcon, typeColor: r.typeColor, name: i.name,
+            bar: r.prColor, title: r.key + " — " + i.name + " · " + r.prName + " priority · " + r.assignee, assignee: r.assignee, avatarOn: F("assignee"), open: r.open }; }) });
+      };
+      const plen = LEN[calM - 1];
+      for (let d = plen - LEAD[calM] + 1; d <= plen; d++) mk(calM - 1, d, true);
+      for (let d = 1; d <= LEN[calM]; d++) mk(calM, d, false);
+      const rem = (7 - (wvCalCells.length % 7)) % 7;
+      for (let d = 1; d <= rem; d++) mk(calM + 1, d, true);
+    }
+    // ---- popovers ----
+    const P = S.wvPop;
+    const flt = P && P.kind === "fvals" && (cfg.filters || [])[P.fIdx] ? cfg.filters[P.fIdx] : null;
+    const fdef = flt ? defs.find((d) => d.id === flt.f) : null;
+    const cfIn = P && (P.kind === "cfinput" || P.kind === "cflabels") ? cfById[P.cfId] : null;
+    const cfItem = cfIn && P.itemId ? this.wItemById(P.itemId) : null;
+    const chip = (on) => ({ bd: on ? "var(--cortex-300)" : "var(--n-200)", bg: on ? "var(--cortex-50)" : "var(--n-0)", color: on ? "var(--cortex-700)" : "var(--n-600)" });
+    const mkLayBtns = (cur, go) => LAYOUTS.map(([v, icon, label]) => ({ icon, label, ...chip(cur === v), go: () => go(v) }));
+    const gWord = cfg.layout === "board" ? "Columns" : cfg.layout === "timeline" ? "Lanes" : "Group";
+    const gName = gField === "none" ? "None" : (defs.find((d) => d.id === gField) || { name: gField }).name;
+    const groupables = [{ id: "none", name: "No grouping", icon: "list" }].concat(defs.map((d) => ({ id: d.id, name: d.name, icon: d.icon })));
+    const mv = P && P.kind === "menu" ? (st.views.find((v) => v.id === P.viewId) || view) : view;
+    const mvCfg = mv.draft || mv.config;
+    const dupView = () => { const nv = { id: "v" + Date.now(), name: mv.name + " copy", shared: false, createdBy: me, config: this.wvNorm(JSON.parse(JSON.stringify(mv.draft || mv.config))) };
+      st.views.push(nv); this.setState({ wvPop: null, pjTab: "wv:" + nv.id }); this.toast("View duplicated", "Saved as a personal view — share it when it's ready.", "success"); };
+    const wvSortLabel = sorts.length === 0 ? "Sort" : sorts.length === 1 ? (sortDefs.find((d) => d.id === sorts[0].f) || { name: "Sorted" }).name : sorts.length + " sorts";
+    const nSh = st.views.filter((v) => v.shared).length, nPe = st.views.length - nSh;
+    const empty = onView && itemsAll.length > 0 && filtered.length === 0;
+    return {
+      // tabs
+      pjViewTabs: st.views.map((v) => {
+        const active = v.id === view.id && onView;
+        const vc = v.draft || v.config;
+        const renaming = S.wvRen === v.id;
+        return { label: v.name, icon: layIcon[vc.layout] || "list", active, normal: !renaming, renaming,
+          weight: active ? 600 : 400, color: active ? "var(--n-900)" : "var(--n-500)", line: active ? "var(--cortex-500)" : "transparent",
+          iconColor: active ? "var(--cortex-600)" : "var(--n-400)", lockOn: !v.shared, dirty: !!v.draft,
+          tip: (v.shared ? "Shared view" : "Personal view") + " · " + (layName[vc.layout] || "List") + (st.defaultId === v.id ? " · default" : "") + " · by " + v.createdBy,
+          go: active ? (e) => pop(e, "menu", { viewId: v.id }) : () => this.setState({ pjTab: "wv:" + v.id, wvPop: null, wvQ: "" }),
+          menu: (e) => pop(e, "menu", { viewId: v.id }),
+          renRef: (el) => { if (el && this._wvRenEl !== el) { this._wvRenEl = el; el.focus(); el.select(); } },
+          renKey: (e) => { if (e.key === "Enter") { const nv = e.target.value.trim(); if (nv) v.name = nv; this.setState({ wvRen: null }); } else if (e.key === "Escape") this.setState({ wvRen: null }); },
+          renBlur: (e) => { const nv = e.target.value.trim(); if (nv) v.name = nv; this.setState({ wvRen: null }); } };
+      }),
+      pjNewView: (e) => pop(e, "new"),
+      pjHasPages: !isList,
+      pjPageTabs: (isList ? [] : [["cycles", "Cycles"], ["overview", "Overview"]]).map(([t, label]) => ({ label,
+        weight: tab === t ? 600 : 400, color: tab === t ? "var(--n-900)" : "var(--n-500)", line: tab === t ? "var(--cortex-500)" : "transparent",
+        go: () => this.setState({ pjTab: t, wvPop: null }) })),
+      pjViewsMeta: nPe ? nSh + " shared · " + nPe + " personal" : nSh + (nSh === 1 ? " shared view" : " shared views"),
+      pjTabItems: onView, pjTabCycles: tab === "cycles", pjTabOverview: tab === "overview",
+      // toolbar
+      wvLayoutOpts: LAYOUTS.map(([v, icon, label]) => ({ icon, label,
+        bg: cfg.layout === v ? "var(--n-0)" : "transparent", color: cfg.layout === v ? "var(--n-800)" : "var(--n-500)",
+        shadow: cfg.layout === v ? "var(--shadow-xs)" : "none", go: () => mut((c) => { c.layout = v; }) })),
+      wvChips: (cfg.filters || []).map((f2, fi) => {
+        const def = defs.find((d) => d.id === f2.f) || { name: f2.f, icon: "list-filter", opts: [] };
+        const names = (f2.vals || []).map((v) => v === "__me" ? "Me" : (def.opts.find((o) => o.v === v) || { label: v }).label);
+        return { icon: def.icon, field: def.name, op: f2.op === "isnot" ? "is not" : "is",
+          val: names.length > 2 ? names.length + " values" : names.join(", ") || "pick…", joiner: fi > 0,
+          edit: (e) => pop(e, "fvals", { fIdx: fi }),
+          del: (e) => { e.stopPropagation(); mut((c) => { c.filters.splice(fi, 1); }); } };
+      }),
+      wvMatchWord: cfg.match === "any" ? "or" : "and",
+      wvMatchToggle: () => mut((c) => { c.match = c.match === "any" ? "all" : "any"; }),
+      wvFilterAdd: (e) => pop(e, "fields"),
+      wvCount: filtered.length === itemsAll.length ? itemsAll.length + " items" : filtered.length + " of " + itemsAll.length,
+      wvCountColor: filtered.length === itemsAll.length ? "var(--n-400)" : "var(--cortex-600)",
+      wvQ: S.wvQ, wvQChange: (e) => this.setState({ wvQ: e.target.value }),
+      wvSortOpen: (e) => pop(e, "sort"), wvSortLabel, ...{ wvSortBd: chip(sorts.length > 0).bd, wvSortBg: chip(sorts.length > 0).bg, wvSortColor: chip(sorts.length > 0).color },
+      wvGroupOpen: (e) => pop(e, "group"), wvGroupLabel: gWord + ": " + gName, wvGroupBd: "var(--n-200)", wvGroupBg: "var(--n-0)", wvGroupColor: "var(--n-600)",
+      wvDisplayOpen: (e) => pop(e, "display"),
+      wvDirty: dirty,
+      wvReset: () => { delete view.draft; this.forceUpdate(); },
+      wvSaveOpen: (e) => pop(e, "save"),
+      // layouts
+      wvList: onView && cfg.layout === "list" && !empty,
+      wvTable: onView && cfg.layout === "table" && !empty,
+      wvBoard: onView && cfg.layout === "board" && !empty,
+      wvCal: onView && cfg.layout === "calendar" && !empty,
+      wvTimeline: onView && cfg.layout === "timeline" && !empty,
+      wvGantt: onView && cfg.layout === "gantt" && !empty,
+      wvEmpty: empty,
+      wvEmptyMeta: itemsAll.length + (itemsAll.length === 1 ? " item is" : " items are") + " hidden by filters" + ((S.wvQ || "").trim() ? " and search" : "") + ".",
+      wvClearFilters: () => { this.setState({ wvQ: "" }); mut((c) => { c.filters = []; }); },
+      wvfKey: F("key"), wvfType: F("type"), wvfStatus: F("status"), wvfPriority: F("priority"), wvfAssignee: F("assignee"), wvfDue: F("due"), wvfEstimate: F("estimate"),
+      wvGroups, wvCols, wvRowH: cfg.table.rowH,
+      wvNameSort: hdrSort("name"), wvNameSi: s0 && s0.f === "name" ? (s0.dir === "asc" ? "arrow-up" : "arrow-down") : null,
+      wvSwims, wvCardPad: cfg.board.size === "compact" ? "7px 10px 8px" : "9px 11px", wvCardHdr: cfg.board.size !== "compact",
+      wvLanes, wvLaneTitle: "Lanes · " + (gField === "none" ? "All items" : gName),
+      wvMonths: (this.DB ? this.DB.MONTHS : []).map((m) => ({ m })),
+      wvTodayLeft: ((2 + 20 / 31) / 8 * 100).toFixed(2),
+      wvGRows, wvGSegs, wvGArrows, wvGProg: cfg.gantt.progress, wvGDeps: cfg.gantt.deps,
+      wvGanttHint: "Bars span planned months · fill shows status progress · diamonds are milestones" + (cfg.gantt.deps ? " · arrows are dependencies (red = blocked upstream)." : "."),
+      wvCalCells, wvCalTitle,
+      wvCalPrev: () => { if (calM > 7) this.setState({ wvCalM: calM - 1 }); }, wvCalPrevC: calM > 7 ? "var(--n-600)" : "var(--n-300)",
+      wvCalNext: () => { if (calM < 9) this.setState({ wvCalM: calM + 1 }); }, wvCalNextC: calM < 9 ? "var(--n-600)" : "var(--n-300)",
+      calDays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => ({ d })),
+      // popovers
+      wvPopOn: !!P, wvPopLeft: P ? P.left : 0, wvPopTop: P ? P.top : 0, wvPopW: P ? P.width : 240,
+      wvPopClose: () => this.wvPopClean(cont),
+      wvPopTitle: P ? ({ fields: "Filter by", fvals: fdef ? fdef.name : "Filter", sort: "Sort", group: gWord + " by", display: "Display", new: "New view", save: "Save \u201c" + view.name + "\u201d", cf: "Fields", cfinput: cfIn ? cfIn.name : "Edit value", cflabels: cfIn ? cfIn.name : "Labels" }[P.kind] || null) : null,
+      wvPopFields: !!P && P.kind === "fields",
+      wvFieldRows: defs.map((d) => ({ icon: d.icon, name: d.name, meta: (cfg.filters || []).some((f2) => f2.f === d.id) ? "active" : "",
+        go: () => { const v = this.wvActive(cont); if (!v.draft) v.draft = JSON.parse(JSON.stringify(v.config));
+          v.draft.filters.push({ f: d.id, op: "is", vals: [] });
+          this.setState((s) => ({ wvPop: { ...s.wvPop, kind: "fvals", fIdx: v.draft.filters.length - 1, width: 274 } })); } })),
+      wvPopVals: !!flt,
+      wvValOps: flt ? [["is", "is"], ["isnot", "is not"]].map(([v, l]) => ({ label: l, ...chip(flt.op === v), go: () => mut((c) => { c.filters[P.fIdx].op = v; }) })) : [],
+      wvValRows: fdef ? fdef.opts.map((o) => {
+        const on = flt.vals.indexOf(o.v) >= 0;
+        const d = o.dot ? this.wDot({ color: o.dot, hollow: o.hollow }) : null;
+        const cnt = o.v === "__me" ? itemsAll.filter((i) => i.assignee === me).length : itemsAll.filter((i) => fdef.of(i) === o.v).length;
+        return { label: o.label, on, dotOn: !!o.dot, dotBg: d ? d.bg : "", dotBd: d ? d.bd : "", avatarOn: !!o.avatar && !o.dot, avatar: o.avatar, count: cnt,
+          checkBg: on ? "var(--cortex-500)" : "var(--n-0)", checkBd: on ? "var(--cortex-500)" : "var(--n-300)",
+          go: () => mut((c) => { const vs = c.filters[P.fIdx].vals; const ix = vs.indexOf(o.v); if (ix >= 0) vs.splice(ix, 1); else vs.push(o.v); }) };
+      }) : [],
+      wvValRemove: () => { mut((c) => { c.filters.splice(P.fIdx, 1); }); this.setState({ wvPop: null }); },
+      wvValDone: () => this.wvPopClean(cont),
+      wvPopSort: !!P && P.kind === "sort",
+      wvSortEmpty: !sorts.length,
+      wvSortRows: sorts.map((s2, si) => { const d = sortDefs.find((x) => x.id === s2.f) || { name: s2.f, icon: "arrow-down-up", asc: "Ascending", desc: "Descending" };
+        return { nth: si === 0 ? "Sort by" : "then by", label: d.name, icon: d.icon,
+          dirLabel: s2.dir === "desc" ? d.desc : d.asc, dirIcon: s2.dir === "desc" ? "arrow-down-wide-narrow" : "arrow-up-narrow-wide",
+          dirToggle: () => mut((c) => { c.sort[si].dir = c.sort[si].dir === "desc" ? "asc" : "desc"; }),
+          del: () => mut((c) => { c.sort.splice(si, 1); }) }; }),
+      wvSortAddRows: sortDefs.filter((d) => !sorts.some((s2) => s2.f === d.id)).map((d) => ({ name: d.name, icon: d.icon, go: () => mut((c) => { c.sort.push({ f: d.id, dir: "asc" }); }) })),
+      wvPopGroup: !!P && P.kind === "group",
+      wvGroupRows: (cfg.layout === "board" ? groupables.filter((g) => g.id !== "none") : groupables).map((g) => ({ name: g.name, icon: g.icon, on: gField === g.id,
+        bg: gField === g.id ? "var(--cortex-50)" : "transparent", go: () => mut((c) => { c.group = g.id; }) })),
+      wvHideEmptyToggle: () => mut((c) => { c.hideEmpty = !c.hideEmpty; }),
+      wvHideEmptyBg: cfg.hideEmpty ? "var(--cortex-500)" : "var(--n-300)", wvHideEmptyKnob: cfg.hideEmpty ? 14 : 2,
+      wvPopDisplay: !!P && P.kind === "display",
+      wvDispLayouts: mkLayBtns(cfg.layout, (v) => mut((c) => { c.layout = v; })),
+      wvDispGroupWord: cfg.layout === "board" ? "Columns" : cfg.layout === "timeline" ? "Lanes" : "Grouping",
+      wvDispGroupVal: gName,
+      wvDispGroupGo: () => this.setState((s) => ({ wvPop: { ...s.wvPop, kind: "group", width: 240 } })),
+      wvDispSortVal: sorts.length ? wvSortLabel : "Manual",
+      wvDispSortGo: () => this.setState((s) => ({ wvPop: { ...s.wvPop, kind: "sort", width: 316 } })),
+      wvDispBoard: cfg.layout === "board", wvDispTable: cfg.layout === "table", wvDispGantt: cfg.layout === "gantt",
+      wvBoardSizeOpts: [["cozy", "Cozy"], ["compact", "Compact"]].map(([v, l]) => ({ label: l, ...chip(cfg.board.size === v), go: () => mut((c) => { c.board.size = v; }) })),
+      wvSwimOpts: [["none", "None"], ["priority", "Priority"], ["assignee", "Assignee"]].concat(wsList.length ? [["workstream", "Workstream"]] : []).filter(([v]) => v === "none" || v !== gField).map(([v, l]) => ({ label: l, ...chip((cfg.board.swim || "none") === v), go: () => mut((c) => { c.board.swim = v; }) })),
+      wvRowHOpts: [[40, "Comfortable"], [32, "Compact"]].map(([v, l]) => ({ label: l, ...chip(cfg.table.rowH === v), go: () => mut((c) => { c.table.rowH = v; }) })),
+      wvGDepsToggle: () => mut((c) => { c.gantt.deps = !c.gantt.deps; }),
+      wvGDepsBg: cfg.gantt.deps ? "var(--cortex-500)" : "var(--n-300)", wvGDepsKnob: cfg.gantt.deps ? 14 : 2,
+      wvGProgToggle: () => mut((c) => { c.gantt.progress = !c.gantt.progress; }),
+      wvGProgBg: cfg.gantt.progress ? "var(--cortex-500)" : "var(--n-300)", wvGProgKnob: cfg.gantt.progress ? 14 : 2,
+      wvDispProps: [["key", "Key"], ["type", "Type"], ["status", "Status"], ["priority", "Priority"], ["assignee", "Assignee"], ["due", "Due date"], ["estimate", "Estimate"], ["feature", "Feature"], ["workstream", "Workstream"], ["cycle", "Cycle"]]
+        .filter(([id]) => (id !== "feature" || hasFeats) && (id !== "workstream" || wsList.length) && (id !== "cycle" || hasCycles))
+        .concat(cfs.map((cf) => [cf.id, cf.name]))
+        .map(([id, label]) => ({ label, ...chip(F(id)), toggle: () => mut((c) => { c.fields = c.fields.indexOf(id) >= 0 ? c.fields.filter((x) => x !== id) : c.fields.concat([id]); }) })),
+      wvCfManage: () => this.setState((s) => ({ wvCfTab: "existing", wvCfNew: null, wvPop: { ...s.wvPop, kind: "cf", width: 304 } })),
+      wvCfCountMeta: cfs.length ? cfs.length + " custom" : "No custom fields yet",
+      // custom fields manager + value editors
+      wvCfOpen: (e) => { this.setState({ wvCfTab: "existing", wvCfNew: null }); pop(e, "cf"); },
+      wvPopCf: !!P && P.kind === "cf",
+      wvCfContName: cont.name,
+      wvCfTabs: [["existing", "Add existing"], ["new", "New field"]].map(([v, l]) => { const on = (S.wvCfTab || "existing") === v; return { label: l,
+        weight: on ? 600 : 400, color: on ? "var(--n-900)" : "var(--n-500)", line: on ? "var(--cortex-500)" : "transparent",
+        go: () => this.setState({ wvCfTab: v, wvCfNew: null }) }; }),
+      wvCfExisting: !!P && P.kind === "cf" && (S.wvCfTab || "existing") === "existing",
+      wvCfExistRows: [["key", "Key", "hash"], ["type", "Item type", "shapes"], ["status", "Status", "loader-circle"], ["priority", "Priority", "signal-high"], ["assignee", "Assignee", "user-round"], ["due", "Due date", "calendar"], ["estimate", "Estimate", "ruler"], ["feature", "Feature", "hexagon"], ["workstream", "Workstream", "boxes"], ["cycle", "Cycle", "iteration-cw"]]
+        .filter(([id]) => (id !== "feature" || hasFeats) && (id !== "workstream" || wsList.length) && (id !== "cycle" || hasCycles))
+        .map(([id, name, icon]) => ({ id, name, icon, custom: false, typeLabel: null }))
+        .concat(cfs.map((cf) => ({ id: cf.id, name: cf.name, icon: CFI[cf.type] || "text", custom: true, typeLabel: CFTL[cf.type],
+          del: (e) => { e.stopPropagation(); const ix = cfs.indexOf(cf); if (ix >= 0) cfs.splice(ix, 1); mut((c) => { c.fields = c.fields.filter((x) => x !== cf.id); }); this.toast("Field deleted", "\u201c" + cf.name + "\u201d and its values were removed from " + cont.name + ".", "neutral"); } })))
+        .map((r) => ({ ...r, tgBg: F(r.id) ? "var(--cortex-500)" : "var(--n-300)", tgKnob: F(r.id) ? 14 : 2,
+          go: () => mut((c) => { c.fields = c.fields.indexOf(r.id) >= 0 ? c.fields.filter((x) => x !== r.id) : c.fields.concat([r.id]); }) })),
+      wvCfPicking: !!P && P.kind === "cf" && S.wvCfTab === "new" && !S.wvCfNew,
+      wvCfNaming: !!P && P.kind === "cf" && S.wvCfTab === "new" && !!S.wvCfNew,
+      wvCfSugRows: (({ "pj-onb": [["Launch risk", "dropdown"], ["Adoption target %", "progress"], ["Training owner", "person"]],
+        "pj-sync": [["Failure rate %", "progress"], ["Device cohort", "labels"], ["Confidence", "rating"]],
+        "pj-phx": [["Inspection date", "date"], ["Crew size", "number"], ["Site risk", "dropdown"]],
+        "pj-camp": [["Approval owner", "person"], ["Production budget", "money"], ["Copy status", "dropdown"]],
+        "l-triage": [["Affected version", "text"], ["Regression", "checkbox"], ["Customer impact", "rating"]] })[cont.id] || [["Confidence", "rating"], ["Effort (days)", "number"], ["Risk level", "dropdown"]])
+        .filter(([n]) => !cfs.some((c) => c.name === n))
+        .map(([n, t]) => ({ name: n, icon: CFI[t], typeLabel: CFTL[t], go: () => this.setState({ wvCfNew: { type: t, name: n } }) })),
+      wvCfSugOn: true,
+      wvCfTypeRows: ["text", "number", "money", "dropdown", "labels", "checkbox", "date", "rating", "progress", "person"].map((t) => ({
+        icon: CFI[t], label: CFTL[t], color: "var(--n-800)", go: () => this.setState({ wvCfNew: { type: t } }) }))
+        .concat([{ icon: "sigma", label: "Formula", color: "var(--n-400)", soon: true, go: () => this.toast("Formula fields", "Computed fields arrive with the reporting milestone.", "neutral") },
+          { icon: "arrow-up-right", label: "Rollup", color: "var(--n-400)", soon: true, go: () => this.toast("Rollup fields", "Aggregate sub-items and linked work — planned.", "neutral") }]),
+      wvCfTypeLabel: S.wvCfNew ? (CFTL[S.wvCfNew.type] || "").toLowerCase() : "",
+      wvCfNameDefault: S.wvCfNew ? S.wvCfNew.name || "" : "",
+      wvCfNameRef: (el) => { if (el && this._wvCfNameEl !== el) { this._wvCfNameEl = el; el.focus(); } },
+      wvCfNameKey: (e) => { if (e.key === "Enter") this._wvCfCreate && this._wvCfCreate(); },
+      wvCfOptHint: S.wvCfNew && (S.wvCfNew.type === "dropdown" || S.wvCfNew.type === "labels") ? "Starts with three example options — edit them from any value picker." : null,
+      wvCfCancel: () => this.setState({ wvCfNew: null }),
+      wvCfCreate: this._wvCfCreate = () => {
+        const t = (S.wvCfNew || {}).type || "text";
+        const nn = (this._wvCfNameEl && this._wvCfNameEl.value.trim()) || (S.wvCfNew && S.wvCfNew.name) || CFTL[t] + " field";
+        const cf = { id: "cf" + Date.now(), name: nn, type: t, values: {} };
+        if (t === "dropdown") cf.options = [{ v: "low", label: "Low", color: "var(--success-500)" }, { v: "med", label: "Medium", color: "var(--warn-500)" }, { v: "high", label: "High", color: "var(--danger-500)" }];
+        if (t === "labels") cf.options = [{ v: "l1", label: "Label A", color: "var(--swatch-teal)" }, { v: "l2", label: "Label B", color: "var(--swatch-sky)" }, { v: "l3", label: "Label C", color: "var(--swatch-violet)" }];
+        cfs.push(cf);
+        this.setState({ wvCfNew: null, wvCfTab: "existing" });
+        mut((c) => { c.fields = c.fields.concat([cf.id]); });
+        this.toast("Field created", "\u201c" + nn + "\u201d now lives on " + cont.name + " — visibility is saved per view.", "success");
+      },
+      wvPopCfIn: !!cfIn && !!cfItem && P.kind === "cfinput",
+      wvCfInVal: cfIn && cfItem && cfIn.values[cfItem.id] != null ? String(cfIn.values[cfItem.id]) : "",
+      wvCfInPh: cfIn ? (cfIn.type === "progress" ? "0–100" : cfIn.type === "money" ? "Amount" : cfIn.type === "number" ? "Number" : "Value") : "",
+      wvCfInHint: cfIn ? (cfIn.type === "progress" ? "Percent complete · Enter to save" : cfIn.type === "money" ? "USD · Enter to save" : "Enter to save · empty clears") : "",
+      wvCfInRef: (el) => { if (el && this._wvCfInEl !== el) { this._wvCfInEl = el; el.focus(); el.select(); } },
+      wvCfInKey: (e) => { if (e.key === "Enter") this._wvCfInSave && this._wvCfInSave(); else if (e.key === "Escape") this.setState({ wvPop: null }); },
+      wvCfInSave: this._wvCfInSave = () => {
+        if (!cfIn || !cfItem) { this.setState({ wvPop: null }); return; }
+        const raw = this._wvCfInEl ? this._wvCfInEl.value.trim() : "";
+        if (!raw) delete cfIn.values[cfItem.id];
+        else if (["number", "money", "progress"].indexOf(cfIn.type) >= 0) {
+          let n = parseFloat(raw.replace(/[^0-9.\-]/g, "")) || 0;
+          if (cfIn.type === "progress") n = Math.max(0, Math.min(100, Math.round(n)));
+          cfIn.values[cfItem.id] = n;
+        } else cfIn.values[cfItem.id] = raw;
+        this.setState({ wvPop: null });
+      },
+      wvPopCfLbl: !!cfIn && !!cfItem && P.kind === "cflabels",
+      wvCfLblRows: cfIn && cfItem && cfIn.type === "labels" ? cfIn.options.map((o) => {
+        const arr = cfIn.values[cfItem.id] || [];
+        const on = arr.indexOf(o.v) >= 0;
+        return { label: o.label, dot: o.color, on, checkBg: on ? "var(--cortex-500)" : "var(--n-0)", checkBd: on ? "var(--cortex-500)" : "var(--n-300)",
+          go: () => { const a2 = (cfIn.values[cfItem.id] || []).slice(); const ix = a2.indexOf(o.v); if (ix >= 0) a2.splice(ix, 1); else a2.push(o.v); if (a2.length) cfIn.values[cfItem.id] = a2; else delete cfIn.values[cfItem.id]; up(); } };
+      }) : [],
+      wvCfLblDone: () => this.setState({ wvPop: null }),
+      wvPopNew: !!P && P.kind === "new",
+      wvNewRef: (el) => { if (el && this._wvNewEl !== el) { this._wvNewEl = el; el.focus(); } },
+      wvNewLayouts: mkLayBtns(S.wvNewLay || "list", (v) => this.setState({ wvNewLay: v })),
+      wvNewSharedToggle: () => this.setState((s) => ({ wvNewShared: !s.wvNewShared })),
+      wvNewSharedBg: S.wvNewShared ? "var(--cortex-500)" : "var(--n-300)", wvNewSharedKnob: S.wvNewShared ? 14 : 2,
+      wvNewSharedLabel: S.wvNewShared ? "Shared with " + spName : "Personal view",
+      wvNewSharedDesc: S.wvNewShared ? "Everyone in the space sees it as a tab" : "Only you can see it",
+      wvNewCreate: () => {
+        const lay = S.wvNewLay || "list";
+        const nm = (this._wvNewEl && this._wvNewEl.value.trim()) || layName[lay] + " view";
+        const nv = { id: "v" + Date.now(), name: nm, shared: !!S.wvNewShared, createdBy: me, config: this.wvDefCfg(lay) };
+        st.views.push(nv);
+        if (this._wvNewEl) this._wvNewEl.value = "";
+        this.setState({ wvPop: null, pjTab: "wv:" + nv.id });
+        this.toast("View created", nv.shared ? "Everyone in " + spName + " can see \"" + nm + "\"." : "\"" + nm + "\" is personal — only you can see it.", "success");
+      },
+      wvPopMenu: !!P && P.kind === "menu",
+      wvMenuName: mv.name,
+      wvMenuMeta: (mv.shared ? "Shared" : "Personal") + " · " + (layName[mvCfg.layout] || "List") + " · by " + mv.createdBy,
+      wvMenuRows: [
+        { icon: "pencil", label: "Rename view", go: () => this.setState({ wvPop: null, wvRen: mv.id, pjTab: "wv:" + mv.id }) },
+        { icon: "copy", label: "Duplicate view", go: dupView },
+        { icon: "pin", label: st.defaultId === mv.id ? "Default view" : "Set as default", check: st.defaultId === mv.id,
+          go: () => { if (st.defaultId === mv.id) return; st.defaultId = mv.id; this.setState({ wvPop: null }); this.toast("Default view updated", "\"" + mv.name + "\" now opens first for this " + (isList ? "list" : "project") + ".", "success"); } },
+        { icon: mv.shared ? "lock" : "globe", label: mv.shared ? "Make personal" : "Share with " + spName,
+          go: () => { mv.shared = !mv.shared; this.setState({ wvPop: null }); this.toast(mv.shared ? "View shared" : "View made personal", mv.shared ? "Everyone in " + spName + " can now use \"" + mv.name + "\"." : "\"" + mv.name + "\" is now visible only to you.", "success"); } },
+      ],
+      wvMenuDelColor: st.views.length <= 1 ? "var(--n-300)" : "var(--danger-600)",
+      wvMenuDel: () => {
+        if (st.views.length <= 1) { this.toast("Can't delete", "A " + (isList ? "list" : "project") + " needs at least one view.", "neutral"); return; }
+        st.views = st.views.filter((v) => v.id !== mv.id);
+        if (st.defaultId === mv.id) st.defaultId = st.views[0].id;
+        this.setState({ wvPop: null, pjTab: "wv:" + st.defaultId });
+        this.toast("View deleted", "\"" + mv.name + "\" was removed" + (mv.shared ? " for everyone in " + spName + "." : "."), "neutral");
+      },
+      wvPopSave: !!P && P.kind === "save",
+      wvSaveRows: [
+        { icon: view.shared ? "users" : "check", label: view.shared ? "Save for everyone" : "Save changes",
+          desc: view.shared ? "Updates \"" + view.name + "\" for everyone in " + spName : "Updates your personal view",
+          go: () => { view.config = this.wvNorm(view.draft || view.config); delete view.draft; this.setState({ wvPop: null });
+            this.toast("View saved", view.shared ? "Everyone in " + spName + " now sees this setup for \"" + view.name + "\"." : "Your personal view was updated.", "success"); } },
+        { icon: "copy", label: "Save as new personal view", desc: "Keeps \"" + view.name + "\" unchanged",
+          go: () => { const nv = { id: "v" + Date.now(), name: view.name + " (mine)", shared: false, createdBy: me, config: this.wvNorm(JSON.parse(JSON.stringify(view.draft || view.config))) };
+            delete view.draft; st.views.push(nv); this.setState({ wvPop: null, pjTab: "wv:" + nv.id }); this.toast("View created", "Your tweaks now live in \"" + nv.name + "\".", "success"); } },
+        { icon: "undo-2", label: "Discard changes", desc: "Back to the last saved setup", go: () => { delete view.draft; this.setState({ wvPop: null }); } },
+      ],
     };
   }
   // ---------- view builders ----------

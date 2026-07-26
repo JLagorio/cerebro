@@ -139,7 +139,38 @@ pub fn first_h1_line_start(body: &str) -> Option<usize> {
 pub fn extract_h1_title(body: &str) -> Option<String> {
     let start = first_h1_line_start(body)?;
     let line = body[start..].lines().next()?;
-    Some(line.trim().strip_prefix("# ")?.trim().to_string())
+    Some(strip_title_markdown(line.trim().strip_prefix("# ")?.trim()))
+}
+
+/// `**Wiki Home**` → `Wiki Home`, `[[target|alias]]` → `alias`: derived
+/// titles never show inline markdown (M2.x docs polish). Only `*` and
+/// backticks are stripped (what our serializer emits for emphasis/code) —
+/// underscores stay, they are common in literal names. The H1 LINE on disk
+/// keeps its markdown; parity with `stripTitleMarkdown` in mockParse.ts.
+fn strip_title_markdown(raw: &str) -> String {
+    let mut unwrapped = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find("[[") {
+        unwrapped.push_str(&rest[..start]);
+        match rest[start + 2..].find("]]") {
+            Some(end_rel) => {
+                let inner = &rest[start + 2..start + 2 + end_rel];
+                unwrapped.push_str(inner.rsplit('|').next().unwrap_or(inner));
+                rest = &rest[start + 2 + end_rel + 2..];
+            }
+            None => {
+                unwrapped.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    unwrapped.push_str(rest);
+    unwrapped
+        .chars()
+        .filter(|c| !matches!(c, '*' | '`'))
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Humanize a filename stem: `fix-login-flow` → `Fix login flow`.

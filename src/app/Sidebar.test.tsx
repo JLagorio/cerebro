@@ -113,8 +113,9 @@ describe('Sidebar', () => {
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
     expect(screen.queryByText('Urgent work')).toBeNull();
     // Clicking a doc file opens it full-page; project.md routes to the project.
-    fireEvent.click(screen.getByRole('button', { name: /^inbox/ }));
-    fireEvent.click(screen.getByRole('button', { name: /^welcome/ }));
+    // Rows show humanized folder names and note titles (M2.x feedback).
+    fireEvent.click(screen.getByRole('button', { name: /^Inbox/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Welcome/ }));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'inbox/welcome.md' });
   });
 

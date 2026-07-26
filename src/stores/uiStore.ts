@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+export type DocPanelTab = 'outline' | 'info' | 'links';
+
 interface UiState {
   detailPath: string | null;
   openDetail(path: string): void;
@@ -9,19 +11,23 @@ interface UiState {
   // File-tree expand state, persisted across sessions (M2 Task 10).
   expandedFolders: Record<string, boolean>;
   toggleFolder(path: string): void;
-  // Doc outline visibility, persisted (M2 Task 15).
-  docOutlineCollapsed: boolean;
-  setDocOutlineCollapsed(v: boolean): void;
-  // Doc properties panel visibility, persisted (M2 Task 16).
-  docPropsCollapsed: boolean;
-  setDocPropsCollapsed(v: boolean): void;
+  // Doc right-hand side panel (M2.x docs polish): one panel, three tabs.
+  docPanelOpen: boolean;
+  setDocPanelOpen(v: boolean): void;
+  docPanelTab: DocPanelTab;
+  setDocPanelTab(tab: DocPanelTab): void;
+  // Home tasks rollup assignee filter ('' = everyone), persisted.
+  homeTaskAssignee: string;
+  setHomeTaskAssignee(v: string): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
 }
 
 const EXPANDED_KEY = 'cerebro.expandedFolders';
-const OUTLINE_KEY = 'cerebro.docOutlineCollapsed';
+const PANEL_OPEN_KEY = 'cerebro.docPanelOpen';
+const PANEL_TAB_KEY = 'cerebro.docPanelTab';
+const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -37,22 +43,25 @@ function loadExpanded(): Record<string, boolean> {
   }
 }
 
-const PROPS_KEY = 'cerebro.docPropsCollapsed';
-
-function loadFlag(key: string): boolean {
+function loadString(key: string, fallback: string): string {
   try {
-    return window.localStorage.getItem(key) === 'true';
+    return window.localStorage.getItem(key) ?? fallback;
   } catch {
-    return false;
+    return fallback;
   }
 }
 
-function storeFlag(key: string, v: boolean): void {
+function storeString(key: string, v: string): void {
   try {
-    window.localStorage.setItem(key, String(v));
+    window.localStorage.setItem(key, v);
   } catch {
     // Storage unavailable: session-only.
   }
+}
+
+function loadPanelTab(): DocPanelTab {
+  const v = loadString(PANEL_TAB_KEY, 'outline');
+  return v === 'info' || v === 'links' ? v : 'outline';
 }
 
 let nextToastId = 1;
@@ -77,16 +86,21 @@ export const useUiStore = create<UiState>((set) => ({
       return { expandedFolders: next };
     }),
 
-  docOutlineCollapsed: loadFlag(OUTLINE_KEY),
-  setDocOutlineCollapsed: (v) => {
-    storeFlag(OUTLINE_KEY, v);
-    set({ docOutlineCollapsed: v });
+  docPanelOpen: loadString(PANEL_OPEN_KEY, 'true') === 'true',
+  setDocPanelOpen: (v) => {
+    storeString(PANEL_OPEN_KEY, String(v));
+    set({ docPanelOpen: v });
+  },
+  docPanelTab: loadPanelTab(),
+  setDocPanelTab: (tab) => {
+    storeString(PANEL_TAB_KEY, tab);
+    set({ docPanelTab: tab });
   },
 
-  docPropsCollapsed: loadFlag(PROPS_KEY),
-  setDocPropsCollapsed: (v) => {
-    storeFlag(PROPS_KEY, v);
-    set({ docPropsCollapsed: v });
+  homeTaskAssignee: loadString(TASK_ASSIGNEE_KEY, ''),
+  setHomeTaskAssignee: (v) => {
+    storeString(TASK_ASSIGNEE_KEY, v);
+    set({ homeTaskAssignee: v });
   },
 
   toasts: [],

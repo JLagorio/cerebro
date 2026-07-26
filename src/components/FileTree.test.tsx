@@ -24,29 +24,32 @@ describe('FileTree', () => {
   });
   afterEach(cleanup);
 
+  // Rows show humanized folder names and note titles (M2.x feedback):
+  // 'meetings' renders as "Meetings", kickoff.md as its H1 title.
+  const KICKOFF_TITLE = 'Guided onboarding GA kickoff';
+
   it('lists folders and files, hides the excluded project.md', () => {
     renderTree();
     const folders = screen.getAllByTestId('tree-folder').map((el) => el.textContent);
-    expect(folders).toContain('meetings');
-    expect(folders).toContain('items');
+    expect(folders).toContain('Meetings');
+    expect(folders).toContain('Items');
     // Root holds only folders (project.md is hidden), so no file rows yet.
-    const files = screen.queryAllByTestId('tree-file').map((el) => el.textContent);
-    expect(files).not.toContain('project');
+    expect(screen.queryAllByTestId('tree-file')).toHaveLength(0);
   });
 
   it('expands a folder on click and persists the expand state', () => {
     renderTree();
-    expect(screen.queryByText('kickoff')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
-    expect(screen.getByText('kickoff')).toBeTruthy();
+    expect(screen.queryByText(KICKOFF_TITLE)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    expect(screen.getByText(KICKOFF_TITLE)).toBeTruthy();
     expect(useUiStore.getState().expandedFolders[`${ROOT}/meetings`]).toBe(true);
     expect(window.localStorage.getItem('cerebro.expandedFolders')).toContain(`${ROOT}/meetings`);
   });
 
   it('opens a file through onOpen', () => {
     const onOpen = renderTree();
-    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
-    fireEvent.click(screen.getByRole('button', { name: /^kickoff/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('button', { name: KICKOFF_TITLE }));
     expect(onOpen).toHaveBeenCalledWith(`${ROOT}/meetings/kickoff.md`);
   });
 
@@ -73,16 +76,17 @@ describe('FileTree', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() =>
       expect(screen.getAllByTestId('tree-folder').map((el) => el.textContent)).toContain(
-        'research',
+        'Research',
       ),
     );
     expect(screen.getByText('Empty folder')).toBeTruthy();
   });
 
-  it('renames a file on disk', async () => {
+  it('renames a file on disk (via the row options menu)', async () => {
     renderTree();
-    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Rename kickoff' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('button', { name: `Options for ${KICKOFF_TITLE}` }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const input = screen.getByPlaceholderText('Page name');
     expect((input as HTMLInputElement).value).toBe('kickoff');
     fireEvent.change(input, { target: { value: 'kickoff-notes' } });
@@ -94,8 +98,8 @@ describe('FileTree', () => {
   // Task 14: right-click context menus.
   it('right-clicking a file offers rename and trash', async () => {
     renderTree();
-    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
-    fireEvent.contextMenu(screen.getByRole('button', { name: /^kickoff/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: KICKOFF_TITLE }));
     expect(screen.getByRole('menu')).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const input = screen.getByPlaceholderText('Page name') as HTMLInputElement;
@@ -107,7 +111,7 @@ describe('FileTree', () => {
 
   it('right-clicking a folder creates a page inside it', async () => {
     const onOpen = renderTree();
-    fireEvent.contextMenu(screen.getByRole('button', { name: /^meetings/ }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Meetings/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'New page' }));
     fireEvent.change(screen.getByPlaceholderText('Page name'), {
       target: { value: 'Retro' },
@@ -130,18 +134,54 @@ describe('FileTree', () => {
 
   it('right-clicking a file and choosing Move to Trash deletes after confirm', async () => {
     renderTree();
-    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
-    fireEvent.contextMenu(screen.getByRole('button', { name: /^kickoff/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: KICKOFF_TITLE }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false));
   });
 
-  it('moves a file to the Trash after confirmation', async () => {
+  it('moves a file to the Trash after confirmation (via the row options menu)', async () => {
     renderTree();
-    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete kickoff' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('button', { name: `Options for ${KICKOFF_TITLE}` }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false));
+  });
+
+  // M2.x docs polish: folder-note docs render as documents with page tabs.
+  it('renders a folder-note as a doc row that opens its main page', async () => {
+    fs().set(`${ROOT}/notes/notes.md`, '# Team Notes\n');
+    fs().set(`${ROOT}/notes/extra.md`, '# Extra page\n');
+    await useVaultStore.getState().rescan();
+    const onOpen = renderTree();
+    const doc = screen.getByTestId('tree-doc');
+    // Doc rows carry the folder note's TITLE, not the slug.
+    expect(doc.textContent).toContain('Team Notes');
+    fireEvent.click(doc);
+    expect(onOpen).toHaveBeenCalledWith(`${ROOT}/notes/notes.md`);
+    // Expanding shows only the extra pages, not the folder note itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Team Notes' }));
+    const files = screen.getAllByTestId('tree-file').map((el) => el.textContent);
+    expect(files).toContain('Extra page');
+    expect(files).not.toContain('Team Notes');
+  });
+
+  it('creates a page from a template with placeholders filled', async () => {
+    const onOpen = renderTree();
+    fireEvent.click(screen.getByRole('button', { name: 'New page' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), {
+      target: { value: 'Sprint Review' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Template' }));
+    fireEvent.click(screen.getByRole('option', { name: /meeting/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/sprint-review.md`));
+    const raw = fs().get(`${ROOT}/sprint-review.md`) ?? '';
+    expect(raw).toContain('# Sprint Review');
+    expect(raw).toContain('type: Meeting');
+    expect(raw).not.toContain('{{title}}');
+    expect(raw).not.toContain('{{date}}');
   });
 });

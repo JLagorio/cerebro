@@ -54,15 +54,14 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
 }
 
 /**
- * Right-hand properties panel for documents (M2 Task 16, Tolaria Inspector
- * pattern): assign a type, edit its declared fields, manage loose
- * frontmatter keys. Everything writes through patchFrontmatter (optimistic,
- * disk-first on rescan).
+ * Info tab of the doc side panel (M2 Task 16, Tolaria Inspector pattern;
+ * M2.x: embedded in the tabbed panel): assign a type, edit its declared
+ * fields, manage loose frontmatter keys. Everything writes through
+ * patchFrontmatter (optimistic, disk-first on rescan).
  */
 export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const toast = useUiStore((s) => s.toast);
-  const setCollapsed = useUiStore((s) => s.setDocPropsCollapsed);
 
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
@@ -95,22 +94,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   };
 
   return (
-    <aside
-      data-testid="doc-properties"
-      aria-label="Document properties"
-      className="w-[264px] flex-none overflow-y-auto border-l border-[var(--n-200)] px-3.5 pb-4 pt-2.5"
-    >
-      <div className="mb-2 flex items-center gap-1.5">
-        <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
-          Properties
-        </span>
-        <IconButton
-          icon="panel-right-close"
-          label="Hide properties"
-          size="sm"
-          onClick={() => setCollapsed(true)}
-        />
-      </div>
+    <div data-testid="doc-properties" aria-label="Document properties" className="pt-1">
       <div className="flex flex-col gap-[7px]">
         <div className="flex items-center gap-2">
           <span className={LABEL}>Type</span>
@@ -176,6 +160,6 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         <div>Created {entry.createdAt.slice(0, 10)}</div>
         <div>Modified {entry.modifiedAt.slice(0, 10)}</div>
       </div>
-    </aside>
+    </div>
   );
 }

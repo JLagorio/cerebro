@@ -1,23 +1,39 @@
 import { useMemo, useState } from 'react';
+import { MoveDialog } from '@/components/MoveDialog';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import type { Entry } from '@/engine/types';
-import { createFolder, deleteNote, renameNote } from '@/lib/ipc';
-import { slugify } from '@/lib/slug';
+import { createFolder, deleteNote, readNote, renameNote } from '@/lib/ipc';
+import { humanizeSlug, slugify } from '@/lib/slug';
+import {
+  applyTemplateBody,
+  applyTemplateFrontmatter,
+  listTemplates,
+  templateDisplayName,
+  todayIso,
+} from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 interface TreeNode {
   path: string;
+  /** Slug basename — what rename operates on. */
   name: string;
-  kind: 'folder' | 'file';
+  /** Human-readable row text: note titles for files, title-cased slugs for
+   * folders (M2.x feedback: show "App Notes", never "app-notes"). */
+  label: string;
+  /** 'doc' = folder-note multi-page doc: the folder renders as a document
+   * whose extra pages nest beneath it (M2.x docs polish). */
+  kind: 'folder' | 'file' | 'doc';
+  /** For 'doc' nodes: path of the folder note (the doc's default page). */
+  mainPath?: string;
   children: TreeNode[];
 }
 
-const displayName = (filename: string) => filename.replace(/\.md$/, '');
 const parentDir = (path: string) =>
   path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 
@@ -39,7 +55,8 @@ function buildTree(
   const ensureFolder = (path: string): TreeNode => {
     let node = byPath.get(path);
     if (node === undefined) {
-      node = { path, name: path.split('/').pop() ?? path, kind: 'folder', children: [] };
+      const name = path.split('/').pop() ?? path;
+      node = { path, name, label: humanizeSlug(name), kind: 'folder', children: [] };
       byPath.set(path, node);
       attach(node);
     }
@@ -51,13 +68,39 @@ function buildTree(
   }
   for (const e of entries) {
     if (!e.path.startsWith(prefix) || hide(e.path)) continue;
-    attach({ path: e.path, name: displayName(e.filename), kind: 'file', children: [] });
+    attach({
+      path: e.path,
+      name: e.filename.replace(/\.md$/, ''),
+      label: e.title,
+      kind: 'file',
+      children: [],
+    });
   }
+
+  // Folder-note pass: a folder holding `<its-name>.md` renders as a doc.
+  const promoteDocs = (nodes: TreeNode[]) => {
+    for (const node of nodes) {
+      if (node.kind === 'folder') {
+        const main = node.children.find(
+          (c) => c.kind === 'file' && c.name === node.name,
+        );
+        if (main !== undefined) {
+          node.kind = 'doc';
+          node.mainPath = main.path;
+          node.label = main.label; // the folder note's title names the doc
+          node.children = node.children.filter((c) => c !== main);
+        }
+      }
+      promoteDocs(node.children);
+    }
+  };
+  promoteDocs(roots);
 
   const sortNodes = (nodes: TreeNode[]) => {
     nodes.sort(
       (a, b) =>
-        Number(a.kind === 'file') - Number(b.kind === 'file') || a.name.localeCompare(b.name),
+        Number(a.kind !== 'folder') - Number(b.kind !== 'folder') ||
+        a.label.localeCompare(b.label),
     );
     for (const n of nodes) sortNodes(n.children);
   };
@@ -75,12 +118,15 @@ export interface FileTreeProps {
   root: string;
   /** Hide specific paths (e.g. the project.md that the Overview tab owns). */
   hide?: (path: string) => boolean;
+  /** Currently open page — its row renders highlighted. */
+  activePath?: string | null;
   /** A file row (or freshly created page) was chosen. */
   onOpen: (path: string) => void;
 }
 
-/** Folder/note tree over the vault (M2 Task 10): create, rename, trash. */
-export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
+/** Folder/note tree over the vault (M2 Task 10): create, rename, move,
+ * trash, templates; folder-note docs render as documents (M2.x). */
+export function FileTree({ root, hide = () => false, activePath = null, onOpen }: FileTreeProps) {
   const entries = useVaultStore((s) => s.entries);
   const folders = useVaultStore((s) => s.folders);
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -94,17 +140,21 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
     () => buildTree(root, entries, folders, hide),
     [root, entries, folders, hide],
   );
+  const templates = useMemo(() => listTemplates(entries), [entries]);
 
   const [dialog, setDialog] = useState<TreeDialog | null>(null);
   const [name, setName] = useState('');
+  const [templatePath, setTemplatePath] = useState('none');
   const [submitting, setSubmitting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<TreeNode | null>(null);
+  const [moveNode, setMoveNode] = useState<TreeNode | null>(null);
   // Task 14: right-click menu — node targets a row, node:null targets root.
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode | null } | null>(null);
 
   const openDialog = (d: TreeDialog) => {
     setDialog(d);
     setName(d.mode === 'rename' ? d.node.name : '');
+    setTemplatePath('none');
   };
   const closeDialog = () => {
     setDialog(null);
@@ -119,12 +169,15 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
       if (dialog.mode === 'new-page') {
         // Typed capitalization becomes the H1; the filename is the slug.
         const slug = slugify(trimmed) || 'page';
-        const path = await createItem({
-          folder: dialog.dir,
-          slug,
-          frontmatter: {},
-          body: `# ${trimmed}\n`,
-        });
+        const template = entries.find((e) => e.path === templatePath) ?? null;
+        const vars = { title: trimmed, date: todayIso() };
+        let body = `# ${trimmed}\n`;
+        let frontmatter: Record<string, unknown> = {};
+        if (template !== null) {
+          body = applyTemplateBody(await readNote(vaultPath, template.path), vars);
+          frontmatter = applyTemplateFrontmatter(template, vars);
+        }
+        const path = await createItem({ folder: dialog.dir, slug, frontmatter, body });
         closeDialog();
         onOpen(path);
         return;
@@ -144,6 +197,11 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
       const to = `${parentDir(node.path)}/${slug}${node.kind === 'file' ? '.md' : ''}`;
       if (to !== node.path) {
         await renameNote(vaultPath, node.path, to);
+        // Folder-note pattern: the doc's main file must keep the folder's
+        // name or the folder stops being a doc.
+        if (node.kind === 'doc' && node.mainPath !== undefined) {
+          await renameNote(vaultPath, `${to}/${node.name}.md`, `${to}/${slug}.md`);
+        }
         await rescan();
       }
       closeDialog();
@@ -171,7 +229,8 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
   };
 
   const menuItems = (node: TreeNode | null): ContextMenuItem[] => {
-    const dir = node === null ? root : node.kind === 'folder' ? node.path : parentDir(node.path);
+    const dir =
+      node === null ? root : node.kind === 'file' ? parentDir(node.path) : node.path;
     const items: ContextMenuItem[] = [
       { icon: 'file-plus', label: 'New page', onSelect: () => openDialog({ mode: 'new-page', dir }) },
       {
@@ -183,6 +242,7 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
     if (node !== null) {
       items.push(
         { icon: 'pencil', label: 'Rename', onSelect: () => openDialog({ mode: 'rename', node }) },
+        { icon: 'folder-input', label: 'Move to folder…', onSelect: () => setMoveNode(node) },
         {
           icon: 'trash-2',
           label: 'Move to Trash',
@@ -202,87 +262,137 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
 
   const rowActions = (node: TreeNode) => (
     <span className="ml-auto hidden items-center gap-0.5 group-hover:inline-flex">
-      {node.kind === 'folder' && (
-        <>
-          <IconButton
-            icon="file-plus"
-            label={`New page in ${node.name}`}
-            size="sm"
-            onClick={() => openDialog({ mode: 'new-page', dir: node.path })}
-          />
-          <IconButton
-            icon="folder-plus"
-            label={`New folder in ${node.name}`}
-            size="sm"
-            onClick={() => openDialog({ mode: 'new-folder', dir: node.path })}
-          />
-        </>
+      {node.kind !== 'file' && (
+        <IconButton
+          icon="file-plus"
+          label={`New page in ${node.label}`}
+          size="sm"
+          onClick={() => openDialog({ mode: 'new-page', dir: node.path })}
+        />
       )}
-      <IconButton
-        icon="pencil"
-        label={`Rename ${node.name}`}
-        size="sm"
-        onClick={() => openDialog({ mode: 'rename', node })}
-      />
-      <IconButton
-        icon="trash-2"
-        label={`Delete ${node.name}`}
-        size="sm"
-        onClick={() => setConfirmDelete(node)}
-      />
+      <span
+        className="inline-flex"
+        onClick={(e) => {
+          e.stopPropagation();
+          setMenu({ x: e.clientX, y: e.clientY, node });
+        }}
+      >
+        <IconButton icon="ellipsis" label={`Options for ${node.label}`} size="sm" />
+      </span>
     </span>
   );
 
-  const renderNodes = (nodes: TreeNode[], depth: number) =>
-    nodes.map((node) => (
-      <li key={node.path} className="list-none">
-        <div
-          className="group flex min-w-0 items-center gap-1 rounded-md pr-1 hover:bg-[var(--n-50)]"
-          style={{ paddingLeft: depth * 16 }}
-          onContextMenu={onRowContextMenu(node)}
-        >
-          {node.kind === 'folder' ? (
-            <button
-              type="button"
-              data-testid="tree-folder"
-              aria-expanded={expanded[node.path] === true}
-              onClick={() => toggleFolder(node.path)}
-              className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-1 text-left text-[13px] text-[var(--n-800)]"
-            >
-              <Icon
-                name={expanded[node.path] === true ? 'chevron-down' : 'chevron-right'}
-                size={13}
-                color="var(--n-400)"
-              />
-              <Icon name="folder" size={14} color="var(--n-500)" />
-              <span className="truncate">{node.name}</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              data-testid="tree-file"
-              onClick={() => onOpen(node.path)}
-              className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-1 pl-[19px] text-left text-[13px] text-[var(--n-700)]"
-            >
-              <Icon name="file-text" size={14} color="var(--n-500)" />
-              <span className="truncate">{node.name}</span>
-            </button>
+  const rowShell = (node: TreeNode, depth: number, active: boolean, inner: React.ReactNode) => (
+    <div
+      className={[
+        'group flex min-w-0 items-center gap-1 rounded-md pr-1',
+        active ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-100)]',
+      ].join(' ')}
+      style={{ paddingLeft: depth * 14 }}
+      onContextMenu={onRowContextMenu(node)}
+    >
+      {inner}
+      {rowActions(node)}
+    </div>
+  );
+
+  const renderNodes = (nodes: TreeNode[], depth: number): React.ReactNode =>
+    nodes.map((node) => {
+      const isOpen = expanded[node.path] === true;
+      const active =
+        (node.kind === 'file' && node.path === activePath) ||
+        (node.kind === 'doc' && node.mainPath === activePath);
+      const labelClass = [
+        'truncate',
+        active ? 'font-medium text-[var(--cortex-600)]' : '',
+      ].join(' ');
+
+      return (
+        <li key={node.path} className="list-none">
+          {node.kind === 'folder' &&
+            rowShell(
+              node,
+              depth,
+              false,
+              <button
+                type="button"
+                data-testid="tree-folder"
+                aria-expanded={isOpen}
+                onClick={() => toggleFolder(node.path)}
+                className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-[13px] text-[var(--n-800)]"
+              >
+                <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} color="var(--n-400)" />
+                <Icon name={isOpen ? 'folder-open' : 'folder'} size={14} color="var(--n-500)" />
+                <span className="truncate">{node.label}</span>
+              </button>,
+            )}
+          {node.kind === 'doc' &&
+            rowShell(
+              node,
+              depth,
+              active,
+              <span className="flex min-w-0 flex-1 items-center">
+                <button
+                  type="button"
+                  aria-label={isOpen ? `Collapse ${node.label}` : `Expand ${node.label}`}
+                  aria-expanded={isOpen}
+                  onClick={() => toggleFolder(node.path)}
+                  className="inline-flex flex-none items-center border-0 bg-transparent py-[5px] pl-1 pr-0.5 text-[var(--n-400)]"
+                >
+                  <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} />
+                </button>
+                <button
+                  type="button"
+                  data-testid="tree-doc"
+                  onClick={() => node.mainPath !== undefined && onOpen(node.mainPath)}
+                  className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent py-[5px] pr-1 text-left text-[13px] text-[var(--n-700)]"
+                >
+                  <Icon name="file-stack" size={14} color={active ? 'var(--cortex-500)' : 'var(--n-500)'} />
+                  <span className={labelClass}>{node.label}</span>
+                </button>
+              </span>,
+            )}
+          {node.kind === 'file' &&
+            rowShell(
+              node,
+              depth,
+              active,
+              <button
+                type="button"
+                data-testid="tree-file"
+                onClick={() => onOpen(node.path)}
+                className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-[13px] text-[var(--n-700)]"
+              >
+                <Icon
+                  name="file-text"
+                  size={14}
+                  color={active ? 'var(--cortex-500)' : 'var(--n-500)'}
+                />
+                <span className={labelClass}>{node.label}</span>
+              </button>,
+            )}
+          {node.kind !== 'file' && isOpen && node.children.length > 0 && (
+            <ul className="m-0 p-0">{renderNodes(node.children, depth + 1)}</ul>
           )}
-          {rowActions(node)}
-        </div>
-        {node.kind === 'folder' && expanded[node.path] === true && node.children.length > 0 && (
-          <ul className="m-0 p-0">{renderNodes(node.children, depth + 1)}</ul>
-        )}
-        {node.kind === 'folder' && expanded[node.path] === true && node.children.length === 0 && (
-          <p
-            className="m-0 py-1 text-[12px] text-[var(--n-400)]"
-            style={{ paddingLeft: depth * 16 + 40 }}
-          >
-            Empty folder
-          </p>
-        )}
-      </li>
-    ));
+          {node.kind === 'folder' && isOpen && node.children.length === 0 && (
+            <p
+              className="m-0 py-1 text-[12px] text-[var(--n-400)]"
+              style={{ paddingLeft: depth * 14 + 40 }}
+            >
+              Empty folder
+            </p>
+          )}
+          {node.kind === 'doc' && isOpen && node.children.length === 0 && (
+            <p
+              className="m-0 py-1 text-[12px] text-[var(--n-400)]"
+              style={{ paddingLeft: depth * 14 + 40 }}
+            >
+              No extra pages
+            </p>
+          )}
+        </li>
+      );
+    });
 
   return (
     <div
@@ -294,7 +404,7 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
         <button
           type="button"
           onClick={() => openDialog({ mode: 'new-page', dir: root })}
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
         >
           <Icon name="file-plus" size={13} />
           New page
@@ -302,7 +412,7 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
         <button
           type="button"
           onClick={() => openDialog({ mode: 'new-folder', dir: root })}
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
         >
           <Icon name="folder-plus" size={13} />
           New folder
@@ -332,7 +442,7 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
               ? 'New page'
               : dialog.mode === 'new-folder'
                 ? 'New folder'
-                : `Rename ${dialog.node.kind === 'file' ? 'page' : 'folder'}`
+                : `Rename ${dialog.node.kind === 'folder' ? 'folder' : 'page'}`
           }
           width={420}
           primaryAction={{
@@ -342,23 +452,51 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: closeDialog }}
         >
-          <Input
-            autoFocus
-            placeholder={dialog.mode === 'new-folder' ? 'Folder name' : 'Page name'}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void submitDialog();
-            }}
-            width="100%"
-          />
+          <div className="flex flex-col gap-2">
+            <Input
+              autoFocus
+              placeholder={dialog.mode === 'new-folder' ? 'Folder name' : 'Page name'}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void submitDialog();
+              }}
+              width="100%"
+            />
+            {dialog.mode === 'new-page' && templates.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="flex-none text-[12px] text-[var(--n-500)]">Template</span>
+                <Dropdown
+                  size="sm"
+                  label="Template"
+                  options={[
+                    { value: 'none', label: 'Blank page' },
+                    ...templates.map((t) => ({ value: t.path, label: templateDisplayName(t) })),
+                  ]}
+                  value={templatePath}
+                  onChange={setTemplatePath}
+                />
+              </div>
+            )}
+          </div>
         </Dialog>
+      )}
+      {moveNode !== null && (
+        <MoveDialog
+          path={moveNode.path}
+          label={`"${moveNode.label}"`}
+          onClose={() => setMoveNode(null)}
+          onMoved={(dest) => {
+            setMoveNode(null);
+            if (moveNode.kind === 'file') onOpen(dest);
+          }}
+        />
       )}
       {confirmDelete !== null && (
         <Dialog
           open
           onClose={() => setConfirmDelete(null)}
-          title={`Move "${confirmDelete.name}" to Trash?`}
+          title={`Move "${confirmDelete.label}" to Trash?`}
           width={420}
           primaryAction={{
             label: 'Move to Trash',
@@ -368,9 +506,9 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(null) }}
         >
           <p className="m-0 text-[13px] text-[var(--n-600)]">
-            {confirmDelete.kind === 'folder'
-              ? 'The folder and everything inside it move to the system Trash.'
-              : 'The page moves to the system Trash.'}
+            {confirmDelete.kind === 'file'
+              ? 'The page moves to the system Trash.'
+              : 'The folder and everything inside it move to the system Trash.'}
           </p>
         </Dialog>
       )}

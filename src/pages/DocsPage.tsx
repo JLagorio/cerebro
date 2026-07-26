@@ -2,13 +2,16 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
 import type { Entry } from '@/engine/types';
+import { isTemplate } from '@/lib/templates';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const RECENTS_SHOWN = 6;
 
 /** A document here is any markdown file that isn't a work item; project.md
- * files stay out of recents (their surface is the project page). */
-const isDoc = (e: Entry) => e.type !== 'Work item' && !e.path.endsWith('project.md');
+ * files stay out of recents (their surface is the project page), and
+ * templates are scaffolding, not content. */
+const isDoc = (e: Entry) =>
+  e.type !== 'Work item' && !e.path.endsWith('project.md') && !isTemplate(e);
 
 function formatDay(iso: string): string {
   return iso.slice(0, 10);

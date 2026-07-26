@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { BlockNoteEditor } from '@blocknote/core';
+import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
@@ -21,7 +21,7 @@ export function DetailPanel() {
   const [title, setTitle] = useState('');
   // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
   // load/save). The handle is only needed for the rename splice below.
-  const editorRef = useRef<BlockNoteEditor | null>(null);
+  const editorRef = useRef<CerebroEditor | null>(null);
 
   useEffect(() => {
     setTitle(entry?.title ?? '');

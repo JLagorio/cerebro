@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { BlockNoteEditor } from '@blocknote/core';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
-import { MarkdownEditor } from './MarkdownEditor';
+import { MarkdownEditor, type CerebroEditor } from './MarkdownEditor';
 
-type ReadyInfo = { editor: BlockNoteEditor; lossyImport: boolean };
+type ReadyInfo = { editor: CerebroEditor; lossyImport: boolean };
 
 async function renderReady(props: {
   markdown: string;
@@ -25,7 +24,7 @@ async function renderReady(props: {
   return onReady.mock.calls[0][0];
 }
 
-const appendParagraph = (editor: BlockNoteEditor, text: string) => {
+const appendParagraph = (editor: CerebroEditor, text: string) => {
   const last = editor.document[editor.document.length - 1];
   editor.insertBlocks([{ type: 'paragraph', content: text }], last, 'after');
 };

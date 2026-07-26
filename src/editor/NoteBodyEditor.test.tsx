@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BlockNoteEditor } from '@blocknote/core';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import type { CerebroEditor } from './MarkdownEditor';
 import { NoteBodyEditor } from './NoteBodyEditor';
 
 const PAGE = 'inbox/test-page.md';
 const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
 
-type ReadyInfo = { editor: BlockNoteEditor; lossyImport: boolean };
+type ReadyInfo = { editor: CerebroEditor; lossyImport: boolean };
 
 async function renderReady(path: string): Promise<ReadyInfo> {
   const onReady = vi.fn<(info: ReadyInfo) => void>();

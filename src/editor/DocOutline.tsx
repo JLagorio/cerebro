@@ -1,13 +1,20 @@
 import { useEffect, useState } from 'react';
-import type { Block, BlockNoteEditor } from '@blocknote/core';
-import { Icon } from '@/components/ui/Icon';
-import { IconButton } from '@/components/ui/IconButton';
-import { useUiStore } from '@/stores/uiStore';
+import { EmptyState } from '@/components/ui/EmptyState';
+import type { CerebroEditor } from './MarkdownEditor';
 
 export interface OutlineItem {
   id: string;
   level: number;
   text: string;
+}
+
+/** Minimal structural view of a BlockNote block — keeps buildOutline
+ * schema-agnostic (custom inline specs change the concrete Block type). */
+export interface OutlineSourceBlock {
+  id: string;
+  type: string;
+  props: Record<string, unknown>;
+  content?: unknown;
 }
 
 const REBUILD_DEBOUNCE_MS = 200;
@@ -22,7 +29,7 @@ function inlineText(node: unknown): string {
 }
 
 /** Top-level H1–H3 blocks as a flat outline (nesting shown by indent). */
-export function buildOutline(document: Block[]): OutlineItem[] {
+export function buildOutline(document: OutlineSourceBlock[]): OutlineItem[] {
   const items: OutlineItem[] = [];
   for (const block of document) {
     if (block.type !== 'heading') continue;
@@ -41,20 +48,17 @@ const escapeAttr = (value: string): string =>
     : value.replace(/["\\]/g, '\\$&');
 
 /**
- * Floating table of contents for a doc (M2 Task 15, per the OKR mock and
- * Tolaria's TOC panel): fixed at the top-right of the editor area while the
- * page scrolls under it; minimizes to a floating button. Collapse state
- * persists across sessions.
+ * Table-of-contents tab of the doc side panel (M2.x docs polish — Plane's
+ * outline pane pattern): live heading list, click to jump, section under the
+ * viewport top highlighted while the page scrolls.
  */
-export function DocOutline({
+export function OutlineTab({
   editor,
   scrollRef,
 }: {
-  editor: BlockNoteEditor;
+  editor: CerebroEditor;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const collapsed = useUiStore((s) => s.docOutlineCollapsed);
-  const setCollapsed = useUiStore((s) => s.setDocOutlineCollapsed);
   const [items, setItems] = useState<OutlineItem[]>(() => buildOutline(editor.document));
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -99,18 +103,15 @@ export function DocOutline({
     return () => container.removeEventListener('scroll', onScroll);
   }, [items, scrollRef]);
 
-  if (items.length === 0) return null;
-
-  if (collapsed) {
+  if (items.length === 0) {
     return (
-      <button
-        type="button"
-        aria-label="Show outline"
-        onClick={() => setCollapsed(false)}
-        className="absolute right-4 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--n-200)] bg-[var(--n-0)] text-[var(--n-500)] shadow-[0_2px_8px_rgba(22,26,36,0.10)] hover:text-[var(--n-800)]"
-      >
-        <Icon name="list" size={15} />
-      </button>
+      <div className="px-2 py-6">
+        <EmptyState
+          icon="list"
+          title="No headings yet"
+          description="Add headings to this page to see its outline here."
+        />
+      </div>
     );
   }
 
@@ -123,36 +124,20 @@ export function DocOutline({
   };
 
   return (
-    <nav
-      data-testid="doc-outline"
-      aria-label="Document outline"
-      className="absolute right-4 top-2 z-10 flex w-[220px] max-h-[60vh] flex-col rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[0_4px_16px_rgba(22,26,36,0.08)]"
-    >
-      <div className="flex flex-none items-center gap-1.5 px-2.5 pb-1 pt-2">
-        <Icon name="list" size={13} color="var(--n-500)" />
-        <span className="flex-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
-          Outline
-        </span>
-        <IconButton
-          icon="minus"
-          label="Hide outline"
-          size="sm"
-          onClick={() => setCollapsed(true)}
-        />
-      </div>
-      <ul className="m-0 flex-1 overflow-y-auto p-0 px-1 pb-2">
+    <nav data-testid="doc-outline" aria-label="Document outline" className="py-1">
+      <ul className="m-0 p-0">
         {items.map((item) => (
           <li key={item.id} className="list-none">
             <button
               type="button"
               onClick={() => jumpTo(item.id)}
               className={[
-                'block w-full truncate rounded-md border-0 bg-transparent py-1 text-left text-[12px]',
+                'block w-full truncate rounded-md border-0 bg-transparent py-[5px] text-left text-[12.5px]',
                 item.id === activeId
-                  ? 'font-medium text-[var(--cortex-600)]'
-                  : 'text-[var(--n-600)] hover:text-[var(--n-900)]',
+                  ? 'bg-[var(--cortex-50)] font-medium text-[var(--cortex-600)]'
+                  : 'text-[var(--n-600)] hover:bg-[var(--n-50)] hover:text-[var(--n-900)]',
               ].join(' ')}
-              style={{ paddingLeft: 8 + (item.level - 1) * 12, paddingRight: 8 }}
+              style={{ paddingLeft: 10 + (item.level - 1) * 14, paddingRight: 10 }}
             >
               {item.text}
             </button>

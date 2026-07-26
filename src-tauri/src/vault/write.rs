@@ -148,13 +148,19 @@ pub fn read_note(vault: &Path, rel: &str) -> Result<String, String> {
 }
 
 fn unique_rel_path(vault: &Path, folder: &str, slug: &str) -> String {
-    let first = format!("{folder}/{slug}.md");
+    // '' means the vault root — no separator, or the path grows a leading '/'.
+    let prefix = if folder.is_empty() {
+        String::new()
+    } else {
+        format!("{folder}/")
+    };
+    let first = format!("{prefix}{slug}.md");
     if !vault.join(&first).exists() {
         return first;
     }
     let mut n = 2;
     loop {
-        let candidate = format!("{folder}/{slug}-{n}.md");
+        let candidate = format!("{prefix}{slug}-{n}.md");
         if !vault.join(&candidate).exists() {
             return candidate;
         }

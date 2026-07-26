@@ -1,4 +1,12 @@
-import type { Block, BlockNoteEditor, PartialBlock } from '@blocknote/core';
+import type { BlockNoteEditor, PartialBlock } from '@blocknote/core';
+
+/** Schema-agnostic editor view: custom inline specs (chips) change the
+ * concrete BlockNoteEditor generics, but these helpers only need the
+ * markdown conversion surface. Blocks flow back into the same editor's
+ * replaceBlocks, so the erased typing is safe by construction. */
+type AnyEditor = BlockNoteEditor<any, any, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyBlocks = any[];
 
 /**
  * BlockNote 0.46 markdown round-trip helpers.
@@ -47,18 +55,119 @@ export function normalizeParsedBlocks<T extends PartialBlock>(blocks: T[]): T[] 
   return blocks;
 }
 
+// --- Chip round-trip (M2.x docs polish) -----------------------------------
+// Plain-text chip forms — `[[target|alias]]`, `@[[person]]`, `📅 2026-07-30`
+// — are promoted to custom inline nodes after parse (enrichChips) and
+// serialized back to the same plain text (the chips' toExternalHTML), so the
+// file on disk never stops being ordinary markdown.
+
+const CHIP_PATTERN =
+  /@\[\[([^\][|]+?)(?:\|[^\][]*)?\]\]|\[\[([^\][|]+?)(?:\|([^\][]*))?\]\]|📅\s*(\d{4}-\d{2}-\d{2})/g;
+
+interface TextNode {
+  type: 'text';
+  text: string;
+  styles?: Record<string, unknown>;
+}
+
+const isPlainTextNode = (item: unknown): item is TextNode => {
+  if (typeof item !== 'object' || item === null) return false;
+  const n = item as TextNode;
+  return n.type === 'text' && typeof n.text === 'string' && !(n.styles?.code === true);
+};
+
+function splitTextNode(node: TextNode): unknown[] {
+  const out: unknown[] = [];
+  let last = 0;
+  CHIP_PATTERN.lastIndex = 0;
+  for (const m of node.text.matchAll(CHIP_PATTERN)) {
+    const index = m.index ?? 0;
+    if (index > last) out.push({ ...node, text: node.text.slice(last, index) });
+    if (m[1] !== undefined) {
+      out.push({ type: 'assignee', props: { target: m[1].trim() } });
+    } else if (m[2] !== undefined) {
+      out.push({ type: 'wikilink', props: { target: m[2].trim(), alias: (m[3] ?? '').trim() } });
+    } else {
+      out.push({ type: 'due', props: { date: m[4] } });
+    }
+    last = index + m[0].length;
+  }
+  if (out.length === 0) return [node];
+  if (last < node.text.length) out.push({ ...node, text: node.text.slice(last) });
+  return out;
+}
+
+function enrichInlineArray(items: unknown[]): unknown[] {
+  return items.flatMap((item) => (isPlainTextNode(item) ? splitTextNode(item) : [item]));
+}
+
+/** Promote chip text to inline nodes across blocks (incl. table cells). */
+export function enrichChips<T extends PartialBlock>(blocks: T[]): T[] {
+  for (const block of blocks) {
+    if (block.type === 'codeBlock') continue;
+    const b = block as {
+      content?: unknown;
+      children?: unknown[];
+    };
+    if (Array.isArray(b.content)) {
+      b.content = enrichInlineArray(b.content);
+    } else if (typeof b.content === 'object' && b.content !== null) {
+      const rows = (b.content as { rows?: { cells?: unknown[] }[] }).rows;
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (!Array.isArray(row.cells)) continue;
+          row.cells = row.cells.map((cell) => {
+            if (Array.isArray(cell)) return enrichInlineArray(cell);
+            const c = cell as { content?: unknown[] };
+            if (typeof c === 'object' && c !== null && Array.isArray(c.content)) {
+              c.content = enrichInlineArray(c.content);
+            }
+            return cell;
+          });
+        }
+      }
+    }
+    if (Array.isArray(b.children)) enrichChips(b.children as PartialBlock[]);
+  }
+  return blocks;
+}
+
+/**
+ * The markdown serializer escapes brackets in text (`\[\[target\]\]`), which
+ * would corrupt wikilinks on disk. Undo exactly the double-bracket escapes
+ * outside fenced code — single brackets keep their escaping.
+ */
+export function unescapeChipMarkdown(markdown: string): string {
+  let inFence = false;
+  return markdown
+    .split('\n')
+    .map((line) => {
+      if (line.trim().startsWith('```')) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
+      return line.replaceAll('\\[\\[', '[[').replaceAll('\\]\\]', ']]');
+    })
+    .join('\n');
+}
+
 export async function markdownToBlocks(
-  editor: BlockNoteEditor,
+  editor: AnyEditor,
   markdown: string,
-): Promise<Block[]> {
-  return normalizeParsedBlocks(await editor.tryParseMarkdownToBlocks(markdown));
+): Promise<AnyBlocks> {
+  return enrichChips(
+    normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(markdown)) as PartialBlock[]),
+  ) as AnyBlocks;
 }
 
 export async function blocksToMarkdown(
-  editor: BlockNoteEditor,
+  editor: AnyEditor,
   blocks?: PartialBlock[],
 ): Promise<string> {
-  return editor.blocksToMarkdownLossy(blocks ?? editor.document);
+  return unescapeChipMarkdown(
+    await editor.blocksToMarkdownLossy((blocks ?? editor.document) as PartialBlock[]),
+  );
 }
 
 /**
@@ -69,7 +178,7 @@ export async function blocksToMarkdown(
  * policy). Fence-awareness is inherent — code fences are codeBlock blocks,
  * never headings.
  */
-export function spliceTitleIntoBlocks(editor: BlockNoteEditor, title: string): void {
+export function spliceTitleIntoBlocks(editor: AnyEditor, title: string): void {
   const h1 = editor.document.find(
     (b) => b.type === 'heading' && (b.props as { level?: number }).level === 1,
   );

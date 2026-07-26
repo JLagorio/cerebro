@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { BlockNoteEditor } from '@blocknote/core';
 import { readNote, saveNote } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { LazyMarkdownEditor } from './LazyMarkdownEditor';
+import type { CerebroEditor } from './MarkdownEditor';
 
 /**
  * Loads a note's body, shows the rich editor, and persists debounced edits.
@@ -22,17 +22,21 @@ export function NoteBodyEditor({
   /** Narrow contexts (detail panel): smaller gutter and heading scale. */
   compact?: boolean;
   debounceMs?: number;
-  onReady?: (info: { editor: BlockNoteEditor; lossyImport: boolean }) => void;
+  onReady?: (info: { editor: CerebroEditor; lossyImport: boolean }) => void;
 }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
-  const [body, setBody] = useState<string | null>(null);
+  // The body is stored WITH the path it was read from. The editor renders
+  // only when they agree with the current prop — otherwise a path change
+  // would mount the keyed editor with the PREVIOUS doc's body for one
+  // render, and its unmount flush could write that body into the new file
+  // (cross-doc corruption seen live in M2.x doc-polish testing).
+  const [loaded, setLoaded] = useState<{ path: string; body: string } | null>(null);
   const [failed, setFailed] = useState(false);
   const [lossy, setLossy] = useState(false);
 
   useEffect(() => {
-    setBody(null);
     setFailed(false);
     setLossy(false);
     if (vaultPath === null) return;
@@ -42,7 +46,7 @@ export function NoteBodyEditor({
         // Rust read_note returns the body verbatim including the blank line
         // after the frontmatter fence; the mock strips leading newlines —
         // normalize so both backends match (M1 note 10 discipline).
-        if (!cancelled) setBody(text.replace(/^\n+/, ''));
+        if (!cancelled) setLoaded({ path, body: text.replace(/^\n+/, '') });
       })
       .catch(() => {
         if (!cancelled) {
@@ -55,13 +59,15 @@ export function NoteBodyEditor({
     };
   }, [path, vaultPath, toast]);
 
-  const save = (markdown: string) => {
+  // Saves target the path the body was LOADED for, never the current prop —
+  // a debounce flush racing a navigation must land in its own file.
+  const saveFor = (forPath: string) => (markdown: string) => {
     if (vaultPath === null) return;
     void (async () => {
       // Separate catches: after a successful save the disk already holds the
       // edit, so a refresh failure must not claim the save failed.
       try {
-        await saveNote(vaultPath, path, markdown);
+        await saveNote(vaultPath, forPath, markdown);
       } catch {
         toast("Couldn't save page");
         return;
@@ -81,7 +87,9 @@ export function NoteBodyEditor({
       </p>
     );
   }
-  if (body === null) return <div data-testid="note-body-loading" />;
+  if (loaded === null || loaded.path !== path) {
+    return <div data-testid="note-body-loading" />;
+  }
 
   return (
     <div className={`flex min-h-0 flex-1 flex-col${compact ? ' cerebro-editor-compact' : ''}`}>
@@ -95,9 +103,9 @@ export function NoteBodyEditor({
         </div>
       )}
       <LazyMarkdownEditor
-        key={path}
-        markdown={body}
-        onChange={save}
+        key={loaded.path}
+        markdown={loaded.body}
+        onChange={saveFor(loaded.path)}
         onReady={(info) => {
           setLossy(info.lossyImport);
           onReady?.(info);
