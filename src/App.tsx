@@ -12,6 +12,7 @@ import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
+import { RemindersHost } from '@/hooks/useReminders';
 import { getLastVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -137,6 +138,7 @@ function App() {
       <DetailPanel />
       <QuickOpen />
       <ToastHost />
+      <RemindersHost />
     </div>
   );
 }

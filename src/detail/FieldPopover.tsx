@@ -1,6 +1,37 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+
+/**
+ * Fixed-position wrapper that pins its children just below the nearest
+ * `relative` trigger wrapper and clamps them inside the viewport. Escapes
+ * overflow containers (the doc side panel scrolls), which plain `absolute`
+ * popovers cannot.
+ */
+export function FixedBelowAnchor({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (node === null) return;
+    const anchor = node.parentElement?.getBoundingClientRect();
+    const self = node.getBoundingClientRect();
+    if (anchor === undefined) return;
+    setPos({
+      left: Math.max(8, Math.min(anchor.left, window.innerWidth - self.width - 8)),
+      top: Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - self.height - 8)),
+    });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50"
+      style={pos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: pos.left, top: pos.top }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export interface FieldPopoverOption {
   id: string;
@@ -34,9 +65,10 @@ export function FieldPopover({ options, activeId, searchable, onPick, onClose }:
         onClick={onClose}
         className="fixed inset-0 z-40 cursor-default bg-transparent"
       />
+      <FixedBelowAnchor>
       <div
         role="listbox"
-        className="absolute left-0 top-full z-50 mt-1 w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+        className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
       >
         {searchable && (
           <div className="pb-1.5">
@@ -71,6 +103,7 @@ export function FieldPopover({ options, activeId, searchable, onPick, onClose }:
           {visible.length === 0 && <div className="p-2 text-[12px] text-[var(--n-400)]">No matches</div>}
         </div>
       </div>
+      </FixedBelowAnchor>
     </>
   );
 }

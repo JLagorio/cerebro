@@ -1,6 +1,5 @@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import { IconButton } from '@/components/ui/IconButton';
 import { DocProperties } from '@/detail/DocProperties';
 import { OutlineTab } from '@/editor/DocOutline';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
@@ -99,7 +98,6 @@ export function DocSidePanel({
 }) {
   const tab = useUiStore((s) => s.docPanelTab);
   const setTab = useUiStore((s) => s.setDocPanelTab);
-  const setOpen = useUiStore((s) => s.setDocPanelOpen);
 
   return (
     <aside
@@ -124,13 +122,6 @@ export function DocSidePanel({
             {t.label}
           </button>
         ))}
-        <span className="flex-1" />
-        <IconButton
-          icon="panel-right-close"
-          label="Close panel"
-          size="sm"
-          onClick={() => setOpen(false)}
-        />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
         {tab === 'outline' &&

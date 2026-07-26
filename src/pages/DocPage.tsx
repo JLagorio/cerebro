@@ -7,10 +7,11 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
+import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
 import { DocSidePanel } from '@/detail/DocSidePanel';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
-import { docFolderPathFor, docPagesFor, type DocPages } from '@/engine/docPages';
+import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import type { Entry, Selection } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, saveNote } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
@@ -85,54 +86,6 @@ function BlankPageBar({
   );
 }
 
-/** Google-Docs-style page tabs for multi-page docs (folder-note pattern). */
-function PageTabs({
-  pages,
-  activePath,
-  onAddPage,
-}: {
-  pages: DocPages;
-  activePath: string;
-  onAddPage: () => void;
-}) {
-  const navigate = useNavStore((s) => s.navigate);
-  return (
-    <div
-      data-testid="doc-page-tabs"
-      className="flex flex-none items-center gap-0.5 overflow-x-auto border-b border-[var(--n-200)] px-4"
-    >
-      {pages.pages.map((page) => {
-        const active = page.path === activePath;
-        return (
-          <button
-            key={page.path}
-            type="button"
-            data-testid="doc-page-tab"
-            onClick={() => navigate({ kind: 'doc', path: page.path })}
-            className={[
-              'flex items-center gap-1.5 whitespace-nowrap border-0 bg-transparent px-2.5 pb-[7px] pt-1.5 text-[12.5px]',
-              active
-                ? 'font-medium text-[var(--n-900)] shadow-[inset_0_-2px_0_var(--cortex-500)]'
-                : 'text-[var(--n-500)] hover:text-[var(--n-800)]',
-            ].join(' ')}
-          >
-            <Icon name="file-text" size={13} color={active ? 'var(--cortex-500)' : 'var(--n-400)'} />
-            {page.title}
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        aria-label="Add page"
-        onClick={onAddPage}
-        className="ml-0.5 flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-      >
-        <Icon name="plus" size={14} />
-      </button>
-    </div>
-  );
-}
-
 /**
  * Full-page markdown document (M2 Task 10; M2.x docs polish). The title is
  * the doc's H1, edited inside the editor — each save rescans, so the header
@@ -150,6 +103,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const toast = useUiStore((s) => s.toast);
   const panelOpen = useUiStore((s) => s.docPanelOpen);
   const setPanelOpen = useUiStore((s) => s.setDocPanelOpen);
+  const pagesOpen = useUiStore((s) => s.docPagesOpen);
 
   // The outline needs the live editor and the scroll container (Task 15).
   const [editor, setEditor] = useState<CerebroEditor | null>(null);
@@ -426,11 +380,16 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           onClick={() => setPanelOpen(!panelOpen)}
         />
       </div>
-      {docPages !== null && (
-        <PageTabs pages={docPages} activePath={entry.path} onAddPage={() => setAddingPage(true)} />
-      )}
       <div className="flex min-h-0 flex-1">
+        {docPages !== null && pagesOpen && (
+          <DocPagesPanel
+            pages={docPages}
+            activePath={entry.path}
+            onAddPage={() => setAddingPage(true)}
+          />
+        )}
         <div className="relative min-h-0 min-w-0 flex-1">
+          {docPages !== null && !pagesOpen && <DocPagesFloatingButton />}
           <div ref={scrollRef} className="h-full overflow-y-auto pb-10 pt-6">
             <div
               data-testid="doc-content"

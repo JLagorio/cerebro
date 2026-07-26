@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
@@ -19,7 +19,7 @@ describe('FileTree', () => {
   beforeEach(async () => {
     resetMockFs();
     window.localStorage.clear();
-    useUiStore.setState({ expandedFolders: {}, toasts: [], detailPath: null });
+    useUiStore.setState({ expandedFolders: {}, treeOrder: {}, toasts: [], detailPath: null });
     await useVaultStore.getState().openVault('/demo-vault');
   });
   afterEach(cleanup);
@@ -183,5 +183,67 @@ describe('FileTree', () => {
     expect(raw).toContain('type: Meeting');
     expect(raw).not.toContain('{{title}}');
     expect(raw).not.toContain('{{date}}');
+  });
+
+  // --- Drag & drop (M2.x): reorder siblings, move into folders ------------
+  // jsdom rects are zero-sized, so onRowDragOver's ratio reduces to the raw
+  // clientY: 0 → before, 0.5 → into, 1 → after.
+
+  const rowFor = (path: string) =>
+    screen
+      .getAllByTestId('tree-row')
+      .find((el) => el.getAttribute('data-path') === path) as HTMLElement;
+
+  // testing-library's fireEvent drops clientY from drag events in jsdom, so
+  // dispatch native events with the fields the handlers read assigned on
+  // (act-wrapped so each event sees the previous one's committed state).
+  const fireDnd = (el: HTMLElement, type: string, dt: object, clientY: number) => {
+    const ev = new Event(type, { bubbles: true, cancelable: true }) as unknown as Record<
+      string,
+      unknown
+    >;
+    ev.dataTransfer = dt;
+    ev.clientY = clientY;
+    act(() => {
+      el.dispatchEvent(ev as unknown as Event);
+    });
+  };
+
+  const drag = (from: string, to: string, clientY: number) => {
+    const dt = { setData: vi.fn(), dropEffect: '', effectAllowed: '' };
+    fireDnd(rowFor(from), 'dragstart', dt, 0);
+    fireDnd(rowFor(to), 'dragover', dt, clientY);
+    fireDnd(rowFor(to), 'drop', dt, clientY);
+    fireDnd(rowFor(from), 'dragend', dt, 0);
+  };
+
+  it('reorders siblings on drop-before and persists the order', async () => {
+    renderTree();
+    drag(`${ROOT}/meetings`, `${ROOT}/items`, 0);
+    await waitFor(() => {
+      const order = screen
+        .getAllByTestId('tree-row')
+        .map((el) => el.getAttribute('data-path'));
+      expect(order.indexOf(`${ROOT}/meetings`)).toBeLessThan(order.indexOf(`${ROOT}/items`));
+    });
+    expect(useUiStore.getState().treeOrder[ROOT]).toEqual(['meetings', 'items']);
+    expect(window.localStorage.getItem('cerebro.treeOrder')).toContain('meetings');
+  });
+
+  it('moves a file (and keeps it) when dropped onto a folder', async () => {
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    drag(`${ROOT}/meetings/kickoff.md`, `${ROOT}/items`, 0.5);
+    await waitFor(() => expect(fs().has(`${ROOT}/items/kickoff.md`)).toBe(true));
+    expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false);
+    // The destination folder reveals the moved file.
+    expect(useUiStore.getState().expandedFolders[`${ROOT}/items`]).toBe(true);
+  });
+
+  it('refuses to drop a folder into itself or its descendants', async () => {
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    drag(`${ROOT}/meetings`, `${ROOT}/meetings`, 0.5);
+    await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(true));
   });
 });

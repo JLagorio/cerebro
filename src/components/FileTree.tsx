@@ -42,6 +42,7 @@ function buildTree(
   entries: Entry[],
   folders: string[],
   hide: (path: string) => boolean,
+  order: Record<string, string[]> = {},
 ): TreeNode[] {
   const prefix = root === '' ? '' : `${root}/`;
   const byPath = new Map<string, TreeNode>();
@@ -96,15 +97,26 @@ function buildTree(
   };
   promoteDocs(roots);
 
-  const sortNodes = (nodes: TreeNode[]) => {
-    nodes.sort(
-      (a, b) =>
+  // Manual drag order first (basenames, unknowns last), then folders-first
+  // alphabetical.
+  const sortNodes = (nodes: TreeNode[], dir: string) => {
+    const custom = order[dir];
+    nodes.sort((a, b) => {
+      if (custom !== undefined) {
+        const ai = custom.indexOf(a.name);
+        const bi = custom.indexOf(b.name);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+      }
+      return (
         Number(a.kind !== 'folder') - Number(b.kind !== 'folder') ||
-        a.label.localeCompare(b.label),
-    );
-    for (const n of nodes) sortNodes(n.children);
+        a.label.localeCompare(b.label)
+      );
+    });
+    for (const n of nodes) sortNodes(n.children, n.path);
   };
-  sortNodes(roots);
+  sortNodes(roots, root);
   return roots;
 }
 
@@ -134,11 +146,13 @@ export function FileTree({ root, hide = () => false, activePath = null, onOpen }
   const createItem = useVaultStore((s) => s.createItem);
   const expanded = useUiStore((s) => s.expandedFolders);
   const toggleFolder = useUiStore((s) => s.toggleFolder);
+  const treeOrder = useUiStore((s) => s.treeOrder);
+  const setTreeOrder = useUiStore((s) => s.setTreeOrder);
   const toast = useUiStore((s) => s.toast);
 
   const tree = useMemo(
-    () => buildTree(root, entries, folders, hide),
-    [root, entries, folders, hide],
+    () => buildTree(root, entries, folders, hide, treeOrder),
+    [root, entries, folders, hide, treeOrder],
   );
   const templates = useMemo(() => listTemplates(entries), [entries]);
 
@@ -150,6 +164,91 @@ export function FileTree({ root, hide = () => false, activePath = null, onOpen }
   const [moveNode, setMoveNode] = useState<TreeNode | null>(null);
   // Task 14: right-click menu — node targets a row, node:null targets root.
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode | null } | null>(null);
+  // Drag & drop (M2.x): drag any row; drop INTO folders/docs (moves the item
+  // and everything inside it) or BETWEEN siblings (manual reorder).
+  const [dragPath, setDragPath] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ path: string; mode: 'into' | 'before' | 'after' } | null>(null);
+
+  /** Sibling list holding `dir`'s children in current display order. */
+  const siblingsOf = (dir: string): TreeNode[] | null => {
+    if (dir === root) return tree;
+    const walk = (nodes: TreeNode[]): TreeNode[] | null => {
+      for (const n of nodes) {
+        if (n.path === dir) return n.children;
+        const found = walk(n.children);
+        if (found !== null) return found;
+      }
+      return null;
+    };
+    return walk(tree);
+  };
+
+  const stemOf = (path: string) => (path.split('/').pop() ?? path).replace(/\.md$/, '');
+
+  const invalidDrop = (src: string, destDir: string) =>
+    destDir === src || destDir.startsWith(`${src}/`);
+
+  const moveInto = async (src: string, destDir: string) => {
+    if (vaultPath === null || invalidDrop(src, destDir)) return;
+    if (parentDir(src) === destDir) return; // already there
+    const base = src.split('/').pop() ?? src;
+    try {
+      await renameNote(vaultPath, src, destDir === '' ? base : `${destDir}/${base}`);
+      await rescan();
+      if (!expanded[destDir]) toggleFolder(destDir);
+    } catch {
+      toast("Couldn't move here");
+    }
+  };
+
+  const placeBeside = async (src: string, target: TreeNode, mode: 'before' | 'after') => {
+    if (vaultPath === null) return;
+    const destDir = parentDir(target.path);
+    if (invalidDrop(src, destDir)) return;
+    const srcStem = stemOf(src);
+    try {
+      if (parentDir(src) !== destDir) {
+        const base = src.split('/').pop() ?? src;
+        await renameNote(vaultPath, src, destDir === '' ? base : `${destDir}/${base}`);
+        await rescan();
+      }
+      const siblings = siblingsOf(destDir);
+      const names = (siblings ?? []).map((s) => s.name).filter((n) => n !== srcStem);
+      if (!names.includes(target.name)) names.push(target.name);
+      const at = names.indexOf(target.name) + (mode === 'after' ? 1 : 0);
+      names.splice(at, 0, srcStem);
+      setTreeOrder(destDir, names);
+    } catch {
+      toast("Couldn't move here");
+    }
+  };
+
+  const onRowDragOver = (node: TreeNode) => (e: React.DragEvent) => {
+    if (dragPath === null || dragPath === node.path) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
+    const mode: 'into' | 'before' | 'after' =
+      node.kind === 'file'
+        ? y < 0.5 ? 'before' : 'after'
+        : y < 0.25 ? 'before' : y > 0.75 ? 'after' : 'into';
+    setDropHint((prev) =>
+      prev?.path === node.path && prev.mode === mode ? prev : { path: node.path, mode },
+    );
+  };
+
+  const onRowDrop = (node: TreeNode) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const src = dragPath;
+    const hint = dropHint;
+    setDragPath(null);
+    setDropHint(null);
+    if (src === null || hint === null || hint.path !== node.path) return;
+    if (hint.mode === 'into') void moveInto(src, node.path);
+    else void placeBeside(src, node, hint.mode);
+  };
 
   const openDialog = (d: TreeDialog) => {
     setDialog(d);
@@ -282,19 +381,41 @@ export function FileTree({ root, hide = () => false, activePath = null, onOpen }
     </span>
   );
 
-  const rowShell = (node: TreeNode, depth: number, active: boolean, inner: React.ReactNode) => (
-    <div
-      className={[
-        'group flex min-w-0 items-center gap-1 rounded-md pr-1',
-        active ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-100)]',
-      ].join(' ')}
-      style={{ paddingLeft: depth * 14 }}
-      onContextMenu={onRowContextMenu(node)}
-    >
-      {inner}
-      {rowActions(node)}
-    </div>
-  );
+  const rowShell = (node: TreeNode, depth: number, active: boolean, inner: React.ReactNode) => {
+    const hint = dropHint?.path === node.path ? dropHint.mode : null;
+    return (
+      <div
+        data-testid="tree-row"
+        data-path={node.path}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', node.path);
+          setDragPath(node.path);
+        }}
+        onDragEnd={() => {
+          setDragPath(null);
+          setDropHint(null);
+        }}
+        onDragOver={onRowDragOver(node)}
+        onDragLeave={() => setDropHint((p) => (p?.path === node.path ? null : p))}
+        onDrop={onRowDrop(node)}
+        className={[
+          'group flex min-w-0 items-center gap-1 rounded-md pr-1',
+          active ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-100)]',
+          hint === 'into' ? 'bg-[var(--cortex-50)] shadow-[inset_0_0_0_1.5px_var(--cortex-500)]' : '',
+          hint === 'before' ? 'shadow-[inset_0_2px_0_var(--cortex-500)]' : '',
+          hint === 'after' ? 'shadow-[inset_0_-2px_0_var(--cortex-500)]' : '',
+          dragPath === node.path ? 'opacity-50' : '',
+        ].join(' ')}
+        style={{ paddingLeft: depth * 14 }}
+        onContextMenu={onRowContextMenu(node)}
+      >
+        {inner}
+        {rowActions(node)}
+      </div>
+    );
+  };
 
   const renderNodes = (nodes: TreeNode[], depth: number): React.ReactNode =>
     nodes.map((node) => {

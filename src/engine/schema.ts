@@ -8,6 +8,7 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
+import { computeRollup, formatTimestamp } from './properties';
 import { resolveTarget } from './wikilink';
 
 /** Spec "simple" status template — fallback when no type/project declares statuses. */
@@ -22,7 +23,10 @@ export const DEFAULT_STATUSES: StatusDef[] = [
 const FIELD_KINDS: FieldKind[] = [
   'text', 'number', 'checkbox', 'date', 'daterange',
   'select', 'multiselect', 'status', 'person', 'relation',
+  'url', 'files', 'rollup', 'created_time', 'last_edited_time',
 ];
+
+const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
 
 const STATUS_GROUPS = ['active', 'done', 'closed'] as const;
 
@@ -67,6 +71,12 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
       .filter((o): o is FieldOption => o !== null);
   }
   if (typeof s.target === 'string') def.target = s.target;
+  // Rollup config: which relation to follow, what to read, how to fold it.
+  if (typeof s.relation === 'string') def.relation = s.relation;
+  if (typeof s.property === 'string') def.property = s.property;
+  if (typeof s.calculate === 'string' && ROLLUP_CALCS.includes(s.calculate)) {
+    def.calculate = s.calculate as FieldDef['calculate'];
+  }
   return def;
 }
 
@@ -148,6 +158,18 @@ export function buildSchema(entries: Entry[]): Schema {
     const def = typeDef?.fields.find((f) => f.name === field) ?? null;
     const relTargets = e.relationships[field];
     const raw: unknown = relTargets !== undefined ? relTargets : e.properties[field];
+
+    // Computed kinds ignore stored frontmatter entirely.
+    if (def?.kind === 'created_time') {
+      return { def, raw: e.createdAt, display: formatTimestamp(e.createdAt), color: null, ghost: false };
+    }
+    if (def?.kind === 'last_edited_time') {
+      return { def, raw: e.modifiedAt, display: formatTimestamp(e.modifiedAt), color: null, ghost: false };
+    }
+    if (def?.kind === 'rollup') {
+      const display = computeRollup(e, def, entries);
+      return { def, raw: display, display, color: null, ghost: false };
+    }
 
     if (isEmptyValue(raw)) {
       return { def, raw, display: '', color: null, ghost: false };

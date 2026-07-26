@@ -73,9 +73,11 @@ const CORPUS: { name: string; md: string; out: string }[] = [
     out: '> first para\\\n> second para\n',
   },
   {
+    // M2.x callout block: the bare marker line merges into the first content
+    // line on the promote/demote round trip — still a valid Obsidian callout.
     name: 'callout (marker survives unescaped)',
     md: '> [!note]\n> Callout body text.\n',
-    out: '> [!note]\\\n> Callout body text.\n',
+    out: '> [!note] Callout body text.\n',
   },
   {
     name: 'titled callout',

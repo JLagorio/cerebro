@@ -29,17 +29,20 @@ import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+import { CalloutBlock, MermaidBlock } from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
 
 // Default schema with the fully-featured code block (shiki highlighting,
-// full language list) swapped in, plus the Cerebro inline chips: wikilinks,
-// assignees, and due dates (M2.x docs polish).
+// full language list) swapped in, plus the Cerebro custom blocks (callout,
+// mermaid) and inline chips: wikilinks, assignees, and dates (M2.x).
 export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec(codeBlockOptions),
+    callout: CalloutBlock(),
+    mermaid: MermaidBlock(),
   },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
@@ -290,6 +293,53 @@ export function MarkdownEditor({
       onItemClick: () => insertChip({ type: 'due', props: { date: isoAfterDays(days) } }),
     }));
 
+  // Slash command for dates (M2.x feedback): inserts today as a rich date
+  // chip — clicking the chip opens the full picker (range, format, time,
+  // reminders).
+  const dateSlashItem = (): DefaultReactSuggestionItem => ({
+    title: 'Date',
+    subtext: 'Insert a date — click it for range, time & reminders',
+    group: 'Inline',
+    aliases: ['date', 'due', 'calendar', 'today', 'reminder', 'remind'],
+    icon: <Icon name="calendar" size={14} />,
+    onItemClick: () => insertChip({ type: 'due', props: { date: isoAfterDays(0) } }),
+  });
+
+  // Custom blocks (M2.x): callout + mermaid diagram.
+  const insertBlockAtCursor = (block: { type: string; props?: Record<string, string> }) => {
+    const cursor = editor.getTextCursorPosition().block;
+    const inserted = editor.insertBlocks([block as never], cursor, 'after');
+    const target = inserted[0];
+    // The suggestion menu deletes its trigger text AFTER this callback and
+    // restores the selection while doing so — place the cursor once that
+    // cleanup has run, or typing continues in the old block.
+    window.setTimeout(() => {
+      if (target !== undefined && block.type === 'callout') {
+        editor.setTextCursorPosition(target, 'start');
+      }
+      editor.focus();
+    }, 0);
+  };
+
+  const blockSlashItems = (): DefaultReactSuggestionItem[] => [
+    {
+      title: 'Callout',
+      subtext: 'Highlighted note — info, tip, warning…',
+      group: 'Advanced blocks',
+      aliases: ['callout', 'info', 'note', 'tip', 'warning', 'danger', 'aside'],
+      icon: <Icon name="megaphone" size={14} />,
+      onItemClick: () => insertBlockAtCursor({ type: 'callout', props: { kind: 'info' } }),
+    },
+    {
+      title: 'Mermaid diagram',
+      subtext: 'Flowcharts, sequences, gantt — rendered from text',
+      group: 'Advanced blocks',
+      aliases: ['mermaid', 'diagram', 'flowchart', 'chart', 'graph', 'sequence'],
+      icon: <Icon name="waypoints" size={14} />,
+      onItemClick: () => insertBlockAtCursor({ type: 'mermaid', props: { code: '' } }),
+    },
+  ];
+
   // --- Templates in the slash menu (M2.x feedback) ------------------------
 
   const templates = listTemplates(entries);
@@ -423,6 +473,8 @@ export function MarkdownEditor({
               filterItems(
                 [
                   ...(getDefaultReactSlashMenuItems(editor) as DefaultReactSuggestionItem[]),
+                  dateSlashItem(),
+                  ...blockSlashItems(),
                   ...templateSlashItems(),
                 ],
                 query,

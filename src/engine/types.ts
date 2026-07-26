@@ -21,11 +21,24 @@ export interface Entry {
 
 export type FieldKind =
   | 'text' | 'number' | 'checkbox' | 'date' | 'daterange'
-  | 'select' | 'multiselect' | 'status' | 'person' | 'relation';
+  | 'select' | 'multiselect' | 'status' | 'person' | 'relation'
+  | 'url' | 'files' | 'rollup' | 'created_time' | 'last_edited_time';
+
+export type RollupCalc =
+  | 'count' | 'sum' | 'avg' | 'min' | 'max' | 'earliest' | 'latest' | 'show';
 
 export interface FieldOption { id: string; label: string; color: string | null; hollow?: boolean }
 export interface StatusDef extends FieldOption { group: 'active' | 'done' | 'closed' }
-export interface FieldDef { name: string; kind: FieldKind; options?: FieldOption[]; target?: string }
+export interface FieldDef {
+  name: string;
+  kind: FieldKind;
+  options?: FieldOption[];
+  target?: string;
+  /** rollup config: aggregate `property` across the `relation` field's targets. */
+  relation?: string;
+  property?: string;
+  calculate?: RollupCalc;
+}
 export interface TypeDef { name: string; icon: string | null; color: string | null; fields: FieldDef[] }
 
 export interface ResolvedField {

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import type { ChangeEvent } from 'react';
 import { Avatar } from '@/components/ui/Avatar';
+import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
-import { FieldPopover } from '@/detail/FieldPopover';
+import { FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
+import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
 import { formatWikilink } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -16,9 +17,6 @@ export const humanize = (s: string) => {
   const t = s.replace(/[-_]/g, ' ');
   return t.charAt(0).toUpperCase() + t.slice(1);
 };
-
-const dateInputClass =
-  'h-[26px] rounded-md border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 [font-family:var(--font-mono)] text-[12px] text-[var(--n-800)] outline-none focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]';
 
 export interface FieldEditorProps {
   entry: Entry;
@@ -96,28 +94,160 @@ export function FieldEditor({ entry, def, schema }: FieldEditorProps) {
     );
   }
 
-  if (def.kind === 'date') {
-    const value = typeof resolved.raw === 'string' ? resolved.raw : '';
+  if (def.kind === 'date' || def.kind === 'daterange') {
+    // The shared DatePicker (M2.x): frontmatter carries only what the field
+    // kind can store — a bare date, or a {start, end} range.
+    const today = toIsoDate(new Date());
+    let value: DateValue;
+    if (def.kind === 'date') {
+      const raw = typeof resolved.raw === 'string' ? resolved.raw : '';
+      value = makeDateValue(raw === '' ? today : raw);
+    } else {
+      const raw = (resolved.raw ?? {}) as { start?: string | null; end?: string | null };
+      value = { ...makeDateValue(raw.start ?? today), end: raw.end ?? null };
+    }
+    const empty = resolved.display === '';
     return (
-      <input
-        type="date"
-        aria-label={humanize(def.name)}
-        value={value}
-        onChange={(e) => patch(e.target.value === '' ? null : e.target.value)}
-        className={dateInputClass}
-      />
+      <span className="relative inline-flex">
+        <button
+          type="button"
+          aria-label={humanize(def.name)}
+          onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+        >
+          <Icon name="calendar" size={12} color="var(--n-500)" />
+          {empty ? (
+            <span className="text-[var(--n-400)]">Empty</span>
+          ) : (
+            formatDateValue({ ...value, format: 'short' }, today)
+          )}
+        </button>
+        {open && (
+          <>
+            <button
+              type="button"
+              aria-label="Close popover"
+              onClick={() => setOpen(false)}
+              className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+            />
+            <FixedBelowAnchor>
+              <DatePicker
+                value={value}
+                onChange={(v) =>
+                  patch(
+                    def.kind === 'date'
+                      ? v.start
+                      : { start: v.start, end: v.end },
+                  )
+                }
+                onClear={() => {
+                  patch(null);
+                  setOpen(false);
+                }}
+                showEndToggle={def.kind === 'daterange'}
+                showTime={false}
+                showRemind={false}
+              />
+            </FixedBelowAnchor>
+          </>
+        )}
+      </span>
     );
   }
 
-  if (def.kind === 'daterange') {
-    const raw = (resolved.raw ?? {}) as { start?: string; end?: string };
-    const set = (part: 'start' | 'end') => (e: ChangeEvent<HTMLInputElement>) =>
-      patch({ start: raw.start ?? null, end: raw.end ?? null, [part]: e.target.value || null });
+  if (def.kind === 'url') {
+    const url = typeof resolved.raw === 'string' ? resolved.raw : '';
+    if (draft === null && url !== '') {
+      const href = url.startsWith('www.') ? `https://${url}` : url;
+      return (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="truncate text-[12.5px] text-[var(--cortex-600)] hover:underline"
+          >
+            {url}
+          </a>
+          <button
+            type="button"
+            aria-label={`Edit ${humanize(def.name)}`}
+            onClick={() => setDraft(url)}
+            className="flex-none rounded-md border-0 bg-transparent p-1 text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          >
+            <Icon name="pencil" size={11} />
+          </button>
+        </span>
+      );
+    }
+    // Falls through to the text-editing branch below via `draft`.
+  }
+
+  if (def.kind === 'files') {
+    const files =
+      Array.isArray(resolved.raw)
+        ? resolved.raw.map(String)
+        : typeof resolved.raw === 'string' && resolved.raw !== ''
+          ? [resolved.raw]
+          : [];
     return (
-      <span className="inline-flex items-center gap-1.5">
-        <input type="date" aria-label={`${humanize(def.name)} start`} value={raw.start ?? ''} onChange={set('start')} className={dateInputClass} />
-        <span className="text-[var(--n-400)]">to</span>
-        <input type="date" aria-label={`${humanize(def.name)} end`} value={raw.end ?? ''} onChange={set('end')} className={dateInputClass} />
+      <span className="flex min-w-0 flex-wrap items-center gap-1">
+        {files.map((f) => (
+          <span
+            key={f}
+            className="inline-flex max-w-full items-center gap-1 rounded-md bg-[var(--n-50)] px-1.5 py-px text-[12px] text-[var(--n-700)]"
+          >
+            <Icon name="paperclip" size={11} color="var(--n-500)" />
+            <span className="truncate">{f.split('/').pop()}</span>
+            <button
+              type="button"
+              aria-label={`Remove ${f}`}
+              onClick={() => patch(files.filter((x) => x !== f))}
+              className="border-0 bg-transparent p-0 text-[var(--n-400)] hover:text-[var(--danger-600,#c5372c)]"
+            >
+              <Icon name="x" size={11} />
+            </button>
+          </span>
+        ))}
+        {draft !== null ? (
+          <input
+            autoFocus
+            aria-label={`Add file to ${humanize(def.name)}`}
+            placeholder="Path or URL"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => {
+              if (draft.trim() !== '') patch([...files, draft.trim()]);
+              setDraft(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') setDraft(null);
+            }}
+            className="h-[22px] w-36 rounded-md border border-[var(--cortex-500)] px-1.5 text-[12px] outline-none"
+          />
+        ) : (
+          <button
+            type="button"
+            aria-label={`Add file to ${humanize(def.name)}`}
+            onClick={() => setDraft('')}
+            className="rounded-md border-0 bg-transparent px-1 py-px text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          >
+            + Add
+          </button>
+        )}
+      </span>
+    );
+  }
+
+  if (def.kind === 'rollup' || def.kind === 'created_time' || def.kind === 'last_edited_time') {
+    return (
+      <span
+        title="Computed from the vault — read only"
+        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-[12.5px] text-[var(--n-600)]"
+      >
+        {resolved.display === '' ? <span className="text-[var(--n-400)]">—</span> : resolved.display}
+        <Icon name="lock" size={10} color="var(--n-300)" />
       </span>
     );
   }

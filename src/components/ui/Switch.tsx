@@ -25,12 +25,14 @@ export interface SwitchProps {
   checked?: boolean;
   onChange?: (checked: boolean) => void;
   label?: React.ReactNode;
+  /** aria-label for the inner checkbox when no visible label is given. */
+  ariaLabel?: string;
   disabled?: boolean;
   style?: React.CSSProperties;
   className?: string;
 }
 
-export function Switch({ checked, onChange, label, disabled, style, className = '' }: SwitchProps) {
+export function Switch({ checked, onChange, label, ariaLabel, disabled, style, className = '' }: SwitchProps) {
   return (
     <label
       className={`cb-switch ${checked ? 'cb-switch-on' : ''} ${disabled ? 'cb-switch-disabled' : ''} ${className}`}
@@ -39,6 +41,7 @@ export function Switch({ checked, onChange, label, disabled, style, className = 
       <input
         type="checkbox"
         role="switch"
+        aria-label={ariaLabel}
         checked={!!checked}
         disabled={disabled}
         onChange={(e) => onChange && onChange(e.target.checked)}

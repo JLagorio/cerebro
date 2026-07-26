@@ -1,4 +1,5 @@
 import type { BlockNoteEditor, PartialBlock } from '@blocknote/core';
+import { DATE_TOKEN_SOURCE, dateValueToChipProps, parseDateToken } from '@/engine/dates';
 
 /** Schema-agnostic editor view: custom inline specs (chips) change the
  * concrete BlockNoteEditor generics, but these helpers only need the
@@ -61,8 +62,10 @@ export function normalizeParsedBlocks<T extends PartialBlock>(blocks: T[]): T[] 
 // serialized back to the same plain text (the chips' toExternalHTML), so the
 // file on disk never stops being ordinary markdown.
 
-const CHIP_PATTERN =
-  /@\[\[([^\][|]+?)(?:\|[^\][]*)?\]\]|\[\[([^\][|]+?)(?:\|([^\][]*))?\]\]|📅\s*(\d{4}-\d{2}-\d{2})/g;
+const CHIP_PATTERN = new RegExp(
+  String.raw`@\[\[([^\][|]+?)(?:\|[^\][]*)?\]\]|\[\[([^\][|]+?)(?:\|([^\][]*))?\]\]|(${DATE_TOKEN_SOURCE})`,
+  'gu',
+);
 
 interface TextNode {
   type: 'text';
@@ -88,7 +91,12 @@ function splitTextNode(node: TextNode): unknown[] {
     } else if (m[2] !== undefined) {
       out.push({ type: 'wikilink', props: { target: m[2].trim(), alias: (m[3] ?? '').trim() } });
     } else {
-      out.push({ type: 'due', props: { date: m[4] } });
+      const value = parseDateToken(m[4]);
+      if (value === null) {
+        out.push({ ...node, text: m[0] }); // malformed token: keep as text
+      } else {
+        out.push({ type: 'due', props: dateValueToChipProps(value) });
+      }
     }
     last = index + m[0].length;
   }
@@ -152,12 +160,90 @@ export function unescapeChipMarkdown(markdown: string): string {
     .join('\n');
 }
 
+// --- Callout / mermaid round-trip (M2.x custom blocks) ---------------------
+// On disk a callout is an Obsidian-style `> [!info] …` quote and a diagram is
+// a ```mermaid fence. promoteRichBlocks upgrades those plain forms into the
+// custom blocks after parse; demoteRichBlocks reverses it before
+// serialization, on a deep copy so the live editor state is never mutated.
+
+const CALLOUT_KIND_SET = new Set(['info', 'note', 'tip', 'success', 'warning', 'danger']);
+const CALLOUT_MARK = /^\[!([a-z]+)\]\s?/;
+
+const blockText = (content: unknown): string =>
+  Array.isArray(content)
+    ? content
+        .map((n) => (typeof (n as { text?: string }).text === 'string' ? (n as { text: string }).text : ''))
+        .join('')
+    : '';
+
+export function promoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
+  return blocks.map((block) => {
+    const b = block as PartialBlock & { content?: unknown; children?: PartialBlock[] };
+    if (b.type === 'codeBlock' && (b.props as { language?: string })?.language === 'mermaid') {
+      return { type: 'mermaid', props: { code: blockText(b.content) } } as unknown as T;
+    }
+    if (b.type === 'quote' && Array.isArray(b.content)) {
+      const first = b.content[0] as { type?: string; text?: string } | undefined;
+      if (first?.type === 'text' && typeof first.text === 'string') {
+        const m = CALLOUT_MARK.exec(first.text);
+        if (m !== null && CALLOUT_KIND_SET.has(m[1])) {
+          const rest = first.text.replace(CALLOUT_MARK, '');
+          const content = [
+            ...(rest === '' ? [] : [{ ...first, text: rest }]),
+            ...b.content.slice(1),
+          ];
+          return { type: 'callout', props: { kind: m[1] }, content } as unknown as T;
+        }
+      }
+    }
+    if (Array.isArray(b.children) && b.children.length > 0) {
+      b.children = promoteRichBlocks(b.children);
+    }
+    return block;
+  });
+}
+
+export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
+  return blocks.map((block) => {
+    const b = block as {
+      type?: string;
+      props?: Record<string, unknown>;
+      content?: unknown;
+      children?: PartialBlock[];
+    };
+    if (b.type === 'mermaid') {
+      const code = typeof b.props?.code === 'string' ? b.props.code : '';
+      return {
+        type: 'codeBlock',
+        props: { language: 'mermaid' },
+        content: [{ type: 'text', text: code, styles: {} }],
+      } as unknown as T;
+    }
+    if (b.type === 'callout') {
+      const kind = typeof b.props?.kind === 'string' ? b.props.kind : 'info';
+      const content = Array.isArray(b.content) ? b.content : [];
+      return {
+        ...b,
+        type: 'quote',
+        props: {},
+        content: [{ type: 'text', text: `[!${kind}] `, styles: {} }, ...content],
+      } as unknown as T;
+    }
+    if (Array.isArray(b.children) && b.children.length > 0) {
+      return { ...b, children: demoteRichBlocks(b.children) } as unknown as T;
+    }
+    return block;
+  });
+}
+
 export async function markdownToBlocks(
   editor: AnyEditor,
   markdown: string,
 ): Promise<AnyBlocks> {
-  return enrichChips(
-    normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(markdown)) as PartialBlock[]),
+  return promoteRichBlocks(
+    enrichChips(
+      normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(markdown)) as PartialBlock[]),
+    ),
   ) as AnyBlocks;
 }
 
@@ -165,9 +251,10 @@ export async function blocksToMarkdown(
   editor: AnyEditor,
   blocks?: PartialBlock[],
 ): Promise<string> {
-  return unescapeChipMarkdown(
-    await editor.blocksToMarkdownLossy((blocks ?? editor.document) as PartialBlock[]),
-  );
+  const source = (blocks ?? editor.document) as PartialBlock[];
+  // Deep copy: demotion must never touch live editor state.
+  const demoted = demoteRichBlocks(JSON.parse(JSON.stringify(source)) as PartialBlock[]);
+  return unescapeChipMarkdown(await editor.blocksToMarkdownLossy(demoted));
 }
 
 /**

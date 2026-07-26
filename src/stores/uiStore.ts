@@ -11,11 +11,18 @@ interface UiState {
   // File-tree expand state, persisted across sessions (M2 Task 10).
   expandedFolders: Record<string, boolean>;
   toggleFolder(path: string): void;
+  /** Manual sibling order per directory (M2.x drag & drop): basenames in
+   * display order. Dirs without an entry sort folders-first alphabetical. */
+  treeOrder: Record<string, string[]>;
+  setTreeOrder(dir: string, order: string[]): void;
   // Doc right-hand side panel (M2.x docs polish): one panel, three tabs.
   docPanelOpen: boolean;
   setDocPanelOpen(v: boolean): void;
   docPanelTab: DocPanelTab;
   setDocPanelTab(tab: DocPanelTab): void;
+  // Left-hand Pages panel on multi-page docs; collapsed state persists.
+  docPagesOpen: boolean;
+  setDocPagesOpen(v: boolean): void;
   // Home tasks rollup assignee filter ('' = everyone), persisted.
   homeTaskAssignee: string;
   setHomeTaskAssignee(v: string): void;
@@ -27,6 +34,8 @@ interface UiState {
 const EXPANDED_KEY = 'cerebro.expandedFolders';
 const PANEL_OPEN_KEY = 'cerebro.docPanelOpen';
 const PANEL_TAB_KEY = 'cerebro.docPanelTab';
+const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
+const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 
 function loadExpanded(): Record<string, boolean> {
@@ -37,6 +46,18 @@ function loadExpanded(): Record<string, boolean> {
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
     return typeof parsed === 'object' && parsed !== null
       ? (parsed as Record<string, boolean>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function loadTreeOrder(): Record<string, string[]> {
+  try {
+    const raw = window.localStorage.getItem(TREE_ORDER_KEY);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null
+      ? (parsed as Record<string, string[]>)
       : {};
   } catch {
     return {};
@@ -86,6 +107,18 @@ export const useUiStore = create<UiState>((set) => ({
       return { expandedFolders: next };
     }),
 
+  treeOrder: loadTreeOrder(),
+  setTreeOrder: (dir, order) =>
+    set((s) => {
+      const next = { ...s.treeOrder, [dir]: order };
+      try {
+        window.localStorage.setItem(TREE_ORDER_KEY, JSON.stringify(next));
+      } catch {
+        // Storage unavailable: order stays session-only.
+      }
+      return { treeOrder: next };
+    }),
+
   docPanelOpen: loadString(PANEL_OPEN_KEY, 'true') === 'true',
   setDocPanelOpen: (v) => {
     storeString(PANEL_OPEN_KEY, String(v));
@@ -95,6 +128,11 @@ export const useUiStore = create<UiState>((set) => ({
   setDocPanelTab: (tab) => {
     storeString(PANEL_TAB_KEY, tab);
     set({ docPanelTab: tab });
+  },
+  docPagesOpen: loadString(PAGES_OPEN_KEY, 'true') === 'true',
+  setDocPagesOpen: (v) => {
+    storeString(PAGES_OPEN_KEY, String(v));
+    set({ docPagesOpen: v });
   },
 
   homeTaskAssignee: loadString(TASK_ASSIGNEE_KEY, ''),

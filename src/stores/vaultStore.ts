@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { validatePatch } from '@/engine/properties';
 import { buildSchema } from '@/engine/schema';
 import type { Entry, Scalar, Schema, ViewFile } from '@/engine/types';
 import { parseViewYaml } from '@/engine/views';
@@ -109,6 +110,16 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const normalized = Object.fromEntries(
       Object.entries(patch).map(([key, value]) => [key, value === undefined ? null : value]),
     );
+    // Schema enforcement (M2.x properties engine): declared fields must
+    // match their YAML-declared shape or the write never reaches disk.
+    const target = get().entries.find((e) => e.path === path);
+    if (target !== undefined) {
+      const errors = validatePatch(getSchema(get().entries), target, normalized);
+      if (errors.length > 0) {
+        useUiStore.getState().toast(errors[0]);
+        return;
+      }
+    }
     // Optimistic: local state updates synchronously, before the disk write.
     set({ entries: get().entries.map((e) => (e.path === path ? applyPatch(e, normalized) : e)) });
     try {

@@ -1,8 +1,17 @@
 import { useRef, useState } from 'react';
 import { createReactInlineContentSpec } from '@blocknote/react';
+import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
-import { dueBucket, formatDue } from '@/engine/tasks';
+import {
+  chipPropsToDateValue,
+  dateValueToChipProps,
+  formatDateValue,
+  serializeDateValue,
+  type DateChipProps,
+  type DateValue,
+} from '@/engine/dates';
+import { dueBucket } from '@/engine/tasks';
 import { resolveTarget } from '@/engine/wikilink';
 import { todayIso } from '@/lib/templates';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -24,7 +33,8 @@ export const wikilinkText = (props: { target: string; alias: string }): string =
 
 export const assigneeText = (props: { target: string }): string => `@[[${props.target}]]`;
 
-export const dueText = (props: { date: string }): string => `📅 ${props.date}`;
+export const dueText = (props: Partial<DateChipProps>): string =>
+  serializeDateValue(chipPropsToDateValue(props));
 
 /** Delete the inline node rendered at `dom` (due-chip "Remove"). Best-effort:
  * ProseMirror positions via posAtDOM; on any failure the chip just stays and
@@ -134,19 +144,20 @@ export const AssigneeChip = createReactInlineContentSpec(
 );
 
 function DueRender({
-  date,
+  chipProps,
   onChange,
   onRemove,
 }: {
-  date: string;
-  onChange: (date: string) => void;
+  chipProps: Partial<DateChipProps>;
+  onChange: (v: DateValue) => void;
   onRemove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(date);
   const rootRef = useRef<HTMLSpanElement | null>(null);
 
-  const bucket = dueBucket(date, todayIso());
+  const today = todayIso();
+  const value = chipPropsToDateValue(chipProps);
+  const bucket = dueBucket(value.end ?? value.start, today);
   const tone =
     bucket === 'overdue'
       ? 'bg-[var(--danger-50,#fdecec)] text-[var(--danger-600,#c5372c)]'
@@ -159,55 +170,30 @@ function DueRender({
       <button
         type="button"
         tabIndex={-1}
-        onClick={() => {
-          setDraft(date);
-          setEditing((v) => !v);
-        }}
+        onClick={() => setEditing((v) => !v)}
         className={`${CHIP_BASE} cursor-pointer border-0 ${tone} hover:opacity-80`}
-        title="Change due date"
+        title="Change date"
       >
         <Icon name="calendar" size={12} />
-        {formatDue(date)}
+        {formatDateValue(value, today)}
+        {value.remind !== null && <Icon name="bell" size={11} />}
       </button>
       {editing && (
         <span
-          className="absolute left-0 top-[calc(100%+4px)] z-30 flex items-center gap-1.5 rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-md)]"
+          className="absolute left-0 top-[calc(100%+4px)] z-30"
           onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setEditing(false);
+          }}
         >
-          <input
-            type="date"
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && draft !== '') {
-                onChange(draft);
-                setEditing(false);
-              }
-              if (e.key === 'Escape') setEditing(false);
-            }}
-            className="h-7 rounded-md border border-[var(--n-200)] px-1.5 text-[12px] text-[var(--n-800)]"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              if (draft !== '') onChange(draft);
-              setEditing(false);
-            }}
-            className="h-7 rounded-md border-0 bg-[var(--cortex-500)] px-2 text-[12px] font-medium text-[var(--n-0)]"
-          >
-            Set
-          </button>
-          <button
-            type="button"
-            onClick={() => {
+          <DatePicker
+            value={value}
+            onChange={onChange}
+            onClear={() => {
               setEditing(false);
               onRemove();
             }}
-            className="h-7 rounded-md border-0 bg-transparent px-1.5 text-[12px] text-[var(--n-500)] hover:text-[var(--danger-600,#c5372c)]"
-          >
-            Remove
-          </button>
+          />
         </span>
       )}
     </span>
@@ -217,7 +203,15 @@ function DueRender({
 export const DueChip = createReactInlineContentSpec(
   {
     type: 'due',
-    propSchema: { date: { default: '' } },
+    propSchema: {
+      date: { default: '' },
+      end: { default: '' },
+      time: { default: '' },
+      endTime: { default: '' },
+      format: { default: '' },
+      timeFormat: { default: '' },
+      remind: { default: '' },
+    },
     content: 'none',
   },
   {
@@ -230,8 +224,10 @@ export const DueChip = createReactInlineContentSpec(
           }}
         >
           <DueRender
-            date={props.inlineContent.props.date}
-            onChange={(date) => props.updateInlineContent({ type: 'due', props: { date } })}
+            chipProps={props.inlineContent.props}
+            onChange={(v) =>
+              props.updateInlineContent({ type: 'due', props: dateValueToChipProps(v) })
+            }
             onRemove={() => deleteInlineNodeAt(props.editor, dom)}
           />
         </span>

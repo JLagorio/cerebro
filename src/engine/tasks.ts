@@ -21,8 +21,12 @@ export interface DocTask {
   assignees: string[]; // wikilink targets from @[[target]]
 }
 
+import { DATE_TOKEN_SOURCE } from './dates';
+
 const TASK_LINE = /^(\s*)[-*+] \[( |x|X)\] (.*)$/;
 const DUE_TOKEN = /📅\s*(\d{4}-\d{2}-\d{2})/g;
+/** Full rich-date token (range/time/flags) — what gets stripped from text. */
+const DATE_TOKEN = new RegExp(DATE_TOKEN_SOURCE, 'gu');
 const ASSIGNEE_TOKEN = /@\[\[([^\]|[]+)(?:\|[^\][]*)?\]\]/g;
 const WIKILINK_TOKEN = /\[\[([^\]|[]+)(?:\|([^\][]*))?\]\]/g;
 
@@ -46,7 +50,7 @@ export function parseTasks(sourcePath: string, body: string): DocTask[] {
     const assignees = [...raw.matchAll(ASSIGNEE_TOKEN)].map((m) => m[1].trim());
 
     const text = raw
-      .replace(DUE_TOKEN, '')
+      .replace(DATE_TOKEN, '')
       .replace(ASSIGNEE_TOKEN, '')
       // Unwrap remaining wikilinks to their display text.
       .replace(WIKILINK_TOKEN, (_, target: string, alias?: string) => alias ?? target)
