@@ -7,8 +7,6 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { DocsPage } from './DocsPage';
 
-const KICKOFF = 'projects/guided-onboarding-ga/meetings/kickoff.md';
-
 describe('DocsPage', () => {
   beforeEach(async () => {
     resetMockFs();
@@ -43,33 +41,20 @@ describe('DocsPage', () => {
     expect(useNavStore.getState().selection.kind).toBe('doc');
   });
 
-  it('shows the whole vault as a folder tree', () => {
+  // Task 14: the folder tree moved to the docs-mode Sidebar; the canvas is
+  // recents only.
+  it('no longer hosts the folder tree on the canvas', () => {
     render(<DocsPage />);
-    const folders = screen.getAllByTestId('tree-folder').map((el) => el.textContent);
-    expect(folders).toContain('projects');
-    expect(folders).toContain('inbox');
+    expect(screen.queryByTestId('file-tree')).toBeNull();
   });
 
-  it('routes tree opens by entry kind: project, work item, doc', () => {
-    render(<DocsPage />);
-    // Drill into projects → guided-onboarding-ga.
-    fireEvent.click(screen.getByRole('button', { name: /^projects$/ }));
-    fireEvent.click(screen.getByRole('button', { name: /^guided-onboarding-ga/ }));
-    // project.md navigates to the project canvas.
-    fireEvent.click(screen.getByRole('button', { name: /^project$/ }));
-    expect(useNavStore.getState().selection).toEqual({
-      kind: 'project',
-      path: 'projects/guided-onboarding-ga/project.md',
+  it('shows an empty state when the vault has no documents', () => {
+    useVaultStore.setState({
+      entries: useVaultStore
+        .getState()
+        .entries.filter((e) => e.type === 'Work item' || e.path.endsWith('project.md')),
     });
-    // A work item opens the detail panel on its project.
-    fireEvent.click(screen.getByRole('button', { name: /^items$/ }));
-    fireEvent.click(screen.getAllByTestId('tree-file').find((el) => el.textContent === 'fld-1')!);
-    expect(useUiStore.getState().detailPath).toBe(
-      'projects/guided-onboarding-ga/items/fld-1.md',
-    );
-    // A meeting note opens as a document.
-    fireEvent.click(screen.getByRole('button', { name: /^meetings$/ }));
-    fireEvent.click(screen.getByRole('button', { name: /^kickoff$/ }));
-    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: KICKOFF });
+    render(<DocsPage />);
+    expect(screen.getByText('No documents yet')).toBeTruthy();
   });
 });

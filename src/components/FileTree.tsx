@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -98,6 +99,8 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<TreeNode | null>(null);
+  // Task 14: right-click menu — node targets a row, node:null targets root.
+  const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode | null } | null>(null);
 
   const openDialog = (d: TreeDialog) => {
     setDialog(d);
@@ -167,6 +170,36 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
     }
   };
 
+  const menuItems = (node: TreeNode | null): ContextMenuItem[] => {
+    const dir = node === null ? root : node.kind === 'folder' ? node.path : parentDir(node.path);
+    const items: ContextMenuItem[] = [
+      { icon: 'file-plus', label: 'New page', onSelect: () => openDialog({ mode: 'new-page', dir }) },
+      {
+        icon: 'folder-plus',
+        label: 'New folder',
+        onSelect: () => openDialog({ mode: 'new-folder', dir }),
+      },
+    ];
+    if (node !== null) {
+      items.push(
+        { icon: 'pencil', label: 'Rename', onSelect: () => openDialog({ mode: 'rename', node }) },
+        {
+          icon: 'trash-2',
+          label: 'Move to Trash',
+          danger: true,
+          onSelect: () => setConfirmDelete(node),
+        },
+      );
+    }
+    return items;
+  };
+
+  const onRowContextMenu = (node: TreeNode | null) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY, node });
+  };
+
   const rowActions = (node: TreeNode) => (
     <span className="ml-auto hidden items-center gap-0.5 group-hover:inline-flex">
       {node.kind === 'folder' && (
@@ -206,6 +239,7 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
         <div
           className="group flex min-w-0 items-center gap-1 rounded-md pr-1 hover:bg-[var(--n-50)]"
           style={{ paddingLeft: depth * 16 }}
+          onContextMenu={onRowContextMenu(node)}
         >
           {node.kind === 'folder' ? (
             <button
@@ -251,7 +285,11 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
     ));
 
   return (
-    <div data-testid="file-tree" className="flex min-w-0 max-w-[720px] flex-col">
+    <div
+      data-testid="file-tree"
+      className="flex min-w-0 max-w-[720px] flex-col"
+      onContextMenu={onRowContextMenu(null)}
+    >
       <div className="mb-1.5 flex items-center gap-1">
         <button
           type="button"
@@ -276,6 +314,14 @@ export function FileTree({ root, hide = () => false, onOpen }: FileTreeProps) {
         </p>
       ) : (
         <ul className="m-0 p-0">{renderNodes(tree, 0)}</ul>
+      )}
+      {menu !== null && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems(menu.node)}
+          onClose={() => setMenu(null)}
+        />
       )}
       {dialog !== null && (
         <Dialog

@@ -1,8 +1,7 @@
-import { FileTree } from '@/components/FileTree';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { useOpenPath } from '@/app/useOpenPath';
 import type { Entry } from '@/engine/types';
-import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const RECENTS_SHOWN = 6;
@@ -17,12 +16,11 @@ function formatDay(iso: string): string {
 
 /**
  * All-docs rail surface (M2 Task 11): recents to pick up where you left
- * off, plus the whole vault as a folder tree.
+ * off. The full folder tree lives in the docs-mode Sidebar (Task 14).
  */
 export function DocsPage() {
   const entries = useVaultStore((s) => s.entries);
-  const navigate = useNavStore((s) => s.navigate);
-  const openDetail = useUiStore((s) => s.openDetail);
+  const open = useOpenPath();
 
   const recents = entries
     .filter(isDoc)
@@ -32,23 +30,6 @@ export function DocsPage() {
   const projectTitle = (e: Entry) =>
     e.project === null ? null : (entries.find((p) => p.path === e.project)?.title ?? null);
 
-  // Same open rule as the project tree/QuickOpen: work items belong to the
-  // detail panel on their project canvas, project.md IS the project, and
-  // everything else is a document.
-  const open = (path: string) => {
-    const opened = entries.find((e) => e.path === path);
-    if (opened?.type === 'Project') {
-      navigate({ kind: 'project', path });
-      return;
-    }
-    if (opened?.type === 'Work item') {
-      if (opened.project !== null) navigate({ kind: 'project', path: opened.project });
-      openDetail(path);
-      return;
-    }
-    navigate({ kind: 'doc', path });
-  };
-
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="docs-page">
       <div className="flex flex-none items-center gap-2 px-5 pb-2 pt-3.5">
@@ -56,6 +37,13 @@ export function DocsPage() {
         <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">Docs</h1>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
+        {recents.length === 0 && (
+          <EmptyState
+            icon="file-text"
+            title="No documents yet"
+            description="Create a page from the file tree in the sidebar."
+          />
+        )}
         {recents.length > 0 && (
           <>
             <h2 className="mb-1.5 mt-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
@@ -86,10 +74,6 @@ export function DocsPage() {
             </ul>
           </>
         )}
-        <h2 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
-          All files
-        </h2>
-        <FileTree root="" onOpen={open} />
       </div>
     </div>
   );

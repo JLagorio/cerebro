@@ -98,6 +98,26 @@ describe('Sidebar', () => {
     expect(screen.getByText('No projects yet')).toBeTruthy();
   });
 
+  // Task 14: on the Docs surfaces the sidebar is a Drive-style file tree.
+  it('shows the file tree instead of projects on the Docs surface', () => {
+    const doc = mkEntry({
+      path: 'inbox/welcome.md',
+      filename: 'welcome.md',
+      title: 'Welcome',
+    });
+    useVaultStore.setState({ entries: [project, doc], folders: ['inbox', 'projects'] });
+    useNavStore.setState({ selection: { kind: 'docs' } });
+    render(<Sidebar onNewProject={vi.fn()} />);
+    expect(screen.getByText('Docs')).toBeTruthy();
+    expect(screen.getByTestId('file-tree')).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-project')).toBeNull();
+    expect(screen.queryByText('Urgent work')).toBeNull();
+    // Clicking a doc file opens it full-page; project.md routes to the project.
+    fireEvent.click(screen.getByRole('button', { name: /^inbox/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^welcome/ }));
+    expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'inbox/welcome.md' });
+  });
+
   // Task 6: project-scoped views belong to their project's tabs, not here.
   it('hides project-scoped views from the Views section', () => {
     const scoped = {

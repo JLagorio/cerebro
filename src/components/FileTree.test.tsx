@@ -91,6 +91,52 @@ describe('FileTree', () => {
     expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false);
   });
 
+  // Task 14: right-click context menus.
+  it('right-clicking a file offers rename and trash', async () => {
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^kickoff/ }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const input = screen.getByPlaceholderText('Page name') as HTMLInputElement;
+    expect(input.value).toBe('kickoff');
+    fireEvent.change(input, { target: { value: 'standup' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(fs().has(`${ROOT}/meetings/standup.md`)).toBe(true));
+  });
+
+  it('right-clicking a folder creates a page inside it', async () => {
+    const onOpen = renderTree();
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^meetings/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New page' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), {
+      target: { value: 'Retro' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/meetings/retro.md`));
+  });
+
+  it('right-clicking the background targets the tree root', async () => {
+    const onOpen = renderTree();
+    fireEvent.contextMenu(screen.getByTestId('file-tree'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New page' }));
+    // No rename/trash on the background menu — there is no target node.
+    fireEvent.change(screen.getByPlaceholderText('Page name'), {
+      target: { value: 'Scratch' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/scratch.md`));
+  });
+
+  it('right-clicking a file and choosing Move to Trash deletes after confirm', async () => {
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^kickoff/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false));
+  });
+
   it('moves a file to the Trash after confirmation', async () => {
     renderTree();
     fireEvent.click(screen.getByRole('button', { name: /^meetings/ }));
