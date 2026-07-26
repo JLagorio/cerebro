@@ -12,6 +12,9 @@ interface UiState {
   // Doc outline visibility, persisted (M2 Task 15).
   docOutlineCollapsed: boolean;
   setDocOutlineCollapsed(v: boolean): void;
+  // Doc properties panel visibility, persisted (M2 Task 16).
+  docPropsCollapsed: boolean;
+  setDocPropsCollapsed(v: boolean): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
@@ -34,11 +37,21 @@ function loadExpanded(): Record<string, boolean> {
   }
 }
 
-function loadOutlineCollapsed(): boolean {
+const PROPS_KEY = 'cerebro.docPropsCollapsed';
+
+function loadFlag(key: string): boolean {
   try {
-    return window.localStorage.getItem(OUTLINE_KEY) === 'true';
+    return window.localStorage.getItem(key) === 'true';
   } catch {
     return false;
+  }
+}
+
+function storeFlag(key: string, v: boolean): void {
+  try {
+    window.localStorage.setItem(key, String(v));
+  } catch {
+    // Storage unavailable: session-only.
   }
 }
 
@@ -64,14 +77,16 @@ export const useUiStore = create<UiState>((set) => ({
       return { expandedFolders: next };
     }),
 
-  docOutlineCollapsed: loadOutlineCollapsed(),
+  docOutlineCollapsed: loadFlag(OUTLINE_KEY),
   setDocOutlineCollapsed: (v) => {
-    try {
-      window.localStorage.setItem(OUTLINE_KEY, String(v));
-    } catch {
-      // Storage unavailable: session-only.
-    }
+    storeFlag(OUTLINE_KEY, v);
     set({ docOutlineCollapsed: v });
+  },
+
+  docPropsCollapsed: loadFlag(PROPS_KEY),
+  setDocPropsCollapsed: (v) => {
+    storeFlag(PROPS_KEY, v);
+    set({ docPropsCollapsed: v });
   },
 
   toasts: [],

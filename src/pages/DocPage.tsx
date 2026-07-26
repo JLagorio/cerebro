@@ -3,11 +3,14 @@ import type { BlockNoteEditor } from '@blocknote/core';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { IconButton } from '@/components/ui/IconButton';
+import { DocProperties } from '@/detail/DocProperties';
 import { DocOutline } from '@/editor/DocOutline';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import type { Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
-import { useEntry, useVaultStore } from '@/stores/vaultStore';
+import { useUiStore } from '@/stores/uiStore';
+import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export type DocSelection = Extract<Selection, { kind: 'doc' }>;
 
@@ -20,6 +23,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const entry = useEntry(selection.path);
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
+  const schema = useSchema();
+  // Task 16: properties panel, collapsible and persisted.
+  const propsCollapsed = useUiStore((s) => s.docPropsCollapsed);
+  const setPropsCollapsed = useUiStore((s) => s.setDocPropsCollapsed);
 
   // Task 15: the outline needs the live editor and the scroll container.
   const [editor, setEditor] = useState<BlockNoteEditor | null>(null);
@@ -71,12 +78,22 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         >
           {entry.title}
         </h1>
+        <span className="flex-1" />
+        <IconButton
+          icon="panel-right"
+          label={propsCollapsed ? 'Show properties' : 'Hide properties'}
+          size="sm"
+          onClick={() => setPropsCollapsed(!propsCollapsed)}
+        />
       </div>
-      <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} className="h-full overflow-y-auto px-5 pb-6">
-          <NoteBodyEditor path={entry.path} onReady={({ editor: e }) => setEditor(e)} />
+      <div className="flex min-h-0 flex-1">
+        <div className="relative min-h-0 min-w-0 flex-1">
+          <div ref={scrollRef} className="h-full overflow-y-auto px-5 pb-6">
+            <NoteBodyEditor path={entry.path} onReady={({ editor: e }) => setEditor(e)} />
+          </div>
+          {editor !== null && <DocOutline editor={editor} scrollRef={scrollRef} />}
         </div>
-        {editor !== null && <DocOutline editor={editor} scrollRef={scrollRef} />}
+        {!propsCollapsed && <DocProperties entry={entry} schema={schema} />}
       </div>
     </div>
   );
