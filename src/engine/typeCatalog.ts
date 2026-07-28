@@ -10,6 +10,7 @@
  * editable.
  */
 
+import { isTemplate } from '@/lib/templates';
 import { humanize } from './schema';
 import type { Entry, FieldDef, FieldOption, Presentation, Schema } from './types';
 import { DEFAULT_PRESENTATION } from './views';
@@ -84,12 +85,15 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
   for (const spec of SYSTEM_TYPES) names.add(spec.name);
   for (const name of schema.types.keys()) names.add(name);
   for (const e of entries) {
-    if (e.type !== null && e.type !== '') names.add(e.type);
+    if (e.type !== null && e.type !== '' && !isTemplate(e)) names.add(e.type);
   }
 
+  // Templates carry a `type:` so pages created from them inherit it — they
+  // are scaffolding, never records, and must not inflate counts (M3.1: the
+  // Meeting type showed "1 record" that was really templates/meeting.md).
   const counts = new Map<string, number>();
   for (const e of entries) {
-    if (e.type === null || e.type === '') continue;
+    if (e.type === null || e.type === '' || isTemplate(e)) continue;
     counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
   }
 
@@ -108,6 +112,21 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * True when this entry belongs in the Docs file tree (M3.1: one surface per
+ * shape — records live on their type screen, docs live in Docs).
+ *
+ * Untyped notes are always docs. `type: Type` docs are the schema itself and
+ * never appear as content. Everything else follows its type's `display:`,
+ * which defaults to 'record' — a type opts back into Docs with `display: doc`
+ * (meeting notes, journals: things you write rather than track).
+ */
+export function isDocEntry(entry: Entry, schema: Schema): boolean {
+  if (entry.type === null || entry.type === '') return true;
+  if (entry.type === 'Type') return false;
+  return schema.types.get(entry.type)?.display === 'doc';
 }
 
 /** Icon + color for an entry's type, with the same fallbacks as listTypes —
@@ -146,8 +165,11 @@ function fieldToSpec(def: FieldDef): unknown {
   }
   if (def.target !== undefined) spec.target = def.target;
   if (def.relation !== undefined) spec.relation = def.relation;
+  if (def.from !== undefined) spec.from = def.from;
   if (def.property !== undefined) spec.property = def.property;
   if (def.calculate !== undefined) spec.calculate = def.calculate;
+  if (def.format !== undefined && def.format !== 'plain') spec.format = def.format;
+  if (def.precision !== undefined) spec.precision = def.precision;
   return spec;
 }
 
@@ -160,15 +182,17 @@ export function serializeFields(fields: FieldDef[]): Record<string, unknown> {
 }
 
 /**
- * Presentation for a type's record list: group by status only when the type
- * declares one, and show the type's own declared fields as columns.
+ * Presentation for a type's record list: the split browser by default (M3
+ * feedback — browsing records should read like a notes list with the doc and
+ * its properties beside it), grouped by status only when the type declares
+ * one (for the list/board layouts), with the type's own fields as columns.
  */
 export function typePresentation(typeName: string, schema: Schema): Presentation {
   const def = schema.types.get(typeName);
   const fields = def?.fields ?? [];
   const hasStatus = fields.some((f) => f.kind === 'status');
   return {
-    type: 'list',
+    type: 'split',
     groupBy: hasStatus ? 'status' : null,
     orderBy: { ...DEFAULT_PRESENTATION.orderBy },
     visibleFields:

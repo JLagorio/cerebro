@@ -11,8 +11,9 @@
  */
 
 import { kindMeta } from '@/engine/properties';
+import { humanize } from '@/engine/schema';
 import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
-import type { Entry, FieldKind, FieldOption } from '@/engine/types';
+import type { Entry, FieldKind, FieldOption, StatusDef } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -129,6 +130,69 @@ export async function removeFieldFromType(typeName: string, fieldName: string): 
   return true;
 }
 
+/**
+ * Rename a declared field, keeping its position in the `fields:` mapping and
+ * migrating every record that carries the old key (M3.1: renaming the schema
+ * without moving the data would orphan every stored value).
+ */
+export async function renameFieldOnType(
+  typeName: string,
+  fieldName: string,
+  rawNext: string,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const next = normalizeFieldName(rawNext);
+  if (next === '' || next === fieldName) return false;
+  if (isLockedField(typeName, fieldName)) {
+    toast(`"${fieldName}" is a built-in property of ${typeName} and can't be renamed`);
+    return false;
+  }
+  if (RESERVED.has(next)) {
+    toast(`"${next}" is a reserved key and can't be a property`);
+    return false;
+  }
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return false;
+  if (!guardEditable(doc, typeName)) return false;
+  const fields = rawFieldsOf(doc);
+  const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
+  if (actual === undefined) return false;
+  if (Object.keys(fields).some((k) => k.toLowerCase() === next && k !== actual)) {
+    toast('Property already exists');
+    return false;
+  }
+  // Rebuild the mapping so the renamed key keeps its slot in the panel order.
+  const renamed = Object.fromEntries(
+    Object.entries(fields).map(([k, v]) => (k === actual ? [next, v] : [k, v])),
+  );
+  try {
+    await patchFrontmatter(doc.path, { fields: renamed });
+  } catch {
+    toast(`Couldn't rename "${fieldName}"`);
+    return false;
+  }
+  // Move stored values on every record of this type. A record whose write
+  // fails keeps its old key — the schema rename already landed, so the value
+  // still resolves as an undeclared property rather than vanishing.
+  const records = entries.filter(
+    (e) => e.type === typeName && (actual in e.properties || actual in e.relationships),
+  );
+  let failed = 0;
+  for (const record of records) {
+    const targets = record.relationships[actual];
+    const value =
+      targets !== undefined ? targets.map((t) => `[[${t}]]`) : record.properties[actual];
+    try {
+      await patchFrontmatter(record.path, { [next]: value, [actual]: null });
+    } catch {
+      failed += 1;
+    }
+  }
+  if (failed > 0) toast(`Renamed, but ${failed} record(s) kept the old value`);
+  return true;
+}
+
 /** Replace a field's option set (select / multiselect / status configs). */
 export async function setFieldOptions(
   typeName: string,
@@ -158,6 +222,80 @@ export async function setFieldOptions(
     await patchFrontmatter(doc.path, { fields });
   } catch {
     toast(`Couldn't update "${fieldName}" options`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Patch a field's spec keys (M3.4): rollup wiring (`relation`, `property`,
+ * `calculate`) and display config (`format`, `precision`). Passing null for a
+ * key drops it. Kept separate from setFieldOptions so a config change never
+ * rewrites the option set.
+ */
+export async function setFieldConfig(
+  typeName: string,
+  fieldName: string,
+  config: Partial<Record<'relation' | 'property' | 'calculate' | 'format' | 'precision', unknown>>,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return false;
+  if (!guardEditable(doc, typeName)) return false;
+  const fields = rawFieldsOf(doc);
+  const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
+  if (actual === undefined) return false;
+  const raw = fields[actual];
+  // A bare `field: text` shorthand has to grow into a mapping to hold config.
+  const spec: Record<string, unknown> =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) }
+      : { kind: typeof raw === 'string' ? raw : 'text' };
+  for (const [key, value] of Object.entries(config)) {
+    if (value === null || value === undefined || value === '') delete spec[key];
+    else spec[key] = value;
+  }
+  fields[actual] = spec;
+  try {
+    await patchFrontmatter(doc.path, { fields });
+  } catch {
+    toast(`Couldn't update "${fieldName}"`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Replace a type's own `statuses:` list (M3.1). Unlike `fields:`, statuses
+ * are a top-level key on the Type doc — including on system types, whose
+ * status chain the whole app reads. Editing them is allowed (the LOCK is on
+ * the `status` field's existence, not on which statuses a team uses); the
+ * list is written whole so reordering and regrouping round-trip.
+ */
+export async function setTypeStatuses(
+  listing: { name: string; docPath: string | null },
+  statuses: StatusDef[],
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+  const serialized = statuses.map((s) => {
+    const spec: Record<string, unknown> = { id: s.id, group: s.group };
+    if (s.label !== humanize(s.id)) spec.label = s.label;
+    if (s.color !== null) spec.color = s.color;
+    if (s.hollow === true) spec.hollow = true;
+    return spec;
+  });
+  try {
+    if (doc === null) {
+      await ensureTypeDoc({ name: listing.name, docPath: null }, { statuses: serialized });
+    } else {
+      await patchFrontmatter(doc.path, { statuses: serialized });
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} statuses`);
     return false;
   }
   return true;

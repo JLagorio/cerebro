@@ -25,8 +25,8 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   const kind: FieldKind = def?.kind ?? 'text';
 
   let known: FieldOption[] = [];
-  if (kind === 'status') {
-    known = schema.statusSetForProject(entries.length > 0 ? entries[0].project : null);
+  if (kind === 'status' && entries.length > 0) {
+    known = schema.statusSetFor(entries[0]);
   } else if (def?.options !== undefined && def.options.length > 0) {
     known = def.options;
   }

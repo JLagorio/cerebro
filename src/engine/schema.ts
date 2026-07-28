@@ -8,7 +8,8 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
-import { computeRollup, formatTimestamp } from './properties';
+import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
+import { buildRelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
 
 /** Spec "simple" status template — fallback when no type/project declares statuses. */
@@ -27,6 +28,8 @@ const FIELD_KINDS: FieldKind[] = [
 ];
 
 const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
+
+const FIELD_FORMATS = ['plain', 'percent', 'progress', 'currency'];
 
 const STATUS_GROUPS = ['active', 'done', 'closed'] as const;
 
@@ -77,6 +80,20 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   if (typeof s.calculate === 'string' && ROLLUP_CALCS.includes(s.calculate)) {
     def.calculate = s.calculate as FieldDef['calculate'];
   }
+  // Reverse rollup source (M3.5): `from: { type, field }`.
+  const from = s.from;
+  if (from !== null && typeof from === 'object' && !Array.isArray(from)) {
+    const f = from as Record<string, unknown>;
+    if (typeof f.type === 'string' && typeof f.field === 'string') {
+      def.from = { type: f.type, field: f.field };
+    }
+  }
+  if (typeof s.format === 'string' && FIELD_FORMATS.includes(s.format)) {
+    def.format = s.format as FieldDef['format'];
+  }
+  if (typeof s.precision === 'number' && Number.isFinite(s.precision)) {
+    def.precision = Math.max(0, Math.min(6, Math.trunc(s.precision)));
+  }
   return def;
 }
 
@@ -124,10 +141,17 @@ export function buildSchema(entries: Entry[]): Schema {
       icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
       color: typeof e.properties.color === 'string' ? e.properties.color : null,
       fields: parseFields((e.properties as Record<string, unknown>).fields),
+      // Records are the default surface; `display: doc` opts a type into the
+      // Docs file tree as well (M3.1 — one surface per shape).
+      display: e.properties.display === 'doc' ? 'doc' : 'record',
+      statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
     });
   }
 
   const byPath = new Map(entries.map((e) => [e.path, e]));
+  // Built once per schema so reverse rollups/trees are O(1) lookups instead
+  // of a full scan per row (M3.5).
+  const relations = buildRelationIndex(entries);
 
   // Vault-level default statuses live on the Work item Type doc (locked
   // decision 4); parsed once per schema build.
@@ -153,6 +177,21 @@ export function buildSchema(entries: Entry[]): Schema {
     return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
   }
 
+  /** Project override → the entry's own type's `statuses:` → Work item's →
+   * defaults. Lets a Bug type carry a status set Work items never see. */
+  function statusSetFor(e: Entry): StatusDef[] {
+    if (e.project !== null) {
+      const project = byPath.get(e.project);
+      if (project !== undefined) {
+        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        if (override.length > 0) return override;
+      }
+    }
+    const own = e.type !== null ? types.get(e.type)?.statuses : undefined;
+    if (own !== undefined && own.length > 0) return own;
+    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
+  }
+
   function resolveField(e: Entry, field: string): ResolvedField {
     const typeDef = e.type !== null ? types.get(e.type) : undefined;
     const def = typeDef?.fields.find((f) => f.name === field) ?? null;
@@ -167,8 +206,14 @@ export function buildSchema(entries: Entry[]): Schema {
       return { def, raw: e.modifiedAt, display: formatTimestamp(e.modifiedAt), color: null, ghost: false };
     }
     if (def?.kind === 'rollup') {
-      const display = computeRollup(e, def, entries);
-      return { def, raw: display, display, color: null, ghost: false };
+      const computed = computeRollup(e, def, entries, relations);
+      return {
+        def,
+        raw: computed,
+        display: applyFormat(computed, def),
+        color: null,
+        ghost: false,
+      };
     }
 
     if (isEmptyValue(raw)) {
@@ -186,7 +231,7 @@ export function buildSchema(entries: Entry[]): Schema {
     }
 
     if (kind === 'status') {
-      const statuses = statusSetForProject(e.project);
+      const statuses = statusSetFor(e);
       const id = String(Array.isArray(raw) ? raw[0] : raw);
       const match = statuses.find((s) => s.id === id);
       if (match !== undefined) {
@@ -216,10 +261,15 @@ export function buildSchema(entries: Entry[]): Schema {
       return { def, raw, display: raw === true ? 'Yes' : 'No', color: null, ghost: false };
     }
 
-    // text / number / date / daterange and undeclared fields
+    // Declared numbers carry their field's format (percent, progress, money).
+    if (kind === 'number' && def !== null && typeof raw === 'number') {
+      return { def, raw, display: formatNumber(raw, def), color: null, ghost: false };
+    }
+
+    // text / date / daterange and undeclared fields
     const display = Array.isArray(raw) ? raw.map(String).join(', ') : String(raw);
     return { def, raw, display, color: null, ghost: false };
   }
 
-  return { types, projectForEntry, statusSetForProject, resolveField };
+  return { types, relations, projectForEntry, statusSetForProject, statusSetFor, resolveField };
 }

@@ -1,4 +1,5 @@
-import type { Entry, Presentation, Schema, Selection, ViewFile } from './types';
+import { isTemplate } from '@/lib/templates';
+import type { Entry, Presentation, Schema, Selection, ViewFile, ViewSource } from './types';
 import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { DEFAULT_PRESENTATION } from './views';
@@ -43,7 +44,7 @@ function optionOrder(entries: Entry[], field: string, schema: Schema): string[] 
     const def = schema.resolveField(e, field).def;
     if (def === null) continue;
     if (def.kind === 'status') {
-      return schema.statusSetForProject(e.project).map((s) => s.id);
+      return schema.statusSetFor(e).map((s) => s.id);
     }
     if (def.options !== undefined && def.options.length > 0) {
       return def.options.map((o) => o.id);
@@ -92,6 +93,25 @@ function itemsOfProject(project: Entry, entries: Entry[]): Entry[] {
   return entries.filter((e) => e.project === project.path && e.type === 'Work item');
 }
 
+/**
+ * The records a view's source selects, before its filters run (M3.5): every
+ * record of a type, optionally narrowed to one project by containment. This
+ * is what makes "a project" just a saved view — the project page's hardcoded
+ * `type: Work item` + containment query, expressed as data.
+ */
+export function selectSource(entries: Entry[], source: ViewSource): Entry[] {
+  return entries.filter((e) => {
+    if (isTemplate(e)) return false;
+    if (source.type !== null) return e.type === source.type && matchesProject(e, source);
+    // A typeless view means "everything I wrote": untyped pages included,
+    // Type docs excluded — those are the schema, not content.
+    return e.type !== 'Type' && matchesProject(e, source);
+  });
+}
+
+const matchesProject = (e: Entry, source: ViewSource) =>
+  source.project === null || e.project === source.project;
+
 /** Map a sidebar selection to what the canvas renders: a titled, filtered,
  * sorted entry list plus the presentation the views draw it with. */
 export function resolveCollection(
@@ -117,12 +137,16 @@ export function resolveCollection(
       // unique within a scope).
       const view = views.find((v) => v.id === sel.id && v.project === null) ?? null;
       if (view === null) return { title: sel.id, entries: [], presentation: defaultPresentation() };
-      const { name, filters, presentation } = view.definition;
-      const matched =
-        filters === null ? entries : entries.filter((e) => evaluateFilters(e, filters, schema));
+      const { name, source, filters, presentation } = view.definition;
       return {
         title: name,
-        entries: sortEntries(matched, presentation.orderBy, schema),
+        entries: sortEntries(
+          selectSource(entries, source).filter(
+            (e) => filters === null || evaluateFilters(e, filters, schema),
+          ),
+          presentation.orderBy,
+          schema,
+        ),
         presentation,
       };
     }
@@ -133,7 +157,9 @@ export function resolveCollection(
       return {
         title: sel.name,
         entries: sortEntries(
-          entries.filter((e) => e.type === sel.name),
+          // Templates declare a type so new pages inherit it; they are not
+          // records of it (M3.1).
+          entries.filter((e) => e.type === sel.name && !isTemplate(e)),
           presentation.orderBy,
           schema,
         ),

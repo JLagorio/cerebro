@@ -12,8 +12,82 @@
  * as ghosts rather than being rejected (locked M1 decision).
  */
 
-import type { Entry, FieldDef, FieldKind, RollupCalc, Schema } from './types';
-import { resolveTarget } from './wikilink';
+import { childrenOf, rollupSpec, type RelationIndex } from './relations';
+import type { Entry, FieldDef, FieldFormat, FieldKind, RollupCalc, Schema } from './types';
+
+// --- Rollup catalog + numeric formatting (M3.4) ----------------------------
+
+export interface RollupCalcMeta {
+  calc: RollupCalc;
+  label: string;
+  /** Reads a property on each target (false = the targets themselves count). */
+  needsProperty: boolean;
+  /** Only meaningful over numeric properties. */
+  numeric: boolean;
+}
+
+/** Every aggregation the engine can compute, with what it needs configured. */
+export const ROLLUP_CALCS: RollupCalcMeta[] = [
+  { calc: 'count',    label: 'Count',          needsProperty: false, numeric: false },
+  { calc: 'sum',      label: 'Sum',            needsProperty: true,  numeric: true },
+  { calc: 'avg',      label: 'Average',        needsProperty: true,  numeric: true },
+  { calc: 'min',      label: 'Min',            needsProperty: true,  numeric: true },
+  { calc: 'max',      label: 'Max',            needsProperty: true,  numeric: true },
+  { calc: 'earliest', label: 'Earliest',       needsProperty: true,  numeric: false },
+  { calc: 'latest',   label: 'Latest',         needsProperty: true,  numeric: false },
+  { calc: 'show',     label: 'Show values',    needsProperty: true,  numeric: false },
+];
+
+export const rollupCalcMeta = (calc: RollupCalc | undefined): RollupCalcMeta =>
+  ROLLUP_CALCS.find((c) => c.calc === calc) ?? ROLLUP_CALCS[0];
+
+export const FIELD_FORMATS: { format: FieldFormat; label: string }[] = [
+  { format: 'plain', label: 'Plain number' },
+  { format: 'percent', label: 'Percent' },
+  { format: 'progress', label: 'Progress bar' },
+  { format: 'currency', label: 'Currency' },
+];
+
+/** Trim trailing zeros so 69.67 stays 69.67 but 3.00 reads 3. */
+function trimNumber(n: number, precision: number): string {
+  return String(Number(n.toFixed(precision)));
+}
+
+/**
+ * Display string for a numeric value under its field's format. Formats are
+ * presentation only — the frontmatter keeps the bare number, so a percent
+ * field still sorts, sums, and round-trips as a number.
+ */
+export function formatNumber(value: number, def: FieldDef): string {
+  const precision = def.precision ?? 2;
+  switch (def.format) {
+    case 'percent':
+    case 'progress':
+      return `${trimNumber(value, precision)}%`;
+    case 'currency':
+      return `$${value.toLocaleString('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: precision,
+      })}`;
+    default:
+      return trimNumber(value, precision);
+  }
+}
+
+/** Apply a field's format to an already-computed display string when it
+ * parses as a number; non-numeric values (e.g. `show` rollups) pass through. */
+export function applyFormat(display: string, def: FieldDef): string {
+  if (display === '' || def.format === undefined || def.format === 'plain') return display;
+  const n = Number(display);
+  return Number.isFinite(n) ? formatNumber(n, def) : display;
+}
+
+/** 0–100 clamp for progress bars; null when the value isn't numeric. */
+export function progressRatio(display: string): number | null {
+  const n = Number(String(display).replace(/[%$,]/g, ''));
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, n));
+}
 
 export interface PropertyKindMeta {
   kind: FieldKind;
@@ -23,25 +97,34 @@ export interface PropertyKindMeta {
   computed: boolean;
   /** Initial frontmatter value seeded when the property is added untyped. */
   seed: unknown;
+  /** Kept for existing vaults but kept OUT of the "+ Add property" catalog
+   * (M3.1: Date covers ranges via its own end toggle). */
+  legacy?: boolean;
+  /** Holds several values at once — the pickers stay open and toggle. */
+  multi?: boolean;
 }
 
 export const PROPERTY_KINDS: PropertyKindMeta[] = [
   { kind: 'text',             label: 'Text',             icon: 'type',           computed: false, seed: '' },
   { kind: 'number',           label: 'Number',           icon: 'hash',           computed: false, seed: '' },
   { kind: 'select',           label: 'Select',           icon: 'circle-chevron-down', computed: false, seed: '' },
-  { kind: 'multiselect',      label: 'Multi-select',     icon: 'list-checks',    computed: false, seed: '' },
+  { kind: 'multiselect',      label: 'Multi-select',     icon: 'list-checks',    computed: false, seed: '', multi: true },
   { kind: 'status',           label: 'Status',           icon: 'loader',         computed: false, seed: '' },
   { kind: 'date',             label: 'Date',             icon: 'calendar',       computed: false, seed: '' },
-  { kind: 'daterange',        label: 'Date range',       icon: 'calendar-range', computed: false, seed: '' },
-  { kind: 'person',           label: 'Person',           icon: 'circle-user',    computed: false, seed: '' },
-  { kind: 'files',            label: 'Files & media',    icon: 'paperclip',      computed: false, seed: '' },
+  { kind: 'daterange',        label: 'Date range',       icon: 'calendar-range', computed: false, seed: '', legacy: true },
+  { kind: 'person',           label: 'Person',           icon: 'circle-user',    computed: false, seed: '', multi: true },
+  { kind: 'files',            label: 'Files & media',    icon: 'paperclip',      computed: false, seed: '', multi: true },
   { kind: 'checkbox',         label: 'Checkbox',         icon: 'square-check',   computed: false, seed: false },
   { kind: 'url',              label: 'URL',              icon: 'link',           computed: false, seed: '' },
-  { kind: 'relation',         label: 'Relation',         icon: 'arrow-up-right', computed: false, seed: '' },
+  { kind: 'relation',         label: 'Relation',         icon: 'arrow-up-right', computed: false, seed: '', multi: true },
   { kind: 'rollup',           label: 'Rollup',           icon: 'sigma',          computed: true,  seed: null },
   { kind: 'created_time',     label: 'Created time',     icon: 'clock',          computed: true,  seed: null },
   { kind: 'last_edited_time', label: 'Last edited time', icon: 'history',        computed: true,  seed: null },
 ];
+
+/** The kinds offered in "+ Add property" — legacy kinds stay resolvable but
+ * are no longer creatable. */
+export const CREATABLE_PROPERTY_KINDS = PROPERTY_KINDS.filter((k) => k.legacy !== true);
 
 export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
   PROPERTY_KINDS.find((k) => k.kind === kind) ?? PROPERTY_KINDS[0];
@@ -146,11 +229,16 @@ const asNumbers = (values: unknown[]): number[] =>
  * Aggregate `def.property` across the entries referenced by this entry's
  * `def.relation` field. Returns a display string ('' when unresolvable).
  */
-export function computeRollup(entry: Entry, def: FieldDef, entries: Entry[]): string {
-  const relation = def.relation ?? '';
-  const targets = (entry.relationships[relation] ?? [])
-    .map((t) => resolveTarget(t, entries))
-    .filter((e): e is Entry => e !== null);
+export function computeRollup(
+  entry: Entry,
+  def: FieldDef,
+  entries: Entry[],
+  index?: RelationIndex,
+): string {
+  // M3.5: forward (`relation:`) and reverse (`from:`) sources both resolve
+  // here, so a parent can aggregate children that point at it.
+  const spec = rollupSpec(def);
+  const targets = spec === null ? [] : childrenOf(entry, spec, entries, index);
   const calc: RollupCalc = def.calculate ?? 'count';
   if (calc === 'count') return String(targets.length);
   const prop = def.property ?? '';

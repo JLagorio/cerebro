@@ -107,6 +107,7 @@ function mkView(partial: Partial<ViewFile['definition']> & { id: string }): View
       icon: null,
       color: null,
       order: null,
+      source: { type: null, project: null },
       filters: null,
       presentation: {
         type: 'list',
@@ -155,6 +156,7 @@ describe('resolveCollection', () => {
     const view = mkView({
       id: 'done-work',
       name: 'Done work',
+      source: { type: null, project: null },
       filters: {
         all: [
           { field: 'type', op: 'equals', value: 'Work item' },
@@ -177,7 +179,7 @@ describe('resolveCollection', () => {
     ]);
   });
 
-  it('a filterless view collects every entry', () => {
+  it('a filterless, typeless view collects every entry but the schema docs', () => {
     const { entries, schema } = fixture();
     const view = mkView({ id: 'everything' });
     const collection = resolveCollection(
@@ -186,7 +188,24 @@ describe('resolveCollection', () => {
       schema,
       [view],
     );
-    expect(collection.entries).toHaveLength(entries.length);
+    // M3.5: `type: Type` docs are the model, so a content view leaves them out.
+    const typeDocs = entries.filter((e) => e.type === 'Type').length;
+    expect(typeDocs).toBeGreaterThan(0);
+    expect(collection.entries).toHaveLength(entries.length - typeDocs);
+    expect(collection.entries.some((e) => e.type === 'Type')).toBe(false);
+  });
+
+  it('a type-rooted view lists only that type, scoped by project (M3.5)', () => {
+    const { entries, schema } = fixture();
+    const project = entries.find((e) => e.type === 'Project');
+    expect(project).toBeDefined();
+    const view = mkView({
+      id: 'projects',
+      source: { type: 'Project', project: null },
+    });
+    const collection = resolveCollection({ kind: 'view', id: 'projects' }, entries, schema, [view]);
+    expect(collection.entries.length).toBeGreaterThan(0);
+    expect(collection.entries.every((e) => e.type === 'Project')).toBe(true);
   });
 
   it('an unknown view id yields an empty default collection titled by the id', () => {
@@ -207,6 +226,7 @@ describe('resolveCollection', () => {
     const { entries, schema } = fixture();
     const view = mkView({
       id: 'by-priority',
+      source: { type: null, project: null },
       filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
       presentation: {
         type: 'list',
@@ -244,6 +264,7 @@ describe('resolveCollection', () => {
     const schemaAll = buildSchema(all);
     const view = mkView({
       id: 'by-due',
+      source: { type: null, project: null },
       filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
       presentation: {
         type: 'list',

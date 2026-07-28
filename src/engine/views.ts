@@ -1,5 +1,6 @@
 import { parse, stringify } from 'yaml';
 import type {
+  ChildrenSpec,
   FilterGroup,
   FilterOp,
   FilterRule,
@@ -7,6 +8,7 @@ import type {
   Scalar,
   ViewDefinition,
   ViewFile,
+  ViewSource,
 } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
@@ -32,7 +34,13 @@ function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
   const orderBy = asRecord(obj.orderBy);
   return {
-    type: obj.type === 'board' ? 'board' : 'list',
+    type:
+      obj.type === 'board' ||
+      obj.type === 'split' ||
+      obj.type === 'table' ||
+      obj.type === 'tree'
+        ? obj.type
+        : 'list',
     groupBy:
       typeof obj.groupBy === 'string'
         ? obj.groupBy
@@ -47,6 +55,27 @@ function parsePresentation(raw: unknown): Presentation {
     visibleFields: Array.isArray(obj.visibleFields)
       ? obj.visibleFields.map(String)
       : [...DEFAULT_PRESENTATION.visibleFields],
+    childrenVia: parseChildrenSpec(obj.childrenVia),
+  };
+}
+
+/** `childrenVia: key_results` (forward) or `{ type, field }` (reverse). */
+function parseChildrenSpec(raw: unknown): ChildrenSpec | null {
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    return { direction: 'forward', field: raw.trim() };
+  }
+  const obj = asRecord(raw);
+  if (typeof obj.type === 'string' && typeof obj.field === 'string') {
+    return { direction: 'reverse', type: obj.type, field: obj.field };
+  }
+  return null;
+}
+
+function parseSource(raw: unknown): ViewSource {
+  const obj = asRecord(raw);
+  return {
+    type: typeof obj.type === 'string' && obj.type !== '' ? obj.type : null,
+    project: typeof obj.project === 'string' && obj.project !== '' ? obj.project : null,
   };
 }
 
@@ -100,6 +129,7 @@ export function parseViewYaml(id: string, yamlText: string, project: string | nu
       icon: typeof obj.icon === 'string' ? obj.icon : null,
       color: typeof obj.color === 'string' ? obj.color : null,
       order: typeof obj.order === 'number' ? obj.order : null,
+      source: parseSource(obj.source),
       filters: parseFilters(obj.filters),
       presentation: parsePresentation(obj.presentation),
     },
@@ -112,6 +142,7 @@ export function serializeView(def: ViewDefinition): string {
     icon: def.icon,
     color: def.color,
     order: def.order,
+    source: def.source,
     filters: def.filters,
     presentation: def.presentation,
   });
