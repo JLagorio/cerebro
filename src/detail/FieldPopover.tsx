@@ -1,6 +1,37 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+
+/**
+ * Fixed-position wrapper that pins its children just below the nearest
+ * `relative` trigger wrapper and clamps them inside the viewport. Escapes
+ * overflow containers (the doc side panel scrolls), which plain `absolute`
+ * popovers cannot.
+ */
+export function FixedBelowAnchor({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (node === null) return;
+    const anchor = node.parentElement?.getBoundingClientRect();
+    const self = node.getBoundingClientRect();
+    if (anchor === undefined) return;
+    setPos({
+      left: Math.max(8, Math.min(anchor.left, window.innerWidth - self.width - 8)),
+      top: Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - self.height - 8)),
+    });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50"
+      style={pos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: pos.left, top: pos.top }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export interface FieldPopoverOption {
   id: string;
@@ -12,19 +43,40 @@ export interface FieldPopoverOption {
 export interface FieldPopoverProps {
   options: FieldPopoverOption[];
   activeId?: string | null;
+  /** Multi-value fields (multi-select, person, relation): every selected id.
+   * Set this and the popover toggles instead of picking-and-closing. */
+  activeIds?: string[];
   /** show a title-filter input (person/relation pickers) */
   searchable?: boolean;
+  /** Offer "Create <query>" when the typed text matches no option. */
+  onCreate?: (label: string) => void;
   onPick: (id: string) => void;
   onClose: () => void;
 }
 
 /** Anchored option popover; render inside a `relative` wrapper next to its trigger. */
-export function FieldPopover({ options, activeId, searchable, onPick, onClose }: FieldPopoverProps) {
+export function FieldPopover({
+  options,
+  activeId,
+  activeIds,
+  searchable,
+  onCreate,
+  onPick,
+  onClose,
+}: FieldPopoverProps) {
   const [query, setQuery] = useState('');
+  const trimmed = query.trim();
   const visible =
-    query.trim() === ''
+    trimmed === ''
       ? options
-      : options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()));
+      : options.filter((o) => o.label.toLowerCase().includes(trimmed.toLowerCase()));
+  // Multi mode keeps the popover open so several values land in one visit.
+  const multi = activeIds !== undefined;
+  const selected = new Set(activeIds ?? (activeId != null ? [activeId] : []));
+  const canCreate =
+    onCreate !== undefined &&
+    trimmed !== '' &&
+    !options.some((o) => o.label.toLowerCase() === trimmed.toLowerCase());
 
   return (
     <>
@@ -34,9 +86,10 @@ export function FieldPopover({ options, activeId, searchable, onPick, onClose }:
         onClick={onClose}
         className="fixed inset-0 z-40 cursor-default bg-transparent"
       />
+      <FixedBelowAnchor>
       <div
         role="listbox"
-        className="absolute left-0 top-full z-50 mt-1 w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+        className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
       >
         {searchable && (
           <div className="pb-1.5">
@@ -49,10 +102,10 @@ export function FieldPopover({ options, activeId, searchable, onPick, onClose }:
               key={o.id}
               type="button"
               role="option"
-              aria-selected={o.id === activeId}
+              aria-selected={selected.has(o.id)}
               onClick={() => {
                 onPick(o.id);
-                onClose();
+                if (!multi) onClose();
               }}
               className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
             >
@@ -65,12 +118,36 @@ export function FieldPopover({ options, activeId, searchable, onPick, onClose }:
                 }
               />
               <span className="min-w-0 flex-1 truncate">{o.label}</span>
-              {o.id === activeId && <Icon name="check" size={14} color="var(--cortex-600)" />}
+              {selected.has(o.id) && <Icon name="check" size={14} color="var(--cortex-600)" />}
             </button>
           ))}
-          {visible.length === 0 && <div className="p-2 text-[12px] text-[var(--n-400)]">No matches</div>}
+          {visible.length === 0 && !canCreate && (
+            <div className="p-2 text-[12px] text-[var(--n-400)]">No matches</div>
+          )}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => {
+                onCreate?.(trimmed);
+                setQuery('');
+                if (!multi) onClose();
+              }}
+              className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+            >
+              <Icon name="plus" size={13} color="var(--n-400)" />
+              <span className="min-w-0 flex-1 truncate">
+                Create <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
+              </span>
+            </button>
+          )}
         </div>
+        {multi && (
+          <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[11px] text-[var(--n-400)]">
+            Pick as many as you need — Esc or click away to close.
+          </div>
+        )}
       </div>
+      </FixedBelowAnchor>
     </>
   );
 }

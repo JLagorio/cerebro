@@ -8,9 +8,11 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
+import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
+import { buildRelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
 
-/** Spec "simple" status template — fallback when an item has no resolvable space. */
+/** Spec "simple" status template — fallback when no type/project declares statuses. */
 export const DEFAULT_STATUSES: StatusDef[] = [
   { id: 'backlog', label: 'Backlog', color: '#A8AFC2', group: 'active' },
   { id: 'todo', label: 'Todo', color: '#3D8BE8', group: 'active' },
@@ -22,12 +24,17 @@ export const DEFAULT_STATUSES: StatusDef[] = [
 const FIELD_KINDS: FieldKind[] = [
   'text', 'number', 'checkbox', 'date', 'daterange',
   'select', 'multiselect', 'status', 'person', 'relation',
+  'url', 'files', 'rollup', 'created_time', 'last_edited_time',
 ];
+
+const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
+
+const FIELD_FORMATS = ['plain', 'percent', 'progress', 'currency'];
 
 const STATUS_GROUPS = ['active', 'done', 'closed'] as const;
 
 /** 'in-progress' → 'In progress' (sentence case, DS rule). */
-function humanize(id: string): string {
+export function humanize(id: string): string {
   const words = id.replace(/[-_]+/g, ' ').trim();
   if (words === '') return id;
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -67,6 +74,26 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
       .filter((o): o is FieldOption => o !== null);
   }
   if (typeof s.target === 'string') def.target = s.target;
+  // Rollup config: which relation to follow, what to read, how to fold it.
+  if (typeof s.relation === 'string') def.relation = s.relation;
+  if (typeof s.property === 'string') def.property = s.property;
+  if (typeof s.calculate === 'string' && ROLLUP_CALCS.includes(s.calculate)) {
+    def.calculate = s.calculate as FieldDef['calculate'];
+  }
+  // Reverse rollup source (M3.5): `from: { type, field }`.
+  const from = s.from;
+  if (from !== null && typeof from === 'object' && !Array.isArray(from)) {
+    const f = from as Record<string, unknown>;
+    if (typeof f.type === 'string' && typeof f.field === 'string') {
+      def.from = { type: f.type, field: f.field };
+    }
+  }
+  if (typeof s.format === 'string' && FIELD_FORMATS.includes(s.format)) {
+    def.format = s.format as FieldDef['format'];
+  }
+  if (typeof s.precision === 'number' && Number.isFinite(s.precision)) {
+    def.precision = Math.max(0, Math.min(6, Math.trunc(s.precision)));
+  }
   return def;
 }
 
@@ -114,39 +141,55 @@ export function buildSchema(entries: Entry[]): Schema {
       icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
       color: typeof e.properties.color === 'string' ? e.properties.color : null,
       fields: parseFields((e.properties as Record<string, unknown>).fields),
+      // Records are the default surface; `display: doc` opts a type into the
+      // Docs file tree as well (M3.1 — one surface per shape).
+      display: e.properties.display === 'doc' ? 'doc' : 'record',
+      statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
     });
   }
 
   const byPath = new Map(entries.map((e) => [e.path, e]));
+  // Built once per schema so reverse rollups/trees are O(1) lookups instead
+  // of a full scan per row (M3.5).
+  const relations = buildRelationIndex(entries);
 
-  function firstTarget(e: Entry, key: string): string | null {
-    const targets = e.relationships[key];
-    return targets !== undefined && targets.length > 0 ? targets[0] : null;
+  // Vault-level default statuses live on the Work item Type doc (locked
+  // decision 4); parsed once per schema build.
+  const workItemTypeEntry = entries.find((e) => e.type === 'Type' && e.title === 'Work item');
+  const vaultStatuses =
+    workItemTypeEntry !== undefined
+      ? parseStatuses((workItemTypeEntry.properties as Record<string, unknown>).statuses)
+      : [];
+
+  function projectForEntry(e: Entry): Entry | null {
+    if (e.project === null) return null;
+    return byPath.get(e.project) ?? null;
   }
 
-  function spaceForEntry(e: Entry): Entry | null {
-    if (e.type === 'Space') return e;
-    const ownSpace = firstTarget(e, 'space');
-    if (ownSpace !== null) {
-      const found = resolveTarget(ownSpace, entries);
-      return found !== null && found.type === 'Space' ? found : null;
+  function statusSetForProject(projectPath: string | null): StatusDef[] {
+    if (projectPath !== null) {
+      const project = byPath.get(projectPath);
+      if (project !== undefined) {
+        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        if (override.length > 0) return override;
+      }
     }
-    const projectTarget = firstTarget(e, 'project');
-    if (projectTarget === null) return null;
-    const project = resolveTarget(projectTarget, entries);
-    if (project === null) return null;
-    const spaceTarget = firstTarget(project, 'space');
-    if (spaceTarget === null) return null;
-    const found = resolveTarget(spaceTarget, entries);
-    return found !== null && found.type === 'Space' ? found : null;
+    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
   }
 
-  function statusSetForSpace(spacePath: string | null): StatusDef[] {
-    if (spacePath === null) return DEFAULT_STATUSES;
-    const space = byPath.get(spacePath);
-    if (space === undefined) return DEFAULT_STATUSES;
-    const parsed = parseStatuses((space.properties as Record<string, unknown>).statuses);
-    return parsed.length > 0 ? parsed : DEFAULT_STATUSES;
+  /** Project override → the entry's own type's `statuses:` → Work item's →
+   * defaults. Lets a Bug type carry a status set Work items never see. */
+  function statusSetFor(e: Entry): StatusDef[] {
+    if (e.project !== null) {
+      const project = byPath.get(e.project);
+      if (project !== undefined) {
+        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        if (override.length > 0) return override;
+      }
+    }
+    const own = e.type !== null ? types.get(e.type)?.statuses : undefined;
+    if (own !== undefined && own.length > 0) return own;
+    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
   }
 
   function resolveField(e: Entry, field: string): ResolvedField {
@@ -154,6 +197,24 @@ export function buildSchema(entries: Entry[]): Schema {
     const def = typeDef?.fields.find((f) => f.name === field) ?? null;
     const relTargets = e.relationships[field];
     const raw: unknown = relTargets !== undefined ? relTargets : e.properties[field];
+
+    // Computed kinds ignore stored frontmatter entirely.
+    if (def?.kind === 'created_time') {
+      return { def, raw: e.createdAt, display: formatTimestamp(e.createdAt), color: null, ghost: false };
+    }
+    if (def?.kind === 'last_edited_time') {
+      return { def, raw: e.modifiedAt, display: formatTimestamp(e.modifiedAt), color: null, ghost: false };
+    }
+    if (def?.kind === 'rollup') {
+      const computed = computeRollup(e, def, entries, relations);
+      return {
+        def,
+        raw: computed,
+        display: applyFormat(computed, def),
+        color: null,
+        ghost: false,
+      };
+    }
 
     if (isEmptyValue(raw)) {
       return { def, raw, display: '', color: null, ghost: false };
@@ -170,8 +231,7 @@ export function buildSchema(entries: Entry[]): Schema {
     }
 
     if (kind === 'status') {
-      const space = spaceForEntry(e);
-      const statuses = statusSetForSpace(space !== null ? space.path : null);
+      const statuses = statusSetFor(e);
       const id = String(Array.isArray(raw) ? raw[0] : raw);
       const match = statuses.find((s) => s.id === id);
       if (match !== undefined) {
@@ -201,10 +261,15 @@ export function buildSchema(entries: Entry[]): Schema {
       return { def, raw, display: raw === true ? 'Yes' : 'No', color: null, ghost: false };
     }
 
-    // text / number / date / daterange and undeclared fields
+    // Declared numbers carry their field's format (percent, progress, money).
+    if (kind === 'number' && def !== null && typeof raw === 'number') {
+      return { def, raw, display: formatNumber(raw, def), color: null, ghost: false };
+    }
+
+    // text / date / daterange and undeclared fields
     const display = Array.isArray(raw) ? raw.map(String).join(', ') : String(raw);
     return { def, raw, display, color: null, ghost: false };
   }
 
-  return { types, spaceForEntry, statusSetForSpace, resolveField };
+  return { types, relations, projectForEntry, statusSetForProject, statusSetFor, resolveField };
 }

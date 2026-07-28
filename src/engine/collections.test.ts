@@ -11,11 +11,15 @@ const DEFAULT_LIST_PRESENTATION = {
   visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
 };
 
+const FOUNDATIONS = 'projects/foundations/project.md';
+const LAUNCH = 'projects/launch/project.md';
+
 function fixture() {
   const entries = [
     makeEntry({
-      path: 'type/work-item.md',
+      path: 'types/work-item.md',
       filename: 'work-item.md',
+      folder: 'types',
       title: 'Work item',
       type: 'Type',
       properties: {
@@ -33,54 +37,61 @@ function fixture() {
       },
     }),
     makeEntry({
-      path: 'spaces/product.md',
-      filename: 'product.md',
-      title: 'Product',
-      type: 'Space',
-      properties: { color: '#3D8BE8' },
-    }),
-    makeEntry({
-      path: 'projects/foundations.md',
-      filename: 'foundations.md',
+      path: FOUNDATIONS,
+      filename: 'project.md',
+      folder: 'projects/foundations',
+      project: FOUNDATIONS,
       title: 'Foundations',
       type: 'Project',
       properties: { key: 'FLD' },
-      relationships: { space: ['product'] },
     }),
     makeEntry({
-      path: 'projects/launch.md',
-      filename: 'launch.md',
+      path: LAUNCH,
+      filename: 'project.md',
+      folder: 'projects/launch',
+      project: LAUNCH,
       title: 'Launch',
       type: 'Project',
       properties: { key: 'LNC' },
-      relationships: { space: ['product'] },
     }),
     makeEntry({
-      path: 'items/fld-1.md',
+      path: 'projects/foundations/items/fld-1.md',
       filename: 'fld-1.md',
+      folder: 'projects/foundations/items',
+      project: FOUNDATIONS,
       title: 'Older item',
       type: 'Work item',
       properties: { status: 'done', priority: 'low' },
-      relationships: { project: ['foundations'] },
       modifiedAt: '2026-07-01T00:00:00.000Z',
     }),
     makeEntry({
-      path: 'items/fld-2.md',
+      path: 'projects/foundations/items/fld-2.md',
       filename: 'fld-2.md',
+      folder: 'projects/foundations/items',
+      project: FOUNDATIONS,
       title: 'Newer item',
       type: 'Work item',
       properties: { status: 'todo', priority: 'urgent' },
-      relationships: { project: ['foundations'] },
       modifiedAt: '2026-07-03T00:00:00.000Z',
     }),
     makeEntry({
-      path: 'items/lnc-1.md',
+      path: 'projects/launch/items/lnc-1.md',
       filename: 'lnc-1.md',
+      folder: 'projects/launch/items',
+      project: LAUNCH,
       title: 'Launch item',
       type: 'Work item',
       properties: { status: 'done', priority: 'high' },
-      relationships: { project: ['launch'] },
       modifiedAt: '2026-07-02T00:00:00.000Z',
+    }),
+    // A doc inside the project folder must NOT appear on the item canvas.
+    makeEntry({
+      path: 'projects/foundations/meetings/kickoff.md',
+      filename: 'kickoff.md',
+      folder: 'projects/foundations/meetings',
+      project: FOUNDATIONS,
+      title: 'Kickoff',
+      type: null,
     }),
   ];
   return { entries, schema: buildSchema(entries) };
@@ -90,11 +101,13 @@ function mkView(partial: Partial<ViewFile['definition']> & { id: string }): View
   const { id, ...definition } = partial;
   return {
     id,
+    project: null,
     definition: {
       name: id,
       icon: null,
       color: null,
       order: null,
+      source: { type: null, project: null },
       filters: null,
       presentation: {
         type: 'list',
@@ -108,46 +121,34 @@ function mkView(partial: Partial<ViewFile['definition']> & { id: string }): View
 }
 
 describe('resolveCollection', () => {
-  it('a project selection collects its items with the default presentation', () => {
+  it('a project selection collects its contained Work items only', () => {
     const { entries, schema } = fixture();
     const collection = resolveCollection(
-      { kind: 'project', path: 'projects/foundations.md' },
+      { kind: 'project', path: FOUNDATIONS },
       entries,
       schema,
       [],
     );
     expect(collection.title).toBe('Foundations');
-    expect(collection.entries.map((e) => e.path)).toEqual(['items/fld-2.md', 'items/fld-1.md']);
+    // Docs and the project.md itself are excluded — items only, sorted.
+    expect(collection.entries.map((e) => e.path)).toEqual([
+      'projects/foundations/items/fld-2.md',
+      'projects/foundations/items/fld-1.md',
+    ]);
     expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
   });
 
   it('a missing project yields an empty collection titled by the path stem', () => {
     const { entries, schema } = fixture();
     const collection = resolveCollection(
-      { kind: 'project', path: 'projects/gone.md' },
+      { kind: 'project', path: 'projects/gone/project.md' },
       entries,
       schema,
       [],
     );
-    expect(collection.title).toBe('gone');
+    expect(collection.title).toBe('project');
     expect(collection.entries).toEqual([]);
     expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
-  });
-
-  it('a space selection collects items across its projects', () => {
-    const { entries, schema } = fixture();
-    const collection = resolveCollection(
-      { kind: 'space', path: 'spaces/product.md' },
-      entries,
-      schema,
-      [],
-    );
-    expect(collection.title).toBe('Product');
-    expect(collection.entries.map((e) => e.path)).toEqual([
-      'items/fld-2.md',
-      'items/lnc-1.md',
-      'items/fld-1.md',
-    ]);
   });
 
   it('a view selection applies its filters and presentation', () => {
@@ -155,6 +156,7 @@ describe('resolveCollection', () => {
     const view = mkView({
       id: 'done-work',
       name: 'Done work',
+      source: { type: null, project: null },
       filters: {
         all: [
           { field: 'type', op: 'equals', value: 'Work item' },
@@ -171,10 +173,13 @@ describe('resolveCollection', () => {
     const collection = resolveCollection({ kind: 'view', id: 'done-work' }, entries, schema, [view]);
     expect(collection.title).toBe('Done work');
     expect(collection.presentation).toEqual(view.definition.presentation);
-    expect(collection.entries.map((e) => e.path)).toEqual(['items/fld-1.md', 'items/lnc-1.md']);
+    expect(collection.entries.map((e) => e.path)).toEqual([
+      'projects/foundations/items/fld-1.md',
+      'projects/launch/items/lnc-1.md',
+    ]);
   });
 
-  it('a filterless view collects every entry', () => {
+  it('a filterless, typeless view collects every entry but the schema docs', () => {
     const { entries, schema } = fixture();
     const view = mkView({ id: 'everything' });
     const collection = resolveCollection(
@@ -183,7 +188,24 @@ describe('resolveCollection', () => {
       schema,
       [view],
     );
-    expect(collection.entries).toHaveLength(entries.length);
+    // M3.5: `type: Type` docs are the model, so a content view leaves them out.
+    const typeDocs = entries.filter((e) => e.type === 'Type').length;
+    expect(typeDocs).toBeGreaterThan(0);
+    expect(collection.entries).toHaveLength(entries.length - typeDocs);
+    expect(collection.entries.some((e) => e.type === 'Type')).toBe(false);
+  });
+
+  it('a type-rooted view lists only that type, scoped by project (M3.5)', () => {
+    const { entries, schema } = fixture();
+    const project = entries.find((e) => e.type === 'Project');
+    expect(project).toBeDefined();
+    const view = mkView({
+      id: 'projects',
+      source: { type: 'Project', project: null },
+    });
+    const collection = resolveCollection({ kind: 'view', id: 'projects' }, entries, schema, [view]);
+    expect(collection.entries.length).toBeGreaterThan(0);
+    expect(collection.entries.every((e) => e.type === 'Project')).toBe(true);
   });
 
   it('an unknown view id yields an empty default collection titled by the id', () => {
@@ -204,6 +226,7 @@ describe('resolveCollection', () => {
     const { entries, schema } = fixture();
     const view = mkView({
       id: 'by-priority',
+      source: { type: null, project: null },
       filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
       presentation: {
         type: 'list',
@@ -220,26 +243,28 @@ describe('resolveCollection', () => {
     );
     // urgent -> high -> low per the declared options, not alphabetical
     expect(collection.entries.map((e) => e.path)).toEqual([
-      'items/fld-2.md',
-      'items/lnc-1.md',
-      'items/fld-1.md',
+      'projects/foundations/items/fld-2.md',
+      'projects/launch/items/lnc-1.md',
+      'projects/foundations/items/fld-1.md',
     ]);
   });
 
   it('entries without the order field sort last', () => {
     const { entries } = fixture();
     const bare = makeEntry({
-      path: 'items/bare.md',
+      path: 'projects/foundations/items/bare.md',
       filename: 'bare.md',
+      folder: 'projects/foundations/items',
+      project: FOUNDATIONS,
       title: 'Bare',
       type: 'Work item',
-      relationships: { project: ['foundations'] },
       modifiedAt: '2026-07-09T00:00:00.000Z',
     });
     const all = [...entries, bare];
     const schemaAll = buildSchema(all);
     const view = mkView({
       id: 'by-due',
+      source: { type: null, project: null },
       filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
       presentation: {
         type: 'list',
@@ -249,6 +274,8 @@ describe('resolveCollection', () => {
       },
     });
     const collection = resolveCollection({ kind: 'view', id: 'by-due' }, all, schemaAll, [view]);
-    expect(collection.entries[collection.entries.length - 1].path).toBe('items/bare.md');
+    expect(collection.entries[collection.entries.length - 1].path).toBe(
+      'projects/foundations/items/bare.md',
+    );
   });
 });

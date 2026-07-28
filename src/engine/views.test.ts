@@ -7,12 +7,17 @@ const DEFAULT_LIST_PRESENTATION = {
   groupBy: 'status',
   orderBy: { field: 'modifiedAt', dir: 'desc' },
   visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
+  childrenVia: null,
 };
+
+const NO_SOURCE = { type: null, project: null };
 
 const ACTIVE_WORK_YAML = `name: Active work
 icon: flame
 color: '#DE8F0A'
 order: 2
+source:
+  type: Work item
 filters:
   all:
     - { field: type, op: equals, value: Work item }
@@ -30,11 +35,13 @@ describe('parseViewYaml', () => {
   it('parses a complete view file', () => {
     expect(parseViewYaml('active-work', ACTIVE_WORK_YAML)).toEqual({
       id: 'active-work',
+      project: null,
       definition: {
         name: 'Active work',
         icon: 'flame',
         color: '#DE8F0A',
         order: 2,
+        source: { type: 'Work item', project: null },
         filters: {
           all: [
             { field: 'type', op: 'equals', value: 'Work item' },
@@ -51,9 +58,16 @@ describe('parseViewYaml', () => {
           groupBy: 'status',
           orderBy: { field: 'due', dir: 'asc' },
           visibleFields: ['key', 'status', 'assignee'],
+          childrenVia: null,
         },
       },
     });
+  });
+
+  it('carries the project scope through (Task 6)', () => {
+    const scoped = parseViewYaml('delivery', 'name: Delivery\n', 'projects/atlas/project.md');
+    expect(scoped.project).toBe('projects/atlas/project.md');
+    expect(parseViewYaml('global', 'name: G\n').project).toBeNull();
   });
 
   it('bad yaml falls back to name = id and the default list presentation', () => {
@@ -63,6 +77,7 @@ describe('parseViewYaml', () => {
       icon: null,
       color: null,
       order: null,
+      source: NO_SOURCE,
       filters: null,
       presentation: DEFAULT_LIST_PRESENTATION,
     });
@@ -85,6 +100,7 @@ describe('parseViewYaml', () => {
       groupBy: 'status',
       orderBy: { field: 'modifiedAt', dir: 'desc' },
       visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
+      childrenVia: null,
     });
   });
 
@@ -159,6 +175,7 @@ describe('serializeView', () => {
       icon: null,
       color: null,
       order: 3,
+      source: NO_SOURCE,
       filters: {
         any: [
           { field: 'status', op: 'is_empty' },
@@ -175,8 +192,38 @@ describe('serializeView', () => {
         groupBy: null,
         orderBy: { field: 'title', dir: 'asc' },
         visibleFields: ['key', 'status'],
+        childrenVia: null,
       },
     };
     expect(parseViewYaml('sprint-board', serializeView(def)).definition).toEqual(def);
+  });
+
+  // M3.5: a view is rooted in a type, and a tree descends a relation — both
+  // have to survive the YAML round trip or a saved view loses its shape.
+  it('round-trips a type-rooted tree view', () => {
+    const def: ViewDefinition = {
+      name: 'OKR tree',
+      icon: 'target',
+      color: null,
+      order: 1,
+      source: { type: 'Objective', project: 'projects/atlas/project.md' },
+      filters: null,
+      presentation: {
+        type: 'tree',
+        groupBy: null,
+        orderBy: { field: 'title', dir: 'asc' },
+        visibleFields: ['status', 'progress'],
+        childrenVia: { direction: 'reverse', type: 'Key result', field: 'objective' },
+      },
+    };
+    expect(parseViewYaml('okr-tree', serializeView(def)).definition).toEqual(def);
+  });
+
+  it('accepts the shorthand `childrenVia: <field>` as a forward descent', () => {
+    const view = parseViewYaml('t', 'presentation:\n  type: tree\n  childrenVia: key_results\n');
+    expect(view.definition.presentation.childrenVia).toEqual({
+      direction: 'forward',
+      field: 'key_results',
+    });
   });
 });

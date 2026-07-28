@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { validatePatch } from '@/engine/properties';
 import { buildSchema } from '@/engine/schema';
 import type { Entry, Scalar, Schema, ViewFile } from '@/engine/types';
 import { parseViewYaml } from '@/engine/views';
@@ -10,6 +11,7 @@ export interface VaultState {
   vaultPath: string | null;
   entries: Entry[];
   views: ViewFile[];
+  folders: string[];   // all vault directories incl. empty ones (M2 Task 10 file trees)
   status: 'idle' | 'scanning' | 'ready' | 'error';
   error: string | null;
   openVault(path: string): Promise<void>;
@@ -52,6 +54,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   vaultPath: null,
   entries: [],
   views: [],
+  folders: [],
   status: 'idle',
   error: null,
 
@@ -59,7 +62,8 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     set({ vaultPath: path, status: 'scanning', error: null });
     try {
       const entries = await ipc.scanVault(path);
-      const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml));
+      const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
+      const folders = await ipc.listFolders(path);
       await ipc.startWatcher(path);
       if (inTauri() && !watcherBound) {
         const { listen } = await import('@tauri-apps/api/event');
@@ -75,7 +79,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
         // app lifetime.
         watcherBound = true;
       }
-      set({ entries, views, status: 'ready' });
+      set({ entries, views, folders, status: 'ready' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ status: 'error', error: message });
@@ -91,8 +95,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const vault = get().vaultPath;
     if (vault === null) return;
     const entries = await ipc.scanVault(vault);
-    const views = (await ipc.listViews(vault)).map((v) => parseViewYaml(v.id, v.yaml));
-    set({ entries, views, status: 'ready' });
+    const views = (await ipc.listViews(vault)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
+    const folders = await ipc.listFolders(vault);
+    set({ entries, views, folders, status: 'ready' });
   },
 
   async patchFrontmatter(path, patch) {
@@ -105,6 +110,16 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const normalized = Object.fromEntries(
       Object.entries(patch).map(([key, value]) => [key, value === undefined ? null : value]),
     );
+    // Schema enforcement (M2.x properties engine): declared fields must
+    // match their YAML-declared shape or the write never reaches disk.
+    const target = get().entries.find((e) => e.path === path);
+    if (target !== undefined) {
+      const errors = validatePatch(getSchema(get().entries), target, normalized);
+      if (errors.length > 0) {
+        useUiStore.getState().toast(errors[0]);
+        return;
+      }
+    }
     // Optimistic: local state updates synchronously, before the disk write.
     set({ entries: get().entries.map((e) => (e.path === path ? applyPatch(e, normalized) : e)) });
     try {

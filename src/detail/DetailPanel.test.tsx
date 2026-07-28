@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { FieldEditor } from '@/detail/FieldEditor';
+import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -19,6 +21,10 @@ vi.mock('@/lib/ipc', () => ({
   listViews: vi.fn().mockResolvedValue([]),
   saveView: vi.fn(),
   startWatcher: vi.fn().mockResolvedValue(undefined),
+  listFolders: vi.fn().mockResolvedValue([]),
+  createFolder: vi.fn(),
+  renameNote: vi.fn(),
+  deleteNote: vi.fn(),
 }));
 
 afterEach(cleanup);
@@ -26,7 +32,7 @@ afterEach(cleanup);
 describe('DetailPanel', () => {
   beforeEach(() => {
     useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
-    useUiStore.setState({ detailPath: 'items/fld-1.md' });
+    useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
   });
 
   it('writes a frontmatter patch when a status option is picked', async () => {
@@ -36,7 +42,7 @@ describe('DetailPanel', () => {
     render(<DetailPanel />);
     await user.click(screen.getByRole('button', { name: 'Todo' }));
     await user.click(screen.getByRole('option', { name: 'Doing' }));
-    expect(patchFrontmatter).toHaveBeenCalledWith('items/fld-1.md', { status: 'doing' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: 'doing' });
   });
 
   it('shows undeclared frontmatter keys as advisory text', () => {
@@ -59,32 +65,16 @@ describe('DetailPanel', () => {
 
   // --- Tests below cover reported deviations from the plan's verbatim code ---
 
-  it('strips the leading blank line a Rust-backend body carries (note 10)', async () => {
-    // Mock readNote strips leading newlines; Rust read_note returns the body
-    // verbatim including the blank line after the frontmatter fence. The
-    // panel must display both identically.
+  // Task 12: the body renders in the rich editor; NoteBodyEditor covers
+  // save-failure toasts and the note-10 newline normalization at its level.
+  it('renders the note body in the rich markdown editor', async () => {
     vi.mocked(ipc.readNote).mockResolvedValueOnce('\n# Design first-run flow\n\nBody text\n');
     render(<DetailPanel />);
-    await waitFor(() => {
-      const textarea = screen.getByLabelText('Description') as HTMLTextAreaElement;
-      expect(textarea.value).toBe('# Design first-run flow\n\nBody text\n');
+    await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+      timeout: 5_000,
     });
-  });
-
-  it('toasts when the description save fails instead of rejecting silently (note 16a)', async () => {
-    useUiStore.setState({ toasts: [] });
-    vi.mocked(ipc.saveNote).mockRejectedValueOnce(new Error('disk full'));
-    render(<DetailPanel />);
-    await waitFor(() => {
-      expect((screen.getByLabelText('Description') as HTMLTextAreaElement).disabled).toBe(false);
-    });
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Edited body' } });
-    fireEvent.blur(screen.getByLabelText('Description'));
-    await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't save description",
-      );
-    });
+    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy());
+    expect(screen.queryByRole('textbox', { name: 'Description' })).toBeNull();
   });
 
   it('toasts and reverts the title when the H1 rename fails (note 16a)', async () => {
@@ -107,9 +97,74 @@ describe('DetailPanel', () => {
     vi.mocked(ipc.readNote).mockRejectedValueOnce(new Error('gone'));
     render(<DetailPanel />);
     await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't load description",
-      );
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't load page");
     });
+  });
+
+  // M1.x stale-body-after-rename, block edition: the editor keeps its
+  // document across a rename (the file path doesn't change) — without the
+  // splice, its next debounced save writes the OLD H1 back over the renamed
+  // file. spliceTitleIntoBlocks unit coverage lives in markdown.test.ts.
+  it('splices the new H1 into the live editor after a rename', async () => {
+    vi.mocked(ipc.readNote).mockResolvedValueOnce('# Design first-run flow\n\nBody text\n');
+    vi.mocked(ipc.scanVault).mockResolvedValue(fixtureVault());
+    render(<DetailPanel />);
+    await waitFor(() => expect(screen.getByText('Body text')).toBeTruthy(), { timeout: 5_000 });
+    const input = screen.getByLabelText('Title') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'Renamed flow' } });
+    fireEvent.blur(input);
+    // The editor's H1 block now carries the new title...
+    await waitFor(() => {
+      expect(screen.getByTestId('markdown-editor').textContent).toContain('Renamed flow');
+    });
+    // ...and the splice-triggered debounced save writes it to disk.
+    await waitFor(
+      () => {
+        const bodies = vi.mocked(ipc.saveNote).mock.calls.map((c) => c[2]);
+        expect(bodies.some((b) => b.startsWith('# Renamed flow'))).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
+  });
+});
+
+// spliceTitle (string splice) was replaced by spliceTitleIntoBlocks in Task
+// 12 — equivalent coverage lives in src/editor/markdown.test.ts.
+
+// M1.x .nan guard: Number('junk') is NaN and serde_yaml writes it as `.nan`.
+describe('FieldEditor number guard', () => {
+  beforeEach(() => {
+    useUiStore.setState({ toasts: [] });
+  });
+
+  function setupNumberEditor() {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const entry = entries.find((e) => e.path === 'projects/onboarding/items/fld-1.md')!;
+    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    useVaultStore.setState({ entries, patchFrontmatter });
+    render(
+      <FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />,
+    );
+    return patchFrontmatter;
+  }
+
+  it('refuses a non-numeric draft with a toast instead of writing .nan', async () => {
+    const user = userEvent.setup();
+    const patchFrontmatter = setupNumberEditor();
+    await user.click(screen.getByRole('button'));
+    await user.type(screen.getByLabelText('Effort'), 'abc');
+    fireEvent.blur(screen.getByLabelText('Effort'));
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Enter a number');
+  });
+
+  it('commits a numeric draft as a number', async () => {
+    const user = userEvent.setup();
+    const patchFrontmatter = setupNumberEditor();
+    await user.click(screen.getByRole('button'));
+    await user.type(screen.getByLabelText('Effort'), '5');
+    fireEvent.blur(screen.getByLabelText('Effort'));
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { effort: 5 });
   });
 });

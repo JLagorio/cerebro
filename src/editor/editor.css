@@ -1,0 +1,166 @@
+/* DS theme for BlockNote (M2 Task 9): map the mantine flavor's CSS
+   variables onto Cerebro tokens, scoped under our wrapper. */
+.cerebro-editor .bn-container {
+  --bn-colors-editor-text: var(--n-900);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--n-700);
+  --bn-colors-menu-background: var(--n-0);
+  --bn-colors-tooltip-text: var(--n-0);
+  --bn-colors-tooltip-background: var(--n-800);
+  --bn-colors-hovered-text: var(--n-900);
+  --bn-colors-hovered-background: var(--n-50);
+  --bn-colors-selected-text: var(--n-0);
+  --bn-colors-selected-background: var(--cortex-500);
+  --bn-colors-disabled-text: var(--n-400);
+  --bn-colors-disabled-background: var(--n-50);
+  --bn-colors-side-menu: var(--n-400);
+  --bn-colors-border: var(--n-200);
+  --bn-colors-shadow: var(--n-200);
+  --bn-font-family: var(--font-ui);
+  --bn-border-radius-medium: 8px;
+}
+
+.cerebro-editor .bn-editor {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.cerebro-editor .bn-inline-content code,
+.cerebro-editor .bn-block-content[data-content-type='codeBlock'] pre {
+  font-family: var(--font-mono);
+}
+
+/* Table polish (M2.x docs polish): quiet grid, header band, roomy cells —
+   closer to Notion/ClickUp tables than the mantine defaults. */
+.cerebro-editor .bn-block-content[data-content-type='table'] table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.cerebro-editor .bn-block-content[data-content-type='table'] th,
+.cerebro-editor .bn-block-content[data-content-type='table'] td {
+  border: 1px solid var(--n-200);
+  padding: 6px 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.cerebro-editor .bn-block-content[data-content-type='table'] th {
+  background: var(--n-25);
+  font-weight: 600;
+  text-align: left;
+}
+.cerebro-editor .bn-block-content[data-content-type='table'] tr:hover td {
+  background: var(--n-25);
+}
+
+/* Inline chips must fit INSIDE the text line box — anything taller grows the
+   line and pushes content down (user-reported with @ mentions in bullets). */
+.cerebro-editor [data-chip] {
+  height: 18px;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 1;
+  vertical-align: text-bottom;
+  font-size: 12px;
+}
+.cerebro-editor [data-chip] svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Round task checkboxes (user-requested), aligned with the first text line. */
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--n-300);
+  background: var(--n-0);
+  margin: 2.5px 4px 0 0;
+  cursor: pointer;
+  position: relative;
+  flex: none;
+}
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox']:hover {
+  border-color: var(--cortex-500);
+}
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox']:checked {
+  border-color: var(--cortex-500);
+  background: var(--cortex-500);
+}
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--n-0);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+/* Markers and checkboxes hug the first text line instead of stretching. */
+.cerebro-editor .bn-block-content[data-content-type='bulletListItem'],
+.cerebro-editor .bn-block-content[data-content-type='numberedListItem'],
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'] {
+  align-items: flex-start;
+}
+
+/* The block +/drag controls stay hidden while the pointer is inside a table
+   body — hover the left gutter to get that row's controls (user-reported). */
+.cerebro-editor:has(.bn-block-content[data-content-type='table'] table:hover) .bn-side-menu {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Side-menu "assign task" button on checklist rows (M2.x feedback): matches
+   the +/drag buttons it sits beside. */
+.cerebro-editor .cerebro-assign-task {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--n-400);
+  cursor: pointer;
+}
+.cerebro-editor .cerebro-assign-task:hover {
+  background: var(--n-100);
+  color: var(--cortex-600);
+}
+
+/* Checklist items read as tasks: dim + strike when done. */
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'][data-checked='true'] p,
+.cerebro-editor .bn-block-content[data-content-type='checkListItem'][data-checked='true'] .bn-inline-content {
+  color: var(--n-400);
+  text-decoration: line-through;
+}
+
+/* Inline chips (wikilink / assignee / due) sit on the text baseline. */
+.cerebro-editor [data-inline-content-type='wikilink'],
+.cerebro-editor [data-inline-content-type='assignee'],
+.cerebro-editor [data-inline-content-type='due'] {
+  display: inline;
+  white-space: nowrap;
+}
+
+/* Narrow contexts (detail panel): shrink the side-menu gutter and scale
+   headings down so an H1 doesn't dwarf a 420px panel. */
+.cerebro-editor-compact .bn-editor {
+  padding-inline: 28px 8px;
+  font-size: 13px;
+}
+.cerebro-editor-compact .bn-block-content[data-content-type='heading'] h1 {
+  font-size: 18px;
+}
+.cerebro-editor-compact .bn-block-content[data-content-type='heading'] h2 {
+  font-size: 16px;
+}
+.cerebro-editor-compact .bn-block-content[data-content-type='heading'] h3 {
+  font-size: 14px;
+}

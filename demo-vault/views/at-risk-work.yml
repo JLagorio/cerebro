@@ -1,0 +1,34 @@
+name: At risk
+icon: triangle-alert
+color: null
+order: 2
+source:
+  type: Work item
+  project: null
+# Nested AND/OR: urgent work that is either in review or still in progress.
+filters:
+  all:
+    - field: priority
+      op: any_of
+      value:
+        - urgent
+        - high
+    - any:
+        - field: status
+          op: equals
+          value: progress
+        - field: status
+          op: equals
+          value: review
+presentation:
+  type: table
+  groupBy: status
+  orderBy:
+    field: due
+    dir: asc
+  visibleFields:
+    - status
+    - priority
+    - assignee
+    - due
+    - estimate

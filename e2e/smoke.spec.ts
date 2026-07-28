@@ -21,21 +21,19 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
   // vault"; if the mock IPC restored a last vault it boots straight to the
   // shell. Handle both.
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarSpaces = page.getByTestId('sidebar-space');
-  await expect(demoButton.or(sidebarSpaces.first())).toBeVisible({ timeout: 10_000 });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
 
-  // -- Sidebar lists at least one space --------------------------------
-  await expect(sidebarSpaces.first()).toBeVisible({ timeout: 10_000 });
-  expect(await sidebarSpaces.count()).toBeGreaterThanOrEqual(1);
-
-  // -- Expand the first space, open its first project -------------------
-  await sidebarSpaces.first().click();
-  const sidebarProjects = page.getByTestId('sidebar-project');
-  await expect(sidebarProjects.first()).toBeVisible();
-  await sidebarProjects.first().click();
+  // -- M3.5: projects are no longer a sidebar primitive. Reach one through
+  // the Project type's records, then open it with the row's Open button.
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Project' }).first().click();
+  await page.getByTestId('view-switch-table').click();
+  await page.getByTestId('table-row').first().hover();
+  await page.getByRole('button', { name: /^Open / }).first().click();
 
   // -- List view: grouped section headers visible ----------------------
   const groupHeaders = page.getByTestId('list-group-header');
@@ -102,8 +100,12 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
     .toMatch(new RegExp(`status:\\s*['"]?${targetKey}['"]?`));
 
   // -- Detail panel: rename the title ----------------------------------
-  await movedCard.click();
-  await expect(page.getByTestId('detail-panel')).toBeVisible();
+  // dnd-kit suppresses the click that immediately follows a drag on the
+  // dragged element — retry the click until the panel opens.
+  await expect(async () => {
+    await movedCard.click();
+    await expect(page.getByTestId('detail-panel')).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   const titleInput = page.getByTestId('detail-title');
   await expect(titleInput).toBeVisible();
   await titleInput.fill('Renamed by smoke');
@@ -121,4 +123,101 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
   const results = page.getByTestId('quick-open-result');
   await expect(results.first()).toBeVisible();
   await expect(results.filter({ hasText: itemKey }).first()).toBeVisible();
+});
+
+// M2 Task 13 smoke v2: saved-view tabs, doc creation in a folder, BlockNote
+// editing, and a full disk round trip. The plan's "reload persists" step is
+// navigate-away-and-back here: the mock filesystem reseeds on page reload,
+// so cross-reload persistence belongs to the tauri-dev shakeout. Coming
+// back still exercises the whole chain — save → rescan → readNote → parse.
+test('smoke v2: view tabs persist edits, page created in folder, BlockNote round trip', async ({
+  page,
+}) => {
+  // -- Boot -------------------------------------------------------------
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  // M3.5: reach a project through the Project type's records.
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Project' }).first().click();
+  await page.getByTestId('view-switch-table').click();
+  await page.getByTestId('table-row').first().hover();
+  await page.getByRole('button', { name: /^Open / }).first().click();
+
+  // -- Create a saved view from the tab row (scoped: the sidebar has its
+  // own New-view control now) -------------------------------------------
+  await page.getByTestId('project-tabs').getByRole('button', { name: 'New view' }).click();
+  await page.getByPlaceholder('View name').fill('Smoke board');
+  await page.getByRole('button', { name: 'Save' }).click();
+  const smokeTab = page.getByRole('tab', { name: 'Smoke board' });
+  await expect(smokeTab).toHaveAttribute('aria-selected', 'true');
+
+  // Locate the view file on the mock disk (project dir derived from it).
+  const findViewPath = () =>
+    page.evaluate(() =>
+      [...window.__cerebroMockFs.keys()].find((k) => k.endsWith('/views/smoke-board.yml')),
+    );
+  await expect.poll(findViewPath, { timeout: 5_000 }).toBeDefined();
+  const viewPath = await findViewPath();
+  if (!viewPath) throw new Error('smoke-board view file missing from mock fs');
+
+  // -- Tab switching keeps working, toolbar edits auto-persist ------------
+  await page.getByRole('tab', { name: 'Items' }).click();
+  await smokeTab.click();
+  await page.getByTestId('view-switch-board').click();
+  await expect(page.getByTestId('board-column').first()).toBeVisible();
+  await expect
+    .poll(() => readMockFile(page, viewPath), { timeout: 5_000 })
+    .toContain('type: board');
+
+  // -- Pages tab: new folder, new page inside it --------------------------
+  await page.getByRole('tab', { name: 'Pages' }).click();
+  await page.getByRole('button', { name: 'New folder' }).click();
+  await page.getByPlaceholder('Folder name').fill('Notes');
+  await page.getByRole('button', { name: 'Create' }).click();
+  const notesFolder = page.getByRole('button', { name: 'notes' });
+  await expect(notesFolder).toBeVisible();
+  await notesFolder.hover();
+  await page.getByRole('button', { name: 'New page in notes' }).click();
+  await page.getByPlaceholder('Page name').fill('Smoke Notes');
+  await page.getByRole('button', { name: 'Create' }).click();
+
+  // -- Lands on the doc page with the typed-capitalization H1 -------------
+  await expect(page.getByTestId('doc-title')).toHaveText('Smoke Notes');
+  const editor = page.locator('[data-testid="markdown-editor"] .bn-editor');
+  await expect(editor).toBeVisible({ timeout: 10_000 });
+
+  // The file on disk is clean markdown — H1 only, no frontmatter.
+  const docPath = await page.evaluate(() =>
+    [...window.__cerebroMockFs.keys()].find((k) => k.endsWith('notes/smoke-notes.md')),
+  );
+  if (!docPath) throw new Error('created page missing from mock fs');
+  expect(await readMockFile(page, docPath)).toBe('# Smoke Notes\n');
+
+  // -- Edit in BlockNote: new paragraph under the heading ------------------
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Written by the smoke test.');
+  await expect
+    .poll(() => readMockFile(page, docPath), { timeout: 5_000 })
+    .toContain('Written by the smoke test.');
+
+  // -- Navigate away and back through the Docs rail (disk round trip) -----
+  await page.getByRole('button', { name: 'Home' }).click();
+  await page.getByRole('button', { name: 'Docs' }).click();
+  const recent = page
+    .getByTestId('recent-doc')
+    .filter({ hasText: 'Smoke Notes' })
+    .first();
+  await expect(recent).toBeVisible();
+  await recent.click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Smoke Notes');
+  await expect(
+    page.locator('[data-testid="markdown-editor"]').getByText('Written by the smoke test.'),
+  ).toBeVisible({ timeout: 10_000 });
 });

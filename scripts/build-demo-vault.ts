@@ -124,18 +124,18 @@ interface SeedUser {
 
 // Pure mapping: one seed work item -> item note frontmatter (unit-tested).
 // Returns null for items that should not be generated (work-list items).
+// Vault format v2: no `project:` wikilink — membership is containment (the
+// item file lives inside the project's folder).
 export function seedItemToFrontmatter(
   item: SeedWorkItem,
   projectSlugById: Map<string, string>,
 ): Record<string, unknown> | null {
   // Seed items carry either projectId or listId; work lists are not M1.
   if (item.projectId === undefined) return null;
-  const projectSlug = projectSlugById.get(item.projectId);
-  if (projectSlug === undefined) return null;
+  if (!projectSlugById.has(item.projectId)) return null;
   return {
     type: 'Work item',
     key: item.key,
-    project: `[[${projectSlug}]]`,
     status: item.status,
     priority: item.priority,
     assignee: `[[${slugify(item.assignee)}]]`,
@@ -152,15 +152,19 @@ function note(frontmatter: Record<string, unknown>, title: string, body?: string
 }
 
 // ---------------------------------------------------------------------------
-// Type notes. Fields blocks follow the spec examples verbatim (hand-written,
-// not derived from the seed); select-option hexes are baked from DS tokens
-// (project states mirror the seed PROJECT_STATES colors).
+// Type notes (vault format v2: `types/` folder, no Space type). Fields blocks
+// follow the spec examples verbatim (hand-written, not derived from the seed);
+// select-option hexes are baked from DS tokens. The Work item type note is
+// built dynamically — it carries the vault-default `statuses:` (locked
+// decision 4: statuses live on the Work item Type doc, projects may override).
 // ---------------------------------------------------------------------------
-const TYPE_NOTES: Record<string, string> = {
-  'type/work-item.md': `---
+export function workItemTypeNote(statuses: Array<Record<string, unknown>>): string {
+  const statusYaml = YAML.stringify({ statuses }, { lineWidth: 0 });
+  return `---
 type: Type
 icon: check-square
 color: '#3D8BE8'
+${statusYaml.trimEnd()}
 fields:
   status: { kind: status }
   priority:
@@ -181,24 +185,16 @@ fields:
       - { id: M }
       - { id: L }
       - { id: XL }
-  project: { kind: relation, target: Project }
 ---
 
 # Work item
 
 Work items are the unit of delivery: tasks, bugs, and milestones tracked on project boards.
-`,
-  'type/space.md': `---
-type: Type
-icon: layers
-color: '#8250DC'
----
+`;
+}
 
-# Space
-
-Spaces group related projects and declare the status workflow their items move through.
-`,
-  'type/project.md': `---
+const TYPE_NOTES: Record<string, string> = {
+  'types/project.md': `---
 type: Type
 icon: folder-kanban
 color: '#14B8A6'
@@ -212,14 +208,13 @@ fields:
       - { id: execution, color: '#DE8F0A' }
       - { id: monitoring, color: '#38BDF8' }
       - { id: completed, color: '#1F9D61' }
-  space: { kind: relation, target: Space }
 ---
 
 # Project
 
-Projects belong to a space, carry an uppercase item-key prefix, and collect work items.
+A project is a folder: project.md carries its metadata, items/ holds its work items, and any other folders and notes are the project's docs.
 `,
-  'type/person.md': `---
+  'types/person.md': `---
 type: Type
 icon: user
 color: '#38BDF8'
@@ -247,45 +242,67 @@ export function buildVault(): Map<string, string> {
   const files = new Map<string, string>();
   for (const [path, content] of Object.entries(TYPE_NOTES)) files.set(path, content);
 
-  const spaceSlugById = new Map(work.SPACES.map((s) => [s.id, slugify(s.name)]));
   const projectSlugById = new Map(work.PROJECTS.map((p) => [p.id, slugify(p.name)]));
 
   const bySlug = <T>(slugOf: (x: T) => string) => (a: T, b: T) =>
     slugOf(a).localeCompare(slugOf(b));
 
-  // Spaces: statuses mapped to { id, group, color, hollow? } with hex colors.
-  for (const space of [...work.SPACES].sort(bySlug((s) => slugify(s.name)))) {
-    const statuses = space.statuses.map((st) => ({
+  const mapStatuses = (statuses: SeedStatus[]) =>
+    statuses.map((st) => ({
       id: st.id,
       group: st.group,
       color: cssColor(st.color),
       ...(st.hollow === true ? { hollow: true } : {}),
     }));
-    files.set(
-      `spaces/${slugify(space.name)}.md`,
-      note({ type: 'Space', color: cssColor(space.swatch), statuses }, space.name, space.description),
-    );
-  }
 
-  // Projects: key, space wikilink, state.
+  // Vault-default statuses: the set of the seed space with the most projects
+  // (ties → alphabetical slug). It lands on types/work-item.md; projects
+  // whose seed space declared a different set get a `statuses:` override.
+  const projectCountBySpace = new Map<string, number>();
+  for (const p of work.PROJECTS) {
+    projectCountBySpace.set(p.spaceId, (projectCountBySpace.get(p.spaceId) ?? 0) + 1);
+  }
+  const defaultSpace = [...work.SPACES].sort(
+    (a, b) =>
+      (projectCountBySpace.get(b.id) ?? 0) - (projectCountBySpace.get(a.id) ?? 0) ||
+      slugify(a.name).localeCompare(slugify(b.name)),
+  )[0];
+  const defaultStatuses = mapStatuses(defaultSpace.statuses);
+  files.set('types/work-item.md', workItemTypeNote(defaultStatuses));
+
+  // Projects as folders: projects/<slug>/project.md (+ a starter meeting doc
+  // so every project demonstrates user-structured content).
   for (const project of [...work.PROJECTS].sort(bySlug((p) => slugify(p.name)))) {
-    const spaceSlug = spaceSlugById.get(project.spaceId);
-    if (spaceSlug === undefined) throw new Error(`Unknown spaceId ${project.spaceId}`);
+    const space = work.SPACES.find((s) => s.id === project.spaceId);
+    if (space === undefined) throw new Error(`Unknown spaceId ${project.spaceId}`);
+    const slug = slugify(project.name);
+    const fm: Record<string, unknown> = {
+      type: 'Project',
+      key: project.key,
+      state: project.state,
+      color: cssColor(space.swatch),
+    };
+    const spaceStatuses = mapStatuses(space.statuses);
+    if (JSON.stringify(spaceStatuses) !== JSON.stringify(defaultStatuses)) {
+      fm.statuses = spaceStatuses;
+    }
+    files.set(`projects/${slug}/project.md`, note(fm, project.name, project.description));
     files.set(
-      `projects/${slugify(project.name)}.md`,
-      note(
-        { type: 'Project', key: project.key, space: `[[${spaceSlug}]]`, state: project.state },
-        project.name,
-        project.description,
-      ),
+      `projects/${slug}/meetings/kickoff.md`,
+      `# ${project.name} kickoff\n\nAgenda and notes for the ${project.name} kickoff.\n\n- [ ] Confirm scope\n- [ ] Assign owners\n- [x] Book the room\n`,
     );
   }
 
-  // Work items: skip list-attached items; body from seed description.
+  // Work items live inside their project's folder (containment membership).
   for (const item of [...work.WORK_ITEMS].sort(bySlug((i) => slugify(i.key)))) {
     const fm = seedItemToFrontmatter(item, projectSlugById);
-    if (fm === null) continue;
-    files.set(`items/${slugify(item.key)}.md`, note(fm, item.name, item.description));
+    if (fm === null || item.projectId === undefined) continue;
+    const projectSlug = projectSlugById.get(item.projectId);
+    if (projectSlug === undefined) continue;
+    files.set(
+      `projects/${projectSlug}/items/${slugify(item.key)}.md`,
+      note(fm, item.name, item.description),
+    );
   }
 
   // People.
@@ -295,6 +312,12 @@ export function buildVault(): Map<string, string> {
       note({ type: 'Person', role: user.role, team: user.team }, user.name),
     );
   }
+
+  // A loose vault-level doc outside any project.
+  files.set(
+    'inbox/welcome.md',
+    '# Welcome to Cerebro\n\nThis vault is plain markdown: projects are folders, work items and docs are files, and YAML frontmatter carries the metadata.\n',
+  );
 
   return files;
 }

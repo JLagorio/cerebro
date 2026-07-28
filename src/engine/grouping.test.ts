@@ -4,11 +4,17 @@ import { groupEntries } from './grouping';
 import { makeEntry } from './testHelpers';
 
 const typeNote = makeEntry({
-  path: 'type/work-item.md',
+  path: 'types/work-item.md',
   filename: 'work-item.md',
   title: 'Work item',
   type: 'Type',
   properties: {
+    // v2: the vault-default status set lives on the Work item Type doc.
+    statuses: [
+      { id: 'triage', group: 'active', color: '#A8AFC2' },
+      { id: 'doing', group: 'active', color: '#EFB428' },
+      { id: 'shipped', group: 'done', color: '#34B764' },
+    ],
     fields: {
       status: { kind: 'status' },
       priority: {
@@ -24,26 +30,11 @@ const typeNote = makeEntry({
   },
 });
 
-const space = makeEntry({
-  path: 'spaces/fieldwork.md',
-  filename: 'fieldwork.md',
-  title: 'Fieldwork',
-  type: 'Space',
-  properties: {
-    statuses: [
-      { id: 'triage', group: 'active', color: '#A8AFC2' },
-      { id: 'doing', group: 'active', color: '#EFB428' },
-      { id: 'shipped', group: 'done', color: '#34B764' },
-    ],
-  },
-});
-
 const project = makeEntry({
-  path: 'projects/flight-deck.md',
-  filename: 'flight-deck.md',
+  path: 'projects/flight-deck/project.md',
+  filename: 'project.md',
   title: 'Flight deck',
   type: 'Project',
-  relationships: { space: ['fieldwork'] },
 });
 
 const ana = makeEntry({
@@ -87,11 +78,11 @@ const i5 = makeEntry({
 
 // person entries are in the schema entry set but NOT in the grouped subset,
 // exactly like a project page grouping its work items
-const schema = buildSchema([typeNote, space, project, ana, zed, i1, i2, i3, i4, i5]);
+const schema = buildSchema([typeNote, project, ana, zed, i1, i2, i3, i4, i5]);
 const items = [i1, i2, i3, i4, i5];
 
 describe('groupEntries — status', () => {
-  it('orders groups by the space status set, keeps empty groups, ghosts unknown values, trails No status', () => {
+  it('orders groups by the type-doc status set, keeps empty groups, ghosts unknown values, trails No status', () => {
     const groups = groupEntries(items, 'status', schema);
     expect(groups.map((g) => g.key)).toEqual(['triage', 'doing', 'shipped', 'qa', '__none__']);
     expect(groups.map((g) => g.label)).toEqual(['Triage', 'Doing', 'Shipped', 'qa', 'No status']);

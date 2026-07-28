@@ -9,6 +9,8 @@ import { greetingForHour, HomePage, projectProgress } from './HomePage';
 function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   return {
     filename: partial.path.split('/').pop() ?? '',
+    folder: partial.path.includes('/') ? partial.path.slice(0, partial.path.lastIndexOf('/')) : '',
+    project: null,
     title: 'Untitled',
     type: null,
     properties: {},
@@ -22,35 +24,30 @@ function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   };
 }
 
-const space = mkEntry({
-  path: 'spaces/product.md',
-  filename: 'product.md',
-  title: 'Product',
-  type: 'Space',
-  properties: { color: '#3D8BE8' },
-  snippet: 'Everything customer-facing.',
-});
+const FOUNDATIONS = 'projects/foundations/project.md';
 const project = mkEntry({
-  path: 'projects/foundations.md',
-  filename: 'foundations.md',
+  path: FOUNDATIONS,
+  filename: 'project.md',
+  project: FOUNDATIONS,
   title: 'Foundations',
   type: 'Project',
   properties: { key: 'FLD' },
-  relationships: { space: ['product'] },
 });
 const itemDone = mkEntry({
-  path: 'items/fld-1.md',
+  path: 'projects/foundations/items/fld-1.md',
   filename: 'fld-1.md',
+  project: FOUNDATIONS,
   title: 'Ship tokens',
+  type: 'Work item',
   properties: { status: 'done' },
-  relationships: { project: ['foundations'] },
 });
 const itemOpen = mkEntry({
-  path: 'items/fld-2.md',
+  path: 'projects/foundations/items/fld-2.md',
   filename: 'fld-2.md',
+  project: FOUNDATIONS,
   title: 'Port primitives',
+  type: 'Work item',
   properties: { status: 'todo' },
-  relationships: { project: ['foundations'] },
 });
 
 const STATUSES: StatusDef[] = [
@@ -60,8 +57,10 @@ const STATUSES: StatusDef[] = [
 
 const fakeSchema: Schema = {
   types: new Map(),
-  spaceForEntry: () => space,
-  statusSetForSpace: () => STATUSES,
+  projectForEntry: () => project,
+  relations: new Map(),
+  statusSetForProject: () => STATUSES,
+  statusSetFor: () => STATUSES,
   resolveField: () => ({ def: null, raw: null, display: '', color: null, ghost: false }),
 };
 
@@ -81,23 +80,28 @@ describe('greetingForHour', () => {
 });
 
 describe('projectProgress', () => {
-  const entries = [space, project, itemDone, itemOpen];
+  const entries = [project, itemDone, itemOpen];
 
-  it('counts done-group items over total items of the project', () => {
+  it('counts done-group items over total contained Work items', () => {
     expect(projectProgress(project, entries, fakeSchema)).toEqual({ total: 2, done: 1 });
   });
 
   it('returns zeros for a project with no items', () => {
-    const empty = mkEntry({ path: 'projects/empty.md', title: 'Empty', type: 'Project' });
+    const empty = mkEntry({
+      path: 'projects/empty/project.md',
+      title: 'Empty',
+      type: 'Project',
+    });
     expect(projectProgress(empty, entries, fakeSchema)).toEqual({ total: 0, done: 0 });
   });
 
   it('does not count items whose status is not in the status set', () => {
     const ghost = mkEntry({
-      path: 'items/fld-3.md',
+      path: 'projects/foundations/items/fld-3.md',
       filename: 'fld-3.md',
+      project: FOUNDATIONS,
+      type: 'Work item',
       properties: { status: 'someday' },
-      relationships: { project: ['foundations'] },
     });
     expect(projectProgress(project, [...entries, ghost], fakeSchema)).toEqual({
       total: 3,
@@ -110,7 +114,7 @@ describe('HomePage', () => {
   beforeEach(() => {
     useVaultStore.setState({
       vaultPath: '/demo-vault',
-      entries: [space, project, itemDone, itemOpen],
+      entries: [project, itemDone, itemOpen],
       views: [],
       status: 'ready',
       error: null,
@@ -124,14 +128,20 @@ describe('HomePage', () => {
 
   afterEach(cleanup);
 
-  it('renders space tiles with project counts and the projects grid', () => {
+  it('renders the projects grid with key tags and progress', () => {
     render(<HomePage />);
-    // "Product" appears twice by design: the space tile and the project card's
-    // space subtitle — the plan's getByText throws on multiple matches.
-    expect(screen.getAllByText('Product').length).toBeGreaterThan(0);
     expect(screen.getByText('1 project')).toBeTruthy();
     expect(screen.getByText('Foundations')).toBeTruthy();
     expect(screen.getByText('FLD')).toBeTruthy();
     expect(screen.getByText('1/2 done')).toBeTruthy();
+  });
+
+  // M1.x fresh-vault empty state: a brand-new vault rendered a bare section
+  // heading with nothing actionable under it.
+  it('shows an empty state when the vault has no projects', () => {
+    useVaultStore.setState({ entries: [] });
+    render(<HomePage />);
+    expect(screen.getByText('Nothing here yet')).toBeTruthy();
+    expect(screen.getByText('Use New to create your first project.')).toBeTruthy();
   });
 });

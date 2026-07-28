@@ -10,6 +10,12 @@ use super::parse;
 pub struct Entry {
     pub path: String,
     pub filename: String,
+    /// Vault-relative parent directory ('' at the root) — vault format v2.
+    pub folder: String,
+    /// Owning `project.md` path via containment (nearest ancestor directory
+    /// holding a project.md); None outside any project. Filled by the
+    /// scanner's post-pass — a single file can't know this.
+    pub project: Option<String>,
     pub title: String,
     #[serde(rename = "type")]
     pub entry_type: Option<String>,
@@ -26,6 +32,7 @@ pub struct Entry {
 /// content. Timestamps are passed in by the scanner (ISO 8601 strings).
 pub fn build_entry(rel_path: &str, content: &str, created_at: String, modified_at: String) -> Entry {
     let filename = rel_path.rsplit('/').next().unwrap_or(rel_path).to_string();
+    let folder = rel_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("").to_string();
     let stem = filename.strip_suffix(".md").unwrap_or(&filename).to_string();
     let (block, body) = parse::split_frontmatter(content);
     let (mapping, parse_error) = match block {
@@ -61,6 +68,8 @@ pub fn build_entry(rel_path: &str, content: &str, created_at: String, modified_a
     Entry {
         path: rel_path.to_string(),
         filename,
+        folder,
+        project: None,
         title,
         entry_type,
         properties,
@@ -128,7 +137,7 @@ mod tests {
     #[test]
     fn wikilink_arrays_become_relationships() {
         let content = "---\nmembers:\n  - \"[[maya-chen]]\"\n  - \"[[joss-b|Joss]]\"\n---\n\n# Team\n";
-        let e = build("spaces/team.md", content);
+        let e = build("people/team.md", content);
         assert_eq!(e.relationships["members"], vec!["maya-chen", "joss-b"]);
         assert!(!e.properties.contains_key("members"));
     }

@@ -49,41 +49,45 @@ describe('vaultStore', () => {
     expect(s.vaultPath).toBe('/demo-vault');
     expect(s.entries.length).toBeGreaterThan(50);
     expect(Array.isArray(s.views)).toBe(true);
-    const item = findEntry('items/fld-1.md');
+    const item = findEntry('projects/guided-onboarding-ga/items/fld-1.md');
     expect(item?.title).toBe('First-run walkthrough GA');
-    expect(item?.relationships.project).toEqual(['guided-onboarding-ga']);
+    // v2 containment: the owning project comes from the folder, not a link.
+    expect(item?.project).toBe('projects/guided-onboarding-ga/project.md');
+    // Task 10: directories load alongside entries for the file trees.
+    expect(s.folders).toContain('projects/guided-onboarding-ga/items');
+    expect(s.folders).toContain('inbox');
   });
 
   it('patchFrontmatter applies optimistically before the write resolves', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
     const pending = useVaultStore
       .getState()
-      .patchFrontmatter('items/fld-1.md', { status: 'done', assignee: '[[sam-ito]]' });
+      .patchFrontmatter('projects/guided-onboarding-ga/items/fld-1.md', { status: 'done', assignee: '[[sam-ito]]' });
     // Synchronously visible: scalar to properties, wikilink to relationships.
-    expect(findEntry('items/fld-1.md')?.properties.status).toBe('done');
-    expect(findEntry('items/fld-1.md')?.relationships.assignee).toEqual(['sam-ito']);
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.properties.status).toBe('done');
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.relationships.assignee).toEqual(['sam-ito']);
     await pending;
     // Survives the reconciling rescan because the mock disk was updated too.
-    expect(findEntry('items/fld-1.md')?.properties.status).toBe('done');
-    expect(findEntry('items/fld-1.md')?.relationships.assignee).toEqual(['sam-ito']);
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.properties.status).toBe('done');
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.relationships.assignee).toEqual(['sam-ito']);
   });
 
   it('patchFrontmatter with null deletes the field', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
-    await useVaultStore.getState().patchFrontmatter('items/fld-1.md', { due: null });
-    expect(findEntry('items/fld-1.md')?.properties).not.toHaveProperty('due');
+    await useVaultStore.getState().patchFrontmatter('projects/guided-onboarding-ga/items/fld-1.md', { due: null });
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.properties).not.toHaveProperty('due');
   });
 
   it('patchFrontmatter surfaces a failed disk write as a toast and reverts', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
     useUiStore.setState({ toasts: [] });
     vi.mocked(ipc.updateFrontmatter).mockRejectedValueOnce(new Error('disk full'));
-    await useVaultStore.getState().patchFrontmatter('items/fld-1.md', { status: 'done' });
+    await useVaultStore.getState().patchFrontmatter('projects/guided-onboarding-ga/items/fld-1.md', { status: 'done' });
     // Disk truth wins: the optimistic update is reverted by the rescan.
-    expect(findEntry('items/fld-1.md')?.properties.status).toBe('progress');
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.properties.status).toBe('progress');
     const toasts = useUiStore.getState().toasts;
     expect(toasts).toHaveLength(1);
-    expect(toasts[0].message).toBe("Couldn't save changes to items/fld-1.md");
+    expect(toasts[0].message).toBe("Couldn't save changes to projects/guided-onboarding-ga/items/fld-1.md");
   });
 
   // Deviation test (Task 23, execution-log note 15a, reported): a stale
@@ -128,6 +132,7 @@ describe('vaultStore', () => {
     vi.mocked(ipc.createNote).mockImplementation(mockBackend.createNote);
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    vi.mocked(ipc.listFolders).mockImplementation(mockBackend.listFolders);
     enterTauri();
     try {
       const path = await useVaultStore.getState().createItem({
@@ -142,25 +147,27 @@ describe('vaultStore', () => {
       vi.mocked(ipc.createNote).mockReset();
       vi.mocked(ipc.scanVault).mockReset();
       vi.mocked(ipc.listViews).mockReset();
+      vi.mocked(ipc.listFolders).mockReset();
     }
   });
 
   it('patchFrontmatter treats undefined exactly like null: the key is deleted on disk', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
-    await useVaultStore.getState().patchFrontmatter('items/fld-1.md', { due: undefined });
+    await useVaultStore.getState().patchFrontmatter('projects/guided-onboarding-ga/items/fld-1.md', { due: undefined });
     // Normalized to null before the IPC call: JSON serialization to Tauri
     // silently drops undefined keys, and the mock's yaml doc.set would write
     // `due: null` instead of deleting.
-    expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalledWith('/demo-vault', 'items/fld-1.md', {
+    expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalledWith('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', {
       due: null,
     });
-    expect(findEntry('items/fld-1.md')?.properties).not.toHaveProperty('due');
-    expect(mockFsDisk().get('items/fld-1.md')).not.toMatch(/^due:/m);
+    expect(findEntry('projects/guided-onboarding-ga/items/fld-1.md')?.properties).not.toHaveProperty('due');
+    expect(mockFsDisk().get('projects/guided-onboarding-ga/items/fld-1.md')).not.toMatch(/^due:/m);
   });
 
   it('rebinds the vault-changed listener after a failed bind and contains rescan errors', async () => {
     vi.mocked(ipc.scanVault).mockImplementation(mockBackend.scanVault);
     vi.mocked(ipc.listViews).mockImplementation(mockBackend.listViews);
+    vi.mocked(ipc.listFolders).mockImplementation(mockBackend.listFolders);
     vi.mocked(ipc.startWatcher).mockImplementation(mockBackend.startWatcher);
     enterTauri();
     try {
@@ -188,6 +195,7 @@ describe('vaultStore', () => {
       exitTauri();
       vi.mocked(ipc.scanVault).mockReset();
       vi.mocked(ipc.listViews).mockReset();
+      vi.mocked(ipc.listFolders).mockReset();
       vi.mocked(ipc.startWatcher).mockReset();
     }
   });
@@ -203,7 +211,7 @@ describe('vaultStore', () => {
 
   it('useEntry returns the entry for a path', async () => {
     await useVaultStore.getState().openVault('/demo-vault');
-    const { result } = renderHook(() => useEntry('items/fld-1.md'));
+    const { result } = renderHook(() => useEntry('projects/guided-onboarding-ga/items/fld-1.md'));
     expect(result.current?.title).toBe('First-run walkthrough GA');
     const { result: missing } = renderHook(() => useEntry('items/nope.md'));
     expect(missing.current).toBeNull();

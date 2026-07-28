@@ -1,7 +1,8 @@
-import type { Entry, Presentation, Schema, Selection, ViewFile } from './types';
+import { isTemplate } from '@/lib/templates';
+import type { Entry, Presentation, Schema, Selection, ViewFile, ViewSource } from './types';
+import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { DEFAULT_PRESENTATION } from './views';
-import { resolveTarget } from './wikilink';
 
 export interface Collection {
   title: string;
@@ -43,8 +44,7 @@ function optionOrder(entries: Entry[], field: string, schema: Schema): string[] 
     const def = schema.resolveField(e, field).def;
     if (def === null) continue;
     if (def.kind === 'status') {
-      const space = schema.spaceForEntry(e);
-      return schema.statusSetForSpace(space !== null ? space.path : null).map((s) => s.id);
+      return schema.statusSetFor(e).map((s) => s.id);
     }
     if (def.options !== undefined && def.options.length > 0) {
       return def.options.map((o) => o.id);
@@ -86,20 +86,31 @@ export function sortEntries(
   });
 }
 
+/** Vault format v2: project membership is containment — Entry.project points
+ * at the owning project.md. The item canvas shows the project's Work items
+ * only; docs inside the folder belong to the Pages surface, not the board. */
 function itemsOfProject(project: Entry, entries: Entry[]): Entry[] {
-  return entries.filter((e) =>
-    (e.relationships.project ?? []).some((t) => resolveTarget(t, entries)?.path === project.path),
-  );
+  return entries.filter((e) => e.project === project.path && e.type === 'Work item');
 }
 
-function itemsOfSpace(spacePath: string, entries: Entry[], schema: Schema): Entry[] {
-  return entries.filter(
-    (e) =>
-      e.type !== 'Space' &&
-      e.type !== 'Project' &&
-      schema.spaceForEntry(e)?.path === spacePath,
-  );
+/**
+ * The records a view's source selects, before its filters run (M3.5): every
+ * record of a type, optionally narrowed to one project by containment. This
+ * is what makes "a project" just a saved view — the project page's hardcoded
+ * `type: Work item` + containment query, expressed as data.
+ */
+export function selectSource(entries: Entry[], source: ViewSource): Entry[] {
+  return entries.filter((e) => {
+    if (isTemplate(e)) return false;
+    if (source.type !== null) return e.type === source.type && matchesProject(e, source);
+    // A typeless view means "everything I wrote": untyped pages included,
+    // Type docs excluded — those are the schema, not content.
+    return e.type !== 'Type' && matchesProject(e, source);
+  });
 }
+
+const matchesProject = (e: Entry, source: ViewSource) =>
+  source.project === null || e.project === source.project;
 
 /** Map a sidebar selection to what the canvas renders: a titled, filtered,
  * sorted entry list plus the presentation the views draw it with. */
@@ -120,30 +131,48 @@ export function resolveCollection(
         presentation,
       };
     }
-    case 'space': {
-      const space = entries.find((e) => e.path === sel.path) ?? null;
-      const presentation = defaultPresentation();
-      if (space === null) return { title: stem(sel.path), entries: [], presentation };
+    case 'view': {
+      // Sidebar view selections are vault-global; project-scoped views are
+      // rendered by their project's tabs, not by id lookup here (ids are only
+      // unique within a scope).
+      const view = views.find((v) => v.id === sel.id && v.project === null) ?? null;
+      if (view === null) return { title: sel.id, entries: [], presentation: defaultPresentation() };
+      const { name, source, filters, presentation } = view.definition;
       return {
-        title: space.title,
-        entries: sortEntries(itemsOfSpace(sel.path, entries, schema), presentation.orderBy, schema),
+        title: name,
+        entries: sortEntries(
+          selectSource(entries, source).filter(
+            (e) => filters === null || evaluateFilters(e, filters, schema),
+          ),
+          presentation.orderBy,
+          schema,
+        ),
         presentation,
       };
     }
-    case 'view': {
-      const view = views.find((v) => v.id === sel.id) ?? null;
-      if (view === null) return { title: sel.id, entries: [], presentation: defaultPresentation() };
-      const { name, filters, presentation } = view.definition;
-      const matched =
-        filters === null ? entries : entries.filter((e) => evaluateFilters(e, filters, schema));
+    case 'type': {
+      // M3 type screen: every record carrying `type: <name>`, presented with
+      // the type's own declared fields.
+      const presentation = typePresentation(sel.name, schema);
       return {
-        title: name,
-        entries: sortEntries(matched, presentation.orderBy, schema),
+        title: sel.name,
+        entries: sortEntries(
+          // Templates declare a type so new pages inherit it; they are not
+          // records of it (M3.1).
+          entries.filter((e) => e.type === sel.name && !isTemplate(e)),
+          presentation.orderBy,
+          schema,
+        ),
         presentation,
       };
     }
     case 'home':
       return { title: 'Home', entries: [], presentation: defaultPresentation() };
+    case 'doc':
+      // Docs render in the editor surface (DocPage); they have no item canvas.
+      return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
+    case 'docs':
+      return { title: 'Docs', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }

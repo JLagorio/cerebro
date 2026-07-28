@@ -16,59 +16,61 @@ describe('mockIpc', () => {
     const entries = await mock.scanVault('/demo-vault');
     expect(entries.length).toBeGreaterThan(50);
     expect(entries.every((e) => e.parseError === null)).toBe(true);
-    const item = entries.find((e) => e.path === 'items/fld-1.md');
+    const item = entries.find((e) => e.path === 'projects/guided-onboarding-ga/items/fld-1.md');
     expect(item?.title).toBe('First-run walkthrough GA');
     expect(item?.type).toBe('Work item');
     expect(item?.properties.key).toBe('FLD-1');
-    expect(item?.relationships.project).toEqual(['guided-onboarding-ga']);
+    // v2 containment: membership from the folder, not a `project:` link.
+    expect(item?.project).toBe('projects/guided-onboarding-ga/project.md');
     expect(item?.relationships.assignee).toEqual(['ana-rios']);
   });
 
   it('exposes the file map for Playwright assertions', () => {
     const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
     expect(fs).toBeInstanceOf(Map);
-    expect(fs.has('items/fld-1.md')).toBe(true);
+    expect(fs.has('projects/guided-onboarding-ga/items/fld-1.md')).toBe(true);
   });
 
   it('readNote returns the body with frontmatter stripped', async () => {
-    const body = await mock.readNote('/demo-vault', 'items/fld-1.md');
+    const body = await mock.readNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md');
     expect(body.startsWith('# First-run walkthrough GA')).toBe(true);
     expect(body).not.toContain('---');
   });
 
   it('updateFrontmatter patches values, deletes nulls, preserves order and unknown keys', async () => {
-    await mock.updateFrontmatter('/demo-vault', 'items/fld-1.md', { status: 'done', due: null });
+    await mock.updateFrontmatter('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', { status: 'done', due: null });
     const entries = await mock.scanVault('/demo-vault');
-    const item = entries.find((e) => e.path === 'items/fld-1.md');
+    const item = entries.find((e) => e.path === 'projects/guided-onboarding-ga/items/fld-1.md');
     expect(item?.properties.status).toBe('done');
     expect(item?.properties).not.toHaveProperty('due');
     expect(item?.properties.estimate).toBe('XL'); // untouched key preserved
     const raw = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs.get(
-      'items/fld-1.md',
+      'projects/guided-onboarding-ga/items/fld-1.md',
     ) as string;
     expect(raw.indexOf('type:')).toBeLessThan(raw.indexOf('key:')); // key order preserved
-    expect(raw).toContain('project:'); // unknown-to-the-patch key preserved
+    expect(raw).toContain('assignee:'); // unknown-to-the-patch key preserved
   });
 
   it('createNote dedupes slugs with -2, -3 and returns the vault-relative path', async () => {
+    const folder = 'projects/guided-onboarding-ga/items';
     const path = await mock.createNote(
       '/demo-vault',
-      'items',
+      folder,
       'fld-1',
       { type: 'Work item', key: 'FLD-99' },
       '',
     );
-    expect(path).toBe('items/fld-1-2.md');
-    const again = await mock.createNote('/demo-vault', 'items', 'fld-1', { type: 'Work item' }, '');
-    expect(again).toBe('items/fld-1-3.md');
+    expect(path).toBe(`${folder}/fld-1-2.md`);
+    const again = await mock.createNote('/demo-vault', folder, 'fld-1', { type: 'Work item' }, '');
+    expect(again).toBe(`${folder}/fld-1-3.md`);
     const entries = await mock.scanVault('/demo-vault');
-    expect(entries.find((e) => e.path === 'items/fld-1-2.md')?.properties.key).toBe('FLD-99');
+    expect(entries.find((e) => e.path === `${folder}/fld-1-2.md`)?.properties.key).toBe('FLD-99');
   });
 
   it('setNoteTitle rewrites the first H1', async () => {
-    await mock.setNoteTitle('/demo-vault', 'items/fld-1.md', 'Renamed walkthrough');
+    await mock.setNoteTitle('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', 'Renamed walkthrough');
     const entries = await mock.scanVault('/demo-vault');
-    expect(entries.find((e) => e.path === 'items/fld-1.md')?.title).toBe('Renamed walkthrough');
+    expect(entries.find((e) => e.path === 'projects/guided-onboarding-ga/items/fld-1.md')?.title).toBe('Renamed walkthrough');
   });
 
   // Parity with write.rs create_note: default H1 for empty bodies, no fence
@@ -125,11 +127,87 @@ describe('mockIpc', () => {
     expect(fs.get('items/indent.md')).toBe('# Fixed\n\nBody.\n');
   });
 
-  it('listViews is empty for the demo vault and saveView round-trips', async () => {
-    expect(await mock.listViews('/demo-vault')).toEqual([]);
+  // M3.5: the demo vault now ships saved views, so assert the round trip
+  // rather than an empty list.
+  it('saveView round-trips into the global views/ dir', async () => {
+    const before = await mock.listViews('/demo-vault');
+    expect(before.every((v) => v.project === null)).toBe(true);
     await mock.saveView('/demo-vault', 'my-view', 'name: My view\n');
-    expect(await mock.listViews('/demo-vault')).toEqual([
-      { id: 'my-view', yaml: 'name: My view\n' },
-    ]);
+    const after = await mock.listViews('/demo-vault');
+    expect(after).toContainEqual({ id: 'my-view', yaml: 'name: My view\n', project: null });
+    expect(after).toHaveLength(before.length + 1);
+  });
+
+  // Task 6 parity with write.rs: a views/ dir next to a project.md is scoped.
+  it('listViews scopes project views and sorts globals first', async () => {
+    await mock.saveView('/demo-vault', 'global', 'name: G\n');
+    await mock.saveView('/demo-vault', 'delivery', 'name: D\n', 'projects/guided-onboarding-ga');
+    const views = await mock.listViews('/demo-vault');
+    expect(views).toContainEqual({ id: 'global', yaml: 'name: G\n', project: null });
+    expect(views).toContainEqual({
+      id: 'delivery',
+      yaml: 'name: D\n',
+      project: 'projects/guided-onboarding-ga/project.md',
+    });
+    // Globals sort ahead of project-scoped views.
+    const scopedFirst = views.findIndex((v) => v.project !== null);
+    const globalLast = views.map((v) => v.project).lastIndexOf(null);
+    expect(globalLast).toBeLessThan(scopedFirst);
+  });
+
+  // --- Vault format v2 (M2 Task 3) — parity with scan.rs / write.rs ---
+
+  it('scanVault resolves containment: nearest ancestor project.md wins', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    fs.set('projects/atlas/project.md', '---\ntype: Project\n---\n\n# Atlas\n');
+    fs.set('projects/atlas/items/a1.md', '---\ntype: Work item\n---\n\n# One\n');
+    fs.set('projects/atlas/sub/project.md', '---\ntype: Project\n---\n\n# Sub\n');
+    fs.set('projects/atlas/sub/notes.md', '# Notes\n');
+    fs.set('inbox/loose.md', '# Loose\n');
+    const entries = await mock.scanVault('/demo-vault');
+    const get = (p: string) => entries.find((e) => e.path === p)!;
+    expect(get('projects/atlas/items/a1.md').project).toBe('projects/atlas/project.md');
+    expect(get('projects/atlas/items/a1.md').folder).toBe('projects/atlas/items');
+    expect(get('projects/atlas/sub/notes.md').project).toBe('projects/atlas/sub/project.md');
+    expect(get('projects/atlas/project.md').project).toBe('projects/atlas/project.md');
+    expect(get('inbox/loose.md').project).toBeNull();
+  });
+
+  it('renameNote moves a note, refuses to clobber, and moves folders', async () => {
+    await mock.createFolder('/demo-vault', 'projects/atlas/items');
+    await mock.renameNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', 'projects/atlas/items/fld-1.md');
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    expect(fs.has('projects/guided-onboarding-ga/items/fld-1.md')).toBe(false);
+    expect(fs.has('projects/atlas/items/fld-1.md')).toBe(true);
+    await expect(
+      mock.renameNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-2.md', 'projects/atlas/items/fld-1.md'),
+    ).rejects.toThrow('already exists');
+    // Folder move: every key under the prefix relocates.
+    await mock.renameNote('/demo-vault', 'projects/guided-onboarding-ga/items', 'archive');
+    expect([...fs.keys()].some((p) => p.startsWith('projects/guided-onboarding-ga/items/'))).toBe(
+      false,
+    );
+    expect(fs.has('archive/fld-2.md')).toBe(true);
+  });
+
+  it('deleteNote removes notes or whole folders, throwing on unknown paths', async () => {
+    const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+    await mock.deleteNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md');
+    expect(fs.has('projects/guided-onboarding-ga/items/fld-1.md')).toBe(false);
+    await mock.deleteNote('/demo-vault', 'projects/guided-onboarding-ga/items');
+    expect([...fs.keys()].some((p) => p.startsWith('projects/guided-onboarding-ga/items/'))).toBe(
+      false,
+    );
+    await expect(mock.deleteNote('/demo-vault', 'items/nope.md')).rejects.toThrow('not found');
+  });
+
+  it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
+    await mock.createFolder('/demo-vault', 'projects/empty-folder');
+    await mock.saveView('/demo-vault', 'v', 'name: V\n');
+    const dirs = await mock.listFolders('/demo-vault');
+    expect(dirs).toContain('projects/guided-onboarding-ga/items');
+    expect(dirs).toContain('projects/empty-folder');
+    expect(dirs.some((d) => d === 'views' || d.startsWith('views/'))).toBe(false);
+    expect([...dirs].sort()).toEqual(dirs);
   });
 });

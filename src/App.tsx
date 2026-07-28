@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
-import { NewProjectDialog } from '@/app/CreateMenu';
+import { createView } from '@/app/viewActions';
+import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog';
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { CollectionPage } from '@/pages/CollectionPage';
+import { DocPage } from '@/pages/DocPage';
+import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
-import { SpacePage } from '@/pages/SpacePage';
+import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
+import { RemindersHost } from '@/hooks/useReminders';
 import { getLastVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -22,9 +27,12 @@ function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
     case 'home': return <HomePage />;
-    case 'space': return <SpacePage path={selection.path} />;
     case 'project': return <ProjectPage selection={selection} />;
-    case 'view': return <ProjectPage selection={selection} />;
+    case 'doc': return <DocPage selection={selection} />;
+    case 'docs': return <DocsPage />;
+    // M3.5: saved views are their own top-level surface, not a project tab.
+    case 'view': return <CollectionPage selection={selection} />;
+    case 'type': return <TypePage selection={selection} />;
     case 'settings': return <SettingsPage />;
   }
 }
@@ -64,7 +72,7 @@ function VaultChooser() {
         </span>
         <h1 className="m-0 text-[16px] font-semibold text-[var(--n-900)]">Open a vault</h1>
         <p className="m-0 text-[13px] leading-[19px] text-[var(--n-600)]">
-          A vault is a folder of markdown files — spaces, projects, and work items live there as
+          A vault is a folder of markdown files — projects, docs, and work items live there as
           plain text.
         </p>
         {(error ?? pickError) ? (
@@ -82,10 +90,13 @@ function VaultChooser() {
 function App() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
+  const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
+  const navigate = useNavStore((s) => s.navigate);
   const [booted, setBooted] = useState(false);
-  // Fix (fix round D8): the Sidebar's per-space "New project" rows open the
-  // project dialog prefilled with the clicked space (plan line 7618).
-  const [newProjectSpace, setNewProjectSpace] = useState<string | null>(null);
+  // M3.5: the sidebar's + opens the view builder — "New project" is gone,
+  // because a project is just a saved view over Work items.
+  const [newViewOpen, setNewViewOpen] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -125,22 +136,33 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar onNewProject={setNewProjectSpace} />
+      <Sidebar onNewView={() => setNewViewOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
         </div>
       </div>
-      {newProjectSpace !== null && (
-        <NewProjectDialog
-          initialSpacePath={newProjectSpace}
-          onClose={() => setNewProjectSpace(null)}
+      {newViewOpen && (
+        <ViewSettingsDialog
+          initial={newViewDefinition(null, schema)}
+          entries={entries}
+          schema={schema}
+          title="New view"
+          onCancel={() => setNewViewOpen(false)}
+          onSubmit={(definition) => {
+            setNewViewOpen(false);
+            void (async () => {
+              const id = await createView(definition);
+              if (id !== null) navigate({ kind: 'view', id });
+            })();
+          }}
         />
       )}
       <DetailPanel />
       <QuickOpen />
       <ToastHost />
+      <RemindersHost />
     </div>
   );
 }

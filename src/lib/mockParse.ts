@@ -154,6 +154,34 @@ export function firstH1LineIndex(body: string): number {
 }
 
 /**
+ * `**Wiki Home**` → `Wiki Home`, `[[target|alias]]` → `alias`: derived
+ * titles never show inline markdown (M2.x docs polish). Only `*` and
+ * backticks are stripped — underscores stay, they are common in literal
+ * names. Parity with `strip_title_markdown` in parse.rs.
+ */
+function stripTitleMarkdown(raw: string): string {
+  let out = '';
+  let rest = raw;
+  for (;;) {
+    const start = rest.indexOf('[[');
+    if (start === -1) break;
+    out += rest.slice(0, start);
+    const endRel = rest.indexOf(']]', start + 2);
+    if (endRel === -1) {
+      out += rest.slice(start);
+      rest = '';
+      break;
+    }
+    const inner = rest.slice(start + 2, endRel);
+    const segments = inner.split('|');
+    out += segments[segments.length - 1] ?? inner;
+    rest = rest.slice(endRel + 2);
+  }
+  out += rest;
+  return out.replace(/[*`]/g, '').trim();
+}
+
+/**
  * Text of the first H1 (`# ...`) line anywhere in the body — parity with
  * `extract_h1_title` in parse.rs (fence/indent-aware via firstH1LineIndex).
  */
@@ -162,7 +190,7 @@ function extractH1Title(body: string): string | null {
   if (index === -1) return null;
   const line = body.split('\n')[index];
   const noCr = line.endsWith('\r') ? line.slice(0, -1) : line;
-  return noCr.trim().slice(2).trim();
+  return stripTitleMarkdown(noCr.trim().slice(2).trim());
 }
 
 /** Wikilink targets in the body, deduplicated preserving first-seen order
@@ -250,6 +278,10 @@ export function parseNote(path: string, raw: string, createdAt: string, modified
   return {
     path,
     filename,
+    // Containment (`project`) is a whole-vault property — the scanner's
+    // post-pass (assignProjects in mockIpc / scan.rs) fills it in.
+    folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+    project: null,
     title: h1 !== null ? h1 : humanize(stem),
     type: entryType,
     properties,

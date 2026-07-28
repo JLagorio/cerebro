@@ -24,6 +24,9 @@ export interface InputProps {
   value?: string;
   onChange?: React.ChangeEventHandler<HTMLInputElement>;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+  onBlur?: React.FocusEventHandler<HTMLInputElement>;
+  /** aria-label for the inner <input> (M2 Task 16 property rows) */
+  ariaLabel?: string;
   /** right-side node, e.g. <kbd>⌘K</kbd> */
   suffix?: React.ReactNode;
   /** "sm" 28 | "md" 32 (default) | "lg" 38 */
@@ -44,6 +47,8 @@ export function Input({
   value,
   onChange,
   onKeyDown,
+  onBlur,
+  ariaLabel,
   suffix,
   size = 'md',
   disabled,
@@ -62,10 +67,12 @@ export function Input({
       {icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} /> : null}
       <input
         data-testid={testId}
+        aria-label={ariaLabel}
         placeholder={placeholder}
         value={value}
         onChange={onChange}
         onKeyDown={onKeyDown}
+        onBlur={onBlur}
         disabled={disabled}
         autoFocus={autoFocus}
       />

@@ -14,6 +14,8 @@ export function makeEntry(patch: EntryPatch = {}): Entry {
   return {
     path: 'items/item.md',
     filename: 'item.md',
+    folder: 'items',
+    project: null,
     title: 'Item',
     type: null,
     properties: (properties ?? {}) as Entry['properties'],

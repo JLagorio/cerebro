@@ -9,6 +9,8 @@ import { fixtureVault } from '@/test/factories';
 
 afterEach(cleanup);
 
+const PLACEHOLDER = 'Search items, projects, and docs…';
+
 describe('QuickOpen', () => {
   beforeEach(() => {
     useVaultStore.setState({ entries: fixtureVault() });
@@ -18,30 +20,47 @@ describe('QuickOpen', () => {
   it('ranks an exact title prefix above a mid-title match', async () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
-    await user.type(screen.getByPlaceholderText('Search items, projects, and spaces…'), 'field');
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'guided');
     const options = screen.getAllByRole('option');
-    // 'Field platform' (prefix match) must outrank 'Wire field sync banner' (substring match)
-    expect(options[0].textContent).toContain('Field platform');
-    expect(options.length).toBeGreaterThanOrEqual(2);
+    // 'Guided onboarding' (prefix match) must rank first
+    expect(options[0].textContent).toContain('Guided onboarding');
   });
 
   it('Enter navigates to the top result and closes the palette', async () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
-    await user.type(
-      screen.getByPlaceholderText('Search items, projects, and spaces…'),
-      'field{Enter}',
-    );
-    expect(useNavStore.getState().selection).toEqual({ kind: 'space', path: 'spaces/field-platform.md' });
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'guided{Enter}');
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'project',
+      path: 'projects/onboarding/project.md',
+    });
     expect(useUiStore.getState().quickOpenVisible).toBe(false);
   });
 
-  it('picking an item opens its detail and navigates to its project', async () => {
+  it('picking an item opens its detail and navigates to its containing project', async () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
-    await user.type(screen.getByPlaceholderText('Search items, projects, and spaces…'), 'wire');
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'wire');
     await user.click(screen.getAllByRole('option')[0]);
-    expect(useNavStore.getState().selection).toEqual({ kind: 'project', path: 'projects/onboarding.md' });
-    expect(useUiStore.getState().detailPath).toBe('items/fld-2.md');
+    // v2: the owning project comes from Entry.project (containment).
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'project',
+      path: 'projects/onboarding/project.md',
+    });
+    expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-2.md');
+  });
+
+  // Task 10: non-work-item files are documents and open full-page.
+  it('picking a doc navigates to its page instead of the detail panel', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ detailPath: null });
+    render(<QuickOpen />);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'ana');
+    await user.click(screen.getAllByRole('option')[0]);
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'doc',
+      path: 'people/ana-rios.md',
+    });
+    expect(useUiStore.getState().detailPath).toBeNull();
   });
 });

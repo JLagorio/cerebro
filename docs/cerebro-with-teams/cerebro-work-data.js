@@ -141,7 +141,7 @@ export const WORK_ITEMS = [
   { id: "wi-1", key: "FLD-1", name: "First-run walkthrough GA", type: "epic", status: "progress", priority: "high", assignee: "Ana Rios",
     due: "Sep 18", dueN: 918, estimate: "XL", projectId: "pj-onb", wsId: "ws-flow", cycleId: null, featureId: "ft-firstrun", startM: 1, lenM: 4,
     description: "Umbrella for everything the GA gate needs: flow, coaching, telemetry, and the fallback path." },
-  { id: "wi-2", key: "FLD-2", name: "Coach marks on job screen", type: "task", status: "review", priority: "high", assignee: "Elena Vasquez",
+  { id: "wi-2", deps: ["wi-3"], key: "FLD-2", name: "Coach marks on job screen", type: "task", status: "review", priority: "high", assignee: "Elena Vasquez",
     due: "Jul 23", dueN: 723, estimate: "M", projectId: "pj-onb", wsId: "ws-coach", cycleId: "cy-12", featureId: "ft-firstrun", parentId: "wi-1", startM: 2, lenM: 1 },
   { id: "wi-3", key: "FLD-3", name: "Progress tracker states", type: "task", status: "done", priority: "medium", assignee: "Elena Vasquez",
     due: "Jul 17", dueN: 717, estimate: "S", projectId: "pj-onb", wsId: "ws-flow", cycleId: "cy-12", featureId: "ft-firstrun", parentId: "wi-1", startM: 2, lenM: 1 },
@@ -153,24 +153,24 @@ export const WORK_ITEMS = [
     due: "Jul 16", dueN: 716, estimate: "M", projectId: "pj-onb", wsId: "ws-flow", cycleId: "cy-12", featureId: "ft-firstrun", startM: 2, lenM: 1 },
   { id: "wi-7", key: "FLD-7", name: "Checklist stalls on step 3 offline", type: "bug", status: "progress", priority: "urgent", assignee: "Sam Ito",
     due: "Jul 22", dueN: 722, estimate: "S", projectId: "pj-onb", wsId: "ws-flow", cycleId: "cy-12", featureId: "ft-setup", startM: 2, lenM: 1 },
-  { id: "wi-8", key: "FLD-8", name: "Finish-line moment animation", type: "task", status: "backlog", priority: "low", assignee: "Elena Vasquez",
+  { id: "wi-8", deps: ["wi-3"], key: "FLD-8", name: "Finish-line moment animation", type: "task", status: "backlog", priority: "low", assignee: "Elena Vasquez",
     due: "Aug 12", dueN: 812, estimate: "S", projectId: "pj-onb", wsId: "ws-coach", cycleId: "cy-13", featureId: "ft-firstrun", startM: 3, lenM: 1 },
-  { id: "wi-9", key: "FLD-9", name: "Handoff-to-human fallback", type: "task", status: "review", priority: "medium", assignee: "Ana Rios",
+  { id: "wi-9", deps: ["wi-2"], key: "FLD-9", name: "Handoff-to-human fallback", type: "task", status: "review", priority: "medium", assignee: "Ana Rios",
     due: "Jul 25", dueN: 725, estimate: "M", projectId: "pj-onb", wsId: "ws-flow", cycleId: "cy-12", featureId: "ft-setup", startM: 2, lenM: 2 },
-  { id: "wi-10", key: "FLD-10", name: "Localize first-run copy (ES)", type: "task", status: "backlog", priority: "medium", assignee: "Priya Nair",
+  { id: "wi-10", deps: ["wi-4"], key: "FLD-10", name: "Localize first-run copy (ES)", type: "task", status: "backlog", priority: "medium", assignee: "Priya Nair",
     due: "Aug 20", dueN: 820, estimate: "M", projectId: "pj-onb", wsId: "ws-coach", cycleId: "cy-13", featureId: "ft-firstrun", startM: 3, lenM: 2 },
-  { id: "wi-11", key: "FLD-11", name: "GA go/no-go review", type: "milestone", status: "todo", priority: "high", assignee: "Maya Chen",
+  { id: "wi-11", deps: ["wi-5", "wi-9"], key: "FLD-11", name: "GA go/no-go review", type: "milestone", status: "todo", priority: "high", assignee: "Maya Chen",
     due: "Aug 7", dueN: 807, estimate: "XS", projectId: "pj-onb", wsId: "ws-launch", cycleId: "cy-13", featureId: null, startM: 3, lenM: 1 },
   { id: "wi-12", key: "FLD-12", name: "Support playbook for stuck first runs", type: "request", status: "todo", priority: "low", assignee: "Dana Fox",
     due: "Aug 14", dueN: 814, estimate: "S", projectId: "pj-onb", wsId: "ws-launch", cycleId: null, featureId: null, startM: 3, lenM: 1 },
   // Offline sync hardening (SYN)
   { id: "wi-13", key: "SYN-1", name: "Conflict resolution UX spec", type: "task", status: "progress", priority: "high", assignee: "Sam Ito",
     due: "Jul 29", dueN: 729, estimate: "M", projectId: "pj-sync", wsId: "ws-core", cycleId: null, featureId: "ft-offline", startM: 2, lenM: 2 },
-  { id: "wi-14", key: "SYN-2", name: "Delta sync backoff tuning", type: "task", status: "todo", priority: "medium", assignee: "Sam Ito",
+  { id: "wi-14", deps: ["wi-13"], key: "SYN-2", name: "Delta sync backoff tuning", type: "task", status: "todo", priority: "medium", assignee: "Sam Ito",
     due: "Aug 5", dueN: 805, estimate: "M", projectId: "pj-sync", wsId: "ws-core", cycleId: null, featureId: "ft-offline", startM: 3, lenM: 2 },
   { id: "wi-15", key: "SYN-3", name: "Duplicate jobs after reconnect", type: "bug", status: "progress", priority: "urgent", assignee: "Dana Fox",
     due: "Jul 24", dueN: 724, estimate: "S", projectId: "pj-sync", wsId: "ws-core", cycleId: null, featureId: "ft-offline", startM: 2, lenM: 1 },
-  { id: "wi-16", key: "SYN-4", name: "Sync health dashboard", type: "task", status: "backlog", priority: "medium", assignee: "Dana Fox",
+  { id: "wi-16", deps: ["wi-13"], key: "SYN-4", name: "Sync health dashboard", type: "task", status: "backlog", priority: "medium", assignee: "Dana Fox",
     due: "Sep 4", dueN: 904, estimate: "L", projectId: "pj-sync", wsId: "ws-observ", cycleId: null, featureId: "ft-offline", startM: 4, lenM: 2 },
   { id: "wi-17", key: "SYN-5", name: "Field kill-switch for sync", type: "task", status: "backlog", priority: "low", assignee: "Sam Ito",
     due: "Sep 25", dueN: 925, estimate: "S", projectId: "pj-sync", wsId: "ws-observ", cycleId: null, featureId: null, startM: 4, lenM: 1 },
@@ -190,28 +190,28 @@ export const WORK_ITEMS = [
     due: "Jul 10", dueN: 710, estimate: "XS", projectId: "pj-phx", wsId: "ws-fit", featureId: null, startM: 1, lenM: 2 },
   { id: "wi-24", key: "OPS-2", name: "Vendor contract countersign", type: "task", status: "blocked", priority: "urgent", assignee: "Marcus Webb",
     due: "Jul 23", dueN: 723, estimate: "S", projectId: "pj-phx", wsId: "ws-fit", featureId: null, startM: 2, lenM: 1 },
-  { id: "wi-25", key: "OPS-3", name: "Rack delivery + install window", type: "task", status: "blocked", priority: "high", assignee: "Mo Byrd",
+  { id: "wi-25", deps: ["wi-24"], key: "OPS-3", name: "Rack delivery + install window", type: "task", status: "blocked", priority: "high", assignee: "Mo Byrd",
     due: "Aug 1", dueN: 801, estimate: "L", projectId: "pj-phx", wsId: "ws-fit", featureId: null, startM: 2, lenM: 2 },
   { id: "wi-26", key: "OPS-4", name: "Forklift certification schedule", type: "task", status: "progress", priority: "medium", assignee: "Mo Byrd",
     due: "Jul 30", dueN: 730, estimate: "S", projectId: "pj-phx", wsId: "ws-fit", featureId: null, startM: 2, lenM: 1 },
-  { id: "wi-27", key: "OPS-5", name: "WMS device provisioning (40 scanners)", type: "task", status: "progress", priority: "high", assignee: "Dana Fox",
+  { id: "wi-27", deps: ["wi-25"], key: "OPS-5", name: "WMS device provisioning (40 scanners)", type: "task", status: "progress", priority: "high", assignee: "Dana Fox",
     due: "Aug 8", dueN: 808, estimate: "M", projectId: "pj-phx", wsId: "ws-sys", featureId: null, startM: 2, lenM: 2 },
   { id: "wi-28", key: "OPS-6", name: "Network drops — floor 2", type: "task", status: "todo", priority: "medium", assignee: "Dana Fox",
     due: "Aug 15", dueN: 815, estimate: "M", projectId: "pj-phx", wsId: "ws-sys", featureId: null, startM: 3, lenM: 1 },
   { id: "wi-29", key: "OPS-7", name: "Safety walkthrough with county inspector", type: "task", status: "todo", priority: "high", assignee: "Marcus Webb",
     due: "Aug 21", dueN: 821, estimate: "S", projectId: "pj-phx", wsId: "ws-fit", featureId: null, startM: 3, lenM: 1 },
-  { id: "wi-30", key: "OPS-8", name: "Go-live readiness review", type: "milestone", status: "todo", priority: "urgent", assignee: "Marcus Webb",
+  { id: "wi-30", deps: ["wi-27", "wi-29"], key: "OPS-8", name: "Go-live readiness review", type: "milestone", status: "todo", priority: "urgent", assignee: "Marcus Webb",
     due: "Sep 12", dueN: 912, estimate: "XS", projectId: "pj-phx", wsId: "ws-sys", featureId: null, startM: 4, lenM: 1 },
   // Field App launch campaign (LNC) — statuses: idea/drafting/review/scheduled/live/killed
   { id: "wi-31", key: "LNC-1", name: "Campaign brief", type: "task", status: "review", priority: "high", assignee: "Priya Nair",
     due: "Jul 24", dueN: 724, estimate: "S", projectId: "pj-camp", wsId: "ws-msg", featureId: null, startM: 2, lenM: 1 },
   { id: "wi-32", key: "LNC-2", name: "Positioning + message house", type: "task", status: "drafting", priority: "high", assignee: "Priya Nair",
     due: "Jul 31", dueN: 731, estimate: "M", projectId: "pj-camp", wsId: "ws-msg", featureId: null, startM: 2, lenM: 2 },
-  { id: "wi-33", key: "LNC-3", name: "Launch email sequence (3 touches)", type: "task", status: "idea", priority: "medium", assignee: "Josef Lang",
+  { id: "wi-33", deps: ["wi-32"], key: "LNC-3", name: "Launch email sequence (3 touches)", type: "task", status: "idea", priority: "medium", assignee: "Josef Lang",
     due: "Aug 18", dueN: 818, estimate: "M", projectId: "pj-camp", wsId: "ws-channels", featureId: null, startM: 3, lenM: 2 },
-  { id: "wi-34", key: "LNC-4", name: "Landing page refresh", type: "task", status: "idea", priority: "medium", assignee: "Josef Lang",
+  { id: "wi-34", deps: ["wi-32"], key: "LNC-4", name: "Landing page refresh", type: "task", status: "idea", priority: "medium", assignee: "Josef Lang",
     due: "Sep 2", dueN: 902, estimate: "L", projectId: "pj-camp", wsId: "ws-channels", featureId: null, startM: 3, lenM: 2 },
-  { id: "wi-35", key: "LNC-5", name: "Field champions webinar", type: "task", status: "idea", priority: "low", assignee: "Maya Chen",
+  { id: "wi-35", deps: ["wi-33"], key: "LNC-5", name: "Field champions webinar", type: "task", status: "idea", priority: "low", assignee: "Maya Chen",
     due: "Sep 16", dueN: 916, estimate: "M", projectId: "pj-camp", wsId: "ws-channels", featureId: null, startM: 4, lenM: 1 },
   { id: "wi-36", key: "LNC-6", name: "GA dry run with support", type: "task", status: "drafting", priority: "high", assignee: "Maya Chen",
     due: "Aug 26", dueN: 826, estimate: "S", projectId: "pj-camp", wsId: "ws-msg", featureId: null, startM: 3, lenM: 1 },
@@ -229,6 +229,64 @@ export const WORK_ITEMS = [
   { id: "wi-42", key: "MY-5", name: "Expense report — June travel", type: "task", status: "done", priority: "none", assignee: "Maya Chen",
     due: "Jul 14", dueN: 714, estimate: "XS", listId: "l-todos", featureId: null, startM: 2, lenM: 1 },
 ];
+
+// Custom fields — per-container definitions. Values live on the field (keyed by item id)
+// so work items stay clean. Option colors use DS swatch tokens.
+export const CUSTOM_FIELDS = {
+  "pj-onb": [
+    { id: "cf-conf", name: "Confidence", type: "rating", values: { "wi-1": 4, "wi-2": 3, "wi-4": 3, "wi-5": 2, "wi-7": 2, "wi-8": 4, "wi-9": 4, "wi-10": 3, "wi-11": 3, "wi-12": 3 } },
+    { id: "cf-eff", name: "Effort (days)", type: "number", unit: "d", values: { "wi-2": 4, "wi-4": 2, "wi-5": 3, "wi-7": 1, "wi-8": 2, "wi-9": 5, "wi-10": 6, "wi-12": 2 } },
+    { id: "cf-chan", name: "Rollout channel", type: "dropdown", options: [{ v: "pilot", label: "Pilot cohort", color: "var(--swatch-teal)" }, { v: "beta", label: "Field beta", color: "var(--swatch-sky)" }, { v: "ga", label: "All technicians", color: "var(--swatch-violet)" }], values: { "wi-1": "ga", "wi-2": "beta", "wi-3": "pilot", "wi-4": "beta", "wi-5": "pilot", "wi-6": "pilot", "wi-7": "pilot", "wi-8": "ga", "wi-9": "beta", "wi-10": "ga", "wi-11": "ga" } },
+    { id: "cf-l10n", name: "Localization ready", type: "checkbox", values: { "wi-3": true, "wi-6": true } },
+  ],
+  "pj-phx": [
+    { id: "cf-vendor", name: "Vendor", type: "dropdown", options: [{ v: "acme", label: "Acme Racking", color: "var(--swatch-vermilion)" }, { v: "flux", label: "FluxNet", color: "var(--swatch-sky)" }, { v: "inhouse", label: "In-house", color: "var(--swatch-teal)" }], values: { "wi-24": "acme", "wi-25": "acme", "wi-26": "inhouse", "wi-27": "flux", "wi-28": "flux", "wi-29": "inhouse" } },
+    { id: "cf-budget", name: "Budget", type: "money", values: { "wi-23": 4000, "wi-25": 84000, "wi-26": 3600, "wi-27": 22500, "wi-28": 9800 } },
+    { id: "cf-permit", name: "Permit needed", type: "checkbox", values: { "wi-25": true, "wi-28": true, "wi-29": true } },
+  ],
+  "l-triage": [
+    { id: "cf-sev", name: "Severity", type: "dropdown", options: [{ v: "s1", label: "S1 · Data loss", color: "var(--danger-500)" }, { v: "s2", label: "S2 · Broken flow", color: "var(--swatch-vermilion)" }, { v: "s3", label: "S3 · Papercut", color: "var(--warn-500)" }], values: { "wi-18": "s1", "wi-19": "s2", "wi-20": "s3", "wi-21": "s3", "wi-22": "s2" } },
+    { id: "cf-dev", name: "Devices", type: "labels", options: [{ v: "pixel", label: "Pixel", color: "var(--swatch-sky)" }, { v: "iphone", label: "iPhone", color: "var(--swatch-teal)" }, { v: "tablet", label: "Tablet", color: "var(--swatch-amber)" }], values: { "wi-18": ["pixel"], "wi-19": ["pixel", "iphone"], "wi-20": ["tablet"], "wi-21": ["pixel", "iphone"], "wi-22": ["iphone"] } },
+    { id: "cf-rep", name: "Repro rate", type: "progress", values: { "wi-18": 90, "wi-19": 60, "wi-20": 25, "wi-21": 40, "wi-22": 100 } },
+  ],
+  "pj-camp": [
+    { id: "cf-aud", name: "Audience", type: "labels", options: [{ v: "tech", label: "Technicians", color: "var(--swatch-teal)" }, { v: "mgr", label: "Field managers", color: "var(--swatch-sky)" }, { v: "exec", label: "Execs", color: "var(--swatch-violet)" }], values: { "wi-31": ["mgr", "exec"], "wi-32": ["tech", "mgr"], "wi-33": ["tech"], "wi-34": ["tech", "mgr"], "wi-35": ["tech"], "wi-36": ["mgr"] } },
+    { id: "cf-cost", name: "Est. spend", type: "money", values: { "wi-33": 1200, "wi-34": 8000, "wi-35": 2500 } },
+  ],
+};
+
+// Saved views per container. Configs are partial — the app fills in defaults
+// (filters/sort/group/fields/layout options). "__me" resolves to the current user.
+export const SAVED_VIEWS = {
+  "pj-onb": { defaultId: "v-onb-all", views: [
+    { id: "v-onb-all", name: "All work", shared: true, createdBy: "Ana Rios", config: { layout: "list", group: "status", sort: [{ f: "priority", dir: "asc" }] } },
+    { id: "v-onb-board", name: "Board", shared: true, createdBy: "Ana Rios", config: { layout: "board", group: "status", board: { size: "cozy", swim: "none" } } },
+    { id: "v-onb-gantt", name: "Delivery plan", shared: true, createdBy: "Maya Chen", config: { layout: "gantt", group: "workstream", sort: [{ f: "due", dir: "asc" }] } },
+    { id: "v-onb-c13", name: "Cycle 13 scope", shared: true, createdBy: "Ana Rios", config: { layout: "table", group: "none", filters: [{ f: "cycle", op: "is", vals: ["cy-13"] }], sort: [{ f: "priority", dir: "asc" }], fields: ["key", "type", "status", "priority", "assignee", "due", "cf-conf", "cf-eff", "cf-chan"] } },
+    { id: "v-onb-mine", name: "My focus", shared: false, createdBy: "Maya Chen", config: { layout: "list", group: "due", filters: [{ f: "assignee", op: "is", vals: ["__me"] }, { f: "status", op: "isnot", vals: ["done", "cancelled"] }], sort: [{ f: "due", dir: "asc" }] } },
+  ] },
+  "pj-sync": { defaultId: "v-syn-all", views: [
+    { id: "v-syn-all", name: "All work", shared: true, createdBy: "Sam Ito", config: { layout: "list", group: "status" } },
+    { id: "v-syn-gantt", name: "Plan", shared: true, createdBy: "Sam Ito", config: { layout: "gantt", group: "workstream" } },
+  ] },
+  "pj-phx": { defaultId: "v-phx-all", views: [
+    { id: "v-phx-all", name: "All work", shared: true, createdBy: "Marcus Webb", config: { layout: "list", group: "status", fields: ["key", "type", "status", "priority", "assignee", "due", "cf-vendor", "cf-budget"] } },
+    { id: "v-phx-gantt", name: "Rollout plan", shared: true, createdBy: "Marcus Webb", config: { layout: "gantt", group: "workstream", sort: [{ f: "due", dir: "asc" }] } },
+    { id: "v-phx-blocked", name: "Blocked", shared: true, createdBy: "Mo Byrd", config: { layout: "list", group: "none", filters: [{ f: "status", op: "is", vals: ["blocked"] }] } },
+  ] },
+  "pj-camp": { defaultId: "v-camp-all", views: [
+    { id: "v-camp-all", name: "All work", shared: true, createdBy: "Priya Nair", config: { layout: "list", group: "status", fields: ["key", "type", "status", "priority", "assignee", "due", "cf-aud", "cf-cost"] } },
+    { id: "v-camp-cal", name: "Content calendar", shared: true, createdBy: "Priya Nair", config: { layout: "calendar", group: "none" } },
+  ] },
+  "l-triage": { defaultId: "v-tri-all", views: [
+    { id: "v-tri-all", name: "All bugs", shared: true, createdBy: "Sam Ito", config: { layout: "list", group: "priority", sort: [{ f: "due", dir: "asc" }], fields: ["key", "type", "status", "priority", "assignee", "due", "cf-sev", "cf-dev"] } },
+    { id: "v-tri-sev", name: "Severity table", shared: true, createdBy: "Dana Fox", config: { layout: "table", group: "cf-sev", sort: [{ f: "cf-rep", dir: "desc" }], fields: ["key", "type", "status", "assignee", "due", "cf-sev", "cf-dev", "cf-rep"] } },
+    { id: "v-tri-board", name: "Board", shared: true, createdBy: "Sam Ito", config: { layout: "board", group: "status" } },
+  ] },
+  "l-todos": { defaultId: "v-my-all", views: [
+    { id: "v-my-all", name: "Todos", shared: false, createdBy: "Maya Chen", config: { layout: "list", group: "status", sort: [{ f: "due", dir: "asc" }] } },
+  ] },
+};
 
 export const WORK_DIGEST = [
   { icon: "iteration-cw", text: "Cycle 12 is trailing the ideal line by 3 items — four are parked in review; that column is the bottleneck.", meta: "From Cycle 12 · Guided onboarding GA" },
