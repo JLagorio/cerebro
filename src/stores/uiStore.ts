@@ -26,6 +26,9 @@ interface UiState {
   // Home tasks rollup assignee filter ('' = everyone), persisted.
   homeTaskAssignee: string;
   setHomeTaskAssignee(v: string): void;
+  // Sidebar "Types" section collapse (M3); persisted.
+  typesOpen: boolean;
+  setTypesOpen(v: boolean): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
@@ -37,6 +40,7 @@ const PANEL_TAB_KEY = 'cerebro.docPanelTab';
 const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
+const TYPES_OPEN_KEY = 'cerebro.typesOpen';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -139,6 +143,12 @@ export const useUiStore = create<UiState>((set) => ({
   setHomeTaskAssignee: (v) => {
     storeString(TASK_ASSIGNEE_KEY, v);
     set({ homeTaskAssignee: v });
+  },
+
+  typesOpen: loadString(TYPES_OPEN_KEY, 'true') === 'true',
+  setTypesOpen: (v) => {
+    storeString(TYPES_OPEN_KEY, String(v));
+    set({ typesOpen: v });
   },
 
   toasts: [],

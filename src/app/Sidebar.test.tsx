@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { Sidebar } from './Sidebar';
 
@@ -64,6 +65,7 @@ describe('Sidebar', () => {
       history: [{ kind: 'home' }],
       historyIndex: 0,
     });
+    useUiStore.setState({ typesOpen: true });
   });
 
   afterEach(cleanup);
@@ -117,6 +119,68 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Inbox/ }));
     fireEvent.click(screen.getByRole('button', { name: /^Welcome/ }));
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'inbox/welcome.md' });
+  });
+
+  // M3: collapsible Types section above Views.
+  describe('Types section', () => {
+    const recipeType = mkEntry({
+      path: 'types/recipe.md',
+      title: 'Recipe',
+      type: 'Type',
+      properties: { icon: 'chef-hat', color: '#DE8F0A' },
+    });
+
+    it('lists system types plus declared types with record counts', () => {
+      useVaultStore.setState({
+        entries: [
+          project,
+          recipeType,
+          mkEntry({ path: 'recipes/pasta.md', title: 'Pasta', type: 'Recipe' }),
+          mkEntry({ path: 'recipes/soup.md', title: 'Soup', type: 'Recipe' }),
+        ],
+      });
+      render(<Sidebar onNewProject={vi.fn()} />);
+      const rows = screen.getAllByTestId('sidebar-type');
+      const labels = rows.map((r) => r.textContent);
+      // Project (1 record), Recipe (2), Type (1 type doc), Work item (0).
+      expect(labels).toEqual(['Project1', 'Recipe2', 'Type1', 'Work item0']);
+    });
+
+    it('clicking a type navigates to the type screen', () => {
+      render(<Sidebar onNewProject={vi.fn()} />);
+      fireEvent.click(screen.getByText('Work item'));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Work item' });
+    });
+
+    it('collapses via the section header', () => {
+      render(<Sidebar onNewProject={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Types' }));
+      expect(screen.queryAllByTestId('sidebar-type')).toEqual([]);
+      expect(useUiStore.getState().typesOpen).toBe(false);
+    });
+
+    it('the + button opens the Create-type dialog', () => {
+      render(<Sidebar onNewProject={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: 'New type' }));
+      expect(screen.getByText('Create new type')).toBeTruthy();
+    });
+
+    it('right-click on a custom type offers rename and delete', () => {
+      useVaultStore.setState({ entries: [project, recipeType] });
+      render(<Sidebar onNewProject={vi.fn()} />);
+      fireEvent.contextMenu(screen.getByText('Recipe'));
+      expect(screen.getByText('Change display name…')).toBeTruthy();
+      expect(screen.getByText('Customize icon & color…')).toBeTruthy();
+      expect(screen.getByText('Delete type')).toBeTruthy();
+    });
+
+    it('right-click on a system type only offers customize (locked)', () => {
+      render(<Sidebar onNewProject={vi.fn()} />);
+      fireEvent.contextMenu(screen.getByText('Work item'));
+      expect(screen.getByText('Customize icon & color…')).toBeTruthy();
+      expect(screen.queryByText('Change display name…')).toBeNull();
+      expect(screen.queryByText('Delete type')).toBeNull();
+    });
   });
 
   // Task 6: project-scoped views belong to their project's tabs, not here.

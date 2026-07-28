@@ -31,7 +31,7 @@ const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest',
 const STATUS_GROUPS = ['active', 'done', 'closed'] as const;
 
 /** 'in-progress' → 'In progress' (sentence case, DS rule). */
-function humanize(id: string): string {
+export function humanize(id: string): string {
   const words = id.replace(/[-_]+/g, ' ').trim();
   if (words === '') return id;
   return words.charAt(0).toUpperCase() + words.slice(1);

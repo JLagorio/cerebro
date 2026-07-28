@@ -55,6 +55,7 @@ export type Selection =
   | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)
   | { kind: 'view'; id: string }       // id = filename stem in views/
+  | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
   | { kind: 'settings' };
 
 export interface Presentation {

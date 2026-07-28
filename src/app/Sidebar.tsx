@@ -1,9 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
+import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
+import {
+  DeleteTypeDialog,
+  NewTypeDialog,
+  RenameTypeDialog,
+  TypeStyleDialog,
+} from '@/app/TypeDialogs';
 import { useOpenPath } from '@/app/useOpenPath';
+import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
 import { useNavStore } from '@/stores/navStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useUiStore } from '@/stores/uiStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
   /** Opens the New-project dialog (v2: projects are the top level). */
@@ -19,15 +28,27 @@ function rowClass(active: boolean): string {
     active
       ? 'bg-[var(--n-100)] font-medium text-[var(--n-900)]'
       : 'bg-transparent font-normal text-[var(--n-700)] hover:bg-[var(--n-100)]',
-  ].join(' ');
+  ].join(' ')
 }
+
+type TypeDialog =
+  | { mode: 'new' }
+  | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
 export function Sidebar({ onNewProject }: SidebarProps) {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
+  const schema = useSchema();
   const selection = useNavStore((s) => s.selection);
   const navigate = useNavStore((s) => s.navigate);
+  const typesOpen = useUiStore((s) => s.typesOpen);
+  const setTypesOpen = useUiStore((s) => s.setTypesOpen);
   const openPath = useOpenPath();
+
+  const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
+  const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
+    null,
+  );
 
   // Task 14: on the Docs surfaces the sidebar is a Drive-style file
   // navigator — folders and files, click to open, right-click to manage.
@@ -42,6 +63,9 @@ export function Sidebar({ onNewProject }: SidebarProps) {
     [entries],
   );
 
+  // M3: every type the vault knows about — system, declared, and ghost.
+  const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
+
   const sortedViews = useMemo(
     () =>
       views
@@ -55,6 +79,33 @@ export function Sidebar({ onNewProject }: SidebarProps) {
         ),
     [views],
   );
+
+  const typeMenuItems = (listing: TypeListing): ContextMenuItem[] => {
+    const items: ContextMenuItem[] = [];
+    // System types are locked at the system level (Salesforce-style):
+    // restyle is fine, rename/delete are not.
+    if (!listing.system) {
+      items.push({
+        icon: 'pencil',
+        label: 'Change display name…',
+        onSelect: () => setTypeDialog({ mode: 'rename', listing }),
+      });
+    }
+    items.push({
+      icon: 'palette',
+      label: 'Customize icon & color…',
+      onSelect: () => setTypeDialog({ mode: 'style', listing }),
+    });
+    if (!listing.system && listing.docPath !== null) {
+      items.push({
+        icon: 'trash-2',
+        label: 'Delete type',
+        danger: true,
+        onSelect: () => setTypeDialog({ mode: 'delete', listing }),
+      });
+    }
+    return items;
+  };
 
   return (
     <nav
@@ -83,6 +134,7 @@ export function Sidebar({ onNewProject }: SidebarProps) {
         ) : null}
         {projects.map((project) => {
           const projectActive = selection.kind === 'project' && selection.path === project.path;
+          const style = typeStyle('Project', schema);
           return (
             <button
               key={project.path}
@@ -91,7 +143,7 @@ export function Sidebar({ onNewProject }: SidebarProps) {
               onClick={() => navigate({ kind: 'project', path: project.path })}
               className={rowClass(projectActive)}
             >
-              <Icon name="folder-kanban" size={15} color="var(--n-500)" />
+              <Icon name={style.icon} size={15} color={style.color ?? 'var(--n-500)'} />
               <span className="overflow-hidden text-ellipsis whitespace-nowrap">
                 {project.title}
               </span>
@@ -106,6 +158,49 @@ export function Sidebar({ onNewProject }: SidebarProps) {
           <Icon name="plus" size={13} />
           New project
         </button>
+        {/* M3: collapsible Types section — sits above Views. */}
+        <div className="flex items-center justify-between pr-1">
+          <button
+            type="button"
+            aria-expanded={typesOpen}
+            onClick={() => setTypesOpen(!typesOpen)}
+            className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-[var(--n-700)]`}
+          >
+            <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+            Types
+          </button>
+          <button
+            type="button"
+            aria-label="New type"
+            onClick={() => setTypeDialog({ mode: 'new' })}
+            className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+          >
+            <Icon name="plus" size={13} />
+          </button>
+        </div>
+        {typesOpen &&
+          types.map((t) => {
+            const typeActive = selection.kind === 'type' && selection.name === t.name;
+            return (
+              <button
+                key={t.name}
+                type="button"
+                data-testid="sidebar-type"
+                onClick={() => navigate({ kind: 'type', name: t.name })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setTypeMenu({ x: e.clientX, y: e.clientY, listing: t });
+                }}
+                className={rowClass(typeActive)}
+              >
+                <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
+                <span className="overflow-hidden text-ellipsis whitespace-nowrap">{t.name}</span>
+                <span className="ml-auto [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                  {t.count}
+                </span>
+              </button>
+            );
+          })}
         <div className={SECTION_LABEL}>Views</div>
         {sortedViews.length === 0 ? (
           <div className="px-2 py-1 text-[12px] text-[var(--n-400)]">No saved views</div>
@@ -127,6 +222,24 @@ export function Sidebar({ onNewProject }: SidebarProps) {
           );
         })}
       </div>
+      )}
+      {typeMenu !== null && (
+        <ContextMenu
+          x={typeMenu.x}
+          y={typeMenu.y}
+          items={typeMenuItems(typeMenu.listing)}
+          onClose={() => setTypeMenu(null)}
+        />
+      )}
+      {typeDialog?.mode === 'new' && <NewTypeDialog onClose={() => setTypeDialog(null)} />}
+      {typeDialog?.mode === 'rename' && (
+        <RenameTypeDialog listing={typeDialog.listing} onClose={() => setTypeDialog(null)} />
+      )}
+      {typeDialog?.mode === 'style' && (
+        <TypeStyleDialog listing={typeDialog.listing} onClose={() => setTypeDialog(null)} />
+      )}
+      {typeDialog?.mode === 'delete' && (
+        <DeleteTypeDialog listing={typeDialog.listing} onClose={() => setTypeDialog(null)} />
       )}
     </nav>
   );

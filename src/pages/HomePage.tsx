@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Tag } from '@/components/ui/Tag';
 import { dueBucket, formatDue, type DocTask, type DueBucket } from '@/engine/tasks';
+import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { useDocTasks } from '@/hooks/useDocTasks';
@@ -58,7 +59,11 @@ export function ProjectCard({ project, subtitle }: { project: Entry; subtitle: s
       className={CARD}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <Icon name="folder-kanban" size={15} color="var(--n-500)" />
+        <Icon
+          name={typeStyle('Project', schema).icon}
+          size={15}
+          color={typeStyle('Project', schema).color ?? 'var(--n-500)'}
+        />
         <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-[var(--n-900)]">
           {project.title}
         </span>

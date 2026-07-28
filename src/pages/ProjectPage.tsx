@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { resolveCollection, sortEntries } from '@/engine/collections';
+import { typeStyle } from '@/engine/typeCatalog';
 import type { Presentation, Selection, ViewFile } from '@/engine/types';
 import { serializeView } from '@/engine/views';
 import { saveView } from '@/lib/ipc';
@@ -202,7 +203,11 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
         <div className="mb-2.5 flex min-w-0 items-center gap-2">
           {project ? (
             <>
-              <Icon name="folder-kanban" size={16} color="var(--n-600)" />
+              <Icon
+                name={typeStyle('Project', schema).icon}
+                size={16}
+                color={typeStyle('Project', schema).color ?? 'var(--n-600)'}
+              />
               <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">
                 {project.title}
               </h1>

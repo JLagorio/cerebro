@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
+import { addPropertyToEntry } from '@/app/typeActions';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
+import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
@@ -19,6 +21,9 @@ export function DetailPanel() {
   const rescan = useVaultStore((s) => s.rescan);
 
   const [title, setTitle] = useState('');
+  // M3: work items finally get an add-property surface (the panel is their
+  // canonical editor — DocPage's Info tab is unreachable for them).
+  const [addingProp, setAddingProp] = useState(false);
   // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
   // load/save). The handle is only needed for the rename splice below.
   const editorRef = useRef<CerebroEditor | null>(null);
@@ -124,6 +129,24 @@ export function DetailPanel() {
               </span>
             </div>
           ))}
+          {addingProp ? (
+            <AddPropertyPanel
+              onAdd={(name, kind) => {
+                void (async () => {
+                  if (await addPropertyToEntry(entry, name, kind)) setAddingProp(false);
+                })();
+              }}
+              onCancel={() => setAddingProp(false)}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAddingProp(true)}
+              className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            >
+              + Add property
+            </button>
+          )}
         </div>
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">Description</div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by

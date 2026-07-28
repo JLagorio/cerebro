@@ -10,6 +10,7 @@ import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
@@ -28,6 +29,7 @@ function CanvasOutlet() {
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;
     case 'view': return <ProjectPage selection={selection} />;
+    case 'type': return <TypePage selection={selection} />;
     case 'settings': return <SettingsPage />;
   }
 }

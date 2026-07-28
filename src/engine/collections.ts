@@ -1,4 +1,5 @@
 import type { Entry, Presentation, Schema, Selection, ViewFile } from './types';
+import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { DEFAULT_PRESENTATION } from './views';
 
@@ -122,6 +123,20 @@ export function resolveCollection(
       return {
         title: name,
         entries: sortEntries(matched, presentation.orderBy, schema),
+        presentation,
+      };
+    }
+    case 'type': {
+      // M3 type screen: every record carrying `type: <name>`, presented with
+      // the type's own declared fields.
+      const presentation = typePresentation(sel.name, schema);
+      return {
+        title: sel.name,
+        entries: sortEntries(
+          entries.filter((e) => e.type === sel.name),
+          presentation.orderBy,
+          schema,
+        ),
         presentation,
       };
     }

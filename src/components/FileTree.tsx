@@ -16,8 +16,9 @@ import {
   templateDisplayName,
   todayIso,
 } from '@/lib/templates';
+import { typeStyle } from '@/engine/typeCatalog';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 interface TreeNode {
   path: string;
@@ -155,6 +156,9 @@ export function FileTree({ root, hide = () => false, activePath = null, onOpen }
     [root, entries, folders, hide, treeOrder],
   );
   const templates = useMemo(() => listTemplates(entries), [entries]);
+  // M3: typed files carry their type's icon/color in the tree.
+  const schema = useSchema();
+  const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries]);
 
   const [dialog, setDialog] = useState<TreeDialog | null>(null);
   const [name, setName] = useState('');
@@ -484,11 +488,16 @@ export function FileTree({ root, hide = () => false, activePath = null, onOpen }
                 onClick={() => onOpen(node.path)}
                 className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-[13px] text-[var(--n-700)]"
               >
-                <Icon
-                  name="file-text"
-                  size={14}
-                  color={active ? 'var(--cortex-500)' : 'var(--n-500)'}
-                />
+                {(() => {
+                  const style = typeStyle(entryByPath.get(node.path)?.type ?? null, schema);
+                  return (
+                    <Icon
+                      name={style.icon}
+                      size={14}
+                      color={active ? 'var(--cortex-500)' : (style.color ?? 'var(--n-500)')}
+                    />
+                  );
+                })()}
                 <span className={labelClass}>{node.label}</span>
               </button>,
             )}

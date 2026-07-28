@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
+import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { typeStyle } from '@/engine/typeCatalog';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import type { Entry } from '@/engine/types';
 
 export function QuickOpen() {
@@ -12,6 +14,7 @@ export function QuickOpen() {
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
   const openDetail = useUiStore((s) => s.openDetail);
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -99,6 +102,14 @@ export function QuickOpen() {
             className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left"
             style={{ background: i === activeIndex ? 'var(--n-50)' : 'transparent' }}
           >
+            {(() => {
+              const style = typeStyle(r.entry.type, schema);
+              return (
+                <span className="inline-flex flex-none" style={{ color: style.color ?? 'var(--n-400)' }}>
+                  <Icon name={style.icon} size={14} />
+                </span>
+              );
+            })()}
             <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">{r.entry.title}</span>
             {typeof r.entry.properties.key === 'string' && (
               <span className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">

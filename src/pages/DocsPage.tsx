@@ -1,9 +1,10 @@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
+import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry } from '@/engine/types';
 import { isTemplate } from '@/lib/templates';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const RECENTS_SHOWN = 6;
 
@@ -23,6 +24,7 @@ function formatDay(iso: string): string {
  */
 export function DocsPage() {
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const open = useOpenPath();
 
   const recents = entries
@@ -61,7 +63,10 @@ export function DocsPage() {
                     onClick={() => open(e.path)}
                     className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-1.5 text-left hover:bg-[var(--n-50)]"
                   >
-                    <Icon name="file-text" size={14} color="var(--n-500)" />
+                    {(() => {
+                      const style = typeStyle(e.type, schema);
+                      return <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />;
+                    })()}
                     <span className="truncate text-[13px] text-[var(--n-800)]">{e.title}</span>
                     {projectTitle(e) !== null && (
                       <span className="flex-none rounded-[5px] bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--n-600)]">
