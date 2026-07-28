@@ -1,18 +1,17 @@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
-import { typeStyle } from '@/engine/typeCatalog';
-import type { Entry } from '@/engine/types';
+import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
+import type { Entry, Schema } from '@/engine/types';
 import { isTemplate } from '@/lib/templates';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const RECENTS_SHOWN = 6;
 
-/** A document here is any markdown file that isn't a work item; project.md
- * files stay out of recents (their surface is the project page), and
- * templates are scaffolding, not content. */
-const isDoc = (e: Entry) =>
-  e.type !== 'Work item' && !e.path.endsWith('project.md') && !isTemplate(e);
+/** A document here is a note that lives in Docs (M3.1 `isDocEntry`: untyped
+ * notes plus types marked `display: doc`). Records belong to their type
+ * screen, and templates are scaffolding, not content. */
+const isDoc = (e: Entry, schema: Schema) => isDocEntry(e, schema) && !isTemplate(e);
 
 function formatDay(iso: string): string {
   return iso.slice(0, 10);
@@ -28,7 +27,7 @@ export function DocsPage() {
   const open = useOpenPath();
 
   const recents = entries
-    .filter(isDoc)
+    .filter((e) => isDoc(e, schema))
     .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
     .slice(0, RECENTS_SHOWN);
 
@@ -60,6 +59,7 @@ export function DocsPage() {
                   <button
                     type="button"
                     data-testid="recent-doc"
+                    data-path={e.path}
                     onClick={() => open(e.path)}
                     className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-1.5 text-left hover:bg-[var(--n-50)]"
                   >

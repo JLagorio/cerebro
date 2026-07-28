@@ -51,6 +51,7 @@ const boardView: ViewFile = {
     icon: null,
     color: null,
     order: null,
+    source: { type: null, project: null },
     filters: null,
     presentation: {
       type: 'board',

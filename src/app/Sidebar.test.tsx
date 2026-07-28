@@ -47,6 +47,7 @@ describe('Sidebar', () => {
             icon: null,
             color: null,
             order: null,
+            source: { type: null, project: null },
             filters: null,
             presentation: {
               type: 'list',
@@ -70,34 +71,32 @@ describe('Sidebar', () => {
 
   afterEach(cleanup);
 
-  it('renders top-level project rows and saved views (v2: no spaces)', () => {
-    render(<Sidebar onNewProject={vi.fn()} />);
-    expect(screen.getByText('Foundations')).toBeTruthy();
+  // M3.5: views are the top-level navigation; projects are no longer a
+  // sidebar primitive (a project is a saved view over Work items).
+  it('lists saved views above the types, and no project rows', () => {
+    render(<Sidebar onNewView={vi.fn()} />);
     expect(screen.getByText('Urgent work')).toBeTruthy();
+    expect(screen.queryByTestId('sidebar-project')).toBeNull();
+    expect(screen.queryByText('New project')).toBeNull();
   });
 
-  it('clicking rows navigates to project and view', () => {
-    render(<Sidebar onNewProject={vi.fn()} />);
-    fireEvent.click(screen.getByText('Foundations'));
-    expect(useNavStore.getState().selection).toEqual({
-      kind: 'project',
-      path: 'projects/foundations/project.md',
-    });
+  it('clicking a view navigates to it', () => {
+    render(<Sidebar onNewView={vi.fn()} />);
     fireEvent.click(screen.getByText('Urgent work'));
     expect(useNavStore.getState().selection).toEqual({ kind: 'view', id: 'urgent-work' });
   });
 
-  it('the new project row calls onNewProject', () => {
-    const onNewProject = vi.fn();
-    render(<Sidebar onNewProject={onNewProject} />);
-    fireEvent.click(screen.getByText('New project'));
-    expect(onNewProject).toHaveBeenCalledTimes(1);
+  it('the + button opens the view builder', () => {
+    const onNewView = vi.fn();
+    render(<Sidebar onNewView={onNewView} />);
+    fireEvent.click(screen.getByTestId('new-view'));
+    expect(onNewView).toHaveBeenCalledTimes(1);
   });
 
-  it('shows an empty hint when the vault has no projects', () => {
-    useVaultStore.setState({ entries: [] });
-    render(<Sidebar onNewProject={vi.fn()} />);
-    expect(screen.getByText('No projects yet')).toBeTruthy();
+  it('shows an empty hint when the vault has no saved views', () => {
+    useVaultStore.setState({ entries: [], views: [] });
+    render(<Sidebar onNewView={vi.fn()} />);
+    expect(screen.getByText(/No views yet/)).toBeTruthy();
   });
 
   // Task 14: on the Docs surfaces the sidebar is a Drive-style file tree.
@@ -109,7 +108,7 @@ describe('Sidebar', () => {
     });
     useVaultStore.setState({ entries: [project, doc], folders: ['inbox', 'projects'] });
     useNavStore.setState({ selection: { kind: 'docs' } });
-    render(<Sidebar onNewProject={vi.fn()} />);
+    render(<Sidebar onNewView={vi.fn()} />);
     expect(screen.getByText('Docs')).toBeTruthy();
     expect(screen.getByTestId('file-tree')).toBeTruthy();
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
@@ -139,7 +138,7 @@ describe('Sidebar', () => {
           mkEntry({ path: 'recipes/soup.md', title: 'Soup', type: 'Recipe' }),
         ],
       });
-      render(<Sidebar onNewProject={vi.fn()} />);
+      render(<Sidebar onNewView={vi.fn()} />);
       const rows = screen.getAllByTestId('sidebar-type');
       const labels = rows.map((r) => r.textContent);
       // Project (1 record), Recipe (2), Type (1 type doc), Work item (0).
@@ -147,27 +146,27 @@ describe('Sidebar', () => {
     });
 
     it('clicking a type navigates to the type screen', () => {
-      render(<Sidebar onNewProject={vi.fn()} />);
+      render(<Sidebar onNewView={vi.fn()} />);
       fireEvent.click(screen.getByText('Work item'));
       expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Work item' });
     });
 
     it('collapses via the section header', () => {
-      render(<Sidebar onNewProject={vi.fn()} />);
+      render(<Sidebar onNewView={vi.fn()} />);
       fireEvent.click(screen.getByRole('button', { name: 'Types' }));
       expect(screen.queryAllByTestId('sidebar-type')).toEqual([]);
       expect(useUiStore.getState().typesOpen).toBe(false);
     });
 
     it('the + button opens the Create-type dialog', () => {
-      render(<Sidebar onNewProject={vi.fn()} />);
+      render(<Sidebar onNewView={vi.fn()} />);
       fireEvent.click(screen.getByRole('button', { name: 'New type' }));
       expect(screen.getByText('Create new type')).toBeTruthy();
     });
 
     it('right-click on a custom type offers rename and delete', () => {
       useVaultStore.setState({ entries: [project, recipeType] });
-      render(<Sidebar onNewProject={vi.fn()} />);
+      render(<Sidebar onNewView={vi.fn()} />);
       fireEvent.contextMenu(screen.getByText('Recipe'));
       expect(screen.getByText('Change display name…')).toBeTruthy();
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
@@ -175,7 +174,7 @@ describe('Sidebar', () => {
     });
 
     it('right-click on a system type only offers customize (locked)', () => {
-      render(<Sidebar onNewProject={vi.fn()} />);
+      render(<Sidebar onNewView={vi.fn()} />);
       fireEvent.contextMenu(screen.getByText('Work item'));
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
       expect(screen.queryByText('Change display name…')).toBeNull();
@@ -192,7 +191,7 @@ describe('Sidebar', () => {
       definition: { ...useVaultStore.getState().views[0].definition, name: 'Delivery' },
     };
     useVaultStore.setState({ views: [...useVaultStore.getState().views, scoped] });
-    render(<Sidebar onNewProject={vi.fn()} />);
+    render(<Sidebar onNewView={vi.fn()} />);
     expect(screen.getByText('Urgent work')).toBeTruthy();
     expect(screen.queryByText('Delivery')).toBeNull();
   });

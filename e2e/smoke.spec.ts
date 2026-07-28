@@ -21,18 +21,19 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
   // vault"; if the mock IPC restored a last vault it boots straight to the
   // shell. Handle both.
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarProjects = page.getByTestId('sidebar-project');
-  await expect(demoButton.or(sidebarProjects.first())).toBeVisible({ timeout: 10_000 });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
 
-  // -- Sidebar lists top-level projects (v2: no spaces) -----------------
-  await expect(sidebarProjects.first()).toBeVisible({ timeout: 10_000 });
-  expect(await sidebarProjects.count()).toBeGreaterThanOrEqual(1);
-
-  // -- Open the first project -------------------------------------------
-  await sidebarProjects.first().click();
+  // -- M3.5: projects are no longer a sidebar primitive. Reach one through
+  // the Project type's records, then open it with the row's Open button.
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Project' }).first().click();
+  await page.getByTestId('view-switch-table').click();
+  await page.getByTestId('table-row').first().hover();
+  await page.getByRole('button', { name: /^Open / }).first().click();
 
   // -- List view: grouped section headers visible ----------------------
   const groupHeaders = page.getByTestId('list-group-header');
@@ -135,16 +136,21 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   // -- Boot -------------------------------------------------------------
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarProjects = page.getByTestId('sidebar-project');
-  await expect(demoButton.or(sidebarProjects.first())).toBeVisible({ timeout: 10_000 });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  await expect(sidebarProjects.first()).toBeVisible({ timeout: 10_000 });
-  await sidebarProjects.first().click();
+  // M3.5: reach a project through the Project type's records.
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Project' }).first().click();
+  await page.getByTestId('view-switch-table').click();
+  await page.getByTestId('table-row').first().hover();
+  await page.getByRole('button', { name: /^Open / }).first().click();
 
-  // -- Create a saved view from the tab row ------------------------------
-  await page.getByRole('button', { name: 'New view' }).click();
+  // -- Create a saved view from the tab row (scoped: the sidebar has its
+  // own New-view control now) -------------------------------------------
+  await page.getByTestId('project-tabs').getByRole('button', { name: 'New view' }).click();
   await page.getByPlaceholder('View name').fill('Smoke board');
   await page.getByRole('button', { name: 'Save' }).click();
   const smokeTab = page.getByRole('tab', { name: 'Smoke board' });

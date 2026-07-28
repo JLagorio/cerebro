@@ -15,8 +15,8 @@ import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
-  /** Opens the New-project dialog (v2: projects are the top level). */
-  onNewProject: () => void;
+  /** Opens the New-view dialog (M3.5: views are the top level). */
+  onNewView: () => void;
 }
 
 const SECTION_LABEL =
@@ -35,7 +35,7 @@ type TypeDialog =
   | { mode: 'new' }
   | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
-export function Sidebar({ onNewProject }: SidebarProps) {
+export function Sidebar({ onNewView }: SidebarProps) {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
@@ -53,15 +53,6 @@ export function Sidebar({ onNewProject }: SidebarProps) {
   // Task 14: on the Docs surfaces the sidebar is a Drive-style file
   // navigator — folders and files, click to open, right-click to manage.
   const docsMode = selection.kind === 'docs' || selection.kind === 'doc';
-
-  // Vault format v2: projects are the top-level group — no spaces.
-  const projects = useMemo(
-    () =>
-      entries
-        .filter((e) => e.type === 'Project')
-        .sort((a, b) => a.title.localeCompare(b.title)),
-    [entries],
-  );
 
   // M3: every type the vault knows about — system, declared, and ghost.
   const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
@@ -122,43 +113,56 @@ export function Sidebar({ onNewProject }: SidebarProps) {
           <div className={SECTION_LABEL}>Files</div>
           <FileTree
             root=""
+            docsOnly
             activePath={selection.kind === 'doc' ? selection.path : null}
             onOpen={openPath}
           />
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-2 pb-4">
-        <div className={SECTION_LABEL}>Projects</div>
-        {projects.length === 0 ? (
-          <div className="px-2 py-1 text-[12px] text-[var(--n-400)]">No projects yet</div>
+        {/* M3.5: Views are the top-level navigation — saved collections over
+            the type databases. A "project" is one of these, not a primitive. */}
+        <div className="flex items-center justify-between pr-1">
+          <div className={SECTION_LABEL}>Views</div>
+          <button
+            type="button"
+            aria-label="New view"
+            data-testid="new-view"
+            onClick={onNewView}
+            className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+          >
+            <Icon name="plus" size={13} />
+          </button>
+        </div>
+        {sortedViews.length === 0 ? (
+          <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
+            No views yet — save one to collect any set of records.
+          </div>
         ) : null}
-        {projects.map((project) => {
-          const projectActive = selection.kind === 'project' && selection.path === project.path;
-          const style = typeStyle('Project', schema);
+        {sortedViews.map((view) => {
+          const viewActive = selection.kind === 'view' && selection.id === view.id;
+          const sourceType = view.definition.source.type;
+          const style = sourceType === null ? null : typeStyle(sourceType, schema);
           return (
             <button
-              key={project.path}
+              key={view.id}
               type="button"
-              data-testid="sidebar-project"
-              onClick={() => navigate({ kind: 'project', path: project.path })}
-              className={rowClass(projectActive)}
+              data-testid="sidebar-view"
+              onClick={() => navigate({ kind: 'view', id: view.id })}
+              className={rowClass(viewActive)}
             >
-              <Icon name={style.icon} size={15} color={style.color ?? 'var(--n-500)'} />
+              <Icon
+                name={view.definition.icon ?? style?.icon ?? 'layout-list'}
+                size={15}
+                color={view.definition.color ?? style?.color ?? 'var(--n-500)'}
+              />
               <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                {project.title}
+                {view.definition.name}
               </span>
             </button>
           );
         })}
-        <button
-          type="button"
-          onClick={onNewProject}
-          className="flex h-[30px] w-full items-center gap-[7px] rounded-md border-0 bg-transparent px-2 text-left text-[12.5px] text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
-        >
-          <Icon name="plus" size={13} />
-          New project
-        </button>
-        {/* M3: collapsible Types section — sits above Views. */}
+        {/* M3: collapsible Types section — the databases themselves. */}
         <div className="flex items-center justify-between pr-1">
           <button
             type="button"
@@ -201,26 +205,6 @@ export function Sidebar({ onNewProject }: SidebarProps) {
               </button>
             );
           })}
-        <div className={SECTION_LABEL}>Views</div>
-        {sortedViews.length === 0 ? (
-          <div className="px-2 py-1 text-[12px] text-[var(--n-400)]">No saved views</div>
-        ) : null}
-        {sortedViews.map((view) => {
-          const viewActive = selection.kind === 'view' && selection.id === view.id;
-          return (
-            <button
-              key={view.id}
-              type="button"
-              onClick={() => navigate({ kind: 'view', id: view.id })}
-              className={rowClass(viewActive)}
-            >
-              <Icon name={view.definition.icon ?? 'layout-list'} size={15} color="var(--n-500)" />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                {view.definition.name}
-              </span>
-            </button>
-          );
-        })}
       </div>
       )}
       {typeMenu !== null && (

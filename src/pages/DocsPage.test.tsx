@@ -21,17 +21,23 @@ describe('DocsPage', () => {
   });
   afterEach(cleanup);
 
-  it('lists recent docs without work items or project files', () => {
+  it('lists recent docs without records, type docs, or templates', () => {
     render(<DocsPage />);
-    const recents = screen.getAllByTestId('recent-doc').map((el) => el.textContent ?? '');
-    expect(recents.length).toBeGreaterThan(0);
-    expect(recents.length).toBeLessThanOrEqual(6);
-    const entries = useVaultStore.getState().entries;
-    const items = new Set(
-      entries.filter((e) => e.type === 'Work item' || e.type === 'Project').map((e) => e.title),
-    );
-    for (const label of recents) {
-      for (const title of items) expect(label.startsWith(title)).toBe(false);
+    // Paths, not title prefixes: a meeting note legitimately starts with its
+    // project's name ("Field App launch campaign kickoff").
+    const paths = screen
+      .getAllByTestId('recent-doc')
+      .map((el) => el.getAttribute('data-path') ?? '');
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.length).toBeLessThanOrEqual(6);
+    const byPath = new Map(useVaultStore.getState().entries.map((e) => [e.path, e]));
+    for (const path of paths) {
+      const entry = byPath.get(path);
+      expect(entry).toBeDefined();
+      // M3.1: records (work items, people, projects) and type declarations
+      // live on their type screen, never in Docs.
+      expect(entry?.type === null || entry?.type === undefined).toBe(true);
+      expect(path.startsWith('templates/')).toBe(false);
     }
   });
 

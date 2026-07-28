@@ -127,12 +127,15 @@ describe('mockIpc', () => {
     expect(fs.get('items/indent.md')).toBe('# Fixed\n\nBody.\n');
   });
 
-  it('listViews is empty for the demo vault and saveView round-trips', async () => {
-    expect(await mock.listViews('/demo-vault')).toEqual([]);
+  // M3.5: the demo vault now ships saved views, so assert the round trip
+  // rather than an empty list.
+  it('saveView round-trips into the global views/ dir', async () => {
+    const before = await mock.listViews('/demo-vault');
+    expect(before.every((v) => v.project === null)).toBe(true);
     await mock.saveView('/demo-vault', 'my-view', 'name: My view\n');
-    expect(await mock.listViews('/demo-vault')).toEqual([
-      { id: 'my-view', yaml: 'name: My view\n', project: null },
-    ]);
+    const after = await mock.listViews('/demo-vault');
+    expect(after).toContainEqual({ id: 'my-view', yaml: 'name: My view\n', project: null });
+    expect(after).toHaveLength(before.length + 1);
   });
 
   // Task 6 parity with write.rs: a views/ dir next to a project.md is scoped.
@@ -140,14 +143,16 @@ describe('mockIpc', () => {
     await mock.saveView('/demo-vault', 'global', 'name: G\n');
     await mock.saveView('/demo-vault', 'delivery', 'name: D\n', 'projects/guided-onboarding-ga');
     const views = await mock.listViews('/demo-vault');
-    expect(views).toEqual([
-      { id: 'global', yaml: 'name: G\n', project: null },
-      {
-        id: 'delivery',
-        yaml: 'name: D\n',
-        project: 'projects/guided-onboarding-ga/project.md',
-      },
-    ]);
+    expect(views).toContainEqual({ id: 'global', yaml: 'name: G\n', project: null });
+    expect(views).toContainEqual({
+      id: 'delivery',
+      yaml: 'name: D\n',
+      project: 'projects/guided-onboarding-ga/project.md',
+    });
+    // Globals sort ahead of project-scoped views.
+    const scopedFirst = views.findIndex((v) => v.project !== null);
+    const globalLast = views.map((v) => v.project).lastIndexOf(null);
+    expect(globalLast).toBeLessThan(scopedFirst);
   });
 
   // --- Vault format v2 (M2 Task 3) — parity with scan.rs / write.rs ---

@@ -58,7 +58,9 @@ const STATUSES: StatusDef[] = [
 const fakeSchema: Schema = {
   types: new Map(),
   projectForEntry: () => project,
+  relations: new Map(),
   statusSetForProject: () => STATUSES,
+  statusSetFor: () => STATUSES,
   resolveField: () => ({ def: null, raw: null, display: '', color: null, ghost: false }),
 };
 

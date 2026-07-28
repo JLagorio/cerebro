@@ -90,13 +90,16 @@ describe('App boot flow', () => {
     expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeTruthy();
   });
 
-  it('sidebar new-project row opens the project dialog (v2: no spaces)', async () => {
+  // M3.5: "New project" is gone — the sidebar's + builds a saved view, and a
+  // project is one of those (Work items scoped to a folder).
+  it('the sidebar + opens the view builder with a source picker', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.scanVault).mockResolvedValueOnce(fixtureVault());
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });
-    await user.click(screen.getByRole('button', { name: 'New project' }));
+    await user.click(screen.getByRole('button', { name: 'New view' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByPlaceholderText('Project name')).toBeTruthy();
+    expect(within(dialog).getByLabelText('View name')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Source type/ })).toBeTruthy();
   });
 });

@@ -12,11 +12,12 @@ import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
   applyTemplateFrontmatter,
+  isTemplate,
   listTemplates,
   templateDisplayName,
   todayIso,
 } from '@/lib/templates';
-import { typeStyle } from '@/engine/typeCatalog';
+import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -44,6 +45,7 @@ function buildTree(
   folders: string[],
   hide: (path: string) => boolean,
   order: Record<string, string[]> = {},
+  pruneEmptied = false,
 ): TreeNode[] {
   const prefix = root === '' ? '' : `${root}/`;
   const byPath = new Map<string, TreeNode>();
@@ -77,6 +79,25 @@ function buildTree(
       kind: 'file',
       children: [],
     });
+  }
+
+  // Folders whose every file was filtered out (types/, people/, templates/…)
+  // would linger as empty rows; drop them, but keep genuinely empty folders
+  // the user made themselves.
+  if (pruneEmptied) {
+    const hadHiddenFile = new Set<string>();
+    for (const e of entries) {
+      if (e.path.startsWith(prefix) && hide(e.path)) hadHiddenFile.add(parentDir(e.path));
+    }
+    const prune = (nodes: TreeNode[]): TreeNode[] =>
+      nodes.filter((node) => {
+        if (node.kind === 'file') return true;
+        node.children = prune(node.children);
+        return node.children.length > 0 || !hadHiddenFile.has(node.path);
+      });
+    const pruned = prune(roots);
+    roots.length = 0;
+    roots.push(...pruned);
   }
 
   // Folder-note pass: a folder holding `<its-name>.md` renders as a doc.
@@ -133,13 +154,23 @@ export interface FileTreeProps {
   hide?: (path: string) => boolean;
   /** Currently open page — its row renders highlighted. */
   activePath?: string | null;
+  /** Show only documents: records (people, work items, type declarations) and
+   * templates are hidden, and folders they emptied are pruned. M3.1 — records
+   * belong to their type screen, so the same file never appears twice. */
+  docsOnly?: boolean;
   /** A file row (or freshly created page) was chosen. */
   onOpen: (path: string) => void;
 }
 
 /** Folder/note tree over the vault (M2 Task 10): create, rename, move,
  * trash, templates; folder-note docs render as documents (M2.x). */
-export function FileTree({ root, hide = () => false, activePath = null, onOpen }: FileTreeProps) {
+export function FileTree({
+  root,
+  hide = () => false,
+  activePath = null,
+  docsOnly = false,
+  onOpen,
+}: FileTreeProps) {
   const entries = useVaultStore((s) => s.entries);
   const folders = useVaultStore((s) => s.folders);
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -151,14 +182,25 @@ export function FileTree({ root, hide = () => false, activePath = null, onOpen }
   const setTreeOrder = useUiStore((s) => s.setTreeOrder);
   const toast = useUiStore((s) => s.toast);
 
-  const tree = useMemo(
-    () => buildTree(root, entries, folders, hide, treeOrder),
-    [root, entries, folders, hide, treeOrder],
-  );
   const templates = useMemo(() => listTemplates(entries), [entries]);
   // M3: typed files carry their type's icon/color in the tree.
   const schema = useSchema();
   const entryByPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries]);
+
+  const hidePath = useMemo(() => {
+    if (!docsOnly) return hide;
+    return (path: string) => {
+      if (hide(path)) return true;
+      const entry = entryByPath.get(path);
+      if (entry === undefined) return false; // folders fall through to pruning
+      return isTemplate(entry) || !isDocEntry(entry, schema);
+    };
+  }, [docsOnly, hide, entryByPath, schema]);
+
+  const tree = useMemo(
+    () => buildTree(root, entries, folders, hidePath, treeOrder, docsOnly),
+    [root, entries, folders, hidePath, treeOrder, docsOnly],
+  );
 
   const [dialog, setDialog] = useState<TreeDialog | null>(null);
   const [name, setName] = useState('');

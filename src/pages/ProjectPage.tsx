@@ -14,6 +14,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { BoardView } from '@/views/BoardView';
 import { ListView } from '@/views/ListView';
+import { TableView } from '@/views/TableView';
 import { slugifyViewId, ViewToolbar } from '@/views/ViewToolbar';
 
 // Task 10: the project header carries two tab groups — saved views (Items +
@@ -146,6 +147,13 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     [collection.entries, presentation.orderBy, schema],
   );
 
+  // The project canvas is Work-item-only, so its column universe is that
+  // type's declared fields (M3.4: drives the table and the property picker).
+  const workItemFields = useMemo(
+    () => schema.types.get('Work item')?.fields ?? [],
+    [schema],
+  );
+
   // Task 8: toolbar edits auto-persist to the active saved view's file
   // (project-scoped tab or global view). The Items tab stays ephemeral.
   const handlePresentationChange = (next: Presentation) => {
@@ -181,6 +189,9 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       icon: null,
       color: null,
       order: null,
+      // A project tab is a view over this project's work items (M3.5) — the
+      // same shape any saved view uses, no longer a special case.
+      source: { type: 'Work item', project: project.path },
       filters: null,
       presentation,
     });
@@ -225,6 +236,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
           <div
             role="tablist"
             aria-label="Project views"
+            data-testid="project-tabs"
             className="flex items-end gap-1 border-b border-[var(--n-200)]"
           >
             <ViewTab
@@ -281,8 +293,31 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
         </div>
       ) : (
         <>
-          <ViewToolbar presentation={presentation} onChange={handlePresentationChange} />
-          {presentation.type === 'board' ? (
+          <ViewToolbar
+            presentation={presentation}
+            onChange={handlePresentationChange}
+            fields={workItemFields}
+          />
+          {presentation.type === 'table' ? (
+            <TableView
+              entries={sortedEntries}
+              presentation={presentation}
+              schema={schema}
+              fields={workItemFields}
+              onOrderBy={(field) =>
+                handlePresentationChange({
+                  ...presentation,
+                  orderBy: {
+                    field,
+                    dir:
+                      presentation.orderBy.field === field && presentation.orderBy.dir === 'asc'
+                        ? 'desc'
+                        : 'asc',
+                  },
+                })
+              }
+            />
+          ) : presentation.type === 'board' ? (
             <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
           ) : (
             <ListView entries={sortedEntries} presentation={presentation} schema={schema} project={project} />
