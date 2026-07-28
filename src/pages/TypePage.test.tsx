@@ -34,8 +34,20 @@ describe('TypePage — Records tab', () => {
     expect(screen.queryByText('Guided onboarding')).toBeNull();
   });
 
-  it('opens a record in the right-hand detail panel on click', () => {
+  it('selects a record inline in the default split browser on click', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    fireEvent.click(screen.getByText('Design first-run flow'));
+    // Split layout: selection is inline — the overlay detail panel stays shut.
+    expect(useUiStore.getState().detailPath).toBeNull();
+    const row = screen
+      .getAllByTestId('split-row')
+      .find((r) => r.textContent?.includes('Design first-run flow'));
+    expect(row?.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('opens a record in the right-hand detail panel from the list layout', () => {
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    fireEvent.click(screen.getByTestId('view-switch-list'));
     fireEvent.click(screen.getByText('Design first-run flow'));
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
   });
@@ -102,6 +114,22 @@ describe('TypePage — Properties tab', () => {
     });
   });
 
+  it('names the property after the kind when none is typed (kind-first flow)', async () => {
+    openProperties('Work item');
+    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByTestId('property-kind-checkbox'));
+    await waitFor(() => {
+      expect(patches).toEqual([
+        {
+          path: 'types/work-item.md',
+          patch: {
+            fields: expect.objectContaining({ checkbox: { kind: 'checkbox' } }),
+          },
+        },
+      ]);
+    });
+  });
+
   it('removes custom fields but never built-ins', () => {
     openProperties('Person');
     // fixture Person type declares no fields — add-only surface.
@@ -127,10 +155,6 @@ describe('TypePage — Properties tab', () => {
   });
 
   it('edits select options inline', () => {
-    openProperties('Work item');
-    // priority is locked (system built-in): no option editing UI.
-    expect(screen.queryByLabelText('Add option to Priority')).toBeNull();
-    cleanup();
     // A custom type with a select field gets the option editor.
     useVaultStore.setState({
       entries: [
@@ -147,6 +171,8 @@ describe('TypePage — Properties tab', () => {
       ],
     });
     openProperties('Recipe');
+    // M3.1: the value editor lives behind the row's "1 options" expander.
+    fireEvent.click(screen.getByRole('button', { name: /1 options/ }));
     expect(screen.getByText('Thai')).toBeTruthy();
     const input = screen.getByLabelText('Add option to Cuisine');
     fireEvent.change(input, { target: { value: 'Oaxacan' } });
@@ -155,5 +181,60 @@ describe('TypePage — Properties tab', () => {
     expect(patches[0].path).toBe('types/recipe.md');
     const fields = patches[0].patch.fields as Record<string, { options: unknown[] }>;
     expect(fields.cuisine.options).toHaveLength(2);
+  });
+
+  it('renames an option without touching the id records store', () => {
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'types/recipe.md',
+          title: 'Recipe',
+          type: 'Type',
+          properties: {
+            fields: {
+              cuisine: { kind: 'select', options: [{ id: 'thai', color: '#DE3B4E' }] },
+            },
+          } as unknown as ReturnType<typeof makeEntry>['properties'],
+        }),
+      ],
+    });
+    openProperties('Recipe');
+    fireEvent.click(screen.getByRole('button', { name: /1 options/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Thai' }));
+    const input = screen.getByLabelText('Rename Thai');
+    fireEvent.change(input, { target: { value: 'Thai (street)' } });
+    fireEvent.blur(input);
+    const fields = patches[0].patch.fields as Record<string, { options: { id: string; label: string }[] }>;
+    expect(fields.cuisine.options[0]).toMatchObject({ id: 'thai', label: 'Thai (street)' });
+  });
+
+  it('renames a property and migrates the records carrying it', async () => {
+    openProperties('Person');
+    // Person declares no fields in the fixture; add one, then rename it.
+    useVaultStore.setState({
+      entries: fixtureVault().map((e) =>
+        e.path === 'types/person.md'
+          ? {
+              ...e,
+              properties: {
+                ...e.properties,
+                fields: { pronouns: { kind: 'text' } },
+              } as unknown as typeof e.properties,
+            }
+          : e,
+      ),
+    });
+    cleanup();
+    openProperties('Person');
+    fireEvent.click(screen.getByRole('button', { name: 'Pronouns' }));
+    const input = screen.getByLabelText('Rename Pronouns');
+    fireEvent.change(input, { target: { value: 'Uses pronouns' } });
+    fireEvent.blur(input);
+    await waitFor(() => {
+      expect(patches[0]).toEqual({
+        path: 'types/person.md',
+        patch: { fields: { uses_pronouns: { kind: 'text' } } },
+      });
+    });
   });
 });

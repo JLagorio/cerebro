@@ -134,7 +134,15 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
           </div>
         ))}
         {adding ? (
-          <AddPropertyPanel onAdd={addProperty} onCancel={() => setAdding(false)} />
+          <AddPropertyPanel
+            existingNames={[
+              ...declared.map((f) => humanize(f.name)),
+              ...undeclaredScalars.map(humanize),
+              ...undeclaredRelations.map(humanize),
+            ]}
+            onAdd={addProperty}
+            onCancel={() => setAdding(false)}
+          />
         ) : (
           <button
             type="button"

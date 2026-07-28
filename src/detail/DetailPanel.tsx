@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
-import { addPropertyToEntry } from '@/app/typeActions';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
-import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
-import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { setNoteTitle } from '@/lib/ipc';
@@ -21,9 +19,6 @@ export function DetailPanel() {
   const rescan = useVaultStore((s) => s.rescan);
 
   const [title, setTitle] = useState('');
-  // M3: work items finally get an add-property surface (the panel is their
-  // canonical editor — DocPage's Info tab is unreachable for them).
-  const [addingProp, setAddingProp] = useState(false);
   // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
   // load/save). The handle is only needed for the rename splice below.
   const editorRef = useRef<CerebroEditor | null>(null);
@@ -46,11 +41,6 @@ export function DetailPanel() {
   if (!detailPath || !entry) return null;
 
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
-  const declared = typeDef?.fields ?? [];
-  const declaredNames = new Set(declared.map((f) => f.name));
-  const undeclared = [...Object.keys(entry.properties), ...Object.keys(entry.relationships)].filter(
-    (k) => !declaredNames.has(k) && k !== 'type' && k !== 'key',
-  );
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 
   const commitTitle = async () => {
@@ -112,42 +102,10 @@ export function DetailPanel() {
           }}
           className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-[16px] font-semibold leading-[22px] tracking-[-0.01em] text-[var(--n-900)] outline-none hover:border-[var(--n-200)] focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]"
         />
-        <div className="mb-4 flex flex-col gap-[7px]">
-          {declared.map((f) => (
-            <div key={f.name} className="flex items-center gap-2">
-              <span className="w-24 flex-none text-[12px] text-[var(--n-500)]">{humanize(f.name)}</span>
-              <FieldEditor entry={entry} def={f} schema={schema} />
-            </div>
-          ))}
-          {undeclared.map((name) => (
-            <div key={name} className="flex items-center gap-2">
-              <span className="w-24 flex-none text-[12px] text-[var(--n-500)]">{humanize(name)}</span>
-              <span className="text-[12.5px] text-[var(--n-700)]">
-                {name in entry.relationships
-                  ? entry.relationships[name].join(', ')
-                  : String(entry.properties[name])}
-              </span>
-            </div>
-          ))}
-          {addingProp ? (
-            <AddPropertyPanel
-              onAdd={(name, kind) => {
-                void (async () => {
-                  if (await addPropertyToEntry(entry, name, kind)) setAddingProp(false);
-                })();
-              }}
-              onCancel={() => setAddingProp(false)}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setAddingProp(true)}
-              className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-            >
-              + Add property
-            </button>
-          )}
-        </div>
+        {/* M3: extracted to RecordProperties — shared with the split view.
+            Keyed per record (prefixed: the sibling NoteBodyEditor also keys
+            on the path) so the add-property flyout closes on switch. */}
+        <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">Description</div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
             path so switching items reloads cleanly. */}
