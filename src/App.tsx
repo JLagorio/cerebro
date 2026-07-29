@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { AgentActions } from '@/agent/AgentActions';
+import { AiPanel } from '@/agent/AiPanel';
+import { useLearnRunner } from '@/agent/useLearnRunner';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
 import { createView } from '@/app/viewActions';
@@ -10,12 +13,15 @@ import { CollectionPage } from '@/pages/CollectionPage';
 import { DocPage } from '@/pages/DocPage';
 import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
+import { InboxPage } from '@/pages/InboxPage';
+import { KnowledgePage } from '@/pages/KnowledgePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
+import { captureNote } from '@/lib/capture';
 import { getLastVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -27,6 +33,8 @@ function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
     case 'home': return <HomePage />;
+    case 'inbox': return <InboxPage />;
+    case 'knowledge': return <KnowledgePage selection={selection} />;
     case 'project': return <ProjectPage selection={selection} />;
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;
@@ -94,15 +102,39 @@ function App() {
   const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
   const [booted, setBooted] = useState(false);
+  const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
   const [newViewOpen, setNewViewOpen] = useState(false);
+  // M8.6 — the base reads filed captures and edited notes on its own. Mounted
+  // here rather than in the AI panel: the panel unmounts when you close it,
+  // and a knowledge base that only grows while a panel is open is not one.
+  useLearnRunner();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         useUiStore.getState().setQuickOpen(true);
+      }
+      // Cmd+J toggles the assistant (M6) — the panel is a companion to
+      // whatever surface you are on, not a surface of its own.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        const ui = useUiStore.getState();
+        ui.setAiPanelOpen(!ui.aiPanelOpen);
+      }
+      // Quick capture (M4): writes an untyped note and opens the Inbox on
+      // it, so capture never costs more than the keystroke.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        void captureNote()
+          .then(() => useNavStore.getState().navigate({ kind: 'inbox' }))
+          .catch((err: unknown) => {
+            useUiStore
+              .getState()
+              .toast(`Couldn't capture: ${err instanceof Error ? err.message : String(err)}`);
+          });
       }
     };
     window.addEventListener('keydown', onKey);
@@ -143,6 +175,7 @@ function App() {
           <CanvasOutlet />
         </div>
       </div>
+      {aiPanelOpen && <AiPanel />}
       {newViewOpen && (
         <ViewSettingsDialog
           initial={newViewDefinition(null, schema)}
@@ -163,6 +196,7 @@ function App() {
       <QuickOpen />
       <ToastHost />
       <RemindersHost />
+      <AgentActions />
     </div>
   );
 }

@@ -21,8 +21,11 @@ import { useVaultStore } from '@/stores/vaultStore';
 /** Frontmatter keys with schema meaning on a Type doc — never field names. */
 const RESERVED = new Set(['type', 'icon', 'color', 'fields', 'statuses']);
 
+/** Leading underscores are stripped: `_`-prefixed keys are the app-managed
+ * namespace (M4, see engine/properties.isSystemProperty) and a user-declared
+ * field must never land in it — the property surfaces would hide it. */
 export function normalizeFieldName(raw: string): string {
-  return raw.trim().replace(/\s+/g, '_').toLowerCase();
+  return raw.trim().replace(/\s+/g, '_').toLowerCase().replace(/^_+/, '');
 }
 
 /** The `type: Type` doc declaring a type; exact title match first, then

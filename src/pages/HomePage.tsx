@@ -10,6 +10,7 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { useDocTasks } from '@/hooks/useDocTasks';
+import { LearnedCard } from '@/knowledge/LearnedCard';
 import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -293,6 +294,10 @@ export function HomePage() {
             description="Use New to create your first project."
           />
         )}
+
+        {/* M8.3 — the only surface in the app that speaks first, and it is
+            capped at three items each of which can be dismissed for good. */}
+        <LearnedCard />
 
         <HomeTasks />
 

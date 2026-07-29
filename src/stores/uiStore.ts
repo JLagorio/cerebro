@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import type { OrganizeProposal } from '@/agent/types';
+import type { InboxPeriod } from '@/engine/inbox';
 
-export type DocPanelTab = 'outline' | 'info' | 'links';
+export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
 
 interface UiState {
   detailPath: string | null;
@@ -29,6 +31,83 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+  /** Inbox workflow (M4). Off = every note reads as organized and the Rail
+   * hides the Inbox — for people who file at capture time. Persisted. */
+  inboxEnabled: boolean;
+  setInboxEnabled(v: boolean): void;
+  /** After organizing, open the next queued capture automatically. */
+  inboxAutoAdvance: boolean;
+  setInboxAutoAdvance(v: boolean): void;
+  /** Selected Inbox period pill; persisted so the queue reopens as left. */
+  inboxPeriod: InboxPeriod;
+  setInboxPeriod(v: InboxPeriod): void;
+  /**
+   * Which capture the Inbox has open. In the store rather than inside the
+   * page because the agent has to be able to point the queue at the capture
+   * it is proposing a filing for — a proposal you land next to the wrong note
+   * is invisible, which is the one thing propose_organize exists to prevent.
+   * Session-only: a stale selection restored across reloads is noise.
+   */
+  inboxSelectedPath: string | null;
+  setInboxSelectedPath(v: string | null): void;
+  /** Identity for OKF actor stamps (M5): written as `human:<id>` when you
+   * verify a concept. Per device — it records who reviewed, not who owns. */
+  actorId: string;
+  setActorId(v: string): void;
+  // --- Local agent (M6) ---
+  aiPanelOpen: boolean;
+  setAiPanelOpen(v: boolean): void;
+  /** The one agent ceiling (M8.1) — see AgentPolicy. Persisted. */
+  agentShellAccess: boolean;
+  setAgentShellAccess(v: boolean): void;
+  /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
+  agentConnectors: boolean;
+  setAgentConnectors(v: boolean): void;
+  /** Comma-separated issue-tracker project keys, e.g. "PHX, SYN". Issue
+   * references cannot be recognised by shape, only declared — see
+   * engine/ingest.ts. Persisted. */
+  issuePrefixes: string;
+  setIssuePrefixes(v: string): void;
+  /** A prompt handed to the panel from elsewhere ("Ask the agent to revise"). */
+  agentPendingPrompt: string | null;
+  setAgentPendingPrompt(v: string | null): void;
+  // --- Automatic learning (M8.6) ---
+  /**
+   * Let the base read filed captures and edited notes on its own. Persisted.
+   *
+   * A ceiling rather than a per-note choice, for the same reason the
+   * permission dropdown was deleted: whether the assistant may spend a turn
+   * reading your work is a standing decision, not one to re-litigate per note.
+   */
+  autoLearn: boolean;
+  setAutoLearn(v: boolean): void;
+  /** Captures handed to the distiller when they were filed. Persisted. */
+  filedForLearning: string[];
+  fileForLearning(path: string): void;
+  /**
+   * path → the note version last handed to the distiller. Persisted, and the
+   * only thing stopping a note nobody could learn anything from being read
+   * again on every tick — see engine/learn.ts.
+   */
+  learnAttempts: Record<string, string>;
+  recordLearnAttempt(path: string, modifiedAt: string): void;
+  /** True while ANY agent turn is in flight — the chat's or the runner's. */
+  agentBusy: boolean;
+  setAgentBusy(v: boolean): void;
+  /** The note the background distiller is reading right now, if any. */
+  learningPath: string | null;
+  setLearningPath(v: string | null): void;
+  /**
+   * Home insight cards the user has waved away (M8.3), by concept path.
+   * Persisted, because a card you dismissed and that came back tomorrow is
+   * the definition of the nagging this surface is not allowed to do.
+   */
+  dismissedInsights: string[];
+  dismissInsight(path: string): void;
+  /** Filings the agent has suggested but not applied (M7), keyed by path. */
+  proposals: Record<string, OrganizeProposal>;
+  addProposal(p: OrganizeProposal): void;
+  dismissProposal(path: string): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
@@ -41,6 +120,18 @@ const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
+const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
+const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
+const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
+const ACTOR_ID_KEY = 'cerebro.actorId';
+const AI_PANEL_KEY = 'cerebro.aiPanelOpen';
+const AGENT_SHELL_KEY = 'cerebro.agentShellAccess';
+const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
+const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
+const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
+const AUTO_LEARN_KEY = 'cerebro.autoLearn';
+const FILED_LEARN_KEY = 'cerebro.filedForLearning';
+const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -68,6 +159,31 @@ function loadTreeOrder(): Record<string, string[]> {
   }
 }
 
+function loadStringList(key: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadStringMap(key: string): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (pair): pair is [string, string] => typeof pair[1] === 'string',
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 function loadString(key: string, fallback: string): string {
   try {
     return window.localStorage.getItem(key) ?? fallback;
@@ -86,7 +202,12 @@ function storeString(key: string, v: string): void {
 
 function loadPanelTab(): DocPanelTab {
   const v = loadString(PANEL_TAB_KEY, 'outline');
-  return v === 'info' || v === 'links' ? v : 'outline';
+  return v === 'info' || v === 'links' || v === 'knowledge' ? v : 'outline';
+}
+
+function loadInboxPeriod(): InboxPeriod {
+  const v = loadString(INBOX_PERIOD_KEY, 'all');
+  return v === 'week' || v === 'month' ? v : 'all';
 }
 
 let nextToastId = 1;
@@ -150,6 +271,105 @@ export const useUiStore = create<UiState>((set) => ({
     storeString(TYPES_OPEN_KEY, String(v));
     set({ typesOpen: v });
   },
+
+  inboxEnabled: loadString(INBOX_ENABLED_KEY, 'true') === 'true',
+  setInboxEnabled: (v) => {
+    storeString(INBOX_ENABLED_KEY, String(v));
+    set({ inboxEnabled: v });
+  },
+  inboxAutoAdvance: loadString(INBOX_ADVANCE_KEY, 'true') === 'true',
+  setInboxAutoAdvance: (v) => {
+    storeString(INBOX_ADVANCE_KEY, String(v));
+    set({ inboxAutoAdvance: v });
+  },
+  inboxPeriod: loadInboxPeriod(),
+  setInboxPeriod: (v) => {
+    storeString(INBOX_PERIOD_KEY, v);
+    set({ inboxPeriod: v });
+  },
+  inboxSelectedPath: null,
+  setInboxSelectedPath: (v) => set({ inboxSelectedPath: v }),
+
+  actorId: loadString(ACTOR_ID_KEY, 'me'),
+  setActorId: (v) => {
+    storeString(ACTOR_ID_KEY, v);
+    set({ actorId: v });
+  },
+
+  aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
+  setAiPanelOpen: (v) => {
+    storeString(AI_PANEL_KEY, String(v));
+    set({ aiPanelOpen: v });
+  },
+  // Defaults off: shell access is a choice the user makes, never one they
+  // inherit. Everything else the agent can do follows from the folder model.
+  agentShellAccess: loadString(AGENT_SHELL_KEY, 'false') === 'true',
+  setAgentShellAccess: (v) => {
+    storeString(AGENT_SHELL_KEY, String(v));
+    set({ agentShellAccess: v });
+  },
+  // Also off by default: reaching other systems is a choice, never one
+  // inherited from opening the panel.
+  agentConnectors: loadString(AGENT_CONNECTORS_KEY, 'false') === 'true',
+  setAgentConnectors: (v) => {
+    storeString(AGENT_CONNECTORS_KEY, String(v));
+    set({ agentConnectors: v });
+  },
+  issuePrefixes: loadString(ISSUE_PREFIXES_KEY, ''),
+  setIssuePrefixes: (v) => {
+    storeString(ISSUE_PREFIXES_KEY, v);
+    set({ issuePrefixes: v });
+  },
+  agentPendingPrompt: null,
+  setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+
+  autoLearn: loadString(AUTO_LEARN_KEY, 'true') === 'true',
+  setAutoLearn: (v) => {
+    storeString(AUTO_LEARN_KEY, String(v));
+    set({ autoLearn: v });
+  },
+  filedForLearning: loadStringList(FILED_LEARN_KEY),
+  fileForLearning: (path) =>
+    set((s) => {
+      if (s.filedForLearning.includes(path)) return s;
+      const next = [...s.filedForLearning, path];
+      storeString(FILED_LEARN_KEY, JSON.stringify(next));
+      return { filedForLearning: next };
+    }),
+  learnAttempts: loadStringMap(LEARN_ATTEMPTS_KEY),
+  recordLearnAttempt: (path, modifiedAt) =>
+    set((s) => {
+      // Filing is consumed here rather than on completion: the attempt is
+      // what the record is for, and a run that dies mid-way must not leave the
+      // path queued to be tried again on the next tick.
+      const filed = s.filedForLearning.filter((p) => p !== path);
+      const next = { ...s.learnAttempts, [path]: modifiedAt };
+      storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
+      storeString(FILED_LEARN_KEY, JSON.stringify(filed));
+      return { learnAttempts: next, filedForLearning: filed };
+    }),
+  agentBusy: false,
+  setAgentBusy: (v) => set({ agentBusy: v }),
+  learningPath: null,
+  setLearningPath: (v) => set({ learningPath: v }),
+
+  dismissedInsights: loadStringList(DISMISSED_INSIGHTS_KEY),
+  dismissInsight: (path) =>
+    set((s) => {
+      if (s.dismissedInsights.includes(path)) return s;
+      const next = [...s.dismissedInsights, path];
+      storeString(DISMISSED_INSIGHTS_KEY, JSON.stringify(next));
+      return { dismissedInsights: next };
+    }),
+
+  proposals: {},
+  addProposal: (p) => set((s) => ({ proposals: { ...s.proposals, [p.path]: p } })),
+  dismissProposal: (path) =>
+    set((s) => {
+      const next = { ...s.proposals };
+      delete next[path];
+      return { proposals: next };
+    }),
 
   toasts: [],
   toast: (message) =>

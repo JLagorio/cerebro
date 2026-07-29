@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isDocEntry } from '@/engine/typeCatalog';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { getSchema, useVaultStore } from '@/stores/vaultStore';
 import { DocsPage } from './DocsPage';
 
 describe('DocsPage', () => {
@@ -31,12 +32,16 @@ describe('DocsPage', () => {
     expect(paths.length).toBeGreaterThan(0);
     expect(paths.length).toBeLessThanOrEqual(6);
     const byPath = new Map(useVaultStore.getState().entries.map((e) => [e.path, e]));
+    const schema = getSchema(useVaultStore.getState().entries);
     for (const path of paths) {
       const entry = byPath.get(path);
       expect(entry).toBeDefined();
-      // M3.1: records (work items, people, projects) and type declarations
-      // live on their type screen, never in Docs.
-      expect(entry?.type === null || entry?.type === undefined).toBe(true);
+      // M3.1 (isDocEntry): Docs holds untyped notes PLUS types that opt in
+      // with `display: doc` — meeting notes and journals are written, not
+      // tracked. Records (Work item, Person, Project) and `type: Type`
+      // declarations live on their type screen and never appear here.
+      expect(entry !== undefined && isDocEntry(entry, schema)).toBe(true);
+      expect(entry?.type).not.toBe('Type');
       expect(path.startsWith('templates/')).toBe(false);
     }
   });

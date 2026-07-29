@@ -1,11 +1,16 @@
 ---
 type: Work item
 key: FLD-9
-status: review
-priority: medium
-assignee: "[[ana-rios]]"
-due: 2026-07-25
+status: todo
+priority: high
+assignee: "[[maya-chen]]"
+due: 2026-08-25
 estimate: M
+epic: "[[epic-first-week-activation]]"
+blocked_by:
+  - "[[syn-8]]"
 ---
 
-# Handoff-to-human fallback
+# Recover gracefully from the first failed sync
+
+Depends on the resolution screen: there is no graceful recovery to show until there is somewhere to send them.

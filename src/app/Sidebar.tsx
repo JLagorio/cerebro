@@ -9,7 +9,9 @@ import {
   TypeStyleDialog,
 } from '@/app/TypeDialogs';
 import { useOpenPath } from '@/app/useOpenPath';
+import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
 import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
+import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -17,18 +19,6 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
 export interface SidebarProps {
   /** Opens the New-view dialog (M3.5: views are the top level). */
   onNewView: () => void;
-}
-
-const SECTION_LABEL =
-  'px-2 pb-1 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]';
-
-function rowClass(active: boolean): string {
-  return [
-    'flex h-[30px] w-full items-center gap-[7px] rounded-md border-0 px-2 text-left text-[13px]',
-    active
-      ? 'bg-[var(--n-100)] font-medium text-[var(--n-900)]'
-      : 'bg-transparent font-normal text-[var(--n-700)] hover:bg-[var(--n-100)]',
-  ].join(' ')
 }
 
 type TypeDialog =
@@ -53,6 +43,9 @@ export function Sidebar({ onNewView }: SidebarProps) {
   // Task 14: on the Docs surfaces the sidebar is a Drive-style file
   // navigator — folders and files, click to open, right-click to manage.
   const docsMode = selection.kind === 'docs' || selection.kind === 'doc';
+  // M8.1: Knowledge navigates by its own axes rather than borrowing Views and
+  // Types, which describe a corpus with a different author.
+  const knowledgeMode = selection.kind === 'knowledge';
 
   // M3: every type the vault knows about — system, declared, and ghost.
   const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
@@ -105,10 +98,12 @@ export function Sidebar({ onNewView }: SidebarProps) {
     >
       <div className="flex items-center justify-between pb-2 pl-4 pr-3 pt-3.5">
         <h1 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">
-          {docsMode ? 'Docs' : 'Workspace'}
+          {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
         </h1>
       </div>
-      {docsMode ? (
+      {knowledgeMode && selection.kind === 'knowledge' ? (
+        <KnowledgeNav nav={selection.nav ?? { tab: 'all' }} />
+      ) : docsMode ? (
         <div className="flex-1 overflow-y-auto px-2 pb-4">
           <div className={SECTION_LABEL}>Files</div>
           <FileTree

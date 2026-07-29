@@ -15,6 +15,9 @@ async function readMockFile(page: Page, path: string): Promise<string> {
 
 test('smoke: boot demo vault, list, board drag writes disk, rename, quick open', async ({ page }) => {
   // -- Boot -----------------------------------------------------------
+  // The background distiller (M8.6) is off for tests that are not about it:
+  // a reader that fires four seconds in would rescan the vault mid-assertion.
+  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'false'));
   await page.goto('/');
 
   // With no persisted vault the first-launch chooser renders "Open demo
@@ -134,6 +137,9 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   page,
 }) => {
   // -- Boot -------------------------------------------------------------
+  // The background distiller (M8.6) is off for tests that are not about it:
+  // a reader that fires four seconds in would rescan the vault mid-assertion.
+  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'false'));
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
   const sidebarTypes = page.getByTestId('sidebar-type');

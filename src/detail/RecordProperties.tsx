@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { addPropertyToEntry } from '@/app/typeActions';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { visibleProperties } from '@/engine/properties';
 import type { Entry, Schema } from '@/engine/types';
 
 /**
@@ -16,9 +17,10 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const declared = typeDef?.fields ?? [];
   const declaredNames = new Set(declared.map((f) => f.name));
-  const undeclared = [...Object.keys(entry.properties), ...Object.keys(entry.relationships)].filter(
-    (k) => !declaredNames.has(k) && k !== 'type' && k !== 'key',
-  );
+  const undeclared = visibleProperties([
+    ...Object.keys(entry.properties),
+    ...Object.keys(entry.relationships),
+  ]).filter((k) => !declaredNames.has(k) && k !== 'type' && k !== 'key');
 
   return (
     <div className="mb-4 flex flex-col gap-[7px]">

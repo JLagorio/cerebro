@@ -1,11 +1,13 @@
 ---
 type: Work item
 key: FLD-11
-status: todo
+status: done
 priority: high
-assignee: "[[maya-chen]]"
-due: 2026-08-07
-estimate: XS
+assignee: "[[priya-nair]]"
+due: 2026-07-22
+estimate: M
+epic: "[[epic-first-week-activation]]"
 ---
 
-# GA go/no-go review
+# Instrument the first seven days
+

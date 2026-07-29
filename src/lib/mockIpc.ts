@@ -5,6 +5,7 @@
 // "disk" state. 'vault-changed' has no equivalent here: startWatcher is a
 // no-op and writers trigger rescans directly (see vaultStore).
 import YAML, { type Document } from 'yaml';
+import { isKnowledgePath } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 
@@ -102,7 +103,21 @@ export async function readNote(_vault: string, path: string): Promise<string> {
   return splitFrontmatter(mustGet(path)).body.replace(/^\n+/, '');
 }
 
+/**
+ * Mirrors src-tauri/src/knowledge.rs. The mock backend must refuse exactly
+ * what Tauri refuses — otherwise the boundary "works" in dev and vitest and
+ * only fails in the packaged app, which is the worst way to find out.
+ */
+const READ_ONLY_KNOWLEDGE =
+  'knowledge/ is maintained by the AI knowledge base and is read-only here. ' +
+  'Verify the concept, or ask the agent to revise it.';
+
+function guardHumanWrite(path: string): void {
+  if (isKnowledgePath(path)) throw new Error(READ_ONLY_KNOWLEDGE);
+}
+
 export async function saveNote(_vault: string, path: string, body: string): Promise<void> {
+  guardHumanWrite(path);
   const { yaml } = splitFrontmatter(mustGet(path));
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n\n${body}` : body);
   touch(path);
@@ -113,6 +128,30 @@ export async function updateFrontmatter(
   path: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
+  guardHumanWrite(path);
+  return writeFrontmatter(path, patch);
+}
+
+/** The one sanctioned human write into the bundle: `verified` and nothing
+ * else. Scoping lives here so it cannot become a general-purpose bypass. */
+export async function verifyConcept(
+  _vault: string,
+  path: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  if (!isKnowledgePath(path)) {
+    throw new Error('verify_concept only applies to knowledge/ concepts');
+  }
+  const keys = Object.keys(patch);
+  const offending = keys.find((k) => k !== 'verified');
+  if (offending !== undefined) {
+    throw new Error(`verify_concept may only write \`verified\`, not \`${offending}\``);
+  }
+  if (keys.length === 0) throw new Error('verify_concept requires a `verified` value');
+  return writeFrontmatter(path, patch);
+}
+
+async function writeFrontmatter(path: string, patch: Record<string, unknown>): Promise<void> {
   const { yaml, body } = splitFrontmatter(mustGet(path));
   // parseDocument preserves key order and untouched keys on round-trip.
   // Typed as plain Document so the null-contents fallback assignment
@@ -134,6 +173,7 @@ export async function createNote(
   frontmatter: Record<string, unknown>,
   body: string,
 ): Promise<string> {
+  guardHumanWrite(folder);
   // '' means the vault root — no separator, or the path grows a leading '/'
   // (parity with unique_rel_path in write.rs).
   const prefix = folder === '' ? '' : `${folder}/`;
@@ -155,6 +195,7 @@ export async function createNote(
 }
 
 export async function setNoteTitle(_vault: string, path: string, title: string): Promise<void> {
+  guardHumanWrite(path);
   const { yaml, body } = splitFrontmatter(mustGet(path));
   // Parity with write.rs replace_h1: rewrite exactly the line the parser
   // reads the title from (fence/indent-aware, shared firstH1LineIndex);
@@ -219,11 +260,16 @@ export async function startWatcher(_vault: string): Promise<void> {
 // --- Vault format v2 file operations (M2 Task 3) ---
 
 export async function createFolder(_vault: string, path: string): Promise<void> {
+  guardHumanWrite(path);
   folders.add(path);
 }
 
 /** Move a note — or a whole folder prefix — within the vault. */
 export async function renameNote(_vault: string, from: string, to: string): Promise<void> {
+  // Refused from both sides: out would strip the boundary, in would smuggle
+  // human content into the agent's corpus.
+  guardHumanWrite(from);
+  guardHumanWrite(to);
   if (files.has(to) || folders.has(to)) throw new Error(`target already exists: ${to}`);
   if (files.has(from)) {
     files.set(to, files.get(from)!);

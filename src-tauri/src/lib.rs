@@ -1,4 +1,7 @@
+pub mod agent;
 pub mod app_config;
+pub mod knowledge;
+pub mod mcp;
 pub mod vault;
 
 use std::path::{Path, PathBuf};
@@ -49,8 +52,12 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
     vault::write::read_note(Path::new(&vault), &path)
 }
 
+// The write commands below are the HUMAN path — every one of them is
+// reachable from the UI, so each guards the knowledge/ bundle (M5). The
+// agent's MCP tools call vault::write directly and are not gated here.
 #[tauri::command(async)]
 fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
+    knowledge::guard_human_write(&path)?;
     vault::write::save_note(Path::new(&vault), &path, &body)
 }
 
@@ -60,6 +67,19 @@ fn update_frontmatter(
     path: String,
     patch: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
+    knowledge::guard_human_write(&path)?;
+    vault::write::update_frontmatter(Path::new(&vault), &path, &patch)
+}
+
+/// The one sanctioned human write into the bundle: recording that a person
+/// has confirmed a concept. Scoped to the `verified` key (see knowledge.rs).
+#[tauri::command(async)]
+fn verify_concept(
+    vault: String,
+    path: String,
+    patch: serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    knowledge::guard_verify(&path, &patch)?;
     vault::write::update_frontmatter(Path::new(&vault), &path, &patch)
 }
 
@@ -71,11 +91,13 @@ fn create_note(
     frontmatter: serde_json::Map<String, serde_json::Value>,
     body: String,
 ) -> Result<String, String> {
+    knowledge::guard_human_write(&folder)?;
     vault::write::create_note(Path::new(&vault), &folder, &slug, &frontmatter, &body)
 }
 
 #[tauri::command(async)]
 fn set_note_title(vault: String, path: String, title: String) -> Result<(), String> {
+    knowledge::guard_human_write(&path)?;
     vault::write::set_note_title(Path::new(&vault), &path, &title)
 }
 
@@ -91,11 +113,13 @@ fn save_view(vault: String, id: String, yaml: String, folder: Option<String>) ->
 
 #[tauri::command(async)]
 fn create_folder(vault: String, path: String) -> Result<(), String> {
+    knowledge::guard_human_write(&path)?;
     vault::write::create_folder(Path::new(&vault), &path)
 }
 
 #[tauri::command(async)]
 fn rename_note(vault: String, from: String, to: String) -> Result<(), String> {
+    knowledge::guard_human_move(&from, &to)?;
     vault::write::rename_note(Path::new(&vault), &from, &to)
 }
 
@@ -107,6 +131,41 @@ fn delete_note(vault: String, path: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn list_folders(vault: String) -> Result<Vec<String>, String> {
     vault::scan::list_folders(Path::new(&vault))
+}
+
+// --- Local agent + MCP (M6) ------------------------------------------------
+
+#[tauri::command(async)]
+fn check_agent() -> agent::AgentStatus {
+    agent::status()
+}
+
+/// Start (or retarget) the loopback MCP endpoint and return its address. The
+/// token is handed to the CLI through a private config file; the frontend
+/// carries it only to pass it back into `run_agent`.
+#[tauri::command(async)]
+fn start_mcp(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, mcp::McpState>,
+    vault: String,
+) -> Result<mcp::McpInfo, String> {
+    state.ensure(&app, Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn run_agent(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, agent::AgentState>,
+    vault: String,
+    request: agent::AgentRequest,
+) -> Result<(), String> {
+    let dir = config_dir(&app)?;
+    agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
+}
+
+#[tauri::command(async)]
+fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<(), String> {
+    state.stop()
 }
 
 #[tauri::command(async)]
@@ -123,6 +182,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState::default())
+        .manage(agent::AgentState::default())
+        .manage(mcp::McpState::default())
         .invoke_handler(tauri::generate_handler![
             pick_vault,
             get_last_vault,
@@ -130,6 +191,7 @@ pub fn run() {
             read_note,
             save_note,
             update_frontmatter,
+            verify_concept,
             create_note,
             set_note_title,
             list_views,
@@ -138,7 +200,11 @@ pub fn run() {
             rename_note,
             delete_note,
             list_folders,
-            start_watcher
+            start_watcher,
+            check_agent,
+            start_mcp,
+            run_agent,
+            stop_agent
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

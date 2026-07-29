@@ -1,15 +1,72 @@
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Switch } from '@/components/ui/Switch';
+import { learnQueue } from '@/engine/learn';
+import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
+import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const APP_VERSION = '0.1.0';
+
+/** One labelled toggle with its explanation — settings rows read as prose. */
+function SettingRow({
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className={`flex items-start gap-3 py-2 ${disabled ? 'opacity-50' : ''}`}>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-medium text-[var(--n-800)]">{label}</div>
+        <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">{hint}</div>
+      </div>
+      <Switch ariaLabel={label} checked={checked} onChange={onChange} disabled={disabled} />
+    </div>
+  );
+}
 
 export function SettingsPage() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const status = useVaultStore((s) => s.status);
   const error = useVaultStore((s) => s.error);
+  const inboxEnabled = useUiStore((s) => s.inboxEnabled);
+  const setInboxEnabled = useUiStore((s) => s.setInboxEnabled);
+  const inboxAutoAdvance = useUiStore((s) => s.inboxAutoAdvance);
+  const setInboxAutoAdvance = useUiStore((s) => s.setInboxAutoAdvance);
+  const actorId = useUiStore((s) => s.actorId);
+  const setActorId = useUiStore((s) => s.setActorId);
+  const shellAccess = useUiStore((s) => s.agentShellAccess);
+  const setShellAccess = useUiStore((s) => s.setAgentShellAccess);
+  const connectors = useUiStore((s) => s.agentConnectors);
+  const setConnectors = useUiStore((s) => s.setAgentConnectors);
+  const issuePrefixes = useUiStore((s) => s.issuePrefixes);
+  const setIssuePrefixes = useUiStore((s) => s.setIssuePrefixes);
+  const autoLearn = useUiStore((s) => s.autoLearn);
+  const setAutoLearn = useUiStore((s) => s.setAutoLearn);
+  const learningPath = useUiStore((s) => s.learningPath);
+  const filed = useUiStore((s) => s.filedForLearning);
+  const attempts = useUiStore((s) => s.learnAttempts);
+  const entries = useVaultStore((s) => s.entries);
+
+  // The one place the outstanding count is shown at all. It belongs in
+  // Settings and nowhere else: a number on the Rail that ticks up is the
+  // "you have 47 unread" pattern the knowledge surfaces are barred from.
+  const pending = useMemo(
+    () => learnQueue(entries, listConcepts(entries, todayIso()), { filed, attempts }).length,
+    [attempts, entries, filed],
+  );
 
   const changeVault = async () => {
     // Deviation from the plan's verbatim body (execution-log note 17b guard
@@ -44,6 +101,104 @@ export function SettingsPage() {
         <Button variant="secondary" size="sm" icon="folder-open" onClick={() => void changeVault()}>
           Change vault…
         </Button>
+      </section>
+      <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
+        <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Workflow</h2>
+        <p className="mb-4 text-[12.5px] text-[var(--n-500)]">
+          Capture fast, organize deliberately. A note stays in the Inbox until it has a type.
+        </p>
+        <SettingRow
+          label="Inbox"
+          hint="Queue untyped captures for review. Off — every note reads as organized."
+          checked={inboxEnabled}
+          onChange={setInboxEnabled}
+        />
+        <SettingRow
+          label="Auto-advance"
+          hint="After marking a note organized, open the next one in the queue."
+          checked={inboxAutoAdvance}
+          onChange={setInboxAutoAdvance}
+          disabled={!inboxEnabled}
+        />
+      </section>
+      <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
+        <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Assistant</h2>
+        <p className="mb-4 text-[12.5px] leading-[18px] text-[var(--n-500)]">
+          What the assistant may change follows from where it is writing, not from a mode you
+          pick each time: it owns{' '}
+          <span className="[font-family:var(--font-mono)]">knowledge/</span> and writes there
+          directly, and it reaches everything else through cerebro's own tools. Shell access is
+          the one thing a folder boundary cannot express.
+        </p>
+        <SettingRow
+          label="Shell access"
+          hint="Let the assistant run commands and edit files directly inside the vault folder. Off — cerebro's tools only."
+          checked={shellAccess}
+          onChange={setShellAccess}
+        />
+        <SettingRow
+          label="Connectors"
+          hint="Let the assistant use your other MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once."
+          checked={connectors}
+          onChange={setConnectors}
+        />
+        <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-[var(--n-800)]">Issue keys</div>
+            <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+              Your tracker's project keys, comma separated —{' '}
+              <span className="[font-family:var(--font-mono)]">PHX, SYN</span>. These cannot be
+              guessed: <span className="[font-family:var(--font-mono)]">PHX-421</span> and{' '}
+              <span className="[font-family:var(--font-mono)]">UTF-8</span> are the same shape, so
+              without them nothing is treated as a ticket.
+            </div>
+          </div>
+          <Input
+            ariaLabel="Issue keys"
+            value={issuePrefixes}
+            placeholder="PHX, SYN"
+            disabled={!connectors}
+            onChange={(e) => setIssuePrefixes(e.target.value)}
+            className="w-[140px] flex-none"
+          />
+        </div>
+      </section>
+      <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
+        <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Knowledge</h2>
+        <p className="mb-4 text-[12.5px] text-[var(--n-500)]">
+          The AI knowledge base in <span className="[font-family:var(--font-mono)]">knowledge/</span> is
+          written by the agent and read-only here. Verifying a concept records who confirmed it.
+        </p>
+        <SettingRow
+          label="Learn on its own"
+          hint="Read filed captures, and re-read notes you have edited since the base last read them. Runs in the background and never interrupts — it only writes into knowledge/. Off: the base grows only when you press Learn from this."
+          checked={autoLearn}
+          onChange={setAutoLearn}
+        />
+        {pending > 0 && (
+          <p className="m-0 mb-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+            {learningPath !== null
+              ? `Reading ${learningPath} now.`
+              : `${pending} note${pending === 1 ? '' : 's'} waiting to be read.`}
+          </p>
+        )}
+        <div className="flex items-start gap-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-[var(--n-800)]">Your identity</div>
+            <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+              Stamped as{' '}
+              <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when you
+              verify. The <span className="[font-family:var(--font-mono)]">human:</span> prefix is what
+              separates your review from a machine's.
+            </div>
+          </div>
+          <Input
+            ariaLabel="Your identity"
+            value={actorId}
+            onChange={(e) => setActorId(e.target.value.trim())}
+            className="w-[140px] flex-none"
+          />
+        </div>
       </section>
       <section className="rounded-[14px] border border-[var(--n-200)] p-5">
         <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">About</h2>

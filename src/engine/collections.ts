@@ -1,4 +1,6 @@
 import { isTemplate } from '@/lib/templates';
+import { inboxEntries } from './inbox';
+import { isKnowledgePath } from './okf';
 import type { Entry, Presentation, Schema, Selection, ViewFile, ViewSource } from './types';
 import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
@@ -102,6 +104,10 @@ function itemsOfProject(project: Entry, entries: Entry[]): Entry[] {
 export function selectSource(entries: Entry[], source: ViewSource): Entry[] {
   return entries.filter((e) => {
     if (isTemplate(e)) return false;
+    // The knowledge bundle (M5) is the agent's corpus with its own surface;
+    // a typeless "everything" view would otherwise sweep all of it in.
+    // Path-keyed so index.md/log.md are excluded too.
+    if (isKnowledgePath(e.path)) return false;
     if (source.type !== null) return e.type === source.type && matchesProject(e, source);
     // A typeless view means "everything I wrote": untyped pages included,
     // Type docs excluded — those are the schema, not content.
@@ -168,6 +174,15 @@ export function resolveCollection(
     }
     case 'home':
       return { title: 'Home', entries: [], presentation: defaultPresentation() };
+    case 'knowledge':
+      // The bundle has its own read-only surface; it is deliberately not a
+      // collection of records, so nothing else can list or filter it.
+      return { title: 'Knowledge', entries: [], presentation: defaultPresentation() };
+    case 'inbox':
+      // InboxPage draws its own queue/reading/organize layout, but the
+      // collection still reports the real contents so the topbar and any
+      // other consumer see the truth rather than an empty stand-in.
+      return { title: 'Inbox', entries: inboxEntries(entries), presentation: defaultPresentation() };
     case 'doc':
       // Docs render in the editor surface (DocPage); they have no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };

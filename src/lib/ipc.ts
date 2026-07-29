@@ -46,6 +46,22 @@ export function updateFrontmatter(
     : mock.updateFrontmatter(vault, path, patch);
 }
 
+/**
+ * Record a human verification on a knowledge concept (M5). Separate from
+ * updateFrontmatter because that path REFUSES writes under `knowledge/` —
+ * the bundle is the agent's to write and yours to verify. Both backends
+ * scope this command to the `verified` key.
+ */
+export function verifyConcept(
+  vault: string,
+  path: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  return inTauri()
+    ? invokeTauri('verify_concept', { vault, path, patch })
+    : mock.verifyConcept(vault, path, patch);
+}
+
 export function createNote(
   vault: string,
   folder: string,

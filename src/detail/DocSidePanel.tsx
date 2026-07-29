@@ -6,6 +6,9 @@ import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
+import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
+import { augmentDocPrompt } from '@/lib/prompts';
 import { useUiStore, type DocPanelTab } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -13,6 +16,9 @@ const TABS: { id: DocPanelTab; label: string }[] = [
   { id: 'outline', label: 'Outline' },
   { id: 'info', label: 'Info' },
   { id: 'links', label: 'Links' },
+  // M8.3 — the PRD case. A tab rather than an inline suggestion: opening it
+  // is the ask, so the assistant never speaks first while you are writing.
+  { id: 'knowledge', label: 'Knowledge' },
 ];
 
 function LinkRow({ link }: { link: DocLink }) {
@@ -132,6 +138,22 @@ export function DocSidePanel({
           ))}
         {tab === 'info' && <DocProperties entry={entry} schema={schema} />}
         {tab === 'links' && <LinksTab entry={entry} />}
+        {tab === 'knowledge' && (
+          <div className="flex flex-col gap-4 pb-2">
+            {/* What this note gave the base comes before what the base can
+                give the note: every doc is a candidate source, not just the
+                ones that happened to arrive through the Inbox. */}
+            <KnowledgeCommit entry={entry} variant="panel" />
+            <div className="border-t border-[var(--n-100)] pt-3.5">
+              <RelatedKnowledge
+                entry={entry}
+                variant="panel"
+                askPrompt={augmentDocPrompt(entry.path, entry.title)}
+                askLabel="What am I missing?"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </aside>
   );

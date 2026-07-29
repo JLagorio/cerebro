@@ -74,8 +74,26 @@ export interface ResolvedField {
   ghost: boolean;               // value not in the declared option set
 }
 
+/**
+ * Which slice of the knowledge bundle is on screen (M8.1). Knowledge navigates
+ * by its own axes — the bundle's sections, the entities concepts are about,
+ * and the update log — rather than borrowing Home's Views and Types, which
+ * describe a different corpus with a different author.
+ */
+export type KnowledgeNav =
+  | { tab: 'all' }
+  | { tab: 'review' }
+  | { tab: 'log' }
+  | { tab: 'section'; folder: string }
+  | { tab: 'entity'; key: string };
+
 export type Selection =
   | { kind: 'home' }
+  | { kind: 'inbox' }                  // capture queue: unorganized notes (M4)
+  // AI knowledge base: OKF bundle, read-only (M5); `nav` defaults to all (M8.1).
+  // `path` deep-links one concept, so knowledge surfaced beside your work
+  // (M8.3) can actually be opened rather than only named.
+  | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
   | { kind: 'project'; path: string }  // path of the project.md (vault format v2)
   | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)

@@ -1,11 +1,13 @@
 ---
 type: Work item
 key: FLD-8
-status: backlog
-priority: low
-assignee: "[[elena-vasquez]]"
+status: progress
+priority: high
+assignee: "[[maya-chen]]"
 due: 2026-08-12
-estimate: S
+estimate: L
+epic: "[[epic-first-week-activation]]"
 ---
 
-# Finish-line moment animation
+# First-job checklist inside the app
+

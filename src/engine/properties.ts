@@ -15,6 +15,27 @@
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
 import type { Entry, FieldDef, FieldFormat, FieldKind, RollupCalc, Schema } from './types';
 
+// --- System properties (M4) -------------------------------------------------
+
+/**
+ * App-managed frontmatter keys are `_`-prefixed (Tolaria's convention:
+ * `_organized`, `_pinned`, `_icon`). They are real YAML — visible to any
+ * editor and to agents — but the property surfaces hide them and the field
+ * pickers refuse to create them, so the workflow state the app maintains
+ * never reads as user data the user is expected to curate.
+ *
+ * Hidden, not stripped: writes preserve unknown keys, so a `_`-key set by
+ * another tool survives a round-trip through cerebro untouched.
+ */
+export function isSystemProperty(name: string): boolean {
+  return name.startsWith('_');
+}
+
+/** Drop app-managed keys from a list of frontmatter names for display. */
+export function visibleProperties(names: string[]): string[] {
+  return names.filter((n) => !isSystemProperty(n));
+}
+
 // --- Rollup catalog + numeric formatting (M3.4) ----------------------------
 
 export interface RollupCalcMeta {

@@ -28,6 +28,28 @@ pub struct Entry {
     pub parse_error: Option<String>,
 }
 
+impl Entry {
+    /// A bare Entry for unit tests that only exercise field-level logic.
+    #[cfg(test)]
+    pub fn empty_for_test(path: &str) -> Entry {
+        Entry {
+            path: path.to_string(),
+            filename: path.rsplit('/').next().unwrap_or(path).to_string(),
+            folder: path.rsplit_once('/').map(|(d, _)| d).unwrap_or("").to_string(),
+            project: None,
+            title: "Untitled".into(),
+            entry_type: None,
+            properties: serde_json::Map::new(),
+            relationships: BTreeMap::new(),
+            outgoing_links: Vec::new(),
+            snippet: String::new(),
+            created_at: "2026-07-28T00:00:00Z".into(),
+            modified_at: "2026-07-28T00:00:00Z".into(),
+            parse_error: None,
+        }
+    }
+}
+
 /// Build an Entry from a vault-relative path (forward slashes) and raw file
 /// content. Timestamps are passed in by the scanner (ISO 8601 strings).
 pub fn build_entry(rel_path: &str, content: &str, created_at: String, modified_at: String) -> Entry {

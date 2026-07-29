@@ -201,6 +201,62 @@ describe('mockIpc', () => {
     await expect(mock.deleteNote('/demo-vault', 'items/nope.md')).rejects.toThrow('not found');
   });
 
+  // Parity with src-tauri/src/knowledge.rs. If these two backends disagree
+  // the boundary "works" in dev and vitest and only fails in the packaged
+  // app — the worst possible way to discover it.
+  describe('knowledge/ read-only boundary (M5)', () => {
+    const CONCEPT = 'knowledge/metrics/onboarding-completion.md';
+
+    it('refuses every human write into the bundle', async () => {
+      await expect(mock.saveNote('/demo-vault', CONCEPT, '# Rewritten')).rejects.toThrow(
+        /read-only/,
+      );
+      await expect(
+        mock.updateFrontmatter('/demo-vault', CONCEPT, { lifecycle: 'deprecated' }),
+      ).rejects.toThrow(/read-only/);
+      await expect(mock.setNoteTitle('/demo-vault', CONCEPT, 'Mine now')).rejects.toThrow(
+        /read-only/,
+      );
+      await expect(
+        mock.createNote('/demo-vault', 'knowledge/metrics', 'smuggled', {}, ''),
+      ).rejects.toThrow(/read-only/);
+      await expect(mock.createFolder('/demo-vault', 'knowledge/new')).rejects.toThrow(/read-only/);
+    });
+
+    it('refuses moves in both directions', async () => {
+      // Out: would strip the concept of its boundary.
+      await expect(mock.renameNote('/demo-vault', CONCEPT, 'docs/stolen.md')).rejects.toThrow(
+        /read-only/,
+      );
+      // In: would smuggle human content into the agent's corpus.
+      await expect(
+        mock.renameNote('/demo-vault', 'inbox/welcome.md', 'knowledge/welcome.md'),
+      ).rejects.toThrow(/read-only/);
+    });
+
+    it('leaves notes outside the bundle writable', async () => {
+      await expect(
+        mock.updateFrontmatter('/demo-vault', 'inbox/welcome.md', { type: 'Note' }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('allows verifyConcept, scoped to the verified key', async () => {
+      const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+      await mock.verifyConcept('/demo-vault', CONCEPT, {
+        verified: [{ by: 'human:josef', at: '2026-07-28T10:00:00Z' }],
+      });
+      expect(fs.get(CONCEPT)).toContain('human:josef');
+
+      // Must not become a general-purpose bypass of the guard above.
+      await expect(
+        mock.verifyConcept('/demo-vault', CONCEPT, { verified: [], description: 'rewritten' }),
+      ).rejects.toThrow(/may only write/);
+      await expect(
+        mock.verifyConcept('/demo-vault', 'inbox/welcome.md', { verified: [] }),
+      ).rejects.toThrow(/only applies to/);
+    });
+  });
+
   it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
     await mock.createFolder('/demo-vault', 'projects/empty-folder');
     await mock.saveView('/demo-vault', 'v', 'name: V\n');
