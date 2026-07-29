@@ -22,12 +22,10 @@ import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
 import { captureNote } from '@/lib/capture';
-import { getLastVault, pickVault } from '@/lib/ipc';
+import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-
-const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
@@ -54,13 +52,12 @@ function VaultChooser() {
   // error stays for openVault failures.
   const [pickError, setPickError] = useState<string | null>(null);
 
+  // The demo vault ships inside the app bundle and is copied out to a real
+  // folder on first use (see src-tauri/src/demo.rs). Before that it opened a
+  // folder picker, which asked a fresh install to find a vault that did not
+  // exist yet.
   const openDemo = async () => {
-    if (isTauri) {
-      const path = await pickVault();
-      if (path) await openVault(path);
-    } else {
-      await openVault('/demo-vault');
-    }
+    await openVault(await openDemoVault());
   };
 
   const chooseFolder = async () => {
