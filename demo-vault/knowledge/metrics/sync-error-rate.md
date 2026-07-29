@@ -5,13 +5,16 @@ description: Failed sync operations as a share of all sync attempts, per hour.
 tags: [reliability, offline-sync]
 lifecycle: stable
 stale_after: 2026-07-26
-generated: { by: claude-code/2.0, at: 2026-07-19T16:40:00Z }
+generated: { by: claude-code, at: 2026-07-19T16:40:00Z }
 sources:
   - id: syn-project
     resource: /projects/offline-sync-hardening/project.md
     title: Offline sync hardening
     author: human:tom-keller
     last_modified: 2026-07-23
+  - id: dec-manual
+    resource: /records/decisions/dec-conflict-resolution-is-manual.md
+    title: "Decision: conflicts are resolved by a person"
   - id: sync-logs
     resource: all sync telemetry in the eu-west region
     usage_count: 42000
@@ -20,14 +23,18 @@ sources:
 
 # Definition
 
-`failed_syncs / total_sync_attempts`, bucketed hourly. A sync counts as
-failed when it exhausts its retries, not on the first error.[^syn-project]
+`failed_syncs / total_sync_attempts`, bucketed hourly. A sync counts as failed when it exhausts its retries, not on the first error.[^syn-project]
+
+# This number is about to get worse on purpose
+
+[[epic-offline-conflict-model]] surfaces conflicts that are currently resolved silently and discarded.[^dec-manual] When it ships, measured errors will **rise** while the underlying reliability improves.
+
+Anyone reading this KR through the transition needs that context, or the improvement reads as a regression.
 
 # Known distortion
 
-The nightly batch window inflates the denominator between 02:00 and 04:00,
-so the hourly rate looks artificially healthy overnight.[^sync-logs] Compare
-like-for-like hours when reading a trend.
+The nightly batch window inflates the denominator between 02:00 and 04:00, so the hourly rate looks artificially healthy overnight.[^sync-logs] Compare like-for-like hours when reading a trend.
 
-> This concept has not been confirmed by anyone since it was written, and it
-> is past its freshness date. Treat the batch-window claim as a hypothesis.
+[^syn-project]: Offline sync hardening
+[^dec-manual]: Decision — conflicts are resolved by a person
+[^sync-logs]: Sync telemetry, eu-west

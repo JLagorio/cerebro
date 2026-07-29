@@ -24,8 +24,7 @@ sources:
 
 # Definition
 
-An account counts as **completed** when it has finished every required step
-of guided onboarding within 14 days of first login.[^kr-onboarding]
+An account counts as **completed** when it has finished every required step of guided onboarding within 14 days of first login.[^kr-onboarding]
 
 | Term | Meaning |
 |------|---------|
@@ -35,13 +34,11 @@ of guided onboarding within 14 days of first login.[^kr-onboarding]
 
 # Why 14 days
 
-The 14-day window was chosen because the funnel dashboard shows completion
-effectively flat after day 12 — a longer window adds noise, not signal.[^ga-dashboard]
+The 14-day window was chosen because the funnel dashboard shows completion effectively flat after day 12 — a longer window adds noise, not signal.[^ga-dashboard]
 
 # Caveats
 
-Accounts created by the sales team during a migration are excluded; they
-skip guided onboarding entirely and would otherwise depress the number.
+Accounts created by the sales team during a migration are excluded; they skip guided onboarding entirely and would otherwise depress the number.
 
 [^kr-onboarding]: KR — Onboarding completion
 [^ga-dashboard]: Onboarding funnel dashboard

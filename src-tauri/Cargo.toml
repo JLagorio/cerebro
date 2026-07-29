@@ -21,3 +21,8 @@ walkdir = "2"
 notify = "6"
 chrono = "0.4"
 trash = "5"
+# Loopback MCP endpoint (M6). tiny_http over axum on purpose: we serve three
+# JSON-RPC methods on 127.0.0.1, which needs a socket and a body parser, not
+# an async web framework and its ~100 transitive crates.
+tiny_http = "0.12"
+rand = "0.8"

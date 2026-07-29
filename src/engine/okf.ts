@@ -285,6 +285,19 @@ export function verifyPatch(entry: Entry, actor: string, at: string): Record<str
   return { verified: [...list, { by: actor, at }] };
 }
 
+// --- Agent provenance on ordinary notes (M7) -------------------------------
+
+/**
+ * True when a NON-human actor wrote this note. Provenance is not a knowledge-
+ * bundle privilege: an agent that creates a work item or a capture stamps
+ * `generated` there too, which is what makes "show me what the AI wrote"
+ * answerable and the review gate meaningful.
+ */
+export function isAgentWritten(entry: Entry): boolean {
+  const generated = parseGenerated(entry);
+  return generated !== null && generated.by.kind !== 'human';
+}
+
 // --- Footnote attribution (§5.1) -------------------------------------------
 
 /**

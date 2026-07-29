@@ -50,6 +50,8 @@ export function Rail() {
   const navigate = useNavStore((s) => s.navigate);
   const entries = useVaultStore((s) => s.entries);
   const inboxEnabled = useUiStore((s) => s.inboxEnabled);
+  const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   // Task 11: Docs owns the document surfaces; Home keeps the item world.
   const docsActive = selection.kind === 'docs' || selection.kind === 'doc';
   const settingsActive = selection.kind === 'settings';
@@ -105,6 +107,14 @@ export function Rail() {
         onClick={() => navigate({ kind: 'knowledge' })}
       />
       <div className="flex-1" />
+      {/* The assistant is a companion to whatever surface you are on, so it
+          toggles rather than navigating. */}
+      <RailButton
+        icon="sparkles"
+        label="Assistant"
+        active={aiPanelOpen}
+        onClick={() => setAiPanelOpen(!aiPanelOpen)}
+      />
       <RailButton
         icon="settings"
         label="Settings"

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { inboxEntries, ORGANIZED_KEY, type InboxPeriod } from '@/engine/inbox';
+import { isAgentWritten, verifyPatch } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -64,6 +65,8 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
   // listener on every list change is how double-fires happen.
   const state = useRef({ entries, selectedPath: selectedResolvedPath, autoAdvance });
   state.current = { entries, selectedPath: selectedResolvedPath, autoAdvance };
+  const allEntriesRef = useRef(allEntries);
+  allEntriesRef.current = allEntries;
 
   const organize = useCallback(
     async (path: string) => {
@@ -76,7 +79,19 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
       const wasOnScreen = current.selectedPath === path;
 
       setPinned((prev) => prev.filter((p) => p !== path));
-      await patchFrontmatter(path, { [ORGANIZED_KEY]: true });
+
+      // M7: organizing an AI-written note is a REVIEW, so it records who
+      // signed off. That is the whole loop — the agent writes, the note
+      // lands unverified, and approving it is what earns the human stamp.
+      const entry = allEntriesRef.current.find((e) => e.path === path);
+      const patch: Record<string, unknown> = { [ORGANIZED_KEY]: true };
+      if (entry !== undefined && isAgentWritten(entry)) {
+        Object.assign(
+          patch,
+          verifyPatch(entry, `human:${useUiStore.getState().actorId}`, new Date().toISOString()),
+        );
+      }
+      await patchFrontmatter(path, patch);
 
       // Only steer the selection when the note we organized was the one on
       // screen — organizing from a row while reading another must not yank

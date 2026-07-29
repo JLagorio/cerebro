@@ -88,6 +88,8 @@ export function KnowledgePage() {
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const actorId = useUiStore((s) => s.actorId);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -250,9 +252,12 @@ export function KnowledgePage() {
             today={today}
             verifying={verifying}
             onVerify={verify}
-            onAskAgent={() =>
-              toast('The AI panel arrives in M6 — it will open with this concept as context.')
-            }
+            onAskAgent={() => {
+              setAiPanelOpen(true);
+              setPendingPrompt(
+                `Review the knowledge concept at ${selected.entry.path} ("${selected.title}"). Check it against its sources, then revise it with write_concept if it is wrong, stale, or thin. Explain what you changed and why.`,
+              );
+            }}
           />
         </div>
       )}

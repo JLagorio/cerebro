@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { OrganizeProposal, PermissionMode } from '@/agent/types';
 import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links';
@@ -44,6 +45,18 @@ interface UiState {
    * verify a concept. Per device — it records who reviewed, not who owns. */
   actorId: string;
   setActorId(v: string): void;
+  // --- Local agent (M6) ---
+  aiPanelOpen: boolean;
+  setAiPanelOpen(v: boolean): void;
+  agentPermissionMode: PermissionMode;
+  setAgentPermissionMode(v: PermissionMode): void;
+  /** A prompt handed to the panel from elsewhere ("Ask the agent to revise"). */
+  agentPendingPrompt: string | null;
+  setAgentPendingPrompt(v: string | null): void;
+  /** Filings the agent has suggested but not applied (M7), keyed by path. */
+  proposals: Record<string, OrganizeProposal>;
+  addProposal(p: OrganizeProposal): void;
+  dismissProposal(path: string): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
@@ -60,6 +73,8 @@ const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
 const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
 const ACTOR_ID_KEY = 'cerebro.actorId';
+const AI_PANEL_KEY = 'cerebro.aiPanelOpen';
+const AGENT_MODE_KEY = 'cerebro.agentPermissionMode';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -106,6 +121,13 @@ function storeString(key: string, v: string): void {
 function loadPanelTab(): DocPanelTab {
   const v = loadString(PANEL_TAB_KEY, 'outline');
   return v === 'info' || v === 'links' ? v : 'outline';
+}
+
+function loadPermissionMode(): PermissionMode {
+  // Defaults to vault_edits, not power: shell access should be a choice the
+  // user makes, never one they inherit.
+  const v = loadString(AGENT_MODE_KEY, 'vault_edits');
+  return v === 'read_only' || v === 'power' ? v : 'vault_edits';
 }
 
 function loadInboxPeriod(): InboxPeriod {
@@ -196,6 +218,28 @@ export const useUiStore = create<UiState>((set) => ({
     storeString(ACTOR_ID_KEY, v);
     set({ actorId: v });
   },
+
+  aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
+  setAiPanelOpen: (v) => {
+    storeString(AI_PANEL_KEY, String(v));
+    set({ aiPanelOpen: v });
+  },
+  agentPermissionMode: loadPermissionMode(),
+  setAgentPermissionMode: (v) => {
+    storeString(AGENT_MODE_KEY, v);
+    set({ agentPermissionMode: v });
+  },
+  agentPendingPrompt: null,
+  setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+
+  proposals: {},
+  addProposal: (p) => set((s) => ({ proposals: { ...s.proposals, [p.path]: p } })),
+  dismissProposal: (path) =>
+    set((s) => {
+      const next = { ...s.proposals };
+      delete next[path];
+      return { proposals: next };
+    }),
 
   toasts: [],
   toast: (message) =>

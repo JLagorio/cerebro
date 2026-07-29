@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { AgentActions } from '@/agent/AgentActions';
+import { AiPanel } from '@/agent/AiPanel';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
 import { createView } from '@/app/viewActions';
@@ -99,6 +101,7 @@ function App() {
   const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
   const [booted, setBooted] = useState(false);
+  const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
   const [newViewOpen, setNewViewOpen] = useState(false);
@@ -108,6 +111,13 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         useUiStore.getState().setQuickOpen(true);
+      }
+      // Cmd+J toggles the assistant (M6) — the panel is a companion to
+      // whatever surface you are on, not a surface of its own.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        const ui = useUiStore.getState();
+        ui.setAiPanelOpen(!ui.aiPanelOpen);
       }
       // Quick capture (M4): writes an untyped note and opens the Inbox on
       // it, so capture never costs more than the keystroke.
@@ -160,6 +170,7 @@ function App() {
           <CanvasOutlet />
         </div>
       </div>
+      {aiPanelOpen && <AiPanel />}
       {newViewOpen && (
         <ViewSettingsDialog
           initial={newViewDefinition(null, schema)}
@@ -180,6 +191,7 @@ function App() {
       <QuickOpen />
       <ToastHost />
       <RemindersHost />
+      <AgentActions />
     </div>
   );
 }

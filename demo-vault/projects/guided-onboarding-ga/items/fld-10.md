@@ -1,11 +1,13 @@
 ---
 type: Work item
 key: FLD-10
-status: backlog
+status: todo
 priority: medium
 assignee: "[[priya-nair]]"
-due: 2026-08-20
-estimate: M
+due: 2026-08-28
+estimate: S
+epic: "[[epic-first-week-activation]]"
 ---
 
-# Localize first-run copy (ES)
+# Day-3 nudge for crews with no completed job
+

@@ -202,6 +202,41 @@ pub fn create_note(
     Ok(rel)
 }
 
+/// Create or REPLACE a knowledge concept at an exact path (M6).
+///
+/// Unlike `create_note` this does not uniquify the filename: a concept has a
+/// stable identity (its path is its OKF concept ID), so an agent revising one
+/// must overwrite it rather than leave `churn-2.md` beside `churn.md`.
+/// Intermediate directories are created — the agent organizes the bundle.
+pub fn write_concept(
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+) -> Result<(), String> {
+    let target = safe_join(vault, rel)?;
+    if !rel.ends_with(".md") {
+        return Err(format!("a concept path must end in .md: {rel}"));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{rel}: {e}"))?;
+    }
+    let mut mapping = serde_yaml::Mapping::new();
+    for (k, v) in frontmatter {
+        if v.is_null() {
+            continue;
+        }
+        mapping.insert(serde_yaml::Value::String(k.clone()), json_to_yaml(v));
+    }
+    let block = serialize_mapping(&mapping)?;
+    let body = body.trim_end();
+    let content = match block {
+        Some(b) => format!("---\n{b}---\n\n{body}\n"),
+        None => format!("{body}\n"),
+    };
+    write_file(&target, &content)
+}
+
 /// Replace the H1 line that `parse::extract_h1_title` would read the title
 /// from (fenced/indented code lines are never the H1), or prepend one when
 /// the body has no real H1. Only the H1 line itself is spliced; every other

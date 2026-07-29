@@ -28,18 +28,24 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
 
   await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
-  await expect(page.getByTestId('concept-row')).toHaveCount(5);
+  // Counts come from the seed and change whenever it does. Assert the
+  // relationships instead: the review queue is a proper subset of the bundle.
+  const all = await page.getByTestId('concept-row').count();
+  expect(all).toBeGreaterThan(2);
 
   // -- The review queue is the unverified/stale/deprecated set -----------
   await page.getByRole('tab', { name: /Needs review/ }).click();
   const queued = page.getByTestId('concept-row');
-  await expect(queued).toHaveCount(3);
-  await expect(queued.filter({ hasText: 'Onboarding completion' })).toHaveCount(0);
+  const queuedCount = await queued.count();
+  expect(queuedCount).toBeGreaterThan(0);
+  expect(queuedCount).toBeLessThan(all);
+  // Human-reviewed, in date, not deprecated — nothing to act on.
+  await expect(queued.filter({ hasText: 'The offline guarantee' })).toHaveCount(0);
 
   // -- Provenance is shown, not summarised into a score ------------------
   await queued.filter({ hasText: 'Sync error rate' }).click();
   const panel = page.getByTestId('knowledge-panel');
-  await expect(panel).toContainText('claude-code/2.0');
+  await expect(panel).toContainText('claude-code');
   await expect(panel).toContainText('Nobody yet');
   await expect(panel).toContainText('42,000 uses');
   await expect(panel.getByTestId('trust-chip')).toHaveAttribute('data-tier', 'unverified');
@@ -54,13 +60,13 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   // Still queued — and that is the point. Verification and freshness are
   // INDEPENDENT signals: confirming a claim does not move its stale_after
   // date, so a reviewed-but-expired concept still wants attention.
-  await expect(page.getByTestId('concept-row')).toHaveCount(3);
+  await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount);
   await expect(panel).toContainText('Stale since 2026-07-26');
 
   // A concept whose only flag was "unverified" does leave the queue.
   await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
   await page.getByRole('button', { name: /^Verify$/ }).click();
-  await expect(page.getByTestId('concept-row')).toHaveCount(2);
+  await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount - 1);
 });
 
 test('knowledge: the bundle stays out of the surfaces you author', async ({ page }) => {

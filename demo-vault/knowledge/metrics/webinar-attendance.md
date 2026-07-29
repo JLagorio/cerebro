@@ -20,9 +20,7 @@ sources:
 
 # Deprecated
 
-The team is replacing scheduled webinars with recurring office hours, which
-have no registration step — so this ratio has no denominator under the new
-format. Kept for the historical series and for the links that point here.
+The team is replacing scheduled webinars with recurring office hours, which have no registration step — so this ratio has no denominator under the new format. Kept for the historical series and for the links that point here.
 
 Use [Onboarding completion](/metrics/onboarding-completion.md) instead.
 

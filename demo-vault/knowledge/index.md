@@ -1,7 +1,6 @@
 # Knowledge
 
-What the agent has learned about how this team works. Every concept records
-where it came from and who has confirmed it.
+What the assistant has learned about how this team works. Every concept records where it came from and who has confirmed it.
 
 * [Metrics](metrics/) - the numbers the team steers by
 * [Playbooks](playbooks/) - what to do when something happens

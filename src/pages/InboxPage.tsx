@@ -12,7 +12,9 @@ import {
   organizeChecklist,
   type InboxPeriod,
 } from '@/engine/inbox';
+import { isAgentWritten } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
+import { ProposalCard } from '@/agent/ProposalCard';
 import type { Entry, Schema } from '@/engine/types';
 import { useInboxQueue, type InboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
@@ -107,6 +109,9 @@ function OrganizePanel({
   queue: InboxQueue;
 }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+  const proposal = useUiStore((s) => s.proposals[entry.path]);
+  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
 
   const typeOptions = [
     { value: '', label: 'No type' },
@@ -124,6 +129,7 @@ function OrganizePanel({
       <div className="pb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
         Organize
       </div>
+      {proposal !== undefined && <ProposalCard proposal={proposal} />}
       <OrganizeChecklist entry={entry} schema={schema} />
 
       <div className="mt-4 flex items-center gap-2">
@@ -150,6 +156,20 @@ function OrganizePanel({
       )}
 
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
+        {proposal === undefined && (
+          <Button
+            variant="secondary"
+            icon="sparkles"
+            onClick={() => {
+              setAiPanelOpen(true);
+              setPendingPrompt(
+                `Look at the Inbox capture at ${entry.path} and propose how to file it. Use propose_organize.`,
+              );
+            }}
+          >
+            Ask the agent to file it
+          </Button>
+        )}
         <Button variant="primary" icon="circle-check" onClick={() => void queue.organize(entry.path)}>
           Mark organized
         </Button>
@@ -314,6 +334,17 @@ export function InboxPage() {
                   )}
                   <span className="flex items-center gap-2 text-[11px] text-[var(--n-400)]">
                     <span>{e.createdAt.slice(0, 10)}</span>
+                    {/* M7: what the agent wrote is labelled, so the review
+                        queue never hides machine output among your own. */}
+                    {isAgentWritten(e) && (
+                      <span
+                        data-testid="from-ai"
+                        className="inline-flex items-center gap-1 text-[var(--synapse-600)]"
+                      >
+                        <Icon name="sparkles" size={10} />
+                        AI
+                      </span>
+                    )}
                     {e.type !== null && (
                       <span className="inline-flex items-center gap-1">
                         <Icon
