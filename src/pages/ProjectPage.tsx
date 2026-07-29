@@ -8,9 +8,9 @@ import { resolveCollection, sortEntries } from '@/engine/collections';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Presentation, Selection, ViewFile } from '@/engine/types';
 import { serializeView } from '@/engine/views';
+import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
 import { saveView } from '@/lib/ipc';
-import { distillPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -287,11 +287,13 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
           {/* M8.3 — passive by design: it sits under the overview and waits
               to be scrolled to. Nothing about this project's knowledge is
               worth interrupting the page for. */}
-          <RelatedKnowledge
-            entry={project}
-            askPrompt={distillPrompt(project.path, project.title)}
-            askLabel="Learn from this project"
-          />
+          <RelatedKnowledge entry={project} />
+          {/* The overview is a note like any other, so it can be committed
+              like any other (M8.5) — and the button that does it lives with
+              the record of what the last commit produced. */}
+          <div className="mt-6">
+            <KnowledgeCommit entry={project} variant="section" />
+          </div>
         </div>
       ) : tab.kind === 'pages' && project !== null && selection.kind === 'project' ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-3">

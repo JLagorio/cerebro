@@ -12,7 +12,7 @@ import {
   organizeChecklist,
   type InboxPeriod,
 } from '@/engine/inbox';
-import { isAgentWritten } from '@/engine/okf';
+import { conceptsFrom, isAgentWritten, listConcepts } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { ProposalCard } from '@/agent/ProposalCard';
 import type { Entry, Schema } from '@/engine/types';
@@ -24,8 +24,10 @@ import {
   ingestOne,
   INGESTIBLE_EXTENSIONS,
 } from '@/lib/ingest';
-import { distillPrompt, fetchRefsPrompt, organizePrompt } from '@/lib/prompts';
+import { fetchRefsPrompt, organizePrompt } from '@/lib/prompts';
 import { parseIssuePrefixes, uncachedRefs } from '@/engine/ingest';
+import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
+import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -148,14 +150,15 @@ function OrganizePanel({
       aria-label="Organize"
       className="flex w-[320px] flex-none flex-col overflow-y-auto border-l border-[var(--n-200)] px-4 pb-5 pt-3.5"
     >
-      <div className="pb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
-        Organize
-      </div>
-      {proposal !== undefined && <ProposalCard proposal={proposal} />}
-      <OrganizeChecklist entry={entry} schema={schema} />
-
-      <div className="mt-4 flex items-center gap-2">
-        <span className="w-24 flex-none text-[12px] text-[var(--n-500)]">Type</span>
+      {/* Type leads, and the type's own fields follow it, because assigning a
+          type is the whole job here — everything else on this panel is either
+          advice about that decision or something to do once it is made. The
+          checklist used to sit above it, which put a list of instructions
+          between you and the one control you came for. */}
+      <div className="flex items-center gap-2">
+        <span className="flex-none text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+          Type
+        </span>
         <Select
           size="sm"
           options={typeOptions}
@@ -177,51 +180,64 @@ function OrganizePanel({
         </div>
       )}
 
-      <div className="mt-auto flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
-        {proposal === undefined && (
-          <Button
-            variant="secondary"
-            icon="sparkles"
-            onClick={() => {
-              setAiPanelOpen(true);
-              setPendingPrompt(organizePrompt(entry.path));
-            }}
-          >
-            Ask the agent to file it
-          </Button>
-        )}
-        {/* M8.2 — the distil step. Filing decides where a capture lives;
-            this decides what the vault LEARNS from it, and the two are
+      {proposal !== undefined && (
+        <div className="mt-3">
+          <ProposalCard proposal={proposal} />
+        </div>
+      )}
+
+      <div className="mt-auto flex flex-col gap-3 pt-6">
+        {/* M8.5 — what the vault kept from this capture. Filing decides where
+            it lives; this decides what is LEARNED from it, and the two are
             independent: material worth keeping knowledge from is often
             material you would otherwise file and never reread. */}
-        {unresolved.length > 0 && (
+        <div className="border-t border-[var(--n-100)] pt-3">
+          <KnowledgeCommit entry={entry} />
+        </div>
+
+        <div className="border-t border-[var(--n-100)] pt-3">
+          <div className="pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+            Before you file
+          </div>
+          <OrganizeChecklist entry={entry} schema={schema} />
+        </div>
+
+        <div className="flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
+          {proposal === undefined && (
+            <Button
+              variant="secondary"
+              icon="sparkles"
+              onClick={() => {
+                setAiPanelOpen(true);
+                setPendingPrompt(organizePrompt(entry.path));
+              }}
+            >
+              Ask the agent to file it
+            </Button>
+          )}
+          {unresolved.length > 0 && (
+            <Button
+              variant="secondary"
+              icon="download"
+              onClick={() => {
+                setAiPanelOpen(true);
+                setPendingPrompt(fetchRefsPrompt(entry.path, unresolved.map((r) => r.id)));
+              }}
+            >
+              {`Fetch ${unresolved.length} reference${unresolved.length === 1 ? '' : 's'}`}
+            </Button>
+          )}
           <Button
-            variant="secondary"
-            icon="download"
-            onClick={() => {
-              setAiPanelOpen(true);
-              setPendingPrompt(fetchRefsPrompt(entry.path, unresolved.map((r) => r.id)));
-            }}
+            variant="primary"
+            icon="circle-check"
+            onClick={() => void queue.organize(entry.path)}
           >
-            {`Fetch ${unresolved.length} reference${unresolved.length === 1 ? '' : 's'}`}
+            Mark organized
           </Button>
-        )}
-        <Button
-          variant="secondary"
-          icon="brain"
-          onClick={() => {
-            setAiPanelOpen(true);
-            setPendingPrompt(distillPrompt(entry.path, entry.title));
-          }}
-        >
-          Learn from this
-        </Button>
-        <Button variant="primary" icon="circle-check" onClick={() => void queue.organize(entry.path)}>
-          Mark organized
-        </Button>
-        <span className="text-center text-[10.5px] text-[var(--n-400)]">
-          <kbd className="[font-family:var(--font-mono)]">⌘E</kbd> · removes it from the Inbox
-        </span>
+          <span className="text-center text-[10.5px] text-[var(--n-400)]">
+            <kbd className="[font-family:var(--font-mono)]">⌘E</kbd> · removes it from the Inbox
+          </span>
+        </div>
       </div>
     </aside>
   );
@@ -238,6 +254,10 @@ export function InboxPage() {
   const navigate = useNavStore((s) => s.navigate);
   const queue = useInboxQueue(period);
   const counts = useMemo(() => inboxCounts(entries), [entries]);
+  // Which captures the bundle has already learned from. Computed once for the
+  // whole queue rather than per row: the answer is a scan of every concept's
+  // sources, and doing that inside the map is the same work N times over.
+  const concepts = useMemo(() => listConcepts(entries, todayIso()), [entries]);
   const fileInput = useRef<HTMLInputElement>(null);
   // Depth, not a boolean: dragging over a child fires dragleave on the parent,
   // so a flag would flicker the overlay off every time the cursor crossed a row.
@@ -430,6 +450,7 @@ export function InboxPage() {
               // already satisfies the membership rule — so the counts say 3
               // while 4 rows show. Mark it, or that reads as a bug.
               const ready = !inInbox(e);
+              const learned = conceptsFrom(e.path, concepts).length;
               return (
                 <button
                   key={e.path}
@@ -495,6 +516,19 @@ export function InboxPage() {
                           color={typeStyle(e.type, schema).color ?? 'var(--n-400)'}
                         />
                         {e.type}
+                      </span>
+                    )}
+                    {/* M8.5 — the base took something from this one. Shown on
+                        the row because "did I already learn from that?" is a
+                        question you ask while scanning, not after opening. */}
+                    {learned > 0 && (
+                      <span
+                        data-testid="row-committed"
+                        title={`${learned} concept${learned === 1 ? '' : 's'} distilled from this`}
+                        className="inline-flex items-center gap-1 text-[var(--cortex-600)]"
+                      >
+                        <Icon name="brain" size={10} />
+                        {learned}
                       </span>
                     )}
                   </span>

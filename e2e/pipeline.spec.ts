@@ -87,6 +87,43 @@ test('distil: the ingested transcript and its cached ticket are cited by a conce
   await expect(panel.getByTestId('about-entity')).toContainText(['Phoenix warehouse rollout']);
 });
 
+test('commit: any note says what the base took from it, not just Inbox captures', async ({
+  page,
+}) => {
+  await boot(page);
+
+  // A cached ticket is not an Inbox capture and never passed through the
+  // queue, but the concept cites it — so it is committed, and its own page
+  // says so. This is the whole point: the base grows from any note, and every
+  // note can answer whether it has already been read.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('phx-421');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'Rehearse' }).first().click();
+
+  const panel = page.getByTestId('doc-side-panel');
+  await panel.getByTestId('doc-panel-tab-knowledge').click();
+  const commit = panel.getByTestId('knowledge-commit');
+  await expect(commit).toHaveAttribute('data-state', 'committed');
+  await expect(commit.getByTestId('committed-concept')).toContainText(['Pick queue drain time']);
+
+  // Following it lands on the concept it produced.
+  await commit.getByTestId('committed-concept').first().click();
+  await expect(page.getByTestId('concept-body')).toContainText('40 minutes in staging');
+
+  // The same fact, visible without opening anything: the transcript row in
+  // the queue carries what was distilled from it.
+  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  const row = page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`);
+  await expect(row.getByTestId('row-committed')).toHaveText('1');
+
+  // And a capture nothing has been learned from says that plainly, with the
+  // action that would change it — no queue, no badge, no nagging.
+  await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
+  const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');
+  await expect(organize).toHaveAttribute('data-state', 'uncommitted');
+  await expect(organize.getByRole('button', { name: 'Learn from this' })).toBeVisible();
+});
+
 test('augment: knowledge surfaces beside the PRD, and only when asked', async ({ page }) => {
   await boot(page);
 

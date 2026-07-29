@@ -1,0 +1,128 @@
+import { useMemo } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Icon } from '@/components/ui/Icon';
+import { commitOf, listConcepts, type CommitState } from '@/engine/okf';
+import type { Entry } from '@/engine/types';
+import { relativeDay } from '@/knowledge/KnowledgePanel';
+import { distillPrompt } from '@/lib/prompts';
+import { todayIso } from '@/lib/templates';
+import { useNavStore } from '@/stores/navStore';
+import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
+
+/**
+ * Whether THIS note has been committed to the knowledge base, and the button
+ * that commits it (M8.5).
+ *
+ * Two things were wrong before. Distilling was reachable only from the Inbox,
+ * so a note that arrived any other way — written in place, filed months ago,
+ * fetched by a connector — could never be learned from, which quietly meant
+ * the base could only ever grow from the newest thing you dropped in. And
+ * nothing anywhere said what the base had already taken, so committing felt
+ * like shouting into a folder.
+ *
+ * So this lives beside the note rather than in one screen, and it always
+ * answers the same question first: what did the vault keep from this? The
+ * answer is read out of the bundle's own `sources`, so it is the concepts
+ * themselves saying where they came from.
+ */
+
+const HEADINGS: Record<CommitState, { icon: string; color: string; label: string }> = {
+  uncommitted: { icon: 'circle-dashed', color: 'var(--n-400)', label: 'Not in the knowledge base' },
+  committed: { icon: 'circle-check', color: 'var(--success-600)', label: 'In the knowledge base' },
+  behind: { icon: 'clock-alert', color: 'var(--warn-600)', label: 'Edited since it was learned' },
+};
+
+export function KnowledgeCommit({
+  entry,
+  variant = 'panel',
+}: {
+  entry: Entry;
+  /** 'section' sits in a page; 'panel' is the narrower side-panel variant. */
+  variant?: 'section' | 'panel';
+}) {
+  const entries = useVaultStore((s) => s.entries);
+  const navigate = useNavStore((s) => s.navigate);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+
+  const today = todayIso();
+  const commit = useMemo(
+    () => commitOf(entry, listConcepts(entries, today)),
+    [entry, entries, today],
+  );
+
+  const heading = HEADINGS[commit.state];
+  const learned = relativeDay(commit.at, today);
+
+  const distill = () => {
+    setAiPanelOpen(true);
+    setPendingPrompt(distillPrompt(entry.path, entry.title));
+  };
+
+  return (
+    <section
+      data-testid="knowledge-commit"
+      data-state={commit.state}
+      data-count={commit.concepts.length}
+      className={variant === 'panel' ? '' : 'mt-8 border-t border-[var(--n-100)] pt-5'}
+    >
+      <div className="flex items-center gap-2">
+        <Icon name={heading.icon} size={14} color={heading.color} />
+        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+          {heading.label}
+        </h3>
+        {learned !== null && (
+          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+            {learned}
+          </span>
+        )}
+      </div>
+
+      {commit.concepts.length === 0 ? (
+        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-[var(--n-500)]">
+          Nothing has been distilled from this note yet.
+        </p>
+      ) : (
+        <ul className="m-0 mt-2 flex list-none flex-col gap-px p-0">
+          {commit.concepts.map((concept) => (
+            <li key={concept.entry.path}>
+              <button
+                type="button"
+                data-testid="committed-concept"
+                data-path={concept.entry.path}
+                onClick={() =>
+                  navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path })
+                }
+                className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
+              >
+                <Icon name="brain" size={12} color="var(--cortex-500)" />
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--n-800)]">
+                  {concept.title}
+                </span>
+                {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {commit.state === 'behind' && (
+        <p className="m-0 mt-1.5 px-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+          The bundle is still reading the version from {learned}.
+        </p>
+      )}
+
+      <div className="mt-2.5">
+        <Button
+          variant={commit.state === 'committed' ? 'ghost' : 'secondary'}
+          size="sm"
+          icon="brain"
+          onClick={distill}
+        >
+          {commit.state === 'uncommitted' ? 'Learn from this' : 'Learn from it again'}
+        </Button>
+      </div>
+    </section>
+  );
+}

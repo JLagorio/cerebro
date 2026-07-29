@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commitOf,
   conceptsAbout,
+  conceptsFrom,
   footnoteRefs,
   isConcept,
   isKnowledgePath,
@@ -338,6 +340,77 @@ describe('subjects', () => {
     const entries = [project, about('knowledge/a.md', ['phoenix']), about('knowledge/b.md', ['other'])];
     const found = conceptsAbout('projects/phoenix/project.md', listConcepts(entries, TODAY), entries);
     expect(found.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
+  });
+});
+
+describe('commitOf — has this note been committed to the knowledge base?', () => {
+  const from = (path: string, resources: string[], at = '2026-07-28T10:00:00Z') =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      properties: {
+        sources: resources.map((resource, i) => ({ id: `s${i}`, resource })),
+        generated: { by: 'claude-code', at },
+      },
+    });
+
+  const note = (patch = {}) =>
+    makeEntry({ path: 'inbox/standup.md', filename: 'standup.md', ...patch });
+
+  it('is uncommitted when nothing in the bundle cites it', () => {
+    const concepts = listConcepts([from('knowledge/a.md', ['inbox/other.md'])], TODAY);
+    expect(commitOf(note(), concepts)).toMatchObject({ state: 'uncommitted', at: null });
+  });
+
+  it('finds the concepts distilled from it, however the resource was written', () => {
+    const concepts = listConcepts(
+      [from('knowledge/a.md', ['/inbox/standup.md']), from('knowledge/b.md', ['inbox/standup.md'])],
+      TODAY,
+    );
+    const commit = commitOf(note(), concepts);
+    expect(commit.state).toBe('committed');
+    expect(commit.concepts.map((c) => c.entry.path)).toEqual(['knowledge/a.md', 'knowledge/b.md']);
+  });
+
+  it('reports the newest learning, not the first one found', () => {
+    const concepts = listConcepts(
+      [
+        from('knowledge/a.md', ['inbox/standup.md'], '2026-07-20T09:00:00Z'),
+        from('knowledge/b.md', ['inbox/standup.md'], '2026-07-26T09:00:00Z'),
+      ],
+      TODAY,
+    );
+    expect(commitOf(note(), concepts).at).toBe('2026-07-26T09:00:00Z');
+  });
+
+  it('falls behind when the note is edited after it was learned from', () => {
+    const concepts = listConcepts([from('knowledge/a.md', ['inbox/standup.md'])], TODAY);
+    const edited = note({ modifiedAt: '2026-07-29T12:00:00Z' });
+    expect(commitOf(edited, concepts).state).toBe('behind');
+    // Editing it BEFORE the distillation is the ordinary case, not a warning.
+    expect(commitOf(note({ modifiedAt: '2026-07-27T12:00:00Z' }), concepts).state).toBe('committed');
+  });
+
+  it('does not manufacture work from an unstamped concept', () => {
+    // No `generated` at all: nothing to compare the edit against, so the
+    // commit reads as current rather than permanently behind.
+    const unstamped = makeEntry({
+      path: 'knowledge/a.md',
+      filename: 'a.md',
+      properties: { sources: [{ id: 's', resource: 'inbox/standup.md' }] },
+    });
+    const commit = commitOf(note({ modifiedAt: '2027-01-01T00:00:00Z' }), listConcepts([unstamped], TODAY));
+    expect(commit.state).toBe('committed');
+    expect(commit.at).toBeNull();
+  });
+
+  it('ignores a source entry that names no resource', () => {
+    const junk = makeEntry({
+      path: 'knowledge/a.md',
+      filename: 'a.md',
+      properties: { sources: [{ id: 'orphan' }] },
+    });
+    expect(conceptsFrom('inbox/standup.md', listConcepts([junk], TODAY))).toEqual([]);
   });
 });
 

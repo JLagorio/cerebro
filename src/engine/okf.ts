@@ -310,6 +310,62 @@ export function conceptsAbout(path: string, concepts: Concept[], entries: Entry[
   );
 }
 
+// --- Committed to knowledge (M8.5) -----------------------------------------
+
+/** `sources` may cite `/inbox/x.md` or `inbox/x.md`; both name the same note. */
+const normalizeResource = (resource: string): string => resource.replace(/^\.?\//, '');
+
+/**
+ * The concepts distilled FROM this note — `sources` read backwards.
+ *
+ * `about` answers "what is this knowledge of"; `sources` answers "what was it
+ * read from", and only the second can tell you whether a note has been
+ * committed to the knowledge base yet. Derived rather than stamped on purpose:
+ * a `distilled_at` in the note's frontmatter is a claim that survives the
+ * concept being deleted, whereas this cannot say a thing was learned unless
+ * the learning is still there to point at.
+ */
+export function conceptsFrom(path: string, concepts: Concept[]): Concept[] {
+  return concepts.filter((c) => c.sources.some((s) => normalizeResource(s.resource) === path));
+}
+
+export type CommitState =
+  /** Nothing in the bundle cites it. */
+  | 'uncommitted'
+  /** Committed, and the note has not changed since. */
+  | 'committed'
+  /** Committed, but edited afterwards — what was learned is behind the note. */
+  | 'behind';
+
+export interface Commit {
+  concepts: Concept[];
+  state: CommitState;
+  /** Newest `generated.at` among them — when this note was last learned from. */
+  at: string | null;
+}
+
+/**
+ * Whether a note has been committed to the knowledge base, and whether that
+ * commit is still current.
+ *
+ * `behind` is the state that makes the base feel alive: editing a note you
+ * already distilled leaves the bundle holding an older reading of it, and
+ * saying so is how re-distilling becomes an obvious act rather than a chore
+ * nobody remembers. It never nags — the surfaces show it, they do not raise it.
+ */
+export function commitOf(entry: Entry, concepts: Concept[]): Commit {
+  const from = conceptsFrom(entry.path, concepts);
+  if (from.length === 0) return { concepts: from, state: 'uncommitted', at: null };
+  const at = from.reduce<string | null>((newest, c) => {
+    const stamped = c.generated?.at ?? null;
+    return stamped !== null && (newest === null || stamped > newest) ? stamped : newest;
+  }, null);
+  // An unstamped concept cannot be compared against, so it counts as current
+  // rather than permanently behind — absent fields never manufacture work.
+  const behind = at !== null && entry.modifiedAt > at;
+  return { concepts: from, state: behind ? 'behind' : 'committed', at };
+}
+
 /**
  * What the bundle knows that bears on THIS note (M8.3).
  *
