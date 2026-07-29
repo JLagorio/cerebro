@@ -1,6 +1,7 @@
 import { Avatar } from '@/components/ui/Avatar';
 import { Icon } from '@/components/ui/Icon';
 import { CreateMenu } from '@/app/CreateMenu';
+import { DemoBadge } from '@/app/DemoBadge';
 import { useUiStore } from '@/stores/uiStore';
 
 export function Topbar() {
@@ -11,6 +12,7 @@ export function Topbar() {
       <span className="text-[16px] font-bold tracking-[-0.02em]">
         cerebro<span className="text-[var(--synapse-500)]">.</span>
       </span>
+      <DemoBadge />
       <div className="flex flex-1 justify-center">
         <button
           type="button"

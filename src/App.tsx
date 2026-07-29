@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
+import { isDemoMode } from '@/lib/runtime';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -80,6 +81,17 @@ function VaultChooser() {
           A vault is a folder of markdown files — projects, docs, and work items live there as
           plain text.
         </p>
+        {/* In browser dev both buttons land on the same in-memory mock, so
+            "Choose folder…" appears to do nothing whichever folder you pick.
+            Say so here rather than let it read as a broken picker. */}
+        {isDemoMode() ? (
+          <p className="m-0 rounded-lg border border-[var(--warn-500)] bg-[var(--warn-50)] px-3 py-2 text-[12px] leading-[17px] text-[var(--warn-700)]">
+            Demo mode: this is the browser dev server, so both buttons open the same mock vault
+            and the assistant is a canned script. Run{' '}
+            <span className="[font-family:var(--font-mono)]">pnpm dev:app</span> to open your own
+            folder with the real Claude Code CLI.
+          </p>
+        ) : null}
         {(error ?? pickError) ? (
           <p className="m-0 text-[12px] text-[var(--danger-500)]">{error ?? pickError}</p>
         ) : null}

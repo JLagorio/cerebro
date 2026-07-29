@@ -5,6 +5,7 @@ import type { Entry, Scalar, Schema, ViewFile } from '@/engine/types';
 import { parseViewYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
 import { extractWikilinks } from '@/lib/mockParse';
+import { inTauri } from '@/lib/runtime';
 import { useUiStore } from '@/stores/uiStore';
 
 export interface VaultState {
@@ -23,10 +24,6 @@ export interface VaultState {
     frontmatter: Record<string, unknown>;
     body?: string;
   }): Promise<string>;
-}
-
-function inTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
 // Re-derive an entry's properties/relationships from an optimistic patch:

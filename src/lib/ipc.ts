@@ -4,10 +4,7 @@
 // the in-memory mock in mockIpc.ts. Signatures follow the plan's IPC table.
 import type { Entry } from '@/engine/types';
 import * as mock from './mockIpc';
-
-function inTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
+import { inTauri } from './runtime';
 
 async function invokeTauri<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');

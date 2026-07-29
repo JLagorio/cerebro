@@ -1,3 +1,4 @@
+import { inTauri } from '@/lib/runtime';
 import { runMockAgent, type MockRun } from './mockAgent';
 import type { AgentEvent, AgentStatus, McpInfo, UiAction } from './types';
 
@@ -6,10 +7,6 @@ import type { AgentEvent, AgentStatus, McpInfo, UiAction } from './types';
  * the Rust commands and subscribe to the event channel; in the browser they
  * drive the scripted mock so the panel is exercisable in dev and in tests.
  */
-
-function inTauri(): boolean {
-  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
 
 async function invokeTauri<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   const { invoke } = await import('@tauri-apps/api/core');

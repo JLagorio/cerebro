@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:app": "./scripts/dev-app.sh",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest",
