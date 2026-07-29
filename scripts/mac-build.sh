@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 
 # This Mac's own architecture by default: building for the machine you are
 # standing at compiles the dependency tree once instead of twice. --universal
-# is for producing something to hand to someone else.
+# builds the one that also runs on the other kind of Mac.
 case "$(uname -m)" in
   arm64) TARGET="aarch64-apple-darwin" ;;
   *)     TARGET="x86_64-apple-darwin" ;;
