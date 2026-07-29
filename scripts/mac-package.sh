@@ -6,13 +6,16 @@
 # the same steps. Signing happens here, before the DMG is assembled, so the
 # copy a user drags to Applications is the signed one.
 #
-#   usage: scripts/mac-package.sh <path to Cerebro.app>
+#   usage: scripts/mac-package.sh <path to Cerebro.app> [dmg name]
 #
 set -euo pipefail
 
-APP="${1:?usage: scripts/mac-package.sh <path to Cerebro.app>}"
+APP="${1:?usage: scripts/mac-package.sh <path to Cerebro.app> [dmg name]}"
+# The per-architecture builds each produce a DMG, so the name is a parameter —
+# two files called Cerebro.dmg would be one file by the time they were uploaded.
+NAME="${2:-Cerebro}"
 OUT_DIR="dist-mac"
-DMG="$OUT_DIR/Cerebro.dmg"
+DMG="$OUT_DIR/$NAME.dmg"
 
 if [ ! -d "$APP" ]; then
   echo "No app bundle at $APP — build it first (scripts/mac-build.sh)." >&2
@@ -34,7 +37,9 @@ codesign --force --deep --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict "$APP"
 
 echo "==> Building $DMG"
-rm -rf "$OUT_DIR"
+# Only this DMG is cleared, not the whole directory — a local universal build
+# and an architecture-specific one can coexist.
+rm -f "$DMG"
 mkdir -p "$OUT_DIR"
 
 STAGE="$(mktemp -d)"

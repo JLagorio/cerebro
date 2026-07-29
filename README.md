@@ -10,8 +10,9 @@ already installed on your machine, so no API key ever goes into the app.
 ### Download a build
 
 Every push builds a Mac app. Open the repository's **Actions** tab, pick the
-most recent **Mac app** run for your branch, and download the `Cerebro-macOS`
-artifact. Unzip it, open `Cerebro.dmg`, and drag Cerebro to Applications.
+most recent **Mac app** run for your branch, and download the artifact for your
+Mac — `Cerebro-AppleSilicon` for any M-series Mac, `Cerebro-Intel` for an older
+one. Unzip it, open the DMG, and drag Cerebro to Applications.
 
 Then clear the quarantine flag once:
 
@@ -26,8 +27,8 @@ normal cost of a build that is not notarized. Without it you get "Cerebro is
 damaged and can't be opened", which is macOS being unhelpfully worded about
 exactly this.
 
-The download is a universal binary — the same DMG runs on Apple Silicon and
-Intel.
+If you are not sure which Mac you have:  → About This Mac. "Apple M1"
+or later means Apple Silicon; anything reading "Intel" means the other one.
 
 ### Or build it yourself
 
@@ -37,10 +38,11 @@ cd cerebro
 ./scripts/mac-build.sh
 ```
 
-That checks the toolchain, builds a universal app, signs it, installs it to
-`/Applications`, and opens it. The first run compiles the Rust side and takes
-several minutes; later runs are much faster. Pass `--no-install` to build
-without touching `/Applications`.
+That checks the toolchain, builds for your Mac's own architecture, signs the
+app, installs it to `/Applications`, and opens it. The first run compiles the
+Rust side and takes a while; later runs are much faster. Pass `--no-install` to
+build without touching `/Applications`, or `--universal` to build something
+that runs on both Apple Silicon and Intel.
 
 You need Xcode command line tools (`xcode-select --install`),
 [Rust](https://rustup.rs), and Node 20+ with pnpm (`corepack enable`). The
@@ -97,7 +99,7 @@ Push a tag:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-That publishes a GitHub release with the DMG attached.
+That publishes a GitHub release with both DMGs attached.
 
 To produce a build that opens without the `xattr` step, you need an Apple
 Developer account. Set `MAC_SIGN_IDENTITY` to a Developer ID Application

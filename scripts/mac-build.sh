@@ -7,21 +7,32 @@
 # rather than assumes, because a build that fails halfway through with a linker
 # error is worse than one that never starts.
 #
-#   usage: scripts/mac-build.sh [--no-install]
+#   usage: scripts/mac-build.sh [--no-install] [--universal]
 #
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-TARGET="universal-apple-darwin"
-APP="src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"
+# This Mac's own architecture by default: building for the machine you are
+# standing at compiles the dependency tree once instead of twice. --universal
+# is for producing something to hand to someone else.
+case "$(uname -m)" in
+  arm64) TARGET="aarch64-apple-darwin" ;;
+  *)     TARGET="x86_64-apple-darwin" ;;
+esac
+
 INSTALL=1
-# Written as an `if` rather than `[ ... ] && INSTALL=0`: under `set -e` a
-# trailing `&&` whose test fails ends the script, which is every run without
-# the flag.
-if [ "${1:-}" = "--no-install" ]; then
-  INSTALL=0
-fi
+# Written as `if` rather than `[ ... ] && INSTALL=0`: under `set -e` a trailing
+# `&&` whose test fails ends the script, which is every run without the flag.
+for arg in "$@"; do
+  if [ "$arg" = "--no-install" ]; then
+    INSTALL=0
+  elif [ "$arg" = "--universal" ]; then
+    TARGET="universal-apple-darwin"
+  fi
+done
+
+APP="src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -37,14 +48,18 @@ command -v pnpm  >/dev/null || die "pnpm missing. Run: corepack enable && corepa
 # have to be installed. Adding one already present is a no-op. A Rust that did
 # not come from rustup (Homebrew's, say) has no way to add a target at all —
 # say so here rather than let the linker fail ten minutes in.
-command -v rustup >/dev/null || die "rustup missing (a non-rustup Rust cannot build a universal binary). Install it from https://rustup.rs"
-rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+command -v rustup >/dev/null || die "rustup missing (a non-rustup Rust cannot add build targets). Install it from https://rustup.rs"
+if [ "$TARGET" = "universal-apple-darwin" ]; then
+  rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+else
+  rustup target add "$TARGET" >/dev/null
+fi
 
 echo "==> Installing dependencies"
 pnpm install --frozen-lockfile
 
-echo "==> Building (first run compiles the Rust side and takes a while)"
-pnpm tauri build --target "$TARGET" --bundles app
+echo "==> Building for $TARGET (the first run compiles the Rust side and takes a while)"
+pnpm tauri build --ci --target "$TARGET" --bundles app
 
 ./scripts/mac-package.sh "$APP"
 
