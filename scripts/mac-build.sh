@@ -14,9 +14,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TARGET="universal-apple-darwin"
-APP="target/$TARGET/release/bundle/macos/Cerebro.app"
+APP="src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"
 INSTALL=1
-[ "${1:-}" = "--no-install" ] && INSTALL=0
+# Written as an `if` rather than `[ ... ] && INSTALL=0`: under `set -e` a
+# trailing `&&` whose test fails ends the script, which is every run without
+# the flag.
+if [ "${1:-}" = "--no-install" ]; then
+  INSTALL=0
+fi
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -29,7 +34,10 @@ command -v node  >/dev/null || die "Node missing. Install Node 20 or newer from 
 command -v pnpm  >/dev/null || die "pnpm missing. Run: corepack enable && corepack prepare pnpm@10 --activate"
 
 # A universal binary is built from both single-architecture targets, so both
-# have to be installed. Adding one already present is a no-op.
+# have to be installed. Adding one already present is a no-op. A Rust that did
+# not come from rustup (Homebrew's, say) has no way to add a target at all —
+# say so here rather than let the linker fail ten minutes in.
+command -v rustup >/dev/null || die "rustup missing (a non-rustup Rust cannot build a universal binary). Install it from https://rustup.rs"
 rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
 
 echo "==> Installing dependencies"
