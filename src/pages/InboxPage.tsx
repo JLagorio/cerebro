@@ -275,6 +275,7 @@ export function InboxPage() {
                   role="row"
                   aria-selected={active}
                   data-testid="inbox-row"
+                  data-path={e.path}
                   onClick={() => queue.select(e.path)}
                   className={[
                     'flex flex-col gap-0.5 border-0 border-b border-solid border-[var(--n-100)] px-4 py-2.5 text-left',

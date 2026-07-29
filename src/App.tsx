@@ -11,6 +11,7 @@ import { DocPage } from '@/pages/DocPage';
 import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
+import { KnowledgePage } from '@/pages/KnowledgePage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
@@ -30,6 +31,7 @@ function CanvasOutlet() {
   switch (selection.kind) {
     case 'home': return <HomePage />;
     case 'inbox': return <InboxPage />;
+    case 'knowledge': return <KnowledgePage />;
     case 'project': return <ProjectPage selection={selection} />;
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;

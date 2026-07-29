@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { pickVault } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
@@ -40,6 +41,8 @@ export function SettingsPage() {
   const setInboxEnabled = useUiStore((s) => s.setInboxEnabled);
   const inboxAutoAdvance = useUiStore((s) => s.inboxAutoAdvance);
   const setInboxAutoAdvance = useUiStore((s) => s.setInboxAutoAdvance);
+  const actorId = useUiStore((s) => s.actorId);
+  const setActorId = useUiStore((s) => s.setActorId);
 
   const changeVault = async () => {
     // Deviation from the plan's verbatim body (execution-log note 17b guard
@@ -93,6 +96,30 @@ export function SettingsPage() {
           onChange={setInboxAutoAdvance}
           disabled={!inboxEnabled}
         />
+      </section>
+      <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
+        <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Knowledge</h2>
+        <p className="mb-4 text-[12.5px] text-[var(--n-500)]">
+          The AI knowledge base in <span className="[font-family:var(--font-mono)]">knowledge/</span> is
+          written by the agent and read-only here. Verifying a concept records who confirmed it.
+        </p>
+        <div className="flex items-start gap-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium text-[var(--n-800)]">Your identity</div>
+            <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+              Stamped as{' '}
+              <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when you
+              verify. The <span className="[font-family:var(--font-mono)]">human:</span> prefix is what
+              separates your review from a machine's.
+            </div>
+          </div>
+          <Input
+            ariaLabel="Your identity"
+            value={actorId}
+            onChange={(e) => setActorId(e.target.value.trim())}
+            className="w-[140px] flex-none"
+          />
+        </div>
       </section>
       <section className="rounded-[14px] border border-[var(--n-200)] p-5">
         <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">About</h2>

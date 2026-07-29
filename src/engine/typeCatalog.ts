@@ -11,6 +11,7 @@
  */
 
 import { isTemplate } from '@/lib/templates';
+import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
 import type { Entry, FieldDef, FieldOption, Presentation, Schema } from './types';
 import { DEFAULT_PRESENTATION } from './views';
@@ -85,15 +86,18 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
   for (const spec of SYSTEM_TYPES) names.add(spec.name);
   for (const name of schema.types.keys()) names.add(name);
   for (const e of entries) {
-    if (e.type !== null && e.type !== '' && !isTemplate(e)) names.add(e.type);
+    if (e.type !== null && e.type !== '' && !isTemplate(e) && !isConcept(e)) names.add(e.type);
   }
 
   // Templates carry a `type:` so pages created from them inherit it — they
   // are scaffolding, never records, and must not inflate counts (M3.1: the
   // Meeting type showed "1 record" that was really templates/meeting.md).
+  // Knowledge concepts (M5) carry free-form OKF types — `Metric`, `Playbook`,
+  // `BigQuery Table` — which are the agent's vocabulary, not the vault's
+  // schema; listing them would fill the Types sidebar with ghost types.
   const counts = new Map<string, number>();
   for (const e of entries) {
-    if (e.type === null || e.type === '' || isTemplate(e)) continue;
+    if (e.type === null || e.type === '' || isTemplate(e) || isConcept(e)) continue;
     counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
   }
 
@@ -124,6 +128,11 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
  * (meeting notes, journals: things you write rather than track).
  */
 export function isDocEntry(entry: Entry, schema: Schema): boolean {
+  // The whole knowledge bundle (M5) has its own read-only surface and is
+  // never yours to edit. Keyed on the PATH, not on isConcept: `index.md`
+  // and `log.md` are not concepts but are still bundle files, and being
+  // untyped they would otherwise sail through the next branch into Docs.
+  if (isKnowledgePath(entry.path)) return false;
   if (entry.type === null || entry.type === '') return true;
   if (entry.type === 'Type') return false;
   return schema.types.get(entry.type)?.display === 'doc';

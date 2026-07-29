@@ -40,6 +40,10 @@ interface UiState {
   /** Selected Inbox period pill; persisted so the queue reopens as left. */
   inboxPeriod: InboxPeriod;
   setInboxPeriod(v: InboxPeriod): void;
+  /** Identity for OKF actor stamps (M5): written as `human:<id>` when you
+   * verify a concept. Per device — it records who reviewed, not who owns. */
+  actorId: string;
+  setActorId(v: string): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
@@ -55,6 +59,7 @@ const TYPES_OPEN_KEY = 'cerebro.typesOpen';
 const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
 const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
+const ACTOR_ID_KEY = 'cerebro.actorId';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -184,6 +189,12 @@ export const useUiStore = create<UiState>((set) => ({
   setInboxPeriod: (v) => {
     storeString(INBOX_PERIOD_KEY, v);
     set({ inboxPeriod: v });
+  },
+
+  actorId: loadString(ACTOR_ID_KEY, 'me'),
+  setActorId: (v) => {
+    storeString(ACTOR_ID_KEY, v);
+    set({ actorId: v });
   },
 
   toasts: [],

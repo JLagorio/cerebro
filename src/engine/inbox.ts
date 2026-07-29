@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { isKnowledgePath } from './okf';
 import type { Entry, Schema } from './types';
 
 /**
@@ -48,7 +49,10 @@ export function isStructural(entry: Entry): boolean {
     entry.filename === 'project.md' ||
     entry.filename === 'index.md' ||
     entry.filename === 'log.md' ||
-    isTemplate(entry)
+    isTemplate(entry) ||
+    // Knowledge concepts (M5) are the agent's to write and yours to verify.
+    // They are reviewed on the Knowledge surface, not organized in the Inbox.
+    isKnowledgePath(entry.path)
   );
 }
 
