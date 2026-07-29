@@ -30,14 +30,9 @@ pub fn ensure(app: &AppHandle) -> Result<String, String> {
     let source = source(app)?;
     let mut failure = None;
     for destination in &destinations {
-        match copy_dir(&source, destination) {
+        match copy_atomically(&source, destination) {
             Ok(()) => return Ok(destination.to_string_lossy().to_string()),
-            Err(error) => {
-                // A half-written folder would read as seeded on the next launch
-                // and strand the user in a vault missing most of its notes.
-                let _ = std::fs::remove_dir_all(destination);
-                failure = Some(format!("{}: {error}", destination.display()));
-            }
+            Err(error) => failure = Some(format!("{}: {error}", destination.display())),
         }
     }
     Err(format!(
@@ -80,8 +75,51 @@ fn source(app: &AppHandle) -> Result<PathBuf, String> {
     Err("the demo vault is missing from this build".into())
 }
 
-/// A folder that exists but holds nothing is not a seeded vault — treat it as
-/// absent so an interrupted first copy heals itself instead of dead-ending.
+/// The folder the demo is assembled in before it is anything to the user.
+fn staging_path(destination: &Path) -> PathBuf {
+    destination.with_file_name(format!("{FOLDER_NAME} (incomplete)"))
+}
+
+/// Copy the vault into place in a state that is only ever whole.
+///
+/// Copying straight into the destination is not safe to interrupt: kill the
+/// app halfway, or lose the cleanup to a failing `remove_dir_all`, and what is
+/// left is a folder holding some of a vault. The next launch sees a folder
+/// with files in it, calls that seeded, and opens a vault missing most of its
+/// notes with nothing to suggest anything went wrong.
+///
+/// So the copy happens beside the destination and is renamed in once it is
+/// complete. Rename is atomic within a filesystem, which makes the destination
+/// binary: absent, or the whole vault. Nothing here can overwrite a vault the
+/// user has been editing — `ensure` returns early for a populated folder, and
+/// the only directory this removes is an empty one.
+fn copy_atomically(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let staging = staging_path(destination);
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Whatever an earlier interrupted run left behind is half a vault, not a
+    // head start.
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging)?;
+    }
+
+    let staged = copy_dir(source, &staging).and_then(|()| {
+        // An empty destination from an earlier run would block the rename on
+        // some platforms. `remove_dir` refuses to touch a non-empty directory,
+        // so this cannot cost anyone their notes.
+        let _ = std::fs::remove_dir(destination);
+        std::fs::rename(&staging, destination)
+    });
+    if staged.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    staged
+}
+
+/// Whether a seeded vault is already here. Because the copy is renamed in
+/// whole (see `copy_atomically`), a folder with anything in it is a finished
+/// vault and the user's to keep — not a copy that may have been cut short.
 fn is_populated(dir: &Path) -> bool {
     std::fs::read_dir(dir)
         .map(|mut entries| entries.next().is_some())
@@ -133,6 +171,54 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("mine.md"), "my work").unwrap();
         assert!(is_populated(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_cut_short_copy_never_becomes_the_vault() {
+        // Reported by review: the copy used to write straight into the
+        // destination, so an interrupted run left a partial vault that the
+        // next launch read as seeded. The staging folder absorbs that now.
+        let root = testutil::temp_vault("demo-partial");
+        let from = root.join("from");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("top.md"), "# top").unwrap();
+
+        let destination = root.join(FOLDER_NAME);
+        // Half a vault, left behind by a run that died mid-copy.
+        let staging = staging_path(&destination);
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("half.md"), "truncated").unwrap();
+
+        copy_atomically(&from, &destination).unwrap();
+
+        assert!(!staging.exists(), "the staging folder is not left lying around");
+        assert!(
+            !destination.join("half.md").exists(),
+            "content from the abandoned run must not survive into the vault"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join("top.md")).unwrap(),
+            "# top"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn seeding_into_a_folder_left_empty_still_works() {
+        // `rename` onto an existing directory is not portable; an empty
+        // destination must not be the thing that blocks a first run.
+        let root = testutil::temp_vault("demo-empty-dest");
+        let from = root.join("from");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("top.md"), "# top").unwrap();
+
+        let destination = root.join(FOLDER_NAME);
+        std::fs::create_dir_all(&destination).unwrap();
+
+        copy_atomically(&from, &destination).unwrap();
+
+        assert!(destination.join("top.md").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
