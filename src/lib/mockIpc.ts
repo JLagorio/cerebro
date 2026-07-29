@@ -81,6 +81,10 @@ export async function pickVault(): Promise<string | null> {
   return '/demo-vault';
 }
 
+export async function openDemoVault(): Promise<string> {
+  return '/demo-vault';
+}
+
 export async function getLastVault(): Promise<string | null> {
   return '/demo-vault';
 }

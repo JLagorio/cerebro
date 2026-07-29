@@ -6,6 +6,8 @@ tolaria-main/
 # App build artifacts
 node_modules/
 dist/
+# Signed .app + DMG produced by scripts/mac-package.sh
+dist-mac/
 .vite/
 src-tauri/target/
 src-tauri/gen/schemas/

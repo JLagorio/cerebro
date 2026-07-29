@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated Info.plist by the macOS bundler.
+
+  Cerebro opens folders of markdown the user chooses, and seeds its demo vault
+  into Documents on first run. macOS gates that folder behind a consent prompt;
+  without a reason string the prompt has nothing to show but the app's name.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>Cerebro keeps your vault — the folder of markdown files behind everything you see — wherever you put it, and copies its demo vault here on first run.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>Cerebro needs this to open a vault you keep on your Desktop.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>Cerebro needs this to open a vault you keep in Downloads.</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+  </dict>
+</plist>

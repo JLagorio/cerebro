@@ -1,0 +1,97 @@
+name: Mac app
+
+# Builds a runnable Cerebro.app and a drag-to-install DMG on GitHub's macOS
+# runners, so getting the app onto a Mac never requires a local toolchain.
+#
+# Every push produces a downloadable artifact (Actions → this run → Artifacts).
+# Pushing a `v*` tag additionally publishes a release.
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+# Pushing again supersedes the previous build for the same ref rather than
+# leaving it to finish a build nobody is waiting for any more.
+concurrency:
+  group: mac-app-${{ github.ref }}
+  cancel-in-progress: true
+
+# One universal binary: it compiles the dependency tree twice, but that is a
+# couple of minutes here, and it means one download that runs on both Apple
+# Silicon and Intel with nobody having to know which Mac they have.
+env:
+  TARGET: universal-apple-darwin
+
+jobs:
+  build:
+    runs-on: macos-14
+    # The whole job is minutes. Past this something is wedged, and failing says
+    # so instead of holding a runner for hours.
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust with both Mac targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: |
+          pnpm vitest run
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      # Only the .app here — the disk image is assembled in the next step,
+      # after the bundle is signed, so what ships inside it is the signed copy.
+      # `--ci` so a prompt can never hold a runner open.
+      - name: Build the app
+        run: pnpm tauri build --ci --target $TARGET --bundles app
+
+      - name: Sign and package
+        run: ./scripts/mac-package.sh "src-tauri/target/$TARGET/release/bundle/macos/Cerebro.app"
+
+      # Both the DMG and the zip when the DMG was produced, the zip alone when
+      # hdiutil had to be abandoned — either one installs the same app.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Cerebro-macOS
+          path: dist-mac/*
+          if-no-files-found: error
+
+      - name: Publish a release for a tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-mac/*
+          body: |
+            Download `Cerebro.dmg`, open it, and drag Cerebro to Applications.
+            (`Cerebro.zip` holds the same app if you would rather unzip it.)
+
+            macOS quarantines apps downloaded from the internet and this build
+            is not notarized, so clear the flag once after installing:
+
+            ```
+            xattr -dr com.apple.quarantine /Applications/Cerebro.app
+            ```
+
+            The assistant uses the Claude Code CLI already installed on your
+            machine — no API key goes into the app.

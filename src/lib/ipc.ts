@@ -18,6 +18,14 @@ export function pickVault(): Promise<string | null> {
   return inTauri() ? invokeTauri('pick_vault') : mock.pickVault();
 }
 
+/**
+ * Copy the demo vault out of the app bundle into a folder the user can edit,
+ * and return its path. In the browser the mock vault is already that folder.
+ */
+export function openDemoVault(): Promise<string> {
+  return inTauri() ? invokeTauri('open_demo_vault') : mock.openDemoVault();
+}
+
 export function getLastVault(): Promise<string | null> {
   return inTauri() ? invokeTauri('get_last_vault') : mock.getLastVault();
 }

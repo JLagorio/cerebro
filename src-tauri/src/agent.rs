@@ -9,7 +9,7 @@
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -106,15 +106,31 @@ fn which_on_path() -> Option<PathBuf> {
 }
 
 fn which_in_login_shell() -> Option<PathBuf> {
+    let stdout = login_shell_probe("which claude")?;
+    path_from_output(stdout.as_bytes(), true)
+}
+
+/// Run one command through the user's login+interactive shell and return its
+/// stdout, or None if the shell is unavailable or reported failure.
+///
+/// `-l` sources `.zprofile`/`.zlogin` (where Homebrew puts its PATH) and `-i`
+/// sources `.zshrc` (where nvm, fnm, and Volta put theirs); a CLI installed by
+/// any of them is invisible without both. stdin is closed because an rc file
+/// that prompts would otherwise hang the app on a startup check.
+fn login_shell_probe(script: &str) -> Option<String> {
     if cfg!(windows) {
         return None;
     }
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let output = Command::new(shell)
-        .args(["-lic", "which claude"])
+        .args(["-lic", script])
+        .stdin(Stdio::null())
         .output()
         .ok()?;
-    path_from_output(&output.stdout, output.status.success())
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn path_from_output(stdout: &[u8], success: bool) -> Option<PathBuf> {
@@ -128,7 +144,10 @@ fn path_from_output(stdout: &[u8], success: bool) -> Option<PathBuf> {
 }
 
 fn candidates() -> Vec<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    candidates_for(&std::env::var("HOME").unwrap_or_default())
+}
+
+fn candidates_for(home: &str) -> Vec<PathBuf> {
     [
         "/opt/homebrew/bin/claude",
         "/usr/local/bin/claude",
@@ -137,19 +156,94 @@ fn candidates() -> Vec<PathBuf> {
     .iter()
     .map(PathBuf::from)
     .chain(
-        [".local/bin/claude", ".claude/local/claude", ".bun/bin/claude"]
-            .iter()
-            .map(|rel| PathBuf::from(&home).join(rel)),
+        [
+            ".local/bin/claude",
+            ".claude/local/claude",
+            ".bun/bin/claude",
+            ".volta/bin/claude",
+            ".yarn/bin/claude",
+            ".npm-global/bin/claude",
+            ".local/share/pnpm/claude",
+        ]
+        .iter()
+        .map(|rel| PathBuf::from(home).join(rel)),
     )
+    .chain(nvm_candidates(home))
     .collect()
+}
+
+/// nvm installs global binaries per node version, under a directory whose name
+/// is the version — so there is nothing to hard-code. Walk the versions dir.
+fn nvm_candidates(home: &str) -> Vec<PathBuf> {
+    let versions = PathBuf::from(home).join(".nvm/versions/node");
+    let Ok(entries) = std::fs::read_dir(versions) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|e| e.path().join("bin/claude"))
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
+
+/// The PATH the CLI needs in order to run, not merely to be found.
+///
+/// A GUI app launched from Finder inherits launchd's PATH — `/usr/bin:/bin:
+/// /usr/sbin:/sbin` — and nothing else. Finding the binary is handled above,
+/// but finding it is not enough: an npm- or bun-installed `claude` is a script
+/// whose shebang is `#!/usr/bin/env node`, and node lives wherever Homebrew,
+/// nvm, or Volta put it. Launched from a terminal the app inherits a PATH that
+/// has node on it and everything works; launched from the Dock it does not,
+/// and the CLI exits instantly with `env: node: No such file or directory`.
+/// That difference is the whole bug, so we recover the login shell's PATH once
+/// and hand it to every process we spawn.
+fn login_shell_path() -> Option<&'static str> {
+    static CACHED: OnceLock<Option<String>> = OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            // The sentinel survives rc files that print banners of their own.
+            login_shell_probe("printf '\\n__CEREBRO_PATH__%s\\n' \"$PATH\"")
+                .as_deref()
+                .and_then(path_from_probe)
+        })
+        .as_deref()
+}
+
+const PATH_SENTINEL: &str = "__CEREBRO_PATH__";
+
+fn path_from_probe(stdout: &str) -> Option<String> {
+    stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix(PATH_SENTINEL))
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+}
+
+/// Give `command` the login shell's PATH, keeping what we already inherited so
+/// a shell that fails to answer can never make things worse than not asking.
+fn with_login_path(command: &mut Command) -> &mut Command {
+    if let Some(login) = login_shell_path() {
+        let inherited = std::env::var("PATH").unwrap_or_default();
+        let merged = if inherited.is_empty() {
+            login.to_string()
+        } else {
+            format!("{login}:{inherited}")
+        };
+        command.env("PATH", merged);
+    }
+    command
 }
 
 pub fn status() -> AgentStatus {
     let Some(path) = find_binary() else {
         return AgentStatus { installed: false, version: None, path: None };
     };
-    let version = Command::new(&path)
-        .arg("--version")
+    let version = with_login_path(Command::new(&path).arg("--version"))
+        .stdin(Stdio::null())
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -272,8 +366,7 @@ pub fn stream(
     let config_path = config_dir.join("mcp-config.json");
     std::fs::write(&config_path, mcp_config_json(&url, &token)).map_err(|e| e.to_string())?;
 
-    let mut child = Command::new(&binary)
-        .args(build_args(&req, &config_path))
+    let mut child = with_login_path(Command::new(&binary).args(build_args(&req, &config_path)))
         // The vault is the working directory, so shell-capable modes and the
         // CLI's own file tools stay pointed at the user's notes.
         .current_dir(vault)
@@ -547,6 +640,47 @@ mod tests {
         assert!(full.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-5"));
         // A whitespace-only system prompt is not a system prompt.
         assert!(!full.contains(&"--append-system-prompt".to_string()));
+    }
+
+    #[test]
+    fn the_login_path_survives_a_chatty_shell_profile() {
+        // Plenty of .zshrc files print a banner. Reading the last line, or the
+        // whole of stdout, would hand the CLI a PATH of "Welcome back!".
+        let probe = format!("Welcome back!\nnvm loaded\n{PATH_SENTINEL}/opt/homebrew/bin:/usr/bin\n");
+        assert_eq!(
+            path_from_probe(&probe).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+    }
+
+    #[test]
+    fn a_shell_that_answers_with_nothing_useful_leaves_path_alone() {
+        // Falling back to an empty PATH would be worse than not asking: it
+        // would strip the little that launchd did give us.
+        assert_eq!(path_from_probe("no sentinel here\n"), None);
+        assert_eq!(path_from_probe(&format!("{PATH_SENTINEL}   \n")), None);
+        assert_eq!(path_from_probe(""), None);
+    }
+
+    #[test]
+    fn discovery_covers_the_installers_that_hide_from_launchd() {
+        let found: Vec<String> = candidates_for("/Users/example")
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        for expected in [
+            "/opt/homebrew/bin/claude",
+            "/Users/example/.local/bin/claude",
+            "/Users/example/.bun/bin/claude",
+            "/Users/example/.volta/bin/claude",
+        ] {
+            assert!(found.contains(&expected.to_string()), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn nvm_discovery_is_empty_rather_than_wrong_when_nvm_is_absent() {
+        assert!(nvm_candidates("/nonexistent-home").is_empty());
     }
 
     #[test]

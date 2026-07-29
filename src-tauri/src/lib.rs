@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod app_config;
+pub mod demo;
 pub mod knowledge;
 pub mod mcp;
 pub mod vault;
@@ -37,6 +38,15 @@ async fn pick_vault(app: tauri::AppHandle) -> Result<Option<String>, String> {
 
 // All commands below are `(async)` so their disk IO runs on the thread pool
 // instead of stalling the main thread on large vaults (M1.x).
+/// Copy the bundled demo vault somewhere writable and remember it, so a fresh
+/// install has something to open instead of a folder picker onto an empty Mac.
+#[tauri::command(async)]
+fn open_demo_vault(app: tauri::AppHandle) -> Result<String, String> {
+    let path = demo::ensure(&app)?;
+    remember_vault(&app, &path)?;
+    Ok(path)
+}
+
 #[tauri::command(async)]
 fn get_last_vault(app: tauri::AppHandle) -> Result<Option<String>, String> {
     Ok(app_config::load(&config_dir(&app)?).last_vault)
@@ -186,6 +196,7 @@ pub fn run() {
         .manage(mcp::McpState::default())
         .invoke_handler(tauri::generate_handler![
             pick_vault,
+            open_demo_vault,
             get_last_vault,
             scan_vault,
             read_note,
