@@ -246,3 +246,39 @@ test('retire: a replaced concept says so, and stops asking to be verified', asyn
     page.locator('[data-testid="concept-row"][data-path="knowledge/systems/offline-window-pilot.md"]'),
   ).toHaveCount(0);
 });
+
+test('dossier: a project page says what the base believes, doubts, and no longer believes', async ({
+  page,
+}) => {
+  await boot(page);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('offline sync hardening');
+  await page.getByTestId('quick-open-result').first().click();
+  await page.getByRole('tab', { name: 'Overview' }).click();
+
+  const dossier = page.getByTestId('entity-dossier');
+  await expect(dossier).toBeVisible();
+
+  // What it currently believes — gathered from across the bundle's folders.
+  const current = dossier.getByTestId('dossier-concept').filter({ hasNot: page.locator('s') });
+  await expect(current.first()).toBeVisible();
+  await expect(dossier).toContainText('The offline guarantee');
+
+  // What it no longer believes is kept, not hidden: the record of what was
+  // held before is part of knowing how the base got here.
+  const retired = dossier.getByTestId('dossier-retired');
+  await expect(retired).toContainText('The offline window');
+
+  // What is unresolved. A summary that showed only the confident parts is the
+  // kind of confident-and-wrong that makes people stop trusting the whole thing.
+  await expect(dossier.getByTestId('dossier-unsettled')).toContainText('recheck');
+
+  // And what it read to get there — the reading list behind the claims.
+  await expect(dossier.getByTestId('dossier-source').first()).toBeVisible();
+
+  // Following a concept lands on it in the bundle.
+  await dossier.getByTestId('dossier-concept').first().click();
+  await expect(page.getByTestId('knowledge-page')).toBeVisible();
+  await expect(page.getByTestId('concept-body')).toBeVisible();
+});
