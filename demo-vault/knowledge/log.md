@@ -13,5 +13,11 @@ number rises when the conflict epic ships.
 the team is moving to office hours.
 
 ## 2026-07-26
+* **Deprecation**: [The offline window](/systems/offline-window-pilot.md) is replaced by
+[The offline guarantee](/systems/offline-guarantee.md) — the pilot's week was never tested and the decision settled on 72 hours.
 * **Creation**: Established [The offline guarantee](/systems/offline-guarantee.md) after
 finding three documents stating the window independently.
+
+## 2026-05-14
+* **Creation**: Recorded [The offline window](/systems/offline-window-pilot.md) from the
+pilot brief.

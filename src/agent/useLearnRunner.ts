@@ -4,7 +4,7 @@ import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
 import { learnQueue, type LearnJob } from '@/engine/learn';
 import { listConcepts } from '@/engine/okf';
-import { distillPrompt } from '@/lib/prompts';
+import { distillPrompt, reviewConceptPrompt } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -97,7 +97,10 @@ export function useLearnRunner(): void {
         try {
           mcp.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
-            message: distillPrompt(job.path, job.title),
+            message:
+              job.reason === 'stale'
+                ? reviewConceptPrompt(job.path, job.title)
+                : distillPrompt(job.path, job.title),
             // The same rules the panel's agent gets — the conventions about
             // sources, anchors and never self-certifying are the contract, not
             // panel decoration. `selection` is 'none': a background reader is

@@ -67,7 +67,14 @@ function ConceptRow({
         <span
           className={[
             'truncate text-[13px]',
-            active ? 'font-semibold text-[var(--n-900)]' : 'font-medium text-[var(--n-800)]',
+            // M8.7 — a replaced concept is struck through in the list. The
+            // alternative is hiding it, which loses the record of what was
+            // believed before; this keeps it readable and unmistakable.
+            concept.supersededBy !== null
+              ? 'font-medium text-[var(--n-400)] line-through'
+              : active
+                ? 'font-semibold text-[var(--n-900)]'
+                : 'font-medium text-[var(--n-800)]',
           ].join(' ')}
         >
           {concept.title}
@@ -308,6 +315,7 @@ export function KnowledgePage({ selection }: { selection: Extract<Selection, { k
             verifying={verifying}
             onVerify={verify}
             onOpenEntity={openPath}
+            onOpenConcept={openConcept}
             onAskAgent={() => {
               setAiPanelOpen(true);
               setPendingPrompt(reviewConceptPrompt(selected.entry.path, selected.title));

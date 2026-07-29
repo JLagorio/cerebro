@@ -18,9 +18,13 @@ export function distillPrompt(path: string, title: string): string {
     '',
     'Read it, then update the knowledge/ bundle so what it establishes is captured:',
     '1. Work out which vault entities it concerns — projects, people, records — and resolve them with search_notes.',
-    '2. For each durable thing it establishes, write or revise a concept with write_concept.',
-    `3. Anchor every concept with \`about\`, and cite this note in \`sources\` (resource: ${path}).`,
-    '4. Prefer revising an existing concept over adding a near-duplicate.',
+    '2. Search the bundle for what it already holds on those entities BEFORE writing anything.',
+    '3. For each durable thing it establishes, write or revise a concept with write_concept.',
+    `4. Anchor every concept with \`about\`, and cite this note in \`sources\` (resource: ${path}).`,
+    '',
+    'Adding a second concept about something the bundle already covers is the failure mode here, not the goal. Revise the existing one in place when the note refines or extends it.',
+    'When the note establishes something that REPLACES an existing concept, write the new one and set `supersedes: ["[[old-concept]]"]` — that retires the old one without deleting the record of what was believed before.',
+    'When two concepts genuinely disagree and you cannot tell which is right, say so with `contradicts` rather than picking a winner. That is a judgement for the person who owns the work.',
     '',
     'Skip anything ephemeral — scheduling, chit-chat, and things already recorded elsewhere.',
     'Then tell me, briefly, what you learned and what you chose not to keep.',
@@ -63,12 +67,29 @@ export function augmentDocPrompt(path: string, title: string): string {
   ].join('\n');
 }
 
-/** Ask the agent to review one concept against what it was built from. */
+/**
+ * Ask the agent to recheck one concept against what it was built from (M8.8).
+ *
+ * The instruction to reach a verdict is load-bearing. Told only to "review",
+ * a model reliably rewrites the prose slightly and reports success, which
+ * leaves a bundle that grows and never shrinks. Naming the four outcomes —
+ * and saying plainly that "still true" is one of them — is what makes
+ * deprecating something an available answer rather than a failure to find
+ * work.
+ */
 export function reviewConceptPrompt(path: string, title: string): string {
   return [
-    `Review the knowledge concept at ${path} ("${title}").`,
-    'Check it against its sources, then revise it with write_concept if it is wrong, stale, or thin.',
-    'Explain what you changed and why.',
+    `Recheck the knowledge concept at ${path} ("${title}"). Its recheck date has passed.`,
+    '',
+    'Read it, then read the sources it cites and anything newer in the vault about the same subjects. Reach one of four verdicts:',
+    '',
+    '- **Still true** — extend `stale_after` with write_concept and change nothing else.',
+    '- **Needs revising** — rewrite it in place with write_concept, keeping the sources that still hold.',
+    '- **Replaced** — write the concept that replaces it and set `supersedes` on the NEW one. Do not edit the old one.',
+    '- **No longer true** — set `lifecycle: deprecated`. A wrong concept that stays stable is worse than one that is gone.',
+    '',
+    'Do not rewrite it just to have done something. "Still true, date extended" is a real answer and often the right one.',
+    'Say which verdict you reached and what evidence decided it.',
   ].join('\n');
 }
 

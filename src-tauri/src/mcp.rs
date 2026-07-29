@@ -278,7 +278,22 @@ fn tool_catalog() -> Vec<Value> {
                     "description": "Where this came from. Each: {id, resource, title?}. `resource` may be a vault path or a URL.",
                     "items": { "type": "object" }
                 },
-                "lifecycle": { "type": "string", "description": "draft | stable | deprecated" },
+                "supersedes": {
+                    "type": "array",
+                    "description": "Concepts this one REPLACES, as wikilinks. Use it instead of writing a second concept that contradicts an old one: the old concept stops being offered as current, and the record of what was believed before survives. Do not edit the concept being replaced.",
+                    "items": { "type": "string" }
+                },
+                "refines": {
+                    "type": "array",
+                    "description": "Concepts this one narrows or makes more exact, as wikilinks. Both stay true — this is a hierarchy, not a correction.",
+                    "items": { "type": "string" }
+                },
+                "contradicts": {
+                    "type": "array",
+                    "description": "Concepts this one disagrees with, where you cannot tell which is right. Say so rather than picking a winner; that judgement belongs to the person who owns the work.",
+                    "items": { "type": "string" }
+                },
+                "lifecycle": { "type": "string", "description": "draft | stable | deprecated. Use deprecated when a concept is no longer true and nothing replaces it — a wrong concept left stable is worse than one that is gone." },
                 "stale_after": { "type": "string", "description": "YYYY-MM-DD after which this should be rechecked" }
             }), &["path", "type", "title", "body"])
         }),
@@ -600,6 +615,15 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, 
     if let Some(tags) = args.get("tags") {
         frontmatter.insert("tags".into(), tags.clone());
     }
+    // Concept-to-concept relations (M8.7). `supersedes` is the one that
+    // retires something: without it the bundle can only ever append, and a
+    // corrected fact sits beside the fact it corrected with nothing saying
+    // which one won.
+    for field in ["supersedes", "refines", "contradicts"] {
+        if let Some(value) = args.get(field) {
+            frontmatter.insert(field.into(), value.clone());
+        }
+    }
     frontmatter.insert(
         "lifecycle".into(),
         json!(arg_str(args, "lifecycle").unwrap_or_else(|| "draft".into())),
@@ -621,6 +645,27 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, 
 
     // Recorded BEFORE the write, or every concept reads as an update of itself.
     let existed = crate::vault::write::concept_exists(vault, &path);
+
+    // Checked before the write for the same reason: afterwards the new file is
+    // on disk and would have to be excluded from its own duplicate scan.
+    // Only for NEW concepts — revising one in place is the behaviour this is
+    // trying to encourage, so warning about it would be backwards.
+    let duplicates = if existed {
+        Vec::new()
+    } else {
+        let about: Vec<String> = args
+            .get("about")
+            .and_then(|v| v.as_array())
+            .map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        crate::knowledge::near_duplicates(
+            vault,
+            &path,
+            &arg_str(args, "title").unwrap_or_default(),
+            &about,
+        )
+    };
+
     vault::write::write_concept(vault, &path, &frontmatter, &body)?;
 
     // The log is appended by us, on every write, rather than left to the agent
@@ -633,8 +678,18 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, 
         Ok(()) => String::new(),
         Err(e) => format!(" (could not update the knowledge log: {e})"),
     };
+    let warning = if duplicates.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " The bundle already holds {} about the same thing: {}. Consolidate: revise one of \
+             those instead, or set `supersedes` on this one if it replaces them.",
+            if duplicates.len() == 1 { "a concept" } else { "concepts" },
+            duplicates.join(", ")
+        )
+    };
     Ok(text_result(format!(
-        "Wrote {path}. It is unverified until the user reviews it in Knowledge.{note}"
+        "Wrote {path}. It is unverified until the user reviews it in Knowledge.{note}{warning}"
     )))
 }
 

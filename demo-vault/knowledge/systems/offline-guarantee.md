@@ -5,6 +5,8 @@ description: What the product promises when a crew loses connectivity, and where
 about:
   - "[[offline-sync-hardening]]"
   - "[[dec-offline-window-72h]]"
+supersedes:
+  - "[[offline-window-pilot]]"
 tags: [offline-sync, product]
 lifecycle: stable
 generated: { by: claude-code, at: 2026-07-26T11:20:00Z }

@@ -226,6 +226,57 @@ export function parseAbout(entry: Entry): string[] {
   return items.map((v) => String(v).trim()).filter((v) => v !== '');
 }
 
+// --- Concept-to-concept relations (M8.7) -----------------------------------
+
+/**
+ * How one concept stands to another.
+ *
+ * OKF §6.1 leaves the KIND of a link to prose: a link is an untyped directed
+ * edge and the surrounding sentence says what it means. That is right for a
+ * reader and useless for a consumer — "is this still true" and "did something
+ * replace it" cannot be answered by a paragraph. So the kind is lifted into
+ * frontmatter as an extension the spec explicitly permits (§11: unknown fields
+ * are tolerated, never fatal), and the body keeps the explanation.
+ *
+ * Three kinds, because each one changes what the reader should DO:
+ *
+ * - `supersedes` — this replaces that. The only relation that retires
+ *   something, and the reason the bundle can stop being append-only.
+ * - `refines` — this is a narrower or more exact statement of that. Both stay
+ *   true; the pair is a hierarchy, not a correction.
+ * - `contradicts` — the two disagree and neither has won. Deliberately NOT
+ *   self-resolving: a machine that decided which of two claims to keep would
+ *   be exercising the judgement this whole trust model reserves for a person.
+ */
+export type RelationKind = 'supersedes' | 'refines' | 'contradicts';
+
+export const RELATION_KINDS: readonly RelationKind[] = ['supersedes', 'refines', 'contradicts'];
+
+/** How each relation reads from the other end. */
+export const RELATION_LABELS: Record<RelationKind, { out: string; in: string }> = {
+  supersedes: { out: 'Replaces', in: 'Replaced by' },
+  refines: { out: 'Refines', in: 'Refined by' },
+  // Symmetric: disagreement has no direction, and labelling one side as the
+  // author of the conflict would imply it is the one that is wrong.
+  contradicts: { out: 'Contradicts', in: 'Contradicts' },
+};
+
+/** Wikilink targets per relation, in the same shape `about:` uses. */
+export function parseRelations(entry: Entry): Record<RelationKind, string[]> {
+  const out = {} as Record<RelationKind, string[]>;
+  for (const kind of RELATION_KINDS) {
+    const linked = entry.relationships[kind];
+    if (Array.isArray(linked) && linked.length > 0) {
+      out[kind] = linked;
+      continue;
+    }
+    const raw = entry.properties[kind];
+    const items = raw === undefined || raw === null ? [] : Array.isArray(raw) ? raw : [raw];
+    out[kind] = items.map((v) => String(v).trim()).filter((v) => v !== '');
+  }
+  return out;
+}
+
 /**
  * The bundle sub-directory a concept sits in — `metrics`, `playbooks`,
  * `systems`. OKF §3 gives directories no meaning of their own, but the
@@ -436,6 +487,17 @@ export interface Concept {
   lifecycle: Lifecycle;
   staleAfter: string | null;
   stale: boolean;
+  /** Raw relation targets by kind — resolved through `conceptEdges` (M8.7). */
+  relations: Record<RelationKind, string[]>;
+  /**
+   * Path of the concept that replaced this one, filled by `listConcepts`.
+   *
+   * It lives on the model rather than being looked up at each call site
+   * because a replaced concept must READ as replaced everywhere — in a
+   * related list, on a project page, in the review queue — and a rule enforced
+   * only where someone remembered to check it is not a rule.
+   */
+  supersededBy: string | null;
 }
 
 export function toConcept(entry: Entry, today: string): Concept {
@@ -460,14 +522,30 @@ export function toConcept(entry: Entry, today: string): Concept {
     lifecycle: lifecycleOf(entry),
     staleAfter: staleAfter(entry),
     stale: isStale(entry, today),
+    relations: parseRelations(entry),
+    // Resolved by listConcepts, which is the only caller that can see the
+    // rest of the bundle.
+    supersededBy: null,
   };
 }
 
 export function listConcepts(entries: Entry[], today: string): Concept[] {
-  return entries
+  const concepts = entries
     .filter(isConcept)
     .map((e) => toConcept(e, today))
     .sort((a, b) => a.id.localeCompare(b.id));
+
+  // Second pass: supersession is declared by the replacement, so a concept
+  // cannot know it has been retired from its own frontmatter alone.
+  for (const concept of concepts) {
+    for (const target of concept.relations.supersedes) {
+      const replaced = resolveConcept(target, concepts, entries);
+      if (replaced !== null && replaced.entry.path !== concept.entry.path) {
+        replaced.supersededBy = concept.entry.path;
+      }
+    }
+  }
+  return concepts;
 }
 
 /**
@@ -488,6 +566,10 @@ export function recentlyLearned(
   return concepts
     .filter((c) => {
       if (c.trust === 'human-reviewed') return false;
+      // Never offer something that has already been replaced (M8.7) — Home
+      // gets three slots and spending one on a retired claim is worse than
+      // leaving it empty.
+      if (c.supersededBy !== null) return false;
       const at = c.generated?.at ?? null;
       if (at === null) return false;
       const stamped = Date.parse(at);
@@ -507,6 +589,10 @@ export type ReviewReason = 'unverified' | 'stale' | 'deprecated';
  * is what earns the human-reviewed tier.
  */
 export function reviewReasons(concept: Concept): ReviewReason[] {
+  // A replaced concept is resolved, not outstanding (M8.7). Asking someone to
+  // verify a claim that something newer has already overridden is busywork,
+  // and it is how a review queue fills up with things nobody should read.
+  if (concept.supersededBy !== null) return [];
   const reasons: ReviewReason[] = [];
   if (concept.trust !== 'human-reviewed') reasons.push('unverified');
   if (concept.stale) reasons.push('stale');
@@ -516,6 +602,144 @@ export function reviewReasons(concept: Concept): ReviewReason[] {
 
 export function needsReview(concept: Concept): boolean {
   return reviewReasons(concept).length > 0;
+}
+
+// --- The concept graph (M8.7) ----------------------------------------------
+
+/**
+ * Resolve one relation target to a concept.
+ *
+ * Two spellings are accepted for the same reason `about:` accepts two: the
+ * agent writes `[[pick-queue-drain]]` because that is what it writes
+ * everywhere else, and `/systems/pick-queue-drain.md` is what OKF §6.1
+ * recommends. Refusing either would lose a real edge over punctuation.
+ */
+function resolveConcept(
+  target: string,
+  concepts: readonly Concept[],
+  entries: Entry[],
+): Concept | null {
+  const byPath = (path: string) => concepts.find((c) => c.entry.path === path) ?? null;
+  if (target.startsWith('/') || target.startsWith('./') || target.endsWith('.md')) {
+    const link = resolveBundleLink(target, `${KNOWLEDGE_DIR}/x.md`);
+    if ('internal' in link) {
+      const hit = byPath(link.internal);
+      if (hit !== null) return hit;
+    }
+  }
+  const resolved = resolveTarget(target, entries);
+  return resolved === null ? null : byPath(resolved.path);
+}
+
+export interface ConceptEdge {
+  kind: RelationKind;
+  /** 'out' — this concept declared it. 'in' — the other end did. */
+  direction: 'out' | 'in';
+  concept: Concept;
+  label: string;
+}
+
+/**
+ * Every edge touching this concept, both the ones it declared and the ones
+ * pointing at it.
+ *
+ * Inbound matters more than outbound. A concept that has been replaced is not
+ * rewritten to say so — the replacement is what knows — so without reading the
+ * graph backwards a stale claim looks exactly like a current one.
+ */
+export function conceptEdges(
+  concept: Concept,
+  concepts: readonly Concept[],
+  entries: Entry[],
+): ConceptEdge[] {
+  const edges: ConceptEdge[] = [];
+  for (const kind of RELATION_KINDS) {
+    for (const target of concept.relations[kind]) {
+      const other = resolveConcept(target, concepts, entries);
+      if (other !== null && other.entry.path !== concept.entry.path) {
+        edges.push({ kind, direction: 'out', concept: other, label: RELATION_LABELS[kind].out });
+      }
+    }
+  }
+  for (const other of concepts) {
+    if (other.entry.path === concept.entry.path) continue;
+    for (const kind of RELATION_KINDS) {
+      // A symmetric relation declared by the other end is already covered by
+      // the outbound pass when both sides declare it; dedupe on the pair.
+      if (edges.some((e) => e.concept.entry.path === other.entry.path && e.kind === kind)) continue;
+      const hit = other.relations[kind].some(
+        (t) => resolveConcept(t, concepts, entries)?.entry.path === concept.entry.path,
+      );
+      if (hit) {
+        edges.push({ kind, direction: 'in', concept: other, label: RELATION_LABELS[kind].in });
+      }
+    }
+  }
+  return edges;
+}
+
+/** Words too common to make two titles about the same thing. */
+const STOPWORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how', 'in',
+  'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'what', 'when',
+  'which', 'why', 'with',
+]);
+
+function titleTokens(title: string): Set<string> {
+  return new Set(
+    title
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w)),
+  );
+}
+
+/** Jaccard over meaningful title words. */
+export function titleOverlap(a: string, b: string): number {
+  const left = titleTokens(a);
+  const right = titleTokens(b);
+  if (left.size === 0 || right.size === 0) return 0;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared++;
+  return shared / (left.size + right.size - shared);
+}
+
+/** Two concepts this similar about the same thing are almost certainly one. */
+const DUPLICATE_THRESHOLD = 0.5;
+
+/**
+ * Concepts that look like the same knowledge written twice (M8.7).
+ *
+ * A base that only ever appends ends up holding three versions of one fact,
+ * and the reader has no way to tell which to believe. Detection is
+ * deliberately conservative and needs BOTH signals — anchored to a common
+ * entity AND overlapping titles — because "Pick queue drain time" and "Pick
+ * list generation" share a word and nothing else.
+ *
+ * Nothing merges automatically. Deciding two statements are the same claim is
+ * a judgement, and a wrong merge destroys a source; this surfaces the pair and
+ * lets a person or the agent's next revision resolve it.
+ */
+export function nearDuplicates(
+  concept: Concept,
+  concepts: readonly Concept[],
+  entries: Entry[],
+): Concept[] {
+  const anchors = new Set(concept.about.map((t) => resolveTarget(t, entries)?.path ?? t));
+  if (anchors.size === 0) return [];
+  // A pair that already declares a relation is resolved, not duplicated —
+  // saying "this replaces that" is exactly the act of resolving it.
+  const related = new Set(
+    conceptEdges(concept, concepts, entries).map((e) => e.concept.entry.path),
+  );
+  return concepts
+    .filter((other) => {
+      if (other.entry.path === concept.entry.path) return false;
+      if (related.has(other.entry.path)) return false;
+      const shares = other.about.some((t) => anchors.has(resolveTarget(t, entries)?.path ?? t));
+      return shares && titleOverlap(concept.title, other.title) >= DUPLICATE_THRESHOLD;
+    })
+    .sort((a, b) => titleOverlap(concept.title, b.title) - titleOverlap(concept.title, a.title));
 }
 
 /** Frontmatter patch that records a human verification (§5.2). Appends —

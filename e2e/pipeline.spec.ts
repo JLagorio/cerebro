@@ -214,3 +214,35 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
     page.getByTestId('doc-side-panel').getByTestId('learn-queued'),
   ).toContainText(/Queued to be read|Reading this now/);
 });
+
+test('retire: a replaced concept says so, and stops asking to be verified', async ({ page }) => {
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+
+  // The pilot's week-long offline window was replaced by the 72-hour decision.
+  const replaced = page.locator(
+    '[data-testid="concept-row"][data-path="knowledge/systems/offline-window-pilot.md"]',
+  );
+  await replaced.click();
+
+  // It carries the edge it never declared: the REPLACEMENT is what knows.
+  const relation = page
+    .getByTestId('knowledge-panel')
+    .getByTestId('concept-relation')
+    .filter({ hasText: 'The offline guarantee' });
+  await expect(relation).toHaveAttribute('data-label', 'Replaced by');
+
+  // Following it lands on the concept that won.
+  await relation.click();
+  await expect(page.getByTestId('concept-body')).toContainText('72 hours');
+  await expect(
+    page.getByTestId('knowledge-panel').getByTestId('concept-relation').first(),
+  ).toHaveAttribute('data-label', 'Replaces');
+
+  // And the retired one is out of the review queue — verifying a claim that
+  // something newer already overrode is busywork.
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }).click();
+  await expect(
+    page.locator('[data-testid="concept-row"][data-path="knowledge/systems/offline-window-pilot.md"]'),
+  ).toHaveCount(0);
+});

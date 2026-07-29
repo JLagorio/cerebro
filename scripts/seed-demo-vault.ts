@@ -830,6 +830,40 @@ gets duplicated deliberately with a review cadence.
 // Knowledge — what the agent has learned about how this team works
 // ---------------------------------------------------------------------------
 
+// The concept that got replaced (M8.7). It is seeded as its own file rather
+// than edited into history because that is exactly the shape supersession
+// takes on disk: the old concept is untouched and says nothing about being
+// retired, and the NEW one carries `supersedes`. A reader who could only see
+// the old file would have no way to know it had been overruled.
+write(
+  'knowledge/systems/offline-window-pilot.md',
+  fm([
+    'type: Reference',
+    'title: The offline window',
+    'description: How long a crew can work disconnected before sync stops being safe.',
+    'about:',
+    '  - "[[offline-sync-hardening]]"',
+    'tags: [offline-sync, product]',
+    'lifecycle: stable',
+    'generated: { by: claude-code, at: 2026-05-14T10:05:00Z }',
+    'sources:',
+    '  - id: pilot-brief',
+    '    resource: /projects/offline-sync-hardening/project.md',
+    '    title: Offline sync hardening',
+    '    last_modified: 2026-05-12',
+  ]) +
+    `# The window
+
+Field crews are told they can work disconnected for **a week** and sync when
+they get back to signal.[^pilot-brief]
+
+This came out of the pilot, where nobody was offline longer than three days
+and the number was never actually tested at the top of its range.[^pilot-brief]
+
+[^pilot-brief]: Offline sync hardening
+`,
+);
+
 write(
   'knowledge/systems/offline-guarantee.md',
   fm([
@@ -842,6 +876,10 @@ write(
     'about:',
     '  - "[[offline-sync-hardening]]"',
     '  - "[[dec-offline-window-72h]]"',
+    // The retirement (M8.7). The decision replaced a belief the base already
+    // held; saying so is what stops both numbers being offered as current.
+    'supersedes:',
+    '  - "[[offline-window-pilot]]"',
     'tags: [offline-sync, product]',
     'lifecycle: stable',
     'generated: { by: claude-code, at: 2026-07-26T11:20:00Z }',
@@ -1308,8 +1346,15 @@ write(
   the team is moving to office hours.
 
 ## 2026-07-26
+* **Deprecation**: [The offline window](/systems/offline-window-pilot.md) is replaced by
+  [The offline guarantee](/systems/offline-guarantee.md) — the pilot's week was never
+  tested and the decision settled on 72 hours.
 * **Creation**: Established [The offline guarantee](/systems/offline-guarantee.md) after
   finding three documents stating the window independently.
+
+## 2026-05-14
+* **Creation**: Recorded [The offline window](/systems/offline-window-pilot.md) from the
+  pilot brief.
 `,
 );
 

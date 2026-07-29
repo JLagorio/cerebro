@@ -25,6 +25,116 @@ pub fn is_knowledge_path(path: &str) -> bool {
 const READ_ONLY: &str = "knowledge/ is maintained by the AI knowledge base and is read-only here. \
 Verify the concept, or ask the agent to revise it.";
 
+/// Concepts already in the bundle that look like the one about to be written.
+///
+/// The distiller's failure mode is not writing something wrong — it is writing
+/// a fourth concept about a thing the bundle already covers three times, after
+/// which the reader has no way to tell which one to believe. Detection needs
+/// BOTH signals, a shared `about` anchor and overlapping title words, because
+/// either alone fires constantly: everything in a small vault is about the same
+/// project, and "Pick queue drain time" and "Pick list generation" share a word.
+///
+/// This REPORTS, it does not refuse. Deciding two statements are one claim is a
+/// judgement, and a tool that silently merged them could destroy a source; the
+/// agent gets told and consolidates on its next move.
+pub fn near_duplicates(
+    vault: &std::path::Path,
+    skip_rel: &str,
+    title: &str,
+    about: &[String],
+) -> Vec<String> {
+    if about.is_empty() || title.trim().is_empty() {
+        return Vec::new();
+    }
+    let anchors: std::collections::HashSet<String> =
+        about.iter().map(|a| normalize_anchor(a)).collect();
+    let root = vault.join(KNOWLEDGE_DIR);
+    let mut hits = Vec::new();
+
+    for item in walkdir::WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+        if !item.file_type().is_file() {
+            continue;
+        }
+        if item.path().extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let Ok(rel) = item.path().strip_prefix(vault) else { continue };
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if rel == skip_rel || rel.ends_with("/index.md") || rel.ends_with("/log.md") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(item.path()) else { continue };
+        let (Some(block), _) = crate::vault::parse::split_frontmatter(&content) else { continue };
+        let Ok(map) = crate::vault::parse::parse_frontmatter(block) else { continue };
+
+        let other_title = map
+            .get(serde_yaml::Value::from("title"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if title_overlap(title, other_title) < 0.5 {
+            continue;
+        }
+        let shares = yaml_strings(map.get(serde_yaml::Value::from("about")))
+            .iter()
+            .any(|a| anchors.contains(&normalize_anchor(a)));
+        if shares {
+            hits.push(format!("{rel} (\"{other_title}\")"));
+        }
+    }
+    hits.sort();
+    hits
+}
+
+/// `[[phoenix-warehouse-rollout]]` and `phoenix-warehouse-rollout` name the
+/// same entity; comparing them literally would find no overlap at all.
+fn normalize_anchor(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("[[")
+        .trim_end_matches("]]")
+        .trim()
+        .to_lowercase()
+}
+
+fn yaml_strings(value: Option<&serde_yaml::Value>) -> Vec<String> {
+    match value {
+        Some(serde_yaml::Value::Sequence(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        Some(serde_yaml::Value::String(s)) => vec![s.clone()],
+        _ => Vec::new(),
+    }
+}
+
+/// Jaccard over meaningful title words. Mirrors `titleOverlap` in
+/// src/engine/okf.ts — the UI shows the same pairs this warns about, and two
+/// different notions of "similar" would mean the warning and the surface
+/// disagreed about what is a duplicate.
+fn title_overlap(a: &str, b: &str) -> f64 {
+    let left = title_tokens(a);
+    let right = title_tokens(b);
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+    let shared = left.intersection(&right).count() as f64;
+    let union = (left.len() + right.len()) as f64 - shared;
+    if union <= 0.0 { 0.0 } else { shared / union }
+}
+
+const STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "is", "it", "of",
+    "on", "or", "that", "the", "this", "to", "what", "when", "which", "why", "with",
+];
+
+fn title_tokens(title: &str) -> std::collections::HashSet<String> {
+    title
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| w.len() > 2 && !STOPWORDS.contains(w))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Reject a write from the human-facing UI into the bundle.
 pub fn guard_human_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
@@ -197,6 +307,76 @@ mod tests {
     fn log_kind_names_what_actually_happened() {
         assert_eq!(log_kind(false), "Creation");
         assert_eq!(log_kind(true), "Update");
+    }
+
+    fn concept(title: &str, about: &str) -> String {
+        format!("---\ntype: Reference\ntitle: {title}\nabout:\n  - \"{about}\"\n---\n\nBody.\n")
+    }
+
+    #[test]
+    fn near_duplicates_needs_both_a_shared_anchor_and_a_similar_title() {
+        let vault = crate::vault::testutil::temp_vault("near-dup");
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/systems/drain.md",
+            &concept("Pick queue drain time", "[[phoenix]]"),
+        );
+        // Same project, unrelated subject — one shared word is not a duplicate.
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/systems/picking.md",
+            &concept("Pick list generation", "[[phoenix]]"),
+        );
+        // Same subject, different project.
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/systems/other.md",
+            &concept("Pick queue drain time", "[[atlas]]"),
+        );
+
+        let hits = near_duplicates(
+            &vault,
+            "knowledge/systems/new.md",
+            "Pick queue drain time",
+            &["phoenix".to_string()],
+        );
+        assert_eq!(hits.len(), 1, "got {hits:?}");
+        assert!(hits[0].contains("knowledge/systems/drain.md"));
+        std::fs::remove_dir_all(&vault).ok();
+    }
+
+    #[test]
+    fn near_duplicates_never_reports_the_concept_being_written() {
+        let vault = crate::vault::testutil::temp_vault("near-dup-self");
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/systems/drain.md",
+            &concept("Pick queue drain time", "[[phoenix]]"),
+        );
+        // Revising a concept in place is the behaviour this warning exists to
+        // encourage; flagging it as its own duplicate would punish it.
+        let hits = near_duplicates(
+            &vault,
+            "knowledge/systems/drain.md",
+            "Pick queue drain time",
+            &["[[phoenix]]".to_string()],
+        );
+        assert!(hits.is_empty(), "got {hits:?}");
+        std::fs::remove_dir_all(&vault).ok();
+    }
+
+    #[test]
+    fn an_unanchored_concept_is_never_called_a_duplicate() {
+        let vault = crate::vault::testutil::temp_vault("near-dup-anchorless");
+        crate::vault::testutil::write(
+            &vault,
+            "knowledge/systems/drain.md",
+            &concept("Pick queue drain time", "[[phoenix]]"),
+        );
+        // Title alone is not enough: without an anchor there is no evidence
+        // the two are about the same thing.
+        assert!(near_duplicates(&vault, "knowledge/x.md", "Pick queue drain time", &[]).is_empty());
+        std::fs::remove_dir_all(&vault).ok();
     }
 
     #[test]

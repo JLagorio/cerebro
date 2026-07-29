@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   commitOf,
+  conceptEdges,
   conceptsAbout,
   conceptsFrom,
   footnoteRefs,
+  nearDuplicates,
   isConcept,
   isKnowledgePath,
   isStale,
@@ -340,6 +342,149 @@ describe('subjects', () => {
     const entries = [project, about('knowledge/a.md', ['phoenix']), about('knowledge/b.md', ['other'])];
     const found = conceptsAbout('projects/phoenix/project.md', listConcepts(entries, TODAY), entries);
     expect(found.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
+  });
+});
+
+describe('concept relations (M8.7)', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    type: 'Project',
+    title: 'Phoenix',
+  });
+
+  const c = (
+    path: string,
+    title: string,
+    props: Record<string, unknown> = {},
+    relationships: Record<string, string[]> = {},
+  ) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      properties: { title, about: ['[[phoenix]]'], ...props },
+      relationships: { about: ['phoenix'], ...relationships },
+    });
+
+  it('reads supersession from the replacement, and marks the replaced one', () => {
+    // The retired concept says nothing about being retired — it cannot, since
+    // it was written before the thing that replaced it existed.
+    const old = c('knowledge/a.md', 'Offline window');
+    const now = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const concepts = listConcepts([project, old, now], TODAY);
+    const byPath = Object.fromEntries(concepts.map((x) => [x.entry.path, x]));
+    expect(byPath['knowledge/a.md'].supersededBy).toBe('knowledge/b.md');
+    expect(byPath['knowledge/b.md'].supersededBy).toBeNull();
+  });
+
+  it('keeps a replaced concept out of the review queue', () => {
+    // Verifying a claim something newer has already overridden is busywork.
+    const old = c('knowledge/a.md', 'Offline window');
+    const now = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const concepts = listConcepts([project, old, now], TODAY);
+    const replaced = concepts.find((x) => x.entry.path === 'knowledge/a.md');
+    expect(needsReview(replaced!)).toBe(false);
+    expect(reviewReasons(replaced!)).toEqual([]);
+  });
+
+  it('shows an edge from both ends, labelled for the end you are standing on', () => {
+    const old = c('knowledge/a.md', 'Offline window');
+    const now = c('knowledge/b.md', 'Offline window', {}, { supersedes: ['a'] });
+    const entries = [project, old, now];
+    const concepts = listConcepts(entries, TODAY);
+    const [first, second] = concepts;
+
+    const inbound = conceptEdges(first, concepts, entries);
+    expect(inbound).toHaveLength(1);
+    expect(inbound[0]).toMatchObject({ direction: 'in', label: 'Replaced by' });
+
+    const outbound = conceptEdges(second, concepts, entries);
+    expect(outbound[0]).toMatchObject({ direction: 'out', label: 'Replaces' });
+  });
+
+  it('accepts a bundle-relative path as well as a wikilink', () => {
+    // OKF §6.1 recommends `/systems/x.md`; the agent writes wikilinks
+    // everywhere else. Refusing either would lose a real edge over syntax.
+    const old = c('knowledge/systems/a.md', 'Offline window');
+    const now = c('knowledge/b.md', 'Offline window', { supersedes: ['/systems/a.md'] });
+    const concepts = listConcepts([project, old, now], TODAY);
+    expect(concepts.find((x) => x.entry.path === 'knowledge/systems/a.md')?.supersededBy).toBe(
+      'knowledge/b.md',
+    );
+  });
+
+  it('never lets a concept supersede itself', () => {
+    const self = c('knowledge/a.md', 'Offline window', {}, { supersedes: ['a'] });
+    const concepts = listConcepts([project, self], TODAY);
+    expect(concepts[0].supersededBy).toBeNull();
+    expect(conceptEdges(concepts[0], concepts, [project, self])).toEqual([]);
+  });
+});
+
+describe('nearDuplicates', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    type: 'Project',
+    title: 'Phoenix',
+  });
+  const atlas = makeEntry({
+    path: 'projects/atlas/project.md',
+    filename: 'project.md',
+    type: 'Project',
+    title: 'Atlas',
+  });
+
+  const c = (path: string, title: string, about: string, rel: Record<string, string[]> = {}) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      properties: { title },
+      relationships: { about: [about], ...rel },
+    });
+
+  it('needs BOTH a shared anchor and an overlapping title', () => {
+    const entries = [
+      project,
+      atlas,
+      c('knowledge/a.md', 'Pick queue drain time', 'phoenix'),
+      // Same project, one shared word, different subject.
+      c('knowledge/b.md', 'Pick list generation', 'phoenix'),
+      // Same subject, different project.
+      c('knowledge/c.md', 'Pick queue drain time', 'atlas'),
+      // Both — the only real duplicate.
+      c('knowledge/d.md', 'Drain time for the pick queue', 'phoenix'),
+    ];
+    const concepts = listConcepts(entries, TODAY);
+    const subject = concepts.find((x) => x.entry.path === 'knowledge/a.md')!;
+    expect(nearDuplicates(subject, concepts, entries).map((x) => x.entry.path)).toEqual([
+      'knowledge/d.md',
+    ]);
+  });
+
+  it('stops calling a pair duplicates once a relation resolves it', () => {
+    const entries = [
+      project,
+      c('knowledge/a.md', 'Pick queue drain time', 'phoenix'),
+      c('knowledge/d.md', 'Drain time for the pick queue', 'phoenix', { supersedes: ['a'] }),
+    ];
+    const concepts = listConcepts(entries, TODAY);
+    const subject = concepts.find((x) => x.entry.path === 'knowledge/a.md')!;
+    expect(nearDuplicates(subject, concepts, entries)).toEqual([]);
+  });
+
+  it('says nothing about an unanchored concept', () => {
+    // Without an anchor there is no evidence two concepts are about the same
+    // thing, and a title match alone would flag every "Overview" in the base.
+    const loose = makeEntry({
+      path: 'knowledge/a.md',
+      filename: 'a.md',
+      properties: { title: 'Pick queue drain time' },
+    });
+    const other = c('knowledge/b.md', 'Pick queue drain time', 'phoenix');
+    const entries = [project, loose, other];
+    const concepts = listConcepts(entries, TODAY);
+    expect(nearDuplicates(concepts[0], concepts, entries)).toEqual([]);
   });
 });
 

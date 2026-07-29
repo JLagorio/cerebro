@@ -1,7 +1,8 @@
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Tag } from '@/components/ui/Tag';
-import type { Concept, Source, Stamp } from '@/engine/okf';
+import { conceptEdges, listConcepts, nearDuplicates, type Concept, type Source, type Stamp } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveTarget } from '@/engine/wikilink';
 import { FlagChip, TrustChip } from '@/knowledge/TrustChip';
@@ -150,12 +151,97 @@ function AboutBlock({
   );
 }
 
+/**
+ * How this concept stands to the rest of the bundle (M8.7).
+ *
+ * The inbound edges are the point. A concept that has been replaced is never
+ * rewritten to say so — the replacement is what carries `supersedes` — so
+ * without reading the graph backwards, a retired claim is indistinguishable
+ * from a current one. "Replaced by" is therefore the loudest thing on this
+ * panel, above provenance: who wrote it matters less than whether it still
+ * stands.
+ */
+function RelationsBlock({
+  concept,
+  today,
+  onOpenConcept,
+}: {
+  concept: Concept;
+  today: string;
+  onOpenConcept: (path: string) => void;
+}) {
+  const entries = useVaultStore((s) => s.entries);
+  const concepts = useMemo(() => listConcepts(entries, today), [entries, today]);
+  const edges = useMemo(
+    () => conceptEdges(concept, concepts, entries),
+    [concept, concepts, entries],
+  );
+  const duplicates = useMemo(
+    () => nearDuplicates(concept, concepts, entries),
+    [concept, concepts, entries],
+  );
+
+  if (edges.length === 0 && duplicates.length === 0) return null;
+
+  const row = (
+    key: string,
+    label: string,
+    title: string,
+    path: string,
+    tone: 'warn' | 'plain',
+  ) => (
+    <button
+      key={key}
+      type="button"
+      data-testid="concept-relation"
+      data-path={path}
+      data-label={label}
+      onClick={() => onOpenConcept(path)}
+      className="flex w-full min-w-0 items-start gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left hover:bg-[var(--n-50)]"
+    >
+      <span
+        className={`mt-px flex-none text-[10.5px] font-medium uppercase tracking-[0.04em] ${
+          tone === 'warn' ? 'text-[var(--warn-600)]' : 'text-[var(--n-400)]'
+        }`}
+      >
+        {label}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--cortex-600)]">{title}</span>
+    </button>
+  );
+
+  return (
+    <div className="mt-4" data-testid="concept-relations">
+      <div className={LABEL}>Related knowledge</div>
+      <div className="mt-1.5 flex flex-col gap-px">
+        {edges.map((edge) =>
+          row(
+            `${edge.kind}:${edge.direction}:${edge.concept.entry.path}`,
+            edge.label,
+            edge.concept.title,
+            edge.concept.entry.path,
+            edge.kind === 'contradicts' || (edge.kind === 'supersedes' && edge.direction === 'in')
+              ? 'warn'
+              : 'plain',
+          ),
+        )}
+        {/* Unresolved lookalikes, not asserted relations — so they read as a
+            question rather than a fact, and nothing is merged on their say-so. */}
+        {duplicates.map((other) =>
+          row(`dup:${other.entry.path}`, 'Overlaps?', other.title, other.entry.path, 'plain'),
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function KnowledgePanel({
   concept,
   today,
   onVerify,
   onAskAgent,
   onOpenEntity,
+  onOpenConcept,
   verifying = false,
 }: {
   concept: Concept;
@@ -163,6 +249,7 @@ export function KnowledgePanel({
   onVerify: () => void;
   onAskAgent: () => void;
   onOpenEntity: (path: string) => void;
+  onOpenConcept: (path: string) => void;
   verifying?: boolean;
 }) {
   const lastVerified = relativeDay(concept.lastVerified, today);
@@ -186,6 +273,8 @@ export function KnowledgePanel({
       </div>
 
       <AboutBlock concept={concept} onOpenEntity={onOpenEntity} />
+
+      <RelationsBlock concept={concept} today={today} onOpenConcept={onOpenConcept} />
 
       <div className="mt-4">
         <div className={LABEL}>Written by</div>

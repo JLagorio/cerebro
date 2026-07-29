@@ -63,10 +63,15 @@ export function KnowledgeCommit({
   const attempts = useUiStore((s) => s.learnAttempts);
   const autoLearn = useUiStore((s) => s.autoLearn);
   const reading = learningPath === entry.path;
+  // Asked by path, not by "is the queue non-empty": the queue also carries
+  // stale concepts and every other note's edits, so a length check here would
+  // report every note in the vault as queued the moment anything was.
   const queued =
     reading ||
     (autoLearn &&
-      learnQueue([entry], listConcepts(entries, today), { filed, attempts }).length > 0);
+      learnQueue(entries, listConcepts(entries, today), { filed, attempts }).some(
+        (job) => job.path === entry.path,
+      ));
 
   const distill = () => {
     setAiPanelOpen(true);

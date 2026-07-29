@@ -25,7 +25,7 @@ import type { Entry } from './types';
  * turning into "you have 47 unread."
  */
 
-export type LearnReason = 'filed' | 'behind';
+export type LearnReason = 'filed' | 'behind' | 'stale';
 
 export interface LearnJob {
   path: string;
@@ -71,6 +71,24 @@ export function learnQueue(
   const filedSet = new Set(filed);
   const jobs: LearnJob[] = [];
 
+  // M8.8 — the retirement loop. `stale_after` used to be a flag and nothing
+  // more: the date passed, a warning icon appeared, and the concept sat there
+  // being wrong. A date the producer chose is a statement that the claim needs
+  // rechecking THEN, so it becomes work. The recheck reads the concept's own
+  // sources and revises, supersedes, or deprecates it — which is what stops
+  // the bundle being append-only.
+  for (const concept of concepts) {
+    if (!concept.stale || concept.supersededBy !== null) continue;
+    if (concept.lifecycle === 'deprecated') continue;
+    if (attempts[concept.entry.path] === concept.entry.modifiedAt) continue;
+    jobs.push({
+      path: concept.entry.path,
+      title: concept.title,
+      reason: 'stale',
+      modifiedAt: concept.entry.modifiedAt,
+    });
+  }
+
   for (const entry of entries) {
     if (!isLearnable(entry)) continue;
     if (attempts[entry.path] === entry.modifiedAt) continue;
@@ -89,7 +107,10 @@ export function learnQueue(
 
   // Filing is a deliberate act and answering it promptly is what makes the
   // base feel responsive; catching up on edits is maintenance and can wait.
-  const rank = (j: LearnJob) => (j.reason === 'filed' ? 0 : 1);
+  // Rechecking a stale concept waits longest — it is the only job about
+  // something the base already holds rather than something it is missing.
+  const RANK: Record<LearnReason, number> = { filed: 0, behind: 1, stale: 2 };
+  const rank = (j: LearnJob) => RANK[j.reason];
   return jobs.sort(
     (a, b) => rank(a) - rank(b) || b.modifiedAt.localeCompare(a.modifiedAt) || a.path.localeCompare(b.path),
   );
