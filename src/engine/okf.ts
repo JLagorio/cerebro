@@ -325,7 +325,7 @@ const normalizeResource = (resource: string): string => resource.replace(/^\.?\/
  * concept being deleted, whereas this cannot say a thing was learned unless
  * the learning is still there to point at.
  */
-export function conceptsFrom(path: string, concepts: Concept[]): Concept[] {
+export function conceptsFrom(path: string, concepts: readonly Concept[]): Concept[] {
   return concepts.filter((c) => c.sources.some((s) => normalizeResource(s.resource) === path));
 }
 
@@ -353,7 +353,7 @@ export interface Commit {
  * saying so is how re-distilling becomes an obvious act rather than a chore
  * nobody remembers. It never nags — the surfaces show it, they do not raise it.
  */
-export function commitOf(entry: Entry, concepts: Concept[]): Commit {
+export function commitOf(entry: Entry, concepts: readonly Concept[]): Commit {
   const from = conceptsFrom(entry.path, concepts);
   if (from.length === 0) return { concepts: from, state: 'uncommitted', at: null };
   const at = from.reduce<string | null>((newest, c) => {

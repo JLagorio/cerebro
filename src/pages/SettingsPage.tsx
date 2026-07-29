@@ -1,7 +1,11 @@
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
+import { learnQueue } from '@/engine/learn';
+import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
+import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -49,6 +53,20 @@ export function SettingsPage() {
   const setConnectors = useUiStore((s) => s.setAgentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
   const setIssuePrefixes = useUiStore((s) => s.setIssuePrefixes);
+  const autoLearn = useUiStore((s) => s.autoLearn);
+  const setAutoLearn = useUiStore((s) => s.setAutoLearn);
+  const learningPath = useUiStore((s) => s.learningPath);
+  const filed = useUiStore((s) => s.filedForLearning);
+  const attempts = useUiStore((s) => s.learnAttempts);
+  const entries = useVaultStore((s) => s.entries);
+
+  // The one place the outstanding count is shown at all. It belongs in
+  // Settings and nowhere else: a number on the Rail that ticks up is the
+  // "you have 47 unread" pattern the knowledge surfaces are barred from.
+  const pending = useMemo(
+    () => learnQueue(entries, listConcepts(entries, todayIso()), { filed, attempts }).length,
+    [attempts, entries, filed],
+  );
 
   const changeVault = async () => {
     // Deviation from the plan's verbatim body (execution-log note 17b guard
@@ -151,6 +169,19 @@ export function SettingsPage() {
           The AI knowledge base in <span className="[font-family:var(--font-mono)]">knowledge/</span> is
           written by the agent and read-only here. Verifying a concept records who confirmed it.
         </p>
+        <SettingRow
+          label="Learn on its own"
+          hint="Read filed captures, and re-read notes you have edited since the base last read them. Runs in the background and never interrupts — it only writes into knowledge/. Off: the base grows only when you press Learn from this."
+          checked={autoLearn}
+          onChange={setAutoLearn}
+        />
+        {pending > 0 && (
+          <p className="m-0 mb-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+            {learningPath !== null
+              ? `Reading ${learningPath} now.`
+              : `${pending} note${pending === 1 ? '' : 's'} waiting to be read.`}
+          </p>
+        )}
         <div className="flex items-start gap-3 py-2">
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium text-[var(--n-800)]">Your identity</div>

@@ -97,6 +97,12 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
       }
       await patchFrontmatter(path, patch);
 
+      // M8.6 — filing is the trigger the M8 plan named and never wired. It
+      // hands the capture to the background distiller rather than distilling
+      // here: this is a keyboard action that should end the moment the write
+      // lands, and the base reading it is a separate, slower thing.
+      useUiStore.getState().fileForLearning(path);
+
       // Only steer the selection when the note we organized was the one on
       // screen — organizing from a row while reading another must not yank
       // the reading pane away.

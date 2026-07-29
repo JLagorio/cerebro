@@ -31,6 +31,9 @@ export function useAgentChat(
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
+  // Shared with the background distiller so the two never run at once — there
+  // is one agent process, and a typed question outranks a background read.
+  const setAgentBusy = useUiStore((s) => s.setAgentBusy);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const sessionRef = useRef<string | null>(null);
@@ -48,6 +51,12 @@ export function useAgentChat(
 
   useEffect(() => {
     return onAgentEvent((event: AgentEvent) => {
+      // The stream is shared with the background distiller (M8.6), which runs
+      // whole turns of its own. With no active message this conversation is
+      // not the one being answered, and `Init` in particular must not land —
+      // adopting the reader's session id would make your next question resume
+      // its transcript instead of yours.
+      if (activeRef.current === null) return;
       switch (event.kind) {
         case 'Init':
           sessionRef.current = event.session_id;
@@ -96,6 +105,7 @@ export function useAgentChat(
           patchActive((m) => ({ ...m, streaming: false }));
           activeRef.current = null;
           setStreaming(false);
+          setAgentBusy(false);
           if (touchedFiles.current) {
             touchedFiles.current = false;
             void rescan().catch(() => undefined);
@@ -103,7 +113,7 @@ export function useAgentChat(
           break;
       }
     });
-  }, [patchActive, rescan]);
+  }, [patchActive, rescan, setAgentBusy]);
 
   const send = useCallback(
     (text: string) => {
@@ -117,6 +127,7 @@ export function useAgentChat(
         { id: assistantId, role: 'assistant', text: '', tools: [], streaming: true },
       ]);
       setStreaming(true);
+      setAgentBusy(true);
 
       void (async () => {
         try {
@@ -137,11 +148,12 @@ export function useAgentChat(
           );
           activeRef.current = null;
           setStreaming(false);
+          setAgentBusy(false);
           toast(message);
         }
       })();
     },
-    [connectors, model, shell, systemPrompt, toast, vaultPath],
+    [connectors, model, setAgentBusy, shell, systemPrompt, toast, vaultPath],
   );
 
   const stop = useCallback(() => {
@@ -149,15 +161,17 @@ export function useAgentChat(
     patchActive((m) => ({ ...m, streaming: false }));
     activeRef.current = null;
     setStreaming(false);
-  }, [patchActive]);
+    setAgentBusy(false);
+  }, [patchActive, setAgentBusy]);
 
   const reset = useCallback(() => {
     void stopAgent().catch(() => undefined);
     sessionRef.current = null;
     activeRef.current = null;
     setStreaming(false);
+    setAgentBusy(false);
     setMessages([]);
-  }, []);
+  }, [setAgentBusy]);
 
   return { messages, streaming, send, stop, reset };
 }

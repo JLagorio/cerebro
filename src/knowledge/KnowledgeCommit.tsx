@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
+import { learnQueue } from '@/engine/learn';
 import { commitOf, listConcepts, type CommitState } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
 import { relativeDay } from '@/knowledge/KnowledgePanel';
@@ -54,6 +55,18 @@ export function KnowledgeCommit({
 
   const heading = HEADINGS[commit.state];
   const learned = relativeDay(commit.at, today);
+
+  // Outstanding for THIS note only — the queue is computed here rather than
+  // read from a counter so nothing anywhere holds a running total.
+  const learningPath = useUiStore((s) => s.learningPath);
+  const filed = useUiStore((s) => s.filedForLearning);
+  const attempts = useUiStore((s) => s.learnAttempts);
+  const autoLearn = useUiStore((s) => s.autoLearn);
+  const reading = learningPath === entry.path;
+  const queued =
+    reading ||
+    (autoLearn &&
+      learnQueue([entry], listConcepts(entries, today), { filed, attempts }).length > 0);
 
   const distill = () => {
     setAiPanelOpen(true);
@@ -113,11 +126,25 @@ export function KnowledgeCommit({
         </p>
       )}
 
+      {/* M8.6 — where "the base is working on it" is allowed to appear: on
+          the note it concerns, while you are looking at it. Not a badge, not
+          a toast, and it disappears on its own. */}
+      {queued && (
+        <p
+          data-testid="learn-queued"
+          className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-[11.5px] text-[var(--cortex-600)]"
+        >
+          <Icon name="loader" size={11} />
+          {reading ? 'Reading this now' : 'Queued to be read'}
+        </p>
+      )}
+
       <div className="mt-2.5">
         <Button
           variant={commit.state === 'committed' ? 'ghost' : 'secondary'}
           size="sm"
           icon="brain"
+          disabled={queued}
           onClick={distill}
         >
           {commit.state === 'uncommitted' ? 'Learn from this' : 'Learn from it again'}

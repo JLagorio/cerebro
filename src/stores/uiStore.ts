@@ -71,6 +71,32 @@ interface UiState {
   /** A prompt handed to the panel from elsewhere ("Ask the agent to revise"). */
   agentPendingPrompt: string | null;
   setAgentPendingPrompt(v: string | null): void;
+  // --- Automatic learning (M8.6) ---
+  /**
+   * Let the base read filed captures and edited notes on its own. Persisted.
+   *
+   * A ceiling rather than a per-note choice, for the same reason the
+   * permission dropdown was deleted: whether the assistant may spend a turn
+   * reading your work is a standing decision, not one to re-litigate per note.
+   */
+  autoLearn: boolean;
+  setAutoLearn(v: boolean): void;
+  /** Captures handed to the distiller when they were filed. Persisted. */
+  filedForLearning: string[];
+  fileForLearning(path: string): void;
+  /**
+   * path → the note version last handed to the distiller. Persisted, and the
+   * only thing stopping a note nobody could learn anything from being read
+   * again on every tick — see engine/learn.ts.
+   */
+  learnAttempts: Record<string, string>;
+  recordLearnAttempt(path: string, modifiedAt: string): void;
+  /** True while ANY agent turn is in flight — the chat's or the runner's. */
+  agentBusy: boolean;
+  setAgentBusy(v: boolean): void;
+  /** The note the background distiller is reading right now, if any. */
+  learningPath: string | null;
+  setLearningPath(v: string | null): void;
   /**
    * Home insight cards the user has waved away (M8.3), by concept path.
    * Persisted, because a card you dismissed and that came back tomorrow is
@@ -103,6 +129,9 @@ const AGENT_SHELL_KEY = 'cerebro.agentShellAccess';
 const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
 const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
+const AUTO_LEARN_KEY = 'cerebro.autoLearn';
+const FILED_LEARN_KEY = 'cerebro.filedForLearning';
+const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -137,6 +166,21 @@ function loadStringList(key: string): string[] {
     return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
   } catch {
     return [];
+  }
+}
+
+function loadStringMap(key: string): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (pair): pair is [string, string] => typeof pair[1] === 'string',
+      ),
+    );
+  } catch {
+    return {};
   }
 }
 
@@ -278,6 +322,36 @@ export const useUiStore = create<UiState>((set) => ({
   },
   agentPendingPrompt: null,
   setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+
+  autoLearn: loadString(AUTO_LEARN_KEY, 'true') === 'true',
+  setAutoLearn: (v) => {
+    storeString(AUTO_LEARN_KEY, String(v));
+    set({ autoLearn: v });
+  },
+  filedForLearning: loadStringList(FILED_LEARN_KEY),
+  fileForLearning: (path) =>
+    set((s) => {
+      if (s.filedForLearning.includes(path)) return s;
+      const next = [...s.filedForLearning, path];
+      storeString(FILED_LEARN_KEY, JSON.stringify(next));
+      return { filedForLearning: next };
+    }),
+  learnAttempts: loadStringMap(LEARN_ATTEMPTS_KEY),
+  recordLearnAttempt: (path, modifiedAt) =>
+    set((s) => {
+      // Filing is consumed here rather than on completion: the attempt is
+      // what the record is for, and a run that dies mid-way must not leave the
+      // path queued to be tried again on the next tick.
+      const filed = s.filedForLearning.filter((p) => p !== path);
+      const next = { ...s.learnAttempts, [path]: modifiedAt };
+      storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
+      storeString(FILED_LEARN_KEY, JSON.stringify(filed));
+      return { learnAttempts: next, filedForLearning: filed };
+    }),
+  agentBusy: false,
+  setAgentBusy: (v) => set({ agentBusy: v }),
+  learningPath: null,
+  setLearningPath: (v) => set({ learningPath: v }),
 
   dismissedInsights: loadStringList(DISMISSED_INSIGHTS_KEY),
   dismissInsight: (path) =>

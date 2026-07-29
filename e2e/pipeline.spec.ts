@@ -10,6 +10,9 @@ import { test, expect, type Page } from '@playwright/test';
  */
 
 async function boot(page: Page): Promise<void> {
+  // The background distiller (M8.6) is off for tests that are not about it:
+  // a reader that fires four seconds in would rescan the vault mid-assertion.
+  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'false'));
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
   const sidebarTypes = page.getByTestId('sidebar-type');
@@ -177,4 +180,37 @@ test('augment: Home volunteers at most a few unconfirmed things, and forgets wha
   // this surface is not allowed to do.
   await page.reload();
   await expect(page.getByTestId('learned-card').locator(`[data-path="${path}"]`)).toHaveCount(0);
+});
+
+test('grow: filing a capture hands it to the base without anyone asking', async ({ page }) => {
+  // The one spec that leaves the background distiller on. Everything it does
+  // is silent by design, so what is asserted is the absence of interruption
+  // as much as the presence of the work.
+  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'true'));
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) await demoButton.click();
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
+
+  const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');
+  await expect(organize).toHaveAttribute('data-state', 'uncommitted');
+  await expect(organize.getByTestId('learn-queued')).toHaveCount(0);
+
+  // Filing it is the trigger. No dialog, no prompt, no panel opening.
+  await page.getByRole('button', { name: /Mark organized/i }).click();
+  await expect(page.getByTestId('ai-panel')).toHaveCount(0);
+
+  // The capture left the queue, so it is reached the way any filed note is.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('warehouse cutover');
+  await page.getByTestId('quick-open-result').first().click();
+  await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-knowledge').click();
+  await expect(
+    page.getByTestId('doc-side-panel').getByTestId('learn-queued'),
+  ).toContainText(/Queued to be read|Reading this now/);
 });

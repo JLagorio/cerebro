@@ -13,6 +13,9 @@ async function readMockFile(page: Page, path: string): Promise<string> {
 }
 
 async function boot(page: Page): Promise<void> {
+  // The background distiller (M8.6) is off for tests that are not about it:
+  // a reader that fires four seconds in would rescan the vault mid-assertion.
+  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'false'));
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
   const sidebarTypes = page.getByTestId('sidebar-type');

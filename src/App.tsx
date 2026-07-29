@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
+import { useLearnRunner } from '@/agent/useLearnRunner';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
 import { createView } from '@/app/viewActions';
@@ -105,6 +106,10 @@ function App() {
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
   const [newViewOpen, setNewViewOpen] = useState(false);
+  // M8.6 — the base reads filed captures and edited notes on its own. Mounted
+  // here rather than in the AI panel: the panel unmounts when you close it,
+  // and a knowledge base that only grows while a panel is open is not one.
+  useLearnRunner();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

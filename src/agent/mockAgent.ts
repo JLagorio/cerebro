@@ -33,6 +33,18 @@ const DEMO_CAPTURE = 'inbox/warehouse-cutover-thought.md';
 function scriptFor(message: string): Script {
   const prompt = message.toLowerCase();
 
+  // Checked before the Inbox branch: a distillation names the note it is
+  // reading, and most of those paths start with `inbox/` — matching on that
+  // would answer "learn from this capture" with a filing proposal.
+  if (prompt.startsWith('learn from the note at')) {
+    return {
+      tools: [
+        { name: 'get_note', input: '{}' },
+        { name: 'write_concept', input: '{"path":"knowledge/systems/x.md"}' },
+      ],
+      text: 'Kept one thing: the drain window, anchored to the project and citing this note. Skipped the scheduling talk.',
+    };
+  }
   if (prompt.includes('inbox') || prompt.includes('organize') || prompt.includes('organise')) {
     return {
       tools: [
