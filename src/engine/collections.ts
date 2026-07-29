@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { inboxEntries } from './inbox';
 import type { Entry, Presentation, Schema, Selection, ViewFile, ViewSource } from './types';
 import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
@@ -168,6 +169,11 @@ export function resolveCollection(
     }
     case 'home':
       return { title: 'Home', entries: [], presentation: defaultPresentation() };
+    case 'inbox':
+      // InboxPage draws its own queue/reading/organize layout, but the
+      // collection still reports the real contents so the topbar and any
+      // other consumer see the truth rather than an empty stand-in.
+      return { title: 'Inbox', entries: inboxEntries(entries), presentation: defaultPresentation() };
     case 'doc':
       // Docs render in the editor surface (DocPage); they have no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };

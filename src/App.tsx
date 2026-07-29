@@ -10,12 +10,14 @@ import { CollectionPage } from '@/pages/CollectionPage';
 import { DocPage } from '@/pages/DocPage';
 import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
+import { InboxPage } from '@/pages/InboxPage';
 import { ProjectPage } from '@/pages/ProjectPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
+import { captureNote } from '@/lib/capture';
 import { getLastVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -27,6 +29,7 @@ function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
     case 'home': return <HomePage />;
+    case 'inbox': return <InboxPage />;
     case 'project': return <ProjectPage selection={selection} />;
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;
@@ -103,6 +106,18 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         useUiStore.getState().setQuickOpen(true);
+      }
+      // Quick capture (M4): writes an untyped note and opens the Inbox on
+      // it, so capture never costs more than the keystroke.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        void captureNote()
+          .then(() => useNavStore.getState().navigate({ kind: 'inbox' }))
+          .catch((err: unknown) => {
+            useUiStore
+              .getState()
+              .toast(`Couldn't capture: ${err instanceof Error ? err.message : String(err)}`);
+          });
       }
     };
     window.addEventListener('keydown', onKey);

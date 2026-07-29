@@ -5,6 +5,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { visibleProperties } from '@/engine/properties';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -70,10 +71,10 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
   const declared = typeDef?.fields ?? [];
   const declaredNames = new Set(declared.map((f) => f.name));
-  const undeclaredScalars = Object.keys(entry.properties).filter(
+  const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(
     (k) => !declaredNames.has(k) && k !== 'type',
   );
-  const undeclaredRelations = Object.keys(entry.relationships).filter(
+  const undeclaredRelations = visibleProperties(Object.keys(entry.relationships)).filter(
     (k) => !declaredNames.has(k),
   );
 

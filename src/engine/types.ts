@@ -76,6 +76,7 @@ export interface ResolvedField {
 
 export type Selection =
   | { kind: 'home' }
+  | { kind: 'inbox' }                  // capture queue: unorganized notes (M4)
   | { kind: 'project'; path: string }  // path of the project.md (vault format v2)
   | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)

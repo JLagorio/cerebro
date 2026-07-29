@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links';
 
@@ -29,6 +30,16 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+  /** Inbox workflow (M4). Off = every note reads as organized and the Rail
+   * hides the Inbox — for people who file at capture time. Persisted. */
+  inboxEnabled: boolean;
+  setInboxEnabled(v: boolean): void;
+  /** After organizing, open the next queued capture automatically. */
+  inboxAutoAdvance: boolean;
+  setInboxAutoAdvance(v: boolean): void;
+  /** Selected Inbox period pill; persisted so the queue reopens as left. */
+  inboxPeriod: InboxPeriod;
+  setInboxPeriod(v: InboxPeriod): void;
   toasts: { id: number; message: string }[];
   toast(message: string): void;
   dismissToast(id: number): void;
@@ -41,6 +52,9 @@ const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
+const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
+const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
+const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -87,6 +101,11 @@ function storeString(key: string, v: string): void {
 function loadPanelTab(): DocPanelTab {
   const v = loadString(PANEL_TAB_KEY, 'outline');
   return v === 'info' || v === 'links' ? v : 'outline';
+}
+
+function loadInboxPeriod(): InboxPeriod {
+  const v = loadString(INBOX_PERIOD_KEY, 'all');
+  return v === 'week' || v === 'month' ? v : 'all';
 }
 
 let nextToastId = 1;
@@ -149,6 +168,22 @@ export const useUiStore = create<UiState>((set) => ({
   setTypesOpen: (v) => {
     storeString(TYPES_OPEN_KEY, String(v));
     set({ typesOpen: v });
+  },
+
+  inboxEnabled: loadString(INBOX_ENABLED_KEY, 'true') === 'true',
+  setInboxEnabled: (v) => {
+    storeString(INBOX_ENABLED_KEY, String(v));
+    set({ inboxEnabled: v });
+  },
+  inboxAutoAdvance: loadString(INBOX_ADVANCE_KEY, 'true') === 'true',
+  setInboxAutoAdvance: (v) => {
+    storeString(INBOX_ADVANCE_KEY, String(v));
+    set({ inboxAutoAdvance: v });
+  },
+  inboxPeriod: loadInboxPeriod(),
+  setInboxPeriod: (v) => {
+    storeString(INBOX_PERIOD_KEY, v);
+    set({ inboxPeriod: v });
   },
 
   toasts: [],
