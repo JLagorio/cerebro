@@ -34,7 +34,7 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   expect(all).toBeGreaterThan(2);
 
   // -- The review queue is the unverified/stale/deprecated set -----------
-  await page.getByRole('tab', { name: /Needs review/ }).click();
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }).click();
   const queued = page.getByTestId('concept-row');
   const queuedCount = await queued.count();
   expect(queuedCount).toBeGreaterThan(0);
@@ -67,6 +67,73 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
   await page.getByRole('button', { name: /^Verify$/ }).click();
   await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount - 1);
+});
+
+test('knowledge: the bundle navigates by its own axes, not by Home\'s', async ({ page }) => {
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+
+  // The sidebar stops being Home's. Views and Types describe a corpus with a
+  // different author; standing on Knowledge they have no business being here.
+  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
+  await expect(page.getByTestId('sidebar-view')).toHaveCount(0);
+
+  const nav = page.getByTestId('knowledge-nav-row');
+  const total = await page.getByTestId('concept-row').count();
+
+  // -- Sections: the folders knowledge/index.md has always declared -------
+  await nav.filter({ hasText: 'Metrics' }).click();
+  await expect(page.getByTestId('knowledge-heading')).toHaveText('Metrics');
+  const inMetrics = await page.getByTestId('concept-row').count();
+  expect(inMetrics).toBeGreaterThan(0);
+  expect(inMetrics).toBeLessThan(total);
+  const metricPaths = await page
+    .getByTestId('concept-row')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
+  expect(metricPaths.every((p) => p.startsWith('knowledge/metrics/'))).toBe(true);
+
+  // -- By entity: the join `about:` exists to make ------------------------
+  await nav.filter({ hasText: 'Offline sync hardening' }).click();
+  await expect(page.getByTestId('knowledge-heading')).toHaveText('Offline sync hardening');
+  const aboutPaths = await page
+    .getByTestId('concept-row')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-path') ?? ''));
+  // Knowledge about one project, gathered from across the bundle's folders —
+  // which a section-only nav could never assemble.
+  expect(aboutPaths).toContain('knowledge/metrics/sync-error-rate.md');
+  expect(aboutPaths).toContain('knowledge/systems/offline-guarantee.md');
+
+  // The anchor is followable in both directions: the panel gets you from a
+  // concept back to the entity it is about.
+  await expect(
+    page.getByTestId('knowledge-panel').getByTestId('about-entity').first(),
+  ).toBeVisible();
+
+  // -- The log: what the agent has actually done -------------------------
+  await nav.filter({ hasText: 'Update log' }).click();
+  await expect(page.getByTestId('knowledge-log')).toBeVisible();
+  await expect(page.getByTestId('log-day').first()).toContainText('2026-07-28');
+  await expect(page.getByTestId('log-entry').first()).toHaveAttribute('data-kind', 'creation');
+
+  // An entry names the concept it touched, and that name is a way back to it.
+  await page.getByTestId('log-concept-link').filter({ hasText: 'Warehouse cutover' }).click();
+  await expect(page.getByTestId('knowledge-panel')).toBeVisible();
+  await expect(page.getByTestId('concept-body')).toContainText('Go-live night');
+});
+
+test('knowledge: the Rail carries no review badge', async ({ page }) => {
+  await boot(page);
+
+  // A count in the chrome is the app nagging you to drain a queue. The same
+  // number lives on the "Needs review" row, where it describes a destination.
+  const knowledge = page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ });
+  await expect(knowledge).toHaveAttribute('aria-label', 'Knowledge');
+  await expect(knowledge.getByTestId('rail-badge')).toHaveCount(0);
+
+  await knowledge.click();
+  await expect(
+    page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }),
+  ).toContainText(/\d/);
 });
 
 test('knowledge: the bundle stays out of the surfaces you author', async ({ page }) => {

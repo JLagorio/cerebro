@@ -81,6 +81,17 @@ function write(rel: string, content: string): void {
 }
 
 const fm = (lines: string[]): string => `---\n${lines.join('\n')}\n---\n\n`;
+
+/**
+ * Write a file byte for byte. `write` unwraps hard-wrapped prose, which is
+ * right for markdown and destructive for a transcript, where a line break IS
+ * the format.
+ */
+function writeRaw(rel: string, content: string): void {
+  const path = join(VAULT, rel);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content);
+}
 const link = (slug: string): string => `"[[${slug}]]"`;
 const links = (slugs: string[]): string =>
   slugs.length === 0 ? '[]' : `\n${slugs.map((s) => `  - "[[${s}]]"`).join('\n')}`;
@@ -825,6 +836,12 @@ write(
     'type: Reference',
     'title: The offline guarantee',
     'description: What the product promises when a crew loses connectivity, and where that number comes from.',
+    // `about:` anchors a concept to the entities it is knowledge OF (M8.1) —
+    // `sources` says where it came from, this says what it is about, and only
+    // the second can put the concept on a project page.
+    'about:',
+    '  - "[[offline-sync-hardening]]"',
+    '  - "[[dec-offline-window-72h]]"',
     'tags: [offline-sync, product]',
     'lifecycle: stable',
     'generated: { by: claude-code, at: 2026-07-26T11:20:00Z }',
@@ -873,6 +890,9 @@ write(
     'type: Metric',
     'title: Sync error rate',
     'description: Failed sync operations as a share of all sync attempts, per hour.',
+    'about:',
+    '  - "[[offline-sync-hardening]]"',
+    '  - "[[kr-sync-error-rate]]"',
     'tags: [reliability, offline-sync]',
     'lifecycle: stable',
     'stale_after: 2026-07-26',
@@ -923,6 +943,9 @@ write(
     'type: Playbook',
     'title: "Warehouse cutover: go-live and rollback"',
     'description: What to run, in what order, on Phoenix warehouse go-live night.',
+    'about:',
+    '  - "[[phoenix-warehouse-rollout]]"',
+    '  - "[[risk-rollback-unrehearsed]]"',
     'tags: [operations, phoenix]',
     'lifecycle: draft',
     'generated: { by: claude-code, at: 2026-07-28T09:05:00Z }',
@@ -980,11 +1003,301 @@ where it came from and who has confirmed it.
 `,
 );
 
+// The log is written once, at the end of the seed, so it can name the
+// concepts the M8.2 block adds below.
+
+// ---------------------------------------------------------------------------
+// M8.2 / M8.3 — one story running the whole pipeline
+//
+// A standup is recorded. The transcript is ingested as a working doc. It names
+// a Jira ticket, which gets fetched once and cached. The assistant distils
+// both into a concept anchored to the project. A PRD written later in that
+// project surfaces the concept — and contradicts a decision, which is the
+// thing the augment surface exists to catch.
+// ---------------------------------------------------------------------------
+
+write(
+  'types/spec.md',
+  fm([
+    'type: Type',
+    'icon: file-text',
+    "color: '#0EA5E9'",
+    'display: doc',
+    'fields:',
+    '  status: { kind: select, options: [draft, in review, approved] }',
+    '  owner: { kind: person }',
+    '  project: { kind: relation, target: Project }',
+  ]) +
+    `# Spec
+
+Written specifications — PRDs, design docs, proposals. \`display: doc\` because
+a spec is authored, not tracked: it lives in the Docs tree beside the project
+it belongs to.
+`,
+);
+
+write(
+  'types/source.md',
+  fm([
+    'type: Type',
+    'icon: link',
+    "color: '#64748B'",
+    'display: doc',
+    'fields:',
+    '  source_url: { kind: url }',
+    '  source_id: { kind: text }',
+    '  fetched_at: { kind: date }',
+  ]) +
+    `# Source
+
+A local copy of something fetched from another system — a ticket, a wiki page.
+The assistant writes these with \`cache_source\` so the same ticket is fetched
+once rather than on every question about it.
+`,
+);
+
+// -- Raw transcripts, for trying the ingest inlet by hand --------------------
+// Not .md, so the scanner never sees them (scan.rs takes only `.md`). They
+// exist to be dragged onto the Inbox.
+
+writeRaw(
+  '_ingest-samples/2026-07-28 Phoenix cutover standup.vtt',
+  `WEBVTT
+
+NOTE Recorded automatically. Speaker labels are best-effort.
+
+1
+00:00:04.000 --> 00:00:11.500
+<v Marcus Webb>Right, cutover. We are eleven days out and the thing I keep
+coming back to is that nobody has actually run the rollback.
+
+2
+00:00:11.500 --> 00:00:19.000
+<v Marcus Webb>We have it written down. Written down is not rehearsed.
+
+3
+00:00:19.500 --> 00:00:31.000
+<v Priya Nair>The part that worries me is step two. Draining the pick queue
+is not instant — it took about forty minutes in staging, and that was with a
+tenth of the volume.
+
+4
+00:00:31.000 --> 00:00:44.000
+<v Priya Nair>If we cut DNS while there is still work in flight it lands in
+neither system. That is the failure mode nobody has a recovery for.
+
+5
+00:00:44.500 --> 00:00:52.000
+<v Tom Keller>Is that PHX-421? I thought we opened a ticket for the rehearsal
+after the last review.
+
+6
+00:00:52.000 --> 00:01:03.000
+<v Marcus Webb>PHX-421 is the rehearsal, yes. It is still open and unassigned,
+which is the actual problem.
+
+7
+00:01:03.500 --> 00:01:14.000
+<v Priya Nair>Forty minutes is the number to plan around. Anything shorter
+than an hour of drain time and we are guessing.
+
+8
+00:01:14.500 --> 00:01:22.000
+<v Tom Keller>Scanners are fine either way — the camera fallback is the
+assumed path on night one, so hardware is not on the critical path.
+`,
+);
+
+writeRaw(
+  '_ingest-samples/2026-07-27 offline sync review.srt',
+  `1
+00:00:02,000 --> 00:00:09,000
+Tom Keller: The seventy-two hour window is the number in the decision, and it
+is the number the app warns on.
+
+2
+00:00:09,500 --> 00:00:16,000
+Sam Ito: Sales has a deck out there saying a week. That is the one that will
+bite us.
+
+3
+00:00:16,500 --> 00:00:24,000
+Tom Keller: Seventy-two hours. It covers a long weekend plus a day, which is
+the real field pattern.
+`,
+);
+
+// -- The ingested working doc (what dropping that .vtt produces) -------------
+
+write(
+  'inbox/phoenix-cutover-standup.md',
+  fm([
+    'title: Phoenix cutover standup',
+    'ingested_at: 2026-07-28T09:14:00Z',
+    'ingest_format: vtt',
+    "source_file: '2026-07-28 Phoenix cutover standup.vtt'",
+    'speakers: [Marcus Webb, Priya Nair, Tom Keller]',
+    "duration: '00:01:14'",
+  ]) +
+    `# Phoenix cutover standup
+
+\`00:00:04\` **Marcus Webb:** Right, cutover. We are eleven days out and the thing I keep coming back to is that nobody has actually run the rollback. We have it written down. Written down is not rehearsed.
+
+\`00:00:19\` **Priya Nair:** The part that worries me is step two. Draining the pick queue is not instant — it took about forty minutes in staging, and that was with a tenth of the volume. If we cut DNS while there is still work in flight it lands in neither system. That is the failure mode nobody has a recovery for.
+
+\`00:00:44\` **Tom Keller:** Is that PHX-421? I thought we opened a ticket for the rehearsal after the last review.
+
+\`00:00:52\` **Marcus Webb:** PHX-421 is the rehearsal, yes. It is still open and unassigned, which is the actual problem.
+
+\`00:01:03\` **Priya Nair:** Forty minutes is the number to plan around. Anything shorter than an hour of drain time and we are guessing.
+
+\`00:01:14\` **Tom Keller:** Scanners are fine either way — the camera fallback is the assumed path on night one, so hardware is not on the critical path.
+`,
+);
+
+// -- The cached ticket (what cache_source writes after one fetch) ------------
+
+write(
+  'sources/issues/phx-421.md',
+  fm([
+    'type: Source',
+    'title: "PHX-421 — Rehearse the warehouse rollback end to end"',
+    'source_id: PHX-421',
+    'source_kind: issue',
+    'source_url: https://example.atlassian.net/browse/PHX-421',
+    'fetched_at: 2026-07-28T09:20:00Z',
+    'stale_after: 2026-08-27',
+    'generated: { by: claude-code, at: 2026-07-28T09:20:00Z }',
+  ]) +
+    `# PHX-421 — Rehearse the warehouse rollback end to end
+
+| Field | Value |
+|-------|-------|
+| Status | Open |
+| Assignee | *Unassigned* |
+| Priority | High |
+| Reporter | Marcus Webb |
+| Created | 2026-07-14 |
+
+## Description
+
+Execute the documented rollback against the staging warehouse, end to end,
+before the go-live date locks. The written procedure has never been run.
+
+Particular attention to step 2 (drain the in-flight pick queue): staging
+measured ~40 minutes at a tenth of production volume, and cutting DNS with
+work still in flight strands it in neither system.
+
+## Acceptance
+
+* Rollback executed against staging start to finish
+* Measured drain time recorded
+* Recovery path documented for work stranded mid-cut
+`,
+);
+
+// -- The distilled concept, citing both ------------------------------------
+
+write(
+  'knowledge/systems/pick-queue-drain.md',
+  fm([
+    'type: Reference',
+    'title: Pick queue drain time',
+    'description: How long the in-flight pick queue takes to clear, and why it gates the cutover.',
+    'about:',
+    '  - "[[phoenix-warehouse-rollout]]"',
+    '  - "[[risk-rollback-unrehearsed]]"',
+    'tags: [operations, phoenix]',
+    'lifecycle: stable',
+    'generated: { by: claude-code, at: 2026-07-28T09:26:00Z }',
+    'stale_after: 2026-08-15',
+    'sources:',
+    '  - id: standup',
+    '    resource: /inbox/phoenix-cutover-standup.md',
+    '    title: Phoenix cutover standup, 2026-07-28',
+    '    author: human:priya-nair',
+    '    last_modified: 2026-07-28',
+    '  - id: phx-421',
+    '    resource: /sources/issues/phx-421.md',
+    '    title: "PHX-421 — Rehearse the warehouse rollback end to end"',
+    '    last_modified: 2026-07-28',
+  ]) +
+    `# The number
+
+Draining the in-flight pick queue took **about 40 minutes in staging**, at
+roughly a tenth of production volume.[^standup] Plan for at least an hour;
+anything shorter is a guess.[^standup]
+
+# Why it gates everything
+
+Step 2 of the cutover is the drain. Cutting DNS while work is still in flight
+strands that work in neither system, and there is no documented recovery for
+it.[^standup][^phx-421]
+
+That makes drain time the binding constraint on the cutover window — not the
+scanner hardware, which has a camera fallback and is deliberately off the
+critical path.[^standup]
+
+# Status
+
+The rehearsal that would confirm any of this is [[risk-rollback-unrehearsed]],
+tracked as PHX-421, which is **open and unassigned**.[^phx-421]
+
+[^standup]: Phoenix cutover standup, 2026-07-28
+[^phx-421]: PHX-421 — Rehearse the warehouse rollback end to end
+`,
+);
+
+// -- The PRD: what the augment surface reads --------------------------------
+// It deliberately contradicts dec-offline-window-72h and omits the drain time,
+// so "Missing" and "Contradicts" both have something real to find.
+
+write(
+  'projects/phoenix-warehouse-rollout/cutover-prd.md',
+  fm([
+    'type: Spec',
+    'title: Phoenix cutover — go-live PRD',
+    'status: draft',
+    'owner: "[[marcus-webb]]"',
+    'project: "[[phoenix-warehouse-rollout]]"',
+  ]) +
+    `# Phoenix cutover — go-live PRD
+
+## Goal
+
+Move the Phoenix warehouse onto the new stack in a single night, with a
+rollback path that can be taken at any point before receiving is unfrozen.
+
+## Cutover window
+
+We are planning a **four-hour window** starting at 22:00. That covers the
+freeze, the cut, the smoke set, and the unfreeze with room to spare.
+
+## Offline behaviour during the cut
+
+Crews keep working offline throughout. The app guarantees a **seven-day**
+offline window, so a four-hour cut is comfortably inside it and no crew
+should notice the transition.
+
+## Scanning
+
+Hardware is the risk to watch — if the scanners are not delivered we cannot
+go live.
+
+## Open questions
+
+* Who runs the smoke set?
+* Do we need a second on-call for the warehouse floor?
+`,
+);
+
 write(
   'knowledge/log.md',
   `# Knowledge Update Log
 
 ## 2026-07-28
+* **Creation**: [Pick queue drain time](/systems/pick-queue-drain.md) — distilled
+  from the cutover standup transcript and the cached PHX-421 ticket.
 * **Creation**: Drafted [Warehouse cutover](/playbooks/warehouse-cutover.md) from the
   rollout project and the open rollback risk.
 

@@ -58,12 +58,145 @@ pub fn guard_verify(path: &str, patch: &Map<String, Value>) -> Result<(), String
     Ok(())
 }
 
+// --- The update log (M8.2) -------------------------------------------------
+
+pub const LOG_PATH: &str = "knowledge/log.md";
+const LOG_HEADING: &str = "# Knowledge Update Log";
+
+/// Bundle-relative link target for a concept: `knowledge/a/b.md` → `/a/b.md`.
+fn bundle_link(rel: &str) -> String {
+    rel.strip_prefix(KNOWLEDGE_DIR).unwrap_or(rel).to_string()
+}
+
+/// Whether writing this path creates a concept or revises one.
+pub fn log_kind(existed: bool) -> &'static str {
+    if existed {
+        "Update"
+    } else {
+        "Creation"
+    }
+}
+
+/// Insert one entry into `knowledge/log.md`, newest first.
+///
+/// The log is appended by US, on every `write_concept`, rather than left to
+/// the agent to remember. An agent that can choose whether to record what it
+/// changed will eventually not, and a knowledge base whose changelog is
+/// optional cannot answer the only question that matters about a
+/// machine-written corpus: is this thing actually learning anything.
+pub fn insert_log_entry(existing: &str, date: &str, kind: &str, title: &str, rel: &str) -> String {
+    let bullet = format!("* **{kind}**: [{title}]({}).", bundle_link(rel));
+
+    if existing.trim().is_empty() {
+        return format!("{LOG_HEADING}\n\n## {date}\n{bullet}\n");
+    }
+
+    let day_heading = format!("## {date}");
+    let mut out: Vec<String> = Vec::new();
+    let mut inserted = false;
+
+    for line in existing.lines() {
+        // Today already has a section: the new entry goes at its top, so the
+        // most recent change is the first thing read.
+        if !inserted && line.trim_end() == day_heading {
+            out.push(line.to_string());
+            out.push(bullet.clone());
+            inserted = true;
+            continue;
+        }
+        // A different date's section is the first thing this one must precede.
+        if !inserted && line.starts_with("## ") {
+            out.push(day_heading.clone());
+            out.push(bullet.clone());
+            out.push(String::new());
+            out.push(line.to_string());
+            inserted = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+
+    if !inserted {
+        // No dated sections at all — a log with only a heading, or none.
+        if !out.iter().any(|l| l.trim_end() == LOG_HEADING) {
+            out.insert(0, String::new());
+            out.insert(0, LOG_HEADING.to_string());
+        }
+        if out.last().map(|l| !l.trim().is_empty()).unwrap_or(false) {
+            out.push(String::new());
+        }
+        out.push(day_heading);
+        out.push(bullet);
+    }
+
+    let mut text = out.join("\n");
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn patch(pairs: &[(&str, Value)]) -> Map<String, Value> {
         pairs.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect()
+    }
+
+    const REL: &str = "knowledge/playbooks/cutover.md";
+
+    #[test]
+    fn writes_a_whole_log_when_none_exists() {
+        let out = insert_log_entry("", "2026-07-28", "Creation", "Cutover", REL);
+        assert_eq!(
+            out,
+            "# Knowledge Update Log\n\n## 2026-07-28\n* **Creation**: [Cutover](/playbooks/cutover.md).\n"
+        );
+    }
+
+    #[test]
+    fn adds_to_todays_section_newest_first() {
+        let existing = "# Knowledge Update Log\n\n## 2026-07-28\n* **Creation**: [A](/a.md).\n";
+        let out = insert_log_entry(existing, "2026-07-28", "Update", "Cutover", REL);
+        let bullets: Vec<&str> = out.lines().filter(|l| l.starts_with("* ")).collect();
+        assert_eq!(bullets[0], "* **Update**: [Cutover](/playbooks/cutover.md).");
+        assert_eq!(bullets[1], "* **Creation**: [A](/a.md).");
+        // One section for the day, not two.
+        assert_eq!(out.matches("## 2026-07-28").count(), 1);
+    }
+
+    #[test]
+    fn a_new_day_goes_above_every_older_one() {
+        let existing = "# Knowledge Update Log\n\n## 2026-07-27\n* **Creation**: [A](/a.md).\n";
+        let out = insert_log_entry(existing, "2026-07-28", "Creation", "Cutover", REL);
+        let days: Vec<&str> = out.lines().filter(|l| l.starts_with("## ")).collect();
+        assert_eq!(days, vec!["## 2026-07-28", "## 2026-07-27"]);
+    }
+
+    #[test]
+    fn a_log_with_only_a_heading_gains_its_first_section() {
+        let out = insert_log_entry("# Knowledge Update Log\n", "2026-07-28", "Creation", "C", REL);
+        assert!(out.starts_with("# Knowledge Update Log\n"));
+        assert!(out.contains("## 2026-07-28"));
+        assert_eq!(out.matches("# Knowledge Update Log").count(), 1);
+    }
+
+    #[test]
+    fn prose_above_the_first_section_is_preserved() {
+        let existing = "# Knowledge Update Log\n\nWhat I have learned.\n\n## 2026-07-27\n* **Creation**: [A](/a.md).\n";
+        let out = insert_log_entry(existing, "2026-07-28", "Creation", "C", REL);
+        assert!(out.contains("What I have learned."));
+        // The new day still precedes the old one.
+        let new_at = out.find("## 2026-07-28").unwrap();
+        let old_at = out.find("## 2026-07-27").unwrap();
+        assert!(new_at < old_at);
+    }
+
+    #[test]
+    fn log_kind_names_what_actually_happened() {
+        assert_eq!(log_kind(false), "Creation");
+        assert_eq!(log_kind(true), "Update");
     }
 
     #[test]

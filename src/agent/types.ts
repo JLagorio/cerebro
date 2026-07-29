@@ -45,16 +45,24 @@ export interface ChatMessage {
 }
 
 /**
- * Read-only cannot reach a write tool at all (enforced in agent.rs, not just
- * described here). Power adds shell access scoped to the vault directory.
+ * What the agent may do is no longer a mode the user picks per conversation
+ * (M8.1). Three of them — read-only, vault edits, power — asked you to declare
+ * a policy before you knew what you were going to ask for, and the honest
+ * answer was always "it depends on the request."
+ *
+ * The permission model is the folder model instead: the agent owns
+ * `knowledge/` and writes there freely, and cerebro's own tools are the only
+ * way it reaches anything else. Shell access is the one thing left that a
+ * folder boundary cannot express, so it is the one thing still switchable —
+ * once, in Settings, as a ceiling rather than a per-turn choice.
+ *
+ * Enforcement lives in agent.rs, not here: a tool the agent never receives is
+ * a rule, a tool it receives and is asked not to use is a suggestion.
  */
-export type PermissionMode = 'read_only' | 'vault_edits' | 'power';
-
-export const PERMISSION_MODES: { value: PermissionMode; label: string; hint: string }[] = [
-  { value: 'read_only', label: 'Read only', hint: 'Search and read. Cannot change anything.' },
-  { value: 'vault_edits', label: 'Vault edits', hint: 'Can create and edit notes and knowledge. No shell.' },
-  { value: 'power', label: 'Power', hint: 'Adds shell commands scoped to the vault folder.' },
-];
+export interface AgentPolicy {
+  /** Bash + the CLI's own file tools, scoped to the vault directory. */
+  shell: boolean;
+}
 
 /** A filing the agent suggests for an Inbox capture — shown, never applied (M7). */
 export interface OrganizeProposal {

@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import type { OrganizeProposal, PermissionMode } from '@/agent/types';
+import type { OrganizeProposal } from '@/agent/types';
 import type { InboxPeriod } from '@/engine/inbox';
 
-export type DocPanelTab = 'outline' | 'info' | 'links';
+export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
 
 interface UiState {
   detailPath: string | null;
@@ -41,6 +41,15 @@ interface UiState {
   /** Selected Inbox period pill; persisted so the queue reopens as left. */
   inboxPeriod: InboxPeriod;
   setInboxPeriod(v: InboxPeriod): void;
+  /**
+   * Which capture the Inbox has open. In the store rather than inside the
+   * page because the agent has to be able to point the queue at the capture
+   * it is proposing a filing for — a proposal you land next to the wrong note
+   * is invisible, which is the one thing propose_organize exists to prevent.
+   * Session-only: a stale selection restored across reloads is noise.
+   */
+  inboxSelectedPath: string | null;
+  setInboxSelectedPath(v: string | null): void;
   /** Identity for OKF actor stamps (M5): written as `human:<id>` when you
    * verify a concept. Per device — it records who reviewed, not who owns. */
   actorId: string;
@@ -48,11 +57,27 @@ interface UiState {
   // --- Local agent (M6) ---
   aiPanelOpen: boolean;
   setAiPanelOpen(v: boolean): void;
-  agentPermissionMode: PermissionMode;
-  setAgentPermissionMode(v: PermissionMode): void;
+  /** The one agent ceiling (M8.1) — see AgentPolicy. Persisted. */
+  agentShellAccess: boolean;
+  setAgentShellAccess(v: boolean): void;
+  /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
+  agentConnectors: boolean;
+  setAgentConnectors(v: boolean): void;
+  /** Comma-separated issue-tracker project keys, e.g. "PHX, SYN". Issue
+   * references cannot be recognised by shape, only declared — see
+   * engine/ingest.ts. Persisted. */
+  issuePrefixes: string;
+  setIssuePrefixes(v: string): void;
   /** A prompt handed to the panel from elsewhere ("Ask the agent to revise"). */
   agentPendingPrompt: string | null;
   setAgentPendingPrompt(v: string | null): void;
+  /**
+   * Home insight cards the user has waved away (M8.3), by concept path.
+   * Persisted, because a card you dismissed and that came back tomorrow is
+   * the definition of the nagging this surface is not allowed to do.
+   */
+  dismissedInsights: string[];
+  dismissInsight(path: string): void;
   /** Filings the agent has suggested but not applied (M7), keyed by path. */
   proposals: Record<string, OrganizeProposal>;
   addProposal(p: OrganizeProposal): void;
@@ -74,7 +99,10 @@ const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
 const ACTOR_ID_KEY = 'cerebro.actorId';
 const AI_PANEL_KEY = 'cerebro.aiPanelOpen';
-const AGENT_MODE_KEY = 'cerebro.agentPermissionMode';
+const AGENT_SHELL_KEY = 'cerebro.agentShellAccess';
+const AGENT_CONNECTORS_KEY = 'cerebro.agentConnectors';
+const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
+const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -102,6 +130,16 @@ function loadTreeOrder(): Record<string, string[]> {
   }
 }
 
+function loadStringList(key: string): string[] {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function loadString(key: string, fallback: string): string {
   try {
     return window.localStorage.getItem(key) ?? fallback;
@@ -120,14 +158,7 @@ function storeString(key: string, v: string): void {
 
 function loadPanelTab(): DocPanelTab {
   const v = loadString(PANEL_TAB_KEY, 'outline');
-  return v === 'info' || v === 'links' ? v : 'outline';
-}
-
-function loadPermissionMode(): PermissionMode {
-  // Defaults to vault_edits, not power: shell access should be a choice the
-  // user makes, never one they inherit.
-  const v = loadString(AGENT_MODE_KEY, 'vault_edits');
-  return v === 'read_only' || v === 'power' ? v : 'vault_edits';
+  return v === 'info' || v === 'links' || v === 'knowledge' ? v : 'outline';
 }
 
 function loadInboxPeriod(): InboxPeriod {
@@ -212,6 +243,8 @@ export const useUiStore = create<UiState>((set) => ({
     storeString(INBOX_PERIOD_KEY, v);
     set({ inboxPeriod: v });
   },
+  inboxSelectedPath: null,
+  setInboxSelectedPath: (v) => set({ inboxSelectedPath: v }),
 
   actorId: loadString(ACTOR_ID_KEY, 'me'),
   setActorId: (v) => {
@@ -224,13 +257,36 @@ export const useUiStore = create<UiState>((set) => ({
     storeString(AI_PANEL_KEY, String(v));
     set({ aiPanelOpen: v });
   },
-  agentPermissionMode: loadPermissionMode(),
-  setAgentPermissionMode: (v) => {
-    storeString(AGENT_MODE_KEY, v);
-    set({ agentPermissionMode: v });
+  // Defaults off: shell access is a choice the user makes, never one they
+  // inherit. Everything else the agent can do follows from the folder model.
+  agentShellAccess: loadString(AGENT_SHELL_KEY, 'false') === 'true',
+  setAgentShellAccess: (v) => {
+    storeString(AGENT_SHELL_KEY, String(v));
+    set({ agentShellAccess: v });
+  },
+  // Also off by default: reaching other systems is a choice, never one
+  // inherited from opening the panel.
+  agentConnectors: loadString(AGENT_CONNECTORS_KEY, 'false') === 'true',
+  setAgentConnectors: (v) => {
+    storeString(AGENT_CONNECTORS_KEY, String(v));
+    set({ agentConnectors: v });
+  },
+  issuePrefixes: loadString(ISSUE_PREFIXES_KEY, ''),
+  setIssuePrefixes: (v) => {
+    storeString(ISSUE_PREFIXES_KEY, v);
+    set({ issuePrefixes: v });
   },
   agentPendingPrompt: null,
   setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+
+  dismissedInsights: loadStringList(DISMISSED_INSIGHTS_KEY),
+  dismissInsight: (path) =>
+    set((s) => {
+      if (s.dismissedInsights.includes(path)) return s;
+      const next = [...s.dismissedInsights, path];
+      storeString(DISMISSED_INSIGHTS_KEY, JSON.stringify(next));
+      return { dismissedInsights: next };
+    }),
 
   proposals: {},
   addProposal: (p) => set((s) => ({ proposals: { ...s.proposals, [p.path]: p } })),

@@ -1,8 +1,9 @@
 import type { Entry } from './types';
+import { resolveTarget } from './wikilink';
 
 /**
- * Knowledge (M5) — the AI knowledge base, modelled on the Open Knowledge
- * Format v0.2 (docs/knowledge-catalog-main/okf/SPEC.md).
+ * Knowledge (M5, reworked in M8.1) — the AI knowledge base, modelled on the
+ * Open Knowledge Format v0.2 (docs/knowledge-catalog-main/okf/SPEC.md).
  *
  * `knowledge/` in the vault IS an OKF bundle: a directory of markdown
  * concepts an agent writes and maintains. Humans do not edit it — they
@@ -200,6 +201,157 @@ export function isStale(entry: Entry, today: string): boolean {
   return after !== null && today >= after;
 }
 
+// --- Entity anchors (M8.1) -------------------------------------------------
+
+/**
+ * `about:` names the vault entities a concept is knowledge OF — the project,
+ * person, or record it describes.
+ *
+ * This is the join M5 was missing. Without it the bundle is a parallel corpus
+ * that merely happens to mention your work, so the same subject ends up
+ * documented in two places with no way to get from one to the other. `sources`
+ * answers "where did this come from"; `about` answers "what is this about",
+ * and only the second can put knowledge on a project page.
+ *
+ * Written as wikilinks, which the note parser hands back in `relationships`
+ * already reduced to raw targets. A plain string is accepted too: a concept
+ * that names its subject imprecisely still beats one that never names it.
+ */
+export function parseAbout(entry: Entry): string[] {
+  const linked = entry.relationships.about;
+  if (Array.isArray(linked) && linked.length > 0) return linked;
+  const raw = entry.properties.about;
+  if (raw === undefined || raw === null) return [];
+  const items = Array.isArray(raw) ? raw : [raw];
+  return items.map((v) => String(v).trim()).filter((v) => v !== '');
+}
+
+/**
+ * The bundle sub-directory a concept sits in — `metrics`, `playbooks`,
+ * `systems`. OKF §3 gives directories no meaning of their own, but the
+ * bundle's own `index.md` lists them as sections, so they are the shape the
+ * author already chose. Top level only: `knowledge/a/b/c.md` is in `a`.
+ */
+export function sectionOf(entry: Entry): string {
+  const rest = entry.path.slice(KNOWLEDGE_DIR.length + 1);
+  const cut = rest.indexOf('/');
+  return cut === -1 ? '' : rest.slice(0, cut);
+}
+
+export interface Section {
+  /** Directory name; '' for concepts at the bundle root. */
+  folder: string;
+  label: string;
+  count: number;
+}
+
+const humanizeFolder = (folder: string): string =>
+  folder === ''
+    ? 'Ungrouped'
+    : folder.replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+
+export function listSections(concepts: Concept[]): Section[] {
+  const counts = new Map<string, number>();
+  for (const concept of concepts) {
+    counts.set(concept.section, (counts.get(concept.section) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([folder, count]) => ({ folder, label: humanizeFolder(folder), count }))
+    // Root-level concepts sort last: they are the leftovers, not a section.
+    .sort((a, b) => (a.folder === '' ? 1 : b.folder === '' ? -1 : a.label.localeCompare(b.label)));
+}
+
+/** One entity and everything the bundle knows about it. */
+export interface Subject {
+  /** Grouping key: the resolved vault path, else the lowercased target. */
+  key: string;
+  /** The `about:` target as written, for concepts that resolve to nothing. */
+  target: string;
+  /** The vault entry it points at, or null — a dangling anchor is legitimate
+   * (OKF §6.1), it may just be an entity nobody has created yet. */
+  entry: Entry | null;
+  label: string;
+  concepts: Concept[];
+}
+
+/**
+ * Groups concepts by what they are about. A concept with several anchors
+ * appears under each of them: knowledge about a project is also knowledge
+ * about the person who owns it, and hiding it from one of those is a lie of
+ * omission.
+ */
+export function listSubjects(concepts: Concept[], entries: Entry[]): Subject[] {
+  const subjects = new Map<string, Subject>();
+  for (const concept of concepts) {
+    for (const target of concept.about) {
+      const entry = resolveTarget(target, entries);
+      const key = entry?.path ?? target.toLowerCase();
+      const existing = subjects.get(key);
+      if (existing === undefined) {
+        subjects.set(key, {
+          key,
+          target,
+          entry,
+          label: entry?.title ?? target,
+          concepts: [concept],
+        });
+      } else {
+        existing.concepts.push(concept);
+      }
+    }
+  }
+  return [...subjects.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Concepts anchored to a vault path — what a project page asks for. */
+export function conceptsAbout(path: string, concepts: Concept[], entries: Entry[]): Concept[] {
+  return concepts.filter((c) =>
+    c.about.some((target) => resolveTarget(target, entries)?.path === path),
+  );
+}
+
+/**
+ * What the bundle knows that bears on THIS note (M8.3).
+ *
+ * A concept is relevant to a note when they are about the same things, and a
+ * note declares what it is about three ways: it can be the subject itself, it
+ * can live inside a project, and it can link out to records. All three count —
+ * a PRD sitting in `projects/phoenix/` is about Phoenix whether or not it ever
+ * writes the word, and the whole point of this surface is to surface what you
+ * did NOT think to reference.
+ *
+ * Ordered most-anchored first: a concept matching several of the note's
+ * subjects is more likely to matter than one that clipped a single link.
+ */
+export function relatedConcepts(entry: Entry, concepts: Concept[], entries: Entry[]): Concept[] {
+  const subjects = new Set<string>([entry.path]);
+  if (entry.project !== null) subjects.add(entry.project);
+  const linked = [
+    ...entry.outgoingLinks,
+    ...Object.values(entry.relationships).flat(),
+  ];
+  for (const target of linked) {
+    const resolved = resolveTarget(target, entries);
+    if (resolved !== null) subjects.add(resolved.path);
+  }
+
+  const scored: { concept: Concept; hits: number }[] = [];
+  for (const concept of concepts) {
+    // A concept never counts as related to itself, and the bundle does not
+    // recommend itself sideways: only knowledge ABOUT the note's subjects.
+    if (concept.entry.path === entry.path) continue;
+    const hits = concept.about.filter((target) => {
+      const resolved = resolveTarget(target, entries);
+      return resolved !== null && subjects.has(resolved.path);
+    }).length;
+    if (hits > 0) scored.push({ concept, hits });
+  }
+
+  return scored
+    .sort((a, b) => b.hits - a.hits || a.concept.title.localeCompare(b.concept.title))
+    .map((s) => s.concept);
+}
+
 // --- The concept view-model ------------------------------------------------
 
 export interface Concept {
@@ -208,8 +360,16 @@ export interface Concept {
   id: string;
   title: string;
   description: string | null;
-  /** OKF `type:`, free-form and NOT one of cerebro's declared types. */
+  /**
+   * OKF `type:`. Free-form per the format, but read through the vault's own
+   * type catalog wherever one matches (M8.1) — the same word should mean the
+   * same thing, and render the same way, on both sides of the bundle boundary.
+   */
   conceptType: string;
+  /** Bundle sub-directory — see `sectionOf`. */
+  section: string;
+  /** Raw `about:` targets — the entities this is knowledge of. */
+  about: string[];
   resource: string | null;
   tags: string[];
   sources: Source[];
@@ -232,6 +392,8 @@ export function toConcept(entry: Entry, today: string): Concept {
     // Consumers MUST tolerate unknown types (§4.1); untyped falls back to
     // a generic label rather than being treated as malformed.
     conceptType: entry.type ?? 'Concept',
+    section: sectionOf(entry),
+    about: parseAbout(entry),
     resource: asString(entry.properties.resource),
     tags: Array.isArray(tags) ? tags.map((t) => String(t)) : [],
     sources: parseSources(entry),
@@ -250,6 +412,33 @@ export function listConcepts(entries: Entry[], today: string): Concept[] {
     .filter(isConcept)
     .map((e) => toConcept(e, today))
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * What the assistant has learned lately that nobody has looked at (M8.3).
+ *
+ * The one thing Home is allowed to volunteer. It is deliberately narrow —
+ * recently WRITTEN and not yet human-reviewed — because the alternative is a
+ * feed, and a feed on a home screen becomes something you learn to scroll
+ * past. Dismissals are filtered by the caller and remembered, so an item you
+ * decline never returns.
+ */
+export function recentlyLearned(
+  concepts: Concept[],
+  now: Date,
+  { days = 14, limit = 3 }: { days?: number; limit?: number } = {},
+): Concept[] {
+  const cutoff = now.getTime() - days * 86_400_000;
+  return concepts
+    .filter((c) => {
+      if (c.trust === 'human-reviewed') return false;
+      const at = c.generated?.at ?? null;
+      if (at === null) return false;
+      const stamped = Date.parse(at);
+      return !Number.isNaN(stamped) && stamped >= cutoff;
+    })
+    .sort((a, b) => (b.generated?.at ?? '').localeCompare(a.generated?.at ?? ''))
+    .slice(0, limit);
 }
 
 // --- Review queue ----------------------------------------------------------
@@ -314,4 +503,131 @@ export function footnoteRefs(body: string): string[] {
     found.add(match[1]);
   }
   return [...found];
+}
+
+// --- Bundle links (§6.1) ---------------------------------------------------
+
+/**
+ * `/tables/x.md` is bundle-relative (recommended — it survives moves),
+ * `./x.md` is relative to the concept holding it, and anything carrying a
+ * scheme is external.
+ */
+export function resolveBundleLink(
+  href: string,
+  fromPath: string,
+): { internal: string } | { external: string } {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return { external: href };
+  if (href.startsWith('/')) return { internal: `${KNOWLEDGE_DIR}${href}` };
+  const dir = fromPath.slice(0, fromPath.lastIndexOf('/'));
+  const stack: string[] = [];
+  for (const segment of `${dir}/${href}`.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') stack.pop();
+    else stack.push(segment);
+  }
+  return { internal: stack.join('/') };
+}
+
+// --- The update log (M8.1) -------------------------------------------------
+
+/**
+ * `knowledge/log.md` is the bundle's changelog — what the agent learned, when,
+ * and from what. OKF reserves the filename (§3.1) but leaves the contents to
+ * the producer, so this reads the shape the bundle already uses: `## <date>`
+ * headings over `* **Kind**: prose` bullets.
+ *
+ * It is parsed rather than rendered as prose because it is the only honest
+ * answer to "is this thing actually getting smarter" — and that question is
+ * asked by date, by kind, and by which concept moved.
+ */
+export type LogKind = 'creation' | 'update' | 'deprecation' | 'verification' | 'note';
+
+export interface LogLink {
+  label: string;
+  /** Vault-relative path when the link points inside the bundle, else null. */
+  path: string | null;
+  /** Set instead of `path` for an external URL. */
+  url: string | null;
+}
+
+export interface LogEntry {
+  kind: LogKind;
+  /** The bolded lead as written — `kind` is the normalized form of this. */
+  label: string | null;
+  text: string;
+  links: LogLink[];
+}
+
+export interface LogDay {
+  date: string;
+  entries: LogEntry[];
+}
+
+const LOG_KINDS: LogKind[] = ['creation', 'update', 'deprecation', 'verification'];
+
+function classifyLogKind(label: string | null): LogKind {
+  if (label === null) return 'note';
+  const needle = label.toLowerCase();
+  return LOG_KINDS.find((kind) => needle.startsWith(kind.slice(0, 6))) ?? 'note';
+}
+
+/** `[label](/playbooks/x.md)` → a followable concept reference. */
+function parseLogLinks(text: string): LogLink[] {
+  const links: LogLink[] = [];
+  for (const match of text.matchAll(/\[([^\]^]+)\]\(([^)]+)\)/g)) {
+    const target = resolveBundleLink(match[2], `${KNOWLEDGE_DIR}/log.md`);
+    links.push(
+      'internal' in target
+        ? { label: match[1], path: target.internal, url: null }
+        : { label: match[1], path: null, url: target.external },
+    );
+  }
+  return links;
+}
+
+export function parseLog(markdown: string): LogDay[] {
+  const days: LogDay[] = [];
+  let current: LogDay | null = null;
+  // A bullet may wrap across lines, so entries are flushed on the NEXT
+  // structural line rather than when their first line is read.
+  let pending: string | null = null;
+
+  const flush = () => {
+    if (pending === null || current === null) return;
+    const lead = /^\*\*([^*]+)\*\*:?\s*/.exec(pending);
+    const label = lead === null ? null : lead[1].trim();
+    const text = lead === null ? pending : pending.slice(lead[0].length);
+    current.entries.push({
+      kind: classifyLogKind(label),
+      label,
+      text: text.trim(),
+      links: parseLogLinks(text),
+    });
+    pending = null;
+  };
+
+  for (const line of markdown.split('\n')) {
+    const heading = /^##\s+(.+?)\s*$/.exec(line);
+    if (heading !== null) {
+      flush();
+      current = { date: heading[1], entries: [] };
+      days.push(current);
+      continue;
+    }
+    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+    if (bullet !== null) {
+      flush();
+      pending = bullet[1].trim();
+      continue;
+    }
+    if (line.trim() === '') {
+      flush();
+      continue;
+    }
+    // An indented continuation belongs to the bullet above it.
+    if (pending !== null) pending = `${pending} ${line.trim()}`;
+  }
+  flush();
+
+  return days.filter((day) => day.entries.length > 0);
 }

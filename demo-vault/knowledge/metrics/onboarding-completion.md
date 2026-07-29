@@ -2,6 +2,9 @@
 type: Metric
 title: Onboarding completion
 description: Share of new accounts that finish guided onboarding within 14 days.
+about:
+  - "[[guided-onboarding-ga]]"
+  - "[[kr-onboarding-completion]]"
 tags: [onboarding, activation]
 lifecycle: stable
 generated: { by: claude-code/2.0, at: 2026-07-24T10:12:00Z }

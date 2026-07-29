@@ -72,4 +72,41 @@ describe('resolveTarget', () => {
   it('returns null when nothing matches', () => {
     expect(resolveTarget('nobody', entries)).toBeNull();
   });
+
+  // A project IS its folder (vault format v2), and every project's file is
+  // named project.md — so without this pass `[[atlas]]` dangles and every
+  // link into a project in the vault silently resolves to nothing.
+  describe('project folders', () => {
+    const atlas = makeEntry({
+      path: 'projects/atlas/project.md',
+      filename: 'project.md',
+      folder: 'projects/atlas',
+      title: 'Atlas rollout',
+      type: 'Project',
+    });
+
+    it('matches a project by its folder name', () => {
+      expect(resolveTarget('atlas', [atlas])).toBe(atlas);
+      expect(resolveTarget('ATLAS', [atlas])).toBe(atlas);
+    });
+
+    it('still matches a project by title', () => {
+      expect(resolveTarget('Atlas rollout', [atlas])).toBe(atlas);
+    });
+
+    it('lets a real stem match win over a project folder of the same name', () => {
+      const note = makeEntry({ path: 'docs/atlas.md', filename: 'atlas.md', title: 'Atlas notes' });
+      expect(resolveTarget('atlas', [atlas, note])).toBe(note);
+    });
+
+    it('does not treat an ordinary file as its folder', () => {
+      const item = makeEntry({
+        path: 'projects/atlas/items/syn-1.md',
+        filename: 'syn-1.md',
+        folder: 'projects/atlas/items',
+        title: 'Sync one',
+      });
+      expect(resolveTarget('items', [item])).toBeNull();
+    });
+  });
 });

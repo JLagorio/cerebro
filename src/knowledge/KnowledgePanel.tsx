@@ -2,7 +2,10 @@ import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Tag } from '@/components/ui/Tag';
 import type { Concept, Source, Stamp } from '@/engine/okf';
+import { typeStyle } from '@/engine/typeCatalog';
+import { resolveTarget } from '@/engine/wikilink';
 import { FlagChip, TrustChip } from '@/knowledge/TrustChip';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
  * The provenance ledger for one concept (OKF §5): where it came from, who
@@ -89,17 +92,77 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
   );
 }
 
+/**
+ * What this concept is knowledge OF (M8.1) — the entities it anchors to.
+ *
+ * It sits above `Written by` because it answers the first question a reader
+ * has. `sources` says where a claim came from; this says what it is about,
+ * and it is the only field that gets you from the bundle back into your vault.
+ */
+function AboutBlock({
+  concept,
+  onOpenEntity,
+}: {
+  concept: Concept;
+  onOpenEntity: (path: string) => void;
+}) {
+  const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
+  if (concept.about.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <div className={LABEL}>About</div>
+      <div className="mt-1.5 flex flex-col gap-1">
+        {concept.about.map((target) => {
+          const entry = resolveTarget(target, entries);
+          const style = typeStyle(entry?.type ?? null, schema);
+          if (entry === null) {
+            // An anchor naming an entity that does not exist yet is legitimate
+            // (OKF §6.1) — shown greyed rather than dropped, because a claim
+            // about something absent is exactly what a reviewer should notice.
+            return (
+              <span
+                key={target}
+                data-testid="about-entity"
+                className="flex items-center gap-1.5 text-[12px] text-[var(--n-400)]"
+              >
+                <Icon name="link-2-off" size={12} color="var(--n-300)" />
+                <span className="truncate">{target}</span>
+              </span>
+            );
+          }
+          return (
+            <button
+              key={target}
+              type="button"
+              data-testid="about-entity"
+              data-path={entry.path}
+              onClick={() => onOpenEntity(entry.path)}
+              className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-[var(--cortex-600)] hover:underline"
+            >
+              <Icon name={style.icon} size={12} color={style.color ?? 'var(--n-500)'} />
+              <span className="truncate">{entry.title}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function KnowledgePanel({
   concept,
   today,
   onVerify,
   onAskAgent,
+  onOpenEntity,
   verifying = false,
 }: {
   concept: Concept;
   today: string;
   onVerify: () => void;
   onAskAgent: () => void;
+  onOpenEntity: (path: string) => void;
   verifying?: boolean;
 }) {
   const lastVerified = relativeDay(concept.lastVerified, today);
@@ -121,6 +184,8 @@ export function KnowledgePanel({
         )}
         {concept.lifecycle === 'draft' && <FlagChip icon="pencil-line" label="Draft" tone="muted" />}
       </div>
+
+      <AboutBlock concept={concept} onOpenEntity={onOpenEntity} />
 
       <div className="mt-4">
         <div className={LABEL}>Written by</div>

@@ -2,6 +2,9 @@
 type: Metric
 title: Webinar attendance
 description: Live attendees as a share of registrations for the onboarding webinar.
+about:
+  - "[[kr-webinar-attendance]]"
+  - "[[field-app-launch-campaign]]"
 tags: [onboarding, marketing]
 lifecycle: deprecated
 generated: { by: claude-code/2.0, at: 2026-07-20T11:00:00Z }

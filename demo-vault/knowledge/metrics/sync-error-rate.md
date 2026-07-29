@@ -2,6 +2,9 @@
 type: Metric
 title: Sync error rate
 description: Failed sync operations as a share of all sync attempts, per hour.
+about:
+  - "[[offline-sync-hardening]]"
+  - "[[kr-sync-error-rate]]"
 tags: [reliability, offline-sync]
 lifecycle: stable
 stale_after: 2026-07-26

@@ -33,7 +33,7 @@ function CanvasOutlet() {
   switch (selection.kind) {
     case 'home': return <HomePage />;
     case 'inbox': return <InboxPage />;
-    case 'knowledge': return <KnowledgePage />;
+    case 'knowledge': return <KnowledgePage selection={selection} />;
     case 'project': return <ProjectPage selection={selection} />;
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;

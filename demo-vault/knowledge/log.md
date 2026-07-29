@@ -1,6 +1,8 @@
 # Knowledge Update Log
 
 ## 2026-07-28
+* **Creation**: [Pick queue drain time](/systems/pick-queue-drain.md) — distilled
+from the cutover standup transcript and the cached PHX-421 ticket.
 * **Creation**: Drafted [Warehouse cutover](/playbooks/warehouse-cutover.md) from the
 rollout project and the open rollback risk.
 

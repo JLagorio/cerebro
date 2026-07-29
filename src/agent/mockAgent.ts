@@ -1,4 +1,4 @@
-import type { AgentEvent } from './types';
+import type { AgentEvent, UiAction } from './types';
 
 /**
  * Scripted agent for browser dev, vitest, and Playwright (M6).
@@ -15,34 +15,55 @@ import type { AgentEvent } from './types';
 
 interface Script {
   thinking?: string;
-  tool?: { name: string; input: string };
+  tools?: { name: string; input: string }[];
+  /**
+   * A UI action the run drives, fired after its tools report done. The mock
+   * has to actually DO what its reply claims — a script that says "I have
+   * proposed a filing" without emitting the proposal makes the panel's own
+   * transcript the least trustworthy thing on screen, and leaves the real
+   * propose-and-review path with no test running through it.
+   */
+  uiAction?: UiAction;
   text: string;
 }
+
+/** A capture that exists in the demo vault, so the proposal has a real target. */
+const DEMO_CAPTURE = 'inbox/warehouse-cutover-thought.md';
 
 function scriptFor(message: string): Script {
   const prompt = message.toLowerCase();
 
   if (prompt.includes('inbox') || prompt.includes('organize') || prompt.includes('organise')) {
     return {
-      tool: { name: 'list_inbox', input: '{}' },
+      tools: [
+        { name: 'list_inbox', input: '{}' },
+        { name: 'propose_organize', input: JSON.stringify({ path: DEMO_CAPTURE }) },
+      ],
+      uiAction: {
+        action: 'propose_organize',
+        path: DEMO_CAPTURE,
+        type: 'Work item',
+        properties: { status: 'todo', priority: 'high' },
+        reasoning: 'It names an action and an owner, so it reads as a work item.',
+      },
       text: 'There are captures waiting. The one about the warehouse cutover reads like a **Work item** for Phoenix warehouse rollout — it names an owner and an action. I have proposed a filing for it; accept or reject it in the Inbox.',
     };
   }
   if (prompt.includes('risk') || prompt.includes('at risk')) {
     return {
-      tool: { name: 'search_notes', input: '{"query":"risk"}' },
+      tools: [{ name: 'search_notes', input: '{"query":"risk"}' }],
       text: 'Two risks are open. [[risk-scanner-delivery]] is the one with a date attached, and nothing in the vault records a mitigation for it yet.',
     };
   }
   if (prompt.includes('knowledge') || prompt.includes('concept') || prompt.includes('document')) {
     return {
-      tool: { name: 'write_concept', input: '{"path":"knowledge/playbooks/x.md"}' },
+      tools: [{ name: 'write_concept', input: '{"path":"knowledge/playbooks/x.md"}' }],
       text: 'Written to the knowledge bundle as a draft. It is unverified until you review it — open **Knowledge** and check it against the sources I listed.',
     };
   }
   return {
     thinking: 'Reading the vault context first.',
-    tool: { name: 'get_vault_context', input: '{}' },
+    tools: [{ name: 'get_vault_context', input: '{}' }],
     text: 'This vault tracks work as typed markdown: objectives and key results as records, work items inside project folders, and a knowledge bundle I maintain for you to verify. Ask me to find something, file an Inbox capture, or write up what I have learned.',
   };
 }
@@ -65,7 +86,10 @@ export interface MockRun {
 export function runMockAgent(
   message: string,
   emit: (event: AgentEvent) => void,
-  { delayMs = 12 }: { delayMs?: number } = {},
+  {
+    delayMs = 12,
+    onUiAction,
+  }: { delayMs?: number; onUiAction?: (action: UiAction) => void } = {},
 ): MockRun {
   const script = scriptFor(message);
   let cancelled = false;
@@ -76,10 +100,14 @@ export function runMockAgent(
   if (script.thinking !== undefined) {
     steps.push(() => emit({ kind: 'ThinkingDelta', text: script.thinking as string }));
   }
-  if (script.tool !== undefined) {
-    const { name, input } = script.tool;
-    steps.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: 't-1', input }));
-    steps.push(() => emit({ kind: 'ToolDone', tool_id: 't-1' }));
+  (script.tools ?? []).forEach(({ name, input }, i) => {
+    const id = `t-${i + 1}`;
+    steps.push(() => emit({ kind: 'ToolStart', tool_name: name, tool_id: id, input }));
+    steps.push(() => emit({ kind: 'ToolDone', tool_id: id }));
+  });
+  if (script.uiAction !== undefined) {
+    const action = script.uiAction;
+    steps.push(() => onUiAction?.(action));
   }
   for (const piece of chunk(script.text)) {
     steps.push(() => emit({ kind: 'TextDelta', text: piece }));

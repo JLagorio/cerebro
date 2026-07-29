@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp, stopAgent } from './agentIpc';
-import type { AgentEvent, ChatMessage, McpInfo, PermissionMode } from './types';
+import type { AgentEvent, ChatMessage, McpInfo } from './types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -25,7 +25,7 @@ export interface AgentChat {
  */
 export function useAgentChat(
   systemPrompt: string,
-  permissionMode: PermissionMode,
+  { shell, connectors }: { shell: boolean; connectors: boolean },
   model: string | null,
 ): AgentChat {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -126,7 +126,8 @@ export function useAgentChat(
             systemPrompt,
             sessionId: sessionRef.current,
             model,
-            permissionMode,
+            shell,
+            connectors,
             mcp: mcpRef.current,
           });
         } catch (err) {
@@ -140,7 +141,7 @@ export function useAgentChat(
         }
       })();
     },
-    [model, permissionMode, systemPrompt, toast, vaultPath],
+    [connectors, model, shell, systemPrompt, toast, vaultPath],
   );
 
   const stop = useCallback(() => {

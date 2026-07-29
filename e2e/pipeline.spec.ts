@@ -1,0 +1,143 @@
+import { test, expect, type Page } from '@playwright/test';
+
+/**
+ * The M8.2/M8.3 pipeline: ingest → distil → augment.
+ *
+ * The seeded demo vault carries one story end to end — a standup transcript
+ * ingested as a working doc, a Jira ticket cached beside it, a concept
+ * distilled from both and anchored to the project, and a PRD in that project
+ * that the concept should surface next to.
+ */
+
+async function boot(page: Page): Promise<void> {
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) await demoButton.click();
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+}
+
+const TRANSCRIPT = 'inbox/phoenix-cutover-standup.md';
+const CONCEPT = 'knowledge/systems/pick-queue-drain.md';
+
+test('ingest: a dropped transcript becomes an untyped working doc in the Inbox', async ({
+  page,
+}) => {
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+
+  // Drop a .vtt the way a user would. DataTransfer has to be built in the
+  // page: Playwright cannot hand a File across the boundary.
+  const handle = await page.evaluateHandle(() => {
+    const vtt = [
+      'WEBVTT',
+      '',
+      'NOTE auto-generated',
+      '',
+      '1',
+      '00:00:03.000 --> 00:00:08.000',
+      '<v Rosa Alvine>The scanner order slipped again, so night one is camera only.',
+      '',
+      '2',
+      '00:00:08.500 --> 00:00:14.000',
+      'Rosa Alvine: I want that written down before anyone plans around hardware.',
+    ].join('\n');
+    const dt = new DataTransfer();
+    dt.items.add(new File([vtt], '2026-07-29 Scanner slip.vtt', { type: 'text/vtt' }));
+    return dt;
+  });
+  await page.getByTestId('inbox-page').dispatchEvent('drop', { dataTransfer: handle });
+
+  // It lands untyped — untyped is what queues it — and opens.
+  const row = page.locator('[data-testid="inbox-row"][data-path="inbox/scanner-slip.md"]');
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute('aria-selected', 'true');
+
+  const written = await page.evaluate(
+    () => window.__cerebroMockFs.get('inbox/scanner-slip.md') ?? '',
+  );
+  // The transcript is converted, not stored raw: cue timings and the WEBVTT
+  // header are format, and the speaker turns are the content.
+  expect(written).not.toContain('WEBVTT');
+  expect(written).not.toContain('-->');
+  expect(written).toContain('**Rosa Alvine:**');
+  expect(written).toContain('camera only');
+  // Provenance a distilled concept can cite later.
+  expect(written).toContain('source_file:');
+  expect(written).toContain('ingest_format: vtt');
+  expect(written).not.toContain('\ntype:');
+});
+
+test('distil: the ingested transcript and its cached ticket are cited by a concept', async ({
+  page,
+}) => {
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+
+  await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Phoenix warehouse' }).click();
+  await page.locator(`[data-testid="concept-row"][data-path="${CONCEPT}"]`).click();
+
+  // Both inlets show up as sources on the same concept: a dropped transcript
+  // and a fetched ticket are the same kind of object by the time they get here.
+  const panel = page.getByTestId('knowledge-panel');
+  await expect(panel).toContainText('Phoenix cutover standup');
+  await expect(panel).toContainText('PHX-421');
+  // And it is anchored back to the work it describes.
+  await expect(panel.getByTestId('about-entity')).toContainText(['Phoenix warehouse rollout']);
+});
+
+test('augment: knowledge surfaces beside the PRD, and only when asked', async ({ page }) => {
+  await boot(page);
+
+  // Opened through Quick Open — the Docs tree layout is not what is under
+  // test here.
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpen = page.getByTestId('quick-open-input');
+  await expect(quickOpen).toBeVisible();
+  // Picked by name, not position: "go-live" also matches the warehouse key
+  // result, and quick open breaks ties toward the shorter title.
+  await quickOpen.fill('go-live');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'PRD' }).first().click();
+
+  const panel = page.getByTestId('doc-side-panel');
+  await expect(panel).toBeVisible();
+
+  // Nothing has spoken yet: the knowledge tab exists but is not selected, so
+  // the draft is not annotated until the user opens it.
+  await expect(panel.getByTestId('related-knowledge')).toHaveCount(0);
+
+  await panel.getByTestId('doc-panel-tab-knowledge').click();
+  const related = panel.getByTestId('related-knowledge');
+  await expect(related).toBeVisible();
+  // The PRD never names the concept; it is found through the project it lives in.
+  await expect(related.getByTestId('related-concept')).toContainText(['Pick queue drain time']);
+
+  // Following it lands on that concept, not on the head of the bundle.
+  await related.getByTestId('related-concept').first().click();
+  await expect(page.getByTestId('knowledge-page')).toBeVisible();
+  await expect(page.getByTestId('concept-body')).toContainText('40 minutes in staging');
+});
+
+test('augment: Home volunteers at most a few unconfirmed things, and forgets what you dismiss', async ({
+  page,
+}) => {
+  await boot(page);
+
+  const card = page.getByTestId('learned-card');
+  await expect(card).toBeVisible();
+  const items = card.getByTestId('learned-item');
+  const before = await items.count();
+  expect(before).toBeGreaterThan(0);
+  expect(before).toBeLessThanOrEqual(3);
+
+  const first = items.first();
+  const path = await first.locator('[data-path]').getAttribute('data-path');
+  await first.getByRole('button', { name: /^Dismiss/ }).click();
+  await expect(card.locator(`[data-path="${path}"]`)).toHaveCount(0);
+
+  // Dismissed means dismissed — a card that came back tomorrow is the nagging
+  // this surface is not allowed to do.
+  await page.reload();
+  await expect(page.getByTestId('learned-card').locator(`[data-path="${path}"]`)).toHaveCount(0);
+});

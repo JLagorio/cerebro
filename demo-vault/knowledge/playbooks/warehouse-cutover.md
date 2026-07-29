@@ -2,6 +2,9 @@
 type: Playbook
 title: "Warehouse cutover: go-live and rollback"
 description: What to run, in what order, on Phoenix warehouse go-live night.
+about:
+  - "[[phoenix-warehouse-rollout]]"
+  - "[[risk-rollback-unrehearsed]]"
 tags: [operations, phoenix]
 lifecycle: draft
 generated: { by: claude-code, at: 2026-07-28T09:05:00Z }

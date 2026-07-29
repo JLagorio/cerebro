@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  conceptsAbout,
   footnoteRefs,
   isConcept,
   isKnowledgePath,
@@ -7,12 +8,19 @@ import {
   lastVerifiedAt,
   lifecycleOf,
   listConcepts,
+  listSections,
+  listSubjects,
   needsReview,
+  parseAbout,
   parseActor,
   parseGenerated,
+  parseLog,
   parseSources,
   parseVerified,
+  relatedConcepts,
+  resolveBundleLink,
   reviewReasons,
+  sectionOf,
   toConcept,
   trustTier,
   verifyPatch,
@@ -235,6 +243,257 @@ describe('verifyPatch', () => {
     expect(verifyPatch(concept({}), 'human:josef', '2026-07-28T10:00:00Z').verified).toEqual([
       { by: 'human:josef', at: '2026-07-28T10:00:00Z' },
     ]);
+  });
+});
+
+describe('entity anchors', () => {
+  // Wikilink-valued frontmatter lands in `relationships`, plain strings in
+  // `properties` — parseAbout has to read a concept written either way.
+  const anchored = (relationships: Record<string, string[]>, properties = {}) =>
+    makeEntry({
+      path: 'knowledge/systems/x.md',
+      filename: 'x.md',
+      type: 'Reference',
+      relationships,
+      properties,
+    });
+
+  it('reads wikilink anchors out of relationships', () => {
+    expect(parseAbout(anchored({ about: ['phoenix', 'risk-rollback'] }))).toEqual([
+      'phoenix',
+      'risk-rollback',
+    ]);
+  });
+
+  it('accepts a bare string anchor, which names its subject imprecisely but does name it', () => {
+    expect(parseAbout(anchored({}, { about: 'phoenix' }))).toEqual(['phoenix']);
+    expect(parseAbout(anchored({}, { about: ['a', ' b '] }))).toEqual(['a', 'b']);
+  });
+
+  it('treats an absent anchor as empty, not as an error', () => {
+    expect(parseAbout(anchored({}))).toEqual([]);
+    expect(parseAbout(anchored({}, { about: null }))).toEqual([]);
+  });
+
+  it('reads the section from the bundle sub-directory, top level only', () => {
+    expect(sectionOf(makeEntry({ path: 'knowledge/metrics/a.md' }))).toBe('metrics');
+    expect(sectionOf(makeEntry({ path: 'knowledge/a/b/c.md' }))).toBe('a');
+    expect(sectionOf(makeEntry({ path: 'knowledge/a.md' }))).toBe('');
+  });
+
+  it('counts sections and sorts root-level leftovers last', () => {
+    const concepts = [
+      toConcept(concept({}, 'knowledge/systems/a.md'), TODAY),
+      toConcept(concept({}, 'knowledge/metrics/b.md'), TODAY),
+      toConcept(concept({}, 'knowledge/metrics/c.md'), TODAY),
+      toConcept(concept({}, 'knowledge/loose.md'), TODAY),
+    ];
+    expect(listSections(concepts).map((s) => [s.label, s.count])).toEqual([
+      ['Metrics', 2],
+      ['Systems', 1],
+      ['Ungrouped', 1],
+    ]);
+  });
+});
+
+describe('subjects', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    folder: 'projects/phoenix',
+    title: 'Phoenix warehouse rollout',
+    type: 'Project',
+  });
+
+  const about = (path: string, targets: string[]) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      type: 'Reference',
+      relationships: { about: targets },
+    });
+
+  it('groups concepts by the entity they resolve to', () => {
+    const entries = [project, about('knowledge/a.md', ['phoenix']), about('knowledge/b.md', ['phoenix'])];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subjects).toHaveLength(1);
+    expect(subjects[0].label).toBe('Phoenix warehouse rollout');
+    expect(subjects[0].concepts).toHaveLength(2);
+  });
+
+  it('lists a concept under every entity it is about, not just the first', () => {
+    const entries = [project, about('knowledge/a.md', ['phoenix', 'nobody'])];
+    const subjects = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subjects.map((s) => s.concepts.length)).toEqual([1, 1]);
+  });
+
+  it('keeps a dangling anchor rather than dropping it — the entity may not exist yet', () => {
+    const entries = [about('knowledge/a.md', ['not-written-yet'])];
+    const [subject] = listSubjects(listConcepts(entries, TODAY), entries);
+    expect(subject.entry).toBeNull();
+    expect(subject.label).toBe('not-written-yet');
+  });
+
+  it('answers what a project page asks: concepts anchored to this path', () => {
+    const entries = [project, about('knowledge/a.md', ['phoenix']), about('knowledge/b.md', ['other'])];
+    const found = conceptsAbout('projects/phoenix/project.md', listConcepts(entries, TODAY), entries);
+    expect(found.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
+  });
+});
+
+describe('relatedConcepts', () => {
+  const project = makeEntry({
+    path: 'projects/phoenix/project.md',
+    filename: 'project.md',
+    folder: 'projects/phoenix',
+    title: 'Phoenix warehouse rollout',
+    type: 'Project',
+  });
+  const risk = makeEntry({
+    path: 'records/risks/risk-rollback.md',
+    filename: 'risk-rollback.md',
+    title: 'Rollback unrehearsed',
+    type: 'Risk',
+  });
+  const about = (path: string, title: string, targets: string[]) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop(),
+      title,
+      type: 'Reference',
+      relationships: { about: targets },
+    });
+
+  const cutover = about('knowledge/playbooks/cutover.md', 'Cutover', ['phoenix', 'risk-rollback']);
+  const guarantee = about('knowledge/systems/guarantee.md', 'Guarantee', ['risk-rollback']);
+  const unrelated = about('knowledge/metrics/other.md', 'Other', ['something-else']);
+  const entries = [project, risk, cutover, guarantee, unrelated];
+  const concepts = () => listConcepts(entries, TODAY);
+
+  it('finds knowledge about the project a note lives in, unreferenced', () => {
+    // The whole point of the surface: a PRD in projects/phoenix/ is about
+    // Phoenix whether or not it ever writes the word.
+    const prd = makeEntry({
+      path: 'projects/phoenix/prd.md',
+      filename: 'prd.md',
+      folder: 'projects/phoenix',
+      project: 'projects/phoenix/project.md',
+      title: 'Cutover PRD',
+    });
+    expect(relatedConcepts(prd, concepts(), [...entries, prd]).map((c) => c.title)).toContain(
+      'Cutover',
+    );
+  });
+
+  it('follows the note\'s own links and frontmatter relations', () => {
+    const note = makeEntry({
+      path: 'docs/note.md',
+      filename: 'note.md',
+      title: 'Note',
+      outgoingLinks: ['risk-rollback'],
+    });
+    // Both concepts match the one linked risk, so they tie on relevance and
+    // fall back to title order — deterministic, not arbitrary.
+    const found = relatedConcepts(note, concepts(), [...entries, note]);
+    expect(found.map((c) => c.title)).toEqual(['Cutover', 'Guarantee']);
+
+    const related = makeEntry({
+      path: 'docs/other.md',
+      filename: 'other.md',
+      title: 'Other',
+      relationships: { affects: ['phoenix'] },
+    });
+    expect(relatedConcepts(related, concepts(), [...entries, related])).toHaveLength(1);
+  });
+
+  it('ranks a concept matching several subjects above one that clipped a link', () => {
+    const note = makeEntry({
+      path: 'projects/phoenix/prd.md',
+      filename: 'prd.md',
+      folder: 'projects/phoenix',
+      project: 'projects/phoenix/project.md',
+      title: 'PRD',
+      outgoingLinks: ['risk-rollback'],
+    });
+    const found = relatedConcepts(note, concepts(), [...entries, note]);
+    expect(found[0].entry.path).toBe('knowledge/playbooks/cutover.md');
+  });
+
+  it('never recommends a concept to itself', () => {
+    expect(relatedConcepts(cutover, concepts(), entries).map((c) => c.entry.path)).not.toContain(
+      'knowledge/playbooks/cutover.md',
+    );
+  });
+
+  it('returns nothing for a note that shares no subject', () => {
+    const stray = makeEntry({ path: 'docs/stray.md', filename: 'stray.md', title: 'Stray' });
+    expect(relatedConcepts(stray, concepts(), [...entries, stray])).toEqual([]);
+  });
+});
+
+describe('resolveBundleLink', () => {
+  it('reads a leading slash as bundle-relative, not filesystem-absolute', () => {
+    expect(resolveBundleLink('/metrics/a.md', 'knowledge/log.md')).toEqual({
+      internal: 'knowledge/metrics/a.md',
+    });
+  });
+
+  it('resolves ./ and ../ against the concept holding the link', () => {
+    expect(resolveBundleLink('./b.md', 'knowledge/metrics/a.md')).toEqual({
+      internal: 'knowledge/metrics/b.md',
+    });
+    expect(resolveBundleLink('../systems/b.md', 'knowledge/metrics/a.md')).toEqual({
+      internal: 'knowledge/systems/b.md',
+    });
+  });
+
+  it('treats anything with a scheme as external', () => {
+    expect(resolveBundleLink('https://x.test/a', 'knowledge/a.md')).toEqual({
+      external: 'https://x.test/a',
+    });
+  });
+});
+
+describe('parseLog', () => {
+  const LOG = [
+    '# Knowledge Update Log',
+    '',
+    '## 2026-07-28',
+    '* **Creation**: Drafted [Warehouse cutover](/playbooks/warehouse-cutover.md) from the',
+    '  rollout project and the open rollback risk.',
+    '',
+    '## 2026-07-27',
+    '* **Deprecation**: Marked [Webinar attendance](/metrics/webinar-attendance.md) deprecated.',
+    '* A change nobody labelled.',
+  ].join('\n');
+
+  it('groups entries under their date heading', () => {
+    const days = parseLog(LOG);
+    expect(days.map((d) => d.date)).toEqual(['2026-07-28', '2026-07-27']);
+    expect(days[1].entries).toHaveLength(2);
+  });
+
+  it('joins a bullet that wraps across lines', () => {
+    // Hard-wrapped source must not become two half-sentences.
+    expect(parseLog(LOG)[0].entries[0].text).toContain('from the rollout project');
+  });
+
+  it('classifies the labelled kinds and tolerates an unlabelled one', () => {
+    const days = parseLog(LOG);
+    expect(days[0].entries[0].kind).toBe('creation');
+    expect(days[1].entries[0].kind).toBe('deprecation');
+    expect(days[1].entries[1].kind).toBe('note');
+    expect(days[1].entries[1].label).toBeNull();
+  });
+
+  it('resolves the concept each entry points at', () => {
+    expect(parseLog(LOG)[0].entries[0].links).toEqual([
+      { label: 'Warehouse cutover', path: 'knowledge/playbooks/warehouse-cutover.md', url: null },
+    ]);
+  });
+
+  it('drops a date heading with nothing under it', () => {
+    expect(parseLog('## 2026-07-28\n\n## 2026-07-27\n* **Update**: x')).toHaveLength(1);
   });
 });
 

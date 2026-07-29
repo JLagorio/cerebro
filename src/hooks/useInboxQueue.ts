@@ -31,7 +31,11 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
   const allEntries = useVaultStore((s) => s.entries);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const autoAdvance = useUiStore((s) => s.inboxAutoAdvance);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // Selection lives in the store, not in this hook: the agent proposes a
+  // filing for a specific capture and has to be able to open it, which it
+  // cannot do if the only way in is a click on a row.
+  const selectedPath = useUiStore((s) => s.inboxSelectedPath);
+  const setSelectedPath = useUiStore((s) => s.setInboxSelectedPath);
   const [pinned, setPinned] = useState<readonly string[]>([]);
 
   const queued = useMemo(() => inboxEntries(allEntries, period), [allEntries, period]);
@@ -98,7 +102,10 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
       // the reading pane away.
       if (current.autoAdvance && wasOnScreen) setSelectedPath(next?.path ?? null);
     },
-    [patchFrontmatter],
+    // setSelectedPath is the store's own setter and never changes identity,
+    // so listing it keeps the dependency honest without destabilising the
+    // callback that the ⌘E keydown handler is bound to.
+    [patchFrontmatter, setSelectedPath],
   );
 
   const unorganize = useCallback(
@@ -106,7 +113,7 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
       await patchFrontmatter(path, { [ORGANIZED_KEY]: false });
       setSelectedPath(path);
     },
-    [patchFrontmatter],
+    [patchFrontmatter, setSelectedPath],
   );
 
   return { entries, selected, select: setSelectedPath, organize, unorganize };

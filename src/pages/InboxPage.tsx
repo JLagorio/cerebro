@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -18,6 +18,14 @@ import { ProposalCard } from '@/agent/ProposalCard';
 import type { Entry, Schema } from '@/engine/types';
 import { useInboxQueue, type InboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
+import {
+  describeIngest,
+  ingestFiles,
+  ingestOne,
+  INGESTIBLE_EXTENSIONS,
+} from '@/lib/ingest';
+import { distillPrompt, fetchRefsPrompt, organizePrompt } from '@/lib/prompts';
+import { parseIssuePrefixes, uncachedRefs } from '@/engine/ingest';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -112,6 +120,20 @@ function OrganizePanel({
   const proposal = useUiStore((s) => s.proposals[entry.path]);
   const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const connectors = useUiStore((s) => s.agentConnectors);
+  const issuePrefixes = useUiStore((s) => s.issuePrefixes);
+  const allEntries = useVaultStore((s) => s.entries);
+
+  // The visible half of the connector inlet (M8.2): what this capture refers
+  // to that nobody has a local copy of. Nothing is fetched automatically —
+  // reaching another system is a round trip and a decision, so it is offered.
+  const unresolved = useMemo(() => {
+    if (!connectors) return [];
+    const text = `${entry.title}\n${entry.snippet}`;
+    return uncachedRefs(text, allEntries.map((e) => e.path), {
+      issuePrefixes: parseIssuePrefixes(issuePrefixes),
+    });
+  }, [allEntries, connectors, entry.snippet, entry.title, issuePrefixes]);
 
   const typeOptions = [
     { value: '', label: 'No type' },
@@ -162,14 +184,38 @@ function OrganizePanel({
             icon="sparkles"
             onClick={() => {
               setAiPanelOpen(true);
-              setPendingPrompt(
-                `Look at the Inbox capture at ${entry.path} and propose how to file it. Use propose_organize.`,
-              );
+              setPendingPrompt(organizePrompt(entry.path));
             }}
           >
             Ask the agent to file it
           </Button>
         )}
+        {/* M8.2 — the distil step. Filing decides where a capture lives;
+            this decides what the vault LEARNS from it, and the two are
+            independent: material worth keeping knowledge from is often
+            material you would otherwise file and never reread. */}
+        {unresolved.length > 0 && (
+          <Button
+            variant="secondary"
+            icon="download"
+            onClick={() => {
+              setAiPanelOpen(true);
+              setPendingPrompt(fetchRefsPrompt(entry.path, unresolved.map((r) => r.id)));
+            }}
+          >
+            {`Fetch ${unresolved.length} reference${unresolved.length === 1 ? '' : 's'}`}
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          icon="brain"
+          onClick={() => {
+            setAiPanelOpen(true);
+            setPendingPrompt(distillPrompt(entry.path, entry.title));
+          }}
+        >
+          Learn from this
+        </Button>
         <Button variant="primary" icon="circle-check" onClick={() => void queue.organize(entry.path)}>
           Mark organized
         </Button>
@@ -192,6 +238,10 @@ export function InboxPage() {
   const navigate = useNavStore((s) => s.navigate);
   const queue = useInboxQueue(period);
   const counts = useMemo(() => inboxCounts(entries), [entries]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  // Depth, not a boolean: dragging over a child fires dragleave on the parent,
+  // so a flag would flicker the overlay off every time the cursor crossed a row.
+  const [dragDepth, setDragDepth] = useState(0);
 
   // Hoisted to a const so the narrowing survives into the row callbacks.
   const selected = queue.selected;
@@ -226,6 +276,43 @@ export function InboxPage() {
     })();
   };
 
+  // M8.2 — the ingest inlet. Transcripts, exports, and pasted walls of text
+  // arrive here as untyped working docs, which is the same object a fetched
+  // ticket becomes, so the distiller only ever reads one shape.
+  const takeFiles = (files: readonly File[]) => {
+    if (files.length === 0) return;
+    void (async () => {
+      try {
+        const result = await ingestFiles(files);
+        if (result.paths.length > 0) queue.select(result.paths[0]);
+        toast(describeIngest(result));
+      } catch (err) {
+        toast(`Couldn't ingest: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    })();
+  };
+
+  // A paste big enough to be material rather than a typo becomes a capture.
+  // Small pastes are almost certainly meant for a field, so they are left
+  // alone — an app that swallows ⌘V is worse than one that ignores it.
+  const PASTE_MIN = 200;
+  const onPaste = (event: React.ClipboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, [contenteditable="true"]') != null) return;
+    const text = event.clipboardData.getData('text/plain');
+    if (text.trim().length < PASTE_MIN) return;
+    event.preventDefault();
+    void (async () => {
+      try {
+        const path = await ingestOne('', text);
+        queue.select(path);
+        toast('Filed the pasted text to the Inbox');
+      } catch (err) {
+        toast(`Couldn't ingest: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    })();
+  };
+
   // Reachable through nav history after the workflow is switched off —
   // explain and offer the way back rather than bouncing to another screen.
   if (!inboxEnabled) {
@@ -246,15 +333,70 @@ export function InboxPage() {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inbox-page">
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="inbox-page"
+      onPaste={onPaste}
+      onDragEnter={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        setDragDepth((d) => d + 1);
+      }}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+      }}
+      onDragLeave={() => setDragDepth((d) => Math.max(0, d - 1))}
+      onDrop={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        setDragDepth(0);
+        takeFiles([...e.dataTransfer.files]);
+      }}
+    >
       <header className="flex flex-none items-center gap-3 border-b border-[var(--n-200)] px-5 py-2.5">
         <h2 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">Inbox</h2>
         <PeriodPills active={period} counts={counts} onChange={setPeriod} />
         <span className="flex-1" />
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          aria-hidden="true"
+          accept={INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(',')}
+          onChange={(e) => {
+            takeFiles([...(e.target.files ?? [])]);
+            // Cleared so choosing the same file twice fires change twice.
+            e.target.value = '';
+          }}
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          icon="file-up"
+          onClick={() => fileInput.current?.click()}
+        >
+          Add files
+        </Button>
         <Button variant="secondary" size="sm" icon="plus" onClick={capture}>
           Capture
         </Button>
       </header>
+
+      {dragDepth > 0 && (
+        <div
+          data-testid="inbox-dropzone"
+          className="pointer-events-none absolute inset-0 z-10 m-3 flex flex-col items-center justify-center gap-2 rounded-[14px] border-2 border-dashed border-[var(--cortex-400)] bg-[var(--cortex-50)]"
+        >
+          <Icon name="file-down" size={22} color="var(--cortex-600)" />
+          <span className="text-[13px] font-medium text-[var(--cortex-700)]">
+            Drop to file in the Inbox
+          </span>
+          <span className="text-[11.5px] text-[var(--n-500)]">
+            Transcripts and notes — {INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(' ')}
+          </span>
+        </div>
+      )}
 
       {selected === null ? (
         <div className="flex min-h-0 flex-1 items-center justify-center">

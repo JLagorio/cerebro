@@ -237,6 +237,51 @@ pub fn write_concept(
     write_file(&target, &content)
 }
 
+/// Cached copies of fetched external material. Mirrors SOURCES_DIR in
+/// src/engine/ingest.ts.
+pub const SOURCES_DIR: &str = "sources";
+
+/// Write a cached source doc. Same shape as `write_concept` but bounded to
+/// `sources/`: the two folders are both machine-written, and letting one tool
+/// write into the other's territory would make the boundary decorative.
+pub fn write_source(
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+) -> Result<(), String> {
+    if !(rel == SOURCES_DIR || rel.starts_with(&format!("{SOURCES_DIR}/"))) {
+        return Err(format!("cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"));
+    }
+    write_concept(vault, rel, frontmatter, body)
+}
+
+/// Does a concept already live at this path? Read BEFORE writing, so the log
+/// can say whether the write created something or revised it.
+pub fn concept_exists(vault: &Path, rel: &str) -> bool {
+    safe_join(vault, rel).map(|p| p.is_file()).unwrap_or(false)
+}
+
+/// Append the write to `knowledge/log.md`, creating the log if it is absent.
+pub fn append_knowledge_log(
+    vault: &Path,
+    rel: &str,
+    title: &str,
+    existed: bool,
+) -> Result<(), String> {
+    let target = safe_join(vault, crate::knowledge::LOG_PATH)?;
+    let existing = std::fs::read_to_string(&target).unwrap_or_default();
+    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let next = crate::knowledge::insert_log_entry(
+        &existing,
+        &date,
+        crate::knowledge::log_kind(existed),
+        title,
+        rel,
+    );
+    write_file(&target, &next)
+}
+
 /// Replace the H1 line that `parse::extract_h1_title` would read the title
 /// from (fenced/indented code lines are never the H1), or prepend one when
 /// the body has no real H1. Only the H1 line itself is spliced; every other

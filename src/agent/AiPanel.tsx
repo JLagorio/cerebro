@@ -2,16 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
-import { Select } from '@/components/ui/Select';
 import { checkAgent } from '@/agent/agentIpc';
 import { useAgentChat } from '@/agent/useAgentChat';
-import {
-  PERMISSION_MODES,
-  type AgentStatus,
-  type ChatMessage,
-  type PermissionMode,
-  type ToolCall,
-} from '@/agent/types';
+import { type AgentStatus, type ChatMessage, type ToolCall } from '@/agent/types';
+import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
 import { resolveTarget } from '@/engine/wikilink';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useNavStore } from '@/stores/navStore';
@@ -142,8 +136,9 @@ const SUGGESTIONS = [
 
 export function AiPanel() {
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const permissionMode = useUiStore((s) => s.agentPermissionMode);
-  const setPermissionMode = useUiStore((s) => s.setAgentPermissionMode);
+  const shell = useUiStore((s) => s.agentShellAccess);
+  const connectors = useUiStore((s) => s.agentConnectors);
+  const issuePrefixes = useUiStore((s) => s.issuePrefixes);
   const pendingPrompt = useUiStore((s) => s.agentPendingPrompt);
   const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
   const selection = useNavStore((s) => s.selection);
@@ -156,8 +151,11 @@ export function AiPanel() {
 
   // Context is a system-prompt suffix, not a hidden first message: it must
   // travel with every turn, because a resumed session re-reads it.
-  const systemPrompt = useMemo(() => buildSystemPrompt(selection), [selection]);
-  const chat = useAgentChat(systemPrompt, permissionMode, null);
+  const systemPrompt = useMemo(
+    () => buildSystemPrompt(selection, { connectors, issuePrefixes }),
+    [connectors, issuePrefixes, selection],
+  );
+  const chat = useAgentChat(systemPrompt, { shell, connectors }, null);
 
   useEffect(() => {
     void checkAgent().then(setStatus).catch(() => setStatus({ installed: false, version: null, path: null }));
@@ -208,19 +206,6 @@ export function AiPanel() {
         />
         <IconButton icon="x" label="Close AI panel" size="sm" onClick={() => setAiPanelOpen(false)} />
       </header>
-
-      <div className="flex flex-none items-center gap-2 border-b border-[var(--n-100)] px-3 py-1.5">
-        <Select
-          size="sm"
-          options={PERMISSION_MODES.map((m) => ({ value: m.value, label: m.label }))}
-          value={permissionMode}
-          onChange={(e) => setPermissionMode(e.target.value as PermissionMode)}
-          className="min-w-0 flex-1"
-        />
-        <span className="truncate text-[10.5px] text-[var(--n-400)]">
-          {PERMISSION_MODES.find((m) => m.value === permissionMode)?.hint}
-        </span>
-      </div>
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
         {chat.messages.length === 0 ? (
@@ -283,17 +268,36 @@ export function AiPanel() {
   );
 }
 
-/** What the agent is told about where the user is standing. */
-export function buildSystemPrompt(selection: { kind: string; path?: string; id?: string; name?: string }): string {
+/** What the agent is told about where the user is standing, and what it may reach. */
+export function buildSystemPrompt(
+  selection: { kind: string; path?: string; id?: string; name?: string },
+  options: { connectors?: boolean; issuePrefixes?: string } = {},
+): string {
   const lines = [
     'You are the assistant inside cerebro, a local markdown work-management app.',
     'Notes are markdown files with YAML frontmatter. A project is a folder holding project.md; its work items live in <folder>/items/. Types are declared by `type: Type` docs in types/.',
     'Use the cerebro MCP tools: get_vault_context to orient, search_notes and get_note to read, and the write tools to change things. Call open_note so the user sees what you are referring to.',
     'When you mention a note, write it as [[note-name]] so it is clickable.',
-    'You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`. Never write `verified` — that is the user\'s stamp, and claiming it would defeat the review model.',
+    'You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user\'s stamp, and claiming it would defeat the review model.',
     'To file an Inbox capture, use propose_organize so the user can accept or reject it. Do not edit captures directly.',
     'Be concise.',
   ];
+
+  // The connector inlet (M8.2). Said only when the servers are actually
+  // reachable — telling the agent to fetch through tools it does not have
+  // produces apologies, not sources.
+  if (options.connectors === true) {
+    lines.push(
+      `External material you fetch through another MCP server must be written down with cache_source, which stores it under ${SOURCES_DIR}/. Search for an existing copy before fetching: one fetch, a permanent local file, and every later question reads the file.`,
+    );
+    const prefixes = parseIssuePrefixes(options.issuePrefixes ?? '');
+    if (prefixes.length > 0) {
+      lines.push(
+        `This vault's issue-tracker project keys are ${prefixes.join(', ')}. A token like ${prefixes[0]}-421 is a ticket worth fetching; nothing else that merely looks similar is.`,
+      );
+    }
+  }
+
   const where = describeSelection(selection);
   if (where !== null) lines.push(`The user is currently looking at ${where}.`);
   return lines.join('\n');

@@ -58,7 +58,15 @@ beforeEach(() => {
     patchFrontmatter,
   });
   useNavStore.setState({ selection: { kind: 'inbox' }, history: [{ kind: 'inbox' }], historyIndex: 0 });
-  useUiStore.setState({ inboxEnabled: true, inboxAutoAdvance: true, inboxPeriod: 'all' });
+  // inboxSelectedPath is store state so the agent can open the capture its
+  // proposal is about; that also means it outlives a render and has to be
+  // cleared, or each test starts on whatever the last one left open.
+  useUiStore.setState({
+    inboxEnabled: true,
+    inboxAutoAdvance: true,
+    inboxPeriod: 'all',
+    inboxSelectedPath: null,
+  });
 });
 
 afterEach(cleanup);

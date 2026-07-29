@@ -40,41 +40,58 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
   await expect(reply.getByRole('button', { name: /scanner/i })).toBeVisible();
 });
 
-test('agent: permission mode is a visible, persisted choice', async ({ page }) => {
+test('agent: shell access is one persisted ceiling in Settings, not a per-chat mode', async ({
+  page,
+}) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
-  const panel = page.getByTestId('ai-panel');
 
-  // Defaults to vault edits — shell access is never inherited.
-  const mode = panel.getByRole('combobox');
-  await expect(mode).toHaveValue('vault_edits');
-  await mode.selectOption('read_only');
-  await expect(panel).toContainText('Cannot change anything');
+  // M8.1: the three-mode dropdown is gone from the panel. It asked the user to
+  // declare a policy before knowing what they were going to ask for; what the
+  // agent may change now follows from which folder it is writing to.
+  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveCount(0);
+
+  await page.getByTestId('rail').getByRole('button', { name: 'Settings' }).click();
+  const shell = page.getByRole('switch', { name: 'Shell access' });
+  // Off by default — shell access is chosen, never inherited.
+  await expect(shell).not.toBeChecked();
+  // The checkbox itself is 0×0 by design; the label is what a user clicks.
+  await page
+    .locator('label.cb-switch')
+    .filter({ has: page.getByRole('switch', { name: 'Shell access' }) })
+    .click();
+  await expect(shell).toBeChecked();
 
   await page.reload();
-  await expect(page.getByTestId('ai-panel').getByRole('combobox')).toHaveValue('read_only');
+  await page.getByTestId('rail').getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('switch', { name: 'Shell access' })).toBeChecked();
 });
+
+const PROPOSED = 'inbox/warehouse-cutover-thought.md';
 
 test('agent: a suggested filing is shown for approval, never applied', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
 
-  const capture = page.getByTestId('inbox-row').first();
-  const capturePath = await capture.getAttribute('data-path');
-  await capture.click();
+  // Driven through the panel, not by reaching into the module: the previous
+  // version imported agentIpc inside page.evaluate, which Vite serves at a
+  // different URL than the app's own copy once the file has been touched
+  // since the dev server started (`?t=<hmr>`). Two module instances, two
+  // listener sets, and the emit reached nobody — so the test passed on a cold
+  // server and failed on a warm one.
+  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  const panel = page.getByTestId('ai-panel');
+  await panel.getByLabel('Message the assistant').fill('Help me clear the Inbox');
+  await panel.getByRole('button', { name: 'Send' }).click();
 
-  // The agent proposes through the UI-action channel; nothing is written.
-  await page.evaluate(async (path) => {
-    const mod = await import('/src/agent/agentIpc.ts');
-    mod.emitUiAction({
-      action: 'propose_organize',
-      path,
-      type: 'Work item',
-      properties: { status: 'todo', priority: 'high' },
-      reasoning: 'It names an action and an owner, so it reads as a work item.',
-    });
-  }, capturePath);
+  // Proposing lands you on the Inbox, on the capture the proposal is ABOUT —
+  // not on whatever the queue would otherwise have opened.
+  await expect(page.getByTestId('inbox-page')).toBeVisible();
+  await expect(page.locator(`[data-testid="inbox-row"][data-path="${PROPOSED}"]`)).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
 
+  const capturePath = PROPOSED;
   const card = page.getByTestId('proposal-card');
   await expect(card).toBeVisible();
   await expect(card).toContainText('reads as a work item');

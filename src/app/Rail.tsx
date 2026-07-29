@@ -1,8 +1,6 @@
 import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { inboxCount } from '@/engine/inbox';
-import { listConcepts, needsReview } from '@/engine/okf';
-import { todayIso } from '@/lib/templates';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -61,12 +59,6 @@ export function Rail() {
     () => (inboxEnabled ? inboxCount(entries) : 0),
     [entries, inboxEnabled],
   );
-  // The badge counts concepts wanting a human: unverified, stale, or
-  // deprecated — the same review queue the Knowledge page filters to.
-  const reviewCount = useMemo(
-    () => listConcepts(entries, todayIso()).filter(needsReview).length,
-    [entries],
-  );
 
   return (
     <div
@@ -98,12 +90,14 @@ export function Rail() {
         onClick={() => navigate({ kind: 'docs' })}
       />
       {/* M5: the agent's corpus is a peer of Home and Docs, not a section
-          inside them — it has a different author and different rules. */}
+          inside them — it has a different author and different rules.
+          M8.1: no review badge. A count here is the chrome nagging you to
+          drain a queue; the same number lives on the "Needs review" row in
+          the Knowledge sidebar, where it describes a destination instead. */}
       <RailButton
         icon="brain"
         label="Knowledge"
         active={knowledgeActive}
-        count={reviewCount}
         onClick={() => navigate({ kind: 'knowledge' })}
       />
       <div className="flex-1" />

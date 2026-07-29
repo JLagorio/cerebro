@@ -266,6 +266,11 @@ fn tool_catalog() -> Vec<Value> {
                 "type": { "type": "string", "description": "OKF concept type, e.g. Metric, Playbook, Reference" },
                 "title": { "type": "string" },
                 "description": { "type": "string", "description": "One sentence" },
+                "about": {
+                    "type": "array",
+                    "description": "The vault entities this concept is knowledge OF, as wikilinks — e.g. [\"[[phoenix-warehouse-rollout]]\", \"[[risk-rollback-unrehearsed]]\"]. Distinct from `sources`: that is where the claim came from, this is what it is about. Anchor every concept you can; an unanchored concept cannot surface anywhere but the bundle.",
+                    "items": { "type": "string" }
+                },
                 "body": { "type": "string", "description": "Markdown body. Favour structure: headings, tables, lists." },
                 "tags": { "type": "array", "items": { "type": "string" } },
                 "sources": {
@@ -276,6 +281,18 @@ fn tool_catalog() -> Vec<Value> {
                 "lifecycle": { "type": "string", "description": "draft | stable | deprecated" },
                 "stale_after": { "type": "string", "description": "YYYY-MM-DD after which this should be rechecked" }
             }), &["path", "type", "title", "body"])
+        }),
+        json!({
+            "name": "cache_source",
+            "description": "Write down external material you just fetched — a Jira ticket, a Confluence page, a web page — as a local working doc under sources/. ALWAYS call this after fetching through a connector. The point is that the next question about the same thing reads a file instead of spending another round trip, so the copy has to exist locally before the conversation moves on. Check with search_notes whether a copy already exists before fetching at all.",
+            "inputSchema": schema(json!({
+                "id": { "type": "string", "description": "Issue key (PHX-421) or the URL you fetched" },
+                "kind": { "type": "string", "description": "issue | web" },
+                "title": { "type": "string" },
+                "body": { "type": "string", "description": "The content, as markdown" },
+                "source_url": { "type": "string", "description": "Canonical link back to the original" },
+                "stale_after": { "type": "string", "description": "YYYY-MM-DD after which the copy should be refetched. Default: 30 days out." }
+            }), &["id", "kind", "title", "body"])
         }),
         json!({
             "name": "propose_organize",
@@ -333,6 +350,7 @@ fn call_tool(
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
         "append_to_note" => tool_append(&vault, args),
         "write_concept" => tool_write_concept(&vault, args),
+        "cache_source" => tool_cache_source(&vault, args),
         "propose_organize" => tool_propose_organize(app, args),
         "open_note" => tool_ui(app, "open_note", args),
         "navigate" => tool_ui(app, "navigate", args),
@@ -573,6 +591,12 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, 
     if let Some(description) = arg_str(args, "description") {
         frontmatter.insert("description".into(), json!(description));
     }
+    // `about` anchors the concept to the entities it describes (M8.1) — the
+    // join that lets knowledge reach a project page instead of only ever
+    // being reachable from inside the bundle.
+    if let Some(about) = args.get("about") {
+        frontmatter.insert("about".into(), about.clone());
+    }
     if let Some(tags) = args.get("tags") {
         frontmatter.insert("tags".into(), tags.clone());
     }
@@ -595,14 +619,101 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, 
     // `verified` is deliberately never accepted from the agent — see the
     // tool description. Self-certification would empty the trust model.
 
+    // Recorded BEFORE the write, or every concept reads as an update of itself.
+    let existed = crate::vault::write::concept_exists(vault, &path);
     vault::write::write_concept(vault, &path, &frontmatter, &body)?;
+
+    // The log is appended by us, on every write, rather than left to the agent
+    // to remember — see knowledge::insert_log_entry. A failure here must not
+    // lose the concept that was already written, so it degrades to a note in
+    // the tool result instead of an error.
+    let title = arg_str(args, "title").unwrap_or_else(|| path.clone());
+    let logged = crate::vault::write::append_knowledge_log(vault, &path, &title, existed);
+    let note = match logged {
+        Ok(()) => String::new(),
+        Err(e) => format!(" (could not update the knowledge log: {e})"),
+    };
     Ok(text_result(format!(
-        "Wrote {path}. It is unverified until the user reviews it in Knowledge."
+        "Wrote {path}. It is unverified until the user reviews it in Knowledge.{note}"
     )))
 }
 
 fn now_iso() -> String {
     chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// Slug for a cached source. Mirrors `slugForUrl` in src/engine/ingest.ts —
+/// the frontend decides whether a reference is already cached by building the
+/// same path, so the two MUST agree or every fetch looks uncached forever.
+fn source_slug(kind: &str, id: &str) -> String {
+    if kind == "issue" {
+        return format!("issues/{}", id.to_lowercase());
+    }
+    let trimmed = id
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    // ASCII-only on purpose: the TypeScript side uses `\w`, which is ASCII,
+    // and `char::is_alphanumeric` is Unicode-aware. A é in a URL would
+    // otherwise produce two different paths and the cache would never hit.
+    let mut slug: String = trimmed
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug = slug.trim_matches('-').to_lowercase();
+    format!("web/{}", slug.chars().take(80).collect::<String>())
+}
+
+/// Cache fetched external material as a working doc (M8.2).
+///
+/// This is the connector inlet. Cerebro owns no credentials and runs no sync:
+/// the agent reaches for whatever MCP server or CLI it has when a note names
+/// something it cannot read, and writes the answer down here. What makes that
+/// affordable is exactly this file — one fetch, a permanent local copy, and
+/// every later turn reads markdown instead of calling an API.
+fn tool_cache_source(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+    let id = arg_str(args, "id").ok_or("cache_source needs an id")?;
+    let kind = arg_str(args, "kind").unwrap_or_else(|| "web".into());
+    if kind != "issue" && kind != "web" {
+        return Err(format!("cache_source kind must be issue or web, not {kind}"));
+    }
+    let title = arg_str(args, "title").ok_or("cache_source needs a title")?;
+    let body = arg_str(args, "body").ok_or("cache_source needs a body")?;
+    let path = format!("{}/{}.md", crate::vault::write::SOURCES_DIR, source_slug(&kind, &id));
+
+    let mut frontmatter = Map::new();
+    // Typed so it is a first-class note, and `display: doc` keeps the cache
+    // browsable rather than hidden — a copy you cannot read is not evidence.
+    frontmatter.insert("type".into(), json!("Source"));
+    frontmatter.insert("title".into(), json!(title));
+    frontmatter.insert("source_id".into(), json!(id));
+    frontmatter.insert("source_kind".into(), json!(kind));
+    if let Some(url) = arg_str(args, "source_url") {
+        frontmatter.insert("source_url".into(), json!(url));
+    }
+    frontmatter.insert("fetched_at".into(), json!(now_iso()));
+    // A cached copy goes stale exactly the way a concept does, so refreshing
+    // it is the same mechanism rather than a second one (engine/okf.ts).
+    let stale = arg_str(args, "stale_after").unwrap_or_else(|| {
+        (chrono::Utc::now() + chrono::Duration::days(30))
+            .format("%Y-%m-%d")
+            .to_string()
+    });
+    frontmatter.insert("stale_after".into(), json!(stale));
+    // Provenance is stamped by us for the same reason it is on a concept: an
+    // agent that can author its own `generated` can disclaim its own work.
+    frontmatter.insert(
+        "generated".into(),
+        json!({ "by": "claude-code", "at": now_iso() }),
+    );
+
+    let doc = format!("# {title}\n\n{}\n", body.trim());
+    crate::vault::write::write_source(vault, &path, &frontmatter, &doc)?;
+    Ok(text_result(format!(
+        "Cached {id} at {path}. Cite that path in `sources` rather than refetching."
+    )))
 }
 
 fn tool_propose_organize(app: &AppHandle, args: &Map<String, Value>) -> Result<Value, String> {
@@ -639,6 +750,33 @@ pub fn vault_changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// These exact strings are asserted again in src/engine/ingest.test.ts.
+    /// The frontend decides a reference is already cached by building the
+    /// same path this function builds — if the two ever disagree, every
+    /// fetched source looks uncached forever and the agent refetches on
+    /// every turn.
+    #[test]
+    fn source_slugs_match_the_frontends_cache_paths() {
+        assert_eq!(source_slug("issue", "PHX-421"), "issues/phx-421");
+        assert_eq!(
+            source_slug("web", "https://wiki.test/x/Rollback"),
+            "web/wiki.test-x-rollback"
+        );
+        assert_eq!(source_slug("web", "https://a.test/p?q=1&r=2"), "web/a.test-p-q-1-r-2");
+        // Trailing separators are filing noise, not part of the name.
+        assert_eq!(source_slug("web", "http://a.test/p/"), "web/a.test-p");
+    }
+
+    #[test]
+    fn cached_sources_cannot_be_written_outside_the_sources_folder() {
+        let dir = std::env::temp_dir().join("cerebro-src-guard");
+        let _ = std::fs::create_dir_all(&dir);
+        let fm = serde_json::Map::new();
+        assert!(crate::vault::write::write_source(&dir, "knowledge/x.md", &fm, "b").is_err());
+        assert!(crate::vault::write::write_source(&dir, "docs/x.md", &fm, "b").is_err());
+        assert!(crate::vault::write::write_source(&dir, "sources/web/x.md", &fm, "b").is_ok());
+    }
 
     #[test]
     fn notifications_are_recognised_by_their_missing_id() {

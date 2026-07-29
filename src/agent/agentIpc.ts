@@ -1,5 +1,5 @@
 import { runMockAgent, type MockRun } from './mockAgent';
-import type { AgentEvent, AgentStatus, McpInfo, PermissionMode, UiAction } from './types';
+import type { AgentEvent, AgentStatus, McpInfo, UiAction } from './types';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -35,7 +35,10 @@ export interface RunOptions {
   systemPrompt?: string;
   sessionId?: string | null;
   model?: string | null;
-  permissionMode: PermissionMode;
+  /** The Settings ceiling — see AgentPolicy. */
+  shell: boolean;
+  /** Let the run reach the user's own MCP servers (M8.2). */
+  connectors: boolean;
   mcp: McpInfo | null;
 }
 
@@ -43,7 +46,11 @@ let mockRun: MockRun | null = null;
 
 export async function runAgent(vault: string, options: RunOptions): Promise<void> {
   if (!inTauri()) {
-    mockRun = runMockAgent(options.message, (event) => emitLocal(event));
+    // The mock drives the UI-action channel through the same fan-out the
+    // Tauri listener uses, so browser mode exercises the real subscriber.
+    mockRun = runMockAgent(options.message, (event) => emitLocal(event), {
+      onUiAction: emitUiAction,
+    });
     return;
   }
   await invokeTauri('run_agent', {
@@ -53,7 +60,8 @@ export async function runAgent(vault: string, options: RunOptions): Promise<void
       system_prompt: options.systemPrompt ?? null,
       session_id: options.sessionId ?? null,
       model: options.model ?? null,
-      permission_mode: options.permissionMode,
+      shell: options.shell,
+      connectors: options.connectors,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Source } from '@/engine/okf';
+import { resolveBundleLink, type Source } from '@/engine/okf';
 
 /**
  * Read-only markdown for knowledge concepts (M5).
@@ -27,26 +27,9 @@ export interface ConceptBodyProps {
   onCite?: (sourceId: string) => void;
 }
 
-const BUNDLE_ROOT = 'knowledge';
-
-/**
- * OKF §6.1: `/tables/x.md` is bundle-relative (recommended, survives moves),
- * `./x.md` is relative to the current concept. Anything with a scheme is
- * external and opens in the browser.
- */
-export function resolveLink(href: string, fromPath: string): { internal: string } | { external: string } {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return { external: href };
-  if (href.startsWith('/')) return { internal: `${BUNDLE_ROOT}${href}` };
-  const dir = fromPath.slice(0, fromPath.lastIndexOf('/'));
-  const segments = `${dir}/${href}`.split('/');
-  const stack: string[] = [];
-  for (const segment of segments) {
-    if (segment === '' || segment === '.') continue;
-    if (segment === '..') stack.pop();
-    else stack.push(segment);
-  }
-  return { internal: stack.join('/') };
-}
+// Link resolution (OKF §6.1) lives in the engine — the log timeline resolves
+// the same shapes, and two copies would drift.
+export { resolveBundleLink as resolveLink } from '@/engine/okf';
 
 // --- Inline ---------------------------------------------------------------
 
@@ -107,7 +90,7 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
       nodes.push(<Citation key={key++} id={m[3]} ctx={ctx} />);
     } else if (m[4] !== undefined) {
       const label = m[5];
-      const target = resolveLink(m[6], ctx.fromPath);
+      const target = resolveBundleLink(m[6], ctx.fromPath);
       nodes.push(
         'internal' in target ? (
           <button

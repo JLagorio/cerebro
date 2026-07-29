@@ -46,13 +46,26 @@ export function formatWikilink(target: string): string {
   return `[[${target}]]`;
 }
 
-/** Filename-stem match first, then exact title match; both case-insensitive (Tolaria rule). */
+/**
+ * Filename-stem match first, then project folder, then exact title; all
+ * case-insensitive (Tolaria rule).
+ *
+ * The folder pass exists because a project IS its folder: every project's file
+ * is named `project.md`, so a stem match can never name one and `[[atlas]]`
+ * would dangle against `projects/atlas/project.md`. It sits above the title
+ * pass because a folder name is an identifier and a title is prose.
+ */
 export function resolveTarget(target: string, entries: Entry[]): Entry | null {
   const needle = target.trim().toLowerCase();
   if (needle === '') return null;
   for (const entry of entries) {
     const stem = entry.filename.replace(/\.md$/i, '').toLowerCase();
     if (stem === needle) return entry;
+  }
+  for (const entry of entries) {
+    if (entry.filename.toLowerCase() !== 'project.md') continue;
+    const folder = entry.folder.slice(entry.folder.lastIndexOf('/') + 1).toLowerCase();
+    if (folder === needle) return entry;
   }
   for (const entry of entries) {
     if (entry.title.toLowerCase() === needle) return entry;

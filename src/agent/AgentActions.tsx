@@ -20,6 +20,7 @@ export function AgentActions() {
   const navigate = useNavStore((s) => s.navigate);
   const rescan = useVaultStore((s) => s.rescan);
   const addProposal = useUiStore((s) => s.addProposal);
+  const selectInboxPath = useUiStore((s) => s.setInboxSelectedPath);
   const openPath = useOpenPath();
 
   useEffect(() => {
@@ -42,13 +43,19 @@ export function AgentActions() {
             properties: action.properties,
             reasoning: action.reasoning,
           });
+          // Open the capture the proposal is ABOUT. Without this the queue
+          // falls back to its own head, so the card only appeared when the
+          // agent happened to propose for the first capture — a suggestion
+          // silently filed behind another note is exactly the outcome
+          // propose_organize exists to prevent.
+          selectInboxPath(action.path);
           // The Inbox is where a proposal is actionable, so go there — but
           // only to show it. Accepting is still the user's click.
           navigate({ kind: 'inbox' });
           break;
       }
     });
-  }, [addProposal, navigate, openPath, rescan]);
+  }, [addProposal, navigate, openPath, rescan, selectInboxPath]);
 
   return null;
 }

@@ -45,8 +45,13 @@ pub struct AgentRequest {
     pub system_prompt: Option<String>,
     pub session_id: Option<String>,
     pub model: Option<String>,
-    /// read_only | vault_edits | power
-    pub permission_mode: Option<String>,
+    /// The Settings ceiling (M8.1): adds shell + the CLI's own file tools.
+    /// Absent reads as false — a missing field must never widen access.
+    pub shell: Option<bool>,
+    /// Let the agent reach the user's own MCP servers (M8.2) — Atlassian and
+    /// friends — so the connector inlet has something to connect with.
+    /// Absent reads as false, for the same reason.
+    pub connectors: Option<bool>,
     pub mcp_url: Option<String>,
     pub mcp_token: Option<String>,
 }
@@ -160,10 +165,17 @@ pub fn status() -> AgentStatus {
 // Invocation
 // ---------------------------------------------------------------------------
 
-/// Tools the agent may use, by permission mode. Read-only is genuinely
-/// read-only: it cannot reach any tool that writes, in cerebro or on disk.
-fn tool_policy(mode: &str) -> (String, Vec<&'static str>) {
-    let read = vec![
+/// Tools the agent may use.
+///
+/// M8.1 collapsed three user-picked modes into one ceiling. The modes were a
+/// question nobody could answer in advance — what the agent should be allowed
+/// to do depends on the request, not on a dropdown set before it. What replaced
+/// them is structural: cerebro's tools are always available and enforce their
+/// own boundaries (write_concept refuses any path outside `knowledge/`), so the
+/// only thing left to decide is whether the agent gets a shell, which no folder
+/// rule can express.
+fn tool_policy(shell: bool) -> Vec<&'static str> {
+    let mut tools = vec![
         "mcp__cerebro__get_vault_context",
         "mcp__cerebro__search_notes",
         "mcp__cerebro__get_note",
@@ -171,33 +183,20 @@ fn tool_policy(mode: &str) -> (String, Vec<&'static str>) {
         "mcp__cerebro__open_note",
         "mcp__cerebro__navigate",
         "mcp__cerebro__propose_organize",
-    ];
-    let write = [
         "mcp__cerebro__create_note",
         "mcp__cerebro__update_frontmatter",
         "mcp__cerebro__append_to_note",
         "mcp__cerebro__write_concept",
+        "mcp__cerebro__cache_source",
     ];
-    match mode {
-        "read_only" => ("plan".to_string(), read),
-        "power" => {
-            let mut all = read;
-            all.extend(write);
-            all.extend(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]);
-            ("acceptEdits".to_string(), all)
-        }
-        // vault_edits (default): cerebro's own write tools, no shell.
-        _ => {
-            let mut all = read;
-            all.extend(write);
-            ("acceptEdits".to_string(), all)
-        }
+    if shell {
+        tools.extend(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]);
     }
+    tools
 }
 
 pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
-    let mode = req.permission_mode.as_deref().unwrap_or("vault_edits");
-    let (permission_mode, tools) = tool_policy(mode);
+    let tools = tool_policy(req.shell.unwrap_or(false));
     let mut args: Vec<String> = vec![
         "-p".into(),
         req.message.clone(),
@@ -205,16 +204,23 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
         "stream-json".into(),
         "--verbose".into(),
         "--include-partial-messages".into(),
-        // --strict-mcp-config keeps the agent from loading the user's other
-        // MCP servers into a session they opened inside a notes app.
         "--mcp-config".into(),
         mcp_config.to_string_lossy().to_string(),
-        "--strict-mcp-config".into(),
+        // The CLI's own gate stays out of the way: cerebro's tools enforce
+        // their boundaries themselves, and shell access is decided above.
         "--permission-mode".into(),
-        permission_mode,
+        "acceptEdits".into(),
         "--allowedTools".into(),
         tools.join(","),
     ];
+    // Without connectors, --strict-mcp-config keeps the agent from loading the
+    // user's other MCP servers into a session they opened inside a notes app.
+    // WITH connectors, those servers are the whole point: they are how a Jira
+    // key in a note becomes a cached source doc. Off by default — reaching
+    // other systems is a choice, never one inherited from opening the panel.
+    if !req.connectors.unwrap_or(false) {
+        args.push("--strict-mcp-config".into());
+    }
     if let Some(prompt) = req.system_prompt.as_ref().filter(|p| !p.trim().is_empty()) {
         args.push("--append-system-prompt".into());
         args.push(prompt.clone());
@@ -417,14 +423,15 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn args_for(mode: &str) -> Vec<String> {
+    fn args_for(shell: bool) -> Vec<String> {
         build_args(
             &AgentRequest {
                 message: "hi".into(),
                 system_prompt: None,
                 session_id: None,
                 model: None,
-                permission_mode: Some(mode.into()),
+                shell: Some(shell),
+                connectors: None,
                 mcp_url: None,
                 mcp_token: None,
             },
@@ -432,48 +439,56 @@ mod tests {
         )
     }
 
-    #[test]
-    fn read_only_mode_cannot_reach_a_single_write_tool() {
-        let args = args_for("read_only");
-        let allowed = args
-            .iter()
+    fn allowed_tools(args: &[String]) -> String {
+        args.iter()
             .position(|a| a == "--allowedTools")
             .map(|i| args[i + 1].clone())
-            .expect("--allowedTools is always passed");
-        for writer in [
-            "create_note",
-            "update_frontmatter",
-            "append_to_note",
-            "write_concept",
-            "Bash",
-            "Write",
-        ] {
+            .expect("--allowedTools is always passed")
+    }
+
+    #[test]
+    fn the_default_is_cerebros_own_tools_and_never_a_shell() {
+        let allowed = allowed_tools(&args_for(false));
+        assert!(allowed.contains("write_concept"));
+        assert!(allowed.contains("search_notes"));
+        // The whole point of the ceiling: everything else follows from the
+        // folder model, so nothing but the shell is switchable — and it is off.
+        for host_tool in ["Bash", "Write", "Edit", "Glob", "Grep"] {
             assert!(
-                !allowed.contains(writer),
-                "read-only offered {writer}, which would make the mode a lie"
+                !allowed.contains(host_tool),
+                "{host_tool} leaked in without the user turning shell access on"
             );
         }
-        assert!(allowed.contains("search_notes"));
     }
 
     #[test]
-    fn vault_edits_writes_but_never_gets_a_shell() {
-        let args = args_for("vault_edits");
-        let allowed = args[args.iter().position(|a| a == "--allowedTools").unwrap() + 1].clone();
-        assert!(allowed.contains("write_concept"));
-        assert!(!allowed.contains("Bash"), "vault edits must not imply shell access");
-    }
-
-    #[test]
-    fn power_mode_adds_the_shell() {
-        let args = args_for("power");
-        let allowed = args[args.iter().position(|a| a == "--allowedTools").unwrap() + 1].clone();
+    fn shell_access_adds_the_host_tools() {
+        let allowed = allowed_tools(&args_for(true));
         assert!(allowed.contains("Bash"));
+        assert!(allowed.contains("write_concept"), "the cerebro tools stay");
     }
 
     #[test]
-    fn every_run_is_pinned_to_our_mcp_config_alone() {
-        let args = args_for("vault_edits");
+    fn an_absent_shell_flag_never_widens_access() {
+        let args = build_args(
+            &AgentRequest {
+                message: "hi".into(),
+                system_prompt: None,
+                session_id: None,
+                model: None,
+                shell: None,
+                connectors: None,
+                mcp_url: None,
+                mcp_token: None,
+            },
+            Path::new("/tmp/mcp.json"),
+        );
+        assert!(!allowed_tools(&args).contains("Bash"));
+    }
+
+    #[test]
+    fn by_default_a_run_is_pinned_to_our_mcp_config_alone() {
+        let args = args_for(false);
         assert!(
             args.contains(&"--strict-mcp-config".to_string()),
             "without this the agent loads the user's other MCP servers into a notes app"
@@ -482,8 +497,36 @@ mod tests {
     }
 
     #[test]
+    fn connectors_open_the_users_own_mcp_servers_and_nothing_else() {
+        let args = build_args(
+            &AgentRequest {
+                message: "hi".into(),
+                system_prompt: None,
+                session_id: None,
+                model: None,
+                shell: None,
+                connectors: Some(true),
+                mcp_url: None,
+                mcp_token: None,
+            },
+            Path::new("/tmp/mcp.json"),
+        );
+        // The connector inlet needs Atlassian and friends reachable; that is
+        // the ONLY thing this flag changes.
+        assert!(!args.contains(&"--strict-mcp-config".to_string()));
+        assert!(!allowed_tools(&args).contains("Bash"));
+    }
+
+    #[test]
+    fn cache_source_is_always_available_so_a_fetch_can_be_written_down() {
+        // A connector the agent can call but not record from would re-fetch
+        // the same ticket every turn.
+        assert!(allowed_tools(&args_for(false)).contains("cache_source"));
+    }
+
+    #[test]
     fn resume_and_model_are_only_passed_when_set() {
-        let bare = args_for("vault_edits");
+        let bare = args_for(false);
         assert!(!bare.contains(&"--resume".to_string()));
         assert!(!bare.contains(&"--model".to_string()));
 
@@ -493,7 +536,8 @@ mod tests {
                 system_prompt: Some("  ".into()),
                 session_id: Some("abc".into()),
                 model: Some("claude-opus-5".into()),
-                permission_mode: None,
+                shell: None,
+                connectors: None,
                 mcp_url: None,
                 mcp_token: None,
             },

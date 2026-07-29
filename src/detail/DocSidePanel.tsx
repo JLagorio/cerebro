@@ -6,6 +6,8 @@ import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
+import { augmentDocPrompt } from '@/lib/prompts';
 import { useUiStore, type DocPanelTab } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -13,6 +15,9 @@ const TABS: { id: DocPanelTab; label: string }[] = [
   { id: 'outline', label: 'Outline' },
   { id: 'info', label: 'Info' },
   { id: 'links', label: 'Links' },
+  // M8.3 — the PRD case. A tab rather than an inline suggestion: opening it
+  // is the ask, so the assistant never speaks first while you are writing.
+  { id: 'knowledge', label: 'Knowledge' },
 ];
 
 function LinkRow({ link }: { link: DocLink }) {
@@ -132,6 +137,14 @@ export function DocSidePanel({
           ))}
         {tab === 'info' && <DocProperties entry={entry} schema={schema} />}
         {tab === 'links' && <LinksTab entry={entry} />}
+        {tab === 'knowledge' && (
+          <RelatedKnowledge
+            entry={entry}
+            variant="panel"
+            askPrompt={augmentDocPrompt(entry.path, entry.title)}
+            askLabel="What am I missing?"
+          />
+        )}
       </div>
     </aside>
   );
