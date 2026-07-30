@@ -4,11 +4,11 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
-import { resolveCollection, sortEntries } from '@/engine/collections';
+import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { FieldDef, Presentation, Selection, ViewFile } from '@/engine/types';
-import { clonePresentation, serializeView, toggleSort } from '@/engine/views';
+import type { FieldDef, Presentation, Selection, ListFile } from '@/engine/types';
+import { clonePresentation, serializeList, toggleSort } from '@/engine/views';
 import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
 import { resolveDateField } from '@/engine/schedule';
 import { useQuickAdd } from '@/views/QuickAdd';
@@ -19,18 +19,18 @@ import { saveView } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { slugifyViewId, ViewToolbar } from '@/views/ViewToolbar';
+import { slugifyListId, ViewToolbar } from '@/views/ViewToolbar';
 
 // Task 10: the project header carries two tab groups — saved views (Items +
 // per-project views) and page tabs (Overview = project.md body, Pages = the
 // project folder's file tree).
 type ProjectTab =
   | { kind: 'items' }
-  | { kind: 'view'; id: string }
+  | { kind: 'list'; id: string }
   | { kind: 'overview' }
   | { kind: 'pages' };
 
-export type ProjectSelection = Extract<Selection, { kind: 'project' | 'view' }>;
+export type ProjectSelection = Extract<Selection, { kind: 'project' | 'list' }>;
 
 const projectDir = (projectPath: string) => projectPath.replace(/\/project\.md$/, '');
 
@@ -85,7 +85,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   };
 
   const collection = useMemo(
-    () => resolveCollection(selection, entries, schema, views),
+    () => resolveSurface(selection, entries, schema, views),
     [selection, entries, schema, views],
   );
 
@@ -97,7 +97,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   // Task 8: saved-view tabs — "Items" is ephemeral, scoped-view tab edits
   // auto-persist. Task 10 adds the Overview and Pages tabs.
   const [tab, setTab] = useState<ProjectTab>({ kind: 'items' });
-  const projectViews = useMemo<ViewFile[]>(
+  const projectViews = useMemo<ListFile[]>(
     () =>
       project === null
         ? []
@@ -114,15 +114,15 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   // The view file behind the current canvas: a scoped tab on a project page,
   // or the global view file for a sidebar view selection. Null on Items.
   const activeView =
-    selection.kind === 'view'
+    selection.kind === 'list'
       ? views.find((v) => v.id === selection.id && v.project === null) ?? null
-      : tab.kind === 'view'
+      : tab.kind === 'list'
         ? projectViews.find((v) => v.id === tab.id) ?? null
         : null;
 
   // Local presentation state, re-initialized when the selection or tab changes.
   const selectionKey = selection.kind === 'project' ? selection.path : selection.id;
-  const tabKey = tab.kind === 'view' ? `view:${tab.id}` : tab.kind;
+  const tabKey = tab.kind === 'list' ? `view:${tab.id}` : tab.kind;
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
   useEffect(() => {
     setTab({ kind: 'items' });
@@ -138,7 +138,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   }, [selectionKey, tabKey]);
 
   // Deviation from the plan's verbatim body (reported): re-sort by the LIVE
-  // orderBy so the toolbar's order select works — resolveCollection sorts by
+  // orderBy so the toolbar's order select works — resolveSurface sorts by
   // the initial presentation only, and the views never re-sort.
   const sortedEntries = useMemo(
     () => sortEntries(collection.entries, presentation.sort, schema),
@@ -174,7 +174,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     setPresentation(next);
     if (activeView === null || vaultPath === null) return;
     const folder = activeView.project === null ? null : projectDir(activeView.project);
-    const yaml = serializeView({ ...activeView.definition, presentation: next });
+    const yaml = serializeList({ ...activeView.definition, presentation: next });
     void (async () => {
       try {
         await saveView(vaultPath, activeView.id, yaml, folder);
@@ -203,16 +203,16 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   // project-scoped view and switches to its tab.
   const [newViewOpen, setNewViewOpen] = useState(false);
   const [newViewName, setNewViewName] = useState('');
-  const createView = async () => {
+  const createList = async () => {
     const name = newViewName.trim();
     if (name === '' || project === null || vaultPath === null) return;
     // Dedupe within the project scope (M1.x): a name that slugifies to a
     // taken id must not silently overwrite that view's file.
-    const base = slugifyViewId(name) || 'view';
+    const base = slugifyListId(name) || 'view';
     const taken = new Set(projectViews.map((v) => v.id));
     let id = base;
     for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
-    const yaml = serializeView({
+    const yaml = serializeList({
       name,
       icon: null,
       color: null,
@@ -228,7 +228,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       await rescan();
       setNewViewOpen(false);
       setNewViewName('');
-      setTab({ kind: 'view', id });
+      setTab({ kind: 'list', id });
       toast(`View "${name}" saved`);
     } catch {
       // Surface the failed write instead of an unhandled rejection (M1.x).
@@ -276,10 +276,10 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
             {projectViews.map((v) => (
               <ViewTab
                 key={v.id}
-                active={tab.kind === 'view' && tab.id === v.id}
+                active={tab.kind === 'list' && tab.id === v.id}
                 icon={v.definition.icon ?? 'layout-list'}
                 label={v.definition.name}
-                onClick={() => setTab({ kind: 'view', id: v.id })}
+                onClick={() => setTab({ kind: 'list', id: v.id })}
               />
             ))}
             <button
@@ -367,7 +367,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
         width={420}
         primaryAction={{
           label: 'Save',
-          onClick: () => void createView(),
+          onClick: () => void createList(),
           disabled: newViewName.trim() === '',
         }}
         secondaryAction={{ label: 'Cancel', onClick: () => setNewViewOpen(false) }}

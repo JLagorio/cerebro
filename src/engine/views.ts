@@ -9,9 +9,9 @@ import type {
   Presentation,
   Scalar,
   SortSpec,
-  ViewDefinition,
-  ViewFile,
-  ViewSource,
+  ListDefinition,
+  ListFile,
+  ListSource,
   ViewType,
 } from './types';
 
@@ -268,7 +268,7 @@ function parseChildrenSpec(raw: unknown): ChildrenSpec | null {
   return null;
 }
 
-function parseSource(raw: unknown): ViewSource {
+function parseSource(raw: unknown): ListSource {
   const obj = asRecord(raw);
   return {
     type: typeof obj.type === 'string' && obj.type !== '' ? obj.type : null,
@@ -310,7 +310,16 @@ export function parseFilters(raw: unknown): FilterGroup | null {
 }
 
 /** Tolerant by design: a saved view file never fails to load (advisory schema rule). */
-export function parseViewYaml(id: string, yamlText: string, project: string | null = null): ViewFile {
+export function parseListYaml(
+  id: string,
+  yamlText: string,
+  /**
+   * Where the file lives. All three keys are optional so a test can parse a
+   * bare string, and a caller that only knows the project (the legacy shape)
+   * can still say so.
+   */
+  location: { project?: string | null; collection?: string | null; path?: string } = {},
+): ListFile {
   let raw: unknown = null;
   try {
     raw = parse(yamlText);
@@ -320,7 +329,11 @@ export function parseViewYaml(id: string, yamlText: string, project: string | nu
   const obj = asRecord(raw);
   return {
     id,
-    project,
+    project: location.project ?? null,
+    collection: location.collection ?? null,
+    // Defaulted rather than required so a test can parse a bare string; the
+    // store always passes the real path from the scan.
+    path: location.path ?? `${id}.list.yml`,
     definition: {
       name: typeof obj.name === 'string' && obj.name.trim() !== '' ? obj.name : id,
       icon: typeof obj.icon === 'string' ? obj.icon : null,
@@ -335,7 +348,7 @@ export function parseViewYaml(id: string, yamlText: string, project: string | nu
 
 /** v2 keys only (M9.1) — the legacy keys are read, never written back, so a
  * view converges on one shape the first time it is edited. */
-export function serializeView(def: ViewDefinition): string {
+export function serializeList(def: ListDefinition): string {
   const p = def.presentation;
   return stringify({
     name: def.name,

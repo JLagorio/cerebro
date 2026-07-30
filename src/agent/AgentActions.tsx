@@ -69,8 +69,8 @@ export function toSelection(to: string, id?: string): Selection {
       return { kind: 'knowledge' };
     case 'docs':
       return { kind: 'docs' };
-    case 'view':
-      return id !== undefined ? { kind: 'view', id } : { kind: 'home' };
+    case 'list':
+      return id !== undefined ? { kind: 'list', id } : { kind: 'home' };
     default:
       return { kind: 'home' };
   }

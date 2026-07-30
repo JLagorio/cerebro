@@ -97,7 +97,10 @@ export type Selection =
   | { kind: 'project'; path: string }  // path of the project.md (vault format v2)
   | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)
-  | { kind: 'view'; id: string }       // id = filename stem in views/
+  // M10 — a Collection is a container (a folder holding collection.yml); a List
+  // is a database inside one. These were a single `view` kind that was both.
+  | { kind: 'collection'; folder: string }
+  | { kind: 'list'; id: string; collection?: string | null }
   | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
   // M9.4 — git surfaces. `changes` is the uncommitted working tree (with
   // conflict resolution when there is one); `pulse` is the committed history.
@@ -225,27 +228,85 @@ export interface FilterRule { field: string; op: FilterOp; value?: Scalar | Scal
 export type FilterGroup = { all: (FilterRule | FilterGroup)[] } | { any: (FilterRule | FilterGroup)[] };
 
 /**
- * What a view looks at (M3.5). A view is rooted in a type — the Notion model:
- * a type is a database, a view is a saved query over it. `project` narrows to
- * one project's records, which is how a "project" becomes a saved view rather
- * than a hardcoded surface.
+ * What a List looks at (M3.5). A List is rooted in a type — the Notion model:
+ * a type is a database, a List is a saved query over it. `project` narrows to
+ * one project's records, which is how a "project" becomes a List rather than a
+ * hardcoded surface.
  */
-export interface ViewSource {
-  /** Type name whose records this view lists; null = every record. */
+export interface ListSource {
+  /** Type name whose records this List holds; null = every record. */
   type: string | null;
   /** Path of a project.md to scope to via containment; null = whole vault. */
   project: string | null;
 }
 
-export interface ViewDefinition {
+export interface ListDefinition {
   name: string; icon: string | null; color: string | null; order: number | null;
-  source: ViewSource;
+  source: ListSource;
   filters: FilterGroup | null; presentation: Presentation;
 }
-export interface ViewFile {
-  id: string;                          // filename stem; unique within its scope's views/ dir
-  definition: ViewDefinition;
-  project: string | null;              // owning project.md path (projects/x/views/*.yml), null = vault-global
+
+/**
+ * A List: a database of typed records with one active view (M10).
+ *
+ * This is what a saved view was. The rename is not cosmetic — a view was both
+ * the container and the query, and M10 splits those: a Collection contains, a
+ * List queries.
+ */
+export interface ListFile {
+  /** Filename stem — unique within its folder. */
+  id: string;
+  definition: ListDefinition;
+  /** Owning project.md path for a legacy project-scoped view; else null. */
+  project: string | null;
+  /**
+   * Folder of the owning Collection, or null for a top-level List — which is
+   * how a pre-M10 `views/*.yml` surfaces, so no vault has to be migrated.
+   */
+  collection: string | null;
+  /** Vault-relative file path — what rename and delete operate on. */
+  path: string;
+}
+
+/**
+ * A Collection: a container, and nothing else (M10).
+ *
+ * It holds Lists, Folders, and Docs, and deliberately carries no query of its
+ * own — that is what its Lists are for. On disk it is a FOLDER holding a
+ * `collection.yml`, the same shape a project uses, because in a markdown app a
+ * container on screen should be a container on disk.
+ */
+export interface CollectionDefinition {
+  name: string;
+  icon: string | null;
+  color: string | null;
+  order: number | null;
+}
+
+export interface CollectionFile {
+  /** Vault-relative folder path, e.g. "product". Its identity. */
+  folder: string;
+  definition: CollectionDefinition;
+}
+
+/**
+ * One node of the sidebar's Collections tree (M10). A Collection contains
+ * Lists, Folders, and Docs; a Folder contains the same three, recursively.
+ */
+export type CollectionNodeKind = 'collection' | 'folder' | 'list' | 'doc';
+
+export interface CollectionNode {
+  kind: CollectionNodeKind;
+  /** Folder path for a collection/folder, file path for a doc, id for a list. */
+  id: string;
+  label: string;
+  icon: string;
+  color: string | null;
+  children: CollectionNode[];
+  /** Set on `list` nodes — the file this node navigates to. */
+  list?: ListFile;
+  /** Set on `doc` nodes — the markdown path this node opens. */
+  path?: string;
 }
 
 export interface Group { key: string; label: string; color: string | null; ghost: boolean; entries: Entry[] }

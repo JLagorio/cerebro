@@ -35,7 +35,7 @@ describe('buildSnapshot', () => {
 
   it('carries the rows the surface is showing', () => {
     const snap = buildSnapshot({
-      selection: { kind: 'view', id: 'at-risk-work' },
+      selection: { kind: 'list', id: 'at-risk-work' },
       entries,
       schema,
       visible: entries.slice(1),
@@ -61,7 +61,7 @@ describe('buildSnapshot', () => {
   it('carries the active view filters so a subset is not read as the whole', () => {
     const filters = { all: [{ field: 'status', op: 'equals', value: 'progress' }] };
     const snap = buildSnapshot({
-      selection: { kind: 'view', id: 'v' },
+      selection: { kind: 'list', id: 'v' },
       entries,
       schema,
       visible: entries.slice(1),

@@ -5,6 +5,7 @@ status: todo
 priority: urgent
 assignee: "[[mo-byrd]]"
 due: 2026-08-22
+window: { start: 2026-08-05, end: 2026-08-22 }
 estimate: XL
 epic: "[[epic-offline-conflict-model]]"
 blocked_by:

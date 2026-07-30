@@ -8,22 +8,34 @@ import {
   RenameTypeDialog,
   TypeStyleDialog,
 } from '@/app/TypeDialogs';
+import { CollectionTree } from '@/app/CollectionTree';
+import { CollectionDialog } from '@/app/CollectionDialog';
+import { deleteCollection, deleteList } from '@/app/listActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
-import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
+import { collectionsTree } from '@/engine/collections';
+import { listTypes, type TypeListing } from '@/engine/typeCatalog';
+import type { CollectionFile, CollectionNode } from '@/engine/types';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
-  /** Opens the New-view dialog (M3.5: views are the top level). */
-  onNewView: () => void;
+  /**
+   * Opens the New-List builder. `collection` is the folder the List lands in —
+   * null for a top-level one.
+   */
+  onNewView: (collection?: string | null) => void;
 }
 
 type TypeDialog =
   | { mode: 'new' }
   | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
+
+type CollectionDialogState =
+  | { mode: 'new' }
+  | { mode: 'rename'; collection: CollectionFile };
 
 export function Sidebar({ onNewView }: SidebarProps) {
   const entries = useVaultStore((s) => s.entries);
@@ -35,6 +47,8 @@ export function Sidebar({ onNewView }: SidebarProps) {
   const setTypesOpen = useUiStore((s) => s.setTypesOpen);
   const openPath = useOpenPath();
 
+  const collections = useVaultStore((s) => s.collections);
+  const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
   const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
@@ -50,19 +64,52 @@ export function Sidebar({ onNewView }: SidebarProps) {
   // M3: every type the vault knows about — system, declared, and ghost.
   const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
 
-  const sortedViews = useMemo(
-    () =>
-      views
-        // Project-scoped views render as tabs on their project page (Task 8),
-        // not in the sidebar — only vault-global views list here.
-        .filter((v) => v.project === null)
-        .sort(
-          (a, b) =>
-            (a.definition.order ?? 0) - (b.definition.order ?? 0) ||
-            a.definition.name.localeCompare(b.definition.name),
-        ),
-    [views],
+  // M10: one tree of Collections holding Lists, Folders and Docs. Project-scoped
+  // legacy views are excluded by collectionsTree — they render as project tabs.
+  const tree = useMemo(
+    () => collectionsTree(collections, views, entries, schema),
+    [collections, views, entries, schema],
   );
+
+  const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
+    if (node.kind === 'collection') {
+      const file = collections.find((c) => c.folder === node.id);
+      if (file === undefined) return [];
+      return [
+        {
+          icon: 'plus',
+          label: 'New list…',
+          onSelect: () => onNewView(node.id),
+        },
+        {
+          icon: 'pencil',
+          label: 'Rename…',
+          onSelect: () => setCollectionDialog({ mode: 'rename', collection: file }),
+        },
+        {
+          icon: 'folder-minus',
+          // Not "Delete": removing the marker un-collects the folder and leaves
+          // every List and Doc inside it on disk. The label has to say so, or
+          // people will expect their contents to be gone.
+          label: 'Remove collection (keeps contents)',
+          danger: true,
+          onSelect: () => void deleteCollection(file),
+        },
+      ];
+    }
+    if (node.kind === 'list' && node.list !== undefined) {
+      const list = node.list;
+      return [
+        {
+          icon: 'trash-2',
+          label: 'Delete list',
+          danger: true,
+          onSelect: () => void deleteList(list),
+        },
+      ];
+    }
+    return [];
+  };
 
   const typeMenuItems = (listing: TypeListing): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
@@ -115,48 +162,48 @@ export function Sidebar({ onNewView }: SidebarProps) {
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-2 pb-4">
-        {/* M3.5: Views are the top-level navigation — saved collections over
-            the type databases. A "project" is one of these, not a primitive. */}
+        {/* M10: Collections are the top-level navigation. A Collection is a
+            container — it holds Lists, Folders and Docs — where a "view" used
+            to be both the container and the query at once. */}
         <div className="flex items-center justify-between pr-1">
-          <div className={SECTION_LABEL}>Views</div>
+          <div className={SECTION_LABEL}>Collections</div>
           <button
             type="button"
-            aria-label="New view"
-            data-testid="new-view"
-            onClick={onNewView}
+            aria-label="New collection"
+            data-testid="new-collection"
+            onClick={() => setCollectionDialog({ mode: 'new' })}
             className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
           >
             <Icon name="plus" size={13} />
           </button>
         </div>
-        {sortedViews.length === 0 ? (
+        {tree.collections.length === 0 && tree.loose.length === 0 ? (
           <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
-            No views yet — save one to collect any set of records.
+            No collections yet — make one to hold lists, folders, and docs.
           </div>
         ) : null}
-        {sortedViews.map((view) => {
-          const viewActive = selection.kind === 'view' && selection.id === view.id;
-          const sourceType = view.definition.source.type;
-          const style = sourceType === null ? null : typeStyle(sourceType, schema);
-          return (
-            <button
-              key={view.id}
-              type="button"
-              data-testid="sidebar-view"
-              onClick={() => navigate({ kind: 'view', id: view.id })}
-              className={rowClass(viewActive)}
-            >
-              <Icon
-                name={view.definition.icon ?? style?.icon ?? 'layout-list'}
-                size={15}
-                color={view.definition.color ?? style?.color ?? 'var(--n-500)'}
-              />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                {view.definition.name}
-              </span>
-            </button>
-          );
-        })}
+        <CollectionTree
+          nodes={tree.collections}
+          selection={selection}
+          onNavigate={navigate}
+          onOpenDoc={openPath}
+          menuFor={nodeMenuItems}
+          onAdd={(node) => onNewView(node.id)}
+        />
+        {/* Lists that belong to no Collection — which is how a vault written
+            before M10 surfaces its saved views. Nothing had to move. */}
+        {tree.loose.length > 0 && (
+          <>
+            <div className={SECTION_LABEL}>Lists</div>
+            <CollectionTree
+              nodes={tree.loose}
+              selection={selection}
+              onNavigate={navigate}
+              onOpenDoc={openPath}
+              menuFor={nodeMenuItems}
+            />
+          </>
+        )}
         {/* M3: collapsible Types section — the databases themselves. */}
         <div className="flex items-center justify-between pr-1">
           <button
@@ -208,6 +255,13 @@ export function Sidebar({ onNewView }: SidebarProps) {
           y={typeMenu.y}
           items={typeMenuItems(typeMenu.listing)}
           onClose={() => setTypeMenu(null)}
+        />
+      )}
+      {collectionDialog !== null && (
+        <CollectionDialog
+          state={collectionDialog}
+          onClose={() => setCollectionDialog(null)}
+          onCreated={(folder) => navigate({ kind: 'collection', folder })}
         />
       )}
       {typeDialog?.mode === 'new' && <NewTypeDialog onClose={() => setTypeDialog(null)} />}

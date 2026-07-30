@@ -73,7 +73,7 @@ export function valueToOrder(value: string): SortSpec {
   return { field: field || 'modifiedAt', dir: dir === 'asc' ? 'asc' : 'desc' };
 }
 
-export function slugifyViewId(name: string): string {
+export function slugifyListId(name: string): string {
   return name
     .toLowerCase()
     .trim()

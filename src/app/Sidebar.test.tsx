@@ -42,6 +42,8 @@ describe('Sidebar', () => {
         {
           id: 'urgent-work',
           project: null,
+          collection: null,
+          path: 'urgent-work.list.yml',
           definition: {
             name: 'Urgent work',
             icon: null,
@@ -71,32 +73,85 @@ describe('Sidebar', () => {
 
   afterEach(cleanup);
 
-  // M3.5: views are the top-level navigation; projects are no longer a
-  // sidebar primitive (a project is a saved view over Work items).
-  it('lists saved views above the types, and no project rows', () => {
+  // M10: Collections are the top-level navigation; projects are not a sidebar
+  // primitive. A List with no Collection — which is what a pre-M10 saved view
+  // is — surfaces under "Lists" rather than being force-fitted into one.
+  it('lists collection-less Lists above the types, and no project rows', () => {
     render(<Sidebar onNewView={vi.fn()} />);
+    expect(screen.getByText('Collections')).toBeTruthy();
     expect(screen.getByText('Urgent work')).toBeTruthy();
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
     expect(screen.queryByText('New project')).toBeNull();
   });
 
-  it('clicking a view navigates to it', () => {
+  it('clicking a List navigates to it, carrying its collection', () => {
     render(<Sidebar onNewView={vi.fn()} />);
     fireEvent.click(screen.getByText('Urgent work'));
-    expect(useNavStore.getState().selection).toEqual({ kind: 'view', id: 'urgent-work' });
+    // The collection is part of the key: ids are unique per folder only.
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'list',
+      id: 'urgent-work',
+      collection: null,
+    });
   });
 
-  it('the + button opens the view builder', () => {
-    const onNewView = vi.fn();
-    render(<Sidebar onNewView={onNewView} />);
-    fireEvent.click(screen.getByTestId('new-view'));
-    expect(onNewView).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows an empty hint when the vault has no saved views', () => {
-    useVaultStore.setState({ entries: [], views: [] });
+  it('the + button opens the new-collection dialog', () => {
     render(<Sidebar onNewView={vi.fn()} />);
-    expect(screen.getByText(/No views yet/)).toBeTruthy();
+    fireEvent.click(screen.getByTestId('new-collection'));
+    expect(screen.getByRole('textbox', { name: 'Collection name' })).toBeTruthy();
+  });
+
+  it('shows an empty hint when the vault has no collections and no lists', () => {
+    useVaultStore.setState({ entries: [], views: [], collections: [] });
+    render(<Sidebar onNewView={vi.fn()} />);
+    expect(screen.getByText(/No collections yet/)).toBeTruthy();
+  });
+
+  // M10: the tree — a Collection expands to reveal its Lists and Docs, and its
+  // hover + creates a List INTO that collection rather than at the top level.
+  it('expands a Collection to reveal its Lists', () => {
+    const roadmap = {
+      id: 'roadmap',
+      project: null,
+      collection: 'product',
+      path: 'product/roadmap.list.yml',
+      definition: {
+        name: 'Roadmap',
+        icon: null,
+        color: null,
+        order: null,
+        source: { type: null, project: null },
+        filters: null,
+        presentation: {
+          type: 'table' as const,
+          group: [],
+          sort: [{ field: 'modifiedAt', dir: 'desc' as const }],
+          columns: [],
+        },
+      },
+    };
+    useVaultStore.setState({
+      views: [roadmap],
+      collections: [{ folder: 'product', definition: { name: 'Product', icon: null, color: null, order: null } }],
+    });
+    useUiStore.setState({ expandedFolders: {} });
+    render(<Sidebar onNewView={vi.fn()} />);
+    // Collapsed: the Collection shows, its contents do not.
+    expect(screen.getByText('Product')).toBeTruthy();
+    expect(screen.queryByText('Roadmap')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Product' }));
+    expect(screen.getByText('Roadmap')).toBeTruthy();
+  });
+
+  it('creates a List into the Collection whose + was clicked', () => {
+    const onNewView = vi.fn();
+    useVaultStore.setState({
+      views: [],
+      collections: [{ folder: 'product', definition: { name: 'Product', icon: null, color: null, order: null } }],
+    });
+    render(<Sidebar onNewView={onNewView} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Product' }));
+    expect(onNewView).toHaveBeenCalledWith('product');
   });
 
   // Task 14: on the Docs surfaces the sidebar is a Drive-style file tree.

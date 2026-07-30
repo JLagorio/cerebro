@@ -13,7 +13,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 use vault::entry::Entry;
-use vault::write::ViewYaml;
+use vault::write::{CollectionYaml, ViewYaml};
 use vault::watcher::WatcherState;
 
 fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -124,6 +124,23 @@ fn save_view(vault: String, id: String, yaml: String, folder: Option<String>) ->
 }
 
 #[tauri::command(async)]
+fn list_collections(vault: String) -> Result<Vec<CollectionYaml>, String> {
+    vault::write::list_collections(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn save_collection(vault: String, folder: String, yaml: String) -> Result<(), String> {
+    knowledge::guard_human_write(&folder)?;
+    vault::write::save_collection(Path::new(&vault), &folder, &yaml)
+}
+
+#[tauri::command(async)]
+fn save_list(vault: String, folder: String, id: String, yaml: String) -> Result<(), String> {
+    knowledge::guard_human_write(&folder)?;
+    vault::write::save_list(Path::new(&vault), &folder, &id, &yaml)
+}
+
+#[tauri::command(async)]
 fn create_folder(vault: String, path: String) -> Result<(), String> {
     knowledge::guard_human_write(&path)?;
     vault::write::create_folder(Path::new(&vault), &path)
@@ -209,6 +226,9 @@ pub fn run() {
             set_note_title,
             list_views,
             save_view,
+            list_collections,
+            save_collection,
+            save_list,
             create_folder,
             rename_note,
             delete_note,

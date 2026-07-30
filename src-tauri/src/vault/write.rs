@@ -8,13 +8,50 @@ use std::path::{Component, Path, PathBuf};
 
 use super::parse;
 
-/// Raw saved-view file: `views/<id>.yml` at the vault root (project None) or
-/// `<project dir>/views/<id>.yml` (project = that dir's project.md path).
+/// Raw List file — a database: a source type, filters, and one view (M10).
+///
+/// Three shapes live on disk, and all three load:
+/// - `<collection>/<id>.list.yml` — the M10 form, inside a Collection folder.
+/// - `views/<id>.yml` — legacy vault-global; surfaces with no collection.
+/// - `<project dir>/views/<id>.yml` — legacy project-scoped.
+///
+/// Nothing has to move for a vault written before M10 to keep working; the
+/// legacy paths are read but never written back to.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ViewYaml {
     pub id: String,
     pub yaml: String,
     pub project: Option<String>,
+    /// Folder of the owning Collection (the dir holding `collection.yml`);
+    /// None for a top-level List, which is how legacy views surface.
+    pub collection: Option<String>,
+    /// Vault-relative file path — what a rename or delete operates on.
+    pub path: String,
+}
+
+/// Raw Collection file: `<folder>/collection.yml`. A Collection is a container,
+/// so it is a FOLDER, the same way a project is — containers on screen should be
+/// containers on disk in a markdown app.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CollectionYaml {
+    /// Vault-relative folder path, e.g. "product".
+    pub folder: String,
+    pub yaml: String,
+}
+
+/// The `<name>.list.yml` suffix that marks a List file.
+const LIST_SUFFIX: &str = ".list.yml";
+/// The marker that makes a folder a Collection.
+const COLLECTION_MARKER: &str = "collection.yml";
+
+fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
+    Ok(path
+        .strip_prefix(vault)
+        .map_err(|e| e.to_string())?
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/"))
 }
 
 /// Single funnel for all vault file writes; registers each write with the
@@ -312,6 +349,7 @@ pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String
 }
 
 fn collect_views_dir(
+    vault: &Path,
     dir: &Path,
     project: Option<&str>,
     views: &mut Vec<ViewYaml>,
@@ -333,19 +371,19 @@ fn collect_views_dir(
             id: id.to_string(),
             yaml,
             project: project.map(str::to_string),
+            // A legacy view has no Collection; it surfaces at the top level of
+            // the sidebar rather than being force-fitted into one.
+            collection: None,
+            path: rel_path(vault, &path)?,
         });
     }
     Ok(())
 }
 
-/// List saved views: `views/*.yml` at the vault root (global) plus each
-/// project folder's `views/*.yml` (M2 Task 6). Sorted by (project, id).
-pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
-    let mut views = Vec::new();
-    collect_views_dir(&vault.join("views"), None, &mut views)?;
-    // Project views: a views/ dir next to any project.md. Reuse the scanner's
-    // walk semantics (skips dot/views/attachments dirs) to find project docs.
-    let walker = walkdir::WalkDir::new(vault)
+/// Walk the vault the way the scanner does — skipping dot dirs, the legacy
+/// `views/` dirs, and `attachments/`.
+fn vault_walker(vault: &Path) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
+    walkdir::WalkDir::new(vault)
         .into_iter()
         .filter_entry(|e| {
             e.depth() == 0
@@ -354,29 +392,110 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
                     let name = e.file_name().to_string_lossy();
                     name.starts_with('.') || name == "views" || name == "attachments"
                 }
-        });
-    for item in walker {
-        let Ok(item) = item else { continue };
-        if !item.file_type().is_file() || item.file_name().to_string_lossy() != "project.md" {
+        })
+        .filter_map(Result::ok)
+}
+
+/// Every Collection in the vault: each folder holding a `collection.yml`.
+pub fn list_collections(vault: &Path) -> Result<Vec<CollectionYaml>, String> {
+    let mut out = Vec::new();
+    for item in vault_walker(vault) {
+        if !item.file_type().is_file() || item.file_name().to_string_lossy() != COLLECTION_MARKER {
             continue;
         }
-        let Some(project_dir) = item.path().parent() else { continue };
-        let rel_project = item
-            .path()
-            .strip_prefix(vault)
-            .map_err(|e| e.to_string())?
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
-        collect_views_dir(&project_dir.join("views"), Some(&rel_project), &mut views)?;
+        let Some(dir) = item.path().parent() else { continue };
+        out.push(CollectionYaml {
+            folder: rel_path(vault, dir)?,
+            yaml: std::fs::read_to_string(item.path()).map_err(|e| e.to_string())?,
+        });
     }
-    views.sort_by(|a, b| a.project.cmp(&b.project).then(a.id.cmp(&b.id)));
+    out.sort_by(|a, b| a.folder.cmp(&b.folder));
+    Ok(out)
+}
+
+/// The Collection a path belongs to: the nearest ANCESTOR folder holding a
+/// `collection.yml`. Same containment rule projects already use, so a List in a
+/// sub-folder belongs to the Collection above it without restating it.
+fn collection_of(vault: &Path, file: &Path) -> Option<String> {
+    let mut dir = file.parent();
+    while let Some(current) = dir {
+        if current.join(COLLECTION_MARKER).is_file() {
+            return rel_path(vault, current).ok();
+        }
+        if current == vault {
+            break;
+        }
+        dir = current.parent();
+    }
+    None
+}
+
+/// Every List in the vault, in all three on-disk shapes (see `ViewYaml`).
+/// Sorted by (collection, project, id) so the sidebar order is stable.
+pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
+    let mut views = Vec::new();
+    collect_views_dir(vault, &vault.join("views"), None, &mut views)?;
+
+    for item in vault_walker(vault) {
+        if !item.file_type().is_file() {
+            continue;
+        }
+        let name = item.file_name().to_string_lossy().to_string();
+
+        // Legacy project-scoped views: a views/ dir next to any project.md.
+        if name == "project.md" {
+            let Some(project_dir) = item.path().parent() else { continue };
+            let rel_project = rel_path(vault, item.path())?;
+            collect_views_dir(vault, &project_dir.join("views"), Some(&rel_project), &mut views)?;
+            continue;
+        }
+
+        // M10 Lists: `<name>.list.yml` anywhere.
+        if let Some(id) = name.strip_suffix(LIST_SUFFIX) {
+            if id.is_empty() {
+                continue;
+            }
+            views.push(ViewYaml {
+                id: id.to_string(),
+                yaml: std::fs::read_to_string(item.path()).map_err(|e| e.to_string())?,
+                project: None,
+                collection: collection_of(vault, item.path()),
+                path: rel_path(vault, item.path())?,
+            });
+        }
+    }
+
+    views.sort_by(|a, b| {
+        a.collection
+            .cmp(&b.collection)
+            .then(a.project.cmp(&b.project))
+            .then(a.id.cmp(&b.id))
+    });
     Ok(views)
 }
 
+/// Write `<folder>/collection.yml`, creating the folder if needed. Passing ""
+/// is rejected: the vault root is not a Collection.
+pub fn save_collection(vault: &Path, folder: &str, yaml: &str) -> Result<(), String> {
+    let dir = safe_join(vault, folder)?;
+    write_file(&dir.join(COLLECTION_MARKER), yaml)
+}
+
+/// Write a List. `folder` empty means the vault root (a top-level List);
+/// otherwise `<folder>/<id>.list.yml`.
+pub fn save_list(vault: &Path, folder: &str, id: &str, yaml: &str) -> Result<(), String> {
+    safe_component("list id", id)?;
+    let base = if folder.is_empty() {
+        vault.to_path_buf()
+    } else {
+        safe_join(vault, folder)?
+    };
+    write_file(&base.join(format!("{id}{LIST_SUFFIX}")), yaml)
+}
+
 /// Write `<folder>/views/<id>.yml` verbatim (vault-root `views/` when folder
-/// is None), creating the directory if needed.
+/// is None), creating the directory if needed. Legacy shape — kept so a vault
+/// written before M10 can still be edited in place.
 pub fn save_view(vault: &Path, id: &str, yaml: &str, folder: Option<&str>) -> Result<(), String> {
     safe_component("view id", id)?;
     let base = match folder {
@@ -624,6 +743,87 @@ mod tests {
         assert_eq!(views[0].yaml, "name: All items\npresentation:\n  type: list\n");
         assert_eq!(views[0].project, None);
         assert_eq!(views[1].id, "board");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- M10 Collections ---------------------------------------------------
+
+    #[test]
+    fn collections_are_folders_holding_a_marker() {
+        let vault = testutil::temp_vault("wfm-collections");
+        assert!(list_collections(&vault).unwrap().is_empty());
+        save_collection(&vault, "product", "name: Product\nicon: package\n").unwrap();
+        save_collection(&vault, "ops", "name: Ops\n").unwrap();
+        // A nested Collection is legal — a Collection is just a marked folder.
+        save_collection(&vault, "product/platform", "name: Platform\n").unwrap();
+
+        let found = list_collections(&vault).unwrap();
+        assert_eq!(
+            found.iter().map(|c| c.folder.as_str()).collect::<Vec<_>>(),
+            vec!["ops", "product", "product/platform"],
+        );
+        assert_eq!(found[1].yaml, "name: Product\nicon: package\n");
+        assert!(vault.join("product/collection.yml").is_file());
+        // Containment is enforced here, not in the caller.
+        assert!(save_collection(&vault, "../outside", "name: E\n").is_err());
+        assert!(save_collection(&vault, "", "name: E\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn lists_belong_to_the_nearest_ancestor_collection() {
+        let vault = testutil::temp_vault("wfm-lists");
+        save_collection(&vault, "product", "name: Product\n").unwrap();
+        save_list(&vault, "product", "roadmap", "name: Roadmap\n").unwrap();
+        // A List in a plain sub-FOLDER still belongs to the Collection above
+        // it — same containment rule projects already use.
+        save_list(&vault, "product/q3", "risks", "name: Risks\n").unwrap();
+        // A top-level List has no Collection rather than being force-fitted.
+        save_list(&vault, "", "inbox-triage", "name: Triage\n").unwrap();
+
+        let lists = list_views(&vault).unwrap();
+        let by_id = |id: &str| lists.iter().find(|l| l.id == id).unwrap().clone();
+        assert_eq!(by_id("roadmap").collection.as_deref(), Some("product"));
+        assert_eq!(by_id("risks").collection.as_deref(), Some("product"));
+        assert_eq!(by_id("inbox-triage").collection, None);
+        assert_eq!(by_id("roadmap").path, "product/roadmap.list.yml");
+        assert_eq!(by_id("risks").path, "product/q3/risks.list.yml");
+        assert_eq!(by_id("inbox-triage").path, "inbox-triage.list.yml");
+        assert!(save_list(&vault, "../outside", "evil", "name: E\n").is_err());
+        assert!(save_list(&vault, "product", "sub/dir", "name: E\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The migration guarantee: a vault written before M10 keeps working, with
+    // its legacy views surfacing as top-level Lists. Nothing has to move.
+    #[test]
+    fn legacy_views_load_beside_m10_lists() {
+        let vault = testutil::temp_vault("wfm-legacy-lists");
+        testutil::write(&vault, "projects/atlas/project.md", "---\ntype: Project\n---\n\n# Atlas\n");
+        save_view(&vault, "old-global", "name: Old global\n", None).unwrap();
+        save_view(&vault, "old-scoped", "name: Old scoped\n", Some("projects/atlas")).unwrap();
+        save_collection(&vault, "product", "name: Product\n").unwrap();
+        save_list(&vault, "product", "roadmap", "name: Roadmap\n").unwrap();
+
+        let lists = list_views(&vault).unwrap();
+        assert_eq!(lists.len(), 3);
+        let by_id = |id: &str| lists.iter().find(|l| l.id == id).unwrap().clone();
+        // Legacy views carry no collection, so they list at the top level.
+        assert_eq!(by_id("old-global").collection, None);
+        assert_eq!(by_id("old-global").path, "views/old-global.yml");
+        assert_eq!(by_id("old-scoped").project.as_deref(), Some("projects/atlas/project.md"));
+        assert_eq!(by_id("roadmap").collection.as_deref(), Some("product"));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_bare_list_suffix_is_not_a_list() {
+        let vault = testutil::temp_vault("wfm-bare-list");
+        // `.list.yml` with no name would produce an empty id, which is not a
+        // thing the UI can navigate to or the writer can round-trip.
+        testutil::write(&vault, ".list.yml", "name: Nameless\n");
+        testutil::write(&vault, "notes.yml", "name: Not a list\n");
+        assert!(list_views(&vault).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&vault);
     }
 

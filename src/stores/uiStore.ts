@@ -56,6 +56,15 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+  /**
+   * The open sidebar-tree context menu (M10), keyed by node id.
+   *
+   * In the store rather than in each row's local state because only ONE menu
+   * may be open at a time — per-row state let two menus coexist after a
+   * right-click on a second row, with two overlapping popovers on screen.
+   */
+  nodeMenu: { x: number; y: number; id: string } | null;
+  setNodeMenu(v: { x: number; y: number; id: string } | null): void;
   /** Inbox workflow (M4). Off = every note reads as organized and the Rail
    * hides the Inbox — for people who file at capture time. Persisted. */
   inboxEnabled: boolean;
@@ -314,6 +323,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ homeTaskAssignee: v });
   },
 
+  nodeMenu: null,
+  setNodeMenu: (v) => set({ nodeMenu: v }),
   typesOpen: loadString(TYPES_OPEN_KEY, 'true') === 'true',
   setTypesOpen: (v) => {
     storeString(TYPES_OPEN_KEY, String(v));

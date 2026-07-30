@@ -1,0 +1,221 @@
+import { useEffect, useMemo, useState } from 'react';
+import { deleteList, updateList } from '@/app/listActions';
+import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
+import { Dialog } from '@/components/ui/Dialog';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Icon } from '@/components/ui/Icon';
+import { IconButton } from '@/components/ui/IconButton';
+import { resolveSurface, sortEntries } from '@/engine/surface';
+import { columnUniverse } from '@/engine/columns';
+import type { FieldDef, Presentation, Selection } from '@/engine/types';
+import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { clonePresentation, toggleSort } from '@/engine/views';
+import { useNavStore } from '@/stores/navStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
+import { resolveDateField } from '@/engine/schedule';
+import { useQuickAdd } from '@/views/QuickAdd';
+import { ViewCanvas } from '@/views/ViewCanvas';
+import { ViewToolbar } from '@/views/ViewToolbar';
+
+export type ListSelection = Extract<Selection, { kind: 'list' }>;
+
+/**
+ * A List's canvas (M10): a type + filters + one of the six views.
+ *
+ * This was CollectionPage, which is now the container's page — the rename is
+ * the whole point of the milestone. One page renders "Cobra launch" the same
+ * way it renders "My open bugs", because both are Lists. Toolbar edits
+ * auto-persist to the List's YAML, in place, whatever shape it is on disk.
+ */
+export function ListPage({ selection }: { selection: ListSelection }) {
+  const entries = useVaultStore((s) => s.entries);
+  const views = useVaultStore((s) => s.views);
+  const schema = useSchema();
+  const navigate = useNavStore((s) => s.navigate);
+
+  const view = useMemo(
+    // Ids are unique per FOLDER, so the collection is part of the key — two
+    // Collections may each hold a "roadmap".
+    () =>
+      views.find(
+        (v) =>
+          v.id === selection.id &&
+          v.project === null &&
+          v.collection === (selection.collection ?? null),
+      ) ?? null,
+    [views, selection.id, selection.collection],
+  );
+
+  const collection = useMemo(
+    () => resolveSurface(selection, entries, schema, views),
+    [selection, entries, schema, views],
+  );
+
+  const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
+  // M9.7: the whole view configuration is a place, not a row of popovers.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  useEffect(() => {
+    setPresentation(clonePresentation(collection.presentation));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection.id]);
+
+  const sortedEntries = useMemo(
+    () => sortEntries(collection.entries, presentation.sort, schema),
+    [collection.entries, presentation.sort, schema],
+  );
+
+  // M9.2: one resolution for every surface. A typeless view used to get [],
+  // so an "Everything" view had no columns at all; columnUniverse unions the
+  // properties its records actually carry.
+  const fields = useMemo(
+    () =>
+      view === null ? [] : columnUniverse(view.definition.source, collection.entries, schema),
+    [schema, view, collection.entries],
+  );
+
+  const sourceType = view?.definition.source.type ?? null;
+  // M9.6: a typeless view has no single type to create into, so the
+  // affordance is simply absent there rather than guessing one.
+  const quickAdd = useQuickAdd(sourceType ?? '', null);
+  const onCreate =
+    sourceType === null
+      ? undefined
+      : (title: string, band: { groupBy: string; groupValue: string }) => quickAdd(title, band);
+  // Creating on a calendar day means creating WITH that date — the band
+  // mechanism carries a grouping value, not an arbitrary property, so the date
+  // goes through quickAdd's `extra` frontmatter instead.
+  const dateField = resolveDateField(presentation, fields);
+  const onCreateOn =
+    sourceType === null || dateField === null
+      ? undefined
+      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
+  // Collapse state is namespaced per surface so two views don't share bands.
+  const scope = `list:${selection.collection ?? ''}:${selection.id}`;
+
+  if (view === null) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center justify-center">
+        <EmptyState
+          icon="layout-list"
+          title="This list no longer exists"
+          description="It may have been renamed or deleted."
+        />
+      </div>
+    );
+  }
+
+  // Toolbar edits persist immediately — a saved view IS its configuration.
+  const changePresentation = (next: Presentation) => {
+    setPresentation(next);
+    void updateList(view, { ...view.definition, presentation: next });
+  };
+
+  // M9.2: a column IS a property, so adding one writes the type doc and then
+  // shows the column here. Guarded to typed views by the toolbar.
+  const addProperty = (name: string, kind: FieldDef['kind']) => {
+    if (sourceType === null) return;
+    void (async () => {
+      if (await addFieldToType(sourceType, name, kind)) {
+        changePresentation({
+          ...presentation,
+          columns: [...presentation.columns, { field: normalizeFieldName(name) }],
+        });
+      }
+    })();
+  };
+
+  const sourceLabel =
+    view.definition.source.type === null ? 'Everything' : view.definition.source.type;
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex-none px-5 pb-2 pt-3.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon
+            name={view.definition.icon ?? 'layout-list'}
+            size={16}
+            color={view.definition.color ?? 'var(--n-600)'}
+          />
+          <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+            {view.definition.name}
+          </h1>
+          <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
+            {collection.entries.length}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
+            {sourceLabel}
+            {view.definition.filters !== null && ' · filtered'}
+          </span>
+          <span className="flex-1" />
+          <IconButton icon="settings-2" label="List settings" onClick={() => setSettingsOpen(true)} />
+          <IconButton icon="trash-2" label="Delete list" onClick={() => setConfirmDelete(true)} />
+        </div>
+      </div>
+      <ViewToolbar
+        presentation={presentation}
+        onChange={changePresentation}
+        fields={fields}
+        sourceType={sourceType}
+        schema={schema}
+        onAddProperty={addProperty}
+      />
+      <ViewCanvas
+        entries={sortedEntries}
+        allEntries={entries}
+        presentation={presentation}
+        schema={schema}
+        fields={fields}
+        scope={scope}
+        createType={sourceType ?? undefined}
+        filtered={view.definition.filters !== null}
+        onCreate={onCreate}
+        onCreateOn={onCreateOn}
+        onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
+        onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
+        onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+      />
+      </div>
+      {settingsOpen && (
+        <ViewSettingsPanel
+          definition={{ ...view.definition, presentation }}
+          fields={fields}
+          schema={schema}
+          onClose={() => setSettingsOpen(false)}
+          onDelete={() => {
+            setSettingsOpen(false);
+            setConfirmDelete(true);
+          }}
+          onChange={(definition) => {
+            setPresentation(definition.presentation);
+            void updateList(view, definition);
+          }}
+        />
+      )}
+      {confirmDelete && (
+        <Dialog
+          open
+          onClose={() => setConfirmDelete(false)}
+          title={`Delete "${view.definition.name}"?`}
+          width={420}
+          primaryAction={{
+            label: 'Delete list',
+            onClick: () => {
+              setConfirmDelete(false);
+              void (async () => {
+                if (await deleteList(view)) navigate({ kind: 'home' });
+              })();
+            },
+          }}
+          secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
+        >
+          <p className="m-0 text-[13px] text-[var(--n-600)]">
+            The list's configuration is removed. The records it held are untouched — a
+            list is a saved query, not the notes themselves.
+          </p>
+        </Dialog>
+      )}
+    </div>
+  );
+}

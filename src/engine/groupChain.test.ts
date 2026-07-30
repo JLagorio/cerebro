@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { bandLevels, nestLevels } from '@/engine/types';
-import { parseViewYaml, serializeView } from '@/engine/views';
+import { parseListYaml, serializeList } from '@/engine/views';
 import type { GroupSpec } from '@/engine/types';
 
 /**
  * M9.7: group and hierarchy were one concept wearing two hats. These pin the
  * unified chain and the migration off the two shapes it replaces.
  */
-const parse = (yaml: string) => parseViewYaml('v', yaml).definition.presentation;
+const parse = (yaml: string) => parseListYaml('v', yaml).definition.presentation;
 
 describe('band vs nest levels', () => {
   const chain: GroupSpec[] = [
@@ -115,12 +115,12 @@ describe('grouping chain round trip', () => {
         '    - relation: { type: Key result, field: objective }',
       ].join('\n'),
     );
-    const yaml = serializeView({
+    const yaml = serializeList({
       name: 'n', icon: null, color: null, order: null,
       source: { type: 'Objective', project: null },
       filters: null,
       presentation: original,
     });
-    expect(parseViewYaml('v', yaml).definition.presentation.group).toEqual(original.group);
+    expect(parseListYaml('v', yaml).definition.presentation.group).toEqual(original.group);
   });
 });

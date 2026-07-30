@@ -19,7 +19,7 @@ import { humanize } from '@/detail/FieldEditor';
 import { OptionListEditor } from '@/detail/OptionListEditor';
 import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
 import { StatusListEditor } from '@/detail/StatusListEditor';
-import { resolveCollection, sortEntries } from '@/engine/collections';
+import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
 import { clonePresentation, toggleSort } from '@/engine/views';
 import { kindMeta } from '@/engine/properties';
@@ -331,7 +331,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   );
 
   const collection = useMemo(
-    () => resolveCollection(selection, entries, schema, views),
+    () => resolveSurface(selection, entries, schema, views),
     [selection, entries, schema, views],
   );
 

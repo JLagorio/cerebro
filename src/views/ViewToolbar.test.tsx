@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
 import type { Presentation } from '@/engine/types';
-import { orderToValue, slugifyViewId, valueToOrder, ViewToolbar } from './ViewToolbar';
+import { orderToValue, slugifyListId, valueToOrder, ViewToolbar } from './ViewToolbar';
 
 const emptySchema = () => buildSchema([]);
 
@@ -14,12 +14,12 @@ const presentation: Presentation = {
   columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
 };
 
-describe('slugifyViewId', () => {
+describe('slugifyListId', () => {
   it('lowercases and hyphenates', () => {
-    expect(slugifyViewId('My urgent work')).toBe('my-urgent-work');
+    expect(slugifyListId('My urgent work')).toBe('my-urgent-work');
   });
   it('strips leading and trailing separators', () => {
-    expect(slugifyViewId('  Board: Q3! ')).toBe('board-q3');
+    expect(slugifyListId('  Board: Q3! ')).toBe('board-q3');
   });
 });
 

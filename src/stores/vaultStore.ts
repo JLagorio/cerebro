@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { validatePatch } from '@/engine/properties';
 import { buildSchema } from '@/engine/schema';
-import type { Entry, Scalar, Schema, ViewFile } from '@/engine/types';
-import { parseViewYaml } from '@/engine/views';
+import { parseCollectionYaml } from '@/engine/collections';
+import type { CollectionFile, Entry, Scalar, Schema, ListFile } from '@/engine/types';
+import { parseListYaml } from '@/engine/views';
 import * as ipc from '@/lib/ipc';
 import { extractWikilinks } from '@/lib/mockParse';
 import { useUiStore } from '@/stores/uiStore';
@@ -10,7 +11,10 @@ import { useUiStore } from '@/stores/uiStore';
 export interface VaultState {
   vaultPath: string | null;
   entries: Entry[];
-  views: ViewFile[];
+  /** Every List in the vault (M10) — what saved views became. */
+  views: ListFile[];
+  /** Every Collection: the containers Lists and Docs live in (M10). */
+  collections: CollectionFile[];
   folders: string[];   // all vault directories incl. empty ones (M2 Task 10 file trees)
   status: 'idle' | 'scanning' | 'ready' | 'error';
   error: string | null;
@@ -48,12 +52,35 @@ function applyPatch(entry: Entry, patch: Record<string, unknown>): Entry {
   return { ...entry, properties, relationships, modifiedAt: new Date().toISOString() };
 }
 
+/** Read and parse the Lists and Collections in one pass — both surfaces are
+ * needed together to build the sidebar tree, so fetching them apart would let
+ * the two halves disagree for a frame. */
+async function loadCollections(
+  vault: string,
+): Promise<{ views: ListFile[]; collections: CollectionFile[] }> {
+  const [rawLists, rawCollections] = await Promise.all([
+    ipc.listViews(vault),
+    ipc.listCollections(vault),
+  ]);
+  return {
+    views: rawLists.map((v) =>
+      parseListYaml(v.id, v.yaml, {
+        project: v.project,
+        collection: v.collection,
+        path: v.path,
+      }),
+    ),
+    collections: rawCollections.map((c) => parseCollectionYaml(c.folder, c.yaml)),
+  };
+}
+
 let watcherBound = false;
 
 export const useVaultStore = create<VaultState>()((set, get) => ({
   vaultPath: null,
   entries: [],
   views: [],
+  collections: [],
   folders: [],
   status: 'idle',
   error: null,
@@ -62,7 +89,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     set({ vaultPath: path, status: 'scanning', error: null });
     try {
       const entries = await ipc.scanVault(path);
-      const views = (await ipc.listViews(path)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
+      const { views, collections } = await loadCollections(path);
       const folders = await ipc.listFolders(path);
       await ipc.startWatcher(path);
       if (inTauri() && !watcherBound) {
@@ -79,7 +106,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
         // app lifetime.
         watcherBound = true;
       }
-      set({ entries, views, folders, status: 'ready' });
+      set({ entries, views, collections, folders, status: 'ready' });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ status: 'error', error: message });
@@ -95,9 +122,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     const vault = get().vaultPath;
     if (vault === null) return;
     const entries = await ipc.scanVault(vault);
-    const views = (await ipc.listViews(vault)).map((v) => parseViewYaml(v.id, v.yaml, v.project));
+    const { views, collections } = await loadCollections(vault);
     const folders = await ipc.listFolders(vault);
-    set({ entries, views, folders, status: 'ready' });
+    set({ entries, views, collections, folders, status: 'ready' });
   },
 
   async patchFrontmatter(path, patch) {

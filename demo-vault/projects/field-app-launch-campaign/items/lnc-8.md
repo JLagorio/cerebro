@@ -5,6 +5,7 @@ status: progress
 priority: urgent
 assignee: "[[dana-fox]]"
 due: 2026-08-06
+window: { start: 2026-07-21, end: 2026-08-06 }
 estimate: M
 epic: "[[epic-launch-narrative]]"
 ---

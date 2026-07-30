@@ -10,7 +10,7 @@ import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
-import { resolveCollection } from '@/engine/collections';
+import { resolveSurface } from '@/engine/surface';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
@@ -142,11 +142,11 @@ export function AiPanel() {
   // from the At risk view should be answered from that view's records, not
   // from the agent re-deriving a query it will get subtly wrong.
   const collection = useMemo(
-    () => resolveCollection(selection, entries, schema, views),
+    () => resolveSurface(selection, entries, schema, views),
     [selection, entries, schema, views],
   );
   const activeView =
-    selection.kind === 'view'
+    selection.kind === 'list'
       ? views.find((v) => v.id === selection.id && v.project === null) ?? null
       : null;
 
@@ -339,7 +339,7 @@ function describeSelection(selection: {
     case 'doc':
     case 'project':
       return selection.path ?? null;
-    case 'view':
+    case 'list':
       return selection.id !== undefined ? `the saved view "${selection.id}"` : null;
     case 'type':
       return selection.name !== undefined ? `the ${selection.name} type screen` : null;

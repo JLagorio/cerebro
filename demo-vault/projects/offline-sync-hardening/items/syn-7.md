@@ -5,6 +5,7 @@ status: progress
 priority: urgent
 assignee: "[[sam-ito]]"
 due: 2026-08-04
+window: { start: 2026-07-24, end: 2026-08-04 }
 estimate: L
 epic: "[[epic-offline-conflict-model]]"
 blocked_by:

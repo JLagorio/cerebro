@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Entry, ViewFile } from '@/engine/types';
+import type { Entry, ListFile } from '@/engine/types';
 import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -43,9 +43,11 @@ const item = mkEntry({
   properties: { status: 'todo', key: 'FLD-1' },
 });
 
-const boardView: ViewFile = {
+const boardView: ListFile = {
   id: 'all-board',
   project: null,
+  collection: null,
+  path: 'all-board.list.yml',
   definition: {
     name: 'All board',
     icon: null,
@@ -95,13 +97,13 @@ describe('ProjectPage', () => {
   });
 
   it('a view selection uses the saved presentation', () => {
-    render(<ProjectPage selection={{ kind: 'view', id: 'all-board' }} />);
+    render(<ProjectPage selection={{ kind: 'list', id: 'all-board' }} />);
     expect(screen.getByTestId('board-view')).toBeTruthy();
   });
 
   // Task 8: saved-view tabs on the project header.
   it('renders the Items tab plus project-scoped view tabs, not globals', () => {
-    const scoped: ViewFile = {
+    const scoped: ListFile = {
       ...boardView,
       id: 'delivery',
       project: FOUNDATIONS,
@@ -116,7 +118,7 @@ describe('ProjectPage', () => {
   });
 
   it('switching to a scoped view tab applies its presentation', () => {
-    const scoped: ViewFile = {
+    const scoped: ListFile = {
       ...boardView,
       id: 'delivery',
       project: FOUNDATIONS,
@@ -185,7 +187,7 @@ describe('ProjectPage', () => {
     const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
     fs.set(FOUNDATIONS, '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n');
     fs.set('projects/foundations/views/delivery.yml', 'name: Delivery\n');
-    const scoped: ViewFile = {
+    const scoped: ListFile = {
       ...boardView,
       id: 'delivery',
       project: FOUNDATIONS,

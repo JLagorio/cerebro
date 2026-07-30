@@ -1,209 +1,198 @@
-import { useEffect, useMemo, useState } from 'react';
-import { deleteView, updateView } from '@/app/viewActions';
-import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
+import { useMemo, useState } from 'react';
+import { CollectionDialog } from '@/app/CollectionDialog';
+import { deleteCollection } from '@/app/listActions';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
-import { resolveCollection, sortEntries } from '@/engine/collections';
-import { columnUniverse } from '@/engine/columns';
-import type { FieldDef, Presentation, Selection } from '@/engine/types';
-import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
-import { clonePresentation, toggleSort } from '@/engine/views';
+import { useOpenPath } from '@/app/useOpenPath';
+import { collectionsTree, nodeCount } from '@/engine/collections';
+import type { CollectionNode, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { resolveDateField } from '@/engine/schedule';
-import { useQuickAdd } from '@/views/QuickAdd';
-import { ViewCanvas } from '@/views/ViewCanvas';
-import { ViewToolbar } from '@/views/ViewToolbar';
 
-export type ViewSelection = Extract<Selection, { kind: 'view' }>;
+export type CollectionSelection = Extract<Selection, { kind: 'collection' }>;
 
 /**
- * A saved view's canvas (M3.5). Views are now top-level saved collections —
- * a type + filters + a layout — so this one page renders "Cobra launch" the
- * same way it renders "My open bugs". Toolbar edits auto-persist to the
- * view's YAML, matching how project tabs already behaved.
+ * A Collection's page (M10): what is in here.
+ *
+ * Deliberately not a record canvas. A Collection contains Lists, Folders and
+ * Docs and carries no query of its own — the moment a container also filters,
+ * "what is in here" has two answers. So this page lists its contents and hands
+ * off: a List opens its own canvas, a Doc opens the editor.
  */
-export function CollectionPage({ selection }: { selection: ViewSelection }) {
+export function CollectionPage({ selection }: { selection: CollectionSelection }) {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
+  const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
+  const openPath = useOpenPath();
 
-  const view = useMemo(
-    () => views.find((v) => v.id === selection.id && v.project === null) ?? null,
-    [views, selection.id],
-  );
+  const [renaming, setRenaming] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
-  const collection = useMemo(
-    () => resolveCollection(selection, entries, schema, views),
-    [selection, entries, schema, views],
-  );
+  const collection = collections.find((c) => c.folder === selection.folder) ?? null;
 
-  const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
-  // M9.7: the whole view configuration is a place, not a row of popovers.
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  useEffect(() => {
-    setPresentation(clonePresentation(collection.presentation));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection.id]);
+  const node = useMemo(() => {
+    const tree = collectionsTree(collections, views, entries, schema);
+    const find = (nodes: CollectionNode[]): CollectionNode | null => {
+      for (const n of nodes) {
+        if (n.kind === 'collection' && n.id === selection.folder) return n;
+        const hit = find(n.children);
+        if (hit !== null) return hit;
+      }
+      return null;
+    };
+    return find(tree.collections);
+  }, [collections, views, entries, schema, selection.folder]);
 
-  const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.sort, schema),
-    [collection.entries, presentation.sort, schema],
-  );
-
-  // M9.2: one resolution for every surface. A typeless view used to get [],
-  // so an "Everything" view had no columns at all; columnUniverse unions the
-  // properties its records actually carry.
-  const fields = useMemo(
-    () =>
-      view === null ? [] : columnUniverse(view.definition.source, collection.entries, schema),
-    [schema, view, collection.entries],
-  );
-
-  const sourceType = view?.definition.source.type ?? null;
-  // M9.6: a typeless view has no single type to create into, so the
-  // affordance is simply absent there rather than guessing one.
-  const quickAdd = useQuickAdd(sourceType ?? '', null);
-  const onCreate =
-    sourceType === null
-      ? undefined
-      : (title: string, band: { groupBy: string; groupValue: string }) => quickAdd(title, band);
-  // Creating on a calendar day means creating WITH that date — the band
-  // mechanism carries a grouping value, not an arbitrary property, so the date
-  // goes through quickAdd's `extra` frontmatter instead.
-  const dateField = resolveDateField(presentation, fields);
-  const onCreateOn =
-    sourceType === null || dateField === null
-      ? undefined
-      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
-  // Collapse state is namespaced per surface so two views don't share bands.
-  const scope = `view:${selection.id}`;
-
-  if (view === null) {
+  if (collection === null || node === null) {
     return (
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <EmptyState
-          icon="layout-list"
-          title="This view no longer exists"
-          description="It may have been renamed or deleted."
+          icon="folder-open"
+          title="This collection no longer exists"
+          description="Its marker file may have been removed. Anything that was inside it is still on disk."
         />
       </div>
     );
   }
 
-  // Toolbar edits persist immediately — a saved view IS its configuration.
-  const changePresentation = (next: Presentation) => {
-    setPresentation(next);
-    void updateView(view, { ...view.definition, presentation: next });
-  };
+  const total = nodeCount(node);
 
-  // M9.2: a column IS a property, so adding one writes the type doc and then
-  // shows the column here. Guarded to typed views by the toolbar.
-  const addProperty = (name: string, kind: FieldDef['kind']) => {
-    if (sourceType === null) return;
-    void (async () => {
-      if (await addFieldToType(sourceType, name, kind)) {
-        changePresentation({
-          ...presentation,
-          columns: [...presentation.columns, { field: normalizeFieldName(name) }],
-        });
-      }
-    })();
+  const open = (child: CollectionNode) => {
+    if (child.kind === 'doc' && child.path !== undefined) openPath(child.path);
+    else if (child.kind === 'list') {
+      navigate({ kind: 'list', id: child.id, collection: child.list?.collection ?? null });
+    } else if (child.kind === 'collection') navigate({ kind: 'collection', folder: child.id });
   };
-
-  const sourceLabel =
-    view.definition.source.type === null ? 'Everything' : view.definition.source.type;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex-none px-5 pb-2 pt-3.5">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="collection-page">
+      <div className="flex-none px-5 pb-3 pt-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <Icon
-            name={view.definition.icon ?? 'layout-list'}
+            name={collection.definition.icon ?? 'folder-open'}
             size={16}
-            color={view.definition.color ?? 'var(--n-600)'}
+            color={collection.definition.color ?? 'var(--n-600)'}
           />
           <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">
-            {view.definition.name}
+            {collection.definition.name}
           </h1>
           <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-            {collection.entries.length}
+            {total}
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
-            {sourceLabel}
-            {view.definition.filters !== null && ' · filtered'}
+          {/* The folder is the Collection's identity, and the name can drift
+              from it — so the page says which folder you are looking at. */}
+          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+            {collection.folder}/
           </span>
           <span className="flex-1" />
-          <IconButton icon="settings-2" label="View settings" onClick={() => setSettingsOpen(true)} />
-          <IconButton icon="trash-2" label="Delete view" onClick={() => setConfirmDelete(true)} />
+          <IconButton icon="pencil" label="Rename collection" onClick={() => setRenaming(true)} />
+          <IconButton
+            icon="folder-minus"
+            label="Remove collection"
+            onClick={() => setConfirmRemove(true)}
+          />
         </div>
       </div>
-      <ViewToolbar
-        presentation={presentation}
-        onChange={changePresentation}
-        fields={fields}
-        sourceType={sourceType}
-        schema={schema}
-        onAddProperty={addProperty}
-      />
-      <ViewCanvas
-        entries={sortedEntries}
-        allEntries={entries}
-        presentation={presentation}
-        schema={schema}
-        fields={fields}
-        scope={scope}
-        createType={sourceType ?? undefined}
-        filtered={view.definition.filters !== null}
-        onCreate={onCreate}
-        onCreateOn={onCreateOn}
-        onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
-        onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
-        onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
-      />
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
+        {node.children.length === 0 ? (
+          <EmptyState
+            icon="folder-open"
+            title="Nothing in here yet"
+            description="A collection holds lists, folders, and docs. Add a list from the sidebar’s + to start."
+          />
+        ) : (
+          <div className="flex flex-col">
+            {node.children.map((child) => (
+              <ContentRow key={`${child.kind}:${child.id}`} node={child} onOpen={open} />
+            ))}
+          </div>
+        )}
       </div>
-      {settingsOpen && (
-        <ViewSettingsPanel
-          definition={{ ...view.definition, presentation }}
-          fields={fields}
-          schema={schema}
-          onClose={() => setSettingsOpen(false)}
-          onDelete={() => {
-            setSettingsOpen(false);
-            setConfirmDelete(true);
-          }}
-          onChange={(definition) => {
-            setPresentation(definition.presentation);
-            void updateView(view, definition);
-          }}
+
+      {renaming && (
+        <CollectionDialog
+          state={{ mode: 'rename', collection }}
+          onClose={() => setRenaming(false)}
         />
       )}
-      {confirmDelete && (
+      {confirmRemove && (
         <Dialog
           open
-          onClose={() => setConfirmDelete(false)}
-          title={`Delete "${view.definition.name}"?`}
-          width={420}
+          onClose={() => setConfirmRemove(false)}
+          title={`Remove "${collection.definition.name}"?`}
+          width={440}
           primaryAction={{
-            label: 'Delete view',
+            label: 'Remove collection',
             onClick: () => {
-              setConfirmDelete(false);
+              setConfirmRemove(false);
               void (async () => {
-                if (await deleteView(view)) navigate({ kind: 'home' });
+                if (await deleteCollection(collection)) navigate({ kind: 'home' });
               })();
             },
           }}
-          secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
+          secondaryAction={{ label: 'Cancel', onClick: () => setConfirmRemove(false) }}
         >
           <p className="m-0 text-[13px] text-[var(--n-600)]">
-            The view configuration is removed. The records it listed are untouched.
+            The folder stops being a collection. The {total}{' '}
+            {total === 1 ? 'thing' : 'things'} inside stay on disk in{' '}
+            <code>{collection.folder}/</code> — removing a container is not a way to lose work.
           </p>
         </Dialog>
+      )}
+    </div>
+  );
+}
+
+const KIND_LABEL: Record<CollectionNode['kind'], string> = {
+  collection: 'Collection',
+  folder: 'Folder',
+  list: 'List',
+  doc: 'Doc',
+};
+
+function ContentRow({
+  node,
+  onOpen,
+}: {
+  node: CollectionNode;
+  onOpen: (node: CollectionNode) => void;
+}) {
+  const container = node.kind === 'folder' || node.kind === 'collection';
+  const count = container ? nodeCount(node) : 0;
+  return (
+    <div
+      data-testid="collection-content-row"
+      data-kind={node.kind}
+      className="flex h-10 items-center gap-2.5 border-b border-[var(--n-100)]"
+    >
+      <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
+      {/* A Folder is organization, not a destination — it has no page, so its
+          label is text rather than a button that would go nowhere. */}
+      {node.kind === 'folder' ? (
+        <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-700)]">
+          {node.label}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onOpen(node)}
+          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] text-[var(--n-900)] hover:underline"
+        >
+          {node.label}
+        </button>
+      )}
+      <span className="flex-none rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
+        {KIND_LABEL[node.kind]}
+      </span>
+      {container && (
+        <span className="w-8 flex-none text-right [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+          {count}
+        </span>
       )}
     </div>
   );

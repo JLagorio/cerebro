@@ -1,5 +1,5 @@
 import { isSystemProperty } from './properties';
-import type { ColumnSpec, Entry, FieldDef, Schema, ViewSource } from './types';
+import type { ColumnSpec, Entry, FieldDef, Schema, ListSource } from './types';
 
 /** Default column width; a ColumnSpec without one renders at this. */
 export const DEFAULT_COL_W = 150;
@@ -29,7 +29,7 @@ export interface ColumnDef extends FieldDef {
  *   mixed view gets the columns its records really have rather than none.
  */
 export function columnUniverse(
-  source: ViewSource,
+  source: ListSource,
   entries: Entry[],
   schema: Schema,
 ): ColumnDef[] {

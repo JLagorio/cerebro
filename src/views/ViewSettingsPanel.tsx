@@ -21,7 +21,7 @@ import type {
   Presentation,
   Schema,
   SortSpec,
-  ViewDefinition,
+  ListDefinition,
 } from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
@@ -49,8 +49,8 @@ const META_SORTS = [
 ];
 
 export interface ViewSettingsPanelProps {
-  definition: ViewDefinition;
-  onChange: (next: ViewDefinition) => void;
+  definition: ListDefinition;
+  onChange: (next: ListDefinition) => void;
   onClose: () => void;
   fields: ColumnDef[];
   schema: Schema;

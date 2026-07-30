@@ -36,8 +36,8 @@ describe('TableView row opening (M9.3)', () => {
     useUiStore.setState({ detailPath: null });
     // Standing in a saved view — the case that used to navigate away.
     useNavStore.setState({
-      selection: { kind: 'view', id: 'at-risk-work' },
-      history: [{ kind: 'view', id: 'at-risk-work' }],
+      selection: { kind: 'list', id: 'at-risk-work' },
+      history: [{ kind: 'list', id: 'at-risk-work' }],
       historyIndex: 0,
     });
   });
@@ -51,7 +51,7 @@ describe('TableView row opening (M9.3)', () => {
 
     expect(useUiStore.getState().detailPath).toBe(item.path);
     // The regression: this used to become { kind: 'project', … }.
-    expect(useNavStore.getState().selection).toEqual({ kind: 'view', id: 'at-risk-work' });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'list', id: 'at-risk-work' });
   });
 
   it('still navigates when the row is a Project record', async () => {

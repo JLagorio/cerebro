@@ -55,8 +55,8 @@ function describeSelection(selection: Selection): Record<string, unknown> {
     case 'doc':
     case 'project':
       return { kind: selection.kind, path: selection.path };
-    case 'view':
-      return { kind: 'view', id: selection.id };
+    case 'list':
+      return { kind: 'list', id: selection.id };
     case 'type':
       return { kind: 'type', name: selection.name };
     default:

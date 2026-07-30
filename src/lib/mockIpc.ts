@@ -16,7 +16,11 @@ const seededNotes = import.meta.glob('/demo-vault/**/*.md', {
   import: 'default',
   eager: true,
 }) as Record<string, string>;
-const seededViews = import.meta.glob('/demo-vault/views/*.yml', {
+// Every YAML shape the vault holds (M10): legacy `views/*.yml`, the M10
+// `*.list.yml` Lists, and the `collection.yml` markers that make a folder a
+// Collection. A narrower glob was the bug — seeding only `views/` meant the
+// browser and Playwright saw a vault with no Collections in it at all.
+const seededYaml = import.meta.glob('/demo-vault/**/*.yml', {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -33,7 +37,7 @@ export function resetMockFs(): void {
   files.clear();
   times.clear();
   folders.clear();
-  for (const [absPath, raw] of Object.entries({ ...seededNotes, ...seededViews })) {
+  for (const [absPath, raw] of Object.entries({ ...seededNotes, ...seededYaml })) {
     const rel = absPath.replace(/^\/demo-vault\//, '');
     files.set(rel, raw);
     times.set(rel, { createdAt: SEED_TIME, modifiedAt: SEED_TIME });
@@ -218,19 +222,69 @@ export async function setNoteTitle(_vault: string, path: string, title: string):
   touch(path);
 }
 
-export async function listViews(
-  _vault: string,
-): Promise<{ id: string; yaml: string; project: string | null }[]> {
-  // Parity with write.rs list_views: root views/ is global; a views/ dir next
-  // to a project.md is scoped to that project. Sorted by (project, id).
+interface RawList {
+  id: string;
+  yaml: string;
+  project: string | null;
+  collection: string | null;
+  path: string;
+}
+
+const LIST_SUFFIX = '.list.yml';
+const COLLECTION_MARKER = 'collection.yml';
+
+const dirOf = (path: string) => {
+  const cut = path.lastIndexOf('/');
+  return cut === -1 ? '' : path.slice(0, cut);
+};
+
+/** Nearest ancestor folder holding a collection.yml — parity with write.rs. */
+function collectionOf(path: string): string | null {
+  const markers = new Set(
+    [...files.keys()]
+      .filter((p) => p === COLLECTION_MARKER || p.endsWith(`/${COLLECTION_MARKER}`))
+      .map(dirOf),
+  );
+  let dir = dirOf(path);
+  for (;;) {
+    if (markers.has(dir)) return dir;
+    if (dir === '') return null;
+    dir = dirOf(dir);
+  }
+}
+
+export async function listViews(_vault: string): Promise<RawList[]> {
+  // Parity with write.rs list_views: M10 `*.list.yml` anywhere, plus the two
+  // legacy shapes — root views/ is global; a views/ dir next to a project.md is
+  // scoped to that project. Sorted by (collection, project, id).
   const projectDirs = [...files.keys()]
     .filter((p) => p.endsWith('/project.md'))
     .map((p) => p.slice(0, -'/project.md'.length));
-  const views: { id: string; yaml: string; project: string | null }[] = [];
+  const views: RawList[] = [];
   for (const p of [...files.keys()].sort()) {
     if (!p.endsWith('.yml')) continue;
+
+    if (p.endsWith(LIST_SUFFIX)) {
+      const id = (p.split('/').pop() ?? '').slice(0, -LIST_SUFFIX.length);
+      if (id === '') continue;
+      views.push({
+        id,
+        yaml: files.get(p) ?? '',
+        project: null,
+        collection: collectionOf(p),
+        path: p,
+      });
+      continue;
+    }
+
     if (p.startsWith('views/') && !p.slice('views/'.length).includes('/')) {
-      views.push({ id: p.slice('views/'.length, -'.yml'.length), yaml: files.get(p) ?? '', project: null });
+      views.push({
+        id: p.slice('views/'.length, -'.yml'.length),
+        yaml: files.get(p) ?? '',
+        project: null,
+        collection: null,
+        path: p,
+      });
       continue;
     }
     const dir = projectDirs.find((d) => p.startsWith(`${d}/views/`) && !p.slice(`${d}/views/`.length).includes('/'));
@@ -239,10 +293,17 @@ export async function listViews(
         id: p.slice(`${dir}/views/`.length, -'.yml'.length),
         yaml: files.get(p) ?? '',
         project: `${dir}/project.md`,
+        collection: null,
+        path: p,
       });
     }
   }
-  views.sort((a, b) => (a.project ?? '').localeCompare(b.project ?? '') || a.id.localeCompare(b.id));
+  views.sort(
+    (a, b) =>
+      (a.collection ?? '').localeCompare(b.collection ?? '') ||
+      (a.project ?? '').localeCompare(b.project ?? '') ||
+      a.id.localeCompare(b.id),
+  );
   return views;
 }
 
@@ -253,6 +314,37 @@ export async function saveView(
   folder: string | null = null,
 ): Promise<void> {
   const path = folder === null ? `views/${id}.yml` : `${folder}/views/${id}.yml`;
+  files.set(path, yaml);
+  touch(path);
+}
+
+export async function listCollections(
+  _vault: string,
+): Promise<{ folder: string; yaml: string }[]> {
+  return [...files.keys()]
+    .filter((p) => p === COLLECTION_MARKER || p.endsWith(`/${COLLECTION_MARKER}`))
+    .map((p) => ({ folder: dirOf(p), yaml: files.get(p) ?? '' }))
+    .sort((a, b) => a.folder.localeCompare(b.folder));
+}
+
+export async function saveCollection(
+  _vault: string,
+  folder: string,
+  yaml: string,
+): Promise<void> {
+  if (folder === '') throw new Error('the vault root is not a collection');
+  const path = `${folder}/${COLLECTION_MARKER}`;
+  files.set(path, yaml);
+  touch(path);
+}
+
+export async function saveList(
+  _vault: string,
+  folder: string,
+  id: string,
+  yaml: string,
+): Promise<void> {
+  const path = folder === '' ? `${id}${LIST_SUFFIX}` : `${folder}/${id}${LIST_SUFFIX}`;
   files.set(path, yaml);
   touch(path);
 }

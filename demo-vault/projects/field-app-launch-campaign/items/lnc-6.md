@@ -5,6 +5,7 @@ status: drafting
 priority: high
 assignee: "[[maya-chen]]"
 due: 2026-08-26
+window: { start: 2026-08-14, end: 2026-08-26 }
 estimate: S
 ---
 

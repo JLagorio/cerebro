@@ -3,7 +3,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
 import { listTypes } from '@/engine/typeCatalog';
-import type { Entry, Schema, ViewDefinition } from '@/engine/types';
+import type { Entry, Schema, ListDefinition } from '@/engine/types';
 import { DEFAULT_PRESENTATION } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import { VIEW_KINDS } from '@/views/viewKinds';
@@ -11,7 +11,7 @@ import { VIEW_KINDS } from '@/views/viewKinds';
 const ANY = '__any__';
 
 /** A fresh view over a type, with that type's fields as its columns. */
-export function newViewDefinition(typeName: string | null, schema: Schema): ViewDefinition {
+export function newViewDefinition(typeName: string | null, schema: Schema): ListDefinition {
   const fields = typeName === null ? [] : (schema.types.get(typeName)?.fields ?? []);
   return {
     name: '',
@@ -48,14 +48,14 @@ export function ViewSettingsDialog({
   onCancel,
   onSubmit,
 }: {
-  initial: ViewDefinition;
+  initial: ListDefinition;
   entries: Entry[];
   schema: Schema;
   title: string;
   onCancel: () => void;
-  onSubmit: (definition: ViewDefinition) => void;
+  onSubmit: (definition: ListDefinition) => void;
 }) {
-  const [def, setDef] = useState<ViewDefinition>(initial);
+  const [def, setDef] = useState<ListDefinition>(initial);
   const [busy, setBusy] = useState(false);
 
   const types = listTypes(entries, schema);

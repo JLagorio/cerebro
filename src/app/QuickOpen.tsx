@@ -90,7 +90,7 @@ export function QuickOpen() {
         hint: '',
         kindLabel: 'View',
         alias: v.id,
-        run: () => go({ kind: 'view', id: v.id }),
+        run: () => go({ kind: 'list', id: v.id }),
       }));
 
     const typeTargets: Target[] = listTypes(entries, schema).map((t) => ({

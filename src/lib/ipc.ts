@@ -88,13 +88,23 @@ export function setNoteTitle(vault: string, path: string, title: string): Promis
     : mock.setNoteTitle(vault, path, title);
 }
 
-export function listViews(
-  vault: string,
-): Promise<{ id: string; yaml: string; project: string | null }[]> {
+export interface RawList {
+  id: string;
+  yaml: string;
+  project: string | null;
+  /** Owning Collection's folder; null for a top-level List (M10). */
+  collection: string | null;
+  /** Vault-relative file path — what rename and delete operate on. */
+  path: string;
+}
+
+/** Every List in the vault, in all three on-disk shapes (see vault/write.rs). */
+export function listViews(vault: string): Promise<RawList[]> {
   return inTauri() ? invokeTauri('list_views', { vault }) : mock.listViews(vault);
 }
 
-/** folder scopes the view to a project dir (writes <folder>/views/<id>.yml). */
+/** folder scopes the view to a project dir (writes <folder>/views/<id>.yml).
+ * Legacy shape — new Lists go through saveList. */
 export function saveView(
   vault: string,
   id: string,
@@ -104,6 +114,34 @@ export function saveView(
   return inTauri()
     ? invokeTauri('save_view', { vault, id, yaml, folder })
     : mock.saveView(vault, id, yaml, folder);
+}
+
+// --- Collections (M10) -----------------------------------------------------
+
+/** Every Collection: each folder holding a `collection.yml`. */
+export function listCollections(
+  vault: string,
+): Promise<{ folder: string; yaml: string }[]> {
+  return inTauri() ? invokeTauri('list_collections', { vault }) : mock.listCollections(vault);
+}
+
+/** Write `<folder>/collection.yml`, creating the folder. */
+export function saveCollection(vault: string, folder: string, yaml: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('save_collection', { vault, folder, yaml })
+    : mock.saveCollection(vault, folder, yaml);
+}
+
+/** Write `<folder>/<id>.list.yml`; folder '' means the vault root. */
+export function saveList(
+  vault: string,
+  folder: string,
+  id: string,
+  yaml: string,
+): Promise<void> {
+  return inTauri()
+    ? invokeTauri('save_list', { vault, folder, id, yaml })
+    : mock.saveList(vault, folder, id, yaml);
 }
 
 export function startWatcher(vault: string): Promise<void> {

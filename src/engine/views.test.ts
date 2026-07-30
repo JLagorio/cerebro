@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseViewYaml, serializeView } from './views';
-import type { ViewDefinition } from './types';
+import { parseListYaml, serializeList } from './views';
+import type { ListDefinition } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
@@ -34,11 +34,15 @@ presentation:
   visibleFields: [key, status, assignee]
 `;
 
-describe('parseViewYaml', () => {
+describe('parseListYaml', () => {
   it('parses a complete view file', () => {
-    expect(parseViewYaml('active-work', ACTIVE_WORK_YAML)).toEqual({
+    expect(parseListYaml('active-work', ACTIVE_WORK_YAML)).toEqual({
       id: 'active-work',
       project: null,
+      collection: null,
+      // Defaulted when the caller states no path — the store passes the real
+      // one from the scan.
+      path: 'active-work.list.yml',
       definition: {
         name: 'Active work',
         icon: 'flame',
@@ -68,13 +72,13 @@ describe('parseViewYaml', () => {
   });
 
   it('carries the project scope through (Task 6)', () => {
-    const scoped = parseViewYaml('delivery', 'name: Delivery\n', 'projects/atlas/project.md');
+    const scoped = parseListYaml('delivery', 'name: Delivery\n', { project: 'projects/atlas/project.md' });
     expect(scoped.project).toBe('projects/atlas/project.md');
-    expect(parseViewYaml('global', 'name: G\n').project).toBeNull();
+    expect(parseListYaml('global', 'name: G\n').project).toBeNull();
   });
 
   it('bad yaml falls back to name = id and the default list presentation', () => {
-    const view = parseViewYaml('mystery', 'a: [1, 2');
+    const view = parseListYaml('mystery', 'a: [1, 2');
     expect(view.definition).toEqual({
       name: 'mystery',
       icon: null,
@@ -87,17 +91,17 @@ describe('parseViewYaml', () => {
   });
 
   it('a scalar yaml document gets full defaults', () => {
-    const view = parseViewYaml('plain', 'just some text');
+    const view = parseListYaml('plain', 'just some text');
     expect(view.definition.name).toBe('plain');
     expect(view.definition.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
   });
 
   it('an empty file gets full defaults', () => {
-    expect(parseViewYaml('empty', '').definition.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
+    expect(parseListYaml('empty', '').definition.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
   });
 
   it('missing presentation fields fall back individually', () => {
-    const view = parseViewYaml('partial', 'name: Partial\npresentation:\n  type: board\n');
+    const view = parseListYaml('partial', 'name: Partial\npresentation:\n  type: board\n');
     expect(view.definition.presentation).toEqual({
       type: 'board',
       group: [{ field: 'status' }],
@@ -111,12 +115,12 @@ describe('parseViewYaml', () => {
   });
 
   it('an explicit groupBy null stays flat', () => {
-    const view = parseViewYaml('flat', 'presentation:\n  groupBy: null\n');
+    const view = parseListYaml('flat', 'presentation:\n  groupBy: null\n');
     expect(view.definition.presentation.group).toEqual([]);
   });
 
   it('drops malformed filter rules but keeps valid ones', () => {
-    const view = parseViewYaml(
+    const view = parseListYaml(
       'broken',
       'filters:\n  all:\n    - { field: status }\n    - { field: status, op: equals, value: done }\n',
     );
@@ -126,24 +130,24 @@ describe('parseViewYaml', () => {
   });
 
   it('a filters value that is not a group becomes null', () => {
-    expect(parseViewYaml('junk', 'filters: nonsense').definition.filters).toBeNull();
+    expect(parseListYaml('junk', 'filters: nonsense').definition.filters).toBeNull();
   });
 
   // Note 13 hardening: a self-referencing YAML alias inside filters: used to
   // recurse forever in parseFilterNode (stack overflow) — views/*.yml is
   // user-editable, so cyclic nodes must be dropped like any malformed node.
   it('a self-referencing flow alias inside filters does not throw', () => {
-    const view = parseViewYaml('cyclic-flow', 'filters: &a { all: [ *a ] }');
+    const view = parseListYaml('cyclic-flow', 'filters: &a { all: [ *a ] }');
     expect(view.definition.filters).toEqual({ all: [] });
   });
 
   it('a self-referencing block alias inside filters does not throw', () => {
-    const view = parseViewYaml('cyclic-block', 'filters: &a\n  all:\n    - *a\n');
+    const view = parseListYaml('cyclic-block', 'filters: &a\n  all:\n    - *a\n');
     expect(view.definition.filters).toEqual({ all: [] });
   });
 
   it('drops only the cyclic node and keeps valid siblings', () => {
-    const view = parseViewYaml(
+    const view = parseListYaml(
       'cyclic-mixed',
       'filters: &a { all: [ *a, { field: status, op: equals, value: done } ] }',
     );
@@ -153,7 +157,7 @@ describe('parseViewYaml', () => {
   });
 
   it('an indirect cycle through a nested group is dropped', () => {
-    const view = parseViewYaml(
+    const view = parseListYaml(
       'cyclic-nested',
       'filters:\n  all:\n    - &g\n      any:\n        - *g\n',
     );
@@ -161,7 +165,7 @@ describe('parseViewYaml', () => {
   });
 
   it('non-cyclic alias reuse is kept', () => {
-    const view = parseViewYaml(
+    const view = parseListYaml(
       'shared-alias',
       'filters:\n  all:\n    - &r { field: status, op: equals, value: done }\n    - *r\n',
     );
@@ -174,9 +178,9 @@ describe('parseViewYaml', () => {
   });
 });
 
-describe('serializeView', () => {
-  it('round-trips through parseViewYaml', () => {
-    const def: ViewDefinition = {
+describe('serializeList', () => {
+  it('round-trips through parseListYaml', () => {
+    const def: ListDefinition = {
       name: 'Sprint board',
       icon: null,
       color: null,
@@ -200,13 +204,13 @@ describe('serializeView', () => {
         columns: [{ field: 'key' }, { field: 'status' }],
       },
     };
-    expect(parseViewYaml('sprint-board', serializeView(def)).definition).toEqual(def);
+    expect(parseListYaml('sprint-board', serializeList(def)).definition).toEqual(def);
   });
 
   // M3.5: a view is rooted in a type, and a relation level descends it — both
   // have to survive the YAML round trip or a saved view loses its shape.
   it('round-trips a type-rooted nesting view', () => {
-    const def: ViewDefinition = {
+    const def: ListDefinition = {
       name: 'OKR tree',
       icon: 'target',
       color: null,
@@ -223,11 +227,11 @@ describe('serializeView', () => {
         columns: [{ field: 'status' }, { field: 'progress' }],
       },
     };
-    expect(parseViewYaml('okr-tree', serializeView(def)).definition).toEqual(def);
+    expect(parseListYaml('okr-tree', serializeList(def)).definition).toEqual(def);
   });
 
   it('accepts the shorthand `childrenVia: <field>` as a forward descent', () => {
-    const view = parseViewYaml('t', 'presentation:\n  type: tree\n  childrenVia: key_results\n');
+    const view = parseListYaml('t', 'presentation:\n  type: tree\n  childrenVia: key_results\n');
     expect(view.definition.presentation.group).toEqual([
       { field: 'key_results', descend: { direction: 'forward', field: 'key_results' } },
     ]);
@@ -240,7 +244,7 @@ describe('serializeView', () => {
   // nesting already lived in the grouping chain, so a nested table is exactly
   // what it was describing.
   describe('retired view kinds', () => {
-    const parse = (yaml: string) => parseViewYaml('v', yaml).definition.presentation;
+    const parse = (yaml: string) => parseListYaml('v', yaml).definition.presentation;
 
     it('migrates `tree` to a table, keeping its relation levels', () => {
       const p = parse(
@@ -264,9 +268,9 @@ describe('serializeView', () => {
     });
 
     it('writes the migrated kind back, so a file converges on one shape', () => {
-      const def = parseViewYaml('t', 'presentation:\n  type: tree\n').definition;
-      expect(serializeView(def)).toContain('type: table');
-      expect(serializeView(def)).not.toContain('tree');
+      const def = parseListYaml('t', 'presentation:\n  type: tree\n').definition;
+      expect(serializeList(def)).toContain('type: table');
+      expect(serializeList(def)).not.toContain('tree');
     });
 
     it('falls back to the default kind for a name that never existed', () => {
@@ -287,10 +291,10 @@ describe('serializeView', () => {
   // M10 axis configuration. Written only when set, so a table's YAML does not
   // carry three keys about date axes it has no use for.
   describe('date-axis keys', () => {
-    const parse = (yaml: string) => parseViewYaml('v', yaml).definition.presentation;
+    const parse = (yaml: string) => parseListYaml('v', yaml).definition.presentation;
 
     it('round-trips dateField, zoom, and dependencyField', () => {
-      const def: ViewDefinition = {
+      const def: ListDefinition = {
         name: 'Schedule',
         icon: null,
         color: null,
@@ -307,11 +311,11 @@ describe('serializeView', () => {
           dependencyField: 'blocked_by',
         },
       };
-      expect(parseViewYaml('s', serializeView(def)).definition).toEqual(def);
+      expect(parseListYaml('s', serializeList(def)).definition).toEqual(def);
     });
 
     it('omits them entirely when unset', () => {
-      const yaml = serializeView({
+      const yaml = serializeList({
         name: 'Grid',
         icon: null,
         color: null,
@@ -336,7 +340,7 @@ describe('serializeView', () => {
 
   describe('v1 → v2 presentation migration', () => {
     it('lifts groupBy, orderBy, visibleFields, and childrenVia into chains', () => {
-      const view = parseViewYaml(
+      const view = parseListYaml(
         'legacy',
         [
           'presentation:',
@@ -358,7 +362,7 @@ describe('serializeView', () => {
     });
 
     it('lets v2 keys win when a file carries both shapes', () => {
-      const view = parseViewYaml(
+      const view = parseListYaml(
         'both',
         [
           'presentation:',
@@ -374,7 +378,7 @@ describe('serializeView', () => {
     });
 
     it('round-trips a multi-level grouping and hierarchy chain', () => {
-      const def: ViewDefinition = {
+      const def: ListDefinition = {
         name: 'Deep',
         icon: null,
         color: null,
@@ -393,12 +397,12 @@ describe('serializeView', () => {
           columns: [{ field: 'status', width: 180 }, { field: 'owner', hidden: true }],
         },
       };
-      expect(parseViewYaml('deep', serializeView(def)).definition).toEqual(def);
+      expect(parseListYaml('deep', serializeList(def)).definition).toEqual(def);
     });
 
     it('caps nesting and banding separately', () => {
       const levels = Array.from({ length: 9 }, (_, i) => `  - { type: T${i}, field: y }`).join('\n');
-      const view = parseViewYaml('deep', `presentation:\n  groupBy: null\n  hierarchy:\n${levels}\n`);
+      const view = parseListYaml('deep', `presentation:\n  groupBy: null\n  hierarchy:\n${levels}\n`);
       const p = view.definition.presentation;
       // A chain that mixes both must not have its nesting truncated by the
       // band cap, nor the other way round.

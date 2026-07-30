@@ -1,342 +1,211 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCollection, sortEntries } from './collections';
+import {
+  collectionsTree,
+  humanizeFolder,
+  newCollectionDefinition,
+  nodeCount,
+  parseCollectionYaml,
+  serializeCollection,
+} from './collections';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
-import type { ViewFile } from './types';
+import { parseListYaml } from './views';
+import type { CollectionFile, CollectionNode, ListFile } from './types';
 
-const DEFAULT_LIST_PRESENTATION = {
-  type: 'list',
-  group: [{ field: 'status' }],
-  sort: [{ field: 'modifiedAt', dir: 'desc' }],
-  columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
+/**
+ * M10: a Collection contains Lists, Folders, and Docs. These pin the tree the
+ * sidebar draws — including the two things the container must NOT do: claim a
+ * nested Collection's contents, or invent folders for empty directories.
+ */
+
+const schema = buildSchema([]);
+
+const collection = (folder: string, name?: string): CollectionFile =>
+  parseCollectionYaml(folder, name === undefined ? '' : `name: ${name}\n`);
+
+const list = (path: string, name: string, collectionFolder: string | null): ListFile => {
+  const id = (path.split('/').pop() ?? '').replace(/\.list\.yml$/, '');
+  return parseListYaml(id, `name: ${name}\n`, { collection: collectionFolder, path });
 };
 
-const FOUNDATIONS = 'projects/foundations/project.md';
-const LAUNCH = 'projects/launch/project.md';
+const doc = (path: string, title: string) =>
+  makeEntry({
+    path,
+    filename: path.split('/').pop() ?? path,
+    folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+    title,
+  });
 
-function fixture() {
-  const entries = [
-    makeEntry({
-      path: 'types/work-item.md',
-      filename: 'work-item.md',
-      folder: 'types',
-      title: 'Work item',
-      type: 'Type',
-      properties: {
-        fields: {
-          status: { kind: 'status' },
-          priority: {
-            kind: 'select',
-            options: [
-              { id: 'urgent', color: '#D6453D' },
-              { id: 'high', color: '#DE8F0A' },
-              { id: 'low', color: '#A8AFC2' },
-            ],
-          },
-        },
-      },
-    }),
-    makeEntry({
-      path: FOUNDATIONS,
-      filename: 'project.md',
-      folder: 'projects/foundations',
-      project: FOUNDATIONS,
-      title: 'Foundations',
-      type: 'Project',
-      properties: { key: 'FLD' },
-    }),
-    makeEntry({
-      path: LAUNCH,
-      filename: 'project.md',
-      folder: 'projects/launch',
-      project: LAUNCH,
-      title: 'Launch',
-      type: 'Project',
-      properties: { key: 'LNC' },
-    }),
-    makeEntry({
-      path: 'projects/foundations/items/fld-1.md',
-      filename: 'fld-1.md',
-      folder: 'projects/foundations/items',
-      project: FOUNDATIONS,
-      title: 'Older item',
-      type: 'Work item',
-      properties: { status: 'done', priority: 'low' },
-      modifiedAt: '2026-07-01T00:00:00.000Z',
-    }),
-    makeEntry({
-      path: 'projects/foundations/items/fld-2.md',
-      filename: 'fld-2.md',
-      folder: 'projects/foundations/items',
-      project: FOUNDATIONS,
-      title: 'Newer item',
-      type: 'Work item',
-      properties: { status: 'todo', priority: 'urgent' },
-      modifiedAt: '2026-07-03T00:00:00.000Z',
-    }),
-    makeEntry({
-      path: 'projects/launch/items/lnc-1.md',
-      filename: 'lnc-1.md',
-      folder: 'projects/launch/items',
-      project: LAUNCH,
-      title: 'Launch item',
-      type: 'Work item',
-      properties: { status: 'done', priority: 'high' },
-      modifiedAt: '2026-07-02T00:00:00.000Z',
-    }),
-    // A doc inside the project folder must NOT appear on the item canvas.
-    makeEntry({
-      path: 'projects/foundations/meetings/kickoff.md',
-      filename: 'kickoff.md',
-      folder: 'projects/foundations/meetings',
-      project: FOUNDATIONS,
-      title: 'Kickoff',
-      type: null,
-    }),
-  ];
-  return { entries, schema: buildSchema(entries) };
+/** Compact tree shorthand: `kind:label` with children indented by depth. */
+function shape(nodes: CollectionNode[], depth = 0): string[] {
+  return nodes.flatMap((n) => [
+    `${'  '.repeat(depth)}${n.kind}:${n.label}`,
+    ...shape(n.children, depth + 1),
+  ]);
 }
 
-function mkView(partial: Partial<ViewFile['definition']> & { id: string }): ViewFile {
-  const { id, ...definition } = partial;
-  return {
-    id,
-    project: null,
-    definition: {
-      name: id,
-      icon: null,
-      color: null,
-      order: null,
-      source: { type: null, project: null },
-      filters: null,
-      presentation: {
-        type: 'list',
-        group: [{ field: 'status' }],
-        sort: [{ field: 'modifiedAt', dir: 'desc' }],
-        columns: [{ field: 'key' }, { field: 'status' }],
-      },
-      ...definition,
-    },
-  };
-}
-
-describe('resolveCollection', () => {
-  it('a project selection collects its contained Work items only', () => {
-    const { entries, schema } = fixture();
-    const collection = resolveCollection(
-      { kind: 'project', path: FOUNDATIONS },
-      entries,
-      schema,
-      [],
+describe('parseCollectionYaml', () => {
+  it('reads name, icon, color, and order', () => {
+    const c = parseCollectionYaml(
+      'product',
+      'name: Product\nicon: package\ncolor: "#3D8BE8"\norder: 2\n',
     );
-    expect(collection.title).toBe('Foundations');
-    // Docs and the project.md itself are excluded — items only, sorted.
-    expect(collection.entries.map((e) => e.path)).toEqual([
-      'projects/foundations/items/fld-2.md',
-      'projects/foundations/items/fld-1.md',
-    ]);
-    expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
+    expect(c.folder).toBe('product');
+    expect(c.definition).toEqual({
+      name: 'Product',
+      icon: 'package',
+      color: '#3D8BE8',
+      order: 2,
+    });
   });
 
-  it('a missing project yields an empty collection titled by the path stem', () => {
-    const { entries, schema } = fixture();
-    const collection = resolveCollection(
-      { kind: 'project', path: 'projects/gone/project.md' },
-      entries,
-      schema,
-      [],
+  // Tolerant like every other vault file: a fat-fingered collection.yml must
+  // not make its folder vanish from the sidebar.
+  it('never fails to load — a broken file still names itself after its folder', () => {
+    expect(parseCollectionYaml('field-ops', 'name: [oops').definition.name).toBe('Field ops');
+    expect(parseCollectionYaml('field-ops', '').definition.name).toBe('Field ops');
+    expect(parseCollectionYaml('field-ops', 'name: "   "\n').definition.name).toBe('Field ops');
+  });
+
+  it('humanizes only the last segment of a nested folder', () => {
+    expect(humanizeFolder('product/field_ops-team')).toBe('Field ops team');
+    expect(parseCollectionYaml('a/b/customer-success', '').definition.name).toBe(
+      'Customer success',
     );
-    expect(collection.title).toBe('project');
-    expect(collection.entries).toEqual([]);
-    expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
   });
 
-  it('a view selection applies its filters and presentation', () => {
-    const { entries, schema } = fixture();
-    const view = mkView({
-      id: 'done-work',
-      name: 'Done work',
-      source: { type: null, project: null },
-      filters: {
-        all: [
-          { field: 'type', op: 'equals', value: 'Work item' },
-          { field: 'status', op: 'equals', value: 'done' },
-        ],
-      },
-      presentation: {
-        type: 'board',
-        group: [{ field: 'status' }],
-        sort: [{ field: 'modifiedAt', dir: 'asc' }],
-        columns: [{ field: 'key' }, { field: 'status' }],
-      },
-    });
-    const collection = resolveCollection({ kind: 'view', id: 'done-work' }, entries, schema, [view]);
-    expect(collection.title).toBe('Done work');
-    expect(collection.presentation).toEqual(view.definition.presentation);
-    expect(collection.entries.map((e) => e.path)).toEqual([
-      'projects/foundations/items/fld-1.md',
-      'projects/launch/items/lnc-1.md',
-    ]);
-  });
-
-  it('a filterless, typeless view collects every entry but the schema docs', () => {
-    const { entries, schema } = fixture();
-    const view = mkView({ id: 'everything' });
-    const collection = resolveCollection(
-      { kind: 'view', id: 'everything' },
-      entries,
-      schema,
-      [view],
-    );
-    // M3.5: `type: Type` docs are the model, so a content view leaves them out.
-    const typeDocs = entries.filter((e) => e.type === 'Type').length;
-    expect(typeDocs).toBeGreaterThan(0);
-    expect(collection.entries).toHaveLength(entries.length - typeDocs);
-    expect(collection.entries.some((e) => e.type === 'Type')).toBe(false);
-  });
-
-  it('a type-rooted view lists only that type, scoped by project (M3.5)', () => {
-    const { entries, schema } = fixture();
-    const project = entries.find((e) => e.type === 'Project');
-    expect(project).toBeDefined();
-    const view = mkView({
-      id: 'projects',
-      source: { type: 'Project', project: null },
-    });
-    const collection = resolveCollection({ kind: 'view', id: 'projects' }, entries, schema, [view]);
-    expect(collection.entries.length).toBeGreaterThan(0);
-    expect(collection.entries.every((e) => e.type === 'Project')).toBe(true);
-  });
-
-  it('an unknown view id yields an empty default collection titled by the id', () => {
-    const { entries, schema } = fixture();
-    const collection = resolveCollection({ kind: 'view', id: 'nope' }, entries, schema, []);
-    expect(collection.title).toBe('nope');
-    expect(collection.entries).toEqual([]);
-    expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
-  });
-
-  it('home and settings selections resolve to empty collections', () => {
-    const { entries, schema } = fixture();
-    expect(resolveCollection({ kind: 'home' }, entries, schema, []).entries).toEqual([]);
-    expect(resolveCollection({ kind: 'settings' }, entries, schema, []).entries).toEqual([]);
-  });
-
-  it('ordering by a select field follows the declared option order', () => {
-    const { entries, schema } = fixture();
-    const view = mkView({
-      id: 'by-priority',
-      source: { type: null, project: null },
-      filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
-      presentation: {
-        type: 'list',
-        group: [],
-        sort: [{ field: 'priority', dir: 'asc' }],
-        columns: [{ field: 'key' }],
-      },
-    });
-    const collection = resolveCollection(
-      { kind: 'view', id: 'by-priority' },
-      entries,
-      schema,
-      [view],
-    );
-    // urgent -> high -> low per the declared options, not alphabetical
-    expect(collection.entries.map((e) => e.path)).toEqual([
-      'projects/foundations/items/fld-2.md',
-      'projects/launch/items/lnc-1.md',
-      'projects/foundations/items/fld-1.md',
-    ]);
-  });
-
-  it('entries without the order field sort last', () => {
-    const { entries } = fixture();
-    const bare = makeEntry({
-      path: 'projects/foundations/items/bare.md',
-      filename: 'bare.md',
-      folder: 'projects/foundations/items',
-      project: FOUNDATIONS,
-      title: 'Bare',
-      type: 'Work item',
-      modifiedAt: '2026-07-09T00:00:00.000Z',
-    });
-    const all = [...entries, bare];
-    const schemaAll = buildSchema(all);
-    const view = mkView({
-      id: 'by-due',
-      source: { type: null, project: null },
-      filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
-      presentation: {
-        type: 'list',
-        group: [],
-        sort: [{ field: 'priority', dir: 'asc' }],
-        columns: [{ field: 'key' }],
-      },
-    });
-    const collection = resolveCollection({ kind: 'view', id: 'by-due' }, all, schemaAll, [view]);
-    expect(collection.entries[collection.entries.length - 1].path).toBe(
-      'projects/foundations/items/bare.md',
-    );
+  it('round-trips through serialize', () => {
+    const def = newCollectionDefinition('Product');
+    expect(parseCollectionYaml('product', serializeCollection(def)).definition).toEqual(def);
   });
 });
 
-// M9.1: the sort chain. The single-key behaviour above is unchanged; these
-// cover what ordering by more than one key adds.
-describe('sortEntries — multi-key', () => {
-  const typeDoc = makeEntry({
-    path: 'types/work-item.md',
-    title: 'Work item',
-    type: 'Type',
-    properties: {
-      fields: {
-        priority: { kind: 'select', options: [{ id: 'high' }, { id: 'low' }] },
-        due: { kind: 'date' },
-      },
-    },
+describe('collectionsTree', () => {
+  it('nests Folders, Lists, and Docs under their Collection', () => {
+    const tree = collectionsTree(
+      [collection('product', 'Product')],
+      [
+        list('product/roadmap.list.yml', 'Roadmap', 'product'),
+        list('product/q3/risks.list.yml', 'Risks', 'product'),
+      ],
+      [doc('product/charter.md', 'Charter'), doc('product/q3/plan.md', 'Q3 plan')],
+      schema,
+    );
+    expect(shape(tree.collections)).toEqual([
+      'collection:Product',
+      // Folders first, then Lists, then Docs — containers above contents.
+      '  folder:Q3',
+      '    list:Risks',
+      '    doc:Q3 plan',
+      '  list:Roadmap',
+      '  doc:Charter',
+    ]);
   });
-  const schema = buildSchema([typeDoc]);
-  const item = (path: string, priority: string | undefined, due: string | undefined) =>
-    makeEntry({
-      path,
-      type: 'Work item',
-      properties: {
-        ...(priority !== undefined ? { priority } : {}),
-        ...(due !== undefined ? { due } : {}),
-      },
+
+  // A folder is meaningful once something is in it. Deriving folders from the
+  // paths of their contents means an empty directory never shows up as an
+  // empty node the user has to wonder about.
+  it('invents no folder node for a directory holding nothing', () => {
+    const tree = collectionsTree(
+      [collection('product', 'Product')],
+      [list('product/roadmap.list.yml', 'Roadmap', 'product')],
+      [],
+      schema,
+    );
+    expect(shape(tree.collections)).toEqual(['collection:Product', '  list:Roadmap']);
+  });
+
+  it('gives a nested Collection its own subtree, and does not double-count it', () => {
+    const tree = collectionsTree(
+      [collection('product', 'Product'), collection('product/platform', 'Platform')],
+      [
+        list('product/roadmap.list.yml', 'Roadmap', 'product'),
+        list('product/platform/services.list.yml', 'Services', 'product/platform'),
+      ],
+      [doc('product/platform/adr.md', 'ADR 1')],
+      schema,
+    );
+    // Platform appears ONCE, inside Product — not also as a root, and not as a
+    // plain folder duplicating what the nested collection already owns.
+    expect(shape(tree.collections)).toEqual([
+      'collection:Product',
+      '  collection:Platform',
+      '    list:Services',
+      '    doc:ADR 1',
+      '  list:Roadmap',
+    ]);
+  });
+
+  it('orders Collections by declared order, then name', () => {
+    const tree = collectionsTree(
+      [
+        parseCollectionYaml('c', 'name: Charlie\norder: 1\n'),
+        parseCollectionYaml('a', 'name: Alpha\norder: 3\n'),
+        parseCollectionYaml('b', 'name: Bravo\norder: 1\n'),
+      ],
+      [],
+      [],
+      schema,
+    );
+    expect(tree.collections.map((c) => c.label)).toEqual(['Bravo', 'Charlie', 'Alpha']);
+  });
+
+  // The migration guarantee, at the UI layer: a pre-M10 vault's saved views
+  // have no Collection, so they surface at the top level instead of being
+  // force-fitted into an invented container.
+  it('surfaces collection-less Lists separately rather than inventing a home', () => {
+    const tree = collectionsTree(
+      [collection('product', 'Product')],
+      [
+        list('product/roadmap.list.yml', 'Roadmap', 'product'),
+        list('views/at-risk.yml', 'At risk', null),
+      ],
+      [],
+      schema,
+    );
+    expect(shape(tree.collections)).toEqual(['collection:Product', '  list:Roadmap']);
+    expect(shape(tree.loose)).toEqual(['list:At risk']);
+  });
+
+  it('leaves project-scoped legacy views out of the tree — they are project tabs', () => {
+    const scoped = parseListYaml('delivery', 'name: Delivery\n', {
+      project: 'projects/atlas/project.md',
+      path: 'projects/atlas/views/delivery.yml',
     });
-
-  it('breaks ties on the first key with the second', () => {
-    const entries = [
-      item('a.md', 'high', '2026-03-01'),
-      item('b.md', 'high', '2026-01-01'),
-      item('c.md', 'low', '2026-02-01'),
-    ];
-    const sorted = sortEntries(
-      entries,
-      [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'asc' }],
-      schema,
-    );
-    expect(sorted.map((e) => e.path)).toEqual(['b.md', 'a.md', 'c.md']);
+    const tree = collectionsTree([], [scoped], [], schema);
+    expect(tree.collections).toEqual([]);
+    expect(tree.loose).toEqual([]);
   });
 
-  // The trap: a global empty-last check would strand every record missing the
-  // primary key in input order, so the secondary key would never run.
-  it('lets the second key order records missing the first', () => {
-    const entries = [
-      item('a.md', undefined, '2026-03-01'),
-      item('b.md', undefined, '2026-01-01'),
-      item('c.md', 'high', '2026-02-01'),
-    ];
-    const sorted = sortEntries(
-      entries,
-      [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'asc' }],
+  // Type docs are the schema, templates are stationery, and the knowledge
+  // bundle has its own author — none of them is content someone filed here.
+  it('excludes type docs, templates, project.md, and the knowledge bundle', () => {
+    const tree = collectionsTree(
+      [collection('', 'Everything')],
+      [],
+      [
+        doc('real.md', 'Real doc'),
+        makeEntry({ path: 'types/risk.md', filename: 'risk.md', folder: 'types', title: 'Risk', type: 'Type' }),
+        makeEntry({ path: 'templates/t.md', filename: 't.md', folder: 'templates', title: 'Template' }),
+        makeEntry({ path: 'knowledge/c.md', filename: 'c.md', folder: 'knowledge', title: 'Concept' }),
+        makeEntry({ path: 'proj/project.md', filename: 'project.md', folder: 'proj', title: 'A project' }),
+      ],
       schema,
     );
-    expect(sorted.map((e) => e.path)).toEqual(['c.md', 'b.md', 'a.md']);
+    expect(shape(tree.collections)).toEqual(['collection:Everything', '  doc:Real doc']);
   });
 
-  it('an empty chain preserves input order', () => {
-    const entries = [item('b.md', 'low', undefined), item('a.md', 'high', undefined)];
-    expect(sortEntries(entries, [], schema).map((e) => e.path)).toEqual(['b.md', 'a.md']);
+  it('counts everything inside a node, folders excluded from the total', () => {
+    const tree = collectionsTree(
+      [collection('product', 'Product')],
+      [
+        list('product/roadmap.list.yml', 'Roadmap', 'product'),
+        list('product/q3/risks.list.yml', 'Risks', 'product'),
+      ],
+      [doc('product/q3/plan.md', 'Q3 plan')],
+      schema,
+    );
+    // Roadmap + Risks + Q3 plan = 3; the Q3 folder itself is not a thing.
+    expect(nodeCount(tree.collections[0])).toBe(3);
   });
 });
