@@ -34,8 +34,11 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
   await expect(panel.getByTestId('chat-message').filter({ hasText: 'What is at risk' })).toBeVisible();
 
   // Tool use is visible, not hidden: an agent that reads your vault should
-  // say so.
-  await expect(panel.getByTestId('tool-chip')).toContainText('search notes');
+  // say so. M9.5 replaced the chip with an expandable action card, so the
+  // read is nameable AND inspectable rather than merely announced.
+  const card = panel.getByTestId('action-card').filter({ hasText: 'search notes' });
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute('data-write', 'false');
 
   // The reply arrives and wikilinks in it are rendered as links.
   const reply = panel.getByTestId('chat-message').filter({ hasText: 'Two risks are open' });
