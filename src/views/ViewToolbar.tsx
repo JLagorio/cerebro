@@ -10,8 +10,9 @@ import {
 } from '@/engine/hierarchyOptions';
 import { humanize } from '@/engine/schema';
 import { bandLevels, nestLevels } from '@/engine/types';
-import type { FieldDef, GroupSpec, Presentation, Schema, SortSpec } from '@/engine/types';
+import type { FieldDef, GroupSpec, Presentation, Schema, SortSpec, ViewType } from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
+import { VIEW_SEGMENTS } from '@/views/viewKinds';
 
 // Fallback options for surfaces that don't pass declared fields (the project
 // canvas is Work-item-only, so its groupable fields are known statically).
@@ -111,8 +112,6 @@ export interface ViewToolbarProps {
   /** Declared fields of the collection's type; when set, the chain builders
    * offer those instead of the Work-item fallbacks. */
   fields?: ColumnDef[];
-  /** Offer the split (record browser) layout segment (M3 type screen). */
-  withSplit?: boolean;
   /** Source type + schema drive the hierarchy chain's per-level options. */
   sourceType?: string | null;
   schema?: Schema;
@@ -126,7 +125,6 @@ export function ViewToolbar({
   presentation,
   onChange,
   fields,
-  withSplit = false,
   sourceType = null,
   schema,
   onAddProperty,
@@ -205,31 +203,20 @@ export function ViewToolbar({
 
   return (
     <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
+      {/* M10: the six views, one selected at a time. "Hierarchy" is gone —
+          any of these nests when the grouping chain has a relation level, so
+          a whole view kind for it was a control that duplicated another. */}
       <SegmentedControl
         size="sm"
-        options={[
-          ...(withSplit
-            ? [{ value: 'split', label: 'Browse', icon: 'panel-left', testId: 'view-switch-split' }]
-            : []),
-          { value: 'table', label: 'Table', icon: 'table-2', testId: 'view-switch-table' },
-          { value: 'list', label: 'List', icon: 'list', testId: 'view-switch-list' },
-          { value: 'board', label: 'Board', icon: 'columns-3', testId: 'view-switch-board' },
-          // M9.1: the tree layout had no segment, so a saved hierarchy view
-          // showed nothing selected and any click here persisted you out of
-          // it with no way back except the settings dialog.
-          { value: 'tree', label: 'Hierarchy', icon: 'list-tree', testId: 'view-switch-tree' },
-        ]}
+        options={VIEW_SEGMENTS}
         value={presentation.type}
-        onChange={(value) =>
-          onChange({ ...presentation, type: value as Presentation['type'] })
-        }
+        onChange={(value) => onChange({ ...presentation, type: value as ViewType })}
       />
 
       {/* M9.7: one Group control. Its options list properties AND relations,
           so "band by status" and "nest under the objective" are the same
           gesture — which is what they always were. */}
-      {presentation.type !== 'split' && (
-        <ChainBuilder
+      <ChainBuilder
           testId="group-chain"
           label="Group"
           icon="rows-3"
@@ -266,7 +253,6 @@ export function ViewToolbar({
             if (level !== null) setGroup([...presentation.group, level]);
           }}
         />
-      )}
 
       <ChainBuilder
         testId="sort-chain"
@@ -291,17 +277,14 @@ export function ViewToolbar({
         onAdd={(v) => setSort([...presentation.sort, { field: v, dir: 'asc' }])}
       />
 
-      {/* M3.4: every view controls which properties it shows. The split
-          browser has its own full property panel, so it opts out. */}
-      {presentation.type !== 'split' && (
-        <PropertyVisibility
-          fields={declared}
-          columns={presentation.columns}
-          onChange={(columns) => onChange({ ...presentation, columns })}
-          onAddProperty={onAddProperty}
-          canAddProperty={sourceType !== null}
-        />
-      )}
+      {/* M3.4: every view controls which properties it shows. */}
+      <PropertyVisibility
+        fields={declared}
+        columns={presentation.columns}
+        onChange={(columns) => onChange({ ...presentation, columns })}
+        onAddProperty={onAddProperty}
+        canAddProperty={sourceType !== null}
+      />
       <span className="flex-1" />
     </div>
   );

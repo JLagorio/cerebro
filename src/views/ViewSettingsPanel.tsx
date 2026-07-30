@@ -25,6 +25,7 @@ import type {
 } from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
+import { VIEW_KINDS } from '@/views/viewKinds';
 
 /**
  * The view's whole configuration in one place (M9.7).
@@ -36,14 +37,6 @@ import { FilterBuilder } from '@/views/FilterBuilder';
  */
 
 type Page = 'root' | 'layout' | 'properties' | 'filter' | 'sort' | 'group';
-
-const LAYOUTS: { value: Presentation['type']; label: string; icon: string }[] = [
-  { value: 'table', label: 'Table', icon: 'table-2' },
-  { value: 'list', label: 'List', icon: 'list' },
-  { value: 'board', label: 'Board', icon: 'columns-3' },
-  { value: 'tree', label: 'Hierarchy', icon: 'list-tree' },
-  { value: 'split', label: 'Browse', icon: 'panel-left' },
-];
 
 const GROUPABLE_KINDS = new Set([
   'status', 'select', 'multiselect', 'person', 'checkbox', 'relation',
@@ -84,7 +77,7 @@ export function ViewSettingsPanel({
   const bands = bandLevels(p.group);
   const nesting = nestLevels(p.group);
   const visible = p.columns.filter((c) => c.hidden !== true).length;
-  const layoutLabel = LAYOUTS.find((l) => l.value === p.type)?.label ?? 'Table';
+  const layoutLabel = VIEW_KINDS.find((l) => l.value === p.type)?.label ?? 'Table';
 
   return (
     <aside
@@ -174,7 +167,7 @@ export function ViewSettingsPanel({
 
         {page === 'layout' && (
           <div className="flex flex-col gap-0.5">
-            {LAYOUTS.map((l) => (
+            {VIEW_KINDS.map((l) => (
               <button
                 key={l.value}
                 type="button"

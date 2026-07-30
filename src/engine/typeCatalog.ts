@@ -191,17 +191,19 @@ export function serializeFields(fields: FieldDef[]): Record<string, unknown> {
 }
 
 /**
- * Presentation for a type's record list: the split browser by default (M3
- * feedback — browsing records should read like a notes list with the doc and
- * its properties beside it), grouped by status only when the type declares
- * one (for the list/board layouts), with the type's own fields as columns.
+ * Presentation for a type's record list: a table, grouped by status only when
+ * the type declares one, with the type's own fields as columns.
+ *
+ * M10: this defaulted to the `split` browser, which no longer exists — the
+ * open-in-place detail panel gives every view the doc-beside-properties reading
+ * that split was added for, so the type screen opens on the grid instead.
  */
 export function typePresentation(typeName: string, schema: Schema): Presentation {
   const def = schema.types.get(typeName);
   const fields = def?.fields ?? [];
   const hasStatus = fields.some((f) => f.kind === 'status');
   return {
-    type: 'split',
+    type: 'table',
     group: hasStatus ? [{ field: 'status' }] : [],
     sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
     columns:

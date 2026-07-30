@@ -203,9 +203,9 @@ describe('serializeView', () => {
     expect(parseViewYaml('sprint-board', serializeView(def)).definition).toEqual(def);
   });
 
-  // M3.5: a view is rooted in a type, and a tree descends a relation — both
+  // M3.5: a view is rooted in a type, and a relation level descends it — both
   // have to survive the YAML round trip or a saved view loses its shape.
-  it('round-trips a type-rooted tree view', () => {
+  it('round-trips a type-rooted nesting view', () => {
     const def: ViewDefinition = {
       name: 'OKR tree',
       icon: 'target',
@@ -214,7 +214,7 @@ describe('serializeView', () => {
       source: { type: 'Objective', project: 'projects/atlas/project.md' },
       filters: null,
       presentation: {
-        type: 'tree',
+        type: 'table',
         sort: [{ field: 'title', dir: 'asc' }],
         // M9.7: nesting is a level of the ONE grouping chain.
         group: [
@@ -235,6 +235,105 @@ describe('serializeView', () => {
 
   // M9.1 back-compat: every view file written before the chain model must
   // keep opening, and must land on the v2 shape rather than a half-migration.
+  // M10 retired `tree` and `split`. Every file naming one must keep opening,
+  // and must land on a live kind WITHOUT losing its configuration — a tree's
+  // nesting already lived in the grouping chain, so a nested table is exactly
+  // what it was describing.
+  describe('retired view kinds', () => {
+    const parse = (yaml: string) => parseViewYaml('v', yaml).definition.presentation;
+
+    it('migrates `tree` to a table, keeping its relation levels', () => {
+      const p = parse(
+        [
+          'presentation:',
+          '  type: tree',
+          '  group:',
+          '    - relation: { type: Key result, field: objective }',
+        ].join('\n'),
+      );
+      expect(p.type).toBe('table');
+      expect(p.group).toEqual([
+        { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+      ]);
+    });
+
+    it('migrates `split` to a table, keeping its columns', () => {
+      const p = parse('presentation:\n  type: split\n  columns: [{ field: status, width: 140 }]\n');
+      expect(p.type).toBe('table');
+      expect(p.columns).toEqual([{ field: 'status', width: 140 }]);
+    });
+
+    it('writes the migrated kind back, so a file converges on one shape', () => {
+      const def = parseViewYaml('t', 'presentation:\n  type: tree\n').definition;
+      expect(serializeView(def)).toContain('type: table');
+      expect(serializeView(def)).not.toContain('tree');
+    });
+
+    it('falls back to the default kind for a name that never existed', () => {
+      expect(parse('presentation:\n  type: kanban-deluxe\n').type).toBe('list');
+    });
+
+    it('leaves a file with no stated kind on the default', () => {
+      expect(parse('presentation: {}\n').type).toBe('list');
+    });
+
+    it('accepts every live kind verbatim', () => {
+      for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
+        expect(parse(`presentation:\n  type: ${kind}\n`).type).toBe(kind);
+      }
+    });
+  });
+
+  // M10 axis configuration. Written only when set, so a table's YAML does not
+  // carry three keys about date axes it has no use for.
+  describe('date-axis keys', () => {
+    const parse = (yaml: string) => parseViewYaml('v', yaml).definition.presentation;
+
+    it('round-trips dateField, zoom, and dependencyField', () => {
+      const def: ViewDefinition = {
+        name: 'Schedule',
+        icon: null,
+        color: null,
+        order: null,
+        source: { type: 'Work item', project: null },
+        filters: null,
+        presentation: {
+          type: 'gantt',
+          group: [],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [{ field: 'status' }],
+          dateField: 'window',
+          zoom: 'month',
+          dependencyField: 'blocked_by',
+        },
+      };
+      expect(parseViewYaml('s', serializeView(def)).definition).toEqual(def);
+    });
+
+    it('omits them entirely when unset', () => {
+      const yaml = serializeView({
+        name: 'Grid',
+        icon: null,
+        color: null,
+        order: null,
+        source: { type: null, project: null },
+        filters: null,
+        presentation: { type: 'table', group: [], sort: [], columns: [] },
+      });
+      expect(yaml).not.toContain('dateField');
+      expect(yaml).not.toContain('zoom');
+      expect(yaml).not.toContain('dependencyField');
+    });
+
+    it('drops a zoom it does not recognize rather than trusting it', () => {
+      expect(parse('presentation:\n  type: gantt\n  zoom: fortnight\n').zoom).toBeUndefined();
+    });
+
+    it('drops a blank dateField so inference still runs', () => {
+      expect(parse("presentation:\n  type: calendar\n  dateField: ''\n").dateField).toBeUndefined();
+    });
+  });
+
   describe('v1 → v2 presentation migration', () => {
     it('lifts groupBy, orderBy, visibleFields, and childrenVia into chains', () => {
       const view = parseViewYaml(
@@ -283,7 +382,7 @@ describe('serializeView', () => {
         source: { type: 'Objective', project: null },
         filters: null,
         presentation: {
-          type: 'tree',
+          type: 'table',
           group: [
             { field: 'status' },
             { field: 'owner', dir: 'desc' },

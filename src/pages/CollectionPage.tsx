@@ -12,12 +12,9 @@ import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
 import { clonePresentation, toggleSort } from '@/engine/views';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { BoardView } from '@/views/BoardView';
-import { ListView } from '@/views/ListView';
-import { SplitView } from '@/views/SplitView';
-import { TableView } from '@/views/TableView';
-import { TreeView } from '@/views/TreeView';
+import { resolveDateField } from '@/engine/schedule';
 import { useQuickAdd } from '@/views/QuickAdd';
+import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type ViewSelection = Extract<Selection, { kind: 'view' }>;
@@ -75,6 +72,14 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
     sourceType === null
       ? undefined
       : (title: string, band: { groupBy: string; groupValue: string }) => quickAdd(title, band);
+  // Creating on a calendar day means creating WITH that date — the band
+  // mechanism carries a grouping value, not an arbitrary property, so the date
+  // goes through quickAdd's `extra` frontmatter instead.
+  const dateField = resolveDateField(presentation, fields);
+  const onCreateOn =
+    sourceType === null || dateField === null
+      ? undefined
+      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
   // Collapse state is namespaced per surface so two views don't share bands.
   const scope = `view:${selection.id}`;
 
@@ -142,53 +147,25 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
         presentation={presentation}
         onChange={changePresentation}
         fields={fields}
-        withSplit
         sourceType={sourceType}
         schema={schema}
         onAddProperty={addProperty}
       />
-      {presentation.type === 'tree' ? (
-        <TreeView
-          entries={sortedEntries}
-          presentation={presentation}
-          schema={schema}
-          allEntries={entries}
-          fields={fields}
-          scope={scope}
-        />
-      ) : presentation.type === 'table' ? (
-        <TableView
-          entries={sortedEntries}
-          presentation={presentation}
-          schema={schema}
-          fields={fields}
-          scope={scope}
-          onCreate={onCreate}
-          filtered={view.definition.filters !== null}
-          onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
-          onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
-        />
-      ) : presentation.type === 'split' ? (
-        <SplitView entries={sortedEntries} schema={schema} />
-      ) : presentation.type === 'board' ? (
-        <BoardView
-          entries={sortedEntries}
-          presentation={presentation}
-          schema={schema}
-          scope={scope}
-          onCreate={onCreate}
-        />
-      ) : (
-        <ListView
-          entries={sortedEntries}
-          presentation={presentation}
-          schema={schema}
-          project={null}
-          scope={scope}
-          createType={sourceType ?? undefined}
-        />
-      )}
-
+      <ViewCanvas
+        entries={sortedEntries}
+        allEntries={entries}
+        presentation={presentation}
+        schema={schema}
+        fields={fields}
+        scope={scope}
+        createType={sourceType ?? undefined}
+        filtered={view.definition.filters !== null}
+        onCreate={onCreate}
+        onCreateOn={onCreateOn}
+        onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
+        onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
+        onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+      />
       </div>
       {settingsOpen && (
         <ViewSettingsPanel

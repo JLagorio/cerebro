@@ -31,12 +31,9 @@ import {
 } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Schema, Selection, StatusDef } from '@/engine/types';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { BoardView } from '@/views/BoardView';
-import { ListView } from '@/views/ListView';
-import { SplitView } from '@/views/SplitView';
-import { TableView } from '@/views/TableView';
-import { TreeView } from '@/views/TreeView';
+import { resolveDateField } from '@/engine/schedule';
 import { useQuickAdd } from '@/views/QuickAdd';
+import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
@@ -361,6 +358,14 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     [collection.entries, presentation.sort, schema],
   );
 
+  // The calendar creates WITH a date, which the band mechanism cannot carry:
+  // a band sets a grouping value, not an arbitrary property.
+  const dateField = resolveDateField(presentation, typeFields);
+  const onCreateOn =
+    dateField === null
+      ? undefined
+      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex-none px-5 pt-3.5">
@@ -424,7 +429,6 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             presentation={presentation}
             onChange={setPresentation}
             fields={typeFields}
-            withSplit
             sourceType={listing.name}
             schema={schema}
             onAddProperty={(name, kind) => {
@@ -438,46 +442,20 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               })();
             }}
           />
-          {presentation.type === 'split' ? (
-            <SplitView entries={sortedEntries} schema={schema} />
-          ) : presentation.type === 'tree' ? (
-            <TreeView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              allEntries={entries}
-              fields={typeFields}
-              scope={scope}
-            />
-          ) : presentation.type === 'table' ? (
-            <TableView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              fields={typeFields}
-              scope={scope}
-              onCreate={quickAdd}
-              onColumnsChange={(columns) => setPresentation({ ...presentation, columns })}
-              onOrderBy={(field) => setPresentation(toggleSort(presentation, field))}
-            />
-          ) : presentation.type === 'board' ? (
-            <BoardView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              scope={scope}
-              onCreate={quickAdd}
-            />
-          ) : (
-            <ListView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              project={null}
-              scope={scope}
-              createType={listing.name}
-            />
-          )}
+          <ViewCanvas
+            entries={sortedEntries}
+            allEntries={entries}
+            presentation={presentation}
+            schema={schema}
+            fields={typeFields}
+            scope={scope}
+            createType={listing.name}
+            onCreate={quickAdd}
+            onCreateOn={onCreateOn}
+            onColumnsChange={(columns) => setPresentation({ ...presentation, columns })}
+            onOrderBy={(field) => setPresentation(toggleSort(presentation, field))}
+            onZoomChange={(zoom) => setPresentation({ ...presentation, zoom })}
+          />
         </>
       )}
       {dialog === 'style' && (

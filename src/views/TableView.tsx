@@ -10,7 +10,7 @@ import {
   toggleColumn,
   type ColumnDef,
 } from '@/engine/columns';
-import { groupTree, leafNodes } from '@/engine/grouping';
+import { buildRows, entryRows } from '@/engine/rows';
 import { kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -98,16 +98,32 @@ const TableCell = memo(function TableCell({
   );
 });
 
+/** Indent per nesting level, matching the group-band step. */
+const INDENT = 16;
+
 const TableRow = memo(function TableRow({
   entry,
   columns,
   widths,
   schema,
+  depth,
+  childCount,
+  collapsed,
+  onToggle,
+  selected,
+  onSelect,
 }: {
   entry: Entry;
   columns: ColumnDef[];
   widths: Record<string, number>;
   schema: Schema;
+  /** M10: nesting depth from the grouping chain's relation levels. */
+  depth: number;
+  childCount: number;
+  collapsed: boolean;
+  onToggle: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
@@ -121,23 +137,58 @@ const TableRow = memo(function TableRow({
       role="row"
       data-testid="table-row"
       data-path={entry.path}
+      data-depth={depth}
+      onClick={onSelect}
       // `group` sits on the ROW so hovering anywhere reveals Open, not only
       // over the name cell.
-      className="group flex h-9 border-b border-[var(--n-100)] hover:bg-[var(--n-25)]"
+      className={[
+        'group flex h-9 border-b border-[var(--n-100)]',
+        selected ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-25)]',
+      ].join(' ')}
     >
       <div
         role="gridcell"
-        className="sticky left-0 z-10 flex flex-none items-center gap-2 border-r border-[var(--n-100)] bg-[var(--n-0)] px-3"
-        style={{ width: TITLE_W }}
+        className={[
+          'sticky left-0 z-10 flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
+          selected ? 'bg-[var(--cortex-50)]' : 'bg-[var(--n-0)] group-hover:bg-[var(--n-25)]',
+        ].join(' ')}
+        style={{ width: TITLE_W, paddingLeft: 12 + depth * INDENT }}
       >
+        {/* M10: a table nests when the chain has a relation level, so the
+            expander belongs here rather than in a separate hierarchy view. A
+            fixed-size spacer keeps childless rows' titles aligned. */}
+        {childCount > 0 ? (
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${entry.title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+          >
+            <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+          </button>
+        ) : (
+          <span className="h-4 w-4 flex-none" />
+        )}
         <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-400)'} />
         <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
           {entry.title}
         </span>
+        {childCount > 0 && (
+          <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
+            {childCount}
+          </span>
+        )}
         <button
           type="button"
           aria-label={`Open ${entry.title}`}
-          onClick={() => openPath(entry.path)}
+          onClick={(e) => {
+            e.stopPropagation();
+            openPath(entry.path);
+          }}
           className="hidden flex-none items-center gap-1 rounded-md border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 py-px text-[11px] text-[var(--n-600)] hover:border-[var(--n-400)] group-hover:inline-flex"
         >
           <Icon name="maximize-2" size={10} />
@@ -187,6 +238,12 @@ export interface TableViewProps {
   entries: Entry[];
   presentation: Presentation;
   schema: Schema;
+  /**
+   * The whole vault (M10). Nested children resolve against it, so a filtered
+   * table can still nest under a parent the filter excluded. Defaults to
+   * `entries` — a table with no relation level in its chain never reads it.
+   */
+  allEntries?: Entry[];
   /** Declared fields of the collection's type — the column universe. */
   fields: ColumnDef[];
   onOrderBy?: (field: string) => void;
@@ -201,98 +258,55 @@ export interface TableViewProps {
   filtered?: boolean;
 }
 
-/** One group band and everything under it — recursive, so a two- or
- * three-level grouping chain renders without the table knowing its depth. */
-function TableGroup({
+/**
+ * One group band's header.
+ *
+ * M10: this used to be `TableGroup`, a recursive component that owned both the
+ * bands AND the rows beneath them — which is why nesting could not be added to
+ * it without duplicating TreeView's graph walk inside. `buildRows` flattens
+ * both axes, so all that is left here is the header itself.
+ */
+function BandHeader({
   node,
-  columns,
-  widths,
-  schema,
-  scope,
-  collapsedMap,
+  collapsed,
   onToggle,
-  onCreate,
 }: {
   node: GroupNode;
-  columns: ColumnDef[];
-  widths: Record<string, number>;
-  schema: Schema;
-  scope: string;
-  collapsedMap: Record<string, boolean> | undefined;
-  onToggle: (scope: string, key: string) => void;
-  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
-  const isCollapsed = collapsedMap?.[node.path] === true;
-  const isLeaf = node.children.length === 0;
-
   return (
-    <section data-depth={node.depth}>
-      <button
-        type="button"
-        data-testid="table-group-header"
-        data-depth={node.depth}
-        onClick={() => onToggle(scope, node.path)}
-        className="sticky left-0 flex h-8 w-full items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
-        style={{ paddingLeft: 12 + node.depth * 16, paddingRight: 12 }}
+    <button
+      type="button"
+      role="row"
+      data-testid="table-group-header"
+      data-depth={node.depth}
+      onClick={onToggle}
+      className="sticky left-0 flex h-8 w-full items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
+      style={{ paddingLeft: 12 + node.depth * INDENT, paddingRight: 12 }}
+    >
+      <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
+      <span
+        className="box-border h-[10px] w-[10px] flex-none rounded-full"
+        style={
+          node.ghost || !node.color
+            ? { border: '1.5px solid var(--n-400)' }
+            : { background: node.color, border: `1.5px solid ${node.color}` }
+        }
+      />
+      <span
+        className={
+          node.depth === 0
+            ? 'text-[12.5px] font-semibold text-[var(--n-800)]'
+            : 'text-[12px] font-medium text-[var(--n-700)]'
+        }
       >
-        <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
-        <span
-          className="box-border h-[10px] w-[10px] flex-none rounded-full"
-          style={
-            node.ghost || !node.color
-              ? { border: '1.5px solid var(--n-400)' }
-              : { background: node.color, border: `1.5px solid ${node.color}` }
-          }
-        />
-        <span
-          className={
-            node.depth === 0
-              ? 'text-[12.5px] font-semibold text-[var(--n-800)]'
-              : 'text-[12px] font-medium text-[var(--n-700)]'
-          }
-        >
-          {node.label}
-        </span>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-          {node.count}
-        </span>
-      </button>
-      {!isCollapsed &&
-        (isLeaf ? (
-          <>
-            {node.entries.map((e) => (
-              <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
-            ))}
-            {/* M9.6: a listing surface can create, inheriting its band. */}
-            {onCreate !== undefined && (
-              <div className="sticky left-0 w-[280px]">
-                <QuickAddInline
-                  compact
-                  label="New"
-                  ariaLabel={`New record in ${node.label}`}
-                  onCreate={(title) =>
-                    onCreate(title, { groupBy: node.field, groupValue: node.key })
-                  }
-                />
-              </div>
-            )}
-          </>
-        ) : (
-          node.children.map((child) => (
-            <TableGroup
-              key={child.path}
-              node={child}
-              columns={columns}
-              widths={widths}
-              schema={schema}
-              scope={scope}
-              collapsedMap={collapsedMap}
-              onToggle={onToggle}
-              onCreate={onCreate}
-            />
-          ))
-        ))}
-    </section>
+        {node.label}
+      </span>
+      <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+        {node.count}
+      </span>
+    </button>
   );
 }
 
@@ -365,6 +379,7 @@ export function TableView({
   entries,
   presentation,
   schema,
+  allEntries = entries,
   fields,
   onOrderBy,
   onColumnsChange,
@@ -383,9 +398,19 @@ export function TableView({
     [presentation.columns, fields],
   );
 
-  const nodes = useMemo(
-    () => groupTree(entries, presentation.group, schema),
-    [entries, presentation.group, schema],
+  // M10: ONE row list covering bands, nesting, and the create row. The table
+  // no longer knows how deep either axis goes — that is buildRows' problem.
+  const rows = useMemo(
+    () =>
+      buildRows({
+        entries,
+        group: presentation.group,
+        schema,
+        allEntries,
+        addRows: onCreate !== undefined,
+        isCollapsed: (key) => collapsedMap?.[key] === true,
+      }),
+    [entries, presentation.group, schema, allEntries, onCreate, collapsedMap],
   );
 
   // M9.2: widths persist to the view rather than living in component state,
@@ -399,14 +424,15 @@ export function TableView({
     [onColumnsChange, presentation.columns],
   );
 
-  // Flat order of the rows actually on screen, for keyboard traversal.
-  const flatRows = useMemo(
-    () => (nodes.length === 0 ? entries : leafNodes(nodes).flatMap((n) => n.entries)),
-    [nodes, entries],
-  );
+  // Keyboard traverses the record rows only — bands and the create row are not
+  // records, so Enter on them has nothing to open.
+  const flatRows = useMemo(() => entryRows(rows), [rows]);
   const keyboard = useRowKeyboard({
     count: flatRows.length,
-    onOpen: (i) => openDetail(flatRows[i].path),
+    onOpen: (i) => openDetail(flatRows[i].entry.path),
+    onToggle: (i) => {
+      if (flatRows[i].childCount > 0) toggleCollapsed(scope, flatRows[i].key);
+    },
   });
 
   const primarySort = presentation.sort[0];
@@ -477,37 +503,54 @@ export function TableView({
           ))}
         </div>
 
-        {nodes.length === 0 ? (
-          <>
-            {entries.map((e) => (
-              <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
-            ))}
-            {onCreate !== undefined && (
-              <div className="sticky left-0 w-[280px]">
+        {rows.map((row) => {
+          if (row.kind === 'band') {
+            return (
+              <BandHeader
+                key={row.key}
+                node={row.node}
+                collapsed={collapsedMap?.[row.key] === true}
+                onToggle={() => toggleCollapsed(scope, row.key)}
+              />
+            );
+          }
+          if (row.kind === 'add') {
+            // M9.6: a listing surface can create, inheriting its band.
+            return (
+              <div key={row.key} className="sticky left-0 w-[280px]">
                 <QuickAddInline
                   compact
                   label="New"
-                  ariaLabel="New record"
-                  onCreate={(title) => onCreate(title, { groupBy: '', groupValue: '' })}
+                  ariaLabel={
+                    row.band === null ? 'New record' : `New record in ${row.band.label}`
+                  }
+                  onCreate={(title) =>
+                    onCreate!(title, {
+                      groupBy: row.band?.field ?? '',
+                      groupValue: row.band?.key ?? '',
+                    })
+                  }
                 />
               </div>
-            )}
-          </>
-        ) : (
-          nodes.map((node) => (
-            <TableGroup
-              key={node.path}
-              node={node}
+            );
+          }
+          const index = flatRows.indexOf(row);
+          return (
+            <TableRow
+              key={row.key}
+              entry={row.entry}
               columns={columns}
               widths={widths}
               schema={schema}
-              scope={scope}
-              collapsedMap={collapsedMap}
-              onToggle={toggleCollapsed}
-              onCreate={onCreate}
+              depth={row.depth}
+              childCount={row.childCount}
+              collapsed={collapsedMap?.[row.key] === true}
+              onToggle={() => toggleCollapsed(scope, row.key)}
+              selected={index === keyboard.index}
+              onSelect={() => keyboard.setIndex(index)}
             />
-          ))
-        )}
+          );
+        })}
 
         {entries.length === 0 && (
           <div className="sticky left-0 px-3 py-8">

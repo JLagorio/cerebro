@@ -6,6 +6,7 @@ import { listTypes } from '@/engine/typeCatalog';
 import type { Entry, Schema, ViewDefinition } from '@/engine/types';
 import { DEFAULT_PRESENTATION } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
+import { VIEW_KINDS } from '@/views/viewKinds';
 
 const ANY = '__any__';
 
@@ -149,13 +150,7 @@ export function ViewSettingsDialog({
               size="sm"
               label="Layout"
               width="100%"
-              options={[
-                { value: 'table', label: 'Table' },
-                { value: 'list', label: 'List' },
-                { value: 'board', label: 'Board' },
-                { value: 'tree', label: 'Hierarchy' },
-                { value: 'split', label: 'Browse' },
-              ]}
+              options={VIEW_KINDS.map((k) => ({ value: k.value, label: k.label }))}
               value={def.presentation.type}
               onChange={(v) =>
                 setDef({

@@ -5,6 +5,7 @@ status: todo
 priority: medium
 assignee: "[[priya-nair]]"
 due: 2026-08-28
+window: { start: 2026-08-23, end: 2026-08-28 }
 estimate: S
 epic: "[[epic-first-week-activation]]"
 ---

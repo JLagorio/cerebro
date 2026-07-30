@@ -12,6 +12,7 @@ import type {
   ViewDefinition,
   ViewFile,
   ViewSource,
+  ViewType,
 } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
@@ -64,7 +65,20 @@ function asRecord(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-const LAYOUTS = new Set(['list', 'board', 'split', 'table', 'tree', 'calendar']);
+const LAYOUTS = new Set<ViewType>([
+  'table', 'list', 'board', 'calendar', 'gantt', 'timeline',
+]);
+
+/**
+ * The two view kinds M10 retired, and what they become (see types.ts for why).
+ * Both keep their grouping chain, which is where a `tree`'s nesting already
+ * lived — so an okr-tree.yml opens as a nested table rather than losing its
+ * hierarchy, and no saved file has to be hand-edited.
+ */
+const RETIRED_LAYOUTS: Record<string, ViewType> = { tree: 'table', split: 'table' };
+
+const ZOOMS = new Set(['day', 'week', 'month', 'quarter']);
+
 /** Beyond this a nesting chain stops being legible and starts being a cycle. */
 export const MAX_NEST_DEPTH = 6;
 /** Notion caps sub-grouping here for the same reason: nesting stops reading. */
@@ -81,9 +95,7 @@ export const MAX_GROUP_DEPTH = 3;
 function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
   return {
-    type: typeof obj.type === 'string' && LAYOUTS.has(obj.type)
-      ? (obj.type as Presentation['type'])
-      : 'list',
+    type: parseViewType(obj.type),
     group: parseGroupChain(obj),
     sort: parseSortChain(obj),
     columns: parseColumns(obj),
@@ -91,7 +103,27 @@ function parsePresentation(raw: unknown): Presentation {
       obj.rowHeight === 'compact' || obj.rowHeight === 'tall' || obj.rowHeight === 'default'
         ? obj.rowHeight
         : undefined,
+    ...(typeof obj.dateField === 'string' && obj.dateField.trim() !== ''
+      ? { dateField: obj.dateField.trim() }
+      : {}),
+    ...(typeof obj.zoom === 'string' && ZOOMS.has(obj.zoom)
+      ? { zoom: obj.zoom as NonNullable<Presentation['zoom']> }
+      : {}),
+    ...(typeof obj.dependencyField === 'string' && obj.dependencyField.trim() !== ''
+      ? { dependencyField: obj.dependencyField.trim() }
+      : {}),
   };
+}
+
+/**
+ * A live kind, a retired kind's replacement, or the default. A file that names
+ * no layout keeps landing on DEFAULT_PRESENTATION's — M10 retired two kinds, it
+ * did not change what an unconfigured view looks like.
+ */
+function parseViewType(raw: unknown): ViewType {
+  if (typeof raw !== 'string') return DEFAULT_PRESENTATION.type;
+  if (LAYOUTS.has(raw as ViewType)) return raw as ViewType;
+  return RETIRED_LAYOUTS[raw] ?? DEFAULT_PRESENTATION.type;
 }
 
 /**
@@ -318,6 +350,11 @@ export function serializeView(def: ViewDefinition): string {
       sort: p.sort,
       columns: p.columns,
       ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
+      // M10 axis configuration — written only when set, so a table's YAML
+      // does not carry three keys about date axes it has no use for.
+      ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
+      ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
+      ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
     },
   });
 }

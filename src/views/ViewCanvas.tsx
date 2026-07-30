@@ -1,0 +1,140 @@
+import type { ColumnDef } from '@/engine/columns';
+import type { Zoom } from '@/engine/schedule';
+import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
+import { BoardView } from '@/views/BoardView';
+import { CalendarView } from '@/views/CalendarView';
+import { GanttView } from '@/views/GanttView';
+import { ListView } from '@/views/ListView';
+import { TableView } from '@/views/TableView';
+import { TimelineView } from '@/views/TimelineView';
+
+/**
+ * The canvas: renders whichever of the six views a presentation names (M10).
+ *
+ * This switch existed three times — CollectionPage, ProjectPage, and TypePage
+ * each had their own copy — and they had already diverged: only CollectionPage
+ * could render `split`, only two of them passed `onCreate`, and adding a view
+ * kind meant remembering all three. Every surface that shows records now shows
+ * them the same way, and a new view kind is one case here.
+ */
+export interface ViewCanvasProps {
+  /** Filtered and sorted by the caller. */
+  entries: Entry[];
+  /** The whole vault, for resolving nested children outside the query. */
+  allEntries: Entry[];
+  presentation: Presentation;
+  schema: Schema;
+  fields: ColumnDef[];
+  /** Collapse-state namespace — `list:<id>`, `project:<path>`, `type:<name>`. */
+  scope: string;
+  /** Project context enables the list's quick-add row. */
+  project?: Entry | null;
+  /** Type new records get. */
+  createType?: string;
+  /** True when the view has filters, so empty states can say why. */
+  filtered?: boolean;
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+  /** Create dated to a calendar day. */
+  onCreateOn?: (title: string, day: string) => Promise<boolean>;
+  onColumnsChange?: (next: ColumnSpec[]) => void;
+  onOrderBy?: (field: string) => void;
+  /** Persists an axis zoom change to the view file. */
+  onZoomChange?: (zoom: Zoom) => void;
+  /** Overridable "today" for deterministic tests. */
+  today?: string;
+}
+
+export function ViewCanvas({
+  entries,
+  allEntries,
+  presentation,
+  schema,
+  fields,
+  scope,
+  project = null,
+  createType,
+  filtered,
+  onCreate,
+  onCreateOn,
+  onColumnsChange,
+  onOrderBy,
+  onZoomChange,
+  today,
+}: ViewCanvasProps) {
+  switch (presentation.type) {
+    case 'table':
+      return (
+        <TableView
+          entries={entries}
+          allEntries={allEntries}
+          presentation={presentation}
+          schema={schema}
+          fields={fields}
+          scope={scope}
+          onCreate={onCreate}
+          filtered={filtered}
+          onColumnsChange={onColumnsChange}
+          onOrderBy={onOrderBy}
+        />
+      );
+    case 'board':
+      return (
+        <BoardView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          scope={scope}
+          onCreate={onCreate}
+        />
+      );
+    case 'calendar':
+      return (
+        <CalendarView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          fields={fields}
+          onCreateOn={onCreateOn}
+          {...(today !== undefined ? { today } : {})}
+        />
+      );
+    case 'gantt':
+      return (
+        <GanttView
+          entries={entries}
+          allEntries={allEntries}
+          presentation={presentation}
+          schema={schema}
+          fields={fields}
+          scope={scope}
+          onZoomChange={onZoomChange}
+          {...(today !== undefined ? { today } : {})}
+        />
+      );
+    case 'timeline':
+      return (
+        <TimelineView
+          entries={entries}
+          allEntries={allEntries}
+          presentation={presentation}
+          schema={schema}
+          fields={fields}
+          scope={scope}
+          onZoomChange={onZoomChange}
+          {...(today !== undefined ? { today } : {})}
+        />
+      );
+    case 'list':
+      return (
+        <ListView
+          entries={entries}
+          allEntries={allEntries}
+          presentation={presentation}
+          schema={schema}
+          project={project}
+          scope={scope}
+          createType={createType}
+        />
+      );
+  }
+}

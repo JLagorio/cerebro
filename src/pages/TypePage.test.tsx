@@ -34,15 +34,32 @@ describe('TypePage — Records tab', () => {
     expect(screen.queryByText('Guided onboarding')).toBeNull();
   });
 
-  it('selects a record inline in the default split browser on click', () => {
+  // M10: the type screen opens on the table. It used to default to the `split`
+  // browser, which was retired — the open-in-place detail panel gives every
+  // view the doc-beside-properties reading that split existed for.
+  it('opens on the table, with the retired split browser gone', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    fireEvent.click(screen.getByText('Design first-run flow'));
-    // Split layout: selection is inline — the overlay detail panel stays shut.
-    expect(useUiStore.getState().detailPath).toBeNull();
-    const row = screen
-      .getAllByTestId('split-row')
-      .find((r) => r.textContent?.includes('Design first-run flow'));
-    expect(row?.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('table-view')).toBeTruthy();
+    expect(screen.queryByTestId('view-switch-split')).toBeNull();
+    expect(screen.queryByTestId('view-switch-tree')).toBeNull();
+  });
+
+  it('offers the six view kinds and switches between them', () => {
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
+      expect(screen.getByTestId(`view-switch-${kind}`)).toBeTruthy();
+    }
+    fireEvent.click(screen.getByTestId('view-switch-board'));
+    expect(screen.getByTestId('board-view')).toBeTruthy();
+  });
+
+  it('shows the calendar keyed on the type’s date property', () => {
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    fireEvent.click(screen.getByTestId('view-switch-calendar'));
+    const calendar = screen.getByTestId('calendar-view');
+    // Work item declares `due: { kind: date }` and nothing else dated, so the
+    // view infers it rather than rendering blank until someone configures one.
+    expect(calendar.getAttribute('data-date-field')).toBe('due');
   });
 
   it('opens a record in the right-hand detail panel from the list layout', () => {

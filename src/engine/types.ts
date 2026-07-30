@@ -160,18 +160,53 @@ export interface ColumnSpec {
   wrap?: boolean;
 }
 
+/**
+ * The six record views (M10). Mutually exclusive — a collection shows one at a
+ * time, chosen from the toolbar.
+ *
+ * - `table`    — spreadsheet grid with inline-editable cells (M3.4)
+ * - `list`     — banded rows
+ * - `board`    — kanban columns from the first band level
+ * - `calendar` — month grid, records on their date
+ * - `timeline` — records as bars on a horizontal date axis
+ * - `gantt`    — timeline plus scheduling: nested WBS rows, dependency arrows
+ *
+ * Two kinds were REMOVED here, and both for the same reason — they were views
+ * whose only job was something another axis already does:
+ *
+ * - `tree` was "the view that can nest", but nesting is a property of the
+ *   grouping chain (see GroupSpec.descend), so every view can nest and none of
+ *   them needs to be the hierarchy one.
+ * - `split` was a master-detail browser, which M9.3's open-in-place detail
+ *   panel does from any view.
+ *
+ * Saved files naming either one migrate to `table` on read (engine/views.ts).
+ */
+export type ViewType = 'table' | 'list' | 'board' | 'calendar' | 'gantt' | 'timeline';
+
 export interface Presentation {
-  // 'split' = master-detail record browser (M3): rows | doc editor | properties
-  // 'table' = spreadsheet grid with inline-editable cells (M3.4)
-  // 'tree'  = hierarchy outline following a relation (M3.5)
-  // 'calendar' is reserved (M10) so the union does not need re-migrating.
-  type: 'list' | 'board' | 'split' | 'table' | 'tree' | 'calendar';
+  type: ViewType;
   /** Ordered grouping chain; empty = flat. */
   group: GroupSpec[];
   /** Ordered sort chain; never empty in practice (parse supplies a default). */
   sort: SortSpec[];
   columns: ColumnSpec[];
   rowHeight?: 'compact' | 'default' | 'tall';
+  /**
+   * Date property placing records on the calendar/timeline/gantt axis. Omitted
+   * means "infer it" — engine/schedule.ts picks the type's first daterange, or
+   * failing that its first date field, so a calendar works before anyone has
+   * configured one.
+   */
+  dateField?: string;
+  /** Axis granularity for timeline and gantt. */
+  zoom?: 'day' | 'week' | 'month' | 'quarter';
+  /**
+   * Relation field naming the records this one waits on — the arrows a gantt
+   * draws. Omitted means no dependency layer, not "guess a relation": a wrong
+   * guess here draws a schedule that isn't the one the data states.
+   */
+  dependencyField?: string;
 }
 
 /**

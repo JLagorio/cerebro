@@ -67,14 +67,22 @@ describe('ViewToolbar', () => {
     });
   });
 
-  // The defect this segment fixes: a saved tree view showed nothing selected
-  // here, and clicking any other segment persisted you out of the hierarchy
-  // with no way back except the settings dialog.
-  it('offers the hierarchy layout', () => {
+  // M10: the six views, and only those six. "Hierarchy" is gone because
+  // nesting is a grouping level, so every one of these can nest.
+  it('offers exactly the six view kinds', () => {
+    render(<ViewToolbar presentation={presentation} onChange={vi.fn()} />);
+    for (const label of ['Table', 'List', 'Board', 'Calendar', 'Gantt', 'Timeline']) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.queryByText('Hierarchy')).toBeNull();
+    expect(screen.queryByText('Browse')).toBeNull();
+  });
+
+  it('switches to a date view through the segmented control', () => {
     const onChange = vi.fn();
     render(<ViewToolbar presentation={presentation} onChange={onChange} />);
-    fireEvent.click(screen.getByText('Hierarchy'));
-    expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'tree' });
+    fireEvent.click(screen.getByText('Gantt'));
+    expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'gantt' });
   });
 
   // M9.7: there is no separate nesting control. Grouping by a property bands
@@ -82,7 +90,7 @@ describe('ViewToolbar', () => {
   it('has one grouping control, not a group control and a nesting control', () => {
     render(
       <ViewToolbar
-        presentation={{ ...presentation, type: 'tree' }}
+        presentation={{ ...presentation, type: 'table' }}
         onChange={vi.fn()}
         schema={emptySchema()}
       />,

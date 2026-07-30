@@ -10,17 +10,15 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ViewFile } from '@/engine/types';
 import { clonePresentation, serializeView, toggleSort } from '@/engine/views';
 import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { resolveDateField } from '@/engine/schedule';
 import { useQuickAdd } from '@/views/QuickAdd';
-import { TreeView } from '@/views/TreeView';
+import { ViewCanvas } from '@/views/ViewCanvas';
 import { EntityDossier } from '@/knowledge/EntityDossier';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { saveView } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { BoardView } from '@/views/BoardView';
-import { ListView } from '@/views/ListView';
-import { TableView } from '@/views/TableView';
 import { slugifyViewId, ViewToolbar } from '@/views/ViewToolbar';
 
 // Task 10: the project header carries two tab groups — saved views (Items +
@@ -162,6 +160,13 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   const sourceType = activeSource.type;
   const scope = selection.kind === 'project' ? `project:${selection.path}:${tabKey}` : `view:${selection.id}`;
   const quickAdd = useQuickAdd(sourceType ?? 'Work item', project);
+  // Creating on a calendar day carries the date itself, which the band
+  // mechanism cannot express (it sets a grouping value, not any property).
+  const dateField = resolveDateField(presentation, fields);
+  const onCreateOn =
+    dateField === null
+      ? undefined
+      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
 
   // Task 8: toolbar edits auto-persist to the active saved view's file
   // (project-scoped tab or global view). The Items tab stays ephemeral.
@@ -338,45 +343,21 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
             schema={schema}
             onAddProperty={addProperty}
           />
-          {presentation.type === 'tree' ? (
-            <TreeView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              allEntries={entries}
-              fields={fields}
-              scope={scope}
-            />
-          ) : presentation.type === 'table' ? (
-            <TableView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              fields={fields}
-              scope={scope}
-              onCreate={quickAdd}
-              onColumnsChange={(columns) =>
-                handlePresentationChange({ ...presentation, columns })
-              }
-              onOrderBy={(field) => handlePresentationChange(toggleSort(presentation, field))}
-            />
-          ) : presentation.type === 'board' ? (
-            <BoardView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              scope={scope}
-              onCreate={quickAdd}
-            />
-          ) : (
-            <ListView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              project={project}
-              scope={scope}
-            />
-          )}
+          <ViewCanvas
+            entries={sortedEntries}
+            allEntries={entries}
+            presentation={presentation}
+            schema={schema}
+            fields={fields}
+            scope={scope}
+            project={project}
+            createType={sourceType ?? undefined}
+            onCreate={quickAdd}
+            onCreateOn={onCreateOn}
+            onColumnsChange={(columns) => handlePresentationChange({ ...presentation, columns })}
+            onOrderBy={(field) => handlePresentationChange(toggleSort(presentation, field))}
+            onZoomChange={(zoom) => handlePresentationChange({ ...presentation, zoom })}
+          />
         </>
       )}
       <Dialog

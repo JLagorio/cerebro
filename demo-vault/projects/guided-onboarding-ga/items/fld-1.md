@@ -5,6 +5,7 @@ status: progress
 priority: high
 assignee: "[[ana-rios]]"
 due: 2026-09-18
+window: { start: 2026-08-28, end: 2026-09-18 }
 estimate: XL
 ---
 

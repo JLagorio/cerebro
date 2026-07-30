@@ -5,6 +5,7 @@ status: todo
 priority: high
 assignee: "[[maya-chen]]"
 due: 2026-08-25
+window: { start: 2026-08-19, end: 2026-08-25 }
 estimate: M
 epic: "[[epic-first-week-activation]]"
 blocked_by:

@@ -5,6 +5,7 @@ status: progress
 priority: high
 assignee: "[[maya-chen]]"
 due: 2026-08-12
+window: { start: 2026-07-29, end: 2026-08-12 }
 estimate: L
 epic: "[[epic-first-week-activation]]"
 ---
