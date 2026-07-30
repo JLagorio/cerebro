@@ -1,15 +1,16 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { resolveColumns, type ColumnDef } from '@/engine/columns';
 import { kindMeta, progressRatio } from '@/engine/properties';
-import { childrenOf } from '@/engine/relations';
+import { childrenAt } from '@/engine/relations';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { Entry, FieldDef, Presentation, Schema } from '@/engine/types';
+import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { useUiStore } from '@/stores/uiStore';
 
 const NAME_W = 340;
-const COL_W = 150;
 const INDENT = 18;
 /** Depth guard: relation graphs can contain cycles (A → B → A). */
 const MAX_DEPTH = 6;
@@ -22,7 +23,9 @@ export interface TreeViewProps {
    * the rows the view's source selected. */
   allEntries: Entry[];
   /** Declared fields of the ROOT type (column universe for the header). */
-  fields: FieldDef[];
+  fields: ColumnDef[];
+  /** Collapse-state namespace (M9.1). */
+  scope?: string;
 }
 
 interface Row {
@@ -38,10 +41,12 @@ interface Row {
 const TreeCell = memo(function TreeCell({
   entry,
   def,
+  width,
   schema,
 }: {
   entry: Entry;
-  def: FieldDef;
+  width: number;
+  def: ColumnDef;
   schema: Schema;
 }) {
   const resolved = schema.resolveField(entry, def.name);
@@ -57,7 +62,7 @@ const TreeCell = memo(function TreeCell({
       <div
         role="gridcell"
         className="flex flex-none items-center border-r border-[var(--n-100)] px-2"
-        style={{ width: COL_W }}
+        style={{ width }}
       >
         <span className="text-[12px] text-[var(--n-300)]">—</span>
       </div>
@@ -68,7 +73,7 @@ const TreeCell = memo(function TreeCell({
     <div
       role="gridcell"
       className="flex flex-none items-center overflow-hidden border-r border-[var(--n-100)] px-2"
-      style={{ width: COL_W }}
+      style={{ width }}
     >
       {ratio !== null ? (
         <span className="flex w-full min-w-0 items-center gap-2">
@@ -100,20 +105,27 @@ const TreeCell = memo(function TreeCell({
  * in reverse (the children point back). Children can be a different type than
  * the root, which is what makes Objective → Key result → Work item work.
  */
-export function TreeView({ entries, presentation, schema, allEntries, fields }: TreeViewProps) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+export function TreeView({
+  entries,
+  presentation,
+  schema,
+  allEntries,
+  fields,
+  scope = 'tree',
+}: TreeViewProps) {
+  // M9.1: collapse lives in the store — it was component state, so every
+  // expansion reset the moment you navigated away.
+  const collapsedMap = useUiStore((s) => s.collapsed[scope]);
+  const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
   // M9.3: in-place, so opening a row keeps the hierarchy on screen.
   const openPath = useOpenPath('in-place');
-  const spec = presentation.childrenVia ?? null;
+  const hierarchy = presentation.hierarchy;
 
-  const columns = useMemo(
-    () =>
-      presentation.visibleFields
-        .map((name) => fields.find((f) => f.name === name) ?? { name, kind: 'text' as const })
-        .filter((f) => f.name !== 'title'),
-    [presentation.visibleFields, fields],
+  const resolved = useMemo(
+    () => resolveColumns(presentation.columns, fields),
+    [presentation.columns, fields],
   );
 
   // Flatten the tree once per render: expansion is just a filter on this list,
@@ -123,21 +135,25 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
     const walk = (list: Entry[], depth: number, keyPrefix: string, seen: Set<string>) => {
       for (const entry of list) {
         const key = `${keyPrefix}/${entry.path}`;
+        // M9.1: each depth follows its OWN spec, so the levels can be
+        // different types — Objective → Key result → Work item. The old
+        // single-spec descent re-ran level 0's relation forever, which is
+        // why nesting past the first level never appeared.
         const kids =
-          spec === null || depth >= MAX_DEPTH || seen.has(entry.path)
+          depth >= MAX_DEPTH || seen.has(entry.path)
             ? []
-            : childrenOf(entry, spec, allEntries, schema.relations);
+            : childrenAt(entry, hierarchy, depth, allEntries, schema.relations);
         out.push({ entry, depth, childCount: kids.length, key });
-        if (kids.length > 0 && collapsed[key] !== true) {
+        if (kids.length > 0 && collapsedMap?.[key] !== true) {
           walk(kids, depth + 1, key, new Set([...seen, entry.path]));
         }
       }
     };
     walk(entries, 0, '', new Set());
     return out;
-  }, [entries, spec, allEntries, schema, collapsed]);
+  }, [entries, hierarchy, allEntries, schema, collapsedMap]);
 
-  const totalWidth = NAME_W + columns.length * COL_W;
+  const totalWidth = NAME_W + resolved.reduce((sum, c) => sum + c.width, 0);
 
   return (
     <div data-testid="tree-view" role="grid" className="min-h-0 min-w-0 flex-1 overflow-auto">
@@ -154,12 +170,12 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
             <Icon name="list-tree" size={12} color="var(--n-400)" />
             Name
           </div>
-          {columns.map((def) => (
+          {resolved.map(({ def, width }) => (
             <div
               key={def.name}
               role="columnheader"
               className="flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]"
-              style={{ width: COL_W }}
+              style={{ width }}
             >
               <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
               <span className="truncate">{humanize(def.name)}</span>
@@ -169,7 +185,7 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
 
         {rows.map(({ entry, depth, childCount, key }) => {
           const style = typeStyle(entry.type, schema);
-          const isCollapsed = collapsed[key] === true;
+          const isCollapsed = collapsedMap?.[key] === true;
           return (
             <div
               key={key}
@@ -189,7 +205,7 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
                     type="button"
                     aria-expanded={!isCollapsed}
                     aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${entry.title}`}
-                    onClick={() => setCollapsed((c) => ({ ...c, [key]: !isCollapsed }))}
+                    onClick={() => toggleCollapsed(scope, key)}
                     className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
                   >
                     <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} />
@@ -221,8 +237,8 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
                   Open
                 </button>
               </div>
-              {columns.map((def) => (
-                <TreeCell key={def.name} entry={entry} def={def} schema={schema} />
+              {resolved.map(({ def, width }) => (
+                <TreeCell key={def.name} entry={entry} def={def} width={width} schema={schema} />
               ))}
             </div>
           );
@@ -231,7 +247,7 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
         {rows.length === 0 && (
           <div className="px-3 py-6 text-[12.5px] text-[var(--n-400)]">No records yet.</div>
         )}
-        {spec === null && rows.length > 0 && (
+        {hierarchy.length === 0 && rows.length > 0 && (
           <div className="px-3 py-3 text-[12px] text-[var(--n-400)]">
             This view has no child relation set — pick one in the toolbar to nest rows.
           </div>

@@ -55,9 +55,10 @@ const boardView: ViewFile = {
     filters: null,
     presentation: {
       type: 'board',
-      groupBy: 'status',
-      orderBy: { field: 'modifiedAt', dir: 'desc' },
-      visibleFields: ['key', 'status'],
+      group: [{ field: 'status' }],
+      sort: [{ field: 'modifiedAt', dir: 'desc' }],
+      columns: [{ field: 'key' }, { field: 'status' }],
+      hierarchy: [],
     },
   },
 };
@@ -194,10 +195,13 @@ describe('ProjectPage', () => {
     useVaultStore.setState({ views: [scoped] });
     render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Delivery' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
-    fireEvent.click(screen.getByRole('option', { name: 'No grouping' }));
+    // M9.1: the group control is a chain popover; removing its only level is
+    // what "no grouping" now means.
+    fireEvent.click(screen.getByTestId('group-chain'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove level 1' }));
     await waitFor(() => {
-      expect(fs.get('projects/foundations/views/delivery.yml')).toContain('groupBy: null');
+      // Written in v2 keys — an edited view converges on one shape.
+      expect(fs.get('projects/foundations/views/delivery.yml')).toContain('group: []');
     });
   });
 });

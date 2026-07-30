@@ -8,17 +8,22 @@ source:
 filters: null
 presentation:
   type: tree
-  groupBy: null
-  orderBy:
-    field: title
-    dir: asc
-  visibleFields:
-    - status
-    - owner
-    - progress
-    - key_result_count
-  # Reverse descent: key results point UP at their objective, so the parent
-  # needs no duplicate list of children (M3.5).
-  childrenVia:
-    type: Key result
-    field: objective
+  group: []
+  sort:
+    - field: title
+      dir: asc
+  columns:
+    - field: status
+    - field: owner
+    - field: progress
+    - field: key_result_count
+  # M9.1: an ordered descent chain, one spec per depth. Level 0 inverts the
+  # link key results hold (`objective:` points UP, so the parent needs no
+  # duplicate list); level 1 follows the list key results DO hold. Mixing the
+  # two directions in one chain is the point — a hierarchy should not care
+  # which side of each link the data lives on.
+  hierarchy:
+    - type: Key result
+      field: objective
+    - direction: forward
+      field: deliverables

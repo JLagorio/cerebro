@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCollection } from './collections';
+import { resolveCollection, sortEntries } from './collections';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { ViewFile } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
-  groupBy: 'status',
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
+  group: [{ field: 'status' }],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
+  hierarchy: [],
 };
 
 const FOUNDATIONS = 'projects/foundations/project.md';
@@ -111,9 +112,10 @@ function mkView(partial: Partial<ViewFile['definition']> & { id: string }): View
       filters: null,
       presentation: {
         type: 'list',
-        groupBy: 'status',
-        orderBy: { field: 'modifiedAt', dir: 'desc' },
-        visibleFields: ['key', 'status'],
+        group: [{ field: 'status' }],
+        sort: [{ field: 'modifiedAt', dir: 'desc' }],
+        columns: [{ field: 'key' }, { field: 'status' }],
+        hierarchy: [],
       },
       ...definition,
     },
@@ -165,9 +167,10 @@ describe('resolveCollection', () => {
       },
       presentation: {
         type: 'board',
-        groupBy: 'status',
-        orderBy: { field: 'modifiedAt', dir: 'asc' },
-        visibleFields: ['key', 'status'],
+        group: [{ field: 'status' }],
+        sort: [{ field: 'modifiedAt', dir: 'asc' }],
+        columns: [{ field: 'key' }, { field: 'status' }],
+        hierarchy: [],
       },
     });
     const collection = resolveCollection({ kind: 'view', id: 'done-work' }, entries, schema, [view]);
@@ -230,9 +233,10 @@ describe('resolveCollection', () => {
       filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
       presentation: {
         type: 'list',
-        groupBy: null,
-        orderBy: { field: 'priority', dir: 'asc' },
-        visibleFields: ['key'],
+        group: [],
+        sort: [{ field: 'priority', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+        hierarchy: [],
       },
     });
     const collection = resolveCollection(
@@ -268,14 +272,76 @@ describe('resolveCollection', () => {
       filters: { all: [{ field: 'type', op: 'equals', value: 'Work item' }] },
       presentation: {
         type: 'list',
-        groupBy: null,
-        orderBy: { field: 'priority', dir: 'asc' },
-        visibleFields: ['key'],
+        group: [],
+        sort: [{ field: 'priority', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+        hierarchy: [],
       },
     });
     const collection = resolveCollection({ kind: 'view', id: 'by-due' }, all, schemaAll, [view]);
     expect(collection.entries[collection.entries.length - 1].path).toBe(
       'projects/foundations/items/bare.md',
     );
+  });
+});
+
+// M9.1: the sort chain. The single-key behaviour above is unchanged; these
+// cover what ordering by more than one key adds.
+describe('sortEntries — multi-key', () => {
+  const typeDoc = makeEntry({
+    path: 'types/work-item.md',
+    title: 'Work item',
+    type: 'Type',
+    properties: {
+      fields: {
+        priority: { kind: 'select', options: [{ id: 'high' }, { id: 'low' }] },
+        due: { kind: 'date' },
+      },
+    },
+  });
+  const schema = buildSchema([typeDoc]);
+  const item = (path: string, priority: string | undefined, due: string | undefined) =>
+    makeEntry({
+      path,
+      type: 'Work item',
+      properties: {
+        ...(priority !== undefined ? { priority } : {}),
+        ...(due !== undefined ? { due } : {}),
+      },
+    });
+
+  it('breaks ties on the first key with the second', () => {
+    const entries = [
+      item('a.md', 'high', '2026-03-01'),
+      item('b.md', 'high', '2026-01-01'),
+      item('c.md', 'low', '2026-02-01'),
+    ];
+    const sorted = sortEntries(
+      entries,
+      [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'asc' }],
+      schema,
+    );
+    expect(sorted.map((e) => e.path)).toEqual(['b.md', 'a.md', 'c.md']);
+  });
+
+  // The trap: a global empty-last check would strand every record missing the
+  // primary key in input order, so the secondary key would never run.
+  it('lets the second key order records missing the first', () => {
+    const entries = [
+      item('a.md', undefined, '2026-03-01'),
+      item('b.md', undefined, '2026-01-01'),
+      item('c.md', 'high', '2026-02-01'),
+    ];
+    const sorted = sortEntries(
+      entries,
+      [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'asc' }],
+      schema,
+    );
+    expect(sorted.map((e) => e.path)).toEqual(['c.md', 'b.md', 'a.md']);
+  });
+
+  it('an empty chain preserves input order', () => {
+    const entries = [item('b.md', 'low', undefined), item('a.md', 'high', undefined)];
+    expect(sortEntries(entries, [], schema).map((e) => e.path)).toEqual(['b.md', 'a.md']);
   });
 });

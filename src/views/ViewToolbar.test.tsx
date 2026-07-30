@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildSchema } from '@/engine/schema';
 import type { Presentation } from '@/engine/types';
 import { orderToValue, slugifyViewId, valueToOrder, ViewToolbar } from './ViewToolbar';
 
+const emptySchema = () => buildSchema([]);
+
 const presentation: Presentation = {
   type: 'list',
-  groupBy: 'status',
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
+  group: [{ field: 'status' }],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
+  hierarchy: [],
 };
 
 describe('slugifyViewId', () => {
@@ -43,28 +47,50 @@ describe('ViewToolbar', () => {
     expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'board' });
   });
 
-  it('changing group-by to none reports groupBy null', () => {
+  // M9.1: group and sort are ordered chains, so their control is a popover
+  // with a row per level rather than a single-slot dropdown.
+  it('removing the only grouping level reports a flat chain', () => {
     const onChange = vi.fn();
-    render(
-      <ViewToolbar presentation={presentation} onChange={onChange} />,
-    );
-    // M2 Task 2: the group control is a DS Dropdown, not a native select.
-    fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
-    fireEvent.click(screen.getByRole('option', { name: 'No grouping' }));
-    expect(onChange).toHaveBeenCalledWith({ ...presentation, groupBy: null });
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId('group-chain'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove level 1' }));
+    expect(onChange).toHaveBeenCalledWith({ ...presentation, group: [] });
   });
 
-  it('changing order reports the decoded orderBy', () => {
+  it('flipping a sort level direction keeps the field', () => {
     const onChange = vi.fn();
-    render(
-      <ViewToolbar presentation={presentation} onChange={onChange} />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Order by' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Due date' }));
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId('sort-chain'));
+    fireEvent.click(screen.getByRole('button', { name: /Level 1 direction/ }));
     expect(onChange).toHaveBeenCalledWith({
       ...presentation,
-      orderBy: { field: 'due', dir: 'asc' },
+      sort: [{ field: 'modifiedAt', dir: 'asc' }],
     });
+  });
+
+  // The defect this segment fixes: a saved tree view showed nothing selected
+  // here, and clicking any other segment persisted you out of the hierarchy
+  // with no way back except the settings dialog.
+  it('offers the hierarchy layout', () => {
+    const onChange = vi.fn();
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
+    fireEvent.click(screen.getByText('Hierarchy'));
+    expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'tree' });
+  });
+
+  it('shows the nesting chain only on the hierarchy layout', () => {
+    const { rerender } = render(
+      <ViewToolbar presentation={presentation} onChange={vi.fn()} schema={emptySchema()} />,
+    );
+    expect(screen.queryByTestId('hierarchy-chain')).toBeNull();
+    rerender(
+      <ViewToolbar
+        presentation={{ ...presentation, type: 'tree' }}
+        onChange={vi.fn()}
+        schema={emptySchema()}
+      />,
+    );
+    expect(screen.getByTestId('hierarchy-chain')).toBeTruthy();
   });
 
   // Task 8: the Save-view button moved to the project tab row ("New view");

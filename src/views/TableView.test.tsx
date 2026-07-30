@@ -11,9 +11,10 @@ import type { Presentation } from '@/engine/types';
 
 const presentation: Presentation = {
   type: 'table',
-  groupBy: null,
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['status', 'priority'],
+  group: [],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [{ field: 'status' }, { field: 'priority' }],
+  hierarchy: [],
 };
 
 function setup() {

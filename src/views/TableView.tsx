@@ -1,16 +1,24 @@
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
-import { groupEntries } from '@/engine/grouping';
+import {
+  DEFAULT_COL_W,
+  moveColumn,
+  resolveColumns,
+  setColumnWidth,
+  toggleColumn,
+  type ColumnDef,
+} from '@/engine/columns';
+import { groupTree } from '@/engine/grouping';
 import { kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { Entry, FieldDef, Group, Presentation, Schema } from '@/engine/types';
+import type { ColumnSpec, Entry, GroupNode, Presentation, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { useUiStore } from '@/stores/uiStore';
 
 const TITLE_W = 280;
-const DEFAULT_W = 150;
-const MIN_W = 88;
+const DEFAULT_W = DEFAULT_COL_W;
 
 /** Kinds whose editor is a popover/inline control the cell hosts directly. */
 const READ_ONLY = new Set(['rollup', 'created_time', 'last_edited_time']);
@@ -53,7 +61,7 @@ const TableCell = memo(function TableCell({
   width,
 }: {
   entry: Entry;
-  def: FieldDef;
+  def: ColumnDef;
   schema: Schema;
   width: number;
 }) {
@@ -94,7 +102,7 @@ const TableRow = memo(function TableRow({
   schema,
 }: {
   entry: Entry;
-  columns: FieldDef[];
+  columns: ColumnDef[];
   widths: Record<string, number>;
   schema: Schema;
 }) {
@@ -177,43 +185,195 @@ export interface TableViewProps {
   presentation: Presentation;
   schema: Schema;
   /** Declared fields of the collection's type — the column universe. */
-  fields: FieldDef[];
+  fields: ColumnDef[];
   onOrderBy?: (field: string) => void;
+  /** M9.2: persists column order, width, and visibility to the view. Omit on
+   * surfaces with no view file to write to — the header menu hides. */
+  onColumnsChange?: (next: ColumnSpec[]) => void;
+  /** Collapse-state namespace (M9.1). */
+  scope?: string;
+}
+
+/** One group band and everything under it — recursive, so a two- or
+ * three-level grouping chain renders without the table knowing its depth. */
+function TableGroup({
+  node,
+  columns,
+  widths,
+  schema,
+  scope,
+  collapsedMap,
+  onToggle,
+}: {
+  node: GroupNode;
+  columns: ColumnDef[];
+  widths: Record<string, number>;
+  schema: Schema;
+  scope: string;
+  collapsedMap: Record<string, boolean> | undefined;
+  onToggle: (scope: string, key: string) => void;
+}) {
+  const isCollapsed = collapsedMap?.[node.path] === true;
+  const isLeaf = node.children.length === 0;
+
+  return (
+    <section data-depth={node.depth}>
+      <button
+        type="button"
+        data-testid="table-group-header"
+        data-depth={node.depth}
+        onClick={() => onToggle(scope, node.path)}
+        className="sticky left-0 flex h-8 w-full items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
+        style={{ paddingLeft: 12 + node.depth * 16, paddingRight: 12 }}
+      >
+        <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
+        <span
+          className="box-border h-[10px] w-[10px] flex-none rounded-full"
+          style={
+            node.ghost || !node.color
+              ? { border: '1.5px solid var(--n-400)' }
+              : { background: node.color, border: `1.5px solid ${node.color}` }
+          }
+        />
+        <span
+          className={
+            node.depth === 0
+              ? 'text-[12.5px] font-semibold text-[var(--n-800)]'
+              : 'text-[12px] font-medium text-[var(--n-700)]'
+          }
+        >
+          {node.label}
+        </span>
+        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+          {node.count}
+        </span>
+      </button>
+      {!isCollapsed &&
+        (isLeaf
+          ? node.entries.map((e) => (
+              <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
+            ))
+          : node.children.map((child) => (
+              <TableGroup
+                key={child.path}
+                node={child}
+                columns={columns}
+                widths={widths}
+                schema={schema}
+                scope={scope}
+                collapsedMap={collapsedMap}
+                onToggle={onToggle}
+              />
+            )))}
+    </section>
+  );
+}
+
+/** Per-column header menu (M9.2): move, hide. The header is the schema, so
+ * the things you can do to a column live on the column. */
+function ColumnMenu({
+  def,
+  columns,
+  onChange,
+}: {
+  def: ColumnDef;
+  columns: ColumnSpec[];
+  onChange: (next: ColumnSpec[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = humanize(def.name);
+
+  return (
+    <span className="relative inline-flex flex-none">
+      <button
+        type="button"
+        aria-label={`${name} column options`}
+        onClick={() => setOpen(!open)}
+        className="hidden h-4 w-4 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] group-hover/header:inline-flex"
+      >
+        <Icon name="chevron-down" size={11} />
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close column options"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+          />
+          <div className="absolute right-0 top-5 z-50 w-[168px] rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
+            {[
+              { label: 'Move left', icon: 'arrow-left', run: () => onChange(moveColumn(columns, def.name, -1)) },
+              { label: 'Move right', icon: 'arrow-right', run: () => onChange(moveColumn(columns, def.name, 1)) },
+              { label: 'Hide column', icon: 'eye-off', run: () => onChange(toggleColumn(columns, def.name)) },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => {
+                  item.run();
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+              >
+                <Icon name={item.icon} size={12} color="var(--n-500)" />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
 }
 
 /**
  * Table view (M3.4): the spreadsheet surface — one row per record, one
  * column per visible property, edited in place. Columns come from the view's
- * `visibleFields`, so the property-visibility control and this view share one
- * source of truth. Grouping renders as collapsible section bands.
+ * `columns`, so the property-visibility control and this view share one
+ * source of truth. Grouping renders as collapsible section bands, nested to
+ * the depth of the view's grouping chain (M9.1).
  */
-export function TableView({ entries, presentation, schema, fields, onOrderBy }: TableViewProps) {
-  const [widths, setWidths] = useState<Record<string, number>>({});
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+export function TableView({
+  entries,
+  presentation,
+  schema,
+  fields,
+  onOrderBy,
+  onColumnsChange,
+  scope = 'table',
+}: TableViewProps) {
+  // M9.1: collapse lives in the store, keyed by surface — it used to be
+  // component state and reset on every navigation.
+  const collapsedMap = useUiStore((s) => s.collapsed[scope]);
+  const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
 
-  const columns = useMemo(
-    () =>
-      presentation.visibleFields
-        .map((name) => fields.find((f) => f.name === name) ?? { name, kind: 'text' as const })
-        .filter((f) => f.name !== 'title'),
-    [presentation.visibleFields, fields],
+  const resolved = useMemo(
+    () => resolveColumns(presentation.columns, fields),
+    [presentation.columns, fields],
   );
 
-  const groups: Group[] = useMemo(() => {
-    if (presentation.groupBy === null) {
-      return [{ key: '', label: '', color: null, ghost: false, entries }];
-    }
-    return groupEntries(entries, presentation.groupBy, schema);
-  }, [entries, presentation.groupBy, schema]);
+  const nodes = useMemo(
+    () => groupTree(entries, presentation.group, schema),
+    [entries, presentation.group, schema],
+  );
 
-  const resize = useCallback((name: string, delta: number) => {
-    setWidths((w) => ({
-      ...w,
-      [name]: Math.max(MIN_W, (w[name] ?? DEFAULT_W) + delta),
-    }));
-  }, []);
+  // M9.2: widths persist to the view rather than living in component state,
+  // so the same type can be sized differently in two views.
+  const resize = useCallback(
+    (name: string, delta: number) => {
+      if (onColumnsChange === undefined) return;
+      const current = presentation.columns.find((c) => c.field === name)?.width ?? DEFAULT_COL_W;
+      onColumnsChange(setColumnWidth(presentation.columns, name, current + delta));
+    },
+    [onColumnsChange, presentation.columns],
+  );
 
-  const totalWidth = TITLE_W + columns.reduce((sum, c) => sum + (widths[c.name] ?? DEFAULT_W), 0);
+  const primarySort = presentation.sort[0];
+  const totalWidth = TITLE_W + resolved.reduce((sum, c) => sum + c.width, 0);
+  const widths: Record<string, number> = {};
+  for (const c of resolved) widths[c.def.name] = c.width;
+  const columns = resolved.map((c) => c.def);
 
   return (
     <div data-testid="table-view" role="grid" className="min-h-0 min-w-0 flex-1 overflow-auto">
@@ -230,12 +390,12 @@ export function TableView({ entries, presentation, schema, fields, onOrderBy }: 
             <Icon name="type" size={12} color="var(--n-400)" />
             Name
           </div>
-          {columns.map((def) => (
+          {resolved.map(({ def, width }) => (
             <div
               key={def.name}
               role="columnheader"
-              className="relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]"
-              style={{ width: widths[def.name] ?? DEFAULT_W }}
+              className="group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]"
+              style={{ width }}
             >
               <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
               <button
@@ -245,11 +405,26 @@ export function TableView({ entries, presentation, schema, fields, onOrderBy }: 
               >
                 {humanize(def.name)}
               </button>
-              {presentation.orderBy.field === def.name && (
+              {def.heterogeneous === true && (
+                <span
+                  title="Declared with different kinds across the types in this view"
+                  className="flex-none text-[var(--warn-500)]"
+                >
+                  <Icon name="triangle-alert" size={10} />
+                </span>
+              )}
+              {primarySort?.field === def.name && (
                 <Icon
-                  name={presentation.orderBy.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
+                  name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
                   size={11}
                   color="var(--cortex-600)"
+                />
+              )}
+              {onColumnsChange !== undefined && (
+                <ColumnMenu
+                  def={def}
+                  columns={presentation.columns}
+                  onChange={onColumnsChange}
                 />
               )}
               <ColumnResizer onResize={(d) => resize(def.name, d)} />
@@ -257,45 +432,24 @@ export function TableView({ entries, presentation, schema, fields, onOrderBy }: 
           ))}
         </div>
 
-        {groups.map((g) => {
-          const isCollapsed = collapsed[g.key] === true;
-          return (
-            <section key={g.key || 'all'}>
-              {presentation.groupBy !== null && (
-                <button
-                  type="button"
-                  data-testid="table-group-header"
-                  onClick={() => setCollapsed((c) => ({ ...c, [g.key]: !isCollapsed }))}
-                  className="sticky left-0 flex h-8 w-full items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] px-3 text-left"
-                >
-                  <Icon name={isCollapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
-                  <span
-                    className="box-border h-[10px] w-[10px] flex-none rounded-full"
-                    style={
-                      g.ghost || !g.color
-                        ? { border: '1.5px solid var(--n-400)' }
-                        : { background: g.color, border: `1.5px solid ${g.color}` }
-                    }
-                  />
-                  <span className="text-[12.5px] font-semibold text-[var(--n-800)]">{g.label}</span>
-                  <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-                    {g.entries.length}
-                  </span>
-                </button>
-              )}
-              {!isCollapsed &&
-                g.entries.map((e) => (
-                  <TableRow
-                    key={e.path}
-                    entry={e}
-                    columns={columns}
-                    widths={widths}
-                    schema={schema}
-                  />
-                ))}
-            </section>
-          );
-        })}
+        {nodes.length === 0 ? (
+          entries.map((e) => (
+            <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
+          ))
+        ) : (
+          nodes.map((node) => (
+            <TableGroup
+              key={node.path}
+              node={node}
+              columns={columns}
+              widths={widths}
+              schema={schema}
+              scope={scope}
+              collapsedMap={collapsedMap}
+              onToggle={toggleCollapsed}
+            />
+          ))
+        )}
 
         {entries.length === 0 && (
           <div className="px-3 py-6 text-[12.5px] text-[var(--n-400)]">No records yet.</div>

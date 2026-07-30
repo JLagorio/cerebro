@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Icon } from '@/components/ui/Icon';
 import { FieldChip } from '@/views/FieldChip';
-import { groupEntries } from '@/engine/grouping';
+import { groupTree } from '@/engine/grouping';
 import { nextItemKey } from '@/engine/itemKeys';
+import { visibleColumns } from '@/engine/views';
 import { slugify } from '@/lib/slug';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
-import type { Entry, Group, Presentation, Schema } from '@/engine/types';
+import type { Entry, Group, GroupNode, Presentation, Schema } from '@/engine/types';
 
 export interface ListViewProps {
   entries: Entry[];
@@ -15,6 +16,8 @@ export interface ListViewProps {
   schema: Schema;
   /** project context enables the quick-add row; pass null outside a project */
   project: Entry | null;
+  /** Collapse-state namespace (M9.1) — `view:<id>`, `project:<path>`, … */
+  scope?: string;
 }
 
 
@@ -135,25 +138,106 @@ function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: 
       </span>
       <span className="truncate text-[13px] text-[var(--n-900)]">{entry.title}</span>
       <span className="flex-1" />
-      {presentation.visibleFields
-        .filter((f) => f !== 'key')
-        .map((f) => (
-          <FieldChip key={f} resolved={schema.resolveField(entry, f)} />
+      {visibleColumns(presentation)
+        .filter((c) => c.field !== 'key')
+        .map((c) => (
+          <FieldChip key={c.field} resolved={schema.resolveField(entry, c.field)} />
         ))}
     </div>
   );
 }
 
-export function ListView({ entries, presentation, schema, project }: ListViewProps) {
-  const groupBy = presentation.groupBy;
-  // Fix (execution-log note 17a): groupEntries([], …) returns [] — an empty
-  // project rendered a blank canvas with no headers and no Add-item row. Fall
-  // back to the flat "All items" group so quick-add stays reachable.
-  const grouped: Group[] = groupBy ? groupEntries(entries, groupBy, schema) : [];
-  const groups: Group[] =
-    grouped.length > 0
-      ? grouped
-      : [{ key: '', label: 'All items', color: null, ghost: false, entries }];
+/** One band and everything under it. Recursive so a chain of any depth
+ * renders without the view knowing how deep it goes. */
+function GroupSection({
+  node,
+  presentation,
+  schema,
+  project,
+  scope,
+}: {
+  node: GroupNode;
+  presentation: Presentation;
+  schema: Schema;
+  project: Entry | null;
+  scope: string;
+}) {
+  const collapsed = useUiStore((s) => s.collapsed[scope]?.[node.path] === true);
+  const toggle = useUiStore((s) => s.toggleCollapsed);
+  const isLeaf = node.children.length === 0;
+
+  return (
+    <section data-testid="list-group" data-depth={node.depth}>
+      <header
+        data-testid="list-group-header"
+        data-depth={node.depth}
+        className="sticky z-10 flex h-9 items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] px-5"
+        style={{ top: node.depth * 36, paddingLeft: 20 + node.depth * 16 }}
+      >
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.label}`}
+          onClick={() => toggle(scope, node.path)}
+          className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        >
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+        </button>
+        <span
+          className="box-border h-[11px] w-[11px] rounded-full"
+          style={
+            node.ghost || !node.color
+              ? { border: '1.5px solid var(--n-400)' }
+              : { background: node.color, border: `1.5px solid ${node.color}` }
+          }
+        />
+        <span
+          className={[
+            node.depth === 0 ? 'text-[12.5px] font-semibold' : 'text-[12px] font-medium',
+            'text-[var(--n-800)]',
+          ].join(' ')}
+        >
+          {node.label}
+        </span>
+        {/* Recursive count: a collapsed parent still reports what is inside. */}
+        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+          {node.count}
+        </span>
+      </header>
+      {!collapsed &&
+        (isLeaf ? (
+          <>
+            {node.entries.map((e) => (
+              <ListRow key={e.path} entry={e} presentation={presentation} schema={schema} />
+            ))}
+            {project && <QuickAddRow group={node} groupBy={node.field} project={project} />}
+          </>
+        ) : (
+          node.children.map((child) => (
+            <GroupSection
+              key={child.path}
+              node={child}
+              presentation={presentation}
+              schema={schema}
+              project={project}
+              scope={scope}
+            />
+          ))
+        ))}
+    </section>
+  );
+}
+
+export function ListView({ entries, presentation, schema, project, scope = 'list' }: ListViewProps) {
+  // M9.1: a chain, not a single field — groupTree recurses so this view does
+  // not need to know how deep the nesting goes.
+  const nodes = groupTree(entries, presentation.group, schema);
+
+  // Fix (execution-log note 17a): grouping an empty list yields no bands — an
+  // empty project rendered a blank canvas with no headers and no Add-item
+  // row. Fall back to a flat run so quick-add stays reachable. Same fallback
+  // covers an explicitly ungrouped view.
+  const flat = nodes.length === 0;
 
   return (
     // Deviation from the plan's verbatim root (reported): the shared contract
@@ -163,29 +247,45 @@ export function ListView({ entries, presentation, schema, project }: ListViewPro
     // min-w-[720px] block sits inside it.
     <div data-testid="list-view" className="min-h-0 min-w-0 flex-1 overflow-auto">
       <div className="min-w-[720px]">
-        {groups.map((g) => (
-          <section key={g.key || g.label}>
+        {flat ? (
+          <section>
             <header
               data-testid="list-group-header"
+              data-depth={0}
               className="sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] px-5"
             >
               <span
                 className="box-border h-[11px] w-[11px] rounded-full"
-                style={
-                  g.ghost || !g.color
-                    ? { border: '1.5px solid var(--n-400)' }
-                    : { background: g.color, border: `1.5px solid ${g.color}` }
-                }
+                style={{ border: '1.5px solid var(--n-400)' }}
               />
-              <span className="text-[12.5px] font-semibold text-[var(--n-800)]">{g.label}</span>
-              <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">{g.entries.length}</span>
+              <span className="text-[12.5px] font-semibold text-[var(--n-800)]">All items</span>
+              <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                {entries.length}
+              </span>
             </header>
-            {g.entries.map((e) => (
+            {entries.map((e) => (
               <ListRow key={e.path} entry={e} presentation={presentation} schema={schema} />
             ))}
-            {project && <QuickAddRow group={g} groupBy={groupBy} project={project} />}
+            {project && (
+              <QuickAddRow
+                group={{ key: '', label: 'All items', color: null, ghost: false, entries }}
+                groupBy={null}
+                project={project}
+              />
+            )}
           </section>
-        ))}
+        ) : (
+          nodes.map((node) => (
+            <GroupSection
+              key={node.path}
+              node={node}
+              presentation={presentation}
+              schema={schema}
+              project={project}
+              scope={scope}
+            />
+          ))
+        )}
       </div>
     </div>
   );

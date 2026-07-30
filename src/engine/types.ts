@@ -101,16 +101,58 @@ export type Selection =
   | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
   | { kind: 'settings' };
 
+/**
+ * One level of grouping (M9.1). A view holds an ordered chain of these —
+ * `[status, assignee]` groups by status, then by assignee inside each status
+ * band. The single `groupBy: string | null` it replaces could only ever
+ * express the first entry.
+ */
+export interface GroupSpec {
+  field: string;
+  /** Order of the GROUPS themselves; declared option order when omitted. */
+  dir?: 'asc' | 'desc';
+  /** Drop groups with no entries. Boards want them (they are the columns). */
+  hideEmpty?: boolean;
+}
+
+/** One key of a multi-key sort (M9.1). First non-zero comparison wins. */
+export interface SortSpec {
+  field: string;
+  dir: 'asc' | 'desc';
+}
+
+/**
+ * One column (M9.1). Replaces the bare field name in `visibleFields` so a
+ * view can carry width and hidden-ness. `hidden` rather than removal from
+ * the array: re-showing a column returns it to its position instead of
+ * appending it to the end.
+ */
+export interface ColumnSpec {
+  field: string;
+  width?: number;
+  hidden?: boolean;
+  wrap?: boolean;
+}
+
 export interface Presentation {
   // 'split' = master-detail record browser (M3): rows | doc editor | properties
   // 'table' = spreadsheet grid with inline-editable cells (M3.4)
   // 'tree'  = hierarchy outline following a relation (M3.5)
-  type: 'list' | 'board' | 'split' | 'table' | 'tree';
-  groupBy: string | null;              // field name; null = flat list
-  orderBy: { field: string; dir: 'asc' | 'desc' };
-  visibleFields: string[];
-  /** Tree layout only: which relation to descend for child rows. */
-  childrenVia?: ChildrenSpec | null;
+  // 'calendar' is reserved (M10) so the union does not need re-migrating.
+  type: 'list' | 'board' | 'split' | 'table' | 'tree' | 'calendar';
+  /** Ordered grouping chain; empty = flat. */
+  group: GroupSpec[];
+  /** Ordered sort chain; never empty in practice (parse supplies a default). */
+  sort: SortSpec[];
+  columns: ColumnSpec[];
+  /**
+   * Ordered descent chain, one spec per depth (M9.1). `[Objective→Key result,
+   * Key result→Work item]` nests three levels. The single `childrenVia` it
+   * replaces was applied at EVERY depth, so a hierarchy could only ever be
+   * one relation deep.
+   */
+  hierarchy: ChildrenSpec[];
+  rowHeight?: 'compact' | 'default' | 'tall';
 }
 
 /**
@@ -155,6 +197,22 @@ export interface ViewFile {
 export interface Group { key: string; label: string; color: string | null; ghost: boolean; entries: Entry[] }
 // groupEntries emits empty declared option/status groups (boards need the columns) and a trailing
 // no-value group with key '__none__' (label 'No <field>') — pinned; BoardView/ListView rely on it.
+
+/**
+ * A node in a nested grouping (M9.1). `entries` is populated on LEAF nodes
+ * only; interior nodes carry `children`. `count` is the recursive total, so a
+ * collapsed parent still reports how much is inside it rather than zero.
+ *
+ * `path` is the chain of group keys from the root, joined — the stable
+ * identity a collapse-state map keys on.
+ */
+export interface GroupNode extends Group {
+  depth: number;
+  field: string;
+  path: string;
+  children: GroupNode[];
+  count: number;
+}
 
 export interface Schema {
   types: Map<string, TypeDef>;

@@ -6,7 +6,10 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { resolveCollection, sortEntries } from '@/engine/collections';
-import type { Presentation, Selection } from '@/engine/types';
+import { columnUniverse } from '@/engine/columns';
+import type { FieldDef, Presentation, Selection } from '@/engine/types';
+import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { clonePresentation, toggleSort } from '@/engine/views';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { BoardView } from '@/views/BoardView';
@@ -44,22 +47,27 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
-    setPresentation(collection.presentation);
+    setPresentation(clonePresentation(collection.presentation));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.id]);
 
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.orderBy, schema),
-    [collection.entries, presentation.orderBy, schema],
+    () => sortEntries(collection.entries, presentation.sort, schema),
+    [collection.entries, presentation.sort, schema],
   );
 
+  // M9.2: one resolution for every surface. A typeless view used to get [],
+  // so an "Everything" view had no columns at all; columnUniverse unions the
+  // properties its records actually carry.
   const fields = useMemo(
     () =>
-      view?.definition.source.type === null || view === null
-        ? []
-        : (schema.types.get(view.definition.source.type)?.fields ?? []),
-    [schema, view],
+      view === null ? [] : columnUniverse(view.definition.source, collection.entries, schema),
+    [schema, view, collection.entries],
   );
+
+  const sourceType = view?.definition.source.type ?? null;
+  // Collapse state is namespaced per surface so two views don't share bands.
+  const scope = `view:${selection.id}`;
 
   if (view === null) {
     return (
@@ -77,6 +85,20 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
   const changePresentation = (next: Presentation) => {
     setPresentation(next);
     void updateView(view, { ...view.definition, presentation: next });
+  };
+
+  // M9.2: a column IS a property, so adding one writes the type doc and then
+  // shows the column here. Guarded to typed views by the toolbar.
+  const addProperty = (name: string, kind: FieldDef['kind']) => {
+    if (sourceType === null) return;
+    void (async () => {
+      if (await addFieldToType(sourceType, name, kind)) {
+        changePresentation({
+          ...presentation,
+          columns: [...presentation.columns, { field: normalizeFieldName(name) }],
+        });
+      }
+    })();
   };
 
   const sourceLabel =
@@ -111,6 +133,9 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
         onChange={changePresentation}
         fields={fields}
         withSplit
+        sourceType={sourceType}
+        schema={schema}
+        onAddProperty={addProperty}
       />
       {presentation.type === 'tree' ? (
         <TreeView
@@ -119,6 +144,7 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
           schema={schema}
           allEntries={entries}
           fields={fields}
+          scope={scope}
         />
       ) : presentation.type === 'table' ? (
         <TableView
@@ -126,29 +152,26 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
           presentation={presentation}
           schema={schema}
           fields={fields}
-          onOrderBy={(field) =>
-            changePresentation({
-              ...presentation,
-              orderBy: {
-                field,
-                dir:
-                  presentation.orderBy.field === field && presentation.orderBy.dir === 'asc'
-                    ? 'desc'
-                    : 'asc',
-              },
-            })
-          }
+          scope={scope}
+          onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
+          onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
         />
       ) : presentation.type === 'split' ? (
         <SplitView entries={sortedEntries} schema={schema} />
       ) : presentation.type === 'board' ? (
-        <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
+        <BoardView
+          entries={sortedEntries}
+          presentation={presentation}
+          schema={schema}
+          scope={scope}
+        />
       ) : (
         <ListView
           entries={sortedEntries}
           presentation={presentation}
           schema={schema}
           project={null}
+          scope={scope}
         />
       )}
 

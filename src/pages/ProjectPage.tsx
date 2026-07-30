@@ -5,9 +5,12 @@ import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { resolveCollection, sortEntries } from '@/engine/collections';
+import { columnUniverse } from '@/engine/columns';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { Presentation, Selection, ViewFile } from '@/engine/types';
-import { serializeView } from '@/engine/views';
+import type { FieldDef, Presentation, Selection, ViewFile } from '@/engine/types';
+import { clonePresentation, serializeView, toggleSort } from '@/engine/views';
+import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { TreeView } from '@/views/TreeView';
 import { EntityDossier } from '@/knowledge/EntityDossier';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { saveView } from '@/lib/ipc';
@@ -31,12 +34,6 @@ type ProjectTab =
 export type ProjectSelection = Extract<Selection, { kind: 'project' | 'view' }>;
 
 const projectDir = (projectPath: string) => projectPath.replace(/\/project\.md$/, '');
-
-const clonePresentation = (p: Presentation): Presentation => ({
-  ...p,
-  orderBy: { ...p.orderBy },
-  visibleFields: [...p.visibleFields],
-});
 
 /** Underline tab from the design mock's saved-view tab row. */
 function ViewTab({
@@ -145,16 +142,24 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   // orderBy so the toolbar's order select works — resolveCollection sorts by
   // the initial presentation only, and the views never re-sort.
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.orderBy, schema),
-    [collection.entries, presentation.orderBy, schema],
+    () => sortEntries(collection.entries, presentation.sort, schema),
+    [collection.entries, presentation.sort, schema],
   );
 
-  // The project canvas is Work-item-only, so its column universe is that
-  // type's declared fields (M3.4: drives the table and the property picker).
-  const workItemFields = useMemo(
-    () => schema.types.get('Work item')?.fields ?? [],
-    [schema],
+  // M9.2: the canvas is no longer Work-item-only — a scoped view tab lists
+  // whatever type its source names. Hardcoding `Work item` here showed the
+  // wrong type's properties the moment a view tab was active.
+  const activeSource = activeView?.definition.source ?? {
+    type: 'Work item',
+    project: project?.path ?? null,
+  };
+  const fields = useMemo(
+    () => columnUniverse(activeSource, collection.entries, schema),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeSource.type, activeSource.project, collection.entries, schema],
   );
+  const sourceType = activeSource.type;
+  const scope = selection.kind === 'project' ? `project:${selection.path}:${tabKey}` : `view:${selection.id}`;
 
   // Task 8: toolbar edits auto-persist to the active saved view's file
   // (project-scoped tab or global view). The Items tab stays ephemeral.
@@ -169,6 +174,20 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
         await rescan();
       } catch {
         toast(`Couldn't update view "${activeView.definition.name}"`);
+      }
+    })();
+  };
+
+  // M9.2: a column IS a property — adding one writes the type doc, then
+  // shows the column on this canvas.
+  const addProperty = (name: string, kind: FieldDef['kind']) => {
+    if (sourceType === null) return;
+    void (async () => {
+      if (await addFieldToType(sourceType, name, kind)) {
+        handlePresentationChange({
+          ...presentation,
+          columns: [...presentation.columns, { field: normalizeFieldName(name) }],
+        });
       }
     })();
   };
@@ -312,31 +331,47 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
           <ViewToolbar
             presentation={presentation}
             onChange={handlePresentationChange}
-            fields={workItemFields}
+            fields={fields}
+            sourceType={sourceType}
+            schema={schema}
+            onAddProperty={addProperty}
           />
-          {presentation.type === 'table' ? (
+          {presentation.type === 'tree' ? (
+            <TreeView
+              entries={sortedEntries}
+              presentation={presentation}
+              schema={schema}
+              allEntries={entries}
+              fields={fields}
+              scope={scope}
+            />
+          ) : presentation.type === 'table' ? (
             <TableView
               entries={sortedEntries}
               presentation={presentation}
               schema={schema}
-              fields={workItemFields}
-              onOrderBy={(field) =>
-                handlePresentationChange({
-                  ...presentation,
-                  orderBy: {
-                    field,
-                    dir:
-                      presentation.orderBy.field === field && presentation.orderBy.dir === 'asc'
-                        ? 'desc'
-                        : 'asc',
-                  },
-                })
+              fields={fields}
+              scope={scope}
+              onColumnsChange={(columns) =>
+                handlePresentationChange({ ...presentation, columns })
               }
+              onOrderBy={(field) => handlePresentationChange(toggleSort(presentation, field))}
             />
           ) : presentation.type === 'board' ? (
-            <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
+            <BoardView
+              entries={sortedEntries}
+              presentation={presentation}
+              schema={schema}
+              scope={scope}
+            />
           ) : (
-            <ListView entries={sortedEntries} presentation={presentation} schema={schema} project={project} />
+            <ListView
+              entries={sortedEntries}
+              presentation={presentation}
+              schema={schema}
+              project={project}
+              scope={scope}
+            />
           )}
         </>
       )}

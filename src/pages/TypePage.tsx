@@ -5,6 +5,7 @@ import {
   removeFieldFromType,
   renameFieldOnType,
   setFieldConfig,
+  normalizeFieldName,
   setFieldOptions,
   setTypeStatuses,
 } from '@/app/typeActions';
@@ -17,6 +18,8 @@ import { OptionListEditor } from '@/detail/OptionListEditor';
 import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
 import { StatusListEditor } from '@/detail/StatusListEditor';
 import { resolveCollection, sortEntries } from '@/engine/collections';
+import { columnUniverse } from '@/engine/columns';
+import { clonePresentation, toggleSort } from '@/engine/views';
 import { kindMeta } from '@/engine/properties';
 import { DEFAULT_STATUSES } from '@/engine/schema';
 import {
@@ -30,6 +33,7 @@ import { BoardView } from '@/views/BoardView';
 import { ListView } from '@/views/ListView';
 import { SplitView } from '@/views/SplitView';
 import { TableView } from '@/views/TableView';
+import { TreeView } from '@/views/TreeView';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
@@ -309,23 +313,25 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     [selection, entries, schema, views],
   );
 
+  // M9.2: one resolution path shared with every other surface.
   const typeFields = useMemo(
-    () => schema.types.get(listing.name)?.fields ?? [],
-    [schema, listing.name],
+    () => columnUniverse({ type: listing.name, project: null }, collection.entries, schema),
+    [schema, listing.name, collection.entries],
   );
+  const scope = `type:${listing.name}`;
 
   const [tab, setTab] = useState<TypeTab>('records');
   const [dialog, setDialog] = useState<TypeDialog | null>(null);
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
   useEffect(() => {
     setTab('records');
-    setPresentation(collection.presentation);
+    setPresentation(clonePresentation(collection.presentation));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name]);
 
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.orderBy, schema),
-    [collection.entries, presentation.orderBy, schema],
+    () => sortEntries(collection.entries, presentation.sort, schema),
+    [collection.entries, presentation.sort, schema],
   );
 
   return (
@@ -392,36 +398,54 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             onChange={setPresentation}
             fields={typeFields}
             withSplit
+            sourceType={listing.name}
+            schema={schema}
+            onAddProperty={(name, kind) => {
+              void (async () => {
+                if (await addFieldToType(listing.name, name, kind)) {
+                  setPresentation((p) => ({
+                    ...p,
+                    columns: [...p.columns, { field: normalizeFieldName(name) }],
+                  }));
+                }
+              })();
+            }}
           />
           {presentation.type === 'split' ? (
             <SplitView entries={sortedEntries} schema={schema} />
+          ) : presentation.type === 'tree' ? (
+            <TreeView
+              entries={sortedEntries}
+              presentation={presentation}
+              schema={schema}
+              allEntries={entries}
+              fields={typeFields}
+              scope={scope}
+            />
           ) : presentation.type === 'table' ? (
             <TableView
               entries={sortedEntries}
               presentation={presentation}
               schema={schema}
               fields={typeFields}
-              onOrderBy={(field) =>
-                setPresentation({
-                  ...presentation,
-                  orderBy: {
-                    field,
-                    dir:
-                      presentation.orderBy.field === field && presentation.orderBy.dir === 'asc'
-                        ? 'desc'
-                        : 'asc',
-                  },
-                })
-              }
+              scope={scope}
+              onColumnsChange={(columns) => setPresentation({ ...presentation, columns })}
+              onOrderBy={(field) => setPresentation(toggleSort(presentation, field))}
             />
           ) : presentation.type === 'board' ? (
-            <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
+            <BoardView
+              entries={sortedEntries}
+              presentation={presentation}
+              schema={schema}
+              scope={scope}
+            />
           ) : (
             <ListView
               entries={sortedEntries}
               presentation={presentation}
               schema={schema}
               project={null}
+              scope={scope}
             />
           )}
         </>

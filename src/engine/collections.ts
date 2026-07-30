@@ -1,10 +1,10 @@
 import { isTemplate } from '@/lib/templates';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
-import type { Entry, Presentation, Schema, Selection, ViewFile, ViewSource } from './types';
+import type { Entry, Presentation, Schema, Selection, SortSpec, ViewFile, ViewSource } from './types';
 import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
-import { DEFAULT_PRESENTATION } from './views';
+import { clonePresentation, DEFAULT_PRESENTATION } from './views';
 
 export interface Collection {
   title: string;
@@ -13,11 +13,7 @@ export interface Collection {
 }
 
 function defaultPresentation(): Presentation {
-  return {
-    ...DEFAULT_PRESENTATION,
-    orderBy: { ...DEFAULT_PRESENTATION.orderBy },
-    visibleFields: [...DEFAULT_PRESENTATION.visibleFields],
-  };
+  return clonePresentation(DEFAULT_PRESENTATION);
 }
 
 const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.md$/, '');
@@ -57,23 +53,26 @@ function optionOrder(entries: Entry[], field: string, schema: Schema): string[] 
 }
 
 /**
- * Stable sort by the presentation's orderBy. Declared option sets
- * (status/select) sort in declared order; otherwise numbers compare
- * numerically and everything else as strings (ISO dates sort correctly).
- * Entries without a value always sort last, regardless of direction.
+ * Comparator for one sort key. Declared option sets (status/select) sort in
+ * declared order; otherwise numbers compare numerically and everything else
+ * as strings (ISO dates sort correctly). Entries without a value always sort
+ * last, regardless of direction.
  */
-export function sortEntries(
+function compareBy(
+  spec: SortSpec,
   entries: Entry[],
-  orderBy: Presentation['orderBy'],
   schema: Schema,
-): Entry[] {
-  const ranks = optionOrder(entries, orderBy.field, schema);
-  const dir = orderBy.dir === 'asc' ? 1 : -1;
-  return [...entries].sort((a, b) => {
-    const va = sortValue(a, orderBy.field);
-    const vb = sortValue(b, orderBy.field);
+): (a: Entry, b: Entry) => number {
+  const ranks = optionOrder(entries, spec.field, schema);
+  const dir = spec.dir === 'asc' ? 1 : -1;
+  return (a, b) => {
+    const va = sortValue(a, spec.field);
+    const vb = sortValue(b, spec.field);
     const emptyA = isEmptyValue(va);
     const emptyB = isEmptyValue(vb);
+    // Empty-last is evaluated PER KEY (M9.1). Returning 0 when both are empty
+    // is what lets the next key decide — a global empty-last check would
+    // strand every record missing the primary field in input order.
     if (emptyA || emptyB) return emptyA === emptyB ? 0 : emptyA ? 1 : -1;
     if (ranks !== null) {
       const ra = ranks.indexOf(String(va));
@@ -85,6 +84,23 @@ export function sortEntries(
     }
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
     return String(va).localeCompare(String(vb)) * dir;
+  };
+}
+
+/**
+ * Stable multi-key sort (M9.1). First non-zero comparison wins; Array.sort is
+ * stable in every engine we target, so equal-on-every-key entries keep their
+ * input order.
+ */
+export function sortEntries(entries: Entry[], sort: SortSpec[], schema: Schema): Entry[] {
+  if (sort.length === 0) return [...entries];
+  const comparators = sort.map((spec) => compareBy(spec, entries, schema));
+  return [...entries].sort((a, b) => {
+    for (const compare of comparators) {
+      const result = compare(a, b);
+      if (result !== 0) return result;
+    }
+    return 0;
   });
 }
 
@@ -133,7 +149,7 @@ export function resolveCollection(
       if (project === null) return { title: stem(sel.path), entries: [], presentation };
       return {
         title: project.title,
-        entries: sortEntries(itemsOfProject(project, entries), presentation.orderBy, schema),
+        entries: sortEntries(itemsOfProject(project, entries), presentation.sort, schema),
         presentation,
       };
     }
@@ -150,7 +166,7 @@ export function resolveCollection(
           selectSource(entries, source).filter(
             (e) => filters === null || evaluateFilters(e, filters, schema),
           ),
-          presentation.orderBy,
+          presentation.sort,
           schema,
         ),
         presentation,
@@ -166,7 +182,7 @@ export function resolveCollection(
           // Templates declare a type so new pages inherit it; they are not
           // records of it (M3.1).
           entries.filter((e) => e.type === sel.name && !isTemplate(e)),
-          presentation.orderBy,
+          presentation.sort,
           schema,
         ),
         presentation,

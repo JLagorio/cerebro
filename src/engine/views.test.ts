@@ -4,10 +4,14 @@ import type { ViewDefinition } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
-  groupBy: 'status',
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
-  childrenVia: null,
+  group: [{ field: 'status' }],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [
+    { field: 'key' }, { field: 'status' }, { field: 'priority' },
+    { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
+  ],
+  hierarchy: [],
+  rowHeight: undefined,
 };
 
 const NO_SOURCE = { type: null, project: null };
@@ -55,10 +59,11 @@ describe('parseViewYaml', () => {
         },
         presentation: {
           type: 'board',
-          groupBy: 'status',
-          orderBy: { field: 'due', dir: 'asc' },
-          visibleFields: ['key', 'status', 'assignee'],
-          childrenVia: null,
+          group: [{ field: 'status' }],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [{ field: 'key' }, { field: 'status' }, { field: 'assignee' }],
+          hierarchy: [],
+          rowHeight: undefined,
         },
       },
     });
@@ -97,16 +102,20 @@ describe('parseViewYaml', () => {
     const view = parseViewYaml('partial', 'name: Partial\npresentation:\n  type: board\n');
     expect(view.definition.presentation).toEqual({
       type: 'board',
-      groupBy: 'status',
-      orderBy: { field: 'modifiedAt', dir: 'desc' },
-      visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
-      childrenVia: null,
+      group: [{ field: 'status' }],
+      sort: [{ field: 'modifiedAt', dir: 'desc' }],
+      columns: [
+        { field: 'key' }, { field: 'status' }, { field: 'priority' },
+        { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
+      ],
+      hierarchy: [],
+      rowHeight: undefined,
     });
   });
 
-  it('an explicit groupBy null stays null (flat list)', () => {
+  it('an explicit groupBy null stays flat', () => {
     const view = parseViewYaml('flat', 'presentation:\n  groupBy: null\n');
-    expect(view.definition.presentation.groupBy).toBeNull();
+    expect(view.definition.presentation.group).toEqual([]);
   });
 
   it('drops malformed filter rules but keeps valid ones', () => {
@@ -189,10 +198,10 @@ describe('serializeView', () => {
       },
       presentation: {
         type: 'board',
-        groupBy: null,
-        orderBy: { field: 'title', dir: 'asc' },
-        visibleFields: ['key', 'status'],
-        childrenVia: null,
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }, { field: 'status' }],
+        hierarchy: [],
       },
     };
     expect(parseViewYaml('sprint-board', serializeView(def)).definition).toEqual(def);
@@ -210,10 +219,10 @@ describe('serializeView', () => {
       filters: null,
       presentation: {
         type: 'tree',
-        groupBy: null,
-        orderBy: { field: 'title', dir: 'asc' },
-        visibleFields: ['status', 'progress'],
-        childrenVia: { direction: 'reverse', type: 'Key result', field: 'objective' },
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'status' }, { field: 'progress' }],
+        hierarchy: [{ direction: 'reverse', type: 'Key result', field: 'objective' }],
       },
     };
     expect(parseViewYaml('okr-tree', serializeView(def)).definition).toEqual(def);
@@ -221,9 +230,77 @@ describe('serializeView', () => {
 
   it('accepts the shorthand `childrenVia: <field>` as a forward descent', () => {
     const view = parseViewYaml('t', 'presentation:\n  type: tree\n  childrenVia: key_results\n');
-    expect(view.definition.presentation.childrenVia).toEqual({
-      direction: 'forward',
-      field: 'key_results',
+    expect(view.definition.presentation.hierarchy).toEqual([
+      { direction: 'forward', field: 'key_results' },
+    ]);
+  });
+
+  // M9.1 back-compat: every view file written before the chain model must
+  // keep opening, and must land on the v2 shape rather than a half-migration.
+  describe('v1 → v2 presentation migration', () => {
+    it('lifts groupBy, orderBy, visibleFields, and childrenVia into chains', () => {
+      const view = parseViewYaml(
+        'legacy',
+        [
+          'presentation:',
+          '  type: tree',
+          '  groupBy: priority',
+          '  orderBy: { field: due, dir: asc }',
+          '  visibleFields: [status, owner]',
+          '  childrenVia: { type: Key result, field: objective }',
+        ].join('\n'),
+      );
+      const p = view.definition.presentation;
+      expect(p.group).toEqual([{ field: 'priority' }]);
+      expect(p.sort).toEqual([{ field: 'due', dir: 'asc' }]);
+      expect(p.columns).toEqual([{ field: 'status' }, { field: 'owner' }]);
+      expect(p.hierarchy).toEqual([
+        { direction: 'reverse', type: 'Key result', field: 'objective' },
+      ]);
+    });
+
+    it('lets v2 keys win when a file carries both shapes', () => {
+      const view = parseViewYaml(
+        'both',
+        [
+          'presentation:',
+          '  groupBy: status',
+          '  group: [{ field: assignee }]',
+          '  visibleFields: [status]',
+          '  columns: [{ field: due, width: 220 }]',
+        ].join('\n'),
+      );
+      const p = view.definition.presentation;
+      expect(p.group).toEqual([{ field: 'assignee' }]);
+      expect(p.columns).toEqual([{ field: 'due', width: 220 }]);
+    });
+
+    it('round-trips a multi-level grouping and hierarchy chain', () => {
+      const def: ViewDefinition = {
+        name: 'Deep',
+        icon: null,
+        color: null,
+        order: null,
+        source: { type: 'Objective', project: null },
+        filters: null,
+        presentation: {
+          type: 'tree',
+          group: [{ field: 'status' }, { field: 'owner', dir: 'desc' }],
+          sort: [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'desc' }],
+          columns: [{ field: 'status', width: 180 }, { field: 'owner', hidden: true }],
+          hierarchy: [
+            { direction: 'reverse', type: 'Key result', field: 'objective' },
+            { direction: 'reverse', type: 'Work item', field: 'key_result' },
+          ],
+        },
+      };
+      expect(parseViewYaml('deep', serializeView(def)).definition).toEqual(def);
+    });
+
+    it('truncates a hierarchy deeper than the depth guard', () => {
+      const levels = Array.from({ length: 9 }, () => '  - { type: X, field: y }').join('\n');
+      const view = parseViewYaml('deep', `presentation:\n  hierarchy:\n${levels}\n`);
+      expect(view.definition.presentation.hierarchy).toHaveLength(6);
     });
   });
 });

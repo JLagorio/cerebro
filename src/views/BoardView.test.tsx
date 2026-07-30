@@ -9,9 +9,10 @@ import type { Group, Presentation, Schema } from '@/engine/types';
 
 const presentation: Presentation = {
   type: 'board',
-  groupBy: 'status',
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['status', 'priority', 'assignee'],
+  group: [{ field: 'status' }],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [{ field: 'status' }, { field: 'priority' }, { field: 'assignee' }],
+  hierarchy: [],
 };
 
 afterEach(cleanup);

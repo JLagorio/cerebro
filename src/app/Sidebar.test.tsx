@@ -51,9 +51,10 @@ describe('Sidebar', () => {
             filters: null,
             presentation: {
               type: 'list',
-              groupBy: 'status',
-              orderBy: { field: 'modifiedAt', dir: 'desc' },
-              visibleFields: ['key', 'status'],
+              group: [{ field: 'status' }],
+              sort: [{ field: 'modifiedAt', dir: 'desc' }],
+              columns: [{ field: 'key' }, { field: 'status' }],
+              hierarchy: [],
             },
           },
         },

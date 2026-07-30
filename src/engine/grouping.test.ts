@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSchema } from './schema';
-import { groupEntries } from './grouping';
+import { groupEntries, groupTree } from './grouping';
 import { makeEntry } from './testHelpers';
 
 const typeNote = makeEntry({
@@ -145,5 +145,63 @@ describe('groupEntries — plain values', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ key: '__none__', label: 'No zzz', ghost: false });
     expect(groups[0].entries).toEqual(items);
+  });
+});
+
+// M9.1: the chain model. groupEntries above stays the single-level case; these
+// cover what a chain adds on top of it.
+describe('groupTree', () => {
+  const schema = buildSchema([typeNote]);
+  const item = (path: string, status: string, priority: string) =>
+    makeEntry({ path, type: 'Work item', properties: { status, priority } });
+
+  const entries = [
+    item('a.md', 'doing', 'urgent'),
+    item('b.md', 'doing', 'low'),
+    item('c.md', 'triage', 'urgent'),
+  ];
+
+  it('returns [] for an empty chain, so callers render flat', () => {
+    expect(groupTree(entries, [], schema)).toEqual([]);
+  });
+
+  it('nests the second level inside the first', () => {
+    const nodes = groupTree(entries, [{ field: 'status' }, { field: 'priority' }], schema);
+    const doing = nodes.find((n) => n.key === 'doing')!;
+    // Declared option order, empty options included — the depth-0 rule holds
+    // at every level, so 'high' appears here with no entries.
+    expect(doing.children.map((c) => c.key)).toEqual(['urgent', 'high', 'low']);
+    expect(doing.children.find((c) => c.key === 'urgent')!.entries.map((e) => e.path)).toEqual([
+      'a.md',
+    ]);
+  });
+
+  it('keeps entries on leaves only, so nothing renders twice', () => {
+    const nodes = groupTree(entries, [{ field: 'status' }, { field: 'priority' }], schema);
+    for (const parent of nodes) {
+      expect(parent.entries).toEqual([]);
+      for (const leaf of parent.children) expect(leaf.children).toEqual([]);
+    }
+  });
+
+  it('reports a recursive count, so a collapsed parent still tells the truth', () => {
+    const nodes = groupTree(entries, [{ field: 'status' }, { field: 'priority' }], schema);
+    expect(nodes.find((n) => n.key === 'doing')!.count).toBe(2);
+  });
+
+  it('paths disambiguate the same key under different parents', () => {
+    const nodes = groupTree(entries, [{ field: 'status' }, { field: 'priority' }], schema);
+    const urgentPaths = nodes.flatMap((n) => n.children).filter((c) => c.key === 'urgent').map((c) => c.path);
+    // 'urgent' appears under both statuses; collapsing one must not collapse
+    // the other, which is why collapse state keys on path and not key.
+    expect(new Set(urgentPaths).size).toBe(urgentPaths.length);
+  });
+
+  it('hideEmpty drops declared-but-empty groups', () => {
+    const withEmpty = groupTree(entries, [{ field: 'status' }], schema);
+    const withoutEmpty = groupTree(entries, [{ field: 'status', hideEmpty: true }], schema);
+    // 'shipped' is declared on the type but unused here.
+    expect(withEmpty.some((n) => n.key === 'shipped')).toBe(true);
+    expect(withoutEmpty.some((n) => n.key === 'shipped')).toBe(false);
   });
 });

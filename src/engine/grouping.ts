@@ -1,4 +1,13 @@
-import type { Entry, FieldDef, FieldKind, FieldOption, Group, Schema } from './types';
+import type {
+  Entry,
+  FieldDef,
+  FieldKind,
+  FieldOption,
+  Group,
+  GroupNode,
+  GroupSpec,
+  Schema,
+} from './types';
 
 function firstValue(raw: unknown): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
@@ -93,4 +102,68 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   }
 
   return groups;
+}
+
+/**
+ * Nested grouping (M9.1). Applies the chain of specs level by level: the
+ * first partitions the whole list, the second partitions inside each of
+ * those, and so on. `groupEntries` is the depth-0 case and every rule it
+ * establishes — declared option order, empty declared groups, trailing ghost
+ * groups, the pinned `__none__` bucket — applies unchanged at every level.
+ *
+ * `entries` lands on LEAF nodes only, so a renderer walks to the bottom to
+ * find rows. `count` is recursive, so a collapsed parent still reports how
+ * much is inside it.
+ *
+ * An empty chain returns [] — callers treat that as "flat, render `entries`
+ * directly" rather than synthesising a single wrapper group.
+ */
+export function groupTree(
+  entries: Entry[],
+  specs: GroupSpec[],
+  schema: Schema,
+  depth = 0,
+  parentPath = '',
+): GroupNode[] {
+  const spec = specs[depth];
+  if (spec === undefined) return [];
+
+  const flat = groupEntries(entries, spec.field, schema);
+  const ordered = spec.dir === 'desc' ? [...flat].reverse() : flat;
+  const isLeaf = depth === specs.length - 1;
+
+  const nodes: GroupNode[] = [];
+  for (const g of ordered) {
+    if (spec.hideEmpty === true && g.entries.length === 0) continue;
+    // Path, not key, identifies a node: the same status key appears under
+    // every assignee, and a collapse map keyed on `key` alone would toggle
+    // all of them together.
+    const path = parentPath === '' ? g.key : `${parentPath}/${g.key}`;
+    const children = isLeaf ? [] : groupTree(g.entries, specs, schema, depth + 1, path);
+    nodes.push({
+      ...g,
+      depth,
+      field: spec.field,
+      path,
+      children,
+      count: g.entries.length,
+      // Interior nodes hand their rows to the children; keeping both would
+      // let a renderer draw every entry twice.
+      entries: isLeaf ? g.entries : [],
+    });
+  }
+  return nodes;
+}
+
+/** Depth-first walk of the leaves, in render order. */
+export function leafNodes(nodes: GroupNode[]): GroupNode[] {
+  const out: GroupNode[] = [];
+  const walk = (list: GroupNode[]) => {
+    for (const n of list) {
+      if (n.children.length === 0) out.push(n);
+      else walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
 }

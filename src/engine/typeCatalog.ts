@@ -202,11 +202,12 @@ export function typePresentation(typeName: string, schema: Schema): Presentation
   const hasStatus = fields.some((f) => f.kind === 'status');
   return {
     type: 'split',
-    groupBy: hasStatus ? 'status' : null,
-    orderBy: { ...DEFAULT_PRESENTATION.orderBy },
-    visibleFields:
+    group: hasStatus ? [{ field: 'status' }] : [],
+    sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
+    columns:
       fields.length > 0
-        ? fields.map((f) => f.name).slice(0, 6)
-        : [...DEFAULT_PRESENTATION.visibleFields],
+        ? fields.slice(0, 6).map((f) => ({ field: f.name }))
+        : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
+    hierarchy: [],
   };
 }

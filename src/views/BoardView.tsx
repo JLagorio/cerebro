@@ -10,6 +10,7 @@ import type { DragEndEvent } from '@dnd-kit/core';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Icon } from '@/components/ui/Icon';
 import { StatusFlag } from '@/components/ui/StatusFlag';
 import { groupEntries } from '@/engine/grouping';
 import { formatWikilink } from '@/engine/wikilink';
@@ -21,6 +22,8 @@ export interface BoardViewProps {
   entries: Entry[];
   presentation: Presentation;
   schema: Schema;
+  /** Collapse-state namespace for swimlanes (M9.1). */
+  scope?: string;
 }
 
 /** Droppable id used for the trailing "No <field>" group (dnd-kit ids must be non-empty). */
@@ -144,14 +147,62 @@ function BoardColumn({ group, schema }: { group: Group; schema: Schema }) {
   );
 }
 
-export function BoardView({ entries, presentation, schema }: BoardViewProps) {
+/** A sub-group band: one horizontal strip of columns under its own heading.
+ * This is Notion's board sub-grouping, and it falls straight out of the
+ * grouping chain — `group[0]` is the columns, `group[1]` is the swimlane. */
+function Swimlane({
+  label,
+  count,
+  scope,
+  path,
+  children,
+}: {
+  label: string;
+  count: number;
+  scope: string;
+  path: string;
+  children: React.ReactNode;
+}) {
+  const collapsed = useUiStore((s) => s.collapsed[scope]?.[path] === true);
+  const toggle = useUiStore((s) => s.toggleCollapsed);
+  return (
+    <section data-testid="board-swimlane" className="mb-4">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => toggle(scope, path)}
+        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] font-semibold text-[var(--n-800)] hover:bg-[var(--n-100)]"
+      >
+        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+        {label}
+        <span className="[font-family:var(--font-mono)] text-[11px] font-normal text-[var(--n-400)]">
+          {count}
+        </span>
+      </button>
+      {!collapsed && children}
+    </section>
+  );
+}
+
+export function BoardView({ entries, presentation, schema, scope = 'board' }: BoardViewProps) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const toast = useUiStore((s) => s.toast);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const groupBy = presentation.groupBy ?? 'status';
+  // A board's columns ARE its first grouping level, so it always has one.
+  const groupBy = presentation.group[0]?.field ?? 'status';
+  const swimlaneBy = presentation.group[1]?.field ?? null;
   const parseable = entries.filter((e) => e.parseError === null);
   const hiddenCount = entries.length - parseable.length;
   const groups = groupEntries(parseable, groupBy, schema);
+
+  // M9.1: sub-grouping partitions the ROWS first, then columns within each
+  // band — the reverse would produce columns that don't line up across lanes.
+  const lanes =
+    swimlaneBy === null
+      ? null
+      : groupEntries(parseable, swimlaneBy, schema)
+          .filter((lane) => lane.entries.length > 0)
+          .map((lane) => ({ lane, columns: groupEntries(lane.entries, groupBy, schema) }));
 
   return (
     // Deviation from the plan's verbatim root (reported): the shared contract
@@ -177,11 +228,29 @@ export function BoardView({ entries, presentation, schema }: BoardViewProps) {
           sensors={sensors}
           onDragEnd={(event) => handleDragEnd(event, { groupBy, groups, schema, patchFrontmatter, toast })}
         >
-          <div className="flex items-start gap-3 overflow-x-auto">
-            {groups.map((g) => (
-              <BoardColumn key={g.key || g.label} group={g} schema={schema} />
-            ))}
-          </div>
+          {lanes === null ? (
+            <div className="flex items-start gap-3 overflow-x-auto">
+              {groups.map((g) => (
+                <BoardColumn key={g.key || g.label} group={g} schema={schema} />
+              ))}
+            </div>
+          ) : (
+            lanes.map(({ lane, columns }) => (
+              <Swimlane
+                key={lane.key || lane.label}
+                label={lane.label}
+                count={lane.entries.length}
+                scope={scope}
+                path={lane.key}
+              >
+                <div className="flex items-start gap-3 overflow-x-auto">
+                  {columns.map((g) => (
+                    <BoardColumn key={g.key || g.label} group={g} schema={schema} />
+                  ))}
+                </div>
+              </Swimlane>
+            ))
+          )}
         </DndContext>
       )}
       {hiddenCount > 0 && (

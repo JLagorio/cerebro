@@ -10,6 +10,19 @@ interface UiState {
   closeDetail(): void;
   quickOpenVisible: boolean;
   setQuickOpen(v: boolean): void;
+  /**
+   * Collapsed group bands and tree rows (M9.1), keyed scope → key → true.
+   * Scope is the surface's identity (`view:<id>`, `project:<path>`,
+   * `type:<name>`); key is the group path or tree row key.
+   *
+   * This lived in component `useState` in TableView and TreeView, so every
+   * expansion reset the moment you navigated away — which read as "the
+   * nesting doesn't stick". It is session state, not view configuration, so
+   * it belongs in the store and NOT in the view's YAML.
+   */
+  collapsed: Record<string, Record<string, boolean>>;
+  toggleCollapsed(scope: string, key: string): void;
+  isCollapsed(scope: string, key: string): boolean;
   // File-tree expand state, persisted across sessions (M2 Task 10).
   expandedFolders: Record<string, boolean>;
   toggleFolder(path: string): void;
@@ -212,13 +225,21 @@ function loadInboxPeriod(): InboxPeriod {
 
 let nextToastId = 1;
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore = create<UiState>((set, get) => ({
   detailPath: null,
   openDetail: (path) => set({ detailPath: path }),
   closeDetail: () => set({ detailPath: null }),
 
   quickOpenVisible: false,
   setQuickOpen: (v) => set({ quickOpenVisible: v }),
+
+  collapsed: {},
+  toggleCollapsed: (scope, key) =>
+    set((s) => {
+      const band = s.collapsed[scope] ?? {};
+      return { collapsed: { ...s.collapsed, [scope]: { ...band, [key]: band[key] !== true } } };
+    }),
+  isCollapsed: (scope, key) => get().collapsed[scope]?.[key] === true,
 
   expandedFolders: loadExpanded(),
   toggleFolder: (path) =>
