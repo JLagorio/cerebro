@@ -100,8 +100,8 @@ export function ViewSettingsPanel({
           <>
             <div className="px-1 pb-2">
               <Input
-                ariaLabel="View name"
-                placeholder="View name"
+                ariaLabel="List name"
+                placeholder="List name"
                 value={definition.name}
                 onChange={(e) => onChange({ ...definition, name: e.target.value })}
                 width="100%"

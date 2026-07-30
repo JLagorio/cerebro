@@ -12,7 +12,7 @@ import type { Entry, Selection } from '@/engine/types';
 /**
  * One result, whatever kind of thing it points at (M9.6).
  *
- * QuickOpen found notes and nothing else, so reaching a saved view or a type
+ * QuickOpen found notes and nothing else, so reaching a list or a type
  * screen meant leaving the keyboard for the sidebar. Everything navigable is
  * findable here now, under one ranking.
  */
@@ -83,14 +83,17 @@ export function QuickOpen() {
     const viewTargets: Target[] = views
       .filter((v) => v.project === null)
       .map((v) => ({
-        id: `view:${v.id}`,
+        // Ids are unique per folder, so the collection is part of the target's
+        // identity AND of where it navigates — otherwise two collections'
+        // "roadmap" lists collapse into one entry that opens the wrong one.
+        id: `list:${v.collection ?? ''}:${v.id}`,
         label: v.definition.name,
         icon: v.definition.icon ?? 'layout-list',
         color: v.definition.color,
-        hint: '',
-        kindLabel: 'View',
+        hint: v.collection ?? '',
+        kindLabel: 'List',
         alias: v.id,
-        run: () => go({ kind: 'list', id: v.id }),
+        run: () => go({ kind: 'list', id: v.id, collection: v.collection }),
       }));
 
     const typeTargets: Target[] = listTypes(entries, schema).map((t) => ({
@@ -162,7 +165,7 @@ export function QuickOpen() {
         autoFocus
         testId="quick-open-input"
         icon="search"
-        placeholder="Search notes, views, types, and places…"
+        placeholder="Search notes, lists, types, and places…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
@@ -210,7 +213,7 @@ export function QuickOpen() {
         ))}
         {query.trim() === '' && (
           <div className="px-3 py-4 text-[12px] text-[var(--n-500)]">
-            Type to search notes, saved views, types, and places to go.
+            Type to search notes, lists, types, and places to go.
           </div>
         )}
         {query.trim() !== '' && results.length === 0 && (

@@ -340,7 +340,7 @@ function describeSelection(selection: {
     case 'project':
       return selection.path ?? null;
     case 'list':
-      return selection.id !== undefined ? `the saved view "${selection.id}"` : null;
+      return selection.id !== undefined ? `the list "${selection.id}"` : null;
     case 'type':
       return selection.name !== undefined ? `the ${selection.name} type screen` : null;
     case 'inbox':

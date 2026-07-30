@@ -199,7 +199,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     })();
   };
 
-  // "New view" tab affordance: saves the current presentation as a
+  // "New list" tab affordance: saves the current presentation as a
   // project-scoped view and switches to its tab.
   const [newViewOpen, setNewViewOpen] = useState(false);
   const [newViewName, setNewViewName] = useState('');
@@ -288,7 +288,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
               className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
             >
               <Icon name="plus" size={13} />
-              New view
+              New list
             </button>
             {/* Task 10: page tabs — the project folder's document surfaces. */}
             <span aria-hidden className="mx-1.5 mb-1.5 h-4 w-px bg-[var(--n-200)]" />
@@ -363,7 +363,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       <Dialog
         open={newViewOpen}
         onClose={() => setNewViewOpen(false)}
-        title="New view"
+        title="New list"
         width={420}
         primaryAction={{
           label: 'Save',
@@ -374,7 +374,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       >
         <Input
           autoFocus
-          placeholder="View name"
+          placeholder="List name"
           value={newViewName}
           onChange={(e) => setNewViewName(e.target.value)}
           width="100%"

@@ -133,9 +133,9 @@ describe('ProjectPage', () => {
     expect(screen.getByTestId('list-view')).toBeTruthy();
   });
 
-  // Task 6+8: "New view" writes into the project's views/ dir (scope-deduped)
+  // Task 6+8: "New list" writes into the project's views/ dir (scope-deduped)
   // and activates the new tab.
-  it('creates a project-scoped view from the New view affordance', async () => {
+  it('creates a project-scoped list from the New list affordance', async () => {
     // The create flow rescans from the mock fs, so the fixture project must
     // exist there too (listViews scopes by the presence of project.md).
     (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs.set(
@@ -143,8 +143,8 @@ describe('ProjectPage', () => {
       '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n',
     );
     render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
-    fireEvent.click(screen.getByText('New view'));
-    fireEvent.change(screen.getByPlaceholderText('View name'), { target: { value: 'My board' } });
+    fireEvent.click(screen.getByText('New list'));
+    fireEvent.change(screen.getByPlaceholderText('List name'), { target: { value: 'My board' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(async () => {
       const views = await ipc.listViews('/demo-vault');

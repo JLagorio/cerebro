@@ -35,7 +35,7 @@ export function newViewDefinition(typeName: string | null, schema: Schema): List
 const label = 'mb-1 block text-[11.5px] font-medium text-[var(--n-600)]';
 
 /**
- * Create/configure a saved view (M3.5): its source type, project scope,
+ * Create/configure a List (M10): its source type, project scope,
  * filters, and — for tree layouts — which relation nests the rows. This is
  * the surface that replaces "New project": a project is now a saved view
  * over Work items scoped to a folder.
@@ -87,7 +87,7 @@ export function ViewSettingsDialog({
           <span className={label}>Name</span>
           <Input
             autoFocus
-            ariaLabel="View name"
+            ariaLabel="List name"
             placeholder="Cobra launch, My open bugs…"
             value={def.name}
             onChange={(e) => setDef({ ...def, name: e.target.value })}
