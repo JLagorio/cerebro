@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useOpenPath } from '@/app/useOpenPath';
 import { Icon } from '@/components/ui/Icon';
 import { FieldChip } from '@/views/FieldChip';
 import { groupEntries } from '@/engine/grouping';
@@ -95,7 +96,11 @@ function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: strin
 }
 
 function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: Presentation; schema: Schema }) {
-  const openDetail = useUiStore((s) => s.openDetail);
+  // M9.3: the same in-place rule the table and hierarchy use. This row
+  // already called openDetail directly, which was the correct BEHAVIOUR but
+  // a second implementation of it — switching a view from List to Table
+  // silently changed what clicking a row did. One hook, four layouts.
+  const openPath = useOpenPath('in-place');
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 
@@ -103,7 +108,7 @@ function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: 
     return (
       <div
         role="row"
-        onClick={() => openDetail(entry.path)}
+        onClick={() => openPath(entry.path)}
         className="flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] px-5 hover:bg-[var(--n-50)]"
       >
         <span className="w-[52px] flex-none" />
@@ -121,7 +126,7 @@ function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: 
   return (
     <div
       role="row"
-      onClick={() => openDetail(entry.path)}
+      onClick={() => openPath(entry.path)}
       className="flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] px-5 hover:bg-[var(--n-50)]"
     >
       <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">{key}</span>

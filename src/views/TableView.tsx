@@ -100,7 +100,9 @@ const TableRow = memo(function TableRow({
 }) {
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
-  const openPath = useOpenPath();
+  // M9.3: in-place — the table IS the context, so opening a row must not
+  // navigate to the record's project and discard the view you were reading.
+  const openPath = useOpenPath('in-place');
   const style = typeStyle(entry.type, schema);
 
   return (

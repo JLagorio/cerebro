@@ -5,7 +5,9 @@ import { IconButton } from '@/components/ui/IconButton';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { typeStyle } from '@/engine/typeCatalog';
 import { setNoteTitle } from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -17,6 +19,9 @@ export function DetailPanel() {
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
+  const entries = useVaultStore((s) => s.entries);
+  const selection = useNavStore((s) => s.selection);
+  const navigate = useNavStore((s) => s.navigate);
 
   const [title, setTitle] = useState('');
   // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
@@ -42,6 +47,14 @@ export function DetailPanel() {
 
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
+
+  // The owning project, unless you are already looking at it — a crumb back
+  // to the page you are standing on is noise, not navigation.
+  const onItsProject = selection.kind === 'project' && selection.path === entry.project;
+  const project =
+    entry.project !== null && !onItsProject
+      ? entries.find((e) => e.path === entry.project) ?? null
+      : null;
 
   const commitTitle = async () => {
     const trimmed = title.trim();
@@ -83,6 +96,25 @@ export function DetailPanel() {
         </span>
         <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
         {key !== '' && <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">{key}</span>}
+        {/* M9.3: opening a record no longer drags you to its project, so the
+            project becomes something you press rather than something that
+            happens to you. Hidden when you are already standing on it. */}
+        {project !== null && (
+          <>
+            <span aria-hidden className="text-[11px] text-[var(--n-300)]">
+              /
+            </span>
+            <button
+              type="button"
+              data-testid="detail-project-crumb"
+              onClick={() => navigate({ kind: 'project', path: project.path })}
+              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+            >
+              <Icon name={typeStyle('Project', schema).icon} size={11} />
+              <span className="truncate">{project.title}</span>
+            </button>
+          </>
+        )}
         <span className="flex-1" />
         <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
       </header>

@@ -7,6 +7,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
+import { useOpenPath } from '@/app/useOpenPath';
 import { Avatar } from '@/components/ui/Avatar';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { StatusFlag } from '@/components/ui/StatusFlag';
@@ -72,7 +73,8 @@ export function handleDragEnd(
 }
 
 function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schema: Schema }) {
-  const openDetail = useUiStore((s) => s.openDetail);
+  // M9.3: one open rule across all four layouts (see useOpenPath).
+  const openPath = useOpenPath('in-place');
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: entry.path });
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
   const priority = schema.resolveField(entry, 'priority');
@@ -85,7 +87,7 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
       data-path={entry.path}
       {...listeners}
       {...attributes}
-      onClick={() => openDetail(entry.path)}
+      onClick={() => openPath(entry.path)}
       style={{
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         borderLeft: `3px solid ${group.ghost || !group.color ? 'var(--n-300)' : group.color}`,

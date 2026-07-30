@@ -104,7 +104,8 @@ export function TreeView({ entries, presentation, schema, allEntries, fields }: 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
-  const openPath = useOpenPath();
+  // M9.3: in-place, so opening a row keeps the hierarchy on screen.
+  const openPath = useOpenPath('in-place');
   const spec = presentation.childrenVia ?? null;
 
   const columns = useMemo(
