@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;display:flex;min-width:0;font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);background:var(--n-0);overflow:hidden">
+
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="flex:none;padding:14px 20px 0;border-bottom:1px solid var(--n-200)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Supporting documentation</h1>
+        <span style="font-size:12px;color:var(--n-500)">184 linked artifacts across 11 sources · {{ prog.name }}</span>
+        <div style="flex:1"></div>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="link" hint-size="auto,28px">Link artifact</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="ghost" icon="refresh-cw" onClick="{{ syncAll }}" hint-size="auto,28px">Sync all</x-import>
+      </div>
+      <div onClick="{{ onFilter }}" style="display:flex;align-items:center;gap:8px;padding-bottom:12px;flex-wrap:wrap">
+        <sc-for list="{{ sourceChips }}" as="s" hint-placeholder-count="6">
+          <button type="button" data-src="{{ s.name }}" style="display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid {{ s.border }};background:{{ s.bg }};color:{{ s.fg }};border-radius:6px;font-family:var(--font-ui);font-size:12px;cursor:pointer">{{ s.name }}<span style="font-family:var(--font-mono);font-size:11px;opacity:.7">{{ s.count }}</span></button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div onClick="{{ onFilter }}" style="flex:1;overflow:auto">
+      <div style="min-width:900px">
+        <div style="position:sticky;top:0;z-index:2;display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+          <div style="flex:1;min-width:280px;padding:0 10px 0 20px;border-right:1px solid var(--n-200)">Document</div>
+          <div style="width:104px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Source</div>
+          <div style="width:128px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Type</div>
+          <div style="width:112px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Links</div>
+          <div style="width:132px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Last change</div>
+          <div style="width:132px;flex:none;padding:0 10px">Sync</div>
+        </div>
+        <sc-for list="{{ docs }}" as="d" hint-placeholder-count="12">
+          <div data-doc="{{ d.name }}" style="display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ d.rowBg }};box-shadow:{{ d.rowMark }}" style-hover="background:var(--n-50)">
+            <div style="flex:1;min-width:280px;padding:0 10px 0 20px;display:flex;align-items:center;gap:8px;overflow:hidden">
+              <span style="color:var(--n-400);display:flex;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ d.icon }}" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>
+              <span style="color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.name }}</span>
+              <span style="flex:none;font-size:11px;font-weight:500;color:{{ d.needsColor }};display:{{ d.needsDisp }}">{{ d.needsLabel }}</span>
+            </div>
+            <div style="width:104px;flex:none;padding:0 10px"><span style="font-size:11px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:1px 5px">{{ d.source }}</span></div>
+            <div style="width:128px;flex:none;padding:0 10px;font-size:12px;color:var(--n-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.type }}</div>
+            <div style="width:112px;flex:none;padding:0 10px;font-family:var(--font-mono);font-size:11px;color:var(--cortex-600)">{{ d.links }}</div>
+            <div style="width:132px;flex:none;padding:0 10px;font-size:12px;color:var(--n-600)">{{ d.changed }}</div>
+            <div style="width:132px;flex:none;padding:0 10px;display:flex;align-items:center;gap:6px">
+              <span style="width:6px;height:6px;border-radius:999px;background:{{ d.syncColor }};flex:none"></span>
+              <span style="font-size:12px;color:{{ d.syncColor }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ d.sync }}</span>
+              <span style="color:var(--n-400);display:flex;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ n13 }}" hint-size="13px,13px"></x-import></span>
+            </div>
+          </div>
+        </sc-for>
+        <div style="padding:16px 20px;font-size:12px;color:var(--n-500)">{{ moreLabel }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div onClick="{{ onFeed }}" style="width:328px;flex:none;border-left:1px solid var(--n-200);background:var(--n-25);overflow-y:auto;padding:16px 16px 32px">
+    <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ true }}">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);padding:13px 14px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">
+          <span style="font-size:11px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:1px 5px">{{ sel.source }}</span>
+          <span style="font-size:11px;font-weight:500;color:{{ sel.syncColor }}">{{ sel.sync }}</span>
+          <div style="flex:1"></div>
+          <button type="button" onClick="{{ clearSel }}" style="width:22px;height:22px;border:none;border-radius:5px;background:none;color:var(--n-400);display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="x" size="{{ n13 }}" hint-size="13px,13px"></x-import></button>
+        </div>
+        <div style="font-size:13px;font-weight:600;line-height:19px;text-wrap:pretty">{{ sel.name }}</div>
+        <div style="display:flex;flex-direction:column;gap:5px;margin-top:10px;padding-top:10px;border-top:1px solid var(--n-100);font-size:12px;color:var(--n-600)">
+          <div style="display:flex;justify-content:space-between;gap:8px"><span>Type</span><span style="color:var(--n-800)">{{ sel.type }}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px"><span>Feeds</span><span style="color:var(--cortex-600);font-family:var(--font-mono);font-size:11px">{{ sel.links }}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px"><span>Last change</span><span style="color:var(--n-800)">{{ sel.changed }}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px"><span>Reviewed</span><span style="color:{{ sel.revColor }}">{{ sel.revLabel }}</span></div>
+        </div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:10px;text-wrap:pretty">{{ sel.note }}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="{{ sel.actVariant }}" icon="{{ sel.actIcon }}" onClick="{{ review }}" hint-size="auto,28px">{{ sel.actLabel }}</x-import>
+          <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="external-link" onClick="{{ openSource }}" hint-size="auto,28px">Open in {{ sel.source }}</x-import>
+          <button type="button" onClick="{{ goControls }}" style="border:none;background:none;padding:0;font-family:var(--font-ui);font-size:12px;font-weight:500;color:var(--cortex-600);cursor:pointer">Show the controls it feeds</button>
+        </div>
+      </div>
+    </sc-if>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">Incoming changes</div>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="warning" hint-size="auto,18px">{{ feedCount }}</x-import>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:22px">
+      <sc-for list="{{ feed }}" as="f" hint-placeholder-count="4">
+        <div data-goto="{{ f.goto }}" style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:11px 12px;cursor:pointer" style-hover="border-color:var(--n-300)">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:1px 5px">{{ f.source }}</span>
+            <span style="font-size:11px;color:var(--n-500)">{{ f.when }}</span>
+            <div style="flex:1"></div>
+            <span style="font-size:11px;font-weight:500;color:{{ f.color }}">{{ f.state }}</span>
+          </div>
+          <div style="font-size:13px;color:var(--n-800);margin-top:6px;line-height:19px;text-wrap:pretty">{{ f.text }}</div>
+          <div style="font-size:11px;color:var(--n-500);margin-top:6px">{{ f.impact }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:10px">Coverage gaps</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:11px 12px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--danger-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="circle-alert" size="{{ n13 }}" hint-size="13px,13px"></x-import>68 controls have no evidence</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:5px;text-wrap:pretty">Mostly in SR and SI. The assessor asked for artifacts on every partially implemented row before Rev D.</div>
+      </div>
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:11px 12px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--warn-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="unlink" size="{{ n13 }}" hint-size="13px,13px"></x-import>9 links point at moved files</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:5px;text-wrap:pretty">A SharePoint site migration broke the paths. Cerebro can remap them by document identifier.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const DOCS = [
+  { name: "GrayTalon_Arch.mdzip · block 1.1.5.3 Encryption/decryption", source: "Cameo", type: "MBSE model", links: "9 controls", changed: "29 Jul 06:58", sync: "Changed", icon: "workflow" },
+  { name: "GT-4821 ECP-2214 crypto module obsolescence", source: "Jira", type: "Change request", links: "3 controls", changed: "28 Jul 17:40", sync: "In sync", icon: "circle-dot" },
+  { name: "Gray Talon security architecture (living page)", source: "Confluence", type: "Wiki page", links: "22 controls", changed: "28 Jul 14:02", sync: "Changed", icon: "file-text" },
+  { name: "CDRL A012 requirements set · rev 7", source: "Jama", type: "Requirements", links: "148 links", changed: "28 Jul 14:20", sync: "Changed", icon: "file-badge" },
+  { name: "GT-SIL-CRYPTO-TR-014.pdf", source: "SharePoint", type: "Test report", links: "4 controls", changed: "19 Jun 2026", sync: "In sync", icon: "file-check-2" },
+  { name: "CMVP certificate register.xlsx", source: "Excel", type: "Register", links: "31 controls", changed: "03 Mar 2026", sync: "Schema mismatch", icon: "sheet" },
+  { name: "Data link security data flow", source: "Lucidchart", type: "Diagram", links: "12 controls", changed: "11 Jul 2026", sync: "In sync", icon: "git-fork" },
+  { name: "signing-pipeline · job #4821 artifacts", source: "GitLab", type: "Pipeline evidence", links: "6 controls", changed: "26 Jul 2026", sync: "In sync", icon: "git-branch" },
+  { name: "FCC bootloader configuration item 4.2.1", source: "TeamCenter", type: "Configuration item", links: "8 controls", changed: "17 Jul 2026", sync: "Auth expired", icon: "boxes" },
+  { name: "#gt-cyber-eng · crypto swap thread", source: "Slack", type: "Discussion", links: "2 controls", changed: "29 Jul 07:20", sync: "In sync", icon: "message-square-text" },
+  { name: "Gray Talon key management plan.docx", source: "Word", type: "Plan", links: "11 controls", changed: "02 Jun 2026", sync: "In sync", icon: "file-type" },
+  { name: "Supplier component authenticity survey.xlsx", source: "Excel", type: "Survey", links: "14 controls", changed: "22 May 2026", sync: "In sync", icon: "sheet" },
+  { name: "GT-TP-0311 crypto verification procedure", source: "SharePoint", type: "Test procedure", links: "3 controls", changed: "14 Jun 2026", sync: "Owner review", icon: "scan-line" },
+  { name: "Airworthiness security plan cross-reference", source: "Confluence", type: "Wiki page", links: "34 controls", changed: "09 Jul 2026", sync: "In sync", icon: "file-text" },
+  { name: "GT-4655 secure boot spike", source: "Jira", type: "Engineering task", links: "1 control", changed: "24 Jul 2026", sync: "In sync", icon: "circle-dot" },
+  { name: "Ground segment rack layout", source: "Lucidchart", type: "Diagram", links: "5 controls", changed: "30 Apr 2026", sync: "Link broken", icon: "git-fork" }
+];
+
+const SYNC_COLOR = {
+  "In sync": "var(--success-600)", "Changed": "var(--warn-600)", "Owner review": "var(--n-600)",
+  "Schema mismatch": "var(--warn-600)", "Auth expired": "var(--danger-600)", "Link broken": "var(--danger-600)"
+};
+
+const FEED = [
+  { source: "Cameo", when: "06:58", text: "Model revision 41 replaced the KGV-72M with a KI-700 at WBS 1.1.5.3", impact: "3 controls · 3 SP blocks · 1 test procedure", state: "Awaiting review", color: "var(--warn-600)", goto: "impact" },
+  { source: "CISA", when: "05:40", text: "Advisory ICSA-26-189-02 matched to the flight control computer bootloader", impact: "1 control proposed · no evidence yet", state: "Awaiting review", color: "var(--warn-600)", goto: "impact" },
+  { source: "Jama", when: "yesterday", text: "REQ-GT-0409 reworded — module authentication before operational mode", impact: "1 control · 1 SP block", state: "Awaiting review", color: "var(--warn-600)", goto: "impact" },
+  { source: "Confluence", when: "yesterday", text: "Security architecture page edited — 4 paragraphs on the data link", impact: "no downstream effect detected", state: "Informational", color: "var(--n-500)", goto: "docs" }
+];
+
+const REVIEW = {
+  "Changed": { note: "The source moved since this artifact was last reconciled. Review the change so the controls it feeds stay truthful.", act: "Accept the change", icon: "check", variant: "primary" },
+  "Schema mismatch": { note: "Column layout changed in the workbook, so the field mapping no longer resolves. Remap before the next sync writes anything.", act: "Remap fields", icon: "wand-sparkles", variant: "primary" },
+  "Auth expired": { note: "Attest cannot read this source. Nothing it feeds has been verified since the credential lapsed.", act: "Reconnect source", icon: "plug", variant: "primary" },
+  "Link broken": { note: "The path no longer resolves after a site migration. Cerebro can rematch it by document identifier.", act: "Repair link", icon: "link", variant: "primary" },
+  "Owner review": { note: "Waiting on the artifact owner to confirm the current revision before it counts as evidence.", act: "Nudge the owner", icon: "bell", variant: "default" },
+  "In sync": { note: "Reconciled against the source on the last sync. Nothing downstream is waiting on it.", act: "Mark reviewed", icon: "check", variant: "default" }
+};
+
+class Component extends DCLogic {
+  state = { src: null, sel: "GrayTalon_Arch.mdzip · block 1.1.5.3 Encryption/decryption", reviewed: {} };
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n14: 14, feed: FEED, feedCount: 4 };
+    if (!S) return base;
+    const p = S.prog();
+    const counts = {};
+    DOCS.forEach((d) => { counts[d.source] = (counts[d.source] || 0) + 1; });
+    const names = ["Cameo", "Jama", "Jira", "Confluence", "SharePoint", "GitLab", "Excel", "Word", "Lucidchart", "Slack", "TeamCenter"];
+    const active = this.state.src;
+    const rev = this.state.reviewed;
+    const selName = this.state.sel;
+    const docs = DOCS.filter((d) => !active || d.source === active).map((d) => {
+      const done = !!rev[d.name];
+      const needs = !done && d.sync !== "In sync";
+      return Object.assign({}, d, {
+        sync: done ? "Reviewed 07:2" + (d.name.length % 9) : d.sync,
+        syncColor: done ? "var(--success-600)" : SYNC_COLOR[d.sync] || "var(--n-500)",
+        rowBg: d.name === selName ? "var(--cortex-50)" : "transparent",
+        rowMark: d.name === selName ? "inset 3px 0 0 var(--cortex-500)" : "none",
+        needsDisp: needs ? "inline" : "none",
+        needsLabel: "· needs review",
+        needsColor: "var(--warn-700)"
+      });
+    });
+    const cur = DOCS.find((d) => d.name === selName);
+    const curDone = cur ? !!rev[cur.name] : false;
+    const r = cur ? REVIEW[cur.sync] || REVIEW["In sync"] : null;
+    const sel = cur ? Object.assign({}, cur, {
+      syncColor: curDone ? "var(--success-600)" : SYNC_COLOR[cur.sync] || "var(--n-500)",
+      sync: curDone ? "Reviewed" : cur.sync,
+      note: curDone ? "Reviewed by M. Okonjo. The controls it feeds now cite this revision." : r.note,
+      actLabel: curDone ? "Reopen review" : r.act,
+      actIcon: curDone ? "rotate-ccw" : r.icon,
+      actVariant: curDone ? "default" : r.variant,
+      revColor: curDone ? "var(--success-600)" : "var(--warn-700)",
+      revLabel: curDone ? "just now · M. Okonjo" : "not since the last change"
+    }) : {};
+    return Object.assign(base, {
+      prog: p, docs, sel, hasSel: !!cur,
+      clearSel: () => this.setState({ sel: null }),
+      review: () => {
+        if (!cur) return;
+        const next = Object.assign({}, rev);
+        if (curDone) delete next[cur.name]; else next[cur.name] = 1;
+        this.setState({ reviewed: next });
+        S.toast(curDone
+          ? { tone: "default", title: "Review reopened", desc: cur.name + " is back in the queue." }
+          : { tone: "success", title: r.act.replace(/^\w/, (c) => c.toUpperCase()) + " — done", desc: cur.name + " · " + cur.links + " updated to cite this revision." });
+      },
+      openSource: () => cur && S.toast({ tone: "default", title: "Opening " + cur.source, desc: cur.name }),
+      goControls: () => { S.set({ panelOpen: true }); S.go("sctm"); },
+      moreLabel: active ? "Filtered to " + active + " · " + docs.length + " of 184 artifacts" : "168 more artifacts · filter by source or search",
+      sourceChips: names.map((n) => ({
+        name: n, count: counts[n] || 0,
+        bg: active === n ? "var(--cortex-50)" : "var(--n-0)",
+        border: active === n ? "var(--cortex-300)" : "var(--n-200)",
+        fg: active === n ? "var(--cortex-700)" : "var(--n-700)"
+      })),
+      onFilter: (e) => {
+        const d = e.target.closest("[data-doc]");
+        if (d) { const n = d.getAttribute("data-doc"); this.setState({ sel: this.state.sel === n ? null : n }); return; }
+        const b = e.target.closest("[data-src]");
+        if (b) { const n = b.getAttribute("data-src"); this.setState({ src: this.state.src === n ? null : n }); }
+      },
+      onFeed: (e) => { const b = e.target.closest("[data-goto]"); if (b) S.go(b.getAttribute("data-goto")); },
+      syncAll: () => S.sync("All sources")
+    });
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="height:100%;min-width:0;overflow-y:auto;background:var(--n-25);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900)">
+  <div style="max-width:1200px;margin:0 auto;padding:24px 28px 56px;display:flex;flex-direction:column;gap:18px">
+
+    <div style="display:flex;align-items:flex-start;gap:16px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Deliverable packages</h1>
+        <div style="font-size:12px;color:var(--n-600);margin-top:4px">Three audiences want different things from the same source of truth. Pick the package, see what is missing, then render it in the format that audience accepts.</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex:none;padding-top:4px">
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" icon="history" onClick="{{ onHistory }}" hint-size="auto,32px">Submittal history</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="primary" icon="package-check" onClick="{{ onAssemble }}" hint-size="auto,32px">{{ assembleLabel }}</x-import>
+      </div>
+    </div>
+
+    <div onClick="{{ onPkg }}" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <sc-for list="{{ packages }}" as="p" hint-placeholder-count="3">
+        <button type="button" data-pkg="{{ p.id }}" style="text-align:left;background:{{ p.bg }};border:1px solid {{ p.border }};border-radius:10px;box-shadow:var(--shadow-sm);padding:15px;cursor:pointer;font-family:var(--font-ui);display:flex;flex-direction:column;gap:9px" style-hover="border-color:var(--n-300)">
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="width:28px;height:28px;border-radius:8px;background:{{ p.iconBg }};color:{{ p.iconFg }};display:flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ p.icon }}" size="{{ n16 }}" hint-size="16px,16px"></x-import></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600">{{ p.name }}</div>
+              <div style="font-size:11px;color:var(--n-500)">{{ p.audience }}</div>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--n-600);line-height:17px;text-wrap:pretty">{{ p.purpose }}</div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:9px;border-top:1px solid var(--n-100)">
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ p.ready }}</span>
+            <div style="flex:1"></div>
+            <span style="font-size:11px;font-weight:600;color:{{ p.stateFg }}">{{ p.state }}</span>
+          </div>
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+      <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200);display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600">{{ pkg.name }} — contents</div>
+          <div style="font-size:12px;color:var(--n-600);margin-top:2px">{{ pkg.note }}</div>
+        </div>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" variant="outline" hint-size="auto,18px">{{ pkg.ref }}</x-import>
+      </div>
+      <div style="display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+        <div style="flex:1;min-width:0;padding-left:16px">Artifact</div>
+        <div style="width:132px;flex:none">Comes from</div>
+        <div style="width:82px;flex:none">Revision</div>
+        <div style="width:150px;flex:none">Format target</div>
+        <div style="width:132px;flex:none">Reference</div>
+        <div style="width:160px;flex:none;padding-right:16px">State</div>
+      </div>
+      <div onClick="{{ onRow }}">
+        <sc-for list="{{ contents }}" as="c" hint-placeholder-count="8">
+          <div style="display:flex;align-items:center;min-height:42px;border-bottom:1px solid var(--n-100)">
+            <div style="flex:1;min-width:0;padding-left:16px;display:flex;align-items:center;gap:9px">
+              <span style="color:{{ c.iconFg }};display:flex;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ c.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+              <div style="min-width:0">
+                <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.name }}</div>
+                <div style="font-size:11px;color:var(--n-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.note }}</div>
+              </div>
+            </div>
+            <div style="width:132px;flex:none"><button type="button" data-go="{{ c.view }}" style="border:none;background:none;padding:0;font-family:var(--font-ui);font-size:12px;color:var(--cortex-600);cursor:pointer;text-align:left">{{ c.from }}</button></div>
+            <div style="width:82px;flex:none;font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ c.rev }}</div>
+            <div style="width:150px;flex:none;display:flex;align-items:center;gap:6px"><span style="font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:2px 5px">{{ c.fmt }}</span><span style="font-size:11px;color:var(--n-500)">{{ c.fmtNote }}</span></div>
+            <div style="width:132px;flex:none;font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ c.ref }}</div>
+            <div style="width:160px;flex:none;padding-right:16px;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:999px;flex:none;background:{{ c.dot }}"></span><span style="font-size:12px;color:{{ c.stateFg }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.state }}</span></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:16px;align-items:start">
+      <div style="background:var(--n-0);border:1px solid {{ checkBorder }};border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+        <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200);display:flex;align-items:center;gap:9px">
+          <span style="color:{{ checkFg }};display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ checkIcon }}" size="{{ n16 }}" hint-size="16px,16px"></x-import></span>
+          <div>
+            <div style="font-size:14px;font-weight:600">Completeness checks</div>
+            <div style="font-size:12px;color:var(--n-600);margin-top:2px">{{ checkNote }}</div>
+          </div>
+        </div>
+        <sc-for list="{{ checks }}" as="c" hint-placeholder-count="6">
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:11px 16px;border-bottom:1px solid var(--n-100)">
+            <span style="color:{{ c.color }};display:flex;flex:none;padding-top:2px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ c.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:500;color:var(--n-800)">{{ c.text }}</div>
+              <div style="font-size:11px;color:var(--n-500);margin-top:1px">{{ c.detail }}</div>
+            </div>
+            <button type="button" data-go="{{ c.view }}" onClick="{{ onGo }}" style="border:none;background:none;padding:0;font-family:var(--font-ui);font-size:11px;font-weight:500;color:var(--cortex-600);cursor:pointer;flex:none;display:{{ c.linkDisp }}">Open</button>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);padding:16px">
+          <div style="font-size:14px;font-weight:600">Rendering rules</div>
+          <div style="font-size:12px;color:var(--n-600);margin-top:3px;margin-bottom:13px">How the source becomes the document the customer accepts</div>
+          <div style="display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Follow the DID format for each artifact</div><div style="font-size:12px;color:var(--n-600)">Section order, paragraph numbering, and front matter come from the data item description cited on the CDRL</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Refuse to render stale content silently</div><div style="font-size:12px;color:var(--n-600)">A block flagged stale either blocks the render or renders with a visible change bar — never quietly</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Carry the trace into the document</div><div style="font-size:12px;color:var(--n-600)">Evidence identifiers and WBS references print as they appear here, so the assessor can follow them back</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Record the submittal</div><div style="font-size:12px;color:var(--n-600)">Every render is hashed and logged with its revision, so a resubmittal can be diffed against what was sent</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+          <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200)">
+            <div style="font-size:14px;font-weight:600">Submittal history</div>
+            <div style="font-size:12px;color:var(--n-600);margin-top:2px">What was sent, when, and what came back</div>
+          </div>
+          <sc-for list="{{ history }}" as="h" hint-placeholder-count="5">
+            <div style="padding:11px 16px;border-bottom:1px solid var(--n-100)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--n-700)">{{ h.id }}</span>
+                <span style="font-size:12px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ h.what }}</span>
+                <span style="font-size:11px;color:var(--n-500);flex:none">{{ h.when }}</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+                <span style="width:7px;height:7px;border-radius:999px;background:{{ h.dot }};flex:none"></span>
+                <span style="font-size:11px;color:var(--n-600)">{{ h.state }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AISummary" title="{{ ai.title }}" sources="{{ ai.sources }}" hint-size="100%,130px">{{ ai.body }}</x-import>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const PKGS = {
+  cdrl: {
+    id: "cdrl", name: "CDRL submittal", audience: "Government PMO · contractual", icon: "file-badge",
+    iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)",
+    purpose: "The deliverables the contract actually requires, in the format the data item description specifies, on the CDRL due date.",
+    ready: "5 of 6 ready", state: "Due 14 Sep", stateFg: "var(--n-700)",
+    note: "CDRL A012 and A014 · next submittal due 14 Sep 2026 · 30-day government review", ref: "CDRL A012 / A014",
+    contents: [
+      ["Security plan", "Security plan", "sp", "Rev B", "Word", "per DID format", "A012-001", "stale", "3 blocks stale", "file-text"],
+      ["Security control traceability matrix", "SCTM", "sctm", "Rev C", "Excel", "one row per control", "A012-002", "ok", "Ready", "table-2"],
+      ["Requirements verification cross-reference", "Requirements", "reqs", "Rev C", "Excel", "shall-to-control map", "A012-003", "warn", "7 unallocated", "file-signature"],
+      ["Program protection plan", "Program protection", "protect", "Rev D", "Word", "OSD PPP outline", "A014-001", "ok", "Ready", "shield-half"],
+      ["Anti-tamper plan appendix", "Program protection", "protect", "Rev B", "Word", "appendix F", "A014-002", "ok", "Ready", "shield-half"],
+      ["Supporting analyses and test reports", "Supporting documentation", "docs", "184 files", "PDF", "index with hashes", "A012-004", "ok", "Ready", "paperclip"]
+    ],
+    checks: [
+      ["3 security plan blocks reference a superseded crypto module", "Accept CHG-118 in change impact and the blocks regenerate", "impact", "bad"],
+      ["7 contractual requirements are not allocated to a control", "The cross-reference will render with gaps the PMO will question", "reqs", "warn"],
+      ["Security plan Rev B is unsigned", "The DID requires a signature page", "reviews", "warn"],
+      ["SCTM Rev C matches the assessed baseline", "612 rows, no orphan references", "sctm", "ok"],
+      ["All 184 supporting files resolve", "9 SharePoint links were repointed after the file move", "docs", "ok"],
+      ["Front matter and distribution statement present", "Distribution D applied to both CDRL items", "", "ok"]
+    ],
+    ai: { title: "What the PMO will send back", sources: "From CDRL A012 and A014 · 3 prior submittals · government review comments",
+      body: "The last two submittals came back with comments on the same thing: requirement-to-control gaps in the cross-reference. Seven requirements are still unallocated, and six of them are the interface requirements waiting on the ICD update. Cerebro suggests submitting the cross-reference with an explicit gap annex rather than leaving the cells blank — the previous comment asked for exactly that." }
+  },
+  sca: {
+    id: "sca", name: "Assessment package", audience: "SCA · assessment team", icon: "clipboard-check",
+    iconBg: "var(--warn-50)", iconFg: "var(--warn-700)",
+    purpose: "What the assessor needs to execute and finish the assessment: procedures, results, evidence, and answers to open requests.",
+    ready: "4 of 7 ready", state: "AE-4 blocked", stateFg: "var(--danger-700)",
+    note: "Assessment event AE-4 · AFLCMC/HNCP · 5 open RFIs", ref: "SAP Rev B",
+    contents: [
+      ["Security assessment plan", "Assessment", "assess", "Rev B", "Word", "signed by the SCA", "SAP", "ok", "Ready", "clipboard-check"],
+      ["Assessment results by control", "Assessment", "assess", "388 of 612", "Excel", "one row per procedure", "SAR-A", "warn", "224 not assessed", "table-2"],
+      ["Security assessment report", "Assessment", "assess", "draft", "Word", "per DID format", "SAR", "bad", "Blocked on AE-4", "file-text"],
+      ["POA&M workbook", "Findings and POA&M", "poam", "29 Jul", "Excel", "assessor template", "POAM", "ok", "Ready", "list-todo"],
+      ["Evidence index with hashes", "Supporting documentation", "docs", "184 files", "PDF", "index only", "EVID", "ok", "Ready", "paperclip"],
+      ["Scan and STIG results", "Scans and STIGs", "scans", "29 Jul", "native", "checklists and .nessus", "SCAN", "ok", "Ready", "scan-search"],
+      ["RFI responses", "Reviews and sign-off", "reviews", "5 open", "Word", "one per request", "RFI", "warn", "2 due this week", "mail-question"]
+    ],
+    checks: [
+      ["Assessment event AE-4 cannot execute", "43 cryptographic controls held by CHG-118 evidence", "impact", "bad"],
+      ["6 assessed controls have no linked evidence", "The assessor will reopen each one", "assess", "bad"],
+      ["2 RFIs are due this week", "Both responses are drafted and need a reviewer", "reviews", "warn"],
+      ["POA&M covers every other-than-satisfied result", "57 assessment findings, all with milestones", "poam", "ok"],
+      ["Scan results supersede 14 assessed rows", "Marked stale on the SCTM rather than overwritten", "scans", "ok"],
+      ["Evidence hashes verify", "184 of 184 files match the index", "docs", "ok"]
+    ],
+    ai: { title: "What the assessor is waiting on", sources: "From 5 open RFIs · 224 unassessed controls · 6 controls with no evidence",
+      body: "Three things stand between the program and a complete SAR. The KI-700 approval letter unblocks 43 controls and assessment event AE-4. Six assessed controls have no evidence linked, which the assessor will reopen on sight — five of the six have artifacts sitting in supporting documentation that were never attached. The two RFIs due Friday are answered by documents that already exist." }
+  },
+  ato: {
+    id: "ato", name: "Authorization package", audience: "AO · ISSM · decision", icon: "stamp",
+    iconBg: "var(--synapse-50)", iconFg: "var(--synapse-600)",
+    purpose: "The decision package: what the system is, what protects it, what is still wrong, and what the AO is being asked to accept.",
+    ready: "6 of 9 ready", state: "Target 14 Nov", stateFg: "var(--n-700)",
+    note: "ATO decision briefing 06 Nov 2026 · IATT expires 12 Aug · AO PEO/HNC", ref: "RMF step 5",
+    contents: [
+      ["Security plan", "Security plan", "sp", "Rev B", "Word", "per DID format", "SP", "stale", "3 blocks stale", "file-text"],
+      ["Security assessment report", "Assessment", "assess", "draft", "Word", "per DID format", "SAR", "bad", "Blocked on AE-4", "clipboard-check"],
+      ["POA&M workbook", "Findings and POA&M", "poam", "29 Jul", "Excel", "AO review format", "POAM", "ok", "Ready", "list-todo"],
+      ["Program protection plan", "Program protection", "protect", "Rev D", "Word", "OSD PPP outline", "PPP", "ok", "Ready", "shield-half"],
+      ["Cyber survivability endorsement annex", "Cyber survivability", "survive", "Rev A", "Word", "10 attributes + MBCRA", "CSE", "warn", "2 attributes open", "radar"],
+      ["Inherited control attestations", "Authorization", "authz", "3 current", "PDF", "provider letters", "INH", "warn", "1 expires 30 Aug", "layers"],
+      ["Contingency plan and test report", "Supporting documentation", "docs", "Rev C", "Word", "per DID format", "CP", "ok", "Ready", "paperclip"],
+      ["Continuous monitoring strategy", "Supporting documentation", "docs", "draft", "Word", "quarterly reporting", "CONMON", "warn", "Unsigned", "activity"],
+      ["Risk acceptance recommendations", "Findings and POA&M", "poam", "9 items", "Word", "one per accepted item", "RISK", "ok", "Ready", "list-todo"]
+    ],
+    checks: [
+      ["2 CAT I findings remain open", "Both have interim measures the AO must accept explicitly", "poam", "bad"],
+      ["Security assessment report is a draft", "No authorization decision without a SAR", "assess", "bad"],
+      ["Ground station attestation expires 30 Aug", "11 inherited controls lose their basis on that date", "authz", "warn"],
+      ["Continuous monitoring strategy is unsigned", "Required as a condition of the authorization", "authz", "warn"],
+      ["Boundary and categorization are current", "M-M-H at IL5, signed 14 Feb 2026", "authz", "ok"],
+      ["9 risk acceptance recommendations drafted", "Each states the residual condition in the AO's language", "poam", "ok"]
+    ],
+    ai: { title: "What the AO is being asked to accept", sources: "From 63 POA&M items · 2 CAT I findings · 10 survivability attributes · IATT conditions",
+      body: "The package will ask the AO to accept two CAT I conditions with interim measures, nine documented risk acceptances, and one survivability attribute — configuration verification — that rests on depot inspection rather than automated verification until the P3 card refresh. Cerebro drafted each acceptance in the terms the AO used in the IATT conditions. The nearer problem is the IATT: it expires 12 August and the extension needs the SAR draft plus a current POA&M, both of which are one signature from ready." }
+  }
+};
+
+const CSTATE = {
+  ok: { dot: "var(--success-500)", fg: "var(--n-600)" },
+  warn: { dot: "var(--warn-500)", fg: "var(--warn-700)" },
+  stale: { dot: "var(--warn-500)", fg: "var(--warn-700)" },
+  bad: { dot: "var(--danger-500)", fg: "var(--danger-700)" }
+};
+
+const CHECK_TONE = {
+  ok: { icon: "circle-check", color: "var(--success-600)" },
+  warn: { icon: "circle-alert", color: "var(--warn-600)" },
+  bad: { icon: "circle-x", color: "var(--danger-600)" }
+};
+
+const HISTORY = [
+  { id: "SUB-014", what: "CDRL A012 — Security plan Rev A, SCTM Rev B", when: "18 Mar 2026", state: "Accepted with comments · 11 comments closed", dot: "var(--success-500)" },
+  { id: "SUB-015", what: "CDRL A014 — Program protection plan Rev C", when: "22 Apr 2026", state: "Accepted", dot: "var(--success-500)" },
+  { id: "SUB-016", what: "CDRL A012 — SCTM Rev C, cross-reference Rev B", when: "22 Jun 2026", state: "Accepted with comments · 4 open on requirement gaps", dot: "var(--warn-500)" },
+  { id: "SUB-017", what: "Assessment package — SAP Rev B, evidence index", when: "12 Jun 2026", state: "Acknowledged by AFLCMC/HNCP", dot: "var(--success-500)" },
+  { id: "SUB-018", what: "IATT request — conditions and interim measures", when: "02 May 2026", state: "Granted 12 May, expires 12 Aug 2026", dot: "var(--cortex-500)" }
+];
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n15: 15, n16: 16, yes: true, history: HISTORY };
+    if (!S) return base;
+    const sel = S.state.pkgSel || "cdrl";
+    const p = PKGS[sel] || PKGS.cdrl;
+    const blockers = p.checks.filter((c) => c[3] === "bad").length;
+    return Object.assign(base, {
+      packages: Object.keys(PKGS).map((k) => {
+        const q = PKGS[k], on = k === sel;
+        return { id: q.id, name: q.name, audience: q.audience, purpose: q.purpose, icon: q.icon,
+          iconBg: q.iconBg, iconFg: q.iconFg, ready: q.ready, state: q.state, stateFg: q.stateFg,
+          bg: on ? "var(--cortex-50)" : "var(--n-0)", border: on ? "var(--cortex-500)" : "var(--n-200)" };
+      }),
+      pkg: { name: p.name, note: p.note, ref: p.ref },
+      contents: p.contents.map((c) => {
+        const t = CSTATE[c[7]];
+        return { name: c[0], from: c[1], view: c[2], rev: c[3], fmt: c[4], fmtNote: c[5], ref: c[6],
+          state: c[8], dot: t.dot, stateFg: t.fg, icon: c[9], iconFg: t.dot === "var(--success-500)" ? "var(--n-500)" : t.fg };
+      }),
+      checks: p.checks.map((c) => {
+        const t = CHECK_TONE[c[3]];
+        return { text: c[0], detail: c[1], view: c[2], icon: t.icon, color: t.color, linkDisp: c[2] ? "block" : "none" };
+      }),
+      checkBorder: blockers ? "var(--danger-500)" : "var(--n-200)",
+      checkFg: blockers ? "var(--danger-600)" : "var(--success-600)",
+      checkIcon: blockers ? "circle-x" : "circle-check",
+      checkNote: blockers ? blockers + " blocking issue" + (blockers > 1 ? "s" : "") + " before this package can render" : "Nothing blocking — ready to render",
+      ai: p.ai,
+      assembleLabel: blockers ? "Assemble with " + blockers + " open" : "Assemble package",
+      onPkg: (e) => { const b = e.target.closest("[data-pkg]"); if (b) S.set({ pkgSel: b.getAttribute("data-pkg") }); },
+      onRow: (e) => { const b = e.target.closest("[data-go]"); if (b) S.go(b.getAttribute("data-go")); },
+      onGo: (e) => { const b = e.currentTarget.closest("[data-go]"); if (b) S.go(b.getAttribute("data-go")); },
+      onAssemble: () => S.toast(blockers
+        ? { tone: "default", title: "Package assembled with " + blockers + " open issue" + (blockers > 1 ? "s" : ""), desc: "Stale content rendered with visible change bars. Fix the blockers before this leaves the program." }
+        : { tone: "success", title: p.name + " assembled", desc: "Word and Excel artifacts rendered per format, hashed, and logged as the next submittal." }),
+      onHistory: () => S.toast({ tone: "default", title: "5 submittals on record", desc: "Each one hashed at render time — a resubmittal diffs against what was actually sent." })
+    });
+  }
+}
+
+</script>
+</body>
+</html>

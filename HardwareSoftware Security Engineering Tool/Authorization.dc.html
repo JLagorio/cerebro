@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="height:100%;min-width:0;overflow-y:auto;background:var(--n-25);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900)">
+  <div style="max-width:1180px;margin:0 auto;padding:24px 28px 56px;display:flex;flex-direction:column;gap:18px">
+
+    <div style="display:flex;align-items:flex-start;gap:16px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Authorization</h1>
+        <div style="font-size:12px;color:var(--n-600);margin-top:4px">Where the program sits in the RMF process, what the authorization package still needs, and which controls the program does not have to prove itself.</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex:none;padding-top:4px">
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="warning" hint-size="auto,18px">IATT expires 12 Aug 2026</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" icon="package-check" onClick="{{ goDeliver }}" hint-size="auto,32px">Authorization package</x-import>
+      </div>
+    </div>
+
+    <div onClick="{{ onStep }}" style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">RMF process · DoDI 8510.01</span>
+        <div style="flex:1"></div>
+        <span style="font-size:12px;color:var(--n-600)">ATO decision target <span style="font-weight:600;color:var(--n-900)">14 Nov 2026</span> · assessor AFLCMC/HNCP · AO PEO/HNC</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px">
+        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="7">
+          <button type="button" data-step="{{ s.id }}" style="text-align:left;border:1px solid {{ s.border }};background:{{ s.bg }};border-radius:8px;padding:10px 11px;cursor:pointer;font-family:var(--font-ui);display:flex;flex-direction:column;gap:6px;min-height:104px" style-hover="border-color:var(--n-300)">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--n-500)">{{ s.num }}</span>
+              <span style="color:{{ s.iconFg }};display:flex;margin-left:auto"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ s.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+            </div>
+            <div style="font-size:13px;font-weight:600;color:{{ s.fg }}">{{ s.name }}</div>
+            <div style="font-size:11px;color:var(--n-600);line-height:15px">{{ s.note }}</div>
+            <div style="margin-top:auto;font-family:var(--font-mono);font-size:10px;color:var(--n-500)">{{ s.date }}</div>
+          </button>
+        </sc-for>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid var(--n-100);padding-top:13px;display:flex;gap:14px;align-items:flex-start">
+        <div style="width:20px;flex:none;color:var(--cortex-600);padding-top:2px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ stepDetail.icon }}" size="{{ n16 }}" hint-size="16px,16px"></x-import></div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">{{ stepDetail.title }}</div>
+          <div style="font-size:12px;color:var(--n-700);margin-top:3px;text-wrap:pretty">{{ stepDetail.body }}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap">
+            <sc-for list="{{ stepDetail.artifacts }}" as="a" hint-placeholder-count="3">
+              <button type="button" data-go="{{ a.view }}" style="display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--n-200);border-radius:999px;background:var(--n-0);font-family:var(--font-ui);font-size:12px;color:var(--n-700);cursor:pointer" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ a.icon }}" size="{{ n13 }}" hint-size="13px,13px"></x-import>{{ a.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+        <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200);display:flex;align-items:center;gap:10px">
+          <div>
+            <div style="font-size:14px;font-weight:600">Package readiness</div>
+            <div style="font-size:12px;color:var(--n-600);margin-top:2px">Nine artifacts the AO expects · 6 ready</div>
+          </div>
+          <div style="flex:1"></div>
+          <span style="font-family:var(--font-mono);font-size:12px;color:var(--n-600)">67%</span>
+        </div>
+        <sc-for list="{{ ready }}" as="r" hint-placeholder-count="9">
+          <button type="button" data-go="{{ r.view }}" onClick="{{ onGo }}" style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;min-height:40px;padding:0 16px;border:none;border-bottom:1px solid var(--n-100);background:var(--n-0);font-family:var(--font-ui);cursor:pointer" style-hover="background:var(--n-50)">
+            <span style="color:{{ r.color }};display:flex;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+            <span style="flex:1;min-width:0;font-size:13px;color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500);flex:none">{{ r.rev }}</span>
+            <span style="font-size:12px;color:{{ r.color }};flex:none;width:104px;text-align:right">{{ r.state }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+          <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200)">
+            <div style="font-size:14px;font-weight:600">Inherited and common controls</div>
+            <div style="font-size:12px;color:var(--n-600);margin-top:2px">96 of {{ prog.controls }} controls are provided, not implemented by this program</div>
+          </div>
+          <sc-for list="{{ providers }}" as="p" hint-placeholder-count="4">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--n-100)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:13px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.name }}</span>
+                <span style="font-family:var(--font-mono);font-size:12px;color:var(--n-700);flex:none">{{ p.count }}</span>
+              </div>
+              <div style="font-size:12px;color:var(--n-600);margin-top:3px">{{ p.scope }}</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:7px">
+                <span style="width:7px;height:7px;border-radius:999px;background:{{ p.dot }};flex:none"></span>
+                <span style="font-size:11px;color:{{ p.fg }}">{{ p.state }}</span>
+                <div style="flex:1"></div>
+                <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ p.agreement }}</span>
+              </div>
+            </div>
+          </sc-for>
+          <div style="padding:12px 16px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="library-big" onClick="{{ goLibrary }}" hint-size="auto,28px">Open inheritance library</x-import></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+      <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200);display:flex;align-items:flex-start;gap:12px">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:600">Systems security engineering activities</div>
+          <div style="font-size:12px;color:var(--n-600);margin-top:2px">NIST SP 800-160 vol. 1 technical processes — the engineering work the compliance artifacts are supposed to describe</div>
+        </div>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" variant="outline" hint-size="auto,18px">Tailored for a Group 4 UAS</x-import>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0">
+        <sc-for list="{{ sse }}" as="p" hint-placeholder-count="8">
+          <div style="padding:13px 16px;border-right:1px solid var(--n-100);border-bottom:1px solid var(--n-100)">
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="width:7px;height:7px;border-radius:999px;background:{{ p.dot }};flex:none"></span>
+              <span style="font-size:12px;font-weight:600">{{ p.name }}</span>
+            </div>
+            <div style="font-size:11px;color:var(--n-600);margin-top:5px;line-height:16px">{{ p.artifact }}</div>
+            <div style="font-size:11px;color:{{ p.fg }};margin-top:5px">{{ p.state }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+      <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200)">
+        <div style="font-size:14px;font-weight:600">Frameworks in effect</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:2px">Each one contributes controls, procedures, or a deliverable. Turning one on changes the baseline, the SCTM columns, and the package contents together.</div>
+      </div>
+      <div onClick="{{ onFw }}">
+        <sc-for list="{{ frameworks }}" as="f" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;gap:12px;min-height:40px;padding:8px 16px;border-bottom:1px solid var(--n-100);background:{{ f.bg }}">
+            <div style="width:34px;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ f.on }}" hint-size="34px,20px"></x-import></div>
+            <div style="width:250px;flex:none;min-width:0">
+              <div style="font-size:13px;font-weight:500;color:{{ f.fg }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.name }}</div>
+              <div style="font-family:var(--font-mono);font-size:10px;color:var(--n-500)">{{ f.ref }}</div>
+            </div>
+            <div style="flex:1;min-width:0;font-size:12px;color:var(--n-600);text-wrap:pretty">{{ f.contributes }}</div>
+            <div style="width:130px;flex:none;text-align:right;font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ f.metric }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AISummary" title="Path to the authorization decision" sources="From the RMF step states · 63 open POA&amp;M items · 9 package artifacts · IATT expiry 12 Aug" hint-size="100%,140px">Two things gate the decision date. The assessment event for the cryptographic family cannot execute until CHG-118 evidence lands, which holds 43 controls in the not-assessed column. Separately, the IATT expires on 12 August and the extension request needs the SAR draft plus a current POA&amp;M — both are one signature away. Cerebro projects the package is complete on 21 October if the crypto evidence arrives by 15 August, which leaves three weeks of margin before the target decision date.</x-import>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const STEPS = [
+  { id: "prepare", num: "P", name: "Prepare", note: "Boundary, roles, and mission threads defined", date: "Complete 04 Feb", state: "done" },
+  { id: "categorize", num: "1", name: "Categorize", note: "CNSSI 1253 M-M-H, IL5", date: "Complete 14 Feb", state: "done" },
+  { id: "select", num: "2", name: "Select", note: "612 controls with 6 overlays applied", date: "Complete 22 Mar", state: "done" },
+  { id: "implement", num: "3", name: "Implement", note: "471 implemented, 96 partial, 45 planned", date: "77% · through Oct", state: "active" },
+  { id: "assess", num: "4", name: "Assess", note: "388 assessed, 57 other than satisfied", date: "63% · event AE-4 next", date2: "", state: "active" },
+  { id: "authorize", num: "5", name: "Authorize", note: "Package 67% assembled, IATT in force", date: "Target 14 Nov", state: "pending" },
+  { id: "monitor", num: "6", name: "Monitor", note: "Continuous monitoring strategy drafted", date: "Not started", state: "pending" }
+];
+
+const STEP_STYLE = {
+  done: { bg: "var(--n-0)", border: "var(--n-200)", fg: "var(--n-700)", icon: "circle-check", iconFg: "var(--success-600)" },
+  active: { bg: "var(--cortex-50)", border: "var(--cortex-200)", fg: "var(--cortex-800)", icon: "circle-dot", iconFg: "var(--cortex-600)" },
+  pending: { bg: "var(--n-0)", border: "var(--n-200)", fg: "var(--n-500)", icon: "circle-dashed", iconFg: "var(--n-400)" }
+};
+
+const DETAIL = {
+  prepare: { icon: "map", title: "Prepare — organization and system level",
+    body: "Authorization boundary covers the air vehicle, the ground control station, and the depot maintenance toolset. Four mission threads were defined with the operational unit and carried into the criticality analysis. Roles are assigned: ISSE M. Okonjo, ISSM PEO/HNC-S, SCA AFLCMC/HNCP, AO PEO/HNC.",
+    artifacts: [["Authorization boundary", "systems", "network"], ["Mission threads", "survive", "route"], ["Program protection", "protect", "shield-half"]] },
+  categorize: { icon: "layers", title: "Categorize — CNSSI 1253 M-M-H at IL5",
+    body: "Confidentiality moderate, integrity moderate, availability high. The availability rating drives the contingency and redundancy controls on the ground segment. Categorization memo signed by the AO on 14 February and referenced from Security plan §2.",
+    artifacts: [["Categorization in the baseline", "baseline", "sliders-horizontal"], ["Security plan §2", "sp", "file-text"]] },
+  select: { icon: "list-checks", title: "Select — 612 controls after tailoring",
+    body: "800-53 Rev 5 moderate-high starting set with six overlays: CNSSI 1253 classified, DO-326A airworthiness, ATT&CK ICS, cybersecurity advisories, CDRL-driven additions, and the cyber survivability attribute set. 47 controls tailored out with rationale, 18 program-unique controls added.",
+    artifacts: [["Baseline and controls", "baseline", "sliders-horizontal"], ["Overlay library", "library", "library-big"], ["SCTM", "sctm", "table-2"]] },
+  implement: { icon: "wrench", title: "Implement — 77% of controls implemented",
+    body: "Implementation statements are written against WBS elements rather than the system as a whole, so a hardware change reaches only the controls allocated to that element. 96 controls sit partial, most waiting on build 4.2 of the ground software and the P3 processor card refresh.",
+    artifacts: [["SCTM", "sctm", "table-2"], ["Systems and WBS", "systems", "network"], ["Security plan", "sp", "file-text"]] },
+  assess: { icon: "clipboard-check", title: "Assess — event AE-4 is the critical path",
+    body: "Three assessment events are complete. AE-4 covers the cryptographic family and cannot execute until the KI-700 substitution evidence lands under CHG-118 — 43 controls are held in the not-assessed column because of it. Machine evidence from scans and STIG checklists supersedes assessed results automatically and marks the affected SCTM rows stale.",
+    artifacts: [["Assessment", "assess", "clipboard-check"], ["Findings and POA&M", "poam", "list-todo"], ["Scans and STIGs", "scans", "scan-search"]] },
+  authorize: { icon: "stamp", title: "Authorize — package 67% assembled",
+    body: "IATT is in force until 12 August with two conditions: the two CAT I findings keep their interim measures, and the maintenance mode restriction stays procedurally enforced. The extension request needs the SAR draft and a current POA&M workbook. AO decision briefing is scheduled for 06 November.",
+    artifacts: [["Package factory", "deliver", "package-check"], ["Reviews and sign-off", "reviews", "messages-square"]] },
+  monitor: { icon: "activity", title: "Monitor — strategy drafted, not yet in force",
+    body: "The continuous monitoring strategy reuses the ingest rules already running on scans and advisories: control-level frequencies, automatic staleness on the SCTM, and quarterly reporting to the AO. It takes effect at the authorization decision.",
+    artifacts: [["Connections", "sources", "cable"], ["Scans and STIGs", "scans", "scan-search"]] }
+};
+
+const READY = [
+  { name: "Security plan", rev: "Rev B", state: "3 blocks stale", icon: "circle-alert", color: "var(--warn-700)", view: "sp" },
+  { name: "Security control traceability matrix", rev: "Rev C", state: "Ready", icon: "circle-check", color: "var(--success-600)", view: "sctm" },
+  { name: "Security assessment plan", rev: "Rev B", state: "Ready", icon: "circle-check", color: "var(--success-600)", view: "assess" },
+  { name: "Security assessment report", rev: "draft", state: "AE-4 pending", icon: "circle-dot", color: "var(--cortex-600)", view: "assess" },
+  { name: "POA&M workbook", rev: "29 Jul", state: "Ready", icon: "circle-check", color: "var(--success-600)", view: "poam" },
+  { name: "Program protection plan", rev: "Rev D", state: "Ready", icon: "circle-check", color: "var(--success-600)", view: "protect" },
+  { name: "Cyber survivability endorsement", rev: "Rev A", state: "2 CSAs open", icon: "circle-alert", color: "var(--warn-700)", view: "survive" },
+  { name: "Contingency plan and test report", rev: "Rev C", state: "Ready", icon: "circle-check", color: "var(--success-600)", view: "docs" },
+  { name: "Continuous monitoring strategy", rev: "draft", state: "Not signed", icon: "circle-dashed", color: "var(--n-500)", view: "docs" }
+];
+
+const PROVIDERS = [
+  { name: "Cloud One IL5 — AWS GovCloud", count: "61", scope: "Physical, environmental, and platform controls for the mission planning enclave", state: "Attested 12 Jun 2026 · current", dot: "var(--success-500)", fg: "var(--success-700)", agreement: "CRM v4.2" },
+  { name: "AFLCMC common control provider", count: "24", scope: "Personnel security, training, and organizational policy controls", state: "Attested 03 Apr 2026 · current", dot: "var(--success-500)", fg: "var(--success-700)", agreement: "MOU-2214" },
+  { name: "Fort Novosel ground station enclave", count: "11", scope: "Boundary protection and audit collection for the fielded GCS", state: "Attestation expires 30 Aug 2026", dot: "var(--warn-500)", fg: "var(--warn-700)", agreement: "ISA-0088" },
+  { name: "Trident Reach reciprocity — ASW crypto subsystem", count: "9 candidate", scope: "Same KI-700 implementation already assessed at IL6 on PRG-021", state: "Reciprocity request drafted, not submitted", dot: "var(--n-300)", fg: "var(--n-600)", agreement: "pending" }
+];
+
+const SSE = [
+  { name: "Stakeholder needs", artifact: "Mission threads and protection needs from the operational unit", state: "Complete · 4 threads", dot: "var(--success-500)", fg: "var(--success-700)" },
+  { name: "Requirements definition", artifact: "148 contractual security requirements traced to controls", state: "7 unallocated", dot: "var(--warn-500)", fg: "var(--warn-700)" },
+  { name: "Architecture definition", artifact: "Authorization boundary, enclaves, and datalink partitioning", state: "Complete · Cameo baseline 4.1", dot: "var(--success-500)", fg: "var(--success-700)" },
+  { name: "Design definition", artifact: "Control allocation to WBS elements, 412 statements", state: "In work · 96 partial", dot: "var(--cortex-500)", fg: "var(--cortex-700)" },
+  { name: "Implementation", artifact: "Build 4.1 fielded, build 4.2 in integration", state: "In work", dot: "var(--cortex-500)", fg: "var(--cortex-700)" },
+  { name: "Verification", artifact: "Assessment procedures, test reports, scan results", state: "63% assessed", dot: "var(--cortex-500)", fg: "var(--cortex-700)" },
+  { name: "Validation", artifact: "Adversarial assessment and operational cyber events", state: "AA-2 complete, OT-1 in Sep", dot: "var(--cortex-500)", fg: "var(--cortex-700)" },
+  { name: "Transition and operation", artifact: "Depot procedures, monitoring strategy, training", state: "Not started", dot: "var(--n-300)", fg: "var(--n-500)" }
+];
+
+const FRAMEWORKS = [
+  { id: "rmf", name: "RMF process", ref: "DoDI 8510.01", on: true, contributes: "Step gating, package contents, and the authorization decision record", metric: "7 steps" },
+  { id: "sse", name: "Systems security engineering", ref: "NIST SP 800-160 vol. 1", on: true, contributes: "Technical process activities and the protection-need trace above the control set", metric: "8 processes" },
+  { id: "cse", name: "Cyber survivability endorsement", ref: "JCIDS · CSRC 3", on: true, contributes: "Ten survivability attributes, tailored requirement levels, and the MBCRA", metric: "10 attributes" },
+  { id: "controls", name: "Security controls catalog", ref: "NIST SP 800-53 Rev 5", on: true, contributes: "The control text every SCTM row and implementation statement points at", metric: "612 selected" },
+  { id: "cnssi", name: "Categorization and overlays", ref: "CNSSI 1253", on: true, contributes: "M-M-H categorization and the classified system overlay", metric: "M-M-H · IL5" },
+  { id: "ppp", name: "Program protection", ref: "DoDI 5000.83", on: true, contributes: "CPI identification, criticality analysis, anti-tamper, and TSN measures", metric: "PPP Rev D" },
+  { id: "stig", name: "STIG and SRG compliance", ref: "DISA", on: true, contributes: "Benchmark results as machine evidence for CM-6 and its enhancements", metric: "12 benchmarks" },
+  { id: "do326", name: "Airworthiness security", ref: "DO-326A / ED-202A", on: true, contributes: "Airworthiness security process steps and the security effectiveness argument", metric: "38 objectives" },
+  { id: "cmmc", name: "Contractor environment", ref: "800-171 R3 / CMMC L2", on: false, contributes: "Applies to the development environment rather than the delivered system", metric: "available" },
+  { id: "iec", name: "Industrial control systems", ref: "IEC 62443-4-2", on: false, contributes: "Component requirements for the launch and recovery ground equipment", metric: "available" },
+  { id: "jsig", name: "Special access programs", ref: "JSIG", on: false, contributes: "Would replace the categorization and overlay set for a SAP variant", metric: "available" },
+  { id: "icd503", name: "Intelligence community systems", ref: "ICD 503", on: false, contributes: "Reciprocity path if the ISR payload data moves to an IC enclave", metric: "available" }
+];
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n15: 15, n16: 16, sse: SSE, providers: PROVIDERS, ready: READY, prog: { controls: 612 } };
+    if (!S) return base;
+    const sel = S.state.authzStep || "assess";
+    const off = S.state.fwOff || {};
+    const d = DETAIL[sel] || DETAIL.assess;
+    return Object.assign(base, {
+      prog: S.prog(),
+      steps: STEPS.map((s) => {
+        const t = STEP_STYLE[s.state], on = s.id === sel;
+        return { id: s.id, num: s.num, name: s.name, note: s.note, date: s.date,
+          bg: on ? "var(--cortex-50)" : t.bg, border: on ? "var(--cortex-500)" : t.border,
+          fg: t.fg, icon: t.icon, iconFg: t.iconFg };
+      }),
+      stepDetail: { icon: d.icon, title: d.title, body: d.body,
+        artifacts: d.artifacts.map((a) => ({ label: a[0], view: a[1], icon: a[2] })) },
+      frameworks: FRAMEWORKS.map((f) => {
+        const on = off[f.id] ? false : f.on;
+        return { id: f.id, name: f.name, ref: f.ref, contributes: f.contributes, on: on,
+          metric: on ? f.metric : "available", bg: on ? "var(--n-0)" : "var(--n-25)",
+          fg: on ? "var(--n-900)" : "var(--n-600)" };
+      }),
+      onStep: (e) => {
+        const g = e.target.closest("[data-go]");
+        if (g) { S.go(g.getAttribute("data-go")); return; }
+        const b = e.target.closest("[data-step]");
+        if (b) S.set({ authzStep: b.getAttribute("data-step") });
+      },
+      onGo: (e) => { const b = e.currentTarget.closest("[data-go]"); if (b) S.go(b.getAttribute("data-go")); },
+      onFw: () => S.toast({ tone: "default", title: "Frameworks change the baseline", desc: "Turning a framework on or off is a baseline action — open Baseline and controls to see the control delta before it commits." }),
+      goDeliver: () => S.go("deliver"),
+      goLibrary: () => S.go("library")
+    });
+  }
+}
+
+</script>
+</body>
+</html>

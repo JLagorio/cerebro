@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="height:100%;min-width:0;overflow-y:auto;background:var(--n-25);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900)">
+  <div style="max-width:1180px;margin:0 auto;padding:24px 28px 56px;display:flex;flex-direction:column;gap:18px">
+
+    <div style="display:flex;align-items:flex-start;gap:16px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Scans, STIGs and SBOM</h1>
+        <div style="font-size:12px;color:var(--n-600);margin-top:4px">Machine evidence lands here first. Cerebro maps each result to the control it satisfies or breaks, deduplicates against open findings, and only then offers it to the POA&amp;M.</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex:none;padding-top:4px">
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" icon="upload" onClick="{{ onImport }}" hint-size="auto,32px">Import results</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="primary" icon="list-todo" onClick="{{ onPromote }}" hint-size="auto,32px">{{ promoteLabel }}</x-import>
+      </div>
+    </div>
+
+    <div onClick="{{ onTab }}" style="display:flex;align-items:center;gap:2px;border-bottom:1px solid var(--n-200)">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+        <button type="button" data-tab="{{ t.id }}" style="height:34px;padding:0 12px;border:none;background:none;border-bottom:2px solid {{ t.border }};font-family:var(--font-ui);font-size:13px;font-weight:{{ t.weight }};color:{{ t.fg }};cursor:pointer;display:flex;align-items:center;gap:7px" style-hover="color:var(--n-900)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ t.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import>{{ t.label }}<span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ t.count }}</span></button>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <sc-for list="{{ tiles }}" as="k" hint-placeholder-count="4">
+        <div style="background:var(--n-0);border:1px solid {{ k.border }};border-radius:10px;box-shadow:var(--shadow-sm);padding:12px 14px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:{{ k.labelFg }}">{{ k.label }}</div>
+          <div style="font-family:var(--font-mono);font-size:20px;font-weight:600;margin-top:4px;color:{{ k.fg }}">{{ k.value }}</div>
+          <div style="font-size:11px;color:var(--n-500);margin-top:2px">{{ k.note }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--n-200)">
+        <span style="font-size:14px;font-weight:600">{{ tableTitle }}</span>
+        <div style="flex:1"></div>
+        <span style="font-size:12px;color:var(--n-500)">{{ tableNote }}</span>
+      </div>
+      <div style="display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+        <sc-for list="{{ cols }}" as="c" hint-placeholder-count="6">
+          <div style="flex:{{ c.grow }};width:{{ c.w }};min-width:0;padding:0 16px 0 {{ c.padLeft }}">{{ c.label }}</div>
+        </sc-for>
+      </div>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="8">
+        <div style="display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--n-100)">
+          <div style="width:0;flex:2;min-width:0;padding-left:16px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="color:{{ r.iconFg }};display:flex;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ r.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+              <span style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.name }}</span>
+            </div>
+            <div style="font-size:11px;color:var(--n-500);margin-top:1px;padding-left:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.sub }}</div>
+          </div>
+          <div style="width:0;flex:1;min-width:0;padding:0 16px;font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ r.c2 }}</div>
+          <div style="width:132px;flex:none;padding:0 16px;display:flex;align-items:center;gap:5px">
+            <sc-for list="{{ r.sev }}" as="s" hint-placeholder-count="3">
+              <span style="font-family:var(--font-mono);font-size:11px;font-weight:600;color:{{ s.fg }};background:{{ s.bg }};border-radius:4px;padding:1px 5px">{{ s.text }}</span>
+            </sc-for>
+          </div>
+          <div style="width:104px;flex:none;padding:0 16px;font-family:var(--font-mono);font-size:11px;color:var(--cortex-700)">{{ r.ctl }}</div>
+          <div style="width:150px;flex:none;padding:0 16px;display:flex;align-items:center;gap:6px"><span style="width:7px;height:7px;border-radius:999px;flex:none;background:{{ r.dot }}"></span><span style="font-size:12px;color:var(--n-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.state }}</span></div>
+          <div style="width:110px;flex:none;padding:0 16px;font-size:12px;color:var(--n-500)">{{ r.when }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:16px;align-items:start">
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AISummary" title="{{ ai.title }}" sources="{{ ai.sources }}" hint-size="100%,150px">{{ ai.body }}</x-import>
+
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);padding:16px">
+        <div style="font-size:14px;font-weight:600">Ingest rules</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:3px;margin-bottom:14px">What happens to a result the moment it arrives</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500">Map to controls before anything else</div><div style="font-size:12px;color:var(--n-600)">STIG rule identifiers and CVE references resolve to catalog controls through the library mapping</div></div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500">Deduplicate against open findings</div><div style="font-size:12px;color:var(--n-600)">A repeat result updates the existing POA&amp;M item instead of creating a second one</div></div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500">Supersede stale assessment evidence</div><div style="font-size:12px;color:var(--n-600)">A newer scan marks the older result stale on the SCTM row rather than deleting it</div></div>
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" hint-size="34px,20px"></x-import>
+            <div style="flex:1"><div style="font-size:13px;font-weight:500">Auto-create POA&amp;M items</div><div style="font-size:12px;color:var(--n-600)">Off — an engineer promotes results deliberately, so the workbook stays defensible</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const SEV = (a, b, c) => [
+  { text: "I " + a, fg: a > 0 ? "var(--danger-700)" : "var(--n-500)", bg: a > 0 ? "var(--danger-50)" : "var(--n-100)" },
+  { text: "II " + b, fg: b > 0 ? "var(--warn-700)" : "var(--n-500)", bg: b > 0 ? "var(--warn-50)" : "var(--n-100)" },
+  { text: "III " + c, fg: "var(--n-600)", bg: "var(--n-100)" }
+];
+
+const STATE = {
+  mapped: { label: "Mapped · not promoted", dot: "var(--warn-500)" },
+  promoted: { label: "Promoted to POA&M", dot: "var(--cortex-500)" },
+  clean: { label: "No open items", dot: "var(--success-500)" },
+  review: { label: "Awaiting triage", dot: "var(--danger-500)" }
+};
+
+const SCANS = [
+  { name: "ACAS credentialed scan — GCS enclave", sub: "Tenable.sc 6.4 · 41 hosts · policy DoD_Compliance_v9", c2: "GT-ACAS-1188", sev: [0, 14, 22], ctl: "RA-5, SI-2", state: "mapped", when: "29 Jul 06:40", icon: "scan-search", iconFg: "var(--cortex-600)" },
+  { name: "ACAS credentialed scan — mission computer bench", sub: "Tenable.sc 6.4 · 6 hosts · bench configuration 4.1.7", c2: "GT-ACAS-1189", sev: [1, 9, 11], ctl: "RA-5", state: "review", when: "29 Jul 06:52", icon: "scan-search", iconFg: "var(--cortex-600)" },
+  { name: "Container image scan — ground software services", sub: "GitLab pipeline #4471 · 18 images", c2: "GT-CI-4471", sev: [0, 6, 19], ctl: "SI-2, SA-11", state: "promoted", when: "28 Jul 22:11", icon: "boxes", iconFg: "var(--cortex-600)" },
+  { name: "Web application scan — mission planning portal", sub: "Authenticated crawl · 214 endpoints", c2: "GT-WAS-0302", sev: [0, 3, 8], ctl: "SI-10, AC-3", state: "mapped", when: "27 Jul 19:30", icon: "globe", iconFg: "var(--cortex-600)" },
+  { name: "Wireless survey — launch and recovery element", sub: "Spectrum sweep during exercise window", c2: "GT-WLS-0044", sev: [0, 0, 2], ctl: "SC-40, AC-18", state: "clean", when: "24 Jul 14:05", icon: "radio", iconFg: "var(--n-500)" },
+  { name: "Database configuration scan — telemetry store", sub: "PostgreSQL 15 · 2 instances", c2: "GT-DB-0117", sev: [0, 4, 6], ctl: "CM-6, AU-9", state: "mapped", when: "22 Jul 03:15", icon: "database", iconFg: "var(--cortex-600)" },
+  { name: "Adversarial assessment findings — event AA-2", sub: "Red team report ingested as structured findings", c2: "GT-AA-0002", sev: [2, 5, 3], ctl: "IA-3, MA-4", state: "promoted", when: "02 Jul 09:00", icon: "swords", iconFg: "var(--danger-600)" }
+];
+
+const STIGS = [
+  { name: "RHEL 8 STIG", sub: "V1R14 · mission computer partition · 6 assets", c2: "GT-SCAP-0742", sev: [0, 34, 51], ctl: "CM-6", state: "mapped", when: "29 Jul", icon: "terminal", iconFg: "var(--cortex-600)", pct: 84 },
+  { name: "Cisco IOS-XE Router NDM STIG", sub: "V3R1 · GCS enclave · 4 assets", c2: "GT-SCAP-0743", sev: [0, 7, 12], ctl: "CM-6, AC-4", state: "mapped", when: "29 Jul", icon: "router", iconFg: "var(--cortex-600)", pct: 92 },
+  { name: "Application Security and Development STIG", sub: "V6R1 · flight software and ground software", c2: "GT-ASD-0058", sev: [1, 11, 26], ctl: "SA-11, SI-10", state: "review", when: "26 Jul", icon: "code-xml", iconFg: "var(--danger-600)", pct: 78 },
+  { name: "Windows Server 2022 STIG", sub: "V2R2 · mission planning server · 3 assets", c2: "GT-SCAP-0744", sev: [0, 5, 14], ctl: "CM-6", state: "mapped", when: "28 Jul", icon: "monitor", iconFg: "var(--cortex-600)", pct: 90 },
+  { name: "Container Platform SRG", sub: "V1R4 · ground software runtime", c2: "GT-SRG-0021", sev: [0, 3, 9], ctl: "CM-6, SC-39", state: "promoted", when: "28 Jul", icon: "boxes", iconFg: "var(--cortex-600)", pct: 88 },
+  { name: "Traditional Security Checklist", sub: "V2R5 · launch and recovery element facility", c2: "GT-TSC-0009", sev: [0, 0, 4], ctl: "PE-3, PE-6", state: "clean", when: "18 Jul", icon: "building-2", iconFg: "var(--n-500)", pct: 97 },
+  { name: "Network Infrastructure Router L3 Switch STIG", sub: "V2R6 · depot maintenance network", c2: "GT-SCAP-0745", sev: [0, 2, 7], ctl: "AC-4, SC-7", state: "mapped", when: "21 Jul", icon: "network", iconFg: "var(--cortex-600)", pct: 94 }
+];
+
+const SBOM = [
+  { name: "openssl 3.0.9", sub: "Ground software base image · 4 services affected", c2: "CVE-2026-31882", sev: [1, 0, 0], ctl: "SI-2, SR-3", state: "promoted", when: "27 Jul", icon: "shield-alert", iconFg: "var(--danger-600)" },
+  { name: "log4j-core 2.20.0", sub: "Mission planning portal · transitive through reporting library", c2: "CVE-2026-20118", sev: [0, 1, 0], ctl: "SI-2", state: "mapped", when: "26 Jul", icon: "package", iconFg: "var(--warn-600)" },
+  { name: "linux-firmware 20240115", sub: "Mission computer partition · vendor blob, no upstream fix", c2: "CVE-2025-49204", sev: [0, 1, 0], ctl: "SI-2, SR-11", state: "review", when: "24 Jul", icon: "cpu", iconFg: "var(--danger-600)" },
+  { name: "libxml2 2.12.4", sub: "Telemetry parser in flight software", c2: "CVE-2026-11907", sev: [0, 1, 2], ctl: "SI-2, SA-11", state: "mapped", when: "22 Jul", icon: "package", iconFg: "var(--warn-600)" },
+  { name: "grpc 1.62.0", sub: "GCS internal services · 6 components", c2: "no known CVE", sev: [0, 0, 0], ctl: "SR-3", state: "clean", when: "22 Jul", icon: "package", iconFg: "var(--n-500)" },
+  { name: "KI-700 firmware 2.4.1", sub: "Government-furnished crypto module · advisory watch only", c2: "ICSA-26-189-02", sev: [0, 1, 0], ctl: "SI-7(9)", state: "promoted", when: "09 Jul", icon: "key-round", iconFg: "var(--warn-600)" },
+  { name: "zlib 1.3.1", sub: "Present in 11 components across both segments", c2: "no known CVE", sev: [0, 0, 0], ctl: "SR-3", state: "clean", when: "22 Jul", icon: "package", iconFg: "var(--n-500)" }
+];
+
+const TABS = [
+  { id: "scans", label: "Vulnerability scans", icon: "scan-search", count: 7 },
+  { id: "stigs", label: "STIG and SRG checklists", icon: "list-checks", count: 12 },
+  { id: "sbom", label: "SBOM and advisories", icon: "boxes", count: 2417 }
+];
+
+const TILES = {
+  scans: [
+    { label: "Scan results ingested", value: "1,284", note: "across 7 events this month" },
+    { label: "Mapped to controls", value: "1,231", note: "53 need a mapping decision", border: "var(--n-200)" },
+    { label: "New since last promote", value: "14", note: "ready for the POA&M", border: "var(--warn-500)", labelFg: "var(--warn-700)", fg: "var(--warn-700)" },
+    { label: "Duplicates suppressed", value: "312", note: "matched to open findings" }
+  ],
+  stigs: [
+    { label: "Benchmarks applied", value: "12", note: "74 assets in scope" },
+    { label: "Weighted compliance", value: "87%", note: "target 90% before the SAR" },
+    { label: "Open CAT I", value: "1", note: "Application Security and Development", border: "var(--danger-500)", labelFg: "var(--danger-700)", fg: "var(--danger-600)" },
+    { label: "Approved deviations", value: "9", note: "each with a compensating control" }
+  ],
+  sbom: [
+    { label: "Components inventoried", value: "2,417", note: "CycloneDX from 3 pipelines" },
+    { label: "Matched CVEs", value: "38", note: "6 in the KEV catalog", border: "var(--warn-500)", labelFg: "var(--warn-700)", fg: "var(--warn-700)" },
+    { label: "No upstream fix", value: "3", note: "vendor blobs and GFE firmware" },
+    { label: "Suppliers with surveys", value: "22", note: "of 24 tier-one suppliers" }
+  ]
+};
+
+const COLS = [
+  { label: "Result", grow: 2, w: "0", padLeft: "16px" },
+  { label: "Identifier", grow: 1, w: "0", padLeft: "16px" },
+  { label: "Severity", grow: "none", w: "132px", padLeft: "16px" },
+  { label: "Controls", grow: "none", w: "104px", padLeft: "16px" },
+  { label: "Disposition", grow: "none", w: "150px", padLeft: "16px" },
+  { label: "Received", grow: "none", w: "110px", padLeft: "16px" }
+];
+
+const AI = {
+  scans: { title: "Triage summary", sources: "From 1,284 results across 7 scan events · deduplicated against 63 open findings",
+    body: "Fourteen results are new and unmatched: one CAT I on the mission computer bench and thirteen CAT II across the GCS enclave. Cerebro mapped all fourteen to RA-5 and SI-2 and drafted finding text for each. The CAT I duplicates the condition already tracked under FND-0188, so promoting it will update that item rather than open a new one." },
+  stigs: { title: "Compliance drift", sources: "From 12 benchmarks · 74 assets · compared against the 22 Jun assessed baseline",
+    body: "Weighted compliance dropped two points since the assessed baseline, driven entirely by the RHEL 8 V1R14 benchmark release. Nineteen of the 34 new open items are settings the OFP overrides at boot — the same class of exception already covered by nine approved deviations. Cerebro recommends folding them into that deviation package rather than opening new findings." },
+  sbom: { title: "Supply chain exposure", sources: "From 2,417 components · CISA KEV catalog · 3 vendor advisories",
+    body: "Six matched CVEs appear in the KEV catalog; four are already promoted. Three components have no upstream fix — two vendor blobs on the mission computer and the government-furnished KI-700 firmware — so each needs a documented compensating control in the security plan rather than a remediation milestone. Component authenticity evidence is still missing for the KI-700, which is tracked under FND-0212." }
+};
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n15: 15, yes: true, cols: COLS };
+    if (!S) return base;
+    const tab = S.state.scanTab || "scans";
+    const src = tab === "stigs" ? STIGS : tab === "sbom" ? SBOM : SCANS;
+    const promoted = !!S.state.scanPromoted;
+    return Object.assign(base, {
+      tabs: TABS.map((t) => {
+        const on = t.id === tab;
+        return { id: t.id, label: t.label, icon: t.icon, count: t.count,
+          border: on ? "var(--cortex-500)" : "transparent", fg: on ? "var(--n-900)" : "var(--n-600)", weight: on ? 600 : 500 };
+      }),
+      tiles: (TILES[tab] || []).map((k) => Object.assign({ border: "var(--n-200)", labelFg: "var(--n-500)", fg: "var(--n-900)" }, k)),
+      rows: src.map((r) => {
+        const st = STATE[promoted && r.state === "mapped" ? "promoted" : r.state];
+        return { name: r.name, sub: r.sub, c2: r.c2, ctl: r.ctl, when: r.when, icon: r.icon, iconFg: r.iconFg,
+          sev: SEV(r.sev[0], r.sev[1], r.sev[2]), state: st.label, dot: st.dot };
+      }),
+      tableTitle: tab === "stigs" ? "Benchmark results by asset group" : tab === "sbom" ? "Components with advisory or CVE matches" : "Scan events and their disposition",
+      tableNote: tab === "stigs" ? "Checklists imported from STIG Viewer and SCAP" : tab === "sbom" ? "CycloneDX inventory matched hourly against KEV and vendor advisories" : "ACAS, pipeline, and assessment-event imports",
+      ai: AI[tab] || AI.scans,
+      promoteLabel: promoted ? "14 promoted" : "Promote 14 to POA&M",
+      onTab: (e) => { const b = e.target.closest("[data-tab]"); if (b) S.set({ scanTab: b.getAttribute("data-tab") }); },
+      onImport: () => S.toast({ tone: "default", title: "Import results", desc: "Drop an ACAS .nessus, a STIG Viewer checklist, a SCAP XCCDF result, or a CycloneDX SBOM." }),
+      onPromote: () => {
+        if (promoted) { S.go("poam"); return; }
+        S.set({ scanPromoted: 1 });
+        S.toast({ tone: "ai", title: "14 results promoted", desc: "13 new POA&M items created with drafted weakness text; 1 CAT I merged into FND-0188. Owners assigned from the WBS element." });
+      }
+    });
+  }
+}
+
+</script>
+</body>
+</html>

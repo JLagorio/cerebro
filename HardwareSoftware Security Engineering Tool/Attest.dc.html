@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+<style>
+html,body{margin:0;height:100%;overflow-x:auto;overflow-y:hidden;background:var(--n-0)}
+a{color:var(--cortex-500);text-decoration:none}
+a:hover{color:var(--cortex-600);text-decoration:underline}
+*::-webkit-scrollbar{width:10px;height:10px}
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);background:var(--n-0);overflow:hidden;min-width:1440px">
+
+  <sc-if value="{{ banner }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:none;height:22px;background:var(--n-800);color:#fff;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase">CUI//SP-CTI · controlled unclassified information</div>
+  </sc-if>
+
+  <div style="flex:1;display:flex;min-height:0">
+
+    <div onClick="{{ onRail }}" style="width:56px;flex:none;border-right:1px solid var(--n-100);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:2px;background:var(--n-0)">
+      <div style="width:32px;height:32px;border-radius:8px;background:var(--cortex-500);color:#fff;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;letter-spacing:-0.02em">a<span style="color:var(--synapse-300)">.</span></div>
+      <button type="button" data-rail="programs" style="width:46px;padding:6px 0 5px;border:none;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--font-ui);font-size:10px;font-weight:500;cursor:pointer;background:{{ railProgramsBg }};color:{{ railProgramsFg }}" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="folder-tree" size="{{ n18 }}" hint-size="18px,18px"></x-import>Programs</button>
+      <button type="button" data-rail="systems" style="width:46px;padding:6px 0 5px;border:none;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--font-ui);font-size:10px;font-weight:500;cursor:pointer;background:{{ railSystemsBg }};color:{{ railSystemsFg }}" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="network" size="{{ n18 }}" hint-size="18px,18px"></x-import>Systems</button>
+      <button type="button" data-rail="library" style="width:46px;padding:6px 0 5px;border:none;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--font-ui);font-size:10px;font-weight:500;cursor:pointer;background:{{ railLibraryBg }};color:{{ railLibraryFg }}" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="library-big" size="{{ n18 }}" hint-size="18px,18px"></x-import>Library</button>
+      <button type="button" data-rail="sources" style="width:46px;padding:6px 0 5px;border:none;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--font-ui);font-size:10px;font-weight:500;cursor:pointer;background:{{ railSourcesBg }};color:{{ railSourcesFg }}" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="cable" size="{{ n18 }}" hint-size="18px,18px"></x-import>Sources</button>
+      <div style="flex:1"></div>
+      <button type="button" style="width:46px;padding:6px 0 5px;border:none;border-radius:8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-family:var(--font-ui);font-size:10px;font-weight:500;cursor:pointer;background:none;color:var(--n-500)" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="settings" size="{{ n18 }}" hint-size="18px,18px"></x-import>Settings</button>
+    </div>
+
+    <sc-if value="{{ showSidebar }}" hint-placeholder-val="{{ true }}">
+    <div onClick="{{ onNav }}" style="width:264px;flex:none;background:var(--n-50);border-right:1px solid var(--n-200);display:flex;flex-direction:column;overflow:hidden">
+
+      <sc-if value="{{ railPrograms }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;overflow:hidden;height:100%">
+          <div style="padding:12px 12px 12px 14px;border-bottom:1px solid var(--n-200)">
+            <button type="button" data-view="portfolio" style="display:flex;align-items:center;gap:5px;height:22px;padding:0 6px 0 4px;margin-bottom:7px;border:none;border-radius:6px;background:none;font-family:var(--font-ui);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--cortex-600);cursor:pointer" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="arrow-left" size="{{ n13 }}" hint-size="13px,13px"></x-import>All programs</button>
+            <div style="display:flex;align-items:center;gap:8px;padding-left:2px">
+              <span style="width:8px;height:8px;border-radius:2px;flex:none;background:{{ progSwatch }}"></span>
+              <div style="font-size:14px;font-weight:600;color:var(--n-900);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ prog.name }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:5px;padding-left:2px;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ prog.code }} · {{ prog.il }} · {{ prog.triad }} · {{ prog.phase }}</div>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:0 8px 16px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Program</div>
+            <button type="button" data-view="home" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nHomeBg }};color:{{ nHomeFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="layout-dashboard" size="{{ n15 }}" hint-size="15px,15px"></x-import>Overview</button>
+            <button type="button" data-view="baseline" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nBaselineBg }};color:{{ nBaselineFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="list-checks" size="{{ n15 }}" hint-size="15px,15px"></x-import>Baseline and controls<span style="margin-left:auto;font-size:11px;color:var(--n-500)">{{ prog.controls }}</span></button>
+            <button type="button" data-view="reqs" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nReqsBg }};color:{{ nReqsFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="file-signature" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Customer requirements</span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;flex:none"><span style="width:6px;height:6px;border-radius:999px;background:var(--danger-500);display:{{ reqGapDot }}"></span><span style="font-size:11px;color:var(--n-500)">{{ prog.reqs }}</span></span></button>
+
+            <button type="button" data-view="protect" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nProtectBg }};color:{{ nProtectFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="shield-half" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Program protection</span><span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500);flex:none">4 CPI</span></button>
+            <button type="button" data-view="survive" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nSurviveBg }};color:{{ nSurviveFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="radar" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Cyber survivability</span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;flex:none"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500)"></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">CSRC 3</span></span></button>
+
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Assess and authorize</div>
+            <button type="button" data-view="assess" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nAssessBg }};color:{{ nAssessFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="clipboard-check" size="{{ n15 }}" hint-size="15px,15px"></x-import>Assessment<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">63%</span></button>
+            <button type="button" data-view="poam" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nPoamBg }};color:{{ nPoamFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="list-todo" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Findings and POA&amp;M</span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;flex:none"><span style="width:6px;height:6px;border-radius:999px;background:var(--danger-500)"></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">63</span></span></button>
+            <button type="button" data-view="scans" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nScansBg }};color:{{ nScansFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="scan-search" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Scans and STIGs</span><span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500);flex:none">{{ scanBadge }}</span></button>
+            <button type="button" data-view="authz" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nAuthzBg }};color:{{ nAuthzFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="stamp" size="{{ n15 }}" hint-size="15px,15px"></x-import>Authorization<span style="margin-left:auto;display:flex;align-items:center;gap:6px;flex:none"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500)"></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">IATT</span></span></button>
+
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Deliverables</div>
+            <button type="button" data-view="sctm" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nSctmBg }};color:{{ nSctmFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="table-2" size="{{ n15 }}" hint-size="15px,15px"></x-import>SCTM<span style="margin-left:auto;display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500);display:{{ sctmDot }}"></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ prog.sctmRev }}</span></span></button>
+            <button type="button" data-view="sp" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nSpBg }};color:{{ nSpFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="file-text" size="{{ n15 }}" hint-size="15px,15px"></x-import>Security plan<span style="margin-left:auto;display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500);display:{{ spDot }}"></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ prog.spRev }}</span></span></button>
+            <button type="button" data-view="docs" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nDocsBg }};color:{{ nDocsFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="paperclip" size="{{ n15 }}" hint-size="15px,15px"></x-import>Supporting documentation<span style="margin-left:auto;font-size:11px;color:var(--n-500)">184</span></button>
+            <button type="button" data-view="deliver" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nDeliverBg }};color:{{ nDeliverFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="package-check" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Customer packages</span><span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500);flex:none">3</span></button>
+
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Collaboration</div>
+            <button type="button" data-view="reviews" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nReviewsBg }};color:{{ nReviewsFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="messages-square" size="{{ n15 }}" hint-size="15px,15px"></x-import><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Reviews and sign-off</span><span style="margin-left:auto;display:flex;align-items:center;gap:6px;flex:none"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500)"></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ revBadge }}</span></span></button>
+
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Change control</div>
+            <button type="button" data-view="impact" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nImpactBg }};color:{{ nImpactFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="git-compare-arrows" size="{{ n15 }}" hint-size="15px,15px"></x-import>Change impact<span style="margin-left:auto;font-size:11px;color:var(--n-500)">{{ openCount }}</span></button>
+            <button type="button" data-view="inbox" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ nInboxBg }};color:{{ nInboxFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="inbox" size="{{ n15 }}" hint-size="15px,15px"></x-import>Notifications<span style="margin-left:auto;font-size:11px;color:var(--n-500)">{{ notif }}</span></button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ railSystems }}">
+        <div style="display:flex;flex-direction:column;overflow:hidden;height:100%">
+          <div style="padding:14px 12px 10px 16px;border-bottom:1px solid var(--n-200)">
+            <div style="font-size:14px;font-weight:600;color:var(--n-900)">Systems</div>
+            <div style="font-size:11px;color:var(--n-500);margin-top:3px">DoD work breakdown structures</div>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:0 8px 16px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Breakdowns</div>
+            <button type="button" data-view="systems" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:var(--cortex-50);color:var(--cortex-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plane" size="{{ n15 }}" hint-size="15px,15px"></x-import>Unmanned aerial vehicle</button>
+            <button type="button" data-view="systems" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-700);cursor:pointer;background:none" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="ship" size="{{ n15 }}" hint-size="15px,15px"></x-import>Shipboard mission system</button>
+            <button type="button" data-view="systems" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-700);cursor:pointer;background:none" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="satellite" size="{{ n15 }}" hint-size="15px,15px"></x-import>GEO hosted payload</button>
+            <button type="button" data-view="systems" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-700);cursor:pointer;background:none" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="radio" size="{{ n15 }}" hint-size="15px,15px"></x-import>Tactical edge compute</button>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;padding:14px 8px 4px">
+              <span style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">Filter the tree</span>
+              <button type="button" data-inv="clear" style="border:none;background:none;padding:0;font-family:var(--font-ui);font-size:11px;font-weight:500;color:var(--cortex-600);cursor:pointer;display:{{ invClearDisp }}">Clear</button>
+            </div>
+            <button type="button" data-inv="hw" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ invHwBg }};color:{{ invHwFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="cpu" size="{{ n15 }}" hint-size="15px,15px"></x-import>Hardware<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">312</span></button>
+            <button type="button" data-inv="fw" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ invFwBg }};color:{{ invFwFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="binary" size="{{ n15 }}" hint-size="15px,15px"></x-import>Firmware<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">148</span></button>
+            <button type="button" data-inv="sw" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ invSwBg }};color:{{ invSwFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="code-xml" size="{{ n15 }}" hint-size="15px,15px"></x-import>Software<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">207</span></button>
+            <button type="button" data-inv="csa" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ invCsaBg }};color:{{ invCsaFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="shield-alert" size="{{ n15 }}" hint-size="15px,15px"></x-import>Unresolved CSAs<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--danger-600)">6</span></button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ railLibrary }}">
+        <div style="display:flex;flex-direction:column;overflow:hidden;height:100%">
+          <div style="padding:14px 12px 10px 16px;border-bottom:1px solid var(--n-200)">
+            <div style="font-size:14px;font-weight:600;color:var(--n-900)">Library</div>
+            <div style="font-size:11px;color:var(--n-500);margin-top:3px">Catalogs, overlays, boilerplate</div>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:0 8px 16px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Catalogs</div>
+            <button type="button" data-cat="800-53" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ cat80053Bg }};color:{{ cat80053Fg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="book-marked" size="{{ n15 }}" hint-size="15px,15px"></x-import>NIST SP 800-53 Rev 5<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">1189</span></button>
+            <button type="button" data-cat="cnssi" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catCnssiBg }};color:{{ catCnssiFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="layers" size="{{ n15 }}" hint-size="15px,15px"></x-import>CNSSI 1253 overlays<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">27</span></button>
+            <button type="button" data-cat="sparta" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catSpartaBg }};color:{{ catSpartaFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="orbit" size="{{ n15 }}" hint-size="15px,15px"></x-import>SPARTA v1.7<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">92</span></button>
+            <button type="button" data-cat="attack" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catAttackBg }};color:{{ catAttackFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="crosshair" size="{{ n15 }}" hint-size="15px,15px"></x-import>MITRE ATT&amp;CK v15<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">201</span></button>
+            <button type="button" data-cat="iec" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catIecBg }};color:{{ catIecFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="factory" size="{{ n15 }}" hint-size="15px,15px"></x-import>IEC 62443-4-2<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">47</span></button>
+            <button type="button" data-cat="do326" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catDo326Bg }};color:{{ catDo326Fg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plane-takeoff" size="{{ n15 }}" hint-size="15px,15px"></x-import>DO-326A / ED-202A<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">38</span></button>
+            <button type="button" data-cat="cmmc" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catCmmcBg }};color:{{ catCmmcFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="badge-check" size="{{ n15 }}" hint-size="15px,15px"></x-import>800-171 R3 / CMMC L2<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">110</span></button>
+            <button type="button" data-cat="csa" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ catCsaBg }};color:{{ catCsaFg }}" style-hover="background:var(--n-100)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="shield-alert" size="{{ n15 }}" hint-size="15px,15px"></x-import>Cybersecurity advisories<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--danger-600)">6</span></button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ railSources }}">
+        <div style="display:flex;flex-direction:column;overflow:hidden;height:100%">
+          <div style="padding:14px 12px 10px 16px;border-bottom:1px solid var(--n-200)">
+            <div style="font-size:14px;font-weight:600;color:var(--n-900)">Sources</div>
+            <div style="font-size:11px;color:var(--n-500);margin-top:3px">11 connected · last sync 07:12</div>
+          </div>
+          <div style="flex:1;overflow-y:auto;padding:0 8px 16px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Connections</div>
+            <button type="button" data-view="sources" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border:none;border-radius:6px;width:100%;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:var(--cortex-50);color:var(--cortex-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="cable" size="{{ n15 }}" hint-size="15px,15px"></x-import>All connections</button>
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:14px 8px 4px">Attention</div>
+            <button type="button" data-src="Cameo" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ srcCameoBg }};color:{{ srcCameoFg }}" style-hover="background:var(--n-100)"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500);flex:none"></span>Cameo — model drift<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">3</span></button>
+            <button type="button" data-src="Excel" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ srcExcelBg }};color:{{ srcExcelFg }}" style-hover="background:var(--n-100)"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500);flex:none"></span>Excel — schema mismatch<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">1</span></button>
+            <button type="button" data-src="TeamCenter" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px;width:100%;border:none;border-radius:6px;text-align:left;font-family:var(--font-ui);font-size:13px;cursor:pointer;background:{{ srcTcBg }};color:{{ srcTcFg }}" style-hover="background:var(--n-100)"><span style="width:6px;height:6px;border-radius:999px;background:var(--danger-500);flex:none"></span>TeamCenter — auth expired<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">1</span></button>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div style="height:64px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--n-200);background:var(--n-0)">
+        <span style="font-weight:700;font-size:16px;letter-spacing:-0.02em">attest<span style="color:var(--synapse-500)">.</span></span>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--n-500);padding-left:8px;border-left:1px solid var(--n-200);margin-left:4px;height:24px;white-space:nowrap;flex:none">
+          <span>{{ crumbRoot }}</span>
+          <span style="color:var(--n-400)">/</span>
+          <span style="color:var(--n-800);font-weight:500">{{ crumbLeaf }}</span>
+        </div>
+        <div style="flex:1;display:flex;justify-content:center">
+          <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AskBar" width="{{ n520 }}" placeholder="Ask about a control, requirement, or system…" onSubmit="{{ onAsk }}" hint-size="520px,36px"></x-import>
+        </div>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="primary" size="sm" icon="plus" hint-size="auto,28px">New</x-import>
+        <button type="button" data-view="inbox" onClick="{{ onNav }}" style="position:relative;width:32px;height:32px;border:none;background:none;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--n-600);cursor:pointer" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="bell" size="{{ n17 }}" hint-size="17px,17px"></x-import><span style="position:absolute;top:3px;right:3px;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--danger-500);color:#fff;font-size:9px;font-weight:600;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff">{{ notif }}</span></button>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="Maya Okonjo" size="{{ n28 }}" hint-size="28px,28px"></x-import>
+      </div>
+
+      <div style="flex:1;min-height:0;min-width:0;background:var(--n-25);overflow:hidden;position:relative">
+        <sc-if value="{{ isPortfolio }}" hint-placeholder-val="{{ true }}"><dc-import name="Portfolio" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isNewProg }}"><dc-import name="NewProgram" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isHome }}"><dc-import name="ProgramHome" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isReqs }}"><dc-import name="Requirements" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isBaseline }}"><dc-import name="BaselineBuilder" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isSctm }}"><dc-import name="SCTM" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isSp }}"><dc-import name="SecurityPlan" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isDocs }}"><dc-import name="SupportingDocs" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isImpact }}"><dc-import name="ChangeImpact" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isInbox }}"><dc-import name="Inbox" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isSystems }}"><dc-import name="Systems" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isLibrary }}"><dc-import name="Library" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isSources }}"><dc-import name="Sources" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isAssess }}"><dc-import name="Assessment" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isPoam }}"><dc-import name="POAM" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isScans }}"><dc-import name="Scans" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isAuthz }}"><dc-import name="Authorization" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isProtect }}"><dc-import name="Protection" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isSurvive }}"><dc-import name="Survivability" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isReviews }}"><dc-import name="Reviews" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+        <sc-if value="{{ isDeliver }}"><dc-import name="Deliverables" style="width:100%;height:100%" hint-size="100%,100%"></dc-import></sc-if>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ banner }}">
+    <div style="flex:none;height:22px;background:var(--n-800);color:var(--n-400);display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase"><span>CUI//SP-CTI</span><span>Derived from: DoD CUI registry · SP-CTI</span><span>{{ prog.code }}</span></div>
+  </sc-if>
+
+  <sc-if value="{{ toastOn }}">
+    <div style="position:fixed;right:20px;bottom:44px;z-index:60;width:360px">
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Toast" tone="{{ toastTone }}" title="{{ toastTitle }}" description="{{ toastDesc }}" onDismiss="{{ clearToast }}" hint-size="360px,64px"></x-import>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;initialView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;portfolio&quot;,&quot;options&quot;:[&quot;portfolio&quot;,&quot;newprog&quot;,&quot;home&quot;,&quot;reqs&quot;,&quot;baseline&quot;,&quot;protect&quot;,&quot;survive&quot;,&quot;assess&quot;,&quot;poam&quot;,&quot;scans&quot;,&quot;authz&quot;,&quot;sctm&quot;,&quot;sp&quot;,&quot;docs&quot;,&quot;deliver&quot;,&quot;reviews&quot;,&quot;impact&quot;,&quot;inbox&quot;,&quot;systems&quot;,&quot;library&quot;,&quot;sources&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;description&quot;:&quot;Which view the tool opens on&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;classificationBanner&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;description&quot;:&quot;Show CUI markings top and bottom&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;startResolved&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;description&quot;:&quot;Open with every upstream change already accepted — the calm state, no stale badges&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this._applyProps(s); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  _applyProps(S) {
+    if (this._applied) return;
+    this._applied = true;
+    const v = this.props.initialView;
+    if (v) S.go(v);
+    if (this.props.startResolved) {
+      S.set({ stale: {}, queue: { "CHG-118": "accepted", "CHG-119": "accepted", "CHG-120": "accepted" }, notif: 0 });
+    }
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n15: 15, n17: 17, n18: 18, n28: 28, n520: 520, banner: this.props.classificationBanner !== false };
+    if (!S) return base;
+    const st = S.state, p = S.prog();
+    const on = (v) => st.view === v;
+    const navBg = (v) => (on(v) ? "var(--cortex-50)" : "none");
+    const navFg = (v) => (on(v) ? "var(--cortex-700)" : "var(--n-700)");
+    const railBg = (r) => (st.rail === r ? "var(--cortex-50)" : "none");
+    const railFg = (r) => (st.rail === r ? "var(--cortex-600)" : "var(--n-500)");
+    const pBg = (id) => (st.programId === id ? "var(--cortex-50)" : "none");
+    const catBg = (id) => (st.libCatalog === id ? "var(--cortex-50)" : "none");
+    const catFg = (id) => (st.libCatalog === id ? "var(--cortex-700)" : "var(--n-700)");
+    const invBg = (k) => (st.wbsFilter === k ? "var(--cortex-50)" : "none");
+    const invFg = (k) => (st.wbsFilter === k ? "var(--cortex-700)" : "var(--n-600)");
+    const srcBg = (n) => (st.srcSel === n ? "var(--cortex-50)" : "none");
+    const srcFg = (n) => (st.srcSel === n ? "var(--cortex-700)" : "var(--n-600)");
+    const CAT_NAME = { "800-53": "NIST SP 800-53 Rev 5", cnssi: "CNSSI 1253 overlays", sparta: "SPARTA v1.7",
+      attack: "MITRE ATT&CK v15", iec: "IEC 62443-4-2", do326: "DO-326A / ED-202A",
+      cmmc: "800-171 R3 / CMMC L2", csa: "Cybersecurity advisories" };
+    const INV_NAME = { hw: "Hardware", fw: "Firmware", sw: "Software", csa: "Advisories" };
+    const crumbs = {
+      portfolio: ["Programs", "All programs"], newprog: ["Programs", "New program"],
+      home: ["Programs", p.name], reqs: ["Programs", "Customer requirements"],
+      baseline: ["Programs", "Baseline and controls"],
+      sctm: ["Deliverables", "SCTM"], sp: ["Deliverables", "Security plan"],
+      docs: ["Deliverables", "Supporting documentation"], impact: ["Change control", "Change impact"],
+      inbox: ["Change control", "Notifications"],
+      protect: ["Programs", "Program protection"], survive: ["Programs", "Cyber survivability"],
+      assess: ["Assess and authorize", "Assessment"], poam: ["Assess and authorize", "Findings and POA&M"],
+      scans: ["Assess and authorize", "Scans and STIGs"], authz: ["Assess and authorize", "Authorization"],
+      deliver: ["Deliverables", "Customer packages"], reviews: ["Collaboration", "Reviews and sign-off"],
+      systems: ["Systems", st.wbsFilter ? "Unmanned aerial vehicle · " + INV_NAME[st.wbsFilter] : "Unmanned aerial vehicle"],
+      library: ["Library", CAT_NAME[st.libCatalog] || "Catalog"], sources: ["Sources", st.srcSel || "All connections"]
+    }[st.view] || ["Programs", "Overview"];
+    const openCount = Object.keys(st.queue).filter((k) => st.queue[k] === "open").length;
+    return Object.assign(base, {
+      prog: p,
+      railPrograms: st.rail === "programs", railSystems: st.rail === "systems",
+      showSidebar: !(st.view === "portfolio" || st.view === "newprog"),
+      progSwatch: p.swatch,
+      railLibrary: st.rail === "library", railSources: st.rail === "sources",
+      railProgramsBg: railBg("programs"), railProgramsFg: railFg("programs"),
+      railSystemsBg: railBg("systems"), railSystemsFg: railFg("systems"),
+      railLibraryBg: railBg("library"), railLibraryFg: railFg("library"),
+      railSourcesBg: railBg("sources"), railSourcesFg: railFg("sources"),
+      nPortBg: navBg("portfolio"), nPortFg: navFg("portfolio"),
+      nNewBg: navBg("newprog"), nNewFg: navFg("newprog"),
+      nHomeBg: navBg("home"), nHomeFg: navFg("home"),
+      nReqsBg: navBg("reqs"), nReqsFg: navFg("reqs"),
+      progCount: S.programs.length,
+      reqGapDot: p.reqGap ? "inline-block" : "none",
+      nBaselineBg: navBg("baseline"), nBaselineFg: navFg("baseline"),
+      nSctmBg: navBg("sctm"), nSctmFg: navFg("sctm"),
+      nSpBg: navBg("sp"), nSpFg: navFg("sp"),
+      nDocsBg: navBg("docs"), nDocsFg: navFg("docs"),
+      nImpactBg: navBg("impact"), nImpactFg: navFg("impact"),
+      nInboxBg: navBg("inbox"), nInboxFg: navFg("inbox"),
+      pGrayTalonBg: pBg("gray-talon"), pTridentBg: pBg("trident-reach"), pOrbitalBg: pBg("orbital-sentry"),
+      pTalonBg: pBg("talon-vector"), pExpedBg: pBg("expeditionary-node"),
+      sctmDot: S.isStale("SC-13") ? "inline-block" : "none",
+      spDot: S.isStale("sp-b3") ? "inline-block" : "none",
+      notif: st.notif, openCount,
+      crumbRoot: crumbs[0], crumbLeaf: crumbs[1],
+      isPortfolio: on("portfolio"), isNewProg: on("newprog"), isReqs: on("reqs"),
+      isHome: on("home"), isBaseline: on("baseline"), isSctm: on("sctm"), isSp: on("sp"), isDocs: on("docs"),
+      isImpact: on("impact"), isInbox: on("inbox"), isSystems: on("systems"), isLibrary: on("library"), isSources: on("sources"),
+      isAssess: on("assess"), isPoam: on("poam"), isScans: on("scans"), isAuthz: on("authz"),
+      isProtect: on("protect"), isSurvive: on("survive"), isReviews: on("reviews"), isDeliver: on("deliver"),
+      nProtectBg: navBg("protect"), nProtectFg: navFg("protect"),
+      nSurviveBg: navBg("survive"), nSurviveFg: navFg("survive"),
+      nAssessBg: navBg("assess"), nAssessFg: navFg("assess"),
+      nPoamBg: navBg("poam"), nPoamFg: navFg("poam"),
+      nScansBg: navBg("scans"), nScansFg: navFg("scans"),
+      nAuthzBg: navBg("authz"), nAuthzFg: navFg("authz"),
+      nDeliverBg: navBg("deliver"), nDeliverFg: navFg("deliver"),
+      nReviewsBg: navBg("reviews"), nReviewsFg: navFg("reviews"),
+      scanBadge: st.scanPromoted ? "clear" : "14 new",
+      revBadge: Object.keys(st.threadsResolved || {}).length ? String(7 - Object.keys(st.threadsResolved).length) : "7",
+      toastOn: !!st.toast, toastTone: st.toast ? st.toast.tone : "default",
+      toastTitle: st.toast ? st.toast.title : "", toastDesc: st.toast ? st.toast.desc : "",
+      clearToast: () => S.set({ toast: null }),
+      cat80053Bg: catBg("800-53"), cat80053Fg: catFg("800-53"),
+      catCnssiBg: catBg("cnssi"), catCnssiFg: catFg("cnssi"),
+      catSpartaBg: catBg("sparta"), catSpartaFg: catFg("sparta"),
+      catAttackBg: catBg("attack"), catAttackFg: catFg("attack"),
+      catIecBg: catBg("iec"), catIecFg: catFg("iec"),
+      catDo326Bg: catBg("do326"), catDo326Fg: catFg("do326"),
+      catCmmcBg: catBg("cmmc"), catCmmcFg: catFg("cmmc"),
+      catCsaBg: catBg("csa"), catCsaFg: catFg("csa"),
+      invHwBg: invBg("hw"), invHwFg: invFg("hw"),
+      invFwBg: invBg("fw"), invFwFg: invFg("fw"),
+      invSwBg: invBg("sw"), invSwFg: invFg("sw"),
+      invCsaBg: invBg("csa"), invCsaFg: invFg("csa"),
+      invClearDisp: st.wbsFilter ? "block" : "none",
+      srcCameoBg: srcBg("Cameo"), srcCameoFg: srcFg("Cameo"),
+      srcExcelBg: srcBg("Excel"), srcExcelFg: srcFg("Excel"),
+      srcTcBg: srcBg("TeamCenter"), srcTcFg: srcFg("TeamCenter"),
+      onRail: (e) => { const b = e.target.closest("[data-rail]"); if (b) S.goRail(b.getAttribute("data-rail")); },
+      onNav: (e) => {
+        const b = e.target.closest("[data-view],[data-prog],[data-cat],[data-inv],[data-src]");
+        if (!b) return;
+        if (b.hasAttribute("data-prog")) S.selectProgram(b.getAttribute("data-prog"));
+        else if (b.hasAttribute("data-cat")) S.setLibCatalog(b.getAttribute("data-cat"));
+        else if (b.hasAttribute("data-inv")) {
+          const k = b.getAttribute("data-inv");
+          if (k === "clear") S.set({ wbsFilter: null }); else S.setWbsFilter(k);
+        }
+        else if (b.hasAttribute("data-src")) S.selectSource(b.getAttribute("data-src"));
+        else S.go(b.getAttribute("data-view"));
+      },
+      onAsk: (q) => S.toast({ tone: "ai", title: "Cerebro is tracing that", desc: q ? "“" + q + "” — 3 controls, 2 requirements, 1 SP section matched." : "Ask about a control, requirement, or system." })
+    });
+  }
+}
+
+</script>
+</body>
+</html>

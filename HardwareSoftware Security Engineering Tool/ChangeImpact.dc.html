@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;display:flex;min-width:0;font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);background:var(--n-0);overflow:hidden">
+
+  <div style="width:332px;flex:none;border-right:1px solid var(--n-200);background:var(--n-25);display:flex;flex-direction:column;overflow:hidden">
+    <div style="flex:none;padding:14px 16px 12px">
+      <div style="display:flex;align-items:center;gap:8px"><h1 style="margin:0;font-size:16px;line-height:24px;font-weight:600">Change impact</h1><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="warning" hint-size="auto,18px">{{ openCount }} open</x-import></div>
+      <div style="font-size:12px;color:var(--n-500);margin-top:3px">Upstream edits waiting on a downstream decision</div>
+    </div>
+    <div onClick="{{ onPick }}" style="flex:1;overflow-y:auto;padding:0 8px 16px">
+      <sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+        <div data-chg="{{ q.id }}" style="border:1px solid {{ q.border }};background:{{ q.bg }};border-radius:10px;padding:11px 12px;margin-bottom:8px;cursor:pointer" style-hover="border-color:var(--n-300)">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:1px 5px">{{ q.source }}</span>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-600)">{{ q.id }}</span>
+            <div style="flex:1"></div>
+            <span style="font-size:11px;font-weight:500;color:{{ q.stateColor }}">{{ q.stateLabel }}</span>
+          </div>
+          <div style="font-size:13px;color:var(--n-800);margin-top:6px;line-height:19px;text-wrap:pretty">{{ q.title }}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:7px;font-size:11px;color:var(--n-500)"><span>{{ q.actor }}</span><span>·</span><span>{{ q.when }}</span><span>·</span><span style="color:{{ q.impactColor }}">{{ q.impact }}</span></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:0;overflow-y:auto;background:var(--n-25)">
+    <div style="max-width:900px;padding:22px 28px 60px;display:flex;flex-direction:column;gap:18px">
+
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;color:var(--n-500);margin-bottom:6px">{{ chg.id }} · {{ chg.sourceLong }} · {{ chg.when }}</div>
+        <h2 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em;text-wrap:pretty">{{ chg.title }}</h2>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+          <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ chg.actorFull }}" size="{{ n20 }}" hint-size="20px,20px"></x-import>
+          <span style="font-size:12px;color:var(--n-600)">{{ chg.actor }} · rationale: {{ chg.rationale }}</span>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border:1px solid var(--n-200);border-radius:10px;background:var(--n-0);box-shadow:var(--shadow-sm);display:{{ chg.decidedRow }}">
+        <span style="color:{{ chg.decidedColor }};display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ chg.decidedIcon }}" size="{{ n16 }}" hint-size="16px,16px"></x-import></span>
+        <span style="font-size:13px;color:var(--n-800)">{{ chg.decidedText }}</span>
+      </div>
+
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AISummary" title="Cerebro assessment" sources="{{ chg.aiSources }}" hint-size="100%,110px">{{ chg.ai }}</x-import>
+
+      <div>
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:10px">Downstream impact — {{ chg.impact }}</div>
+        <div onClick="{{ onImpactClick }}" style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+          <sc-for list="{{ chg.impacts }}" as="i" hint-placeholder-count="4">
+            <div data-goto="{{ i.goto }}" style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--n-100);cursor:pointer" style-hover="background:var(--n-50)">
+              <span style="width:22px;height:22px;border-radius:6px;background:{{ i.iconBg }};color:{{ i.iconFg }};display:flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ i.icon }}" size="{{ n13 }}" hint-size="13px,13px"></x-import></span>
+              <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500);width:88px;flex:none">{{ i.ref }}</span>
+              <span style="flex:1;font-size:13px;color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ i.label }}</span>
+              <span style="font-size:11px;font-weight:500;color:{{ i.tagColor }}">{{ i.tag }}</span>
+              <span style="color:var(--n-400);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="chevron-right" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">Proposed edit</div>
+          <span style="font-size:12px;color:var(--n-500)">{{ chg.diffWhere }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--n-200);border-radius:10px;overflow:hidden;background:var(--n-0);box-shadow:var(--shadow-sm)">
+          <div style="border-right:1px solid var(--n-200)">
+            <div style="padding:8px 14px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">Current — {{ chg.diffFromRev }}</div>
+            <div style="padding:14px;font-size:13px;line-height:21px;color:var(--n-700);text-wrap:pretty">{{ chg.diffBeforeA }}<span style="background:var(--danger-50);color:var(--danger-700);text-decoration:line-through;padding:1px 3px;border-radius:3px">{{ chg.diffDelA }}</span>{{ chg.diffBeforeB }}<span style="background:var(--danger-50);color:var(--danger-700);text-decoration:line-through;padding:1px 3px;border-radius:3px">{{ chg.diffDelB }}</span>{{ chg.diffBeforeC }}</div>
+          </div>
+          <div>
+            <div style="padding:8px 14px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">Proposed — {{ chg.diffToRev }}</div>
+            <div style="padding:14px;font-size:13px;line-height:21px;color:var(--n-700);text-wrap:pretty">{{ chg.diffBeforeA }}<span style="background:var(--success-50);color:var(--success-700);padding:1px 3px;border-radius:3px">{{ chg.diffAddA }}</span>{{ chg.diffBeforeB }}<span style="background:var(--success-50);color:var(--success-700);padding:1px 3px;border-radius:3px">{{ chg.diffAddB }}</span>{{ chg.diffBeforeC }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);display:{{ chg.actionsRow }}">
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="primary" icon="check" onClick="{{ accept }}" hint-size="auto,32px">Accept and propagate</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" icon="x" onClick="{{ reject }}" hint-size="auto,32px">Reject</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="ghost" icon="message-square" hint-size="auto,32px">Ask the source owner</x-import>
+        <div style="flex:1"></div>
+        <span style="font-size:12px;color:var(--n-500);text-align:right">Accepting rewrites {{ chg.writeCount }} and records the rationale in the audit log</span>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:10px">Audit trail</div>
+        <div style="display:flex;flex-direction:column">
+          <sc-for list="{{ chg.trail }}" as="t" hint-placeholder-count="3">
+            <div style="display:flex;gap:10px;padding-bottom:14px">
+              <div style="width:8px;flex:none;display:flex;flex-direction:column;align-items:center;padding-top:5px">
+                <span style="width:7px;height:7px;border-radius:999px;background:{{ t.color }}"></span>
+                <span style="flex:1;width:1px;background:var(--n-200);margin-top:4px"></span>
+              </div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;color:var(--n-800);text-wrap:pretty">{{ t.text }}</div>
+                <div style="font-size:11px;color:var(--n-500);margin-top:2px">{{ t.meta }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const CHANGES = {
+  "CHG-118": {
+    source: "Cameo", sourceLong: "Cameo Systems Modeler · GrayTalon_Arch.mdzip",
+    title: "WBS 1.1.5.3 crypto module changed from KGV-72M to KI-700",
+    actor: "R. Osei", actorFull: "Rita Osei", when: "29 Jul 06:58", rationale: "ECP-2214 obsolescence redesign",
+    impact: "3 controls · 3 SP blocks · 1 test procedure · 1 release", writeCount: "3 SCTM rows and 3 security plan blocks",
+    aiSources: "From 1 model diff · 3 SCTM rows · 3 SP blocks · 1 CMVP register row",
+    ai: "The model now specifies a KI-700 in-line encryptor with 384-bit traffic keys. SC-12, SC-13 and IA-7 still describe the KGV-72M at 256 bits, and Security plan §4.3 quotes the retired key length in two places. The CMVP certificate on file (4418) belongs to the old module, so the evidence link will break on accept — a replacement certificate is needed before Rev D is issued.",
+    impacts: [
+      { goto: "sctm", ref: "SC-12", label: "Cryptographic key establishment and management", tag: "Statement rewrite", tagColor: "var(--warn-600)", icon: "shield-check", iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)" },
+      { goto: "sctm", ref: "SC-13", label: "Cryptographic protection", tag: "Statement rewrite", tagColor: "var(--warn-600)", icon: "shield-check", iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)" },
+      { goto: "sctm", ref: "IA-7", label: "Cryptographic module authentication", tag: "Part number only", tagColor: "var(--n-600)", icon: "shield-check", iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)" },
+      { goto: "sp", ref: "§4.3", label: "Cryptographic protection — 3 blocks reference the old module", tag: "Text edit", tagColor: "var(--warn-600)", icon: "file-text", iconBg: "var(--n-100)", iconFg: "var(--n-600)" },
+      { goto: "docs", ref: "GT-TP-0311", label: "Crypto verification test procedure needs a new setup step", tag: "Owner review", tagColor: "var(--n-600)", icon: "scan-line", iconBg: "var(--n-100)", iconFg: "var(--n-600)" },
+      { goto: "docs", ref: "Cert 4418", label: "CMVP certificate no longer applies to the fitted module", tag: "Evidence gap", tagColor: "var(--danger-600)", icon: "paperclip", iconBg: "var(--danger-50)", iconFg: "var(--danger-600)" }
+    ],
+    diffWhere: "Security plan §4.3 · block 3 · and SCTM rows SC-12, SC-13",
+    diffFromRev: "SP Rev B", diffToRev: "SP Rev C draft",
+    diffBeforeA: "Command-and-control traffic between the ground data terminal and the air vehicle is encrypted end to end by the ",
+    diffDelA: "KGV-72M", diffAddA: "KI-700",
+    diffBeforeB: " in-line network encryptor installed at WBS 1.1.5.3. The encryptor is NSA certified for Secret and below and operates with ",
+    diffDelB: "256-bit", diffAddB: "384-bit",
+    diffBeforeC: " traffic encryption keys established under the program key management plan.",
+    trail: [
+      { color: "var(--warn-500)", text: "Cerebro detected the model diff and computed downstream impact", meta: "29 Jul 07:12 · Cameo sync · 6 downstream objects touched" },
+      { color: "var(--cortex-500)", text: "R. Osei committed model revision 41 in Cameo", meta: "29 Jul 06:58 · rationale: ECP-2214 obsolescence redesign" },
+      { color: "var(--n-400)", text: "ECP-2214 approved at the configuration control board", meta: "24 Jul 2026 · Jira GT-4821 · linked automatically" }
+    ]
+  },
+  "CHG-119": {
+    source: "CISA", sourceLong: "Cybersecurity advisory feed · ICSA-26-189-02",
+    title: "Advisory ICSA-26-189-02 pulls SI-7(9) into the baseline",
+    actor: "Cerebro", actorFull: "Cerebro Agent", when: "29 Jul 05:40", rationale: "advisory affects FCC bootloader v4.2.1",
+    impact: "1 control added · 1 SP section missing · 1 release", writeCount: "1 SCTM row and 1 new security plan block",
+    aiSources: "From 1 advisory · 1 firmware inventory match · 0 existing SP coverage",
+    ai: "The advisory describes an unauthenticated bootloader update path on the same processor family used by the flight control computer at WBS 1.1.4.3, which runs bootloader v4.2.1. Nothing in the current baseline requires boot verification, so SI-7(9) should be added and a new §4.3 subsection drafted. No evidence exists yet.",
+    impacts: [
+      { goto: "baseline", ref: "SI-7(9)", label: "Add to tailored baseline as advisory-driven control", tag: "Control added", tagColor: "var(--cortex-600)", icon: "plus", iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)" },
+      { goto: "sctm", ref: "SI-7", label: "Parent control statement needs a boot integrity paragraph", tag: "Statement edit", tagColor: "var(--warn-600)", icon: "shield-check", iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)" },
+      { goto: "systems", ref: "1.1.4.3", label: "Flight control computer — bootloader v4.2.1 affected", tag: "Firmware", tagColor: "var(--danger-600)", icon: "cpu", iconBg: "var(--danger-50)", iconFg: "var(--danger-600)" },
+      { goto: "sp", ref: "§7.1", label: "System integrity — no block covers boot verification", tag: "Gap", tagColor: "var(--danger-600)", icon: "file-text", iconBg: "var(--n-100)", iconFg: "var(--n-600)" }
+    ],
+    diffWhere: "Tailored baseline · SI family",
+    diffFromRev: "Baseline as issued", diffToRev: "Baseline with advisory overlay",
+    diffBeforeA: "SI-7 Software, firmware, and information integrity is in the baseline with enhancements ",
+    diffDelA: "(15) only", diffAddA: "(9) and (15)",
+    diffBeforeB: ". Boot process verification on the flight control computer is ",
+    diffDelB: "not required", diffAddB: "required and release gated",
+    diffBeforeC: " for the Rev D issue.",
+    trail: [
+      { color: "var(--warn-500)", text: "Cerebro matched the advisory to firmware in the systems inventory", meta: "29 Jul 05:40 · 1 of 148 firmware items matched" },
+      { color: "var(--n-400)", text: "Advisory ingested from the CISA feed", meta: "29 Jul 05:32 · ICSA-26-189-02 · severity high" }
+    ]
+  },
+  "CHG-120": {
+    source: "Jama", sourceLong: "Jama Connect · CDRL A012 requirements",
+    title: "REQ-GT-0409 reworded to require module authentication at power-on",
+    actor: "D. Whitmore", actorFull: "Dana Whitmore", when: "28 Jul 14:20", rationale: "customer comment resolution CR-0087",
+    impact: "1 control · 1 SP block · 1 test procedure", writeCount: "1 SCTM row and 1 security plan block",
+    aiSources: "From 1 requirement diff · 1 SCTM row · 1 SP block",
+    ai: "The requirement now states the cryptographic module shall authenticate before entering operational mode rather than within ten seconds of power-on. IA-7 already describes power-on authentication, so the statement needs a small wording change only. The existing test procedure measures a timing window that no longer applies.",
+    impacts: [
+      { goto: "sctm", ref: "IA-7", label: "Cryptographic module authentication", tag: "Wording", tagColor: "var(--n-600)", icon: "shield-check", iconBg: "var(--cortex-50)", iconFg: "var(--cortex-600)" },
+      { goto: "sp", ref: "§5.4.5", label: "Authenticator management — timing sentence to remove", tag: "Text edit", tagColor: "var(--warn-600)", icon: "file-text", iconBg: "var(--n-100)", iconFg: "var(--n-600)" },
+      { goto: "docs", ref: "GT-TP-0412", label: "Test procedure measures a ten second window", tag: "Owner review", tagColor: "var(--n-600)", icon: "scan-line", iconBg: "var(--n-100)", iconFg: "var(--n-600)" }
+    ],
+    diffWhere: "SCTM row IA-7 · implementation statement",
+    diffFromRev: "SCTM Rev C", diffToRev: "SCTM Rev D draft",
+    diffBeforeA: "The flight control computer authenticates the cryptographic module over a dedicated control bus ",
+    diffDelA: "within ten seconds of power-on", diffAddA: "at power-on, before operational mode",
+    diffBeforeB: ". A failed challenge holds the module in bypass-inhibit and raises a maintenance fault ",
+    diffDelB: "to the maintenance log", diffAddB: "to the ground control station",
+    diffBeforeC: ".",
+    trail: [
+      { color: "var(--warn-500)", text: "Cerebro linked the requirement change to IA-7", meta: "28 Jul 14:26 · Jama sync · 3 downstream objects" },
+      { color: "var(--n-400)", text: "D. Whitmore resolved customer comment CR-0087", meta: "28 Jul 14:20 · Jama Connect" }
+    ]
+  }
+};
+
+const ORDER = ["CHG-118", "CHG-119", "CHG-120"];
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n14: 14, n16: 16, n20: 20 };
+    if (!S) return base;
+    const st = S.state;
+    const cur = st.openChange && CHANGES[st.openChange] ? st.openChange : "CHG-118";
+    const c = CHANGES[cur];
+    const stateOf = (id) => st.queue[id] || "open";
+    const queue = ORDER.map((id) => {
+      const x = CHANGES[id], s = stateOf(id), on = id === cur;
+      return {
+        id, source: x.source, title: x.title, actor: x.actor, when: x.when, impact: x.impact,
+        border: on ? "var(--cortex-500)" : "var(--n-200)",
+        bg: on ? "var(--cortex-50)" : "var(--n-0)",
+        stateLabel: s === "open" ? "Awaiting review" : s === "accepted" ? "Accepted" : "Rejected",
+        stateColor: s === "open" ? "var(--warn-600)" : s === "accepted" ? "var(--success-600)" : "var(--n-500)",
+        impactColor: s === "open" ? "var(--n-500)" : "var(--n-400)"
+      };
+    });
+    const s = stateOf(cur);
+    return Object.assign(base, {
+      queue, openCount: ORDER.filter((id) => stateOf(id) === "open").length,
+      chg: Object.assign({}, c, {
+        id: cur,
+        actionsRow: s === "open" ? "flex" : "none",
+        decidedRow: s === "open" ? "none" : "flex",
+        decidedIcon: s === "accepted" ? "circle-check" : "circle-x",
+        decidedColor: s === "accepted" ? "var(--success-600)" : "var(--n-500)",
+        decidedText: s === "accepted"
+          ? "Accepted 29 Jul by M. Okonjo — downstream objects rewritten and the audit log updated."
+          : "Rejected 29 Jul by M. Okonjo — the source owner was notified and the baseline is unchanged."
+      }),
+      accept: () => S.accept(cur),
+      reject: () => S.reject(cur),
+      onPick: (e) => { const b = e.target.closest("[data-chg]"); if (b) S.set({ openChange: b.getAttribute("data-chg") }); },
+      onImpactClick: (e) => {
+        const b = e.target.closest("[data-goto]");
+        if (!b) return;
+        const to = b.getAttribute("data-goto");
+        const ref = b.querySelector("span:nth-child(2)");
+        if (to === "sctm" && ref) S.set({ sctmSel: ref.textContent.trim(), panelOpen: true });
+        S.go(to);
+      }
+    });
+  }
+}
+
+</script>
+</body>
+</html>

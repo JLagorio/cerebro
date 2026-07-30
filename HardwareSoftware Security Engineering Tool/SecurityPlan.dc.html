@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;display:flex;min-width:0;font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);background:var(--n-0);overflow:hidden">
+
+  <div onClick="{{ onOutline }}" style="width:220px;flex:none;border-right:1px solid var(--n-200);background:var(--n-50);overflow-y:auto;padding:16px 8px 24px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:0 8px 8px">Contents</div>
+    <sc-for list="{{ outline }}" as="o" hint-placeholder-count="14">
+      <div data-sec="{{ o.num }}" style="display:flex;align-items:center;gap:8px;min-height:26px;padding:3px 8px 3px {{ o.pad }};border-radius:6px;cursor:pointer;background:{{ o.bg }};color:{{ o.fg }}" style-hover="background:var(--n-100)">
+        <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500);flex:none;width:26px">{{ o.num }}</span>
+        <span style="font-size:12px;font-weight:{{ o.weight }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">{{ o.title }}</span>
+        <span style="display:{{ o.dot }};width:6px;height:6px;border-radius:999px;background:var(--warn-500);flex:none"></span>
+      </div>
+    </sc-for>
+    <div style="margin-top:16px;padding:0 8px;font-size:11px;color:var(--n-500);text-wrap:pretty">One continuous document · {{ blockCount }} blocks · click a heading to jump</div>
+  </div>
+
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--n-200)">
+      <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap">Security plan</h1>
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--n-500);padding:2px 6px;border:1px solid var(--n-200);border-radius:4px;white-space:nowrap">{{ prog.spRev }}</span>
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--n-500);white-space:nowrap;flex:none">§{{ activeNum }}</span>
+      <div style="flex:1;min-width:8px"></div>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="git-compare-arrows" hint-size="auto,28px">Compare revisions</x-import>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="file-down" hint-size="auto,28px">Export to Word</x-import>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="primary" hint-size="auto,28px">Issue Rev C</x-import>
+    </div>
+
+    <sc-if value="{{ anyStale }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:none;display:flex;align-items:center;gap:10px;padding:10px 20px;background:var(--warn-50);border-bottom:1px solid var(--n-200)">
+        <span style="color:var(--warn-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="triangle-alert" size="{{ n16 }}" hint-size="16px,16px"></x-import></span>
+        <span style="font-size:13px;color:var(--n-800)"><span style="font-weight:600">3 blocks in §4.3 are stale.</span> The Cameo model behind WBS 1.1.5.3 changed, so SC-12, SC-13 and IA-7 no longer match what this plan says.</span>
+        <div style="flex:1"></div>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" onClick="{{ goCrypto }}" hint-size="auto,28px">Jump to §4.3</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="primary" onClick="{{ goImpact }}" hint-size="auto,28px">Review CHG-118</x-import>
+      </div>
+    </sc-if>
+
+    <div data-spdoc="1" onScroll="{{ onScroll }}" style="flex:1;overflow-y:auto;padding:28px 32px 120px">
+      <div style="max-width:720px">
+
+        <div style="padding-bottom:20px;margin-bottom:26px;border-bottom:1px solid var(--n-200)">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">CUI//SP-CTI · controlled unclassified information</div>
+          <h2 style="margin:7px 0 0;font-size:26px;line-height:34px;font-weight:700;letter-spacing:-0.02em">{{ prog.name }} system security plan</h2>
+          <div style="font-size:12px;color:var(--n-500);margin-top:6px">{{ prog.spRev }} · 14 sections · delivered under CDRL {{ prog.cdrl }} · assessor {{ prog.assessor }}</div>
+        </div>
+
+        <sc-for list="{{ sections }}" as="s" hint-placeholder-count="3">
+          <div data-secid="{{ s.num }}" style="padding-bottom:30px">
+            <h3 style="margin:0 0 4px;font-size:{{ s.size }};line-height:{{ s.lh }};font-weight:700;letter-spacing:-0.02em;color:var(--n-900)">{{ s.heading }}</h3>
+            <div style="color:var(--n-500);font-size:12px;margin-bottom:16px">{{ s.meta }}</div>
+
+            <div style="display:flex;gap:10px;margin-bottom:14px">
+              <div style="width:16px;flex:none;color:var(--n-300);padding-top:2px;cursor:grab"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="grip-vertical" size="{{ n14 }}" hint-size="14px,14px"></x-import></div>
+              <div style="flex:1;background:var(--n-25);border:1px solid var(--n-200);border-radius:10px;padding:12px 14px">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Controls satisfied by this section</div>
+                <div onClick="{{ openCtl }}" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                  <sc-for list="{{ s.chips }}" as="c" hint-placeholder-count="3">
+                    <button type="button" data-ctl="{{ c.id }}" style="display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border:1px solid var(--cortex-200);background:var(--cortex-50);color:var(--cortex-700);border-radius:6px;font-family:var(--font-mono);font-size:11px;cursor:pointer" style-hover="background:var(--cortex-100)">{{ c.id }}<span style="display:{{ c.dot }};width:5px;height:5px;border-radius:999px;background:var(--warn-500)"></span></button>
+                  </sc-for>
+                  <span style="font-size:12px;color:var(--n-500);margin-left:2px">from SCTM {{ prog.sctmRev }}</span>
+                </div>
+              </div>
+            </div>
+
+            <sc-for list="{{ s.blocks }}" as="b" hint-placeholder-count="3">
+              <div style="display:flex;gap:10px;margin-bottom:14px">
+                <div style="width:16px;flex:none;color:var(--n-300);padding-top:2px;cursor:grab"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="grip-vertical" size="{{ n14 }}" hint-size="14px,14px"></x-import></div>
+                <div style="flex:1;min-width:0;border-left:3px solid {{ b.bar }};padding-left:{{ b.padL }};margin-left:{{ b.mgL }}">
+                  <div style="align-items:center;gap:8px;margin-bottom:6px;display:{{ b.chipDisp }}">
+                    <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="warning" hint-size="auto,18px">Source changed</x-import>
+                    <span style="font-size:11px;color:var(--warn-700)">{{ b.note }}</span>
+                    <button type="button" onClick="{{ goImpact }}" style="border:none;background:none;padding:0;font-family:var(--font-ui);font-size:11px;font-weight:500;color:var(--cortex-600);cursor:pointer;text-decoration:underline">Review</button>
+                  </div>
+                  <div contentEditable="true" suppressContentEditableWarning="{{ yes }}" style="font-size:14px;line-height:24px;color:var(--n-800);outline:none;border-radius:6px;padding:2px 6px;margin-left:-6px;text-wrap:pretty" style-focus="background:var(--n-25)">{{ b.t }}</div>
+                </div>
+              </div>
+            </sc-for>
+
+            <div style="display:flex;gap:10px">
+              <div style="width:16px;flex:none;color:var(--n-300);padding-top:2px;cursor:grab"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="grip-vertical" size="{{ n14 }}" hint-size="14px,14px"></x-import></div>
+              <div style="flex:1;background:var(--n-25);border:1px solid var(--n-200);border-radius:10px;padding:12px 14px">
+                <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Evidence referenced here</div>
+                <div style="display:flex;flex-direction:column;gap:7px">
+                  <sc-for list="{{ s.evidence }}" as="e" hint-placeholder-count="2">
+                    <div style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="font-size:11px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:1px 5px;flex:none">{{ e.source }}</span><span style="color:var(--n-800);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.name }}</span><span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500);flex:none">{{ e.meta }}</span></div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+
+        <sc-for list="{{ inserted }}" as="ins" hint-placeholder-count="0">
+          <div style="display:flex;gap:10px;margin-bottom:14px">
+            <div style="width:16px;flex:none;color:var(--n-300);padding-top:2px;cursor:grab"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="grip-vertical" size="{{ n14 }}" hint-size="14px,14px"></x-import></div>
+            <div style="flex:1;border:1px dashed var(--cortex-300);background:var(--cortex-50);border-radius:10px;padding:10px 12px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-family:var(--font-mono);font-size:11px;color:var(--cortex-700);background:var(--n-0);border:1px solid var(--cortex-200);border-radius:4px;padding:1px 5px">{{ ins.ref }}</span>
+                <span style="font-size:13px;color:var(--n-800)">{{ ins.text }}</span>
+              </div>
+              <div style="font-size:11px;color:var(--n-500);margin-top:4px">Inserted into §{{ ins.section }} · linked live to {{ ins.origin }}</div>
+            </div>
+          </div>
+        </sc-for>
+
+        <div style="display:flex;gap:10px;position:relative">
+          <div style="width:16px;flex:none;color:var(--n-300);padding-top:6px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="plus" size="{{ n14 }}" hint-size="14px,14px"></x-import></div>
+          <input value="{{ slashValue }}" onChange="{{ onSlash }}" placeholder="Type / to insert a control, requirement, system, or evidence reference…" style="flex:1;height:32px;border:none;outline:none;background:none;font-family:var(--font-ui);font-size:14px;color:var(--n-800);padding:0 6px;margin-left:-6px" />
+          <sc-if value="{{ slashOpen }}">
+            <div onClick="{{ pick }}" style="position:absolute;left:22px;top:38px;width:340px;z-index:20;background:var(--n-0);border:1px solid var(--n-200);border-radius:14px;box-shadow:var(--shadow-lg);padding:6px">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:6px 8px 4px">Insert reference</div>
+              <button type="button" data-ins="control" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:7px 8px;border-radius:8px;cursor:pointer;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-800)" style-hover="background:var(--n-50)"><span style="color:var(--cortex-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="shield-check" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>Control reference<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">SI-7(9)</span></button>
+              <button type="button" data-ins="requirement" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:7px 8px;border-radius:8px;cursor:pointer;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-800)" style-hover="background:var(--n-50)"><span style="color:var(--n-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="file-badge" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>Requirement reference<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">REQ-GT-0605</span></button>
+              <button type="button" data-ins="system" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:7px 8px;border-radius:8px;cursor:pointer;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-800)" style-hover="background:var(--n-50)"><span style="color:var(--n-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="cpu" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>System reference<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">1.1.5.3</span></button>
+              <button type="button" data-ins="evidence" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:7px 8px;border-radius:8px;cursor:pointer;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--n-800)" style-hover="background:var(--n-50)"><span style="color:var(--n-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="paperclip" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>Evidence link<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">GitLab</span></button>
+              <div style="height:1px;background:var(--n-100);margin:5px 8px"></div>
+              <button type="button" data-ins="ai" style="display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;padding:7px 8px;border-radius:8px;cursor:pointer;text-align:left;font-family:var(--font-ui);font-size:13px;color:var(--synapse-700)" style-hover="background:var(--synapse-50)"><span style="display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sparkles" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>Draft from SCTM row<span style="margin-left:auto;font-size:11px;color:var(--synapse-500)">Cerebro</span></button>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="width:268px;flex:none;border-left:1px solid var(--n-200);background:var(--n-25);overflow-y:auto;padding:16px 16px 32px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:10px">Upstream of §{{ activeNum }}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:22px">
+      <sc-for list="{{ upstream }}" as="u" hint-placeholder-count="3">
+        <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:8px;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:6px"><span style="font-size:11px;font-weight:600;color:var(--n-600);background:var(--n-100);border-radius:4px;padding:1px 5px">{{ u.source }}</span><span style="font-family:var(--font-mono);font-size:11px;color:{{ u.color }}">{{ u.count }}</span></div>
+          <div style="font-size:12px;color:var(--n-700);margin-top:5px;text-wrap:pretty">{{ u.detail }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:10px">Comments</div>
+    <sc-if value="{{ hasComments }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <sc-for list="{{ comments }}" as="c" hint-placeholder-count="2">
+          <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:8px;padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Avatar" name="{{ c.who }}" size="{{ n20 }}" hint-size="20px,20px"></x-import><span style="font-size:12px;font-weight:500">{{ c.short }}</span><span style="font-size:11px;color:var(--n-500)">{{ c.when }}</span></div>
+            <div style="font-size:12px;line-height:18px;color:var(--n-700);text-wrap:pretty">{{ c.text }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{ noComments }}">
+      <div style="font-size:12px;color:var(--n-500);text-wrap:pretty">No open comments on this section.</div>
+    </sc-if>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const SECTIONS = {
+  "1": {
+    title: "Introduction", heading: "1 Introduction", meta: "Last edited by M. Okonjo · 04 Feb 2026 · 3 blocks · 2 references",
+    controls: ["PL-2", "CA-2"],
+    blocks: [
+      "This security plan describes the security controls implemented for the Gray Talon tactical unmanned aerial system and the rationale for each. It is delivered under CDRL A012 and is read alongside the security control traceability matrix delivered under CDRL A014.",
+      "The plan covers the air vehicle, the ground control segment, and the test and support equipment listed in the work breakdown structure at revision 41. Facilities, personnel security, and base network services are inherited from the operating installation and are identified as such where they appear.",
+      "Every statement in this plan is traceable to a control in the tailored baseline and to the configuration item that implements it. Where a statement depends on a source outside this plan, the reference is live: if the source changes, the block is flagged for review before the next revision is issued."
+    ],
+    evidence: [{ source: "Jama", name: "CDRL A012 requirements set", meta: "rev 7" }, { source: "Word", name: "Program protection plan", meta: "rev 3" }],
+    upstream: [{ source: "Jama", count: "2 requirements", detail: "CDRL A012 §1.1, §1.2 scope statements" }, { source: "SCTM", count: "2 rows", detail: "PL-2, CA-2" }],
+    comments: []
+  },
+  "2": {
+    title: "System description", heading: "2 System description", meta: "Last edited by R. Osei · 18 Mar 2026 · 4 blocks · 11 references",
+    controls: ["CM-2", "CM-8", "SC-7"],
+    blocks: [
+      "Gray Talon is a Group 4 tactical unmanned aerial system comprising an air vehicle at WBS 1.1, a ground control segment at WBS 1.2, and the launch, recovery, and training equipment at WBS 1.4. The air vehicle carries an electro-optical infrared gimbal and a synthetic aperture radar as its primary payloads.",
+      "Flight critical processing runs on the triple redundant flight control computer at WBS 1.1.4.3. Mission payload processing is physically separated from flight critical processing; the two networks meet only at a controlled interface described in section 5.2.",
+      "The authorisation boundary includes both segments and the data links between them. It excludes the customer key management infrastructure, the base transport network, and the imagery dissemination systems the ground segment feeds, all of which are separately authorised.",
+      "The architecture of record is the Cameo model GrayTalon_Arch.mdzip. Configuration items and part revisions come from TeamCenter. Where this plan names a part number, that number is read from those systems rather than typed here."
+    ],
+    evidence: [{ source: "Cameo", name: "GrayTalon_Arch.mdzip", meta: "rev 41" }, { source: "Lucidchart", name: "Data link security data flow", meta: "11 Jul" }],
+    upstream: [{ source: "Cameo", count: "1 model", detail: "Architecture blocks at every WBS level" }, { source: "TeamCenter", count: "312 items", detail: "Hardware configuration items and revisions" }, { source: "SCTM", count: "3 rows", detail: "CM-2, CM-8, SC-7" }],
+    comments: [{ who: "Dana Whitmore", short: "D. Whitmore", when: "22 Mar", text: "Name the excluded systems explicitly in the boundary paragraph — the assessor asked for that on the last program." }]
+  },
+  "3": {
+    title: "Security categorisation", heading: "3 Security categorisation", meta: "Last edited by M. Okonjo · 09 Feb 2026 · 3 blocks · 4 references",
+    controls: ["RA-2", "PL-2"],
+    blocks: [
+      "The system is categorised under CNSSI 1253 as moderate confidentiality, moderate integrity, and high availability. The tailored baseline is generated from that categorisation and then adjusted by the airworthiness, industrial, and advisory overlays recorded in the tailoring annex.",
+      "Confidentiality is moderate because the collected imagery is classified at Secret and below and is protected in transit by Type 1 cryptography rather than by the system itself holding long-lived national secrets. Integrity is moderate because corrupted mission data degrades the intelligence product but does not by itself endanger the aircraft.",
+      "Availability is high because loss of the command-and-control link during flight is a flight safety event. This drives the redundant data link paths in section 5.2 and the contingency controls inherited from the operating installation."
+    ],
+    evidence: [{ source: "Excel", name: "Categorisation worksheet.xlsx", meta: "rev 2" }, { source: "Confluence", name: "Categorisation rationale", meta: "09 Feb" }],
+    upstream: [{ source: "Jama", count: "1 requirement", detail: "CDRL A012 §2.1 categorisation direction" }, { source: "Library", count: "M-M-H overlay", detail: "CNSSI 1253 selection with 138 additions" }],
+    comments: []
+  },
+  "4.1": {
+    title: "Configuration management", heading: "4.1 Configuration management", meta: "Last edited by R. Osei · 12 Jul 2026 · 5 blocks · 14 references",
+    controls: ["CM-2", "CM-3", "CM-5", "CM-6", "CM-7"],
+    blocks: [
+      "The approved baseline configuration for every configuration item is held in TeamCenter and mirrored in the Cameo architecture model. A change to either is a change to the baseline and enters the configuration control board through Jira.",
+      "Changes that touch a security control are routed to the ISSE before board approval. The traceability matrix shows which controls a configuration item carries, so the security review scope is derived rather than judged case by case.",
+      "Access to change flight critical software is limited to the software integration lab accounts listed in the developer access register. Engine control unit firmware is the exception noted in section 4.2 and is being closed under CHG-101.",
+      "Configuration settings for the ground control station are applied from a hardened image and verified by the checklist in the operations instruction. Deviations are recorded with a rationale and reviewed monthly.",
+      "Least functionality is enforced on the flight control computer by a fixed service list built at compile time; no interpreter or shell is present in the flight software load."
+    ],
+    evidence: [{ source: "TeamCenter", name: "Baseline configuration report", meta: "17 Jul" }, { source: "Jira", name: "CCB board · GT project", meta: "318 issues" }, { source: "GitLab", name: "flight-software pipeline", meta: "job #4821" }],
+    upstream: [{ source: "TeamCenter", count: "5 items", detail: "Configuration item baselines" }, { source: "Jira", count: "12 changes", detail: "Configuration control board decisions" }, { source: "SCTM", count: "5 rows", detail: "CM-2, CM-3, CM-5, CM-6, CM-7" }],
+    comments: []
+  },
+  "4.2": {
+    title: "Component integrity", heading: "4.2 Component integrity", meta: "Last edited by L. Fenn · 21 Jul 2026 · 4 blocks · 9 references",
+    controls: ["CM-14", "SI-7", "SI-7(15)"],
+    blocks: [
+      "Loadable software airplane parts are signed in the GitLab pipeline and verified by the receiving processor before installation. The signing key is held in the program hardware security module and the pipeline records the artifact hash against the release manifest.",
+      "The engine control unit at WBS 1.1.2.4 accepts unsigned firmware when placed in maintenance mode. This is a known gap against CM-14 and SI-7(15). The supplier has committed to a signed bootloader in firmware 2.0, and until then maintenance mode is procedurally controlled by the depot instruction.",
+      "Firmware versions for every processing item are read from TeamCenter and checked against published advisories on each sync. Section 7.1 describes what happens when a match is found.",
+      "Field loadable data such as terrain and threat files is signed by the mission planning system and verified by the flight control computer at load time; a failed verification aborts the load and is recorded in the maintenance log."
+    ],
+    evidence: [{ source: "GitLab", name: "signing-pipeline · job #4821", meta: "sha 8f21c0" }, { source: "SharePoint", name: "Depot maintenance instruction", meta: "rev 4" }],
+    upstream: [{ source: "TeamCenter", count: "148 firmware", detail: "Firmware versions checked against advisories" }, { source: "SCTM", count: "3 rows", detail: "CM-14, SI-7, SI-7(15)" }, { source: "Jira", count: "1 change", detail: "CHG-101 signed bootloader commitment" }],
+    comments: [{ who: "Priya Ibarra", short: "P. Ibarra", when: "23 Jul", text: "The unsigned maintenance path needs a risk acceptance memo referenced here, not just the depot instruction." }]
+  },
+  "5.1": {
+    title: "Access control", heading: "5.1 Access control", meta: "Last edited by A. Duarte · 02 Jun 2026 · 5 blocks · 12 references",
+    controls: ["AC-2", "AC-3", "AC-6(9)"],
+    blocks: [
+      "Operator accounts on the pilot and payload consoles are provisioned from the program directory against the four roles defined in the operations instruction: pilot, payload operator, maintainer, and security administrator. Accounts are reviewed quarterly and disabled within one working day of a personnel change.",
+      "Access enforcement for flight critical functions is implemented in the flight control computer rather than in the console software. A console can request a command; the flight control computer decides whether the requesting role is permitted to issue it in the current flight phase.",
+      "Privileged actions on the imagery exploitation workstations are logged, but the log currently records the action and account without the target object. Closing this to satisfy AC-6(9) fully is tracked against the Rev D delivery.",
+      "Concurrent session limits and session lock are inherited from the ground control station hardened image and are verified by the pre-mission checklist."
+    ],
+    evidence: [{ source: "SharePoint", name: "Operations instruction · roles", meta: "rev 6" }, { source: "Excel", name: "Quarterly account review", meta: "Q2 2026" }],
+    upstream: [{ source: "Jama", count: "6 requirements", detail: "CDRL A012 §3.1 access control direction" }, { source: "SCTM", count: "3 rows", detail: "AC-2, AC-3, AC-6(9)" }],
+    comments: []
+  },
+  "5.2": {
+    title: "Remote access", heading: "5.2 Remote access", meta: "Last edited by T. Nagata · 14 Jun 2026 · 4 blocks · 8 references",
+    controls: ["AC-17", "AC-17(9)", "SC-7(21)"],
+    blocks: [
+      "Remote operation of the air vehicle is possible only from an authorised ground control station over the beyond line-of-sight satellite path. Sessions are mutually authenticated at the terminal and are visible to the security administrator console for the duration of the flight.",
+      "The customer requires the ability to terminate a remote session within sixty seconds. The ground data terminal provides a hardware disconnect that meets this, and the procedure is exercised during pre-mission checks.",
+      "Payload and flight critical networks are segmented at the ground data terminal. A payload operator session cannot reach the flight control path, and the segmentation is verified by the network test in the integration lab.",
+      "No maintenance access to the air vehicle is permitted over the data link. Maintenance is performed on the ground through the depot diagnostic connector described in section 4.1."
+    ],
+    evidence: [{ source: "Lucidchart", name: "Data link security data flow", meta: "11 Jul" }, { source: "SharePoint", name: "GT-SIL-NET-TR-008.pdf", meta: "rev 1" }],
+    upstream: [{ source: "Jama", count: "4 requirements", detail: "CDRL A012 §3.6 remote access direction" }, { source: "SCTM", count: "3 rows", detail: "AC-17, AC-17(9), SC-7(21)" }],
+    comments: []
+  },
+  "5.3": {
+    title: "Audit and accountability", heading: "5.3 Audit and accountability", meta: "Last edited by M. Okonjo · 28 Jul 2026 · 5 blocks · 10 references",
+    controls: ["AU-2", "AU-6", "AU-9"],
+    blocks: [
+      "The flight control computer records the event types listed in the audit event table: command acceptance and rejection, mode changes, load verification results, and cryptographic module authentication outcomes. Records carry a monotonic mission time and the originating console identity.",
+      "Records are transferred to the ground control station after each sortie and reviewed by the security administrator within two working days. Findings are raised in Jira and linked back to the affected control.",
+      "Protection of audit information on the backup battery management system is planned rather than implemented. The unit stores its records in unprotected non-volatile memory; a signed record format is scheduled for firmware 3.1 and is tracked as an AU-9 gap.",
+      "Audit storage capacity is sized for four sorties. Loss of capacity raises a maintenance fault rather than overwriting records.",
+      "The audit review procedure GT-TP-0412 was verified in the integration lab on 28 July and its evidence is attached to the AU-6 row in the matrix."
+    ],
+    evidence: [{ source: "GitLab", name: "audit-review · job #4790", meta: "26 Jul" }, { source: "SharePoint", name: "GT-TP-0412 audit review", meta: "rev 2" }],
+    upstream: [{ source: "Jama", count: "5 requirements", detail: "CDRL A012 §3.3 audit direction" }, { source: "SCTM", count: "3 rows", detail: "AU-2, AU-6, AU-9" }],
+    comments: []
+  },
+  "5.4": {
+    title: "Identification and authentication", heading: "5.4 Identification and authentication", meta: "Last edited by K. Bello · 24 Jun 2026 · 4 blocks · 11 references",
+    controls: ["IA-2", "IA-3", "IA-3(1)", "IA-5"],
+    blocks: [
+      "Operators authenticate to the consoles with program-issued PKI credentials on a hardware token. There are no shared or group accounts on either console type, and the security administrator role requires a second credential held separately.",
+      "The air vehicle and the ground data terminal authenticate each other cryptographically before the data link carries traffic. An unauthenticated terminal cannot associate, and repeated failures raise an alert at the security administrator console.",
+      "Authenticator management for the cryptographic modules is described in section 4.3. Device certificates for the radios are issued from the program certificate authority with a two year validity and are replaced at scheduled depot maintenance.",
+      "Default credentials are removed from every delivered item as part of the acceptance checklist, and the checklist result is retained as evidence against IA-5."
+    ],
+    evidence: [{ source: "SharePoint", name: "Acceptance checklist · IA items", meta: "rev 3" }, { source: "Excel", name: "Device certificate register.xlsx", meta: "Jun 2026" }],
+    upstream: [{ source: "Jama", count: "5 requirements", detail: "CDRL A012 §3.4 identification direction" }, { source: "SCTM", count: "4 rows", detail: "IA-2, IA-3, IA-3(1), IA-5" }],
+    comments: [{ who: "Sam Idris", short: "S. Idris", when: "26 Jun", text: "Two year certificate validity conflicts with the depot cycle of thirty months. Pick one and say why." }]
+  },
+  "6.1": {
+    title: "Developer processes", heading: "6.1 Developer processes", meta: "Last edited by S. Idris · 30 Jun 2026 · 4 blocks · 13 references",
+    controls: ["SA-10", "SA-11", "SA-11(2)", "SA-15", "SA-15(3)"],
+    blocks: [
+      "Flight software is developed to DO-178C design assurance level A and its security activities follow DO-326A. Configuration management, problem reporting, and change control in the development environment are audited against the software development plan.",
+      "Every merge request runs static analysis, unit test, and the signing pipeline. Integration testing is performed in the software integration lab at WBS 1.3.1.2 on production representative hardware.",
+      "Threat and vulnerability analysis is repeated at each design milestone rather than once at the start. The airworthiness security assessment records the analysis and its disposition, and the criticality analysis feeding it is a customer deliverable.",
+      "Development process, standards, and tools evidence for SA-15 is not yet assembled for the ground segment supplier. The subcontract modification requiring it is in negotiation, which is why the matrix shows SA-15 as planned."
+    ],
+    evidence: [{ source: "GitLab", name: "flight-software · pipelines", meta: "62 runs" }, { source: "Confluence", name: "Airworthiness security cross-reference", meta: "09 Jul" }],
+    upstream: [{ source: "Jama", count: "7 requirements", detail: "CDRL A012 §4 developer direction" }, { source: "Library", count: "DO-326A overlay", detail: "34 process controls added" }, { source: "SCTM", count: "5 rows", detail: "SA-10, SA-11, SA-11(2), SA-15, SA-15(3)" }],
+    comments: []
+  },
+  "7.1": {
+    title: "System integrity", heading: "7.1 System integrity", meta: "Last edited by A. Duarte · 28 Jul 2026 · 5 blocks · 12 references",
+    controls: ["SI-2", "SI-4", "SI-7", "SI-7(9)"],
+    blocks: [
+      "Flaw remediation is driven by the advisory feed and by supplier bulletins. Every advisory is matched against the firmware and software inventory; a match raises a change with the affected controls and configuration items already identified.",
+      "Software and firmware integrity is verified at load time on the flight control computer and at power-on for the cryptographic modules. Verification failures abort the operation and are recorded in the audit log described in section 5.3.",
+      "Advisory ICSA-26-189-02 identifies an unauthenticated bootloader update path on the processor family used by the flight control computer, which runs bootloader 4.2.1. Boot process verification is not currently required by the baseline; SI-7(9) has been proposed and is under engineering assessment for the 12 August design review.",
+      "System monitoring on the ground segment is inherited from the installation security operations centre for the enterprise network, and provided locally for the mission network by the security administrator console.",
+      "This section was relinked on 28 July after WBS 1.1.4.3 was split into flight control and air data elements; four references were remapped automatically and confirmed by the author."
+    ],
+    evidence: [{ source: "Jira", name: "GT-4655 secure boot spike", meta: "24 Jul" }, { source: "TeamCenter", name: "FCC bootloader 4.2.1", meta: "17 Jul" }],
+    upstream: [{ source: "CISA", count: "1 advisory", detail: "ICSA-26-189-02 matched to bootloader 4.2.1" }, { source: "SCTM", count: "4 rows", detail: "SI-2, SI-4, SI-7, SI-7(9)" }, { source: "TeamCenter", count: "148 firmware", detail: "Inventory matched on each sync" }],
+    comments: []
+  },
+  "8.1": {
+    title: "Supply chain", heading: "8.1 Supply chain", meta: "Last edited by P. Ibarra · 15 Jul 2026 · 4 blocks · 9 references",
+    controls: ["SR-3", "SR-4", "SR-4(3)", "SR-11"],
+    blocks: [
+      "Supply chain controls follow the corporate supply chain risk management programme, tailored for the navigation and cryptographic items the customer identified as critical. Supplier surveys are held in the supplier register and refreshed annually.",
+      "Provenance validation for the inertial navigation assembly is planned rather than implemented. Incoming inspection will compare vendor lot codes against the TeamCenter bill of materials and x-ray a sample of each lot; the procedure is in draft with quality engineering.",
+      "Component authenticity checks for wiring harnesses and power buses are recorded as not applicable: these are passive assemblies manufactured in-house from qualified stock, and the rationale is carried in the tailoring annex.",
+      "Counterfeit findings, if any, are reported through the corporate programme and raised here as a change so the affected controls and configuration items are identified before the next revision."
+    ],
+    evidence: [{ source: "Excel", name: "Supplier authenticity survey.xlsx", meta: "22 May" }, { source: "TeamCenter", name: "Bill of materials · INS", meta: "rev 12" }],
+    upstream: [{ source: "Jama", count: "3 requirements", detail: "CDRL A014 §2.9 provenance direction" }, { source: "SCTM", count: "4 rows", detail: "SR-3, SR-4, SR-4(3), SR-11" }],
+    comments: []
+  },
+  "9": {
+    title: "Continuous monitoring", heading: "9 Continuous monitoring", meta: "Last edited by M. Okonjo · 20 Jul 2026 · 4 blocks · 6 references",
+    controls: ["CA-7", "SI-4", "RA-5"],
+    blocks: [
+      "Continuous monitoring for Gray Talon is the combination of the connected source syncs described in this plan and the assessment activities in the continuous monitoring strategy. Sources are read on the cadence recorded against each connection.",
+      "A change in any connected source that affects a control raises a notice with its downstream impact. Nothing is written to this plan or the matrix until an engineer accepts the change, and every acceptance records the source revision that justified it.",
+      "Vulnerability scanning of the ground segment is performed monthly against the hardened image; the air vehicle is assessed by analysis and laboratory test rather than by scanning.",
+      "A full reassessment of the tailored baseline is performed annually or on any change to the categorisation, whichever comes first. The last reassessment closed on 04 February 2026."
+    ],
+    evidence: [{ source: "Confluence", name: "Continuous monitoring strategy", meta: "20 Jul" }, { source: "GitLab", name: "scan-report · monthly", meta: "Jul 2026" }],
+    upstream: [{ source: "Sources", count: "11 connections", detail: "Sync cadence per connection" }, { source: "SCTM", count: "3 rows", detail: "CA-7, SI-4, RA-5" }],
+    comments: []
+  }
+};
+
+SECTIONS["4.3"] = {
+  title: "Cryptographic protection", heading: "4.3 Cryptographic protection", meta: "Last edited by K. Bello · 24 Jun 2026 · 5 blocks · 9 references",
+  controls: ["SC-8", "SC-12", "SC-13", "IA-7", "SC-28"],
+  blocks: [
+    "This section describes how the Gray Talon tactical unmanned aerial system protects the confidentiality and integrity of National Security Information in transit and at rest. It applies to the air vehicle, the ground control segment, and the data links between them.",
+    { t: "Command-and-control traffic between the ground data terminal and the air vehicle is encrypted end to end by the KGV-72M in-line network encryptor installed at WBS 1.1.5.3. The encryptor is NSA certified for Secret and below and operates with 256-bit traffic encryption keys established under the program key management plan.", stale: "sp-b3", note: "Cameo 1.1.5.3 · CHG-118 · 29 Jul 06:58" },
+    { t: "Keys are loaded through the AN/PYQ-10 simple key loader under two-person control and rotated every 30 days. Custody is recorded in the program key management log and reconciled monthly against the loader audit extract. This satisfies SC-12 for the air vehicle segment.", stale: "sp-b4", note: "Cameo 1.1.5.3 · CHG-118" },
+    "Mission data at rest on the EO/IR gimbal recorder is encrypted by the sensor payload controller. Because the recorder is removable, the media is treated as classified until sanitised at the ground segment; the procedure is held in the program sanitisation instruction.",
+    { t: "The cryptographic module authenticates to the flight control computer at power-on over a dedicated control bus. A failed challenge holds the module in bypass-inhibit and raises a maintenance fault at the ground control station, which is how IA-7 is satisfied for the air vehicle.", stale: "sp-b6", note: "Cameo 1.1.5.3 · CHG-118" }
+  ],
+  evidence: [
+    { source: "SharePoint", name: "GT-SIL-CRYPTO-TR-014.pdf", meta: "rev 2" },
+    { source: "Excel", name: "CMVP certificate register.xlsx", meta: "cert 4418" },
+    { source: "Cameo", name: "GrayTalon_Arch.mdzip · block 1.1.5.3", meta: "rev 41" }
+  ],
+  upstream: [], comments: []
+};
+
+const ORDER = ["1", "2", "3", "4.1", "4.2", "4.3", "5.1", "5.2", "5.3", "5.4", "6.1", "7.1", "8.1", "9"];
+const TITLES = {};
+ORDER.forEach((k) => { if (SECTIONS[k]) TITLES[k] = SECTIONS[k].title; });
+
+const CRYPTO_UPSTREAM = [
+  { source: "SCTM", count: "4 rows", detail: "SC-8, SC-12, SC-13, IA-7" },
+  { source: "Jama", count: "3 requirements", detail: "REQ-GT-0602, 0604, 0605" },
+  { source: "Cameo", count: "1 block", detail: "1.1.5.3 Encryption/decryption modules" }
+];
+const CRYPTO_COMMENTS = [
+  { who: "Priya Ibarra", short: "P. Ibarra", when: "26 Jun", text: "The customer asked us to name the CMVP certificate inline rather than only in the evidence block. Worth doing before Rev C." },
+  { who: "Sam Idris", short: "S. Idris", when: "24 Jun", text: "Sanitisation instruction is referenced but not linked. Add the SharePoint artifact so the assessor can follow it." }
+];
+
+const INSERTS = {
+  control: { ref: "SI-7(9)", text: "Verify boot process — pulled in by advisory ICSA-26-189-02", origin: "SCTM row SI-7(9)" },
+  requirement: { ref: "REQ-GT-0605", text: "Type 1 cryptography for NSI in transit", origin: "Jama requirement" },
+  system: { ref: "1.1.5.3", text: "Encryption/decryption modules", origin: "Cameo model block" },
+  evidence: { ref: "GitLab", text: "signing-pipeline job #4821", origin: "GitLab artifact" },
+  ai: { ref: "Cerebro", text: "Draft: the FCC shall measure the bootloader against a fuse-locked root of trust before mission software executes.", origin: "SCTM row SI-7(9) + advisory text" }
+};
+
+class Component extends DCLogic {
+  state = { slash: "", inserted: [], active: "4.3" };
+  componentDidMount() {
+    this._bind();
+    const S = window.__attest;
+    this._lastSec = S ? S.state.spSection : null;
+    setTimeout(() => this._jump(this._lastSec || "4.3"), 0);
+    setTimeout(() => this._jump(this._lastSec || "4.3"), 300);
+    window.addEventListener("scroll", this._onScroll, true);
+  }
+  componentDidUpdate() {
+    const S = window.__attest;
+    if (!S) return;
+    const want = S.state.spSection;
+    if (want && want !== this._lastSec) { this._lastSec = want; this._jump(want); }
+  }
+  componentWillUnmount() {
+    if (this._un) this._un();
+    clearInterval(this._iv);
+    window.removeEventListener("scroll", this._onScroll, true);
+  }
+  _scroller() {
+    const c = document.querySelector("[data-spdoc]");
+    return c && c.scrollHeight > c.clientHeight + 4 ? c : null;
+  }
+  _jump(num) {
+    if (!num) return;
+    const root = document.querySelector("[data-spdoc]") || document;
+    const node = root.querySelector('[data-secid="' + num + '"]');
+    if (!node) return;
+    const c = this._scroller();
+    if (c) c.scrollTop += node.getBoundingClientRect().top - c.getBoundingClientRect().top - 16;
+    else window.scrollBy(0, node.getBoundingClientRect().top - 84);
+    if (this.state.active !== num) this.setState({ active: num });
+  }
+  _onScroll = () => {
+    const root = document.querySelector("[data-spdoc]");
+    if (!root) return;
+    const c = this._scroller();
+    const top = c ? c.getBoundingClientRect().top : 84;
+    const nodes = root.querySelectorAll("[data-secid]");
+    if (!nodes.length) return;
+    let cur = nodes[0].getAttribute("data-secid");
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].getBoundingClientRect().top - top <= 120) cur = nodes[i].getAttribute("data-secid");
+    }
+    if (cur !== this.state.active) this.setState({ active: cur });
+  };
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n14: 14, n15: 15, n16: 16, n20: 20, yes: true, inserted: this.state.inserted,
+      slashValue: this.state.slash, slashOpen: this.state.slash.trim().startsWith("/"),
+      onScroll: this._onScroll };
+    if (!S) return base;
+    const st = S.state, p = S.prog();
+    const s3 = !!st.stale["sp-b3"], s4 = !!st.stale["sp-b4"], s6 = !!st.stale["sp-b6"];
+    const active = this.state.active || "4.3";
+    const secActive = SECTIONS[active] || SECTIONS["4.3"];
+    const sections = ORDER.filter((n) => SECTIONS[n]).map((num) => {
+      const sec = SECTIONS[num];
+      const depth = num.split(".").length - 1;
+      return {
+        num, heading: sec.heading, meta: sec.meta,
+        size: depth ? "20px" : "24px", lh: depth ? "28px" : "32px",
+        chips: sec.controls.map((id) => ({ id, dot: S.isStale(id) ? "inline-block" : "none" })),
+        blocks: sec.blocks.map((b) => {
+          const o = typeof b === "string" ? { t: b } : b;
+          const on = !!(o.stale && st.stale[o.stale]);
+          return {
+            t: o.t, note: o.note || "",
+            chipDisp: on ? "flex" : "none",
+            bar: on ? "var(--warn-500)" : "transparent",
+            padL: on ? "12px" : "0px", mgL: on ? "-15px" : "-3px"
+          };
+        }),
+        evidence: sec.evidence
+      };
+    });
+    const comments = active === "4.3" ? CRYPTO_COMMENTS : (secActive.comments || []);
+    return Object.assign(base, {
+      prog: p, sections,
+      blockCount: sections.reduce((a, x) => a + x.blocks.length, 0),
+      activeNum: active, activeTitle: TITLES[active] || "",
+      outline: ORDER.map((num) => {
+        const depth = num.split(".").length - 1;
+        return {
+          num, title: TITLES[num], pad: depth ? "20px" : "8px", weight: depth ? 400 : 500,
+          bg: num === active ? "var(--cortex-50)" : "transparent",
+          fg: num === active ? "var(--cortex-700)" : "var(--n-700)",
+          dot: num === "4.3" && (s3 || s4 || s6) ? "block" : "none"
+        };
+      }),
+      upstream: (active === "4.3" ? CRYPTO_UPSTREAM : (secActive.upstream || []))
+        .map((u) => Object.assign({}, u, { color: u.source === "Cameo" && s6 ? "var(--warn-600)" : "var(--n-600)" })),
+      comments, hasComments: comments.length > 0, noComments: comments.length === 0,
+      anyStale: s3 || s4 || s6,
+      goImpact: () => S.go("impact"),
+      goCrypto: () => { S.set({ spSection: "4.3" }); this._lastSec = "4.3"; this._jump("4.3"); },
+      onOutline: (e) => {
+        const b = e.target.closest("[data-sec]");
+        if (!b) return;
+        const n = b.getAttribute("data-sec");
+        S.set({ spSection: n });
+        this._lastSec = n;
+        this._jump(n);
+      },
+      openCtl: (e) => { const b = e.target.closest("[data-ctl]"); if (!b) return; S.set({ sctmSel: b.getAttribute("data-ctl"), panelOpen: true, controlsOpen: false }); S.go("sctm"); },
+      onSlash: (e) => this.setState({ slash: e.target.value }),
+      pick: (e) => {
+        const b = e.target.closest("[data-ins]");
+        if (!b) return;
+        const k = b.getAttribute("data-ins");
+        const item = Object.assign({ section: active }, INSERTS[k]);
+        this.setState({ inserted: this.state.inserted.concat([item]), slash: "" });
+        S.toast({ tone: k === "ai" ? "ai" : "success", title: "Reference inserted", desc: item.ref + " is now linked live — the block will flag if that source changes." });
+      }
+    });
+  }
+}
+
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;min-width:0;overflow-y:auto;background:var(--n-25);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900)">
+  <div style="max-width:1120px;margin:0 auto;padding:24px 28px 56px;display:flex;flex-direction:column;gap:22px">
+
+    <div style="display:flex;align-items:flex-start;gap:16px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Connections</h1>
+        <div style="font-size:12px;color:var(--n-600);margin-top:4px">Eleven systems feed the baseline. Attest watches each one, detects what changed, and proposes the downstream edit.</div>
+      </div>
+      <sc-if value="{{ picked }}">
+        <button type="button" data-clear="1" onClick="{{ onClear }}" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 6px 0 10px;border:1px solid var(--cortex-200);border-radius:999px;background:var(--cortex-50);font-family:var(--font-ui);font-size:12px;color:var(--cortex-700);cursor:pointer;flex:none">{{ pickedLabel }}<x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="x" size="{{ n13 }}" hint-size="13px,13px"></x-import></button>
+      </sc-if>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" icon="plus" hint-size="auto,32px">Add connection</x-import>
+    </div>
+
+    <div onClick="{{ onCard }}" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <sc-for list="{{ cards }}" as="c" hint-placeholder-count="9">
+        <div data-pick="{{ c.name }}" style="background:var(--n-0);border:1px solid {{ c.border }};border-radius:10px;box-shadow:{{ c.shadow }};padding:14px;display:flex;flex-direction:column;gap:10px;cursor:pointer">
+          <div style="display:flex;align-items:flex-start;gap:9px">
+            <div style="width:30px;height:30px;border-radius:8px;background:var(--n-100);color:var(--n-700);display:flex;align-items:center;justify-content:center;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ c.icon }}" size="{{ n16 }}" hint-size="16px,16px"></x-import></div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600">{{ c.name }}</div>
+              <div style="font-size:11px;color:var(--n-500);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.scope }}</div>
+            </div>
+            <span style="width:7px;height:7px;border-radius:999px;background:{{ c.dot }};flex:none;margin-top:6px"></span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:{{ c.stateColor }}">{{ c.state }}</div>
+          <div style="display:flex;align-items:center;gap:12px;padding-top:9px;border-top:1px solid var(--n-100);font-size:11px;color:var(--n-500)">
+            <span style="font-family:var(--font-mono)">{{ c.items }}</span>
+            <span>{{ c.freq }}</span>
+            <div style="flex:1"></div>
+            <button type="button" data-sync="{{ c.name }}" style="border:none;background:none;padding:0;font-family:var(--font-ui);font-size:11px;font-weight:500;color:var(--cortex-600);cursor:pointer">{{ c.action }}</button>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+        <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200)">
+          <div style="font-size:14px;font-weight:600">Field mapping — Jama Connect</div>
+          <div style="font-size:12px;color:var(--n-600);margin-top:3px">How requirement fields land on baseline attributes</div>
+        </div>
+        <div style="display:flex;align-items:center;height:32px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+          <div style="flex:1;padding:0 16px">Source field</div>
+          <div style="width:24px;flex:none"></div>
+          <div style="flex:1;padding:0 16px">Attest attribute</div>
+        </div>
+        <sc-for list="{{ mapping }}" as="m" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;min-height:36px;border-bottom:1px solid var(--n-100)">
+            <div style="flex:1;padding:0 16px;font-family:var(--font-mono);font-size:11px;color:var(--n-700)">{{ m.from }}</div>
+            <div style="width:24px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--n-400)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="arrow-right" size="{{ n13 }}" hint-size="13px,13px"></x-import></div>
+            <div style="flex:1;padding:0 16px;font-size:12px;color:var(--n-800)">{{ m.to }}</div>
+          </div>
+        </sc-for>
+        <div style="padding:12px 16px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="pencil" hint-size="auto,28px">Edit mapping</x-import></div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);padding:16px">
+          <div style="font-size:14px;font-weight:600;margin-bottom:4px">Change detection</div>
+          <div style="font-size:12px;color:var(--n-600);margin-bottom:14px">What counts as a change worth raising</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Structural model edits</div><div style="font-size:12px;color:var(--n-600)">Part swaps, renumbering, interface changes in Cameo and TeamCenter</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Requirement text changes</div><div style="font-size:12px;color:var(--n-600)">Any edit to a shall statement traced to a control</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ yes }}" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Advisories matching the inventory</div><div style="font-size:12px;color:var(--n-600)">CISA and vendor bulletins matched on part or firmware version</div></div>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" hint-size="34px,20px"></x-import>
+              <div style="flex:1"><div style="font-size:13px;font-weight:500">Wiki and chat discussion</div><div style="font-size:12px;color:var(--n-600)">Raise a notice when a linked page or thread changes materially</div></div>
+            </div>
+          </div>
+        </div>
+
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AISummary" title="What Cerebro does with a sync" sources="Applies to every connection" hint-size="100%,110px">On each sync Cerebro diffs the source against what the SCTM and the security plan currently claim, resolves which controls and blocks are affected through the trace links, and drafts the downstream edit. Nothing is written until an engineer accepts it, and every accept records the source revision that justified it.</x-import>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const CARDS = [
+  { name: "Cameo", icon: "workflow", scope: "GrayTalon_Arch.mdzip · 4 models", state: "3 model diffs awaiting review", tone: "warn", items: "412 blocks", freq: "hourly" },
+  { name: "Jama", icon: "file-badge", scope: "CDRL A012, A014 requirement sets", state: "1 requirement change awaiting review", tone: "warn", items: "1,204 requirements", freq: "hourly" },
+  { name: "Jira", icon: "circle-dot", scope: "GT project · cyber and CCB boards", state: "In sync · last 07:12", tone: "ok", items: "318 issues", freq: "15 minutes" },
+  { name: "Confluence", icon: "file-text", scope: "Gray Talon engineering space", state: "In sync · last 07:12", tone: "ok", items: "96 pages", freq: "hourly" },
+  { name: "SharePoint", icon: "folder", scope: "Program deliverables library", state: "9 links point at moved files", tone: "warn", items: "1,847 files", freq: "daily" },
+  { name: "GitLab", icon: "git-branch", scope: "flight-software, ground-software", state: "In sync · last 07:08", tone: "ok", items: "62 pipelines", freq: "on push" },
+  { name: "TeamCenter", icon: "boxes", scope: "Configuration items and BOM", state: "Authentication expired 2 days ago", tone: "danger", items: "3,102 items", freq: "daily" },
+  { name: "Excel", icon: "sheet", scope: "CMVP register, supplier surveys", state: "Column layout changed in one workbook", tone: "warn", items: "14 workbooks", freq: "daily" },
+  { name: "Word", icon: "file-type", scope: "Plans and procedures", state: "In sync · last 06:40", tone: "ok", items: "58 documents", freq: "daily" },
+  { name: "Lucidchart", icon: "git-fork", scope: "Data flow and rack diagrams", state: "In sync · last 06:40", tone: "ok", items: "23 diagrams", freq: "daily" },
+  { name: "Slack", icon: "message-square-text", scope: "#gt-cyber-eng, #gt-ccb", state: "In sync · last 07:12", tone: "ok", items: "6 channels", freq: "live" }
+];
+
+const TONE = {
+  ok: { dot: "var(--success-500)", border: "var(--n-200)", color: "var(--n-600)" },
+  warn: { dot: "var(--warn-500)", border: "var(--n-200)", color: "var(--warn-700)" },
+  danger: { dot: "var(--danger-500)", border: "var(--danger-500)", color: "var(--danger-700)" }
+};
+
+const MAPPING = [
+  { from: "documentKey", to: "Requirement identifier" },
+  { from: "name", to: "Requirement title" },
+  { from: "description", to: "Requirement text (traced to controls)" },
+  { from: "customFields.cdrlRef", to: "CDRL clause" },
+  { from: "customFields.verifMethod", to: "Verification method" },
+  { from: "upstreamRelationships", to: "Parent requirement" },
+  { from: "lastActivityDate", to: "Change detection timestamp" }
+];
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n16: 16, yes: true, mapping: MAPPING };
+    if (!S) return base;
+    const syncing = S.state.syncing, sel = S.state.srcSel;
+    let list = CARDS.slice();
+    if (sel) list.sort((a, b) => (a.name === sel ? -1 : b.name === sel ? 1 : 0));
+    return Object.assign(base, {
+      picked: !!sel,
+      pickedLabel: sel ? "Focused on " + sel : "",
+      cards: list.map((c) => {
+        const t = TONE[c.tone], on = c.name === sel;
+        return Object.assign({}, c, {
+          dot: t.dot, border: on ? "var(--cortex-500)" : t.border, stateColor: t.color,
+          shadow: on ? "0 0 0 3px var(--cortex-100), var(--shadow-sm)" : "var(--shadow-sm)",
+          state: syncing === c.name ? "Syncing…" : c.state,
+          action: c.tone === "danger" ? "Reconnect" : syncing === c.name ? "Working" : "Sync now"
+        });
+      }),
+      onClear: () => S.set({ srcSel: null }),
+      onCard: (e) => {
+        const s = e.target.closest("[data-sync]");
+        if (s) { S.sync(s.getAttribute("data-sync")); return; }
+        const p = e.target.closest("[data-pick]");
+        if (p) S.set({ srcSel: p.getAttribute("data-pick") === sel ? null : p.getAttribute("data-pick") });
+      }
+    });
+  }
+}
+
+</script>
+</body>
+</html>

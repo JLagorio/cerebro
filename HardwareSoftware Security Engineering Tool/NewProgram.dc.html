@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;min-width:0;display:flex;background:var(--n-0);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);overflow:hidden">
+
+  <div style="width:252px;flex:none;border-right:1px solid var(--n-200);background:var(--n-25);display:flex;flex-direction:column;padding:18px 14px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);padding:0 6px 10px">New program</div>
+    <div onClick="{{ onStep }}" style="display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ steps }}" as="s" hint-placeholder-count="4">
+        <button type="button" data-step="{{ s.n }}" style="display:flex;align-items:flex-start;gap:10px;padding:9px 8px;border:none;border-radius:8px;width:100%;text-align:left;font-family:var(--font-ui);cursor:pointer;background:{{ s.bg }}" style-hover="background:var(--n-100)">
+          <span style="width:20px;height:20px;flex:none;border-radius:999px;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:11px;font-weight:600;background:{{ s.dotBg }};color:{{ s.dotFg }};border:1px solid {{ s.dotBorder }}">{{ s.n }}</span>
+          <span style="min-width:0">
+            <span style="display:block;font-size:13px;font-weight:500;color:{{ s.fg }}">{{ s.title }}</span>
+            <span style="display:block;font-size:11px;color:var(--n-500);margin-top:1px;text-wrap:pretty">{{ s.sub }}</span>
+          </span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="flex:1"></div>
+    <div style="padding:0 6px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="ghost" icon="x" onClick="{{ cancel }}" hint-size="auto,28px">Cancel</x-import></div>
+  </div>
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <div style="flex:none;padding:16px 24px 14px;border-bottom:1px solid var(--n-200)">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">Step {{ step }} of 4</div>
+      <h1 style="margin:4px 0 0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">{{ stepTitle }}</h1>
+      <div style="font-size:12px;color:var(--n-600);margin-top:3px;max-width:640px;text-wrap:pretty">{{ stepBlurb }}</div>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow-y:auto;padding:20px 24px 28px">
+
+      <sc-if value="{{ is1 }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:18px;max-width:720px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12px;font-weight:500;color:var(--n-700)">Program name</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Input" value="{{ wname }}" onChange="{{ setName }}" placeholder="e.g. Iron Kestrel MCU" width="100%" hint-size="100%,32px"></x-import>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12px;font-weight:500;color:var(--n-700)">Program code</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Input" value="{{ wcode }}" onChange="{{ setCode }}" width="100%" hint-size="100%,32px"></x-import>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12px;font-weight:500;color:var(--n-700)">Customer</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Select" value="{{ wservice }}" onChange="{{ setService }}" width="100%" hint-size="100%,32px" dc-props="{{ serviceProps }}"></x-import>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12px;font-weight:500;color:var(--n-700)">Platform type</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Select" value="{{ wplatform }}" onChange="{{ setPlatform }}" width="100%" hint-size="100%,32px" dc-props="{{ platformProps }}"></x-import>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12px;font-weight:500;color:var(--n-700)">ISSE owner</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Select" value="{{ wowner }}" onChange="{{ setOwner }}" width="100%" hint-size="100%,32px" dc-props="{{ ownerProps }}"></x-import>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:12px;font-weight:500;color:var(--n-700)">Assessing organisation</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Input" value="{{ wassessor }}" onChange="{{ setAssessor }}" width="100%" hint-size="100%,32px"></x-import>
+            </div>
+          </div>
+
+          <div style="border:1px solid var(--n-200);border-radius:10px;padding:16px">
+            <div style="display:flex;align-items:baseline;gap:8px">
+              <span style="font-size:14px;font-weight:600">Security categorisation</span>
+              <span style="font-size:12px;color:var(--n-500)">CNSSI 1253 · sets which 800-53 controls are selected</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:14px">
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <span style="font-size:12px;color:var(--n-700)">Confidentiality</span>
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ triad.c }}" onChange="{{ setC }}" hint-size="auto,32px" dc-props="{{ levelProps }}"></x-import>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <span style="font-size:12px;color:var(--n-700)">Integrity</span>
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ triad.i }}" onChange="{{ setI }}" hint-size="auto,32px" dc-props="{{ levelProps }}"></x-import>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:7px">
+                <span style="font-size:12px;color:var(--n-700)">Availability</span>
+                <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ triad.a }}" onChange="{{ setA }}" hint-size="auto,32px" dc-props="{{ levelProps }}"></x-import>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:14px;border-top:1px solid var(--n-100)">
+              <span style="font-size:12px;color:var(--n-600)">Categorisation <span style="font-family:var(--font-mono);color:var(--n-900);font-weight:500">{{ triadLabel }}</span></span>
+              <span style="font-size:12px;color:var(--n-600)">Impact level</span>
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Select" value="{{ wil }}" onChange="{{ setIl }}" size="sm" width="{{ n104 }}" hint-size="104px,28px" dc-props="{{ ilProps }}"></x-import>
+              <div style="flex:1"></div>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--n-700)">{{ baseCount }} controls selected</span>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--n-600);text-wrap:pretty">
+            <span style="color:var(--n-500);display:flex;padding-top:2px;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="info" size="{{ n13 }}" hint-size="13px,13px"></x-import></span>
+            <span>Categorisation is the only thing that selects controls automatically. Everything after this step — overlays, customer requirements, family opt-outs — is tailoring, and every tailoring action has to carry a rationale into the annex.</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ is2 }}">
+        <div style="display:flex;flex-direction:column;gap:14px;max-width:820px">
+          <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--n-200);border-radius:10px;background:var(--n-25)">
+            <span style="color:var(--n-500);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="book-marked" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+            <span style="font-size:13px;font-weight:500">NIST SP 800-53 Rev 5</span>
+            <span style="font-size:12px;color:var(--n-600)">1,189 controls and enhancements · 20 families</span>
+            <div style="flex:1"></div>
+            <span style="font-size:12px;color:var(--n-600)">High-water mark <span style="font-family:var(--font-mono);color:var(--n-900)">{{ triadLabel }}</span></span>
+          </div>
+
+          <div style="border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+            <div style="display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+              <div style="width:64px;flex:none;padding:0 12px;border-right:1px solid var(--n-200)">Family</div>
+              <div style="flex:1;min-width:180px;padding:0 12px;border-right:1px solid var(--n-200)">Name</div>
+              <div style="width:78px;flex:none;padding:0 12px;border-right:1px solid var(--n-200)">Catalog</div>
+              <div style="width:80px;flex:none;padding:0 12px;border-right:1px solid var(--n-200)">Selected</div>
+              <div style="flex:1;min-width:200px;padding:0 12px">Basis</div>
+            </div>
+            <div onClick="{{ onFamily }}">
+              <sc-for list="{{ families }}" as="f" hint-placeholder-count="10">
+                <div data-fam="{{ f.key }}" style="display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--n-100);cursor:{{ f.cursor }};background:{{ f.bg }}" style-hover="background:var(--n-50)">
+                  <div style="width:64px;flex:none;padding:0 12px;font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--n-800)">{{ f.key }}</div>
+                  <div style="flex:1;min-width:180px;padding:0 12px;font-size:12px;color:var(--n-700)">{{ f.name }}</div>
+                  <div style="width:78px;flex:none;padding:0 12px;font-family:var(--font-mono);font-size:12px;color:var(--n-500)">{{ f.catalog }}</div>
+                  <div style="width:80px;flex:none;padding:0 12px;font-family:var(--font-mono);font-size:12px;color:{{ f.selColor }}">{{ f.selected }}</div>
+                  <div style="flex:1;min-width:200px;padding:0 12px;font-size:12px;color:var(--n-600)">{{ f.basis }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:center;height:40px;background:var(--n-25);font-size:12px">
+              <div style="width:64px;flex:none;padding:0 12px"></div>
+              <div style="flex:1;min-width:180px;padding:0 12px;font-weight:600">20 families</div>
+              <div style="width:78px;flex:none;padding:0 12px;font-family:var(--font-mono);color:var(--n-500)">1,189</div>
+              <div style="width:80px;flex:none;padding:0 12px;font-family:var(--font-mono);font-weight:600">{{ baseCount }}</div>
+              <div style="flex:1;min-width:200px;padding:0 12px;color:var(--n-500)">{{ optOutLabel }}</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--n-600);text-wrap:pretty">
+            <span style="color:var(--n-500);display:flex;padding-top:2px;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="info" size="{{ n13 }}" hint-size="13px,13px"></x-import></span>
+            <span>Click PE, MA or PS to inherit that family from the operating base rather than implementing it. Inheritance is a removal: it needs customer concurrence and it appears in the tailoring annex with the provider named.</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ is3 }}">
+        <div style="display:flex;flex-direction:column;gap:14px;max-width:820px">
+          <div onClick="{{ onOverlay }}" style="border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+            <sc-for list="{{ overlays }}" as="o" hint-placeholder-count="9">
+              <div data-ov="{{ o.key }}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ o.bg }}" style-hover="background:var(--n-50)">
+                <div style="flex:1;min-width:0">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:13px;font-weight:500;color:var(--n-800)">{{ o.name }}</span>
+                    <span style="display:{{ o.recDisplay }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="info" hint-size="auto,18px">Recommended for {{ wplatform }}</x-import></span>
+                    <span style="display:{{ o.warnDisplay }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="warning" hint-size="auto,18px">No traceable segment</x-import></span>
+                  </div>
+                  <div style="font-size:12px;color:var(--n-500);margin-top:2px">{{ o.effect }}</div>
+                </div>
+                <div style="width:96px;flex:none;font-family:var(--font-mono);font-size:12px;color:var(--n-600);text-align:right">{{ o.delta }}</div>
+                <div style="flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ o.on }}" hint-size="34px,20px"></x-import></div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--n-600);text-wrap:pretty">
+            <span style="color:var(--n-500);display:flex;padding-top:2px;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="info" size="{{ n13 }}" hint-size="13px,13px"></x-import></span>
+            <span>Overlays are regulatory and threat-driven — they are what the environment demands, not what the customer asked for. Customer demands come in at the next step and are recorded separately, so an assessor can always tell which controls exist because of the contract and which exist because of the catalog.</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ is4 }}">
+        <div style="display:flex;flex-direction:column;gap:16px;max-width:820px">
+          <div style="border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+            <div style="display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);padding:0 14px;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">Requirement documents</div>
+            <div onClick="{{ onDoc }}">
+              <sc-for list="{{ docs }}" as="d" hint-placeholder-count="4">
+                <div data-doc="{{ d.key }}" style="display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--n-100);cursor:pointer" style-hover="background:var(--n-50)">
+                  <span style="color:{{ d.iconColor }};display:flex;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ d.icon }}" size="{{ n15 }}" hint-size="15px,15px"></x-import></span>
+                  <span style="min-width:0;flex:1">
+                    <span style="display:block;font-size:13px;font-weight:500;color:var(--n-800)">{{ d.name }}</span>
+                    <span style="display:block;font-size:11px;color:var(--n-500);margin-top:1px">{{ d.meta }}</span>
+                  </span>
+                  <span style="font-size:12px;color:{{ d.statusColor }};flex:none">{{ d.status }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:var(--n-25)">
+              <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="{{ parseVariant }}" icon="sparkles" onClick="{{ parse }}" hint-size="auto,28px">{{ parseLabel }}</x-import>
+              <span style="font-size:12px;color:var(--n-500)">{{ parseHint }}</span>
+            </div>
+          </div>
+
+          <sc-if value="{{ parsed }}">
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">How the requirements land against the baseline</div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+                <div style="border:1px solid var(--n-200);border-radius:10px;padding:12px 13px">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--cortex-700)"><span style="width:6px;height:6px;border-radius:999px;background:var(--cortex-500)"></span>Invokes a control</div>
+                  <div style="font-family:var(--font-mono);font-size:20px;font-weight:600;margin-top:6px">121</div>
+                  <div style="font-size:11px;color:var(--n-500);margin-top:2px;text-wrap:pretty">Catalog text stands as written</div>
+                </div>
+                <div style="border:1px solid var(--n-200);border-radius:10px;padding:12px 13px">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--warn-700)"><span style="width:6px;height:6px;border-radius:999px;background:var(--warn-500)"></span>Constrains a control</div>
+                  <div style="font-family:var(--font-mono);font-size:20px;font-weight:600;margin-top:6px">28</div>
+                  <div style="font-size:11px;color:var(--n-500);margin-top:2px;text-wrap:pretty">Tighter than the catalog parameter</div>
+                </div>
+                <div style="border:1px solid var(--n-200);border-radius:10px;padding:12px 13px">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--ent-component)"><span style="width:6px;height:6px;border-radius:999px;background:var(--ent-component)"></span>Program-unique</div>
+                  <div style="font-family:var(--font-mono);font-size:20px;font-weight:600;margin-top:6px">8</div>
+                  <div style="font-size:11px;color:var(--n-500);margin-top:2px;text-wrap:pretty">Local controls will be minted</div>
+                </div>
+                <div style="border:1px solid var(--danger-500);border-radius:10px;padding:12px 13px;background:var(--danger-50)">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--danger-700)"><span style="width:6px;height:6px;border-radius:999px;background:var(--danger-500)"></span>Unallocated</div>
+                  <div style="font-family:var(--font-mono);font-size:20px;font-weight:600;margin-top:6px">6</div>
+                  <div style="font-size:11px;color:var(--n-500);margin-top:2px;text-wrap:pretty">Need review before the first SCTM</div>
+                </div>
+              </div>
+
+              <div style="border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+                <div style="display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+                  <div style="width:112px;flex:none;padding:0 14px;border-right:1px solid var(--n-200)">Req ID</div>
+                  <div style="flex:1;min-width:220px;padding:0 12px;border-right:1px solid var(--n-200)">Extracted requirement</div>
+                  <div style="width:132px;flex:none;padding:0 12px;border-right:1px solid var(--n-200)">Relationship</div>
+                  <div style="width:132px;flex:none;padding:0 12px">Proposed controls</div>
+                </div>
+                <sc-for list="{{ preview }}" as="r" hint-placeholder-count="5">
+                  <div style="display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--n-100)">
+                    <div style="width:112px;flex:none;padding:0 14px;font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--n-800)">{{ r.id }}</div>
+                    <div style="flex:1;min-width:220px;padding:0 12px;font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.text }}</div>
+                    <div style="width:132px;flex:none;padding:0 12px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:{{ r.color }}"><span style="width:6px;height:6px;border-radius:999px;background:{{ r.color }}"></span>{{ r.rel }}</span></div>
+                    <div style="width:132px;flex:none;padding:0 12px;font-family:var(--font-mono);font-size:12px;color:{{ r.ctrlColor }}">{{ r.controls }}</div>
+                  </div>
+                </sc-for>
+                <div style="padding:12px 14px;font-size:12px;color:var(--n-500)">158 more requirements — all of them reviewable in the requirements register once the program exists.</div>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--n-600);text-wrap:pretty">
+            <span style="color:var(--n-500);display:flex;padding-top:2px;flex:none"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="info" size="{{ n13 }}" hint-size="13px,13px"></x-import></span>
+            <span>Requirements never replace controls and controls never replace requirements. The SCTM delivers one row per control with the requirement that drives it; requirements with no control show as unallocated lines so the gap is visible rather than silent.</span>
+          </div>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="flex:none;display:flex;align-items:center;gap:10px;padding:12px 24px;border-top:1px solid var(--n-200);background:var(--n-0)">
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="md" icon="arrow-left" onClick="{{ back }}" hint-size="auto,32px">Back</x-import>
+      <div style="flex:1"></div>
+      <span style="font-size:12px;color:var(--n-500)">{{ footHint }}</span>
+      <span style="display:{{ nextDisplay }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="md" variant="primary" icon="arrow-right" onClick="{{ next }}" hint-size="auto,32px">Continue</x-import></span>
+      <span style="display:{{ createDisplay }}"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="md" variant="primary" icon="check" onClick="{{ create }}" hint-size="auto,32px">Create program</x-import></span>
+    </div>
+  </div>
+
+  <div style="width:320px;flex:none;border-left:1px solid var(--n-200);background:var(--n-25);overflow-y:auto;padding:18px 16px 32px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Baseline so far</div>
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:14px">
+      <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:32px;line-height:40px;font-weight:700;letter-spacing:-0.02em">{{ total }}</span><span style="font-size:12px;color:var(--n-500)">controls in the tailored baseline</span></div>
+      <div style="display:flex;flex-direction:column;gap:7px;margin-top:12px;padding-top:12px;border-top:1px solid var(--n-100)">
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">800-53 selected by {{ triadLabel }}</span><span style="font-family:var(--font-mono);color:var(--n-800)">{{ baseCount }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Added by overlays</span><span style="font-family:var(--font-mono);color:var(--success-600)">+{{ added }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Removed by inheritance</span><span style="font-family:var(--font-mono);color:var(--danger-600)">−{{ removed }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Program-unique controls</span><span style="font-family:var(--font-mono);color:var(--ent-component)">+{{ unique }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Statements modified by contract</span><span style="font-family:var(--font-mono);color:var(--warn-600)">{{ modified }}</span></div>
+      </div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin:18px 0 8px">Customer requirements</div>
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:13px 14px;display:flex;flex-direction:column;gap:7px">
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Extracted</span><span style="font-family:var(--font-mono);color:var(--n-800)">{{ reqCount }}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Allocated to a control</span><span style="font-family:var(--font-mono);color:var(--n-800)">{{ allocCount }}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Unallocated</span><span style="font-family:var(--font-mono);color:{{ gapColor }}">{{ gapCount }}</span></div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin:18px 0 8px">Will be generated</div>
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:9px;padding:10px 13px;border-bottom:1px solid var(--n-100);font-size:12px;color:var(--n-700)"><span style="color:var(--cortex-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="table-2" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>SCTM Rev A<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ total }} rows</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:10px 13px;border-bottom:1px solid var(--n-100);font-size:12px;color:var(--n-700)"><span style="color:var(--cortex-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="file-text" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>Security plan Rev A<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">14 §</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:10px 13px;font-size:12px;color:var(--n-700)"><span style="color:var(--n-500);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sliders-horizontal" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>Tailoring annex<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ annexCount }} actions</span></div>
+    </div>
+
+    <div style="border:1px solid var(--synapse-200);border-radius:10px;padding:11px 12px;background:var(--synapse-50);margin-top:16px">
+      <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--synapse-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sparkles" size="{{ n13 }}" hint-size="13px,13px"></x-import>Cerebro</div>
+      <div style="font-size:12px;color:var(--n-700);margin-top:5px;text-wrap:pretty">{{ advice }}</div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const STEPS = [
+  { n: 1, title: "Program and categorisation", sub: "Identity, customer, CNSSI 1253 impact levels" },
+  { n: 2, title: "Baseline controls", sub: "What 800-53 Rev 5 selects for that categorisation" },
+  { n: 3, title: "Overlays", sub: "Regulatory and threat additions on top of the base" },
+  { n: 4, title: "Customer requirements", sub: "Contract documents, and how they map to controls" }
+];
+const BLURB = {
+  1: "Everything downstream keys off the categorisation. Set it first, then tailor.",
+  2: "The catalog selection is computed, not chosen. You can only remove a family by inheriting it from a provider, and that removal is recorded.",
+  3: "Overlays add controls the environment demands. Each one names its own source so the SCTM can cite it later.",
+  4: "Now bring in what the customer actually asked for. Cerebro maps each requirement onto the baseline you just built, and shows you what it cannot map."
+};
+const OVERLAYS = [
+  { key: "cnssi", name: "CNSSI 1253 impact overlay", effect: "adds and removes by C-I-A levels", add: 138, rem: 16, rec: 1 },
+  { key: "do326", name: "DO-326A / ED-202A", effect: "airworthiness security process controls", add: 34, rem: 0, rec: 1 },
+  { key: "attack", name: "MITRE ATT&CK v15", effect: "maps enterprise mitigations", add: 19, rem: 0, rec: 1 },
+  { key: "ics", name: "ATT&CK for ICS v14", effect: "adds embedded and bus controls", add: 26, rem: 0 },
+  { key: "sparta", name: "SPARTA v1.7", effect: "space countermeasures", add: 41, rem: 0, warn: 1 },
+  { key: "iec", name: "IEC 62443-4-2", effect: "component requirements for industrial devices", add: 23, rem: 0 },
+  { key: "cmmc", name: "800-171 R3 / CMMC L2", effect: "contractor handling of CUI", add: 12, rem: 0, rec: 1 },
+  { key: "csa", name: "Cybersecurity advisories", effect: "live advisory feed adds controls as they publish", add: 6, rem: 0, rec: 1 },
+  { key: "cdrl", name: "Customer requirements (CDRL)", effect: "additions the contract demands directly", add: 22, rem: 0, rec: 1 }
+];
+const FAMILIES = [
+  { key: "AC", name: "Access control", catalog: 147, sel: 62, basis: "Selected at C=" },
+  { key: "AU", name: "Audit and accountability", catalog: 82, sel: 41, basis: "Selected at I=" },
+  { key: "CM", name: "Configuration management", catalog: 78, sel: 44, basis: "Selected at I=" },
+  { key: "CP", name: "Contingency planning", catalog: 62, sel: 34, basis: "Selected at A=" },
+  { key: "IA", name: "Identification and authentication", catalog: 96, sel: 48, basis: "Selected at C=" },
+  { key: "SC", name: "System and communications protection", catalog: 162, sel: 71, basis: "Selected at C=" },
+  { key: "SI", name: "System and information integrity", catalog: 138, sel: 66, basis: "Selected at I=" },
+  { key: "SR", name: "Supply chain risk management", catalog: 44, sel: 26, basis: "Selected at I=" },
+  { key: "PE", name: "Physical and environmental protection", catalog: 68, sel: 28, basis: "", opt: 1, prov: "operating base facility plan" },
+  { key: "MA", name: "Maintenance", catalog: 42, sel: 21, basis: "", opt: 1, prov: "depot maintenance authority" },
+  { key: "PS", name: "Personnel security", catalog: 38, sel: 19, basis: "", opt: 1, prov: "government security office" }
+];
+const PREVIEW = [
+  { id: "SRS-3.2.1", text: "The mission computer shall verify the authenticity of loadable software parts before execution.", rel: "Invokes", color: "var(--cortex-600)", controls: "CM-14, SI-7(9)" },
+  { id: "SRS-3.4.4", text: "Session inactivity shall lock the operator console after no more than 10 minutes.", rel: "Constrains", color: "var(--warn-600)", controls: "AC-11" },
+  { id: "SRS-5.1.2", text: "Keying material shall be zeroised within 3 seconds of a tamper event.", rel: "Program-unique", color: "var(--ent-component)", controls: "mint local" },
+  { id: "ICD-1.7", text: "The maintenance port shall be disabled in flight without a software load.", rel: "Unallocated", color: "var(--danger-600)", controls: "none" },
+  { id: "SOW-C.5.1", text: "The contractor shall report vulnerabilities affecting delivered units within 72 hours.", rel: "Invokes", color: "var(--cortex-600)", controls: "SI-5, IR-6" }
+];
+const DOCS = [
+  { key: "a012", name: "CDRL A012 — System requirements specification", meta: "418 pages · security §3, §4, §8", icon: "file-text" },
+  { key: "a014", name: "CDRL A014 — Program protection requirements", meta: "112 pages · §2, §5, §7, §9", icon: "file-text" },
+  { key: "sow", name: "Statement of work §C.4", meta: "process and deliverable requirements", icon: "file-text" },
+  { key: "icd", name: "ICD-GT-002 — Ground data terminal interface", meta: "not attached · 6 interface security clauses expected", icon: "file-plus" }
+];
+const W = { L: 0, M: 1, H: 2 };
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = {
+      n13: 13, n14: 14, n15: 15, n104: 104,
+      levelProps: { size: "md", options: [{ value: "L", label: "Low" }, { value: "M", label: "Moderate" }, { value: "H", label: "High" }] },
+      ilProps: { options: [{ value: "IL4", label: "IL4" }, { value: "IL5", label: "IL5" }, { value: "IL6", label: "IL6" }] },
+      serviceProps: { options: ["U.S. Army", "U.S. Navy", "U.S. Air Force", "U.S. Space Force", "U.S. Marine Corps"].map((v) => ({ value: v, label: v })) },
+      platformProps: { options: ["Rotary-wing mission computer", "Group 4 tactical UAS", "Shipboard mission system", "GEO hosted payload", "Airborne flight controls", "Tactical edge compute"].map((v) => ({ value: v, label: v })) },
+      ownerProps: { options: ["M. Okonjo", "K. Reyes", "D. Vasquez", "S. Whitfield", "J. Park"].map((v) => ({ value: v, label: v })) }
+    };
+    if (!S) return base;
+    const w = S.state.wizard, t = w.triad, step = w.step;
+    const hw = Math.max(W[t.c], W[t.i], W[t.a]);
+    const optOut = FAMILIES.filter((f) => f.opt && !w.families[f.key]);
+    const removed = optOut.reduce((a, f) => a + f.sel, 0);
+    const baseCount = 388 + (W[t.c] + W[t.i] + W[t.a]) * 41 - removed;
+    const onOv = OVERLAYS.filter((o) => w.overlays[o.key]);
+    const added = onOv.reduce((a, o) => a + o.add, 0);
+    const ovRemoved = onOv.reduce((a, o) => a + o.rem, 0);
+    const unique = w.parsed ? 8 : 0;
+    const modified = w.parsed ? 28 : 0;
+    const total = baseCount + added - ovRemoved + unique;
+    const levelName = { L: "low", M: "moderate", H: "high" };
+    return Object.assign(base, {
+      step, is1: step === 1, is2: step === 2, is3: step === 3, is4: step === 4,
+      stepTitle: STEPS[step - 1].title, stepBlurb: BLURB[step],
+      steps: STEPS.map((s) => ({
+        n: s.n, title: s.title, sub: s.sub,
+        bg: s.n === step ? "var(--cortex-50)" : "none",
+        fg: s.n === step ? "var(--cortex-700)" : "var(--n-800)",
+        dotBg: s.n < step ? "var(--cortex-500)" : s.n === step ? "var(--n-0)" : "var(--n-0)",
+        dotFg: s.n < step ? "#fff" : s.n === step ? "var(--cortex-700)" : "var(--n-500)",
+        dotBorder: s.n <= step ? "var(--cortex-400)" : "var(--n-300)"
+      })),
+      wname: w.name, wcode: w.code, wservice: w.service, wplatform: w.platform, wowner: w.owner, wassessor: w.assessor, wil: w.il,
+      triad: t, triadLabel: t.c + "-" + t.i + "-" + t.a,
+      baseCount, added, removed: removed + ovRemoved, unique, modified, total,
+      annexCount: optOut.length + onOv.length + modified,
+      families: FAMILIES.map((f) => {
+        const off = f.opt && !w.families[f.key];
+        return {
+          key: f.key, name: f.name, catalog: f.catalog,
+          selected: off ? "inherited" : f.sel,
+          selColor: off ? "var(--n-500)" : "var(--n-800)",
+          basis: f.opt ? (off ? "Inherited from the " + f.prov : "Implemented by this program — click to inherit instead") : f.basis + levelName[f.basis.indexOf("C=") > -1 ? t.c : f.basis.indexOf("A=") > -1 ? t.a : t.i],
+          cursor: f.opt ? "pointer" : "default",
+          bg: off ? "var(--n-25)" : "var(--n-0)"
+        };
+      }),
+      optOutLabel: optOut.length ? optOut.length + " families inherited — " + removed + " controls removed" : "No families inherited",
+      overlays: OVERLAYS.map((o) => ({
+        key: o.key, name: o.name, effect: o.effect,
+        on: !!w.overlays[o.key],
+        delta: o.rem ? "+" + o.add + " / −" + o.rem : "+" + o.add,
+        recDisplay: o.rec && !w.overlays[o.key] ? "inline-flex" : "none",
+        warnDisplay: o.warn && w.overlays[o.key] ? "inline-flex" : "none",
+        bg: w.overlays[o.key] ? "var(--n-0)" : "var(--n-25)"
+      })),
+      docs: DOCS.map((d) => ({
+        key: d.key, name: d.name, meta: d.meta,
+        icon: w.docs[d.key] ? "file-text" : "file-plus",
+        iconColor: w.docs[d.key] ? "var(--cortex-600)" : "var(--n-400)",
+        status: w.docs[d.key] ? (w.parsed ? "Parsed" : "Attached") : "Attach",
+        statusColor: w.docs[d.key] ? (w.parsed ? "var(--success-600)" : "var(--n-600)") : "var(--cortex-600)"
+      })),
+      parsed: w.parsed, preview: PREVIEW.map((r) => Object.assign({}, r, { ctrlColor: r.controls === "none" ? "var(--danger-600)" : "var(--n-700)" })),
+      parseLabel: w.parsing ? "Reading documents…" : w.parsed ? "Re-extract requirements" : "Extract security requirements",
+      parseVariant: w.parsed ? "secondary" : "primary",
+      parseHint: w.parsing ? "Cerebro is reading §3, §4 and §8 and matching clauses to the tailored baseline." : w.parsed ? "163 requirements extracted from 3 documents · ICD-GT-002 still missing" : "Cerebro extracts every clause with a security obligation and proposes a control for each.",
+      reqCount: w.parsed ? 163 : "—", allocCount: w.parsed ? 149 : "—", gapCount: w.parsed ? 6 : "—",
+      gapColor: w.parsed ? "var(--danger-600)" : "var(--n-500)",
+      advice: step === 1
+        ? "Availability at high is what pulls the CP family in. If the platform provides continuity, set it lower here rather than removing controls later."
+        : step === 2
+          ? "PE, MA and PS are the only families worth inheriting for an airborne program. Everything else has to be implemented."
+          : step === 3
+            ? (w.overlays.sparta ? "SPARTA is on but a rotary-wing program has no space segment. Its 41 additions will have no traceable requirement." : "DO-326A and ATT&CK for ICS together cover the embedded and bus threats for this platform type.")
+            : (w.parsed ? "6 requirements have no control. Create the program to work them in the register, or allocate now — either way they stay visible in the SCTM as unallocated lines." : "Attach ICD-GT-002 before extracting. Interface clauses are where unallocated requirements usually hide."),
+      footHint: step === 4 && !w.parsed ? "Extract requirements to continue" : step === 4 ? "163 requirements traced · " + total + " controls" : "",
+      nextDisplay: step < 4 ? "inline-flex" : "none",
+      createDisplay: step === 4 ? "inline-flex" : "none",
+      setName: (e) => S.wiz({ name: e.target.value }),
+      setCode: (e) => S.wiz({ code: e.target.value }),
+      setService: (e) => S.wiz({ service: e.target.value }),
+      setPlatform: (e) => S.wiz({ platform: e.target.value }),
+      setOwner: (e) => S.wiz({ owner: e.target.value }),
+      setAssessor: (e) => S.wiz({ assessor: e.target.value }),
+      setIl: (e) => S.wiz({ il: e.target.value }),
+      setC: (v) => S.wizTriad("c", v), setI: (v) => S.wizTriad("i", v), setA: (v) => S.wizTriad("a", v),
+      onStep: (e) => { const b = e.target.closest("[data-step]"); if (b) S.wizStep(Number(b.getAttribute("data-step"))); },
+      onFamily: (e) => { const b = e.target.closest("[data-fam]"); if (!b) return; const k = b.getAttribute("data-fam"); if (w.families[k] !== undefined) S.wizFamily(k); },
+      onOverlay: (e) => { const b = e.target.closest("[data-ov]"); if (b) S.wizOverlay(b.getAttribute("data-ov")); },
+      onDoc: (e) => { const b = e.target.closest("[data-doc]"); if (b) S.wizDoc(b.getAttribute("data-doc")); },
+      parse: () => S.wizParse(),
+      back: () => (step === 1 ? S.go("portfolio") : S.wizStep(step - 1)),
+      next: () => S.wizStep(step + 1),
+      cancel: () => S.go("portfolio"),
+      create: () => {
+        if (!w.name) { S.toast({ tone: "warning", title: "Give the program a name", desc: "The name appears on every deliverable, so it is required before creation." }); S.wizStep(1); return; }
+        if (!w.parsed) { S.toast({ tone: "warning", title: "Extract the requirements first", desc: "A program without traced requirements cannot generate an SCTM." }); return; }
+        S.createProgram({ total, reqs: 163, allocated: 149, gap: 6 });
+      }
+    });
+  }
+}
+
+</script>
+</body>
+</html>

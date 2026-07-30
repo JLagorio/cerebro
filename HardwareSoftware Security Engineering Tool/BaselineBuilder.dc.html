@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;display:flex;min-width:0;font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);background:var(--n-0);overflow:hidden">
+
+  <div style="width:312px;flex:none;border-right:1px solid var(--n-200);background:var(--n-25);overflow-y:auto;padding:16px 16px 32px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Base catalog</div>
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:11px 12px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--n-500);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="lock" size="{{ n13 }}" hint-size="13px,13px"></x-import></span><span style="font-size:13px;font-weight:500">NIST SP 800-53 Rev 5</span></div>
+      <div style="font-size:12px;color:var(--n-600);margin-top:4px">1,189 controls and enhancements · 20 families</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">CNSSI 1253 impact levels</div>
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:12px;margin-bottom:20px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:13px;color:var(--n-700)">Confidentiality</span><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ triad.c }}" onChange="{{ setC }}" hint-size="auto,28px" dc-props="{{ levelProps }}"></x-import></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:13px;color:var(--n-700)">Integrity</span><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ triad.i }}" onChange="{{ setI }}" hint-size="auto,28px" dc-props="{{ levelProps }}"></x-import></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font-size:13px;color:var(--n-700)">Availability</span><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ triad.a }}" onChange="{{ setA }}" hint-size="auto,28px" dc-props="{{ levelProps }}"></x-import></div>
+      <div style="display:flex;align-items:center;gap:6px;padding-top:8px;border-top:1px solid var(--n-100);font-size:12px;color:var(--n-600)">Categorisation <span style="font-family:var(--font-mono);color:var(--n-900)">{{ triadLabel }}</span> · {{ triadDelta }}</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Overlays and sources</div>
+    <div onClick="{{ onToggle }}" style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+      <sc-for list="{{ overlays }}" as="o" hint-placeholder-count="8">
+        <div data-ov="{{ o.key }}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-bottom:1px solid var(--n-100);cursor:pointer" style-hover="background:var(--n-50)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:500;color:var(--n-800)">{{ o.name }}</div>
+            <div style="font-size:11px;color:var(--n-500);margin-top:2px">{{ o.effect }}</div>
+          </div>
+          <div style="flex:none;padding-top:2px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Switch" checked="{{ o.on }}" hint-size="34px,20px"></x-import></div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="flex:none;padding:14px 20px;border-bottom:1px solid var(--n-200);display:flex;align-items:center;gap:10px">
+      <div style="min-width:0">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Baseline and controls</h1>
+        <div style="font-size:12px;color:var(--n-500);margin-top:2px">{{ prog.name }} · <span style="color:var(--cortex-700)">regulatory</span> selection from the catalog and overlays, and the <span style="color:var(--ent-release)">contractual</span> additions the customer demands</div>
+      </div>
+      <div style="flex:1"></div>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Input" icon="search" placeholder="Filter tailoring actions…" width="{{ n220 }}" hint-size="220px,32px"></x-import>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="history" hint-size="auto,28px">Tailoring history</x-import>
+    </div>
+
+    <div style="flex:1;overflow:auto">
+      <div style="min-width:820px">
+        <div style="position:sticky;top:0;z-index:2;display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+          <div style="width:110px;flex:none;padding:0 10px 0 20px;border-right:1px solid var(--n-200)">Control</div>
+          <div style="width:104px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Action</div>
+          <div style="width:190px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Driver</div>
+          <div style="flex:1;min-width:240px;padding:0 10px;border-right:1px solid var(--n-200)">Rationale</div>
+          <div style="width:96px;flex:none;padding:0 10px">In SCTM</div>
+        </div>
+        <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
+          <div style="display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--n-100)" style-hover="background:var(--n-50)">
+            <div style="width:110px;flex:none;padding:0 10px 0 20px;font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--n-800)">{{ r.id }}</div>
+            <div style="width:104px;flex:none;padding:0 10px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:{{ r.actionColor }}"><span style="width:6px;height:6px;border-radius:999px;background:{{ r.actionColor }}"></span>{{ r.action }}</span></div>
+            <div style="width:190px;flex:none;padding:0 10px;font-size:12px;color:{{ r.byColor }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.by }}</div>
+            <div style="flex:1;min-width:240px;padding:0 10px;font-size:12px;color:var(--n-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.why }}</div>
+            <div style="width:96px;flex:none;padding:0 10px;font-size:12px;color:{{ r.sctmColor }}">{{ r.sctm }}</div>
+          </div>
+        </sc-for>
+        <div style="padding:16px 20px;font-size:12px;color:var(--n-500)">{{ hiddenLabel }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="width:300px;flex:none;border-left:1px solid var(--n-200);background:var(--n-25);overflow-y:auto;padding:16px 16px 32px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Net effect</div>
+    <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;gap:6px"><span style="font-size:32px;line-height:40px;font-weight:700;letter-spacing:-0.02em">{{ total }}</span><span style="font-size:12px;color:var(--n-500)">controls in the tailored baseline</span></div>
+      <div style="display:flex;flex-direction:column;gap:7px;margin-top:12px;padding-top:12px;border-top:1px solid var(--n-100)">
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">800-53 Rev 5 selected</span><span style="font-family:var(--font-mono);color:var(--n-800)">{{ baseCount }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Added by overlays</span><span style="font-family:var(--font-mono);color:var(--success-600)">+{{ added }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Removed by tailoring</span><span style="font-family:var(--font-mono);color:var(--danger-600)">−{{ removed }}</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span style="color:var(--n-700)">Modified statements</span><span style="font-family:var(--font-mono);color:var(--warn-600)">{{ modified }}</span></div>
+      </div>
+      <div style="margin-top:14px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" variant="primary" size="sm" icon="check" onClick="{{ apply }}" hint-size="auto,28px">Apply to program baseline</x-import></div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Before you apply</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:11px 12px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--warn-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="triangle-alert" size="{{ n13 }}" hint-size="13px,13px"></x-import>{{ addedNote }}</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:5px;text-wrap:pretty">New rows arrive in the SCTM with no implementation statement and no evidence. They will show as planned until an owner is assigned.</div>
+      </div>
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;padding:11px 12px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--danger-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="circle-alert" size="{{ n13 }}" hint-size="13px,13px"></x-import>Removals need customer concurrence</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:5px;text-wrap:pretty">Every removal is exported to the tailoring annex of the security plan with its rationale so the assessor can review it.</div>
+      </div>
+      <div style="background:var(--n-0);border:1px solid var(--synapse-200);border-radius:10px;padding:11px 12px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--synapse-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sparkles" size="{{ n13 }}" hint-size="13px,13px"></x-import>Cerebro suggestion</div>
+        <div style="font-size:12px;color:var(--n-600);margin-top:5px;text-wrap:pretty">{{ suggestion }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:860}}">
+const OVERLAYS = [
+  { key: "cnssi", name: "CNSSI 1253 impact overlay", effect: "adds and removes by C-I-A levels" },
+  { key: "do326", name: "DO-326A / ED-202A", effect: "airworthiness security process controls" },
+  { key: "attack", name: "MITRE ATT&CK v15", effect: "maps enterprise mitigations" },
+  { key: "ics", name: "ATT&CK for ICS v14", effect: "adds embedded and bus controls" },
+  { key: "sparta", name: "SPARTA v1.7", effect: "space countermeasures — not applicable to UAS" },
+  { key: "iec", name: "IEC 62443-4-2", effect: "component requirements for industrial devices" },
+  { key: "cmmc", name: "800-171 R3 / CMMC L2", effect: "contractor handling of CUI" },
+  { key: "csa", name: "Cybersecurity advisories", effect: "adds controls from live advisories" },
+  { key: "cdrl", name: "Customer requirements (CDRL)", effect: "program-specific additions" }
+];
+
+const ACTIONS = [
+  { id: "AC-2", action: "Modified", ov: "cnssi", by: "CNSSI 1253 M-M-H", why: "Inactivity period tightened to 15 minutes for the M confidentiality level", sctm: "Row exists" },
+  { id: "AU-9(3)", action: "Added", ov: "cnssi", by: "CNSSI 1253 M-M-H", why: "Cryptographic protection of audit information required at I=M", sctm: "Row exists" },
+  { id: "CP-2(5)", action: "Removed", ov: "cnssi", by: "CNSSI 1253 M-M-H", why: "Continuity of mission functions handled by the platform, not the UAS segment", sctm: "Not present" },
+  { id: "SC-8(1)", action: "Added", ov: "cnssi", by: "CNSSI 1253 M-M-H", why: "Cryptographic protection of transmitted information at C=M", sctm: "Row exists" },
+  { id: "PE-3", action: "Removed", ov: "cnssi", by: "CNSSI 1253 M-M-H", why: "Physical access inherited from the operating base facility plan", sctm: "Inherited" },
+  { id: "SA-15(3)", action: "Added", ov: "do326", by: "DO-326A SEC-DEV-03", why: "Criticality analysis required for airworthiness security assessment", sctm: "Row exists" },
+  { id: "SA-11(2)", action: "Added", ov: "do326", by: "DO-326A SEC-DEV-05", why: "Threat and vulnerability analysis at each design milestone", sctm: "Row exists" },
+  { id: "CM-14", action: "Added", ov: "do326", by: "DO-326A SEC-INT-02", why: "Signed loadable software airplane parts", sctm: "Row exists" },
+  { id: "SI-7(9)", action: "Added", ov: "csa", by: "Advisory ICSA-26-189-02", why: "Bootloader update path on the flight control computer processor family", sctm: "Pending" },
+  { id: "SI-4(24)", action: "Added", ov: "csa", by: "Advisory AA26-141A", why: "Indicators of compromise for the C-band waveform published in May", sctm: "Row exists" },
+  { id: "SI-7(15)", action: "Added", ov: "ics", by: "ATT&CK ICS T0857", why: "System firmware tampering on engine and flight control units", sctm: "Row exists" },
+  { id: "SC-7(21)", action: "Added", ov: "ics", by: "ATT&CK ICS T0842", why: "Bus segmentation between mission payload and flight critical networks", sctm: "Row exists" },
+  { id: "IA-3(1)", action: "Added", ov: "attack", by: "ATT&CK M1035", why: "Device authentication on the data link before association", sctm: "Row exists" },
+  { id: "SR-11(2)", action: "Added", ov: "attack", by: "ATT&CK M1051", why: "Configuration control for component authenticity checks", sctm: "Row exists" },
+  { id: "SR-4(3)", action: "Added", ov: "cdrl", by: "CDRL A014 §2.9", why: "Provenance validation demanded for navigation-critical components", sctm: "Row exists" },
+  { id: "IA-7", action: "Modified", ov: "cdrl", by: "CDRL A012 §3.4.9", why: "Module authentication required before operational mode, not within a window", sctm: "Row exists" },
+  { id: "AC-17(9)", action: "Added", ov: "cdrl", by: "CDRL A012 §3.6.2", why: "Ground segment must be able to disconnect remote sessions in 60 seconds", sctm: "Row exists" },
+  { id: "CA-8(1)", action: "Added", ov: "cmmc", by: "800-171 R3 03.12.05", why: "Independent penetration testing of the ground control station", sctm: "Not present" },
+  { id: "SR-3(3)", action: "Added", ov: "iec", by: "IEC 62443-4-2 CR 7.8", why: "Component inventory with firmware versions maintained by the supplier", sctm: "Not present" }
+];
+
+const ACTION_COLOR = { Added: "var(--success-600)", Removed: "var(--danger-600)", Modified: "var(--warn-600)" };
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n220: 220, levelProps: { size: "sm", options: [{ value: "L", label: "L" }, { value: "M", label: "M" }, { value: "H", label: "H" }] } };
+    if (!S) return base;
+    const st = S.state, p = S.prog(), ov = st.overlays, t = st.triad;
+    const rows = ACTIONS.filter((a) => ov[a.ov]).map((a) => ({
+      id: a.id, action: a.action, by: a.by, why: a.why, sctm: a.sctm,
+      actionColor: ACTION_COLOR[a.action],
+      byColor: a.ov === "cdrl" ? "var(--ent-release)" : "var(--n-700)",
+      sctmColor: a.sctm === "Pending" ? "var(--warn-600)" : a.sctm === "Not present" ? "var(--n-500)" : "var(--n-700)"
+    }));
+    const added = rows.filter((r) => r.action === "Added").length;
+    const removed = rows.filter((r) => r.action === "Removed").length;
+    const modified = rows.filter((r) => r.action === "Modified").length;
+    const levelWeight = { L: 0, M: 1, H: 2 };
+    const baseCount = 388 + (levelWeight[t.c] + levelWeight[t.i] + levelWeight[t.a]) * 41;
+    const hidden = ACTIONS.length - rows.length;
+    return Object.assign(base, {
+      prog: p, rows, added, removed, modified, baseCount,
+      total: baseCount + added * 12 - removed * 3,
+      triad: t, triadLabel: t.c + "-" + t.i + "-" + t.a,
+      triadDelta: "high water mark " + (levelWeight[t.c] >= levelWeight[t.i] && levelWeight[t.c] >= levelWeight[t.a] ? "confidentiality" : levelWeight[t.i] >= levelWeight[t.a] ? "integrity" : "availability"),
+      overlays: OVERLAYS.map((o) => ({ key: o.key, name: o.name, effect: o.effect, on: !!ov[o.key] })),
+      hiddenLabel: hidden ? hidden + " tailoring actions hidden — enable the overlay to see them" : "All tailoring actions shown",
+      addedNote: added + " controls arrive with no statement",
+      suggestion: ov.sparta
+        ? "SPARTA is enabled but Gray Talon has no space segment. Nothing it adds is traceable to a requirement — consider turning it off."
+        : ov.csa
+          ? "Advisory ICSA-26-189-02 adds SI-7(9) but no owner is assigned. Assign it before Rev D or it will deliver as planned with no statement."
+          : "Advisory sources are off, so newly published advisories will not reach this baseline.",
+      setC: (v) => S.setTriad("c", v), setI: (v) => S.setTriad("i", v), setA: (v) => S.setTriad("a", v),
+      onToggle: (e) => { const b = e.target.closest("[data-ov]"); if (b) S.toggleOverlay(b.getAttribute("data-ov")); },
+      apply: () => S.toast({ tone: "success", title: "Baseline applied", desc: added + " rows added and " + removed + " removed in the SCTM. The tailoring annex was regenerated." })
+    });
+  }
+}
+
+</script>
+</body>
+</html>

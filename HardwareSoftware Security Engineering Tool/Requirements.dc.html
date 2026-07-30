@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="flex:1;height:100%;min-width:0;display:flex;background:var(--n-0);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900);overflow:hidden">
+
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+
+    <div style="flex:none;padding:10px 20px;border-bottom:1px solid var(--n-200);display:flex;align-items:center;gap:10px">
+      <h1 style="margin:0;font-size:16px;line-height:24px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;flex:none">Customer requirements</h1>
+      <span style="font-size:12px;color:var(--n-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ shownLabel }}</span>
+      <div style="flex:1;min-width:8px"></div>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.SegmentedControl" value="{{ filter }}" onChange="{{ setFilter }}" hint-size="auto,28px" dc-props="{{ filterProps }}"></x-import>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Input" icon="search" placeholder="Filter requirements…" width="{{ n200 }}" hint-size="200px,32px"></x-import>
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" icon="file-input" hint-size="auto,28px">Import CDRL</x-import>
+    </div>
+
+    <div style="flex:1;min-height:0;overflow:auto">
+      <div style="min-width:700px">
+        <div style="position:sticky;top:0;z-index:2;display:flex;align-items:center;height:36px;background:var(--n-50);border-bottom:1px solid var(--n-200);font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500)">
+          <div style="width:104px;flex:none;padding:0 10px 0 20px;border-right:1px solid var(--n-200)">Req ID</div>
+          <div style="flex:1;min-width:200px;padding:0 10px;border-right:1px solid var(--n-200)">Requirement</div>
+          <div style="width:132px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Relationship</div>
+          <div style="width:146px;flex:none;padding:0 10px;border-right:1px solid var(--n-200)">Controls</div>
+          <div style="width:104px;flex:none;padding:0 10px">Status</div>
+        </div>
+        <div onClick="{{ onSelect }}">
+          <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+            <div data-req="{{ r.id }}" style="display:flex;align-items:center;min-height:44px;border-bottom:1px solid var(--n-100);cursor:pointer;background:{{ r.bg }};border-left:2px solid {{ r.mark }}" style-hover="background:var(--n-50)">
+              <div style="width:104px;flex:none;padding:0 10px 0 18px;font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--n-800)">{{ r.id }}</div>
+              <div style="flex:1;min-width:200px;padding:0 10px;font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.text }}</div>
+              <div style="width:132px;flex:none;padding:0 10px"><span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:{{ r.relColor }}"><span style="width:6px;height:6px;border-radius:999px;background:{{ r.relColor }}"></span>{{ r.relLabel }}</span></div>
+              <div style="width:146px;flex:none;padding:0 10px;font-family:var(--font-mono);font-size:12px;color:{{ r.ctrlColor }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.ctrlLabel }}</div>
+              <div style="width:104px;flex:none;padding:0 10px;font-size:12px;color:{{ r.statusColor }}">{{ r.status }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ true }}">
+  <div style="width:420px;flex:none;border-left:1px solid var(--n-200);background:var(--n-0);display:flex;flex-direction:column;overflow:hidden">
+    <div style="flex:none;padding:14px 12px 0 18px;border-bottom:1px solid var(--n-200)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-family:var(--font-mono);font-size:13px;font-weight:600">{{ sel.id }}</span>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" variant="outline" hint-size="auto,18px">{{ sel.verify }}</x-import>
+        <span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:{{ sel.relColor }}"><span style="width:6px;height:6px;border-radius:999px;background:{{ sel.relColor }}"></span>{{ sel.relLabel }}</span>
+        <div style="flex:1"></div>
+        <button type="button" onClick="{{ collapsePanel }}" title="Collapse details" style="width:26px;height:26px;flex:none;border:none;border-radius:6px;background:none;color:var(--n-500);display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="panel-right-close" size="{{ n15 }}" hint-size="15px,15px"></x-import></button>
+      </div>
+      <div style="font-size:11px;color:var(--n-500);margin-top:6px">{{ sel.source }} · flowed down {{ sel.flowed }} · verification owner {{ sel.owner }}</div>
+      <div style="margin-top:10px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Tabs" active="{{ tab }}" onChange="{{ setTab }}" hint-size="100%,32px" dc-props="{{ tabProps }}"></x-import></div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:16px 18px 32px;display:flex;flex-direction:column;gap:16px">
+
+      <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:11px 12px;background:var(--n-25);border:1px solid var(--n-200);border-radius:8px;font-size:13px;color:var(--n-800);text-wrap:pretty">{{ sel.text }}</div>
+
+      <div style="padding:11px 12px;border:1px solid var(--n-200);border-radius:10px;background:var(--n-0)">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:6px">How it maps</div>
+        <div style="font-size:12px;color:var(--n-700);text-wrap:pretty">{{ sel.relExplain }}</div>
+      </div>
+
+      </sc-if>
+
+      <sc-if value="{{ isControls }}">
+      <div>
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Satisfied by controls</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ sel.controls }}" as="c" hint-placeholder-count="2">
+            <div style="border:1px solid var(--n-200);border-radius:10px;padding:10px 12px;background:var(--n-0)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--n-900)">{{ c.id }}</span>
+                <span style="font-size:12px;color:var(--n-700);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.title }}</span>
+                <div style="flex:1"></div>
+                <span style="font-size:11px;font-weight:500;color:{{ c.actionColor }}">{{ c.action }}</span>
+              </div>
+              <div style="font-size:11px;color:var(--n-500);margin-top:4px">Source: {{ c.src }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ sel.noControls }}">
+            <div style="border:1px dashed var(--danger-500);border-radius:10px;padding:11px 12px;background:var(--danger-50)">
+              <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--danger-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="circle-alert" size="{{ n13 }}" hint-size="13px,13px"></x-import>No control satisfies this requirement</div>
+              <div style="font-size:12px;color:var(--n-700);margin-top:5px;text-wrap:pretty">It will deliver in the SCTM as an unallocated line. The assessor reads that as an unverifiable requirement.</div>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+
+      <sc-if value="{{ sel.hasImpl }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Implemented in</div>
+          <div style="border:1px solid var(--n-200);border-radius:10px;padding:11px 12px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="color:var(--ent-component);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="cpu" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>
+              <span style="font-family:var(--font-mono);font-size:12px;color:var(--n-600)">{{ sel.wbs }}</span>
+              <span style="font-size:12px;font-weight:500;color:var(--n-800)">{{ sel.wbsName }}</span>
+            </div>
+            <div style="font-size:12px;color:var(--n-600);margin-top:7px;text-wrap:pretty">{{ sel.statement }}</div>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap">
+              <sc-for list="{{ sel.evidence }}" as="e" hint-placeholder-count="2">
+                <span style="display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:4px;background:var(--n-50);border:1px solid var(--n-200);font-family:var(--font-mono);font-size:11px;color:var(--n-700)">{{ e }}</span>
+              </sc-for>
+              <span style="display:{{ sel.noEvDisplay }};font-size:11px;color:var(--warn-700)">No evidence attached</span>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      </sc-if>
+
+      <sc-if value="{{ isDelivery }}">
+      <div>
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:8px">Delivers into</div>
+        <div style="border:1px solid var(--n-200);border-radius:10px;overflow:hidden">
+          <div data-view="sctm" onClick="{{ onNav }}" style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--n-100);cursor:pointer" style-hover="background:var(--n-50)">
+            <span style="color:var(--cortex-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="table-2" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>
+            <span style="font-size:12px;color:var(--n-700)">SCTM {{ prog.sctmRev }}</span>
+            <div style="flex:1"></div>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ sel.sctm }}</span>
+          </div>
+          <div data-view="sp" onClick="{{ onNav }}" style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer" style-hover="background:var(--n-50)">
+            <span style="color:var(--cortex-600);display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="file-text" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>
+            <span style="font-size:12px;color:var(--n-700)">Security plan {{ prog.spRev }}</span>
+            <div style="flex:1"></div>
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--n-500)">{{ sel.sp }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--synapse-200);border-radius:10px;padding:11px 12px;background:var(--synapse-50)">
+        <div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;color:var(--synapse-700)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="sparkles" size="{{ n13 }}" hint-size="13px,13px"></x-import>Cerebro</div>
+        <div style="font-size:12px;color:var(--n-700);margin-top:5px;text-wrap:pretty">{{ sel.ai }}</div>
+        <div style="margin-top:9px"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="{{ sel.aiVariant }}" icon="{{ sel.aiIcon }}" onClick="{{ aiAction }}" hint-size="auto,28px">{{ sel.aiCta }}</x-import></div>
+      </div>
+      </sc-if>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ panelClosed }}">
+    <div style="width:46px;flex:none;border-left:1px solid var(--n-200);background:var(--n-25);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:12px">
+      <button type="button" onClick="{{ expandPanel }}" title="Open requirement details" style="width:28px;height:28px;flex:none;border:1px solid var(--n-200);border-radius:7px;background:var(--n-0);color:var(--n-600);display:flex;align-items:center;justify-content:center;cursor:pointer" style-hover="background:var(--n-50)"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="panel-right-open" size="{{ n15 }}" hint-size="15px,15px"></x-import></button>
+      <span style="writing-mode:vertical-rl;font-family:var(--font-mono);font-size:11px;color:var(--n-500);letter-spacing:0.04em">{{ sel.id }}</span>
+      <span style="width:7px;height:7px;border-radius:999px;background:{{ sel.relColor }};flex:none"></span>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const REL = {
+  invokes: { label: "Invokes", color: "var(--cortex-600)" },
+  constrains: { label: "Constrains", color: "var(--warn-600)" },
+  unique: { label: "Program-unique", color: "var(--ent-component)" },
+  open: { label: "Unallocated", color: "var(--danger-600)" }
+};
+const EXPLAIN = {
+  invokes: "The customer cites this control area directly. The catalog text governs — no tailoring needed, and the implementation statement answers both the requirement and the control at once.",
+  constrains: "The customer is stricter than the catalog parameter. The control stays in the baseline with a modified statement, and the tailoring annex records the customer clause as the reason.",
+  unique: "Nothing in 800-53 or the applied overlays covers this. A program-unique control was minted so the requirement still has a verifiable line in the SCTM.",
+  open: "No control has been allocated yet. Until one is, this requirement has no implementation, no evidence and no SCTM row that an assessor can verify."
+};
+const ACTION_COLOR = { "Catalog as written": "var(--n-600)", "Modified by tailoring": "var(--warn-600)", "Added by overlay": "var(--success-600)", "Program-unique": "var(--ent-component)" };
+
+const REQS = [
+  { id: "SRS-3.4.9", rel: "constrains", status: "Implemented", verify: "Test", source: "CDRL A012 §3.4.9", flowed: "12 Mar 2026", owner: "M. Okonjo",
+    text: "The cryptographic module shall authenticate to the mission computer before the air vehicle enters operational mode.",
+    controls: [{ id: "IA-7", title: "Cryptographic module authentication", src: "800-53 Rev 5 · customer clause tightens it", action: "Modified by tailoring" },
+      { id: "SC-12", title: "Cryptographic key establishment", src: "800-53 Rev 5 · CNSSI 1253 C=M", action: "Catalog as written" }],
+    wbs: "1.1.5.3", wbsName: "Crypto module", statement: "KI-700 performs challenge-response with the mission computer during power-on before the operational mode discrete is asserted.",
+    evidence: ["GT-TP-0412", "GT-AR-0088"], sctm: "2 rows", sp: "§4.3",
+    ai: "The Cameo model now shows a KI-700 where the SCTM still cites KGV-72M. This requirement's statement is ahead of the delivered SCTM row.", aiCta: "Open change impact", aiIcon: "git-compare-arrows", aiVariant: "default" },
+
+  { id: "SRS-3.6.2", rel: "constrains", status: "Partial", verify: "Test", source: "CDRL A012 §3.6.2", flowed: "12 Mar 2026", owner: "A. Duarte",
+    text: "The ground segment shall terminate an active remote session within 60 seconds of an operator disconnect command.",
+    controls: [{ id: "AC-17(9)", title: "Disconnect or disable access", src: "800-53 Rev 5 · 60 s replaces the org-defined period", action: "Modified by tailoring" }],
+    wbs: "1.2.3", wbsName: "Session broker", statement: "The GCS session broker force-closes the tunnel and revokes the session token; measured worst case 41 s in the SIL.",
+    evidence: ["GT-TP-0377"], sctm: "1 row", sp: "§6.2",
+    ai: "Measured margin is 19 s against a 60 s requirement. Nothing to do, but note the SIL run predates the waveform update.", aiCta: "Mark verified", aiIcon: "check", aiVariant: "default" },
+
+  { id: "SRS-2.9", rel: "invokes", status: "Implemented", verify: "Inspection", source: "CDRL A014 §2.9", flowed: "12 Mar 2026", owner: "J. Park",
+    text: "Supplier provenance shall be validated for all navigation-critical components prior to installation.",
+    controls: [{ id: "SR-4(3)", title: "Provenance — validate as genuine and not altered", src: "ATT&CK M1051 overlay · demanded by CDRL", action: "Added by overlay" },
+      { id: "SR-11(2)", title: "Component authenticity — configuration control", src: "800-53 Rev 5", action: "Catalog as written" }],
+    wbs: "1.4.2", wbsName: "Receiving inspection", statement: "Provenance gate in receiving inspection checks supplier attestation and serial traceability before the component enters bonded stock.",
+    evidence: ["GT-QA-0219"], sctm: "2 rows", sp: "§11.4",
+    ai: "This requirement is the reason SR-4(3) is in the baseline. If the overlay were removed the control would stay — the contract demands it.", aiCta: "Show in baseline", aiIcon: "list-checks", aiVariant: "default" },
+
+  { id: "SRS-4.1.1", rel: "unique", status: "Partial", verify: "Test", source: "CDRL A012 §4.1.1", flowed: "12 Mar 2026", owner: "R. Osei",
+    text: "The air vehicle shall zeroise all keying material within 5 seconds of a tamper detection event.",
+    controls: [{ id: "GT-SR-01", title: "Tamper-initiated zeroisation", src: "Program-unique · no 800-53 equivalent at this granularity", action: "Program-unique" }],
+    wbs: "1.1.5.4", wbsName: "Tamper loop", statement: "Tamper switches drive the KI-700 zeroise line directly; the mission computer is not in the path. Bench measured 1.8 s.",
+    evidence: ["GT-TP-0401"], sctm: "1 row", sp: "§4.6",
+    ai: "SC-12(3) and PE-3(5) are adjacent but neither carries a time bound, so a program-unique control is correct here. The annex explains why.", aiCta: "Review local control", aiIcon: "pencil", aiVariant: "default" },
+
+  { id: "SRS-4.2.7", rel: "invokes", status: "Planned", verify: "Test", source: "CDRL A012 §4.2.7", flowed: "12 Mar 2026", owner: "S. Whitfield",
+    text: "Flight control software loads shall be digitally signed and verified by the bootloader before execution.",
+    controls: [{ id: "CM-14", title: "Signed components", src: "DO-326A SEC-INT-02 overlay", action: "Added by overlay" },
+      { id: "SI-7(9)", title: "Verify boot process", src: "Advisory ICSA-26-189-02 · pending baseline apply", action: "Added by overlay" }],
+    wbs: "1.1.4.3", wbsName: "Flight control computer", statement: "", evidence: [], sctm: "2 rows", sp: "§4.4",
+    ai: "SI-7(9) arrived from an advisory this morning and has no owner. The requirement has existed since March — this is the gap the advisory exposed, not a new demand.", aiCta: "Open change impact", aiIcon: "git-compare-arrows", aiVariant: "primary" },
+
+  { id: "SRS-5.3", rel: "invokes", status: "Implemented", verify: "Analysis", source: "CDRL A014 §5.3", flowed: "12 Mar 2026", owner: "M. Okonjo",
+    text: "Mission data at rest on removable media shall be encrypted using an NSA-approved algorithm.",
+    controls: [{ id: "SC-28(1)", title: "Cryptographic protection of information at rest", src: "800-53 Rev 5 · CNSSI 1253 C=M", action: "Catalog as written" },
+      { id: "SC-13", title: "Cryptographic protection", src: "800-53 Rev 5", action: "Catalog as written" }],
+    wbs: "1.1.6.2", wbsName: "Mission data recorder", statement: "AES-256 in the recorder controller with keys held in the KI-700; media is unreadable outside a keyed air vehicle.",
+    evidence: ["GT-AR-0102", "GT-TP-0356"], sctm: "2 rows", sp: "§5.1",
+    ai: "SC-13 is shared with four other requirements. Editing its statement will mark all four for re-verification.", aiCta: "Show shared controls", aiIcon: "share-2", aiVariant: "default" },
+
+  { id: "SRS-3.8.4", rel: "constrains", status: "Implemented", verify: "Demonstration", source: "CDRL A012 §3.8.4", flowed: "12 Mar 2026", owner: "A. Duarte",
+    text: "All privileged operator actions shall be logged with UTC timestamps and retained for no less than 90 days.",
+    controls: [{ id: "AU-11", title: "Audit record retention", src: "800-53 Rev 5 · 90 days replaces the org-defined period", action: "Modified by tailoring" },
+      { id: "AU-3", title: "Content of audit records", src: "800-53 Rev 5", action: "Catalog as written" }],
+    wbs: "1.2.5", wbsName: "Ground audit service", statement: "Audit service writes UTC-stamped records to a 120-day ring store on the GCS with export to the mission archive.",
+    evidence: ["GT-TP-0388"], sctm: "2 rows", sp: "§7.1",
+    ai: "Retention is set to 120 days in the implementation against a 90-day requirement. The surplus is a design choice, not a requirement — worth stating in the SP.", aiCta: "Add rationale", aiIcon: "pencil", aiVariant: "default" },
+
+  { id: "SRS-6.2", rel: "invokes", status: "Partial", verify: "Test", source: "CDRL A012 §6.2", flowed: "12 Mar 2026", owner: "R. Osei",
+    text: "The data link shall detect and reject unauthorised association attempts without loss of the authorised link.",
+    controls: [{ id: "IA-3(1)", title: "Cryptographic bidirectional authentication", src: "ATT&CK M1035 overlay", action: "Added by overlay" },
+      { id: "SC-7(21)", title: "Isolation of system components", src: "ATT&CK ICS T0842 overlay", action: "Added by overlay" }],
+    wbs: "1.1.2.1", wbsName: "C-band data link", statement: "Pre-association challenge on the C-band waveform; rejected attempts are logged and do not interrupt the established session.",
+    evidence: ["GT-TP-0344"], sctm: "2 rows", sp: "§6.4",
+    ai: "Both controls came from threat overlays rather than the contract. The requirement is what makes them verifiable.", aiCta: "Show in baseline", aiIcon: "list-checks", aiVariant: "default" },
+
+  { id: "SOW-C.4.3.2", rel: "invokes", status: "Implemented", verify: "Inspection", source: "SOW §C.4.3.2", flowed: "04 Feb 2026", owner: "M. Okonjo",
+    text: "The contractor shall deliver a threat and vulnerability analysis at each design milestone.",
+    controls: [{ id: "SA-11(2)", title: "Threat modeling and vulnerability analysis", src: "DO-326A SEC-DEV-05 overlay", action: "Added by overlay" },
+      { id: "SA-15(3)", title: "Criticality analysis", src: "DO-326A SEC-DEV-03 overlay", action: "Added by overlay" }],
+    wbs: "1.0", wbsName: "Program process", statement: "TVA delivered at PDR and CDR from the Cameo model with the airworthiness security assessment.",
+    evidence: ["GT-AR-0061", "GT-AR-0074"], sctm: "2 rows", sp: "§2.3",
+    ai: "A process requirement, not a design one. It is satisfied by a deliverable rather than a system element.", aiCta: "Open supporting docs", aiIcon: "paperclip", aiVariant: "default" },
+
+  { id: "SRS-7.1.5", rel: "invokes", status: "Implemented", verify: "Analysis", source: "CDRL A014 §7.1.5", flowed: "12 Mar 2026", owner: "S. Whitfield",
+    text: "The payload network shall be physically segregated from flight-critical buses.",
+    controls: [{ id: "SC-7(21)", title: "Isolation of system components", src: "ATT&CK ICS T0842 overlay", action: "Added by overlay" }],
+    wbs: "1.1.3.2", wbsName: "Bus architecture", statement: "Payload traffic runs on a dedicated Ethernet segment; the only path to the flight-critical 1553 bus is a one-way data diode.",
+    evidence: ["GT-AR-0093"], sctm: "1 row", sp: "§7.3",
+    ai: "The diode is also the reason CP-2(5) could be removed from the baseline. That removal cites this requirement.", aiCta: "Show tailoring action", aiIcon: "sliders-horizontal", aiVariant: "default" },
+
+  { id: "SRS-3.9.1", rel: "constrains", status: "Partial", verify: "Demonstration", source: "CDRL A012 §3.9.1", flowed: "12 Mar 2026", owner: "J. Park",
+    text: "Operator credentials shall be revoked within 24 hours of a personnel change notification.",
+    controls: [{ id: "AC-2(3)", title: "Disable accounts", src: "800-53 Rev 5 · 24 h replaces the org-defined period", action: "Modified by tailoring" },
+      { id: "PS-4", title: "Personnel termination", src: "800-53 Rev 5", action: "Catalog as written" }],
+    wbs: "1.2.4", wbsName: "Identity service", statement: "Revocation is manual on notification from the government account manager. Automation is scheduled for Rev D.",
+    evidence: [], sctm: "2 rows", sp: "§3.5",
+    ai: "No evidence attached and the process is manual, so this cannot be demonstrated at the next assessment as written.", aiCta: "Assign evidence owner", aiIcon: "user-plus", aiVariant: "default" },
+
+  { id: "SRS-9.4", rel: "invokes", status: "Implemented", verify: "Inspection", source: "CDRL A014 §9.4", flowed: "12 Mar 2026", owner: "J. Park",
+    text: "The contractor shall maintain a component inventory recording firmware versions for all delivered units.",
+    controls: [{ id: "CM-8", title: "System component inventory", src: "800-53 Rev 5", action: "Catalog as written" },
+      { id: "SR-3(3)", title: "Supply chain controls and processes", src: "IEC 62443-4-2 CR 7.8 overlay · overlay is off", action: "Added by overlay" }],
+    wbs: "1.0", wbsName: "Program process", statement: "Inventory is generated from TeamCenter with firmware versions pulled from the build manifests each release.",
+    evidence: ["GT-CM-0155"], sctm: "2 rows", sp: "§10.2",
+    ai: "SR-3(3) is allocated here but its overlay is disabled, so it is not currently in the tailored baseline. The requirement is under-covered.", aiCta: "Enable IEC 62443 overlay", aiIcon: "sliders-horizontal", aiVariant: "primary" },
+
+  { id: "ICD-2.4", rel: "open", status: "Not allocated", verify: "Test", source: "ICD-GT-002 §2.4", flowed: "22 Jun 2026", owner: "Unassigned",
+    text: "The interface to the ground data terminal shall reject malformed frames without loss of link.",
+    controls: [], wbs: "", wbsName: "", statement: "", evidence: [], sctm: "Unallocated line", sp: "Not referenced",
+    ai: "SI-10 and SC-5(2) both fit this requirement. Neither is in the tailored baseline yet — allocating SI-10 adds one row to the SCTM.", aiCta: "Allocate SI-10", aiIcon: "link", aiVariant: "primary" },
+
+  { id: "SRS-8.2", rel: "open", status: "Not allocated", verify: "Test", source: "CDRL A012 §8.2", flowed: "12 Mar 2026", owner: "Unassigned",
+    text: "Built-in test shall report cryptographic self-test failures to the operator within 2 seconds.",
+    controls: [], wbs: "", wbsName: "", statement: "", evidence: [], sctm: "Unallocated line", sp: "Not referenced",
+    ai: "SI-6 with a program parameter of 2 seconds covers this, and SI-6(2) covers the automated notification. Allocating both closes the requirement.", aiCta: "Allocate SI-6, SI-6(2)", aiIcon: "link", aiVariant: "primary" }
+];
+
+const STATUS_COLOR = { Implemented: "var(--success-600)", Partial: "var(--warn-600)", Planned: "var(--n-600)", "Not allocated": "var(--danger-600)" };
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n13: 13, n14: 14, n15: 15, n200: 200, filterProps: { size: "sm", options: [{ value: "all", label: "All" }, { value: "constrains", label: "Constrains" }, { value: "unique", label: "Program-unique" }, { value: "open", label: "Unallocated" }] } };
+    if (!S) return base;
+    const st = S.state, p = S.prog();
+    const f = st.reqFilter;
+    const list = f === "all" ? REQS : REQS.filter((r) => r.rel === f);
+    const rows = list.map((r) => ({
+      id: r.id, text: r.text, status: r.status,
+      relLabel: REL[r.rel].label, relColor: REL[r.rel].color,
+      ctrlLabel: r.controls.length ? r.controls.map((c) => c.id).join(", ") : "none",
+      ctrlColor: r.controls.length ? "var(--n-700)" : "var(--danger-600)",
+      statusColor: STATUS_COLOR[r.status],
+      bg: st.reqSel === r.id ? "var(--cortex-50)" : "var(--n-0)",
+      mark: st.reqSel === r.id ? "var(--cortex-500)" : "transparent"
+    }));
+    const cur = REQS.find((r) => r.id === st.reqSel) || REQS[0];
+    const sel = Object.assign({}, cur, {
+      relLabel: REL[cur.rel].label, relColor: REL[cur.rel].color, relExplain: EXPLAIN[cur.rel],
+      controls: cur.controls.map((c) => Object.assign({}, c, { actionColor: ACTION_COLOR[c.action] || "var(--n-600)" })),
+      noControls: cur.controls.length === 0,
+      hasImpl: !!cur.wbs,
+      statement: cur.statement || "No implementation statement yet. The requirement is allocated but nobody has written how the design satisfies it.",
+      noEvDisplay: cur.evidence.length ? "none" : "inline",
+      aiVariant: cur.aiVariant, aiIcon: cur.aiIcon, aiCta: cur.aiCta
+    });
+    const openCount = REQS.filter((r) => r.rel === "open").length;
+    return Object.assign(base, {
+      prog: p, rows, sel, openCount,
+      filter: f,
+      shownLabel: rows.length + " of " + REQS.length + " · " + openCount + " unallocated · " + p.name,
+      panelOpen: !!st.reqPanel, panelClosed: !st.reqPanel,
+      collapsePanel: () => S.set({ reqPanel: 0 }),
+      expandPanel: () => S.set({ reqPanel: 1 }),
+      tab: st.reqTab || "overview",
+      isOverview: (st.reqTab || "overview") === "overview",
+      isControls: st.reqTab === "controls",
+      isDelivery: st.reqTab === "delivery",
+      tabProps: { items: [{ id: "overview", label: "Requirement" }, { id: "controls", label: "Controls", count: cur.controls.length }, { id: "delivery", label: "Delivery" }] },
+      setTab: (t) => S.set({ reqTab: t }),
+      setFilter: (v) => S.set({ reqFilter: v }),
+      onSelect: (e) => { const b = e.target.closest("[data-req]"); if (b) S.selectReq(b.getAttribute("data-req")); },
+      onNav: (e) => { const b = e.currentTarget.getAttribute("data-view"); if (b) S.go(b); },
+      aiAction: () => {
+        if (cur.rel === "open") S.toast({ tone: "success", title: "Controls allocated to " + cur.id, desc: "Added to the tailored baseline with the requirement recorded as the driver. SCTM rows created as planned." });
+        else S.go(cur.aiIcon === "git-compare-arrows" ? "impact" : cur.aiIcon === "list-checks" || cur.aiIcon === "sliders-horizontal" ? "baseline" : "sctm");
+      }
+    });
+  }
+}
+
+</script>
+</body>
+</html>

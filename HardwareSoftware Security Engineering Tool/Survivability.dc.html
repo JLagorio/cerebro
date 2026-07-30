@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/colors.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/typography.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/tokens/base.css">
+<link rel="stylesheet" href="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/styles.css">
+<script src="_ds/cerebro-design-system-d5fb9b6c-a7d7-40f8-ad80-3a48e4462af5/_ds_bundle.js"></script>
+<script src="./store.js"></script>
+</helmet>
+<div style="height:100%;min-width:0;overflow-y:auto;background:var(--n-25);font-family:var(--font-ui);font-size:13px;line-height:20px;color:var(--n-900)">
+  <div style="max-width:1200px;margin:0 auto;padding:24px 28px 56px;display:flex;flex-direction:column;gap:18px">
+
+    <div style="display:flex;align-items:flex-start;gap:16px">
+      <div style="flex:1;min-width:0">
+        <h1 style="margin:0;font-size:20px;line-height:28px;font-weight:600;letter-spacing:-0.01em">Cyber survivability</h1>
+        <div style="font-size:12px;color:var(--n-600);margin-top:4px">The ten survivability attributes, and the mission-based risk assessment that justifies how each one is satisfied. Compliance says the control exists; this says the mission survives.</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex:none;padding-top:4px">
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" tone="info" hint-size="auto,18px">CSRC 3</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" variant="outline" hint-size="auto,18px">CSE Rev A · 2 attributes open</x-import>
+        <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" icon="file-text" onClick="{{ onGen }}" hint-size="auto,32px">Generate CSE annex</x-import>
+      </div>
+    </div>
+
+    <div onClick="{{ onCsa }}" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px">
+      <sc-for list="{{ csas }}" as="c" hint-placeholder-count="10">
+        <button type="button" data-csa="{{ c.id }}" style="text-align:left;background:{{ c.bg }};border:1px solid {{ c.border }};border-radius:10px;box-shadow:var(--shadow-sm);padding:12px;cursor:pointer;font-family:var(--font-ui);display:flex;flex-direction:column;gap:7px;min-height:132px" style-hover="border-color:var(--n-300)">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-family:var(--font-mono);font-size:10px;font-weight:600;color:var(--n-500)">{{ c.num }}</span>
+            <span style="margin-left:auto;color:{{ c.dotFg }};display:flex"><x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Icon" name="{{ c.icon }}" size="{{ n14 }}" hint-size="14px,14px"></x-import></span>
+          </div>
+          <div style="font-size:12px;font-weight:600;line-height:16px">{{ c.name }}</div>
+          <div style="font-size:11px;color:var(--n-600);line-height:15px">{{ c.note }}</div>
+          <div style="margin-top:auto;display:flex;align-items:center;gap:6px">
+            <span style="font-family:var(--font-mono);font-size:10px;color:var(--n-500)">{{ c.ctls }} controls</span>
+            <span style="font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:{{ c.dotFg }};margin-left:auto">{{ c.level }}</span>
+          </div>
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1.35fr;gap:16px;align-items:start">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+        <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200)">
+          <div style="font-size:14px;font-weight:600">Mission threads</div>
+          <div style="font-size:12px;color:var(--n-600);margin-top:2px">Defined with the operational unit. Every attack path starts from one of these.</div>
+        </div>
+        <div onClick="{{ onThread }}">
+          <sc-for list="{{ threads }}" as="t" hint-placeholder-count="4">
+            <button type="button" data-thread="{{ t.id }}" style="display:block;width:100%;text-align:left;padding:12px 16px;border:none;border-bottom:1px solid var(--n-100);background:{{ t.bg }};cursor:pointer;font-family:var(--font-ui);box-shadow:{{ t.rail }}" style-hover="background:var(--n-50)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:13px;font-weight:600;flex:1;min-width:0">{{ t.name }}</span>
+                <span style="font-family:var(--font-mono);font-size:11px;color:{{ t.riskFg }}">{{ t.paths }} paths</span>
+              </div>
+              <div style="font-size:12px;color:var(--n-600);margin-top:3px;text-wrap:pretty">{{ t.desc }}</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:7px">
+                <span style="font-size:11px;color:var(--n-500)">Critical functions {{ t.funcs }}</span>
+                <div style="flex:1"></div>
+                <span style="font-size:11px;font-weight:600;color:{{ t.riskFg }}">{{ t.risk }}</span>
+              </div>
+            </button>
+          </sc-for>
+        </div>
+        <div style="padding:12px 16px">
+          <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Button" size="sm" variant="ghost" icon="route" onClick="{{ onTable }}" hint-size="auto,28px">Run a table-top on this thread</x-import>
+        </div>
+      </div>
+
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+        <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200);display:flex;align-items:flex-start;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600">{{ thread.name }} — attack paths</div>
+            <div style="font-size:12px;color:var(--n-600);margin-top:2px">{{ thread.note }}</div>
+          </div>
+          <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.Badge" variant="outline" hint-size="auto,18px">{{ thread.catalog }}</x-import>
+        </div>
+        <sc-for list="{{ paths }}" as="p" hint-placeholder-count="3">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--n-100)">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--n-700)">{{ p.id }}</span>
+              <span style="font-size:13px;font-weight:600;flex:1;min-width:0">{{ p.name }}</span>
+              <span style="font-size:11px;font-weight:600;color:{{ p.fg }};background:{{ p.bg }};border-radius:4px;padding:2px 7px">{{ p.state }}</span>
+            </div>
+            <div style="display:flex;align-items:stretch;gap:6px;margin-top:11px">
+              <sc-for list="{{ p.steps }}" as="s" hint-placeholder-count="4">
+                <div style="flex:1;min-width:0;border:1px solid var(--n-200);border-radius:8px;padding:8px 9px;background:var(--n-25)">
+                  <div style="font-family:var(--font-mono);font-size:10px;color:var(--synapse-600)">{{ s.ttp }}</div>
+                  <div style="font-size:11px;color:var(--n-800);margin-top:3px;line-height:15px">{{ s.text }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:16px;margin-top:11px">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11px;color:var(--n-500)">Mitigated by</div>
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--cortex-700);margin-top:2px">{{ p.controls }}</div>
+              </div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11px;color:var(--n-500)">Residual condition</div>
+                <div style="font-size:12px;color:{{ p.fg }};margin-top:2px;text-wrap:pretty">{{ p.residual }}</div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:start">
+      <div style="background:var(--n-0);border:1px solid var(--n-200);border-radius:10px;box-shadow:var(--shadow-sm);overflow:hidden">
+        <div style="padding:14px 16px 12px;border-bottom:1px solid var(--n-200)">
+          <div style="font-size:14px;font-weight:600">{{ csa.title }}</div>
+          <div style="font-size:12px;color:var(--n-600);margin-top:2px">{{ csa.requirement }}</div>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:5px">How the program satisfies it</div>
+            <div style="font-size:12px;color:var(--n-800);text-wrap:pretty">{{ csa.approach }}</div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--n-500);margin-bottom:6px">Allocated controls</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <sc-for list="{{ csa.controls }}" as="c" hint-placeholder-count="6">
+                <a href="#" data-go="sctm" style="font-family:var(--font-mono);font-size:11px;border:1px solid var(--n-200);border-radius:6px;padding:3px 7px;color:var(--cortex-700);text-decoration:none">{{ c.id }}</a>
+              </sc-for>
+            </div>
+          </div>
+          <div style="border-top:1px solid var(--n-100);padding-top:12px">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:{{ csa.stateFg }};margin-bottom:5px">{{ csa.stateLabel }}</div>
+            <div style="font-size:12px;color:var(--n-800);text-wrap:pretty">{{ csa.gap }}</div>
+          </div>
+        </div>
+      </div>
+
+      <x-import component-from-global-scope="CerebroDesignSystem_d5fb9b.AISummary" title="Where survivability and compliance disagree" sources="From 4 mission threads · 11 attack paths · 612 controls · adversarial assessment AA-2" hint-size="100%,220px">Three attack paths are fully mitigated on paper by controls that are assessed as satisfied, yet the adversarial assessment defeated two of them — both through the maintenance access path rather than the datalink. Cerebro flags this as the pattern to argue in the endorsement: the control set is adequate for the operational configuration and thin for the maintenance configuration. Attribute 06 and attribute 10 carry that gap, and both trace to the same two CAT I findings. Closing FND-0188 and FND-0191 moves six of the eleven paths from partial to mitigated without adding a single control.</x-import>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+const CSAS = [
+  { id: "csa01", num: "CSA 01", name: "Control access", note: "Authenticate and authorize every path into the system", ctls: 84, level: "Level 3", state: "met",
+    title: "CSA 01 — Control access", requirement: "Tailored requirement level 3: authenticate all interfaces including maintenance, with two-factor for privileged access.",
+    approach: "Operator and maintainer access on the GCS is authenticated against the program PKI with hardware tokens. The air vehicle authenticates command frames on the C2 link. Depot access uses local accounts pending the authenticator procedure.",
+    controls: ["AC-2", "AC-3", "AC-6", "IA-2", "IA-3", "IA-5", "MA-4"],
+    gap: "Depot maintenance accounts are authenticated but the initial authenticator distribution is undocumented — FND-0209 is the only open item." },
+  { id: "csa02", num: "CSA 02", name: "Reduce detectability", note: "Limit emissions and signatures that reveal the platform", ctls: 22, level: "Level 2", state: "met",
+    title: "CSA 02 — Reduce the system's cyber detectability", requirement: "Tailored requirement level 2: minimize discoverable emissions and network signatures in the operational configuration.",
+    approach: "The datalink uses frequency hopping with the adaptive waveform, and the ground segment suppresses service discovery on the operational VLAN. RF emissions were characterized against a measured baseline in May.",
+    controls: ["SC-40", "SC-30", "AC-18", "SI-4(4)"],
+    gap: "No open items. The maintenance VLAN broadcasts service discovery, which is accepted because it is only enabled inside the shielded bay." },
+  { id: "csa03", num: "CSA 03", name: "Secure transmissions", note: "Protect the confidentiality and integrity of every link", ctls: 47, level: "Level 3", state: "risk",
+    title: "CSA 03 — Secure transmissions and communications", requirement: "Tailored requirement level 3: NSA-approved cryptography on the C2 link with authenticated integrity on all mission data.",
+    approach: "Type 1 cryptography protects the C2 link; the payload downlink uses AES-256 with authenticated encryption. Key management runs through the crypto modernization office.",
+    controls: ["SC-8", "SC-12", "SC-13", "IA-7", "AU-11"],
+    gap: "The KI-700 substitution under CHG-118 invalidated the approval evidence for the C2 link. Forty-three controls in this attribute cannot be assessed until that evidence lands — this is the critical path to the ATO." },
+  { id: "csa04", num: "CSA 04", name: "Protect information", note: "Guard mission and CPI data at rest and in transit", ctls: 58, level: "Level 3", state: "met",
+    title: "CSA 04 — Protect the system's information from exploitation", requirement: "Tailored requirement level 3: encrypt CPI-adjacent data at rest, enforce need to know, and bound retention.",
+    approach: "Telemetry and mission data are encrypted at rest with role-based access enforced on the analysis toolset. CPI handling follows the PPP with export control on release.",
+    controls: ["SC-28", "AC-3", "AC-6", "MP-6", "SI-12"],
+    gap: "No open items. Retention limits on the key fill audit records were short and are being extended under FND-0175." },
+  { id: "csa05", num: "CSA 05", name: "Partition critical functions", note: "Keep mission-critical functions performing under attack", ctls: 39, level: "Level 3", state: "partial",
+    title: "CSA 05 — Partition and ensure critical functions at mission completion performance levels", requirement: "Tailored requirement level 3: flight-critical functions must complete the mission with the mission system degraded or compromised.",
+    approach: "Flight control runs in a separate partition from mission processing on the mission computer, with independent watchdogs. Loss of the mission partition leaves the vehicle flyable and recoverable.",
+    controls: ["SC-3", "SC-7", "SC-39", "CP-2", "SI-13"],
+    gap: "Partitioning is implemented but not verified under fault injection. The verification event is scheduled with OT-1 in September; until then the attribute rests on design analysis rather than test." },
+  { id: "csa06", num: "CSA 06", name: "Minimize attack surfaces", note: "Remove and harden every exposed interface", ctls: 71, level: "Level 3", state: "risk",
+    title: "CSA 06 — Minimize and harden attack surfaces", requirement: "Tailored requirement level 3: disable unused interfaces, harden the rest to the applicable benchmark, and remove maintenance capability from the fielded configuration.",
+    approach: "Interfaces are enumerated per WBS element and hardened to the applicable STIG. Unused ports are disabled in the production configuration.",
+    controls: ["CM-6", "CM-7", "SC-7", "MA-4", "SI-7"],
+    gap: "Two CAT I findings live here. The payload controller exposes an unauthenticated debug shell (FND-0191) and the GCS radio accepts unauthenticated frames in maintenance mode (FND-0188). Both have interim procedural measures and firmware fixes on contract." },
+  { id: "csa07", num: "CSA 07", name: "Detect anomalies", note: "Baseline behaviour and alert on deviation", ctls: 52, level: "Level 2", state: "partial",
+    title: "CSA 07 — Baseline and monitor systems and detect anomalies", requirement: "Tailored requirement level 2: monitor the ground segment continuously and capture air vehicle behaviour for post-mission analysis.",
+    approach: "The ground segment sends audit records to a collector with alerting on defined conditions. The air vehicle records behaviour for post-flight review rather than in-flight detection.",
+    controls: ["AU-6", "AU-4", "SI-4", "CA-7"],
+    gap: "Audit storage alerting on the collector is not configured (FND-0226) and the continuous monitoring strategy is drafted but unsigned." },
+  { id: "csa08", num: "CSA 08", name: "Manage degradation", note: "Operate through a cyber event at a defined level", ctls: 31, level: "Level 3", state: "met",
+    title: "CSA 08 — Manage system performance if degraded by cyber events", requirement: "Tailored requirement level 3: define degraded modes and the performance floor the operator can rely on.",
+    approach: "Three degraded modes are defined with the operational unit: loss of payload, loss of datalink, and loss of the mission partition. Each has an operator procedure and a demonstrated performance floor.",
+    controls: ["CP-2", "CP-10", "SI-13", "SC-24"],
+    gap: "No open items. Degraded mode behaviour was demonstrated during the June exercise and is documented in the contingency plan." },
+  { id: "csa09", num: "CSA 09", name: "Recover capability", note: "Restore the system to a trusted state", ctls: 44, level: "Level 2", state: "partial",
+    title: "CSA 09 — Recover system capabilities", requirement: "Tailored requirement level 2: restore the ground segment and reload the air vehicle to a known good state within the defined objective.",
+    approach: "The GCS recovers through three-node failover; the air vehicle is restored by a signed OFP reload at depot with a two-person integrity check.",
+    controls: ["CP-4", "CP-10", "SI-7", "MA-2"],
+    gap: "The failover test report predates the three-node configuration (FND-0181). Retest is scheduled during the August exercise window." },
+  { id: "csa10", num: "CSA 10", name: "Manage configuration", note: "Know and control what is actually fielded", ctls: 63, level: "Level 3", state: "risk",
+    title: "CSA 10 — Actively manage the system's configurations", requirement: "Tailored requirement level 3: maintain an authoritative configuration baseline with automated verification of the fielded state.",
+    approach: "Configuration is controlled through the program CM system with STIG-hardened baselines and an approved deviation register. Scans verify the fielded state on a defined cadence.",
+    controls: ["CM-2", "CM-3", "CM-6", "CM-8", "SI-7(9)"],
+    gap: "Boot integrity verification is not implemented on the mission computer (FND-0198), so the fielded state of the air vehicle cannot be verified automatically — only inspected at depot. This is the weakest attribute in the endorsement." }
+];
+
+const CSA_STATE = {
+  met: { icon: "circle-check", dotFg: "var(--success-600)", border: "var(--n-200)", bg: "var(--n-0)" },
+  partial: { icon: "circle-alert", dotFg: "var(--warn-600)", border: "var(--warn-500)", bg: "var(--n-0)" },
+  risk: { icon: "circle-x", dotFg: "var(--danger-600)", border: "var(--danger-500)", bg: "var(--n-0)" }
+};
+
+const THREADS = [
+  { id: "isr", name: "ISR collection and dissemination", desc: "Vehicle collects, processes, and passes imagery to the supported unit through the ground segment.", funcs: 7, paths: 4, risk: "2 paths partial" },
+  { id: "handoff", name: "Datalink handoff under contested EW", desc: "Control transfers between ground stations while the link is jammed or spoofed.", funcs: 5, paths: 3, risk: "1 path open" },
+  { id: "launch", name: "Launch and recovery", desc: "Automated launch and recovery sequencing at the LRE with the vehicle on the ground network.", funcs: 3, paths: 2, risk: "mitigated" },
+  { id: "maint", name: "Depot maintenance and OFP load", desc: "Depot loads software, calibrates the payload, and returns the vehicle to the unit.", funcs: 3, paths: 2, risk: "2 CAT I here" }
+];
+
+const PATHS = {
+  isr: {
+    note: "Four paths derived from ATT&CK Enterprise and ICS technique sets applied to the ground segment.", catalog: "ATT&CK v15 · ICS",
+    list: [
+      { id: "AP-01", name: "Compromise of the mission planning portal to alter collection tasking", state: "Mitigated", tone: "ok",
+        steps: [["T1190", "Exploit the internet-facing portal"], ["T1078", "Use valid operator credentials"], ["T1565", "Manipulate tasking data"], ["Impact", "Vehicle collects the wrong target set"]],
+        controls: "AC-3, SI-10, SC-7, AU-6", residual: "Portal is not internet-facing in the fielded configuration; scan results are clean." },
+      { id: "AP-02", name: "Exfiltration of imagery from the telemetry data store", state: "Mitigated", tone: "ok",
+        steps: [["T1078", "Valid account on the analysis toolset"], ["T1530", "Access the data store"], ["T1041", "Exfiltrate over the enclave boundary"]],
+        controls: "AC-6, SC-28, SC-7, AU-6", residual: "Encryption at rest and boundary logging verified 24 Jul." },
+      { id: "AP-03", name: "Denial of dissemination by exhausting audit storage on the collector", state: "Partial", tone: "warn",
+        steps: [["T1499", "Exhaust storage on the collector"], ["T1562", "Audit records stop being written"], ["Impact", "Loss of accountability during the event"]],
+        controls: "AU-4, AU-5, SI-4", residual: "Storage alerting is not configured — FND-0226 open until 19 Aug." },
+      { id: "AP-04", name: "Malicious model update through the mission planning supply chain", state: "Partial", tone: "warn",
+        steps: [["T1195", "Compromise a software dependency"], ["T1554", "Persist in the deployed image"], ["T1565", "Alter planning heuristics"]],
+        controls: "SR-3, SA-11, SI-7, CM-14", residual: "SBOM matching is running, but one base image CVE is still open under FND-0223." }
+    ]
+  },
+  handoff: {
+    note: "Three paths against the C2 link, drawn from the EW and ICS technique sets.", catalog: "ATT&CK ICS · EW analysis",
+    list: [
+      { id: "AP-05", name: "Spoofed command injection during handoff", state: "Open", tone: "bad",
+        steps: [["T0855", "Unauthorized command message"], ["T0831", "Manipulate control"], ["Impact", "Adversary commands the vehicle"]],
+        controls: "IA-3, SC-8, SC-13", residual: "Depends on the cryptographic evidence held by CHG-118; the assessment for this family cannot execute yet." },
+      { id: "AP-06", name: "Jamming the primary link to force a fallback path", state: "Mitigated", tone: "ok",
+        steps: [["T0814", "Denial of service on the RF link"], ["T0815", "Denial of view at the GCS"], ["Impact", "Handoff fails, vehicle enters lost link"]],
+        controls: "SC-40, CP-2, SI-13", residual: "Lost link behaviour demonstrated in June; degraded mode performance floor documented." },
+      { id: "AP-07", name: "Geolocation of the ground station from link characteristics", state: "Mitigated", tone: "ok",
+        steps: [["T0842", "Monitor RF communication"], ["T0846", "Discover the remote system"], ["Impact", "Targeting of the ground element"]],
+        controls: "SC-30, SC-40, PE-3", residual: "Emissions baseline captured; hopping pattern is CPI-protected." }
+    ]
+  },
+  launch: {
+    note: "Two paths against the launch and recovery ground equipment.", catalog: "ATT&CK ICS · IEC 62443 analysis",
+    list: [
+      { id: "AP-08", name: "Manipulation of the launch sequencing controller", state: "Mitigated", tone: "ok",
+        steps: [["T0886", "Remote services on the control network"], ["T0836", "Modify parameter"], ["Impact", "Vehicle damaged during launch"]],
+        controls: "SC-7, AC-4, CM-6", residual: "Control network has no routable path; verified 21 Jul. IEC 62443 overlay available if the AO requires component-level requirements." },
+      { id: "AP-09", name: "Physical access to the recovery equipment during setup", state: "Mitigated", tone: "ok",
+        steps: [["T0847", "Replication through removable media"], ["T0873", "Project file infection"], ["Impact", "Persistent access to the LRE"]],
+        controls: "PE-3, MP-7, CM-8", residual: "Removable media is prohibited; traditional security checklist is clean." }
+    ]
+  },
+  maint: {
+    note: "Two paths through the maintenance configuration — where the adversarial assessment succeeded.", catalog: "ATT&CK v15 · AA-2 findings",
+    list: [
+      { id: "AP-10", name: "Unauthenticated command frames accepted in maintenance mode", state: "Open", tone: "bad",
+        steps: [["T0855", "Unauthorized command message"], ["T1078", "No authentication required"], ["T0831", "Manipulate control"], ["Impact", "Full control of the vehicle on the ground"]],
+        controls: "IA-3, MA-4, AC-17", residual: "Demonstrated twice under AA-2. Procedurally restricted to the shielded bay; firmware fix due 15 Aug under FND-0188." },
+      { id: "AP-11", name: "Debug shell on the payload controller reached through the access panel", state: "Open", tone: "bad",
+        steps: [["T1200", "Hardware additions"], ["T0813", "Denial of control"], ["T1552", "Credentials from the debug shell"]],
+        controls: "MA-4, PE-3, AC-3", residual: "Tamper-evident seal is the only measure in place; firmware disables the shell 30 Aug under FND-0191." }
+    ]
+  }
+};
+
+const PATH_TONE = {
+  ok: { fg: "var(--success-700)", bg: "var(--success-50)" },
+  warn: { fg: "var(--warn-700)", bg: "var(--warn-50)" },
+  bad: { fg: "var(--danger-700)", bg: "var(--danger-50)" }
+};
+
+const RISK_FG = { "mitigated": "var(--success-700)", "2 CAT I here": "var(--danger-700)" };
+
+class Component extends DCLogic {
+  componentDidMount() { this._bind(); }
+  componentWillUnmount() { if (this._un) this._un(); clearInterval(this._iv); }
+  _bind() {
+    const s = window.__attest;
+    if (s) { this._un = s.sub(() => this.forceUpdate()); this.forceUpdate(); return; }
+    this._iv = setInterval(() => { if (window.__attest) { clearInterval(this._iv); this._bind(); } }, 40);
+  }
+  renderVals() {
+    const S = window.__attest;
+    const base = { n14: 14 };
+    if (!S) return base;
+    const selCsa = S.state.csaSel || "csa06";
+    const selThread = S.state.threadSel || "maint";
+    const raw = CSAS.find((c) => c.id === selCsa) || CSAS[0];
+    const th = PATHS[selThread] || PATHS.maint;
+    const thMeta = THREADS.find((t) => t.id === selThread) || THREADS[0];
+    const stateLabel = { met: "No open items", partial: "Partially satisfied", risk: "Open risk to the endorsement" };
+    const stateFg = { met: "var(--success-700)", partial: "var(--warn-700)", risk: "var(--danger-700)" };
+    return Object.assign(base, {
+      csas: CSAS.map((c) => {
+        const t = CSA_STATE[c.state], on = c.id === selCsa;
+        return { id: c.id, num: c.num, name: c.name, note: c.note, ctls: c.ctls, level: c.level,
+          icon: t.icon, dotFg: t.dotFg, bg: on ? "var(--cortex-50)" : t.bg, border: on ? "var(--cortex-500)" : t.border };
+      }),
+      threads: THREADS.map((t) => {
+        const on = t.id === selThread;
+        return { id: t.id, name: t.name, desc: t.desc, funcs: t.funcs, paths: t.paths, risk: t.risk,
+          riskFg: RISK_FG[t.risk] || "var(--warn-700)",
+          bg: on ? "var(--cortex-50)" : "var(--n-0)", rail: on ? "inset 3px 0 0 var(--cortex-500)" : "none" };
+      }),
+      thread: { name: thMeta.name, note: th.note, catalog: th.catalog },
+      paths: th.list.map((p) => {
+        const t = PATH_TONE[p.tone];
+        return { id: p.id, name: p.name, state: p.state, fg: t.fg, bg: t.bg,
+          steps: p.steps.map((s) => ({ ttp: s[0], text: s[1] })),
+          controls: p.controls, residual: p.residual };
+      }),
+      csa: { title: raw.title, requirement: raw.requirement, approach: raw.approach, gap: raw.gap,
+        controls: raw.controls.map((c) => ({ id: c })),
+        stateLabel: stateLabel[raw.state], stateFg: stateFg[raw.state] },
+      onCsa: (e) => { const b = e.target.closest("[data-csa]"); if (b) S.set({ csaSel: b.getAttribute("data-csa") }); },
+      onThread: (e) => {
+        const g = e.target.closest("[data-go]");
+        if (g) { e.preventDefault(); S.go(g.getAttribute("data-go")); return; }
+        const b = e.target.closest("[data-thread]");
+        if (b) S.set({ threadSel: b.getAttribute("data-thread") });
+      },
+      onTable: () => S.toast({ tone: "default", title: "Table-top scheduled", desc: thMeta.name + " · invitees drawn from the mission thread owners and the assessor team." }),
+      onGen: () => S.toast({ tone: "success", title: "CSE annex generated", desc: "Ten attributes with tailored requirement levels, allocated controls, and the MBCRA attack path tables. Word format for the endorsement submission." })
+    });
+  }
+}
+
+</script>
+</body>
+</html>
