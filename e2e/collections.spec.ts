@@ -24,6 +24,24 @@ async function expand(page: Page, name: string): Promise<void> {
   if (await caret.isVisible()) await caret.click();
 }
 
+/**
+ * Open the layout picker of the view tab you are standing on (M11).
+ *
+ * A List's layout moved out of the toolbar and into the tab's own menu:
+ * pressing a pill used to overwrite the view you had configured, where opening
+ * another tab takes you to a different one.
+ */
+async function openLayoutPicker(page: Page): Promise<void> {
+  await page.getByTestId('view-tabs').getByRole('tab', { selected: true }).click();
+  await page.getByRole('menuitem', { name: 'Change layout…' }).click();
+}
+
+/** Change the open view's layout. */
+async function switchLayout(page: Page, kind: string): Promise<void> {
+  await openLayoutPicker(page);
+  await page.getByTestId(`view-switch-${kind}`).click();
+}
+
 test('collections: a container holds lists and docs, and the sidebar walks it', async ({ page }) => {
   await boot(page);
 
@@ -42,14 +60,15 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   ).toBeVisible();
   await expect(page.getByTestId('collection-node-doc').filter({ hasText: 'How we schedule' })).toBeVisible();
 
-  // The Collection has a page of its own: what is in here, and nothing else.
-  // A container carries no query, so this is a contents listing, not a canvas.
+  // The Collection has a home page of its own: what is in here, and nothing
+  // else. A container carries no query, so this is contents, not a canvas.
   await delivery.getByRole('button', { name: 'Delivery', exact: true }).click();
   const page_ = page.getByTestId('collection-page');
   await expect(page_).toBeVisible();
-  await expect(page_.getByTestId('collection-content-row')).toHaveCount(4);
-  await expect(page_.getByTestId('collection-content-row').filter({ hasText: 'List' })).toHaveCount(3);
-  await expect(page_.getByTestId('collection-content-row').filter({ hasText: 'Doc' })).toHaveCount(1);
+  // M11: Lists are cards reporting what they hold; Docs are rows.
+  await expect(page_.getByTestId('collection-card').first()).toBeVisible();
+  await expect(page_.locator('[data-testid="collection-card"][data-kind="list"]')).toHaveCount(3);
+  await expect(page_.locator('[data-testid="collection-content-row"][data-kind="doc"]')).toHaveCount(1);
   // No record canvas on a container.
   await expect(page.getByTestId('table-view')).toHaveCount(0);
   await expect(page.getByTestId('list-view')).toHaveCount(0);
@@ -105,8 +124,9 @@ test('collections: a nested table renders the retired hierarchy view’s job', a
   await expect(page.getByTestId('table-view')).toBeVisible();
   await expect(page.locator('[data-testid="table-row"][data-depth="1"]').first()).toBeVisible();
 
-  // Switching the view persists to the List's own file, in place.
-  await page.getByTestId('view-switch-list').click();
+  // Switching the LAYOUT of the open tab persists to the List's own file,
+  // in place — the tab keeps its identity, it just draws differently.
+  await switchLayout(page, 'list');
   await expect(page.getByTestId('list-view')).toBeVisible();
   await expect
     .poll(async () =>
@@ -144,12 +164,15 @@ test('views: all six are reachable, and the date views place records on an axis'
     .getByRole('button', { name: 'Delivery schedule', exact: true })
     .click();
 
-  // The six, and only the six: the retired kinds have no segment.
+  // The six, and only the six: the retired kinds are offered nowhere. M11
+  // moved the picker into the open tab's menu.
+  await openLayoutPicker(page);
   for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
     await expect(page.getByTestId(`view-switch-${kind}`)).toBeVisible();
   }
   await expect(page.getByTestId('view-switch-tree')).toHaveCount(0);
   await expect(page.getByTestId('view-switch-split')).toHaveCount(0);
+  await page.getByLabel('Close layout picker').click();
 
   // -- Gantt: the List declares `dateField: window` and `dependencyField:
   // blocked_by`, so it draws bars AND the arrows the data claims.
@@ -171,13 +194,13 @@ test('views: all six are reachable, and the date views place records on an axis'
     .toContain('zoom: week');
 
   // -- Timeline: same axis, no dependency layer, bars carry their own label.
-  await page.getByTestId('view-switch-timeline').click();
+  await switchLayout(page, 'timeline');
   await expect(page.getByTestId('timeline-view')).toBeVisible();
   await expect(page.getByTestId('timeline-bar').first()).toBeVisible();
 
   // -- Calendar: a month grid of 42 days, and a record on every day its span
   // covers rather than one chip on its start date.
-  await page.getByTestId('view-switch-calendar').click();
+  await switchLayout(page, 'calendar');
   const calendar = page.getByTestId('calendar-view');
   await expect(calendar).toBeVisible();
   await expect(calendar).toHaveAttribute('data-date-field', 'window');
@@ -198,7 +221,7 @@ test('views: a table nests when its grouping chain descends a relation', async (
     .filter({ hasText: 'OKR tree' })
     .getByRole('button', { name: 'OKR tree', exact: true })
     .click();
-  await page.getByTestId('view-switch-table').click();
+  await switchLayout(page, 'table');
 
   const depth0 = page.locator('[data-testid="table-row"][data-depth="0"]');
   const depth1 = page.locator('[data-testid="table-row"][data-depth="1"]');
@@ -216,4 +239,49 @@ test('views: a table nests when its grouping chain descends a relation', async (
     .click();
   await expect.poll(async () => depth1.count()).toBeLessThan(before);
   await expect(depth0.first()).toBeVisible();
+});
+
+/**
+ * Multiple views per List (M11).
+ *
+ * The regression this guards is the one the whole change exists to prevent: a
+ * List used to carry exactly one presentation, so "look at this as a board"
+ * REPLACED the table you had configured. Two tabs must be able to disagree
+ * about layout, filters and grouping while querying the same records.
+ */
+test('views: a list keeps several views as tabs, each with its own layout', async ({ page }) => {
+  await boot(page);
+  await expand(page, 'Delivery');
+  await page
+    .getByTestId('collection-node-list')
+    .filter({ hasText: 'At risk' })
+    .getByRole('button', { name: 'At risk', exact: true })
+    .click();
+
+  // A pre-M11 file opens with one tab, named after the layout it declared.
+  const tabs = page.getByTestId('view-tabs');
+  await expect(tabs.getByRole('tab')).toHaveCount(1);
+  await expect(page.getByTestId('table-view')).toBeVisible();
+  // And no pill strip in the toolbar — layout belongs to the tab now.
+  await expect(page.getByTestId('view-switch-board')).toHaveCount(0);
+
+  // Add a board view. The layout is chosen when the view is made.
+  await page.getByTestId('new-view').click();
+  await page.getByTestId('new-view-board').click();
+  await page.getByTestId('create-view').click();
+
+  await expect(tabs.getByRole('tab')).toHaveCount(2);
+  await expect(page.getByTestId('board-column').first()).toBeVisible();
+
+  // Both views live in the one file, which is what makes them the same List.
+  const yaml = () =>
+    page.evaluate(() => window.__cerebroMockFs.get('delivery/at-risk-work.list.yml') ?? '');
+  await expect.poll(yaml, { timeout: 5_000 }).toContain('type: board');
+  await expect.poll(yaml).toContain('type: table');
+
+  // Going back to the first tab returns the TABLE — the board did not
+  // overwrite it, which is exactly what the old pill row did.
+  await tabs.getByRole('tab').first().click();
+  await expect(page.getByTestId('table-view')).toBeVisible();
+  await expect(page.getByTestId('board-column')).toHaveCount(0);
 });
