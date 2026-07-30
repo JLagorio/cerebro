@@ -79,6 +79,10 @@ export function parseCollectionYaml(folder: string, yamlText: string): Collectio
       icon: typeof obj.icon === 'string' && obj.icon !== '' ? obj.icon : null,
       color: typeof obj.color === 'string' && obj.color !== '' ? obj.color : null,
       order: typeof obj.order === 'number' ? obj.order : null,
+      description:
+        typeof obj.description === 'string' && obj.description.trim() !== ''
+          ? obj.description
+          : null,
     },
   };
 }
@@ -89,12 +93,13 @@ export function serializeCollection(def: CollectionDefinition): string {
     icon: def.icon,
     color: def.color,
     order: def.order,
+    description: def.description,
   });
 }
 
 /** A fresh Collection named by the user. */
 export function newCollectionDefinition(name: string): CollectionDefinition {
-  return { name, icon: 'folder-open', color: null, order: null };
+  return { name, icon: 'folder-open', color: null, order: null, description: null };
 }
 
 const byOrderThenName = <T extends { order: number | null; name: string }>(a: T, b: T) =>
@@ -295,6 +300,7 @@ export function effectiveCollections(
         icon: null,
         color: null,
         order: null,
+        description: null,
       },
     });
   }

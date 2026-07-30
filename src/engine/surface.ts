@@ -4,7 +4,7 @@ import { isKnowledgePath } from './okf';
 import type { Entry, Presentation, Schema, Selection, SortSpec, ListFile, ListSource } from './types';
 import { typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
-import { clonePresentation, DEFAULT_PRESENTATION } from './views';
+import { clonePresentation, DEFAULT_PRESENTATION, resolveView } from './views';
 
 /**
  * What the canvas renders for a selection: a titled, filtered, sorted entry
@@ -174,7 +174,11 @@ export function resolveSurface(
             v.collection === (sel.collection ?? null),
         ) ?? null;
       if (view === null) return { title: sel.id, entries: [], presentation: defaultPresentation() };
-      const { name, source, filters, presentation } = view.definition;
+      const { name, source } = view.definition;
+      // M11: filters and presentation belong to the VIEW, so which tab is open
+      // decides both what the surface holds and how it draws.
+      const active = resolveView(view.definition, sel.view);
+      const { filters, presentation } = active;
       return {
         title: name,
         entries: sortEntries(

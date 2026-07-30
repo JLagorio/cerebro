@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveSurface, sortEntries } from './surface';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
-import type { ListFile } from './types';
+import type { FilterGroup, ListFile, Presentation } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
@@ -97,8 +97,22 @@ function fixture() {
   return { entries, schema: buildSchema(entries) };
 }
 
-function mkView(partial: Partial<ListFile['definition']> & { id: string }): ListFile {
-  const { id, ...definition } = partial;
+/**
+ * A List with one view.
+ *
+ * `filters` and `presentation` are stated flat, as they were before M11 gave a
+ * List several views — these cases are about what resolveSurface does with a
+ * query, not about tabs, and folding them into `views` here keeps that the
+ * subject.
+ */
+function mkView(
+  partial: Partial<Omit<ListFile['definition'], 'views'>> & {
+    id: string;
+    filters?: FilterGroup | null;
+    presentation?: Presentation;
+  },
+): ListFile {
+  const { id, filters = null, presentation, ...definition } = partial;
   return {
     id,
     project: null,
@@ -110,14 +124,21 @@ function mkView(partial: Partial<ListFile['definition']> & { id: string }): List
       color: null,
       order: null,
       source: { type: null, project: null },
-      filters: null,
-      presentation: {
-        type: 'list',
-        group: [{ field: 'status' }],
-        sort: [{ field: 'modifiedAt', dir: 'desc' }],
-        columns: [{ field: 'key' }, { field: 'status' }],
-      },
       ...definition,
+      views: [
+        {
+          id: 'view',
+          name: 'View',
+          icon: null,
+          filters,
+          presentation: presentation ?? {
+            type: 'list',
+            group: [{ field: 'status' }],
+            sort: [{ field: 'modifiedAt', dir: 'desc' }],
+            columns: [{ field: 'key' }, { field: 'status' }],
+          },
+        },
+      ],
     },
   };
 }
@@ -174,7 +195,7 @@ describe('resolveSurface', () => {
     });
     const collection = resolveSurface({ kind: 'list', id: 'done-work' }, entries, schema, [view]);
     expect(collection.title).toBe('Done work');
-    expect(collection.presentation).toEqual(view.definition.presentation);
+    expect(collection.presentation).toEqual(view.definition.views[0].presentation);
     expect(collection.entries.map((e) => e.path)).toEqual([
       'projects/foundations/items/fld-1.md',
       'projects/launch/items/lnc-1.md',

@@ -100,7 +100,10 @@ export type Selection =
   // M10 — a Collection is a container (a folder holding collection.yml); a List
   // is a database inside one. These were a single `view` kind that was both.
   | { kind: 'collection'; folder: string }
-  | { kind: 'list'; id: string; collection?: string | null }
+  // `view` names which of the List's view tabs is open (M11); omitted means
+  // the first one. It rides on the selection rather than in component state so
+  // that "the board tab of Delivery" is a place you can navigate back to.
+  | { kind: 'list'; id: string; collection?: string | null; view?: string }
   | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
   // M9.4 — git surfaces. `changes` is the uncommitted working tree (with
   // conflict resolution when there is one); `pulse` is the committed history.
@@ -187,6 +190,18 @@ export interface ColumnSpec {
  */
 export type ViewType = 'table' | 'list' | 'board' | 'calendar' | 'gantt' | 'timeline';
 
+/**
+ * How a relation value draws in this view (M11).
+ *
+ * A related record is a CHIP — a thing you can read and click — not a line of
+ * text with an arrow glyph in front of it, which is what it was. The remaining
+ * choice is per view, because it is a question about this table's density
+ * rather than about the data: `plain` is the chip alone, `type-icon` prefixes
+ * each chip with the icon of the type it points at, which earns its pixels only
+ * when a field can point at more than one type.
+ */
+export type ChipStyle = 'plain' | 'type-icon';
+
 export interface Presentation {
   type: ViewType;
   /** Ordered grouping chain; empty = flat. */
@@ -195,6 +210,10 @@ export interface Presentation {
   sort: SortSpec[];
   columns: ColumnSpec[];
   rowHeight?: 'compact' | 'default' | 'tall';
+  /** Width of the sticky name column. Omitted = the layout's default. */
+  titleWidth?: number;
+  /** Relation/person chip rendering; defaults to 'plain'. */
+  chips?: ChipStyle;
   /**
    * Date property placing records on the calendar/timeline/gantt axis. Omitted
    * means "infer it" — engine/schedule.ts picks the type's first daterange, or
@@ -240,10 +259,37 @@ export interface ListSource {
   project: string | null;
 }
 
+/**
+ * One saved view of a List (M11): a tab.
+ *
+ * A List used to carry exactly one `presentation` and one `filters`, which
+ * meant "show me this board AND that calendar over the same records" was two
+ * Lists holding two copies of the same query — and editing the query meant
+ * editing it twice. Notion and ClickUp both resolve this the same way and it is
+ * the right resolution: the LIST is the database, a VIEW is a way of looking at
+ * it, and a database has as many as you make.
+ *
+ * Filters live here rather than on the List for the same reason: "only the ones
+ * at risk" is a way of looking, not a different set of records.
+ */
+export interface ViewDefinition {
+  /** Stable slug, unique within the List. What a tab is addressed by. */
+  id: string;
+  name: string;
+  icon: string | null;
+  filters: FilterGroup | null;
+  presentation: Presentation;
+}
+
 export interface ListDefinition {
   name: string; icon: string | null; color: string | null; order: number | null;
   source: ListSource;
-  filters: FilterGroup | null; presentation: Presentation;
+  /**
+   * The List's views, in tab order. NEVER empty — the parser synthesizes one
+   * from a pre-M11 file's `presentation`/`filters`, so "a List with no way to
+   * look at it" is not representable and no caller has to handle it.
+   */
+  views: ViewDefinition[];
 }
 
 /**
@@ -281,6 +327,13 @@ export interface CollectionDefinition {
   icon: string | null;
   color: string | null;
   order: number | null;
+  /**
+   * What this container is for, in the owner's words (M11). Shown on the
+   * Collection's home page and nowhere else — a sidebar row has no space for
+   * prose, and a container that has to explain itself in a tooltip is one
+   * nobody reads.
+   */
+  description: string | null;
 }
 
 export interface CollectionFile {

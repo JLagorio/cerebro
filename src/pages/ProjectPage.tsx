@@ -8,7 +8,7 @@ import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ListFile } from '@/engine/types';
-import { clonePresentation, serializeList, toggleSort } from '@/engine/views';
+import { clonePresentation, replaceView, resolveView, serializeList, toggleSort } from '@/engine/views';
 import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
 import { resolveDateField } from '@/engine/schedule';
 import { useQuickAdd } from '@/views/QuickAdd';
@@ -131,7 +131,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   useEffect(() => {
     setPresentation(
       activeView !== null && selection.kind === 'project'
-        ? clonePresentation(activeView.definition.presentation)
+        ? clonePresentation(resolveView(activeView.definition).presentation)
         : collection.presentation,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,7 +174,14 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     setPresentation(next);
     if (activeView === null || vaultPath === null) return;
     const folder = activeView.project === null ? null : projectDir(activeView.project);
-    const yaml = serializeList({ ...activeView.definition, presentation: next });
+    // A project tab is a single-view List, so the edit lands on its first (and
+    // only) view rather than on the List itself (M11).
+    const yaml = serializeList(
+      replaceView(activeView.definition, activeView.definition.views[0].id, {
+        ...activeView.definition.views[0],
+        presentation: next,
+      }),
+    );
     void (async () => {
       try {
         await saveView(vaultPath, activeView.id, yaml, folder);
@@ -220,8 +227,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       // A project tab is a view over this project's work items (M3.5) — the
       // same shape any saved view uses, no longer a special case.
       source: { type: 'Work item', project: project.path },
-      filters: null,
-      presentation,
+      views: [{ id: 'view', name, icon: null, filters: null, presentation }],
     });
     try {
       await saveView(vaultPath, id, yaml, projectDir(project.path));

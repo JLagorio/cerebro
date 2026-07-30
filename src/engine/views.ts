@@ -1,6 +1,7 @@
 import { parse, stringify } from 'yaml';
 import type {
   ChildrenSpec,
+  ChipStyle,
   ColumnSpec,
   FilterGroup,
   FilterOp,
@@ -12,6 +13,7 @@ import type {
   ListDefinition,
   ListFile,
   ListSource,
+  ViewDefinition,
   ViewType,
 } from './types';
 
@@ -103,6 +105,12 @@ function parsePresentation(raw: unknown): Presentation {
       obj.rowHeight === 'compact' || obj.rowHeight === 'tall' || obj.rowHeight === 'default'
         ? obj.rowHeight
         : undefined,
+    ...(typeof obj.titleWidth === 'number' && Number.isFinite(obj.titleWidth)
+      ? { titleWidth: obj.titleWidth }
+      : {}),
+    ...(obj.chips === 'plain' || obj.chips === 'type-icon'
+      ? { chips: obj.chips as ChipStyle }
+      : {}),
     ...(typeof obj.dateField === 'string' && obj.dateField.trim() !== ''
       ? { dateField: obj.dateField.trim() }
       : {}),
@@ -309,6 +317,134 @@ export function parseFilters(raw: unknown): FilterGroup | null {
   return parseGroupNode(raw, new Set());
 }
 
+// --- views (M11) -----------------------------------------------------------
+
+/** Slugify a view name into a tab id. */
+export function slugifyViewId(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/** A view id not already taken by a sibling tab. */
+export function nextViewId(name: string, taken: Iterable<string>): string {
+  const base = slugifyViewId(name) || 'view';
+  const used = new Set(taken);
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base}-${n}`;
+    if (!used.has(candidate)) return candidate;
+  }
+}
+
+/** Human label for a layout, used to name a view nobody named. */
+const LAYOUT_LABEL: Record<ViewType, string> = {
+  table: 'Table',
+  list: 'List',
+  board: 'Board',
+  calendar: 'Calendar',
+  gantt: 'Gantt',
+  timeline: 'Timeline',
+};
+
+export function layoutLabel(type: ViewType): string {
+  return LAYOUT_LABEL[type] ?? 'Table';
+}
+
+/**
+ * A fresh view tab. `base` seeds it from the view you were looking at, which is
+ * what "add a view" means in practice — you want the same columns arranged
+ * differently, not a blank slate.
+ */
+export function newView(
+  name: string,
+  type: ViewType,
+  taken: Iterable<string> = [],
+  base?: Presentation,
+): ViewDefinition {
+  const presentation =
+    base === undefined
+      ? { ...clonePresentation(DEFAULT_PRESENTATION), type }
+      : { ...clonePresentation(base), type };
+  const label = name.trim() === '' ? layoutLabel(type) : name.trim();
+  return {
+    id: nextViewId(label, taken),
+    name: label,
+    icon: null,
+    filters: null,
+    presentation,
+  };
+}
+
+function parseView(raw: unknown, index: number, taken: Set<string>): ViewDefinition {
+  const obj = asRecord(raw);
+  const presentation = parsePresentation(obj.presentation ?? obj);
+  const name =
+    typeof obj.name === 'string' && obj.name.trim() !== ''
+      ? obj.name.trim()
+      : layoutLabel(presentation.type);
+  const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
+  // Ids must be unique within the List — they are what a tab is addressed by,
+  // and two tabs answering to the same name is a navigation that lands on
+  // whichever one sorted first.
+  const id =
+    declared !== '' && !taken.has(declared)
+      ? declared
+      : nextViewId(declared !== '' ? declared : name || `view-${index + 1}`, taken);
+  taken.add(id);
+  return {
+    id,
+    name,
+    icon: typeof obj.icon === 'string' && obj.icon !== '' ? obj.icon : null,
+    filters: parseFilters(obj.filters),
+    presentation,
+  };
+}
+
+/**
+ * A List's views (M11), migrating the single-view shape every pre-M11 file has.
+ *
+ * A file with no `views:` carries its `presentation`/`filters` at the top of the
+ * definition; those become one view named after their layout. The result is
+ * never empty, which is the invariant every consumer relies on.
+ */
+function parseViews(obj: Record<string, unknown>): ViewDefinition[] {
+  if (Array.isArray(obj.views) && obj.views.length > 0) {
+    const taken = new Set<string>();
+    return obj.views.map((raw, i) => parseView(raw, i, taken));
+  }
+  const presentation = parsePresentation(obj.presentation);
+  return [
+    {
+      id: 'view',
+      name: layoutLabel(presentation.type),
+      icon: null,
+      filters: parseFilters(obj.filters),
+      presentation,
+    },
+  ];
+}
+
+/** The view a selection names, or the first tab when it names none. */
+export function resolveView(def: ListDefinition, viewId?: string | null): ViewDefinition {
+  if (viewId != null) {
+    const hit = def.views.find((v) => v.id === viewId);
+    if (hit !== undefined) return hit;
+  }
+  return def.views[0];
+}
+
+/** Replace one view in a definition, leaving the rest untouched. */
+export function replaceView(
+  def: ListDefinition,
+  viewId: string,
+  next: ViewDefinition,
+): ListDefinition {
+  return { ...def, views: def.views.map((v) => (v.id === viewId ? next : v)) };
+}
+
 /** Tolerant by design: a saved view file never fails to load (advisory schema rule). */
 export function parseListYaml(
   id: string,
@@ -340,34 +476,46 @@ export function parseListYaml(
       color: typeof obj.color === 'string' ? obj.color : null,
       order: typeof obj.order === 'number' ? obj.order : null,
       source: parseSource(obj.source),
-      filters: parseFilters(obj.filters),
-      presentation: parsePresentation(obj.presentation),
+      views: parseViews(obj),
     },
   };
 }
 
-/** v2 keys only (M9.1) — the legacy keys are read, never written back, so a
- * view converges on one shape the first time it is edited. */
+function serializePresentation(p: Presentation): Record<string, unknown> {
+  return {
+    type: p.type,
+    group: p.group,
+    sort: p.sort,
+    columns: p.columns,
+    ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
+    ...(p.titleWidth !== undefined ? { titleWidth: p.titleWidth } : {}),
+    ...(p.chips !== undefined ? { chips: p.chips } : {}),
+    // M10 axis configuration — written only when set, so a table's YAML
+    // does not carry three keys about date axes it has no use for.
+    ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
+    ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
+    ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
+  };
+}
+
+/**
+ * v2 keys only (M9.1), now with M11's `views:` — the legacy single-view keys
+ * are read, never written back, so a List converges on one shape the first time
+ * it is edited.
+ */
 export function serializeList(def: ListDefinition): string {
-  const p = def.presentation;
   return stringify({
     name: def.name,
     icon: def.icon,
     color: def.color,
     order: def.order,
     source: def.source,
-    filters: def.filters,
-    presentation: {
-      type: p.type,
-      group: p.group,
-      sort: p.sort,
-      columns: p.columns,
-      ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
-      // M10 axis configuration — written only when set, so a table's YAML
-      // does not carry three keys about date axes it has no use for.
-      ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
-      ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
-      ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
-    },
+    views: def.views.map((v) => ({
+      id: v.id,
+      name: v.name,
+      icon: v.icon,
+      filters: v.filters,
+      presentation: serializePresentation(v.presentation),
+    })),
   });
 }

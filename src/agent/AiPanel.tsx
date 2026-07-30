@@ -11,6 +11,7 @@ import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
 import { resolveSurface } from '@/engine/surface';
+import { resolveView } from '@/engine/views';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
@@ -160,7 +161,14 @@ export function AiPanel() {
       schema,
       activePath: detailPath,
       visible: collection.entries,
-      filters: activeView?.definition.filters ?? null,
+      // M11: the open TAB's filters — what the person is actually looking at.
+      filters:
+        activeView === null
+          ? null
+          : resolveView(
+              activeView.definition,
+              selection.kind === 'list' ? selection.view : null,
+            ).filters,
       references: extractReferences(draft),
     });
     return `${base}${renderSnapshot(snapshot)}`;

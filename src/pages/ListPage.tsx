@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { deleteList, updateList } from '@/app/listActions';
+import {
+  addView,
+  deleteList,
+  deleteView,
+  duplicateView,
+  updateList,
+} from '@/app/listActions';
 import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -7,25 +13,35 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
-import type { FieldDef, Presentation, Selection } from '@/engine/types';
+import type {
+  FieldDef,
+  ListDefinition,
+  Presentation,
+  Selection,
+  ViewDefinition,
+  ViewType,
+} from '@/engine/types';
 import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
-import { clonePresentation, toggleSort } from '@/engine/views';
+import { clonePresentation, layoutLabel, newView, resolveView, toggleSort } from '@/engine/views';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
 import { useQuickAdd } from '@/views/QuickAdd';
 import { ViewCanvas } from '@/views/ViewCanvas';
+import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type ListSelection = Extract<Selection, { kind: 'list' }>;
 
 /**
- * A List's canvas (M10): a type + filters + one of the six views.
+ * A List's canvas (M10, multi-view since M11): a type, and as many saved views
+ * of it as you make.
  *
- * This was CollectionPage, which is now the container's page — the rename is
- * the whole point of the milestone. One page renders "Cobra launch" the same
- * way it renders "My open bugs", because both are Lists. Toolbar edits
- * auto-persist to the List's YAML, in place, whatever shape it is on disk.
+ * The List is the database — its source type and where it lives. Each TAB is a
+ * way of looking at it, owning its own layout, filters, sorting, grouping and
+ * columns. Switching tabs therefore changes what you see without destroying how
+ * you had the last one set up, which is exactly what the old layout pills could
+ * not do.
  */
 export function ListPage({ selection }: { selection: ListSelection }) {
   const entries = useVaultStore((s) => s.entries);
@@ -33,7 +49,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   const schema = useSchema();
   const navigate = useNavStore((s) => s.navigate);
 
-  const view = useMemo(
+  const list = useMemo(
     // Ids are unique per FOLDER, so the collection is part of the key — two
     // Collections may each hold a "roadmap".
     () =>
@@ -46,35 +62,42 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     [views, selection.id, selection.collection],
   );
 
-  const collection = useMemo(
+  // The open tab. A selection naming a view that no longer exists (deleted in
+  // another window, or renamed on disk) falls back to the first rather than
+  // rendering nothing.
+  const activeView: ViewDefinition | null =
+    list === null ? null : resolveView(list.definition, selection.view);
+  const activeId = activeView?.id ?? '';
+
+  const surface = useMemo(
     () => resolveSurface(selection, entries, schema, views),
     [selection, entries, schema, views],
   );
 
-  const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
-  // M9.7: the whole view configuration is a place, not a row of popovers.
+  const [presentation, setPresentation] = useState<Presentation>(surface.presentation);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Re-seed when the LIST or the TAB changes — a tab carries its own
+  // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
-    setPresentation(clonePresentation(collection.presentation));
+    setPresentation(clonePresentation(surface.presentation));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection.id]);
+  }, [selection.id, selection.collection, activeId]);
 
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.sort, schema),
-    [collection.entries, presentation.sort, schema],
+    () => sortEntries(surface.entries, presentation.sort, schema),
+    [surface.entries, presentation.sort, schema],
   );
 
   // M9.2: one resolution for every surface. A typeless view used to get [],
   // so an "Everything" view had no columns at all; columnUniverse unions the
   // properties its records actually carry.
   const fields = useMemo(
-    () =>
-      view === null ? [] : columnUniverse(view.definition.source, collection.entries, schema),
-    [schema, view, collection.entries],
+    () => (list === null ? [] : columnUniverse(list.definition.source, surface.entries, schema)),
+    [schema, list, surface.entries],
   );
 
-  const sourceType = view?.definition.source.type ?? null;
+  const sourceType = list?.definition.source.type ?? null;
   // M9.6: a typeless view has no single type to create into, so the
   // affordance is simply absent there rather than guessing one.
   const quickAdd = useQuickAdd(sourceType ?? '', null);
@@ -90,10 +113,11 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     sourceType === null || dateField === null
       ? undefined
       : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
-  // Collapse state is namespaced per surface so two views don't share bands.
-  const scope = `list:${selection.collection ?? ''}:${selection.id}`;
+  // Collapse state is namespaced per TAB: two views of one List group
+  // differently, so a band collapsed in the board is not the same band.
+  const scope = `list:${selection.collection ?? ''}:${selection.id}:${activeId}`;
 
-  if (view === null) {
+  if (list === null || activeView === null) {
     return (
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <EmptyState
@@ -105,10 +129,41 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     );
   }
 
+  const openTab = (id: string) =>
+    navigate({ kind: 'list', id: selection.id, collection: selection.collection ?? null, view: id });
+
+  /**
+   * Persist a change to the whole List (source, name, the views array).
+   *
+   * Also re-seeds the local presentation from whatever the OPEN tab looks like
+   * afterwards. The local copy exists so toolbar edits feel instant, but it
+   * only re-seeds on a tab or list change — so a change that came from
+   * somewhere else, like the tab menu switching this view's layout, would
+   * otherwise be written to disk and not shown until you navigated away and
+   * back.
+   */
+  const changeList = (next: ListDefinition) => {
+    const active = next.views.find((v) => v.id === activeId);
+    if (active !== undefined) setPresentation(active.presentation);
+    void updateList(list, next);
+  };
+
+  /** Persist a change to the OPEN tab only. */
+  const changeView = (next: ViewDefinition) =>
+    changeList({
+      ...list.definition,
+      views: list.definition.views.map((v) => (v.id === activeId ? next : v)),
+    });
+
   // Toolbar edits persist immediately — a saved view IS its configuration.
   const changePresentation = (next: Presentation) => {
     setPresentation(next);
-    void updateList(view, { ...view.definition, presentation: next });
+    changeList({
+      ...list.definition,
+      views: list.definition.views.map((v) =>
+        v.id === activeId ? { ...v, presentation: next } : v,
+      ),
+    });
   };
 
   // M9.2: a column IS a property, so adding one writes the type doc and then
@@ -125,71 +180,159 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     })();
   };
 
-  const sourceLabel =
-    view.definition.source.type === null ? 'Everything' : view.definition.source.type;
+  const createView = (name: string, type: ViewType) => {
+    void (async () => {
+      // Seeded from the tab you are on: "same columns, drawn as a board" is
+      // what people mean by adding a view, and starting blank throws away the
+      // configuration they just did.
+      const seeded = newView(
+        name,
+        type,
+        list.definition.views.map((v) => v.id),
+        presentation,
+      );
+      const id = await addView(list, seeded);
+      if (id !== null) openTab(id);
+    })();
+  };
+
+  const removeView = (id: string) => {
+    void (async () => {
+      if (!(await deleteView(list, id))) return;
+      if (id === activeId) {
+        const next = list.definition.views.find((v) => v.id !== id);
+        if (next !== undefined) openTab(next.id);
+      }
+    })();
+  };
+
+  const sourceLabel = list.definition.source.type ?? 'Everything';
+  const filtered = activeView.filters !== null;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex-none px-5 pb-2 pt-3.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon
-            name={view.definition.icon ?? 'layout-list'}
-            size={16}
-            color={view.definition.color ?? 'var(--n-600)'}
-          />
-          <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">
-            {view.definition.name}
-          </h1>
-          <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-            {collection.entries.length}
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
-            {sourceLabel}
-            {view.definition.filters !== null && ' · filtered'}
-          </span>
-          <span className="flex-1" />
-          <IconButton icon="settings-2" label="List settings" onClick={() => setSettingsOpen(true)} />
-          <IconButton icon="trash-2" label="Delete list" onClick={() => setConfirmDelete(true)} />
+        <div className="flex-none px-5 pb-2 pt-3.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <Icon
+              name={list.definition.icon ?? 'layout-list'}
+              size={16}
+              color={list.definition.color ?? 'var(--n-600)'}
+            />
+            <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+              {list.definition.name}
+            </h1>
+            <span className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
+              {surface.entries.length}
+            </span>
+            <span className="hidden flex-none items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)] sm:inline-flex">
+              {sourceLabel}
+              {filtered && ' · filtered'}
+            </span>
+            <span className="flex-1" />
+            <IconButton
+              icon="settings-2"
+              label="View settings"
+              onClick={() => setSettingsOpen(true)}
+            />
+            <IconButton icon="trash-2" label="Delete list" onClick={() => setConfirmDelete(true)} />
+          </div>
         </div>
-      </div>
-      <ViewToolbar
-        presentation={presentation}
-        onChange={changePresentation}
-        fields={fields}
-        sourceType={sourceType}
-        schema={schema}
-        onAddProperty={addProperty}
-      />
-      <ViewCanvas
-        entries={sortedEntries}
-        allEntries={entries}
-        presentation={presentation}
-        schema={schema}
-        fields={fields}
-        scope={scope}
-        createType={sourceType ?? undefined}
-        filtered={view.definition.filters !== null}
-        onCreate={onCreate}
-        onCreateOn={onCreateOn}
-        onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
-        onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
-        onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
-      />
+        {/* M11: the tab row IS the layout control. There is no pill strip in
+            the toolbar below, because pressing one used to overwrite the view
+            you had configured rather than open a different one. */}
+        <ViewTabs
+          views={list.definition.views}
+          activeId={activeId}
+          onSelect={openTab}
+          onCreate={createView}
+          onRename={(id, name) =>
+            changeList({
+              ...list.definition,
+              views: list.definition.views.map((v) => (v.id === id ? { ...v, name } : v)),
+            })
+          }
+          onChangeLayout={(id, type) =>
+            changeList({
+              ...list.definition,
+              views: list.definition.views.map((v) =>
+                v.id === id
+                  ? {
+                      ...v,
+                      // A view still called "Table" that now draws a board is a
+                      // lie in the tab row; rename only the ones that never got
+                      // a name of their own.
+                      name: v.name === layoutLabel(v.presentation.type) ? layoutLabel(type) : v.name,
+                      presentation: { ...v.presentation, type },
+                    }
+                  : v,
+              ),
+            })
+          }
+          onDuplicate={(id) => {
+            void (async () => {
+              const created = await duplicateView(list, id);
+              if (created !== null) openTab(created);
+            })();
+          }}
+          onDelete={removeView}
+          onConfigure={(id) => {
+            if (id !== activeId) openTab(id);
+            setSettingsOpen(true);
+          }}
+        />
+        <ViewToolbar
+          presentation={presentation}
+          onChange={changePresentation}
+          fields={fields}
+          sourceType={sourceType}
+          schema={schema}
+          onAddProperty={addProperty}
+          // M11: no layout pills here. The tab row above owns layout, and a
+          // pill that changed it in place would rewrite the open tab rather
+          // than take you to another one.
+          showLayout={false}
+          filters={activeView.filters}
+          onFiltersChange={(filters) => changeView({ ...activeView, filters })}
+        />
+        <ViewCanvas
+          entries={sortedEntries}
+          allEntries={entries}
+          presentation={presentation}
+          schema={schema}
+          fields={fields}
+          scope={scope}
+          createType={sourceType ?? undefined}
+          filtered={filtered}
+          onCreate={onCreate}
+          onCreateOn={onCreateOn}
+          onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
+          onPresentationChange={changePresentation}
+          onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
+          onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+        />
       </div>
       {settingsOpen && (
         <ViewSettingsPanel
-          definition={{ ...view.definition, presentation }}
+          list={{
+            ...list.definition,
+            views: list.definition.views.map((v) =>
+              v.id === activeId ? { ...v, presentation } : v,
+            ),
+          }}
+          viewId={activeId}
           fields={fields}
           schema={schema}
           onClose={() => setSettingsOpen(false)}
-          onDelete={() => {
+          onDeleteList={() => {
             setSettingsOpen(false);
             setConfirmDelete(true);
           }}
-          onChange={(definition) => {
-            setPresentation(definition.presentation);
-            void updateList(view, definition);
+          onDeleteView={list.definition.views.length > 1 ? () => removeView(activeId) : undefined}
+          onChange={(next) => {
+            const active = next.views.find((v) => v.id === activeId);
+            if (active !== undefined) setPresentation(active.presentation);
+            changeList(next);
           }}
         />
       )}
@@ -197,22 +340,26 @@ export function ListPage({ selection }: { selection: ListSelection }) {
         <Dialog
           open
           onClose={() => setConfirmDelete(false)}
-          title={`Delete "${view.definition.name}"?`}
+          title={`Delete "${list.definition.name}"?`}
           width={420}
           primaryAction={{
             label: 'Delete list',
             onClick: () => {
               setConfirmDelete(false);
               void (async () => {
-                if (await deleteList(view)) navigate({ kind: 'home' });
+                if (await deleteList(list)) navigate({ kind: 'home' });
               })();
             },
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
         >
           <p className="m-0 text-[13px] text-[var(--n-600)]">
-            The list's configuration is removed. The records it held are untouched — a
-            list is a saved query, not the notes themselves.
+            The list's configuration is removed, including its{' '}
+            {list.definition.views.length === 1
+              ? 'view'
+              : `${list.definition.views.length} views`}
+            . The records it held are untouched — a list is a saved query, not the notes
+            themselves.
           </p>
         </Dialog>
       )}

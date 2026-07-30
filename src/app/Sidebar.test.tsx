@@ -50,13 +50,20 @@ describe('Sidebar', () => {
             color: null,
             order: null,
             source: { type: null, project: null },
-            filters: null,
-            presentation: {
-              type: 'list',
-              group: [{ field: 'status' }],
-              sort: [{ field: 'modifiedAt', dir: 'desc' }],
-              columns: [{ field: 'key' }, { field: 'status' }],
-            },
+            views: [
+              {
+                id: 'view',
+                name: 'View',
+                icon: null,
+                filters: null,
+                presentation: {
+                  type: 'list',
+                  group: [{ field: 'status' }],
+                  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+                  columns: [{ field: 'key' }, { field: 'status' }],
+                },
+              },
+            ],
           },
         },
       ],
@@ -133,18 +140,25 @@ describe('Sidebar', () => {
         color: null,
         order: null,
         source: { type: null, project: null },
-        filters: null,
-        presentation: {
-          type: 'table' as const,
-          group: [],
-          sort: [{ field: 'modifiedAt', dir: 'desc' as const }],
-          columns: [],
-        },
+        views: [
+          {
+            id: 'view',
+            name: 'View',
+            icon: null,
+            filters: null,
+            presentation: {
+              type: 'table' as const,
+              group: [],
+              sort: [{ field: 'modifiedAt', dir: 'desc' as const }],
+              columns: [],
+            },
+          },
+        ],
       },
     };
     useVaultStore.setState({
       views: [roadmap],
-      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null } }],
+      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null, description: null } }],
     });
     useUiStore.setState({ expandedFolders: {} });
     render(<Sidebar onNewView={vi.fn()} />);
@@ -159,7 +173,7 @@ describe('Sidebar', () => {
     const onNewView = vi.fn();
     useVaultStore.setState({
       views: [],
-      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null } }],
+      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null, description: null } }],
     });
     render(<Sidebar onNewView={onNewView} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add to Product' }));

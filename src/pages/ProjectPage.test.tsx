@@ -54,13 +54,20 @@ const boardView: ListFile = {
     color: null,
     order: null,
     source: { type: null, project: null },
-    filters: null,
-    presentation: {
-      type: 'board',
-      group: [{ field: 'status' }],
-      sort: [{ field: 'modifiedAt', dir: 'desc' }],
-      columns: [{ field: 'key' }, { field: 'status' }],
-    },
+    views: [
+      {
+        id: 'view',
+        name: 'View',
+        icon: null,
+        filters: null,
+        presentation: {
+          type: 'board',
+          group: [{ field: 'status' }],
+          sort: [{ field: 'modifiedAt', dir: 'desc' }],
+          columns: [{ field: 'key' }, { field: 'status' }],
+        },
+      },
+    ],
   },
 };
 

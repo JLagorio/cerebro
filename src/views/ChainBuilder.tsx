@@ -70,7 +70,10 @@ export function ChainBuilder({
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className={[
-          'inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[12.5px]',
+          // whitespace-nowrap: the row WRAPS at narrow widths, but a pill must
+          // wrap as a unit — "Group: status" broken across two lines reads as
+          // two controls (M11 responsiveness).
+          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-[12.5px]',
           active
             ? 'border-[var(--cortex-300)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
             : 'border-[var(--n-300)] bg-[var(--n-0)] text-[var(--n-700)] hover:border-[var(--n-400)]',

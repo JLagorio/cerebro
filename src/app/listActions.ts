@@ -16,12 +16,13 @@
  */
 
 import { newCollectionDefinition, serializeCollection } from '@/engine/collections';
-import { serializeList } from '@/engine/views';
+import { nextViewId, replaceView, serializeList } from '@/engine/views';
 import type {
   CollectionDefinition,
   CollectionFile,
   ListDefinition,
   ListFile,
+  ViewDefinition,
 } from '@/engine/types';
 import { deleteNote, saveCollection, saveList, saveView } from '@/lib/ipc';
 import { slugifyListId } from '@/views/ViewToolbar';
@@ -127,6 +128,53 @@ export async function createProjectList(
 export async function updateList(list: ListFile, definition: ListDefinition): Promise<boolean> {
   const legacy = isLegacy(list) ? { project: list.project } : undefined;
   return writeList(list.id, definition, { collection: list.collection, legacy });
+}
+
+/** Persist edits to ONE of a List's view tabs (M11), leaving its siblings alone. */
+export async function updateView(
+  list: ListFile,
+  viewId: string,
+  view: ViewDefinition,
+): Promise<boolean> {
+  return updateList(list, replaceView(list.definition, viewId, view));
+}
+
+/** Append a view tab. Returns its id so the caller can switch to it. */
+export async function addView(list: ListFile, view: ViewDefinition): Promise<string | null> {
+  // Re-key against the siblings that actually exist: the caller built this
+  // view from a stale copy if the file changed underneath it.
+  const id = nextViewId(view.name, list.definition.views.map((v) => v.id));
+  const next: ListDefinition = {
+    ...list.definition,
+    views: [...list.definition.views, { ...view, id }],
+  };
+  return (await updateList(list, next)) ? id : null;
+}
+
+/**
+ * Remove a view tab.
+ *
+ * Refuses to remove the last one: a List with no views is not representable
+ * (see ListDefinition.views), and the way to get rid of the last view is to
+ * delete the List it is the only way of looking at.
+ */
+export async function deleteView(list: ListFile, viewId: string): Promise<boolean> {
+  if (list.definition.views.length <= 1) {
+    useUiStore.getState().toast('A list keeps at least one view');
+    return false;
+  }
+  const next: ListDefinition = {
+    ...list.definition,
+    views: list.definition.views.filter((v) => v.id !== viewId),
+  };
+  return updateList(list, next);
+}
+
+/** Duplicate a view tab, named "<name> copy". */
+export async function duplicateView(list: ListFile, viewId: string): Promise<string | null> {
+  const source = list.definition.views.find((v) => v.id === viewId);
+  if (source === undefined) return null;
+  return addView(list, { ...source, name: `${source.name} copy` });
 }
 
 /** A List still living in a pre-M10 `views/` directory. */

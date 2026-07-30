@@ -46,10 +46,10 @@ function shape(nodes: CollectionNode[], depth = 0): string[] {
 }
 
 describe('parseCollectionYaml', () => {
-  it('reads name, icon, color, and order', () => {
+  it('reads name, icon, color, order, and description', () => {
     const c = parseCollectionYaml(
       'product',
-      'name: Product\nicon: package\ncolor: "#3D8BE8"\norder: 2\n',
+      'name: Product\nicon: package\ncolor: "#3D8BE8"\norder: 2\ndescription: Where the roadmap lives\n',
     );
     expect(c.folder).toBe('product');
     expect(c.declared).toBe(true);
@@ -58,7 +58,17 @@ describe('parseCollectionYaml', () => {
       icon: 'package',
       color: '#3D8BE8',
       order: 2,
+      description: 'Where the roadmap lives',
     });
+  });
+
+  // M11: the description is prose about the container, shown on its home page.
+  // A blank one is the same as none — an empty string would render as a line of
+  // nothing where a paragraph is meant to be.
+  it('treats a missing or blank description as none', () => {
+    expect(parseCollectionYaml('p', 'name: P\n').definition.description).toBeNull();
+    expect(parseCollectionYaml('p', 'name: P\ndescription: "  "\n').definition.description).toBeNull();
+    expect(parseCollectionYaml('p', 'name: P\ndescription: 12\n').definition.description).toBeNull();
   });
 
   // Tolerant like every other vault file: a fat-fingered collection.yml must

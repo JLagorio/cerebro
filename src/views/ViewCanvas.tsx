@@ -37,6 +37,8 @@ export interface ViewCanvasProps {
   /** Create dated to a calendar day. */
   onCreateOn?: (title: string, day: string) => Promise<boolean>;
   onColumnsChange?: (next: ColumnSpec[]) => void;
+  /** M11: persists presentation-level layout state (the table's name width). */
+  onPresentationChange?: (next: Presentation) => void;
   onOrderBy?: (field: string) => void;
   /** Persists an axis zoom change to the view file. */
   onZoomChange?: (zoom: Zoom) => void;
@@ -57,6 +59,7 @@ export function ViewCanvas({
   onCreate,
   onCreateOn,
   onColumnsChange,
+  onPresentationChange,
   onOrderBy,
   onZoomChange,
   today,
@@ -74,6 +77,7 @@ export function ViewCanvas({
           onCreate={onCreate}
           filtered={filtered}
           onColumnsChange={onColumnsChange}
+          onPresentationChange={onPresentationChange}
           onOrderBy={onOrderBy}
         />
       );

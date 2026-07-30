@@ -1,9 +1,9 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import {
-  DEFAULT_COL_W,
+  MIN_COL_W,
   moveColumn,
   resolveColumns,
   setColumnWidth,
@@ -14,14 +14,26 @@ import { buildRows, entryRows } from '@/engine/rows';
 import { kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { ColumnSpec, Entry, GroupNode, Presentation, Schema } from '@/engine/types';
+import type {
+  ChipStyle,
+  ColumnSpec,
+  Entry,
+  GroupNode,
+  Presentation,
+  Schema,
+} from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { QuickAddInline } from '@/views/QuickAdd';
 import { useRowKeyboard } from '@/views/useRowKeyboard';
 import { useUiStore } from '@/stores/uiStore';
 
 const TITLE_W = 280;
-const DEFAULT_W = DEFAULT_COL_W;
+const MIN_TITLE_W = 140;
+
+/** CSS custom property carrying a column's width. Index-based, because a
+ * frontmatter key is not guaranteed to be a legal custom-property name. */
+const widthVar = (index: number) => `--cb-cw-${index}`;
+const TITLE_VAR = '--cb-cw-title';
 
 /** Kinds whose editor is a popover/inline control the cell hosts directly. */
 const READ_ONLY = new Set(['rollup', 'created_time', 'last_edited_time']);
@@ -56,17 +68,23 @@ function ProgressCell({ display }: { display: string }) {
 /**
  * One data cell. Memoized on the values that can change it, because a table
  * of 32 rows × 8 columns re-renders on every keystroke elsewhere otherwise.
+ *
+ * Its width comes from a CSS variable rather than a number, so dragging a
+ * column divider repaints without re-rendering a single row (see the resize
+ * handler below).
  */
 const TableCell = memo(function TableCell({
   entry,
   def,
   schema,
-  width,
+  index,
+  chips,
 }: {
   entry: Entry;
   def: ColumnDef;
   schema: Schema;
-  width: number;
+  index: number;
+  chips: ChipStyle;
 }) {
   const resolved = schema.resolveField(entry, def.name);
   const readOnly = READ_ONLY.has(def.kind);
@@ -76,13 +94,13 @@ const TableCell = memo(function TableCell({
     <div
       role="gridcell"
       className="flex flex-none items-center overflow-hidden border-r border-[var(--n-100)] px-2"
-      style={{ width }}
+      style={{ width: `var(${widthVar(index)})` }}
     >
       {readOnly || isProgress ? (
         isProgress ? (
           <ProgressCell display={resolved.display} />
         ) : (
-          <span className="truncate text-[12.5px] text-[var(--n-600)]">
+          <span className="truncate whitespace-nowrap text-[12.5px] text-[var(--n-600)]">
             {resolved.display === '' ? '—' : resolved.display}
           </span>
         )
@@ -91,7 +109,7 @@ const TableCell = memo(function TableCell({
         // validation and popovers behave identically in both surfaces. The
         // wrapper clamps it to one line — cells are a fixed 36px tall.
         <div className="flex min-w-0 flex-1 items-center overflow-hidden [&>*]:max-w-full">
-          <FieldEditor entry={entry} def={def} schema={schema} compact />
+          <FieldEditor entry={entry} def={def} schema={schema} compact chips={chips} />
         </div>
       )}
     </div>
@@ -104,23 +122,23 @@ const INDENT = 16;
 const TableRow = memo(function TableRow({
   entry,
   columns,
-  widths,
   schema,
   depth,
   childCount,
   collapsed,
+  chips,
   onToggle,
   selected,
   onSelect,
 }: {
   entry: Entry;
   columns: ColumnDef[];
-  widths: Record<string, number>;
   schema: Schema;
   /** M10: nesting depth from the grouping chain's relation levels. */
   depth: number;
   childCount: number;
   collapsed: boolean;
+  chips: ChipStyle;
   onToggle: () => void;
   selected: boolean;
   onSelect: () => void;
@@ -152,7 +170,7 @@ const TableRow = memo(function TableRow({
           'sticky left-0 z-10 flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
           selected ? 'bg-[var(--cortex-50)]' : 'bg-[var(--n-0)] group-hover:bg-[var(--n-25)]',
         ].join(' ')}
-        style={{ width: TITLE_W, paddingLeft: 12 + depth * INDENT }}
+        style={{ width: `var(${TITLE_VAR})`, paddingLeft: 12 + depth * INDENT }}
       >
         {/* M10: a table nests when the chain has a relation level, so the
             expander belongs here rather than in a separate hierarchy view. A
@@ -195,42 +213,105 @@ const TableRow = memo(function TableRow({
           Open
         </button>
       </div>
-      {columns.map((def) => (
+      {columns.map((def, i) => (
         <TableCell
           key={def.name}
           entry={entry}
           def={def}
           schema={schema}
-          width={widths[def.name] ?? DEFAULT_W}
+          index={i}
+          chips={chips}
         />
       ))}
     </div>
   );
 });
 
-/** Draggable divider that resizes the column to its left. */
-function ColumnResizer({ onResize }: { onResize: (delta: number) => void }) {
-  const startX = useRef(0);
+/**
+ * Draggable divider that resizes the column to its left (M11 rewrite).
+ *
+ * The old one wrote the new width to the view's YAML on every mousemove — a
+ * disk write and a full vault rescan per pixel — which is why resizing "barely
+ * worked": the drag fought a stream of re-renders carrying stale widths.
+ *
+ * This one paints through a CSS variable during the drag (no React state, no
+ * row re-render, no write) and persists once, on release. It also compares
+ * against the width the drag STARTED at rather than accumulating per-event
+ * deltas, so a fast drag that outruns a repaint lands where the pointer is.
+ */
+function ColumnResizer({
+  label,
+  onDrag,
+  onCommit,
+  width,
+  min,
+}: {
+  label: string;
+  /** Called with each intermediate width — paints, never persists. */
+  onDrag: (width: number) => void;
+  onCommit: (width: number) => void;
+  width: number;
+  min: number;
+}) {
+  const start = useRef({ x: 0, w: 0 });
+  const [active, setActive] = useState(false);
+
+  const begin = (clientX: number) => {
+    start.current = { x: clientX, w: width };
+    setActive(true);
+    const at = (x: number) => Math.max(min, Math.round(start.current.w + (x - start.current.x)));
+    const move = (e: PointerEvent) => onDrag(at(e.clientX));
+    const up = (e: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      document.body.classList.remove('cb-resizing');
+      setActive(false);
+      onCommit(at(e.clientX));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    // Kills text selection and keeps the col-resize cursor while the pointer
+    // is outside the 9px handle, which is most of any real drag.
+    document.body.classList.add('cb-resizing');
+  };
+
   return (
     <span
       role="separator"
       aria-orientation="vertical"
-      onMouseDown={(e) => {
+      aria-label={`Resize ${label} column`}
+      tabIndex={0}
+      onPointerDown={(e) => {
         e.preventDefault();
-        startX.current = e.clientX;
-        const onMove = (ev: MouseEvent) => {
-          onResize(ev.clientX - startX.current);
-          startX.current = ev.clientX;
-        };
-        const onUp = () => {
-          window.removeEventListener('mousemove', onMove);
-          window.removeEventListener('mouseup', onUp);
-        };
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
+        e.stopPropagation();
+        begin(e.clientX);
       }}
-      className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-[var(--cortex-500)]"
-    />
+      onKeyDown={(e) => {
+        // Keyboard resize: a pointer-only affordance is unreachable without one.
+        const step = e.shiftKey ? 40 : 8;
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          onCommit(Math.max(min, width - step));
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          onCommit(width + step);
+        }
+      }}
+      // A 1px target was most of the problem: the pointer had to land on a
+      // hairline. This one is 9px wide, centred on the border, and only paints
+      // the 2px indicator.
+      className="absolute -right-[4px] top-0 z-20 flex h-full w-[9px] cursor-col-resize touch-none items-stretch justify-center"
+    >
+      <span
+        className={[
+          'w-[2px] rounded-full transition-colors',
+          active ? 'bg-[var(--cortex-500)]' : 'bg-transparent hover:bg-[var(--cortex-300)]',
+        ].join(' ')}
+      />
+    </span>
   );
 }
 
@@ -250,6 +331,8 @@ export interface TableViewProps {
   /** M9.2: persists column order, width, and visibility to the view. Omit on
    * surfaces with no view file to write to — the header menu hides. */
   onColumnsChange?: (next: ColumnSpec[]) => void;
+  /** M11: persists presentation-level table state (the name column's width). */
+  onPresentationChange?: (next: Presentation) => void;
   /** Collapse-state namespace (M9.1). */
   scope?: string;
   /** M9.6: create a record from the grid, inheriting the band's value. */
@@ -374,6 +457,13 @@ function ColumnMenu({
  * `columns`, so the property-visibility control and this view share one
  * source of truth. Grouping renders as collapsible section bands, nested to
  * the depth of the view's grouping chain (M9.1).
+ *
+ * M11 made the grid RESPONSIVE. It used to lay out at exactly the sum of its
+ * column widths and stop: in a wide window that left a dead strip to the right
+ * of the last column where the rows simply ended, and in a narrow one the
+ * columns kept their pixel widths and the horizontal scrollbar did all the
+ * work. Now the columns share out any slack, so the table always fills the
+ * space it is given and still scrolls when it genuinely needs to.
  */
 export function TableView({
   entries,
@@ -383,6 +473,7 @@ export function TableView({
   fields,
   onOrderBy,
   onColumnsChange,
+  onPresentationChange,
   scope = 'table',
   onCreate,
   filtered,
@@ -392,6 +483,23 @@ export function TableView({
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
   const openDetail = useUiStore((s) => s.openDetail);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [available, setAvailable] = useState(0);
+
+  // The width the grid has to fill. Observed rather than read once, because
+  // the detail panel opening beside the table changes it (M11 item 2).
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      setAvailable(entry.contentRect.width);
+    });
+    observer.observe(node);
+    setAvailable(node.clientWidth);
+    return () => observer.disconnect();
+  }, []);
 
   const resolved = useMemo(
     () => resolveColumns(presentation.columns, fields),
@@ -413,15 +521,55 @@ export function TableView({
     [entries, presentation.group, schema, allEntries, onCreate, collapsedMap],
   );
 
-  // M9.2: widths persist to the view rather than living in component state,
-  // so the same type can be sized differently in two views.
-  const resize = useCallback(
-    (name: string, delta: number) => {
+  const titleWidth = presentation.titleWidth ?? TITLE_W;
+
+  /**
+   * Widths as laid out, with any slack shared between the columns.
+   *
+   * Only ever GROWS a column: shrinking to fit would silently discard widths
+   * the user set by hand, and the horizontal scrollbar is the honest answer to
+   * a table that is genuinely wider than its window.
+   */
+  const layout = useMemo(() => {
+    const base = resolved.map((c) => c.width);
+    const content = titleWidth + base.reduce((sum, w) => sum + w, 0);
+    const slack = available - content;
+    if (slack <= 0 || base.length === 0) {
+      return { title: titleWidth, columns: base, total: content };
+    }
+    const share = Math.floor(slack / base.length);
+    const columns = base.map((w, i) =>
+      // The remainder lands on the last column so the grid ends flush with its
+      // container rather than a pixel or two short of it.
+      i === base.length - 1 ? w + slack - share * (base.length - 1) : w + share,
+    );
+    return { title: titleWidth, columns, total: available };
+  }, [resolved, titleWidth, available]);
+
+  /** Paint a width mid-drag: straight to the DOM, so no row re-renders. */
+  const paint = useCallback(
+    (variable: string, width: number, delta: number) => {
+      const node = gridRef.current;
+      if (node === null) return;
+      node.style.setProperty(variable, `${width}px`);
+      node.style.width = `${Math.max(0, layout.total + delta)}px`;
+    },
+    [layout.total],
+  );
+
+  const commitColumn = useCallback(
+    (name: string, width: number) => {
       if (onColumnsChange === undefined) return;
-      const current = presentation.columns.find((c) => c.field === name)?.width ?? DEFAULT_COL_W;
-      onColumnsChange(setColumnWidth(presentation.columns, name, current + delta));
+      onColumnsChange(setColumnWidth(presentation.columns, name, width));
     },
     [onColumnsChange, presentation.columns],
+  );
+
+  const commitTitle = useCallback(
+    (width: number) => {
+      onPresentationChange?.({ ...presentation, titleWidth: Math.max(MIN_TITLE_W, width) });
+    },
+    [onPresentationChange, presentation],
   );
 
   // Keyboard traverses the record rows only — bands and the create row are not
@@ -436,37 +584,60 @@ export function TableView({
   });
 
   const primarySort = presentation.sort[0];
-  const totalWidth = TITLE_W + resolved.reduce((sum, c) => sum + c.width, 0);
-  const widths: Record<string, number> = {};
-  for (const c of resolved) widths[c.def.name] = c.width;
-  const columns = resolved.map((c) => c.def);
+  const columns = useMemo(() => resolved.map((c) => c.def), [resolved]);
+  const chips: ChipStyle = presentation.chips ?? 'plain';
+
+  // Widths ride as custom properties on the grid so a drag can repaint them
+  // without React seeing anything.
+  const widthVars = useMemo(() => {
+    const vars: Record<string, string> = { [TITLE_VAR]: `${layout.title}px` };
+    layout.columns.forEach((w, i) => {
+      vars[widthVar(i)] = `${w}px`;
+    });
+    return vars;
+  }, [layout]);
 
   return (
     <div
+      ref={scrollRef}
       data-testid="table-view"
       role="grid"
       className="min-h-0 min-w-0 flex-1 overflow-auto outline-none"
       {...keyboard.containerProps}
     >
-      <div style={{ width: totalWidth, minWidth: '100%' }}>
+      <div
+        ref={gridRef}
+        style={{ width: layout.total, minWidth: '100%', ...widthVars } as React.CSSProperties}
+      >
         <div
           role="row"
           className="sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
         >
           <div
             role="columnheader"
-            className="sticky left-0 z-10 flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]"
-            style={{ width: TITLE_W }}
+            className="sticky left-0 z-30 flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]"
+            style={{ width: `var(${TITLE_VAR})`, position: 'sticky' }}
           >
             <Icon name="type" size={12} color="var(--n-400)" />
-            Name
+            <span className="min-w-0 flex-1 truncate">Name</span>
+            {/* M11: the name column resizes too. It is the widest thing on the
+                row and was the one width nobody could change. */}
+            {onPresentationChange !== undefined && (
+              <ColumnResizer
+                label="Name"
+                width={layout.title}
+                min={MIN_TITLE_W}
+                onDrag={(w) => paint(TITLE_VAR, w, w - layout.title)}
+                onCommit={commitTitle}
+              />
+            )}
           </div>
-          {resolved.map(({ def, width }) => (
+          {resolved.map(({ def }, i) => (
             <div
               key={def.name}
               role="columnheader"
               className="group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]"
-              style={{ width }}
+              style={{ width: `var(${widthVar(i)})` }}
             >
               <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
               <button
@@ -492,13 +663,21 @@ export function TableView({
                 />
               )}
               {onColumnsChange !== undefined && (
-                <ColumnMenu
-                  def={def}
-                  columns={presentation.columns}
-                  onChange={onColumnsChange}
-                />
+                <>
+                  <ColumnMenu
+                    def={def}
+                    columns={presentation.columns}
+                    onChange={onColumnsChange}
+                  />
+                  <ColumnResizer
+                    label={humanize(def.name)}
+                    width={layout.columns[i]}
+                    min={MIN_COL_W}
+                    onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
+                    onCommit={(w) => commitColumn(def.name, w)}
+                  />
+                </>
               )}
-              <ColumnResizer onResize={(d) => resize(def.name, d)} />
             </div>
           ))}
         </div>
@@ -517,7 +696,7 @@ export function TableView({
           if (row.kind === 'add') {
             // M9.6: a listing surface can create, inheriting its band.
             return (
-              <div key={row.key} className="sticky left-0 w-[280px]">
+              <div key={row.key} className="sticky left-0" style={{ width: `var(${TITLE_VAR})` }}>
                 <QuickAddInline
                   compact
                   label="New"
@@ -540,11 +719,11 @@ export function TableView({
               key={row.key}
               entry={row.entry}
               columns={columns}
-              widths={widths}
               schema={schema}
               depth={row.depth}
               childCount={row.childCount}
               collapsed={collapsedMap?.[row.key] === true}
+              chips={chips}
               onToggle={() => toggleCollapsed(scope, row.key)}
               selected={index === keyboard.index}
               onSelect={() => keyboard.setIndex(index)}

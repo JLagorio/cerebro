@@ -15,6 +15,7 @@ import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { bandLevels, nestLevels } from '@/engine/types';
 import type {
+  ChipStyle,
   ColumnSpec,
   FieldDef,
   GroupSpec,
@@ -22,6 +23,7 @@ import type {
   Schema,
   SortSpec,
   ListDefinition,
+  ViewDefinition,
 } from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
@@ -36,7 +38,7 @@ import { VIEW_KINDS } from '@/views/viewKinds';
  * about this view" is itself a place, and it deserves one.
  */
 
-type Page = 'root' | 'layout' | 'properties' | 'filter' | 'sort' | 'group';
+type Page = 'root' | 'layout' | 'properties' | 'filter' | 'sort' | 'group' | 'list';
 
 const GROUPABLE_KINDS = new Set([
   'status', 'select', 'multiselect', 'person', 'checkbox', 'relation',
@@ -49,48 +51,72 @@ const META_SORTS = [
 ];
 
 export interface ViewSettingsPanelProps {
-  definition: ListDefinition;
+  /** The whole List — this panel edits both the open view and the List itself. */
+  list: ListDefinition;
+  /** Which view tab is being configured. */
+  viewId: string;
   onChange: (next: ListDefinition) => void;
   onClose: () => void;
   fields: ColumnDef[];
   schema: Schema;
-  /** Absent on surfaces with no view file (the project Items tab). */
-  onDelete?: () => void;
+  /** Deletes the whole List. */
+  onDeleteList?: () => void;
+  /** Deletes just this tab; absent when it is the only one. */
+  onDeleteView?: () => void;
   /** M9.2: create a property on the source type. */
   onAddProperty?: (name: string, kind: FieldDef['kind']) => void;
 }
 
+const CHIP_STYLES: { value: ChipStyle; label: string; hint: string }[] = [
+  { value: 'plain', label: 'Plain chips', hint: 'The record’s title, and nothing else.' },
+  {
+    value: 'type-icon',
+    label: 'Type icons',
+    hint: 'Each chip carries the icon of the type it points at.',
+  },
+];
+
 export function ViewSettingsPanel({
-  definition,
+  list,
+  viewId,
   onChange,
   onClose,
   fields,
   schema,
-  onDelete,
+  onDeleteList,
+  onDeleteView,
 }: ViewSettingsPanelProps) {
   const [page, setPage] = useState<Page>('root');
-  const p = definition.presentation;
+  const view = list.views.find((v) => v.id === viewId) ?? list.views[0];
+  const p = view.presentation;
 
-  const setPresentation = (presentation: Presentation) =>
-    onChange({ ...definition, presentation });
+  /** Write back one field of the open VIEW, leaving its siblings alone. */
+  const setView = (next: Partial<ViewDefinition>) =>
+    onChange({
+      ...list,
+      views: list.views.map((v) => (v.id === view.id ? { ...v, ...next } : v)),
+    });
+
+  const setPresentation = (presentation: Presentation) => setView({ presentation });
 
   const bands = bandLevels(p.group);
   const nesting = nestLevels(p.group);
   const visible = p.columns.filter((c) => c.hidden !== true).length;
-  const layoutLabel = VIEW_KINDS.find((l) => l.value === p.type)?.label ?? 'Table';
+  const layoutName = VIEW_KINDS.find((l) => l.value === p.type)?.label ?? 'Table';
+  const chipStyle: ChipStyle = p.chips ?? 'plain';
 
   return (
     <aside
       data-testid="view-settings-panel"
       aria-label="View settings"
-      className="flex w-[320px] flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      className="flex w-[320px] max-w-[80vw] flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
     >
       <header className="flex flex-none items-center gap-1.5 border-b border-[var(--n-200)] px-3 py-2.5">
         {page !== 'root' && (
           <IconButton icon="arrow-left" label="Back" size="sm" onClick={() => setPage('root')} />
         )}
-        <span className="flex-1 text-[13px] font-semibold text-[var(--n-900)]">
-          {page === 'root' ? 'View settings' : titleFor(page)}
+        <span className="flex-1 truncate text-[13px] font-semibold text-[var(--n-900)]">
+          {page === 'root' ? view.name : titleFor(page)}
         </span>
         <IconButton icon="x" label="Close view settings" size="sm" onClick={onClose} />
       </header>
@@ -99,15 +125,18 @@ export function ViewSettingsPanel({
         {page === 'root' && (
           <>
             <div className="px-1 pb-2">
+              {/* M11: this names the VIEW, not the List. Two tabs of one
+                  database need two names, and the List's own name is edited
+                  where the List is — one row down, under "This list". */}
               <Input
-                ariaLabel="List name"
-                placeholder="List name"
-                value={definition.name}
-                onChange={(e) => onChange({ ...definition, name: e.target.value })}
+                ariaLabel="View name"
+                placeholder="View name"
+                value={view.name}
+                onChange={(e) => setView({ name: e.target.value })}
                 width="100%"
               />
             </div>
-            <Row icon="table-2" label="Layout" value={layoutLabel} onClick={() => setPage('layout')} />
+            <Row icon="table-2" label="Layout" value={layoutName} onClick={() => setPage('layout')} />
             <Row
               icon="eye"
               label="Properties"
@@ -117,7 +146,7 @@ export function ViewSettingsPanel({
             <Row
               icon="list-filter"
               label="Filter"
-              value={definition.filters === null ? '' : 'On'}
+              value={view.filters === null ? '' : 'On'}
               onClick={() => setPage('filter')}
             />
             <Row
@@ -141,28 +170,122 @@ export function ViewSettingsPanel({
               onClick={() => setPage('group')}
             />
 
+            {/* M11: how related records draw, per view. A dense table wants
+                bare chips; a mixed one wants to see which type each points at. */}
             <div className="mt-2 border-t border-[var(--n-100)] pt-2">
               <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
-                Source
+                Related records
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {CHIP_STYLES.map((style) => (
+                  <button
+                    key={style.value}
+                    type="button"
+                    data-testid={`chip-style-${style.value}`}
+                    aria-pressed={chipStyle === style.value}
+                    onClick={() => setPresentation({ ...p, chips: style.value })}
+                    className={[
+                      'flex items-start gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                      chipStyle === style.value
+                        ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
+                        : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                    ].join(' ')}
+                  >
+                    <Icon
+                      name={style.value === 'plain' ? 'tag' : 'shapes'}
+                      size={13}
+                      color={chipStyle === style.value ? 'var(--cortex-600)' : 'var(--n-500)'}
+                    />
+                    <span className="min-w-0 flex-1">
+                      {style.label}
+                      <span className="mt-px block text-[11px] leading-[15px] text-[var(--n-400)]">
+                        {style.hint}
+                      </span>
+                    </span>
+                    {chipStyle === style.value && <Icon name="check" size={12} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-2 border-t border-[var(--n-100)] pt-2">
+              <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+                This list
               </div>
               <Row
                 icon="database"
-                label={definition.source.type ?? 'Everything'}
-                value=""
-                muted
+                label={list.source.type ?? 'Everything'}
+                value={`${list.views.length} ${list.views.length === 1 ? 'view' : 'views'}`}
+                onClick={() => setPage('list')}
               />
-              {onDelete !== undefined && (
+              {onDeleteView !== undefined && (
                 <button
                   type="button"
-                  onClick={onDelete}
-                  className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--danger-600,#B3261E)] hover:bg-[var(--danger-50)]"
+                  onClick={onDeleteView}
+                  className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-600)] hover:bg-[var(--n-50)]"
                 >
                   <Icon name="trash-2" size={13} />
-                  Delete view
+                  Delete this view
+                </button>
+              )}
+              {onDeleteList !== undefined && (
+                <button
+                  type="button"
+                  onClick={onDeleteList}
+                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--danger-600,#B3261E)] hover:bg-[var(--danger-50)]"
+                >
+                  <Icon name="trash-2" size={13} />
+                  Delete list
                 </button>
               )}
             </div>
           </>
+        )}
+
+        {page === 'list' && (
+          <div className="flex flex-col gap-2 px-1">
+            <div>
+              <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
+                List name
+              </span>
+              <Input
+                ariaLabel="List name"
+                placeholder="List name"
+                value={list.name}
+                onChange={(e) => onChange({ ...list, name: e.target.value })}
+                width="100%"
+              />
+            </div>
+            <p className="m-0 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+              Records come from{' '}
+              <span className="font-medium text-[var(--n-800)]">
+                {list.source.type ?? 'everything in the vault'}
+              </span>
+              . The source is what the list IS — changing it would invalidate every view's
+              columns, so it is fixed once created.
+            </p>
+            <div className="border-t border-[var(--n-100)] pt-2">
+              <div className="pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+                Views
+              </div>
+              {list.views.map((v) => (
+                <div
+                  key={v.id}
+                  className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12.5px] text-[var(--n-700)]"
+                >
+                  <Icon
+                    name={v.icon ?? VIEW_KINDS.find((k) => k.value === v.presentation.type)?.icon ?? 'table-2'}
+                    size={13}
+                    color="var(--n-500)"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{v.name}</span>
+                  {v.id === view.id && (
+                    <span className="flex-none text-[10.5px] text-[var(--n-400)]">open</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {page === 'layout' && (
@@ -171,6 +294,7 @@ export function ViewSettingsPanel({
               <button
                 key={l.value}
                 type="button"
+                data-testid={`view-switch-${l.value}`}
                 onClick={() => setPresentation({ ...p, type: l.value })}
                 className={[
                   'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
@@ -197,9 +321,9 @@ export function ViewSettingsPanel({
 
         {page === 'filter' && (
           <FilterBuilder
-            filters={definition.filters}
+            filters={view.filters}
             fields={fields}
-            onChange={(filters) => onChange({ ...definition, filters })}
+            onChange={(filters) => setView({ filters })}
           />
         )}
 
@@ -216,7 +340,7 @@ export function ViewSettingsPanel({
             group={p.group}
             fields={fields}
             schema={schema}
-            sourceType={definition.source.type}
+            sourceType={list.source.type}
             onChange={(group) => setPresentation({ ...p, group })}
           />
         )}
@@ -232,6 +356,7 @@ function titleFor(page: Page): string {
     case 'filter': return 'Filter';
     case 'sort': return 'Sort';
     case 'group': return 'Group';
+    case 'list': return 'This list';
     default: return 'View settings';
   }
 }

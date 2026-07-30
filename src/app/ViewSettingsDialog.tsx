@@ -3,33 +3,62 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
 import { listTypes } from '@/engine/typeCatalog';
-import type { Entry, Schema, ListDefinition } from '@/engine/types';
-import { DEFAULT_PRESENTATION } from '@/engine/views';
+import type {
+  Entry,
+  Presentation,
+  Schema,
+  ListDefinition,
+  ViewDefinition,
+} from '@/engine/types';
+import { DEFAULT_PRESENTATION, layoutLabel } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import { VIEW_KINDS } from '@/views/viewKinds';
 
 const ANY = '__any__';
 
-/** A fresh view over a type, with that type's fields as its columns. */
-export function newViewDefinition(typeName: string | null, schema: Schema): ListDefinition {
+/** The presentation a fresh List's first view starts from. */
+function seedPresentation(typeName: string | null, schema: Schema): Presentation {
   const fields = typeName === null ? [] : (schema.types.get(typeName)?.fields ?? []);
+  return {
+    type: 'table',
+    group: fields.some((f) => f.kind === 'status') ? [{ field: 'status' }] : [],
+    sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
+    columns:
+      fields.length > 0
+        ? fields.slice(0, 6).map((f) => ({ field: f.name }))
+        : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
+  };
+}
+
+/** A fresh List over a type, with that type's fields as its first view's columns. */
+export function newViewDefinition(typeName: string | null, schema: Schema): ListDefinition {
+  const presentation = seedPresentation(typeName, schema);
   return {
     name: '',
     icon: null,
     color: null,
     order: null,
     source: { type: typeName, project: null },
-    filters: null,
-    presentation: {
-      type: 'table',
-      group: fields.some((f) => f.kind === 'status') ? [{ field: 'status' }] : [],
-      sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
-      columns:
-        fields.length > 0
-          ? fields.slice(0, 6).map((f) => ({ field: f.name }))
-          : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
-    },
+    // M11: a List is created with exactly one view, and gains more from its
+    // tab row. Naming it after its layout is what Notion does and it reads
+    // correctly the moment there are two.
+    views: [
+      {
+        id: 'table',
+        name: layoutLabel(presentation.type),
+        icon: null,
+        filters: null,
+        presentation,
+      },
+    ],
   };
+}
+
+/** The first (and, on a fresh List, only) view — what this dialog configures. */
+const firstView = (def: ListDefinition) => def.views[0];
+
+function withFirstView(def: ListDefinition, next: Partial<ViewDefinition>): ListDefinition {
+  return { ...def, views: [{ ...def.views[0], ...next }, ...def.views.slice(1)] };
 }
 
 const label = 'mb-1 block text-[11.5px] font-medium text-[var(--n-600)]';
@@ -110,18 +139,21 @@ export function ViewSettingsDialog({
               onChange={(v) => {
                 const type = v === ANY ? null : v;
                 const fields = type === null ? [] : (schema.types.get(type)?.fields ?? []);
-                setDef({
-                  ...def,
-                  source: { ...def.source, type },
-                  // Columns belong to the source type — reset them with it.
-                  presentation: {
-                    ...def.presentation,
-                    columns: fields.slice(0, 6).map((f) => ({ field: f.name })),
-                    // The grouping chain names properties and relations of
-                    // the OLD type; none of it survives a source change.
-                    group: [],
-                  },
-                });
+                setDef(
+                  withFirstView(
+                    { ...def, source: { ...def.source, type } },
+                    {
+                      // Columns belong to the source type — reset them with it.
+                      presentation: {
+                        ...firstView(def).presentation,
+                        columns: fields.slice(0, 6).map((f) => ({ field: f.name })),
+                        // The grouping chain names properties and relations of
+                        // the OLD type; none of it survives a source change.
+                        group: [],
+                      },
+                    },
+                  ),
+                );
               }}
             />
           </div>
@@ -145,19 +177,25 @@ export function ViewSettingsDialog({
 
         <div className="flex gap-3">
           <div className="flex-1">
-            <span className={label}>Layout</span>
+            {/* M11: this names the FIRST view's layout. More tabs are added
+                from the List's own tab row, where the thing they belong to is
+                already on screen. */}
+            <span className={label}>First view</span>
             <Dropdown
               size="sm"
               label="Layout"
               width="100%"
               options={VIEW_KINDS.map((k) => ({ value: k.value, label: k.label }))}
-              value={def.presentation.type}
-              onChange={(v) =>
-                setDef({
-                  ...def,
-                  presentation: { ...def.presentation, type: v as typeof def.presentation.type },
-                })
-              }
+              value={firstView(def).presentation.type}
+              onChange={(v) => {
+                const type = v as Presentation['type'];
+                setDef(
+                  withFirstView(def, {
+                    name: layoutLabel(type),
+                    presentation: { ...firstView(def).presentation, type },
+                  }),
+                );
+              }}
             />
           </div>
         </div>
@@ -165,9 +203,9 @@ export function ViewSettingsDialog({
         <div>
           <span className={label}>Filters</span>
           <FilterBuilder
-            filters={def.filters}
+            filters={firstView(def).filters}
             fields={sourceFields}
-            onChange={(filters) => setDef({ ...def, filters })}
+            onChange={(filters) => setDef(withFirstView(def, { filters }))}
           />
         </div>
       </div>

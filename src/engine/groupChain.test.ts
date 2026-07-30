@@ -7,7 +7,7 @@ import type { GroupSpec } from '@/engine/types';
  * M9.7: group and hierarchy were one concept wearing two hats. These pin the
  * unified chain and the migration off the two shapes it replaces.
  */
-const parse = (yaml: string) => parseListYaml('v', yaml).definition.presentation;
+const parse = (yaml: string) => parseListYaml('v', yaml).definition.views[0].presentation;
 
 describe('band vs nest levels', () => {
   const chain: GroupSpec[] = [
@@ -118,9 +118,8 @@ describe('grouping chain round trip', () => {
     const yaml = serializeList({
       name: 'n', icon: null, color: null, order: null,
       source: { type: 'Objective', project: null },
-      filters: null,
-      presentation: original,
+      views: [{ id: 'v', name: 'View', icon: null, filters: null, presentation: original }],
     });
-    expect(parseListYaml('v', yaml).definition.presentation.group).toEqual(original.group);
+    expect(parseListYaml('v', yaml).definition.views[0].presentation.group).toEqual(original.group);
   });
 });

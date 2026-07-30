@@ -1,5 +1,9 @@
+import { useState } from 'react';
+import { Icon } from '@/components/ui/Icon';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { ChainBuilder, type ChainRow } from '@/views/ChainBuilder';
+import { FilterBuilder } from '@/views/FilterBuilder';
 import { PropertyVisibility } from '@/views/PropertyVisibility';
 import type { ColumnDef } from '@/engine/columns';
 import {
@@ -10,7 +14,15 @@ import {
 } from '@/engine/hierarchyOptions';
 import { humanize } from '@/engine/schema';
 import { bandLevels, nestLevels } from '@/engine/types';
-import type { FieldDef, GroupSpec, Presentation, Schema, SortSpec, ViewType } from '@/engine/types';
+import type {
+  FieldDef,
+  FilterGroup,
+  GroupSpec,
+  Presentation,
+  Schema,
+  SortSpec,
+  ViewType,
+} from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 import { VIEW_SEGMENTS } from '@/views/viewKinds';
 
@@ -117,6 +129,20 @@ export interface ViewToolbarProps {
   schema?: Schema;
   /** M9.2: create a property on the source type from the property picker. */
   onAddProperty?: (name: string, kind: FieldDef['kind']) => void;
+  /**
+   * The layout pills (M11).
+   *
+   * Default true, for the EPHEMERAL surfaces — the type screen and a project's
+   * Items tab — where nothing is saved, so switching layout costs nothing.
+   *
+   * A List passes false: there the layout belongs to a view tab, and a control
+   * that changed it in place would overwrite the configuration of the tab you
+   * are standing on rather than open a different one.
+   */
+  showLayout?: boolean;
+  /** M11: per-view filters, edited from the toolbar like every other axis. */
+  filters?: FilterGroup | null;
+  onFiltersChange?: (next: FilterGroup | null) => void;
 }
 
 // Task 8: the Save-view button is gone — saved-view tabs auto-persist edits
@@ -128,6 +154,9 @@ export function ViewToolbar({
   sourceType = null,
   schema,
   onAddProperty,
+  showLayout = true,
+  filters = null,
+  onFiltersChange,
 }: ViewToolbarProps) {
   const declared = fields ?? [];
 
@@ -202,16 +231,27 @@ export function ViewToolbar({
   const setSort = (next: SortSpec[]) => onChange({ ...presentation, sort: next });
 
   return (
-    <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
+    // M11 responsiveness: the controls WRAP rather than overflowing a fixed
+    // row. At a narrow window the old row simply ran off the right edge, so
+    // "Properties" became unreachable instead of moving to the next line.
+    <div className="flex flex-none flex-wrap items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
       {/* M10: the six views, one selected at a time. "Hierarchy" is gone —
           any of these nests when the grouping chain has a relation level, so
           a whole view kind for it was a control that duplicated another. */}
-      <SegmentedControl
-        size="sm"
-        options={VIEW_SEGMENTS}
-        value={presentation.type}
-        onChange={(value) => onChange({ ...presentation, type: value as ViewType })}
-      />
+      {showLayout && (
+        <SegmentedControl
+          size="sm"
+          options={VIEW_SEGMENTS}
+          value={presentation.type}
+          onChange={(value) => onChange({ ...presentation, type: value as ViewType })}
+        />
+      )}
+
+      {/* M11: filters are per view, so they belong beside the other per-view
+          axes rather than only inside the settings panel. */}
+      {onFiltersChange !== undefined && (
+        <FilterControl filters={filters} fields={declared} onChange={onFiltersChange} />
+      )}
 
       {/* M9.7: one Group control. Its options list properties AND relations,
           so "band by status" and "nest under the objective" are the same
@@ -293,4 +333,73 @@ export function ViewToolbar({
 function labelForSort(field: string): string {
   const meta = META_SORTS.find((m) => m.value === field);
   return meta?.label ?? humanize(field);
+}
+
+/** Count the leaf conditions in a filter tree — what the pill reports. */
+function countRules(group: FilterGroup | null): number {
+  if (group === null) return 0;
+  const children = 'all' in group ? group.all : group.any;
+  return children.reduce(
+    (sum, node) => sum + ('all' in node || 'any' in node ? countRules(node) : 1),
+    0,
+  );
+}
+
+/**
+ * The Filter pill (M11): same shape as the Group and Sorting pills, because it
+ * is the same kind of thing — one of the axes a view is configured along.
+ */
+function FilterControl({
+  filters,
+  fields,
+  onChange,
+}: {
+  filters: FilterGroup | null;
+  fields: ColumnDef[];
+  onChange: (next: FilterGroup | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const count = countRules(filters);
+  const active = count > 0;
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        type="button"
+        data-testid="filter-control"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className={[
+          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-[12.5px]',
+          active
+            ? 'border-[var(--cortex-300)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
+            : 'border-[var(--n-300)] bg-[var(--n-0)] text-[var(--n-700)] hover:border-[var(--n-400)]',
+        ].join(' ')}
+      >
+        <Icon name="list-filter" size={13} color={active ? 'var(--cortex-600)' : 'var(--n-500)'} />
+        Filter
+        {count > 0 && (
+          <span className="[font-family:var(--font-mono)] text-[11px] opacity-70">{count}</span>
+        )}
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close filter"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+          />
+          <FixedBelowAnchor>
+            <div className="w-[520px] max-w-[calc(100vw-32px)] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]">
+              <div className="px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+                Filter this view
+              </div>
+              <FilterBuilder filters={filters} fields={fields} onChange={onChange} />
+            </div>
+          </FixedBelowAnchor>
+        </>
+      )}
+    </span>
+  );
 }
