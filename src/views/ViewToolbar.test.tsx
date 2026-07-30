@@ -12,7 +12,6 @@ const presentation: Presentation = {
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
   columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
-  hierarchy: [],
 };
 
 describe('slugifyViewId', () => {
@@ -78,19 +77,37 @@ describe('ViewToolbar', () => {
     expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'tree' });
   });
 
-  it('shows the nesting chain only on the hierarchy layout', () => {
-    const { rerender } = render(
-      <ViewToolbar presentation={presentation} onChange={vi.fn()} schema={emptySchema()} />,
-    );
-    expect(screen.queryByTestId('hierarchy-chain')).toBeNull();
-    rerender(
+  // M9.7: there is no separate nesting control. Grouping by a property bands
+  // records; grouping by a relation nests them — one chain, one question.
+  it('has one grouping control, not a group control and a nesting control', () => {
+    render(
       <ViewToolbar
         presentation={{ ...presentation, type: 'tree' }}
         onChange={vi.fn()}
         schema={emptySchema()}
       />,
     );
-    expect(screen.getByTestId('hierarchy-chain')).toBeTruthy();
+    expect(screen.getByTestId('group-chain')).toBeTruthy();
+    expect(screen.queryByTestId('hierarchy-chain')).toBeNull();
+  });
+
+  it('a relation level reads as nesting in the summary', () => {
+    render(
+      <ViewToolbar
+        presentation={{
+          ...presentation,
+          group: [
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+        schema={emptySchema()}
+      />,
+    );
+    expect(screen.getByTestId('group-chain').textContent).toContain('Nest');
   });
 
   // Task 8: the Save-view button moved to the project tab row ("New view");

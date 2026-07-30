@@ -5,6 +5,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
+import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { typeStyle } from '@/engine/typeCatalog';
 import { setNoteTitle } from '@/lib/ipc';
@@ -155,6 +156,8 @@ export function DetailPanel() {
             Renders nothing when there is no history, so a note you just
             created does not get a heading over an empty list. */}
         <GitHistoryPanel path={entry.path} />
+        {/* M9.7 — the diff appears under the body, not over the panel. */}
+        <InlineDiff path={entry.path} />
       </div>
       <footer className="flex items-center gap-3 border-t border-[var(--n-100)] px-4 py-2.5 [font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">
         <span>Created {entry.createdAt.slice(0, 10)}</span>

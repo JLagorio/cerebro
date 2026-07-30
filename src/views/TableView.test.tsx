@@ -14,7 +14,6 @@ const presentation: Presentation = {
   group: [],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
   columns: [{ field: 'status' }, { field: 'priority' }],
-  hierarchy: [],
 };
 
 function setup() {

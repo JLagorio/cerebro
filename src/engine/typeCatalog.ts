@@ -208,6 +208,5 @@ export function typePresentation(typeName: string, schema: Schema): Presentation
       fields.length > 0
         ? fields.slice(0, 6).map((f) => ({ field: f.name }))
         : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
-    hierarchy: [],
   };
 }

@@ -1,3 +1,4 @@
+import { bandLevels } from './types';
 import type {
   Entry,
   FieldDef,
@@ -120,11 +121,14 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
  */
 export function groupTree(
   entries: Entry[],
-  specs: GroupSpec[],
+  group: GroupSpec[],
   schema: Schema,
   depth = 0,
   parentPath = '',
 ): GroupNode[] {
+  // M9.7: only the property levels band. Relation levels nest, which is a
+  // different rendering — they are handed to the row walker instead.
+  const specs = bandLevels(group);
   const spec = specs[depth];
   if (spec === undefined) return [];
 

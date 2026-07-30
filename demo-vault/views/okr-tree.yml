@@ -8,7 +8,15 @@ source:
 filters: null
 presentation:
   type: tree
-  group: []
+  # M9.7: ONE chain. A level names a property (records band by its value) or
+  # a relation (records nest under what they link to). Level 0 inverts the
+  # link key results hold — `objective:` points UP, so the parent needs no
+  # duplicate list; level 1 follows the list key results DO hold. Mixing the
+  # two directions is the point: a chain should not care which side of each
+  # link the data lives on.
+  group:
+    - relation: { type: Key result, field: objective }
+    - relation: { direction: forward, field: deliverables }
   sort:
     - field: title
       dir: asc
@@ -17,13 +25,3 @@ presentation:
     - field: owner
     - field: progress
     - field: key_result_count
-  # M9.1: an ordered descent chain, one spec per depth. Level 0 inverts the
-  # link key results hold (`objective:` points UP, so the parent needs no
-  # duplicate list); level 1 follows the list key results DO hold. Mixing the
-  # two directions in one chain is the point — a hierarchy should not care
-  # which side of each link the data lives on.
-  hierarchy:
-    - type: Key result
-      field: objective
-    - direction: forward
-      field: deliverables

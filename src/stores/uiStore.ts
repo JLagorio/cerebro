@@ -23,6 +23,18 @@ interface UiState {
   collapsed: Record<string, Record<string, boolean>>;
   toggleCollapsed(scope: string, key: string): void;
   isCollapsed(scope: string, key: string): boolean;
+  /**
+   * The diff currently being read, shown INLINE in place of the editor
+   * rather than in a dialog (M9.7).
+   *
+   * A diff is a way of looking at the note you are already on, not a
+   * separate thing that interrupts it — a modal makes it impossible to
+   * scroll the note beside its own history, and traps focus for something
+   * you are only reading.
+   */
+  diffView: { path: string; commit: string | null } | null;
+  openDiff(path: string, commit?: string | null): void;
+  closeDiff(): void;
   // File-tree expand state, persisted across sessions (M2 Task 10).
   expandedFolders: Record<string, boolean>;
   toggleFolder(path: string): void;
@@ -243,6 +255,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AUTO_CHECKPOINT_KEY, String(v));
     set({ autoCheckpoint: v });
   },
+
+  diffView: null,
+  openDiff: (path, commit = null) => set({ diffView: { path, commit } }),
+  closeDiff: () => set({ diffView: null }),
 
   collapsed: {},
   toggleCollapsed: (scope, key) =>

@@ -58,7 +58,6 @@ const boardView: ViewFile = {
       group: [{ field: 'status' }],
       sort: [{ field: 'modifiedAt', dir: 'desc' }],
       columns: [{ field: 'key' }, { field: 'status' }],
-      hierarchy: [],
     },
   },
 };

@@ -12,7 +12,6 @@ const presentation: Presentation = {
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
   columns: [{ field: 'status' }, { field: 'priority' }, { field: 'assignee' }],
-  hierarchy: [],
 };
 
 afterEach(cleanup);

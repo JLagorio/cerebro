@@ -5,6 +5,7 @@ import { useLearnRunner } from '@/agent/useLearnRunner';
 import { CheckpointHost } from '@/git/CheckpointHost';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
+import { StatusBar } from '@/app/StatusBar';
 import { createView } from '@/app/viewActions';
 import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog';
 import { QuickOpen } from '@/app/QuickOpen';
@@ -176,6 +177,9 @@ function App() {
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
         </div>
+        {/* M9.7 — everything ambient about the vault in one strip, and every
+            segment of it is a control rather than a readout. */}
+        <StatusBar />
       </div>
       {aiPanelOpen && <AiPanel />}
       {newViewOpen && (

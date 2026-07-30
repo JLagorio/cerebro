@@ -10,11 +10,8 @@ import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
-import { Dialog } from '@/components/ui/Dialog';
 import { resolveCollection } from '@/engine/collections';
-import { DiffView } from '@/git/DiffView';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
-import { getFileDiff } from '@/lib/gitIpc';
 import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
 import { resolveTarget } from '@/engine/wikilink';
@@ -130,11 +127,10 @@ export function AiPanel() {
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
   const openPath = useOpenPath();
-  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const openDiff = useUiStore((s) => s.openDiff);
 
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [draft, setDraft] = useState('');
-  const [diff, setDiff] = useState<{ path: string; text: string } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // M9.4: an agent turn that wrote files becomes its own commit, so its work
@@ -204,12 +200,11 @@ export function AiPanel() {
     setDraft('');
   };
 
+  // M9.7: open the note and show its diff there, rather than stacking a
+  // dialog over the panel that produced it.
   const viewDiff = (path: string) => {
-    if (vaultPath === null) return;
-    setDiff({ path, text: '' });
-    void getFileDiff(vaultPath, path)
-      .then((text) => setDiff({ path, text }))
-      .catch(() => setDiff({ path, text: '' }));
+    openPath(path);
+    openDiff(path);
   };
 
   const openTarget = (target: string) => {
@@ -295,19 +290,6 @@ export function AiPanel() {
         </div>
       </div>
 
-      {/* M9.4 + M9.5: read what the assistant actually wrote before deciding
-          whether to keep it. */}
-      {diff !== null && (
-        <Dialog
-          open
-          onClose={() => setDiff(null)}
-          title={diff.path}
-          width={720}
-          secondaryAction={{ label: 'Close', onClick: () => setDiff(null) }}
-        >
-          <DiffView diff={diff.text} emptyLabel="No uncommitted changes to this file." />
-        </Dialog>
-      )}
     </aside>
   );
 }

@@ -9,8 +9,9 @@ import {
   parseDescentValue,
 } from '@/engine/hierarchyOptions';
 import { humanize } from '@/engine/schema';
-import type { ChildrenSpec, FieldDef, Presentation, Schema, SortSpec } from '@/engine/types';
-import { MAX_GROUP_DEPTH, MAX_HIERARCHY_DEPTH } from '@/engine/views';
+import { bandLevels, nestLevels } from '@/engine/types';
+import type { FieldDef, GroupSpec, Presentation, Schema, SortSpec } from '@/engine/types';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 
 // Fallback options for surfaces that don't pass declared fields (the project
 // canvas is Work-item-only, so its groupable fields are known statically).
@@ -131,22 +132,58 @@ export function ViewToolbar({
   onAddProperty,
 }: ViewToolbarProps) {
   const declared = fields ?? [];
-  const isTree = presentation.type === 'tree';
 
-  // --- grouping chain -------------------------------------------------
-  const groupTaken = new Set(presentation.group.map((g) => g.field));
-  const groupable = availableFields(declared, GROUPABLE_KINDS, groupTaken);
-  const groupRows: ChainRow[] = presentation.group.map((g) => ({
-    value: g.field,
-    dir: g.dir ?? 'asc',
-    // Each level offers its own field plus every field no OTHER level took.
-    options: dedupe([
-      { value: g.field, label: humanize(g.field) },
-      ...availableFields(declared, GROUPABLE_KINDS, without(groupTaken, g.field)),
-    ]),
+  // --- grouping chain (M9.7) ------------------------------------------
+  // ONE chain. A level bands by a property or descends a relation; the
+  // options list offers both, because both answer the same question — what
+  // is the next level down?
+  const bands = bandLevels(presentation.group);
+  const bandTaken = new Set(bands.map((g) => g.field));
+
+  /** Options for the level at `index`, which depends on what precedes it. */
+  const optionsForLevel = (index: number): { value: string; label: string }[] => {
+    const before = presentation.group.slice(0, index);
+    const nestedBefore = nestLevels(before).length;
+    // A relation level changes the TYPE of everything below it, so the
+    // properties on offer are that type's, not the view source's.
+    const typeHere = schema === undefined ? sourceType : (chainTypes(sourceType, nestLevels(before), schema).pop() ?? null);
+    const fieldsHere =
+      typeHere === null || schema === undefined ? declared : (schema.types.get(typeHere)?.fields ?? declared);
+    const own = presentation.group[index];
+    const propertyOptions = fieldsHere
+      .filter((f) => GROUPABLE_KINDS.has(f.kind))
+      .filter((f) => own?.field === f.name || !bandTaken.has(f.name))
+      .map((f) => ({ value: `property:${f.name}`, label: humanize(f.name) }));
+    const relationOptions =
+      schema === undefined || nestedBefore >= MAX_NEST_DEPTH
+        ? []
+        : descentOptions(typeHere, schema).map((o) => ({ value: o.value, label: `↳ ${o.label}` }));
+    return dedupe([...propertyOptions, ...relationOptions]);
+  };
+
+  const levelValue = (spec: GroupSpec): string =>
+    spec.descend === undefined ? `property:${spec.field}` : descentValue(spec.descend);
+
+  const decodeLevel = (value: string): GroupSpec | null => {
+    if (value.startsWith('property:')) return { field: value.slice('property:'.length) };
+    const descend = parseDescentValue(value);
+    return descend === null ? null : { field: descend.field, descend };
+  };
+
+  const groupRows: ChainRow[] = presentation.group.map((spec, i) => ({
+    value: levelValue(spec),
+    dir: spec.descend === undefined ? (spec.dir ?? 'asc') : undefined,
+    options: optionsForLevel(i),
   }));
 
-  const setGroup = (next: Presentation['group']) => onChange({ ...presentation, group: next });
+  const setGroup = (next: GroupSpec[]) => onChange({ ...presentation, group: next });
+
+  const groupSummary =
+    presentation.group.length === 0
+      ? 'Group'
+      : presentation.group[0].descend === undefined
+        ? `Group: ${humanize(presentation.group[0].field).toLowerCase()}`
+        : `Nest: ${humanize(presentation.group[0].field).toLowerCase()}`;
 
   // --- sort chain -----------------------------------------------------
   const sortTaken = new Set(presentation.sort.map((s) => s.field));
@@ -165,22 +202,6 @@ export function ViewToolbar({
   }));
 
   const setSort = (next: SortSpec[]) => onChange({ ...presentation, sort: next });
-
-  // --- hierarchy chain ------------------------------------------------
-  // Level n+1's options come from the type level n LANDS on, which is what
-  // makes Objective → Key result → Work item selectable at all.
-  const levelTypes = schema === undefined ? [] : chainTypes(sourceType, presentation.hierarchy, schema);
-  const hierarchyRows: ChainRow[] = presentation.hierarchy.map((spec, i) => ({
-    value: descentValue(spec),
-    options: (schema === undefined ? [] : descentOptions(levelTypes[i] ?? null, schema)).map((o) => ({
-      value: o.value,
-      label: o.label,
-    })),
-  }));
-  const nextDescent =
-    schema === undefined ? [] : descentOptions(levelTypes[presentation.hierarchy.length] ?? null, schema);
-
-  const setHierarchy = (next: ChildrenSpec[]) => onChange({ ...presentation, hierarchy: next });
 
   return (
     <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
@@ -204,34 +225,46 @@ export function ViewToolbar({
         }
       />
 
-      {/* The split browser is a flat ordered list, so grouping doesn't apply.
-          A hierarchy groups ABOVE its roots, so it keeps one level only. */}
+      {/* M9.7: one Group control. Its options list properties AND relations,
+          so "band by status" and "nest under the objective" are the same
+          gesture — which is what they always were. */}
       {presentation.type !== 'split' && (
         <ChainBuilder
           testId="group-chain"
-          label="Grouping"
+          label="Group"
           icon="rows-3"
-          summary={
-            presentation.group.length === 0
-              ? 'Group'
-              : `Group: ${humanize(presentation.group[0].field).toLowerCase()}`
-          }
+          summary={groupSummary}
           rows={groupRows}
-          addOptions={groupable}
-          addLabel="Add a grouping level…"
-          max={isTree ? 1 : MAX_GROUP_DEPTH}
-          emptyHint="Records are listed flat. Add a level to band them by a property."
-          blockedHint="This type declares no other groupable property."
-          onChange={(i, v) => setGroup(presentation.group.map((g, j) => (j === i ? { ...g, field: v } : g)))}
+          addOptions={optionsForLevel(presentation.group.length)}
+          addLabel="Add a level…"
+          max={MAX_GROUP_DEPTH + MAX_NEST_DEPTH}
+          emptyHint="Records are listed flat. Group by a property to band them, or by a relation to nest them."
+          blockedHint="Nothing left to group or nest by at this level."
+          onChange={(i, v) => {
+            const level = decodeLevel(v);
+            if (level === null) return;
+            // Changing a relation level invalidates everything below it —
+            // those options were resolved against the old type.
+            const tail =
+              presentation.group[i]?.descend !== undefined || level.descend !== undefined
+                ? []
+                : presentation.group.slice(i + 1);
+            setGroup([...presentation.group.slice(0, i), level, ...tail]);
+          }}
           onToggleDir={(i) =>
             setGroup(
               presentation.group.map((g, j) =>
-                j === i ? { ...g, dir: (g.dir ?? 'asc') === 'asc' ? 'desc' : 'asc' } : g,
+                j === i && g.descend === undefined
+                  ? { ...g, dir: (g.dir ?? 'asc') === 'asc' ? 'desc' : 'asc' }
+                  : g,
               ),
             )
           }
           onRemove={(i) => setGroup(presentation.group.filter((_, j) => j !== i))}
-          onAdd={(v) => setGroup([...presentation.group, { field: v }])}
+          onAdd={(v) => {
+            const level = decodeLevel(v);
+            if (level !== null) setGroup([...presentation.group, level]);
+          }}
         />
       )}
 
@@ -257,35 +290,6 @@ export function ViewToolbar({
         onRemove={(i) => setSort(presentation.sort.filter((_, j) => j !== i))}
         onAdd={(v) => setSort([...presentation.sort, { field: v, dir: 'asc' }])}
       />
-
-      {/* M9.1: the descent chain, reachable from the toolbar rather than only
-          from the view settings dialog. */}
-      {isTree && schema !== undefined && (
-        <ChainBuilder
-          testId="hierarchy-chain"
-          label="Nesting"
-          icon="list-tree"
-          summary={presentation.hierarchy.length === 0 ? 'Nesting' : `Nested ${presentation.hierarchy.length} deep`}
-          rows={hierarchyRows}
-          addOptions={nextDescent.map((o) => ({ value: o.value, label: o.label }))}
-          addLabel="Add a level…"
-          max={MAX_HIERARCHY_DEPTH}
-          emptyHint="Rows are flat. Pick a relation to nest children underneath them."
-          blockedHint="Nothing links to this level's type, so the chain ends here."
-          onChange={(i, v) => {
-            const spec = parseDescentValue(v);
-            if (spec === null) return;
-            // Changing a level invalidates everything below it — those
-            // relations were computed against the old type.
-            setHierarchy([...presentation.hierarchy.slice(0, i), spec]);
-          }}
-          onRemove={(i) => setHierarchy(presentation.hierarchy.slice(0, i))}
-          onAdd={(v) => {
-            const spec = parseDescentValue(v);
-            if (spec !== null) setHierarchy([...presentation.hierarchy, spec]);
-          }}
-        />
-      )}
 
       {/* M3.4: every view controls which properties it shows. The split
           browser has its own full property panel, so it opts out. */}

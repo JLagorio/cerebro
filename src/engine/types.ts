@@ -106,17 +106,39 @@ export type Selection =
   | { kind: 'settings' };
 
 /**
- * One level of grouping (M9.1). A view holds an ordered chain of these —
- * `[status, assignee]` groups by status, then by assignee inside each status
- * band. The single `groupBy: string | null` it replaces could only ever
- * express the first entry.
+ * One level of a view's grouping chain (M9.1, unified M9.7).
+ *
+ * A level names EITHER a property — records band by its value — or a
+ * relation, in which case records NEST under the ones they link to.
+ *
+ * These were two separate axes, `group` and `hierarchy`, which is one
+ * concept wearing two hats: both answer "what is the next level down?".
+ * Splitting them meant a table could not nest, a hierarchy could not band,
+ * and the user had to learn two controls to say one thing.
  */
 export interface GroupSpec {
+  /** Property to band by, or the name of the relation to descend. */
   field: string;
+  /**
+   * Present ⇒ this level descends a relation instead of banding a value.
+   * `field` is that relation's name either way, so a chain reads the same
+   * whichever kind of level it is.
+   */
+  descend?: ChildrenSpec;
   /** Order of the GROUPS themselves; declared option order when omitted. */
   dir?: 'asc' | 'desc';
   /** Drop groups with no entries. Boards want them (they are the columns). */
   hideEmpty?: boolean;
+}
+
+/** Levels that band by a property value. */
+export function bandLevels(group: GroupSpec[]): GroupSpec[] {
+  return group.filter((g) => g.descend === undefined);
+}
+
+/** Levels that nest by following a relation, in descent order. */
+export function nestLevels(group: GroupSpec[]): ChildrenSpec[] {
+  return group.flatMap((g) => (g.descend === undefined ? [] : [g.descend]));
 }
 
 /** One key of a multi-key sort (M9.1). First non-zero comparison wins. */
@@ -149,13 +171,6 @@ export interface Presentation {
   /** Ordered sort chain; never empty in practice (parse supplies a default). */
   sort: SortSpec[];
   columns: ColumnSpec[];
-  /**
-   * Ordered descent chain, one spec per depth (M9.1). `[Objective→Key result,
-   * Key result→Work item]` nests three levels. The single `childrenVia` it
-   * replaces was applied at EVERY depth, so a hierarchy could only ever be
-   * one relation deep.
-   */
-  hierarchy: ChildrenSpec[];
   rowHeight?: 'compact' | 'default' | 'tall';
 }
 

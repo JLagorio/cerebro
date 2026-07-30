@@ -9,7 +9,6 @@ const DEFAULT_LIST_PRESENTATION = {
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
   columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
-  hierarchy: [],
 };
 
 const FOUNDATIONS = 'projects/foundations/project.md';
@@ -115,7 +114,6 @@ function mkView(partial: Partial<ViewFile['definition']> & { id: string }): View
         group: [{ field: 'status' }],
         sort: [{ field: 'modifiedAt', dir: 'desc' }],
         columns: [{ field: 'key' }, { field: 'status' }],
-        hierarchy: [],
       },
       ...definition,
     },
@@ -170,7 +168,6 @@ describe('resolveCollection', () => {
         group: [{ field: 'status' }],
         sort: [{ field: 'modifiedAt', dir: 'asc' }],
         columns: [{ field: 'key' }, { field: 'status' }],
-        hierarchy: [],
       },
     });
     const collection = resolveCollection({ kind: 'view', id: 'done-work' }, entries, schema, [view]);
@@ -236,7 +233,6 @@ describe('resolveCollection', () => {
         group: [],
         sort: [{ field: 'priority', dir: 'asc' }],
         columns: [{ field: 'key' }],
-        hierarchy: [],
       },
     });
     const collection = resolveCollection(
@@ -275,7 +271,6 @@ describe('resolveCollection', () => {
         group: [],
         sort: [{ field: 'priority', dir: 'asc' }],
         columns: [{ field: 'key' }],
-        hierarchy: [],
       },
     });
     const collection = resolveCollection({ kind: 'view', id: 'by-due' }, all, schemaAll, [view]);

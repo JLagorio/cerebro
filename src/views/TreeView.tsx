@@ -7,6 +7,7 @@ import { kindMeta, progressRatio } from '@/engine/properties';
 import { childrenAt } from '@/engine/relations';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
+import { nestLevels } from '@/engine/types';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useUiStore } from '@/stores/uiStore';
@@ -123,7 +124,8 @@ export function TreeView({
   // opens the detail panel. No sidebar special-casing needed.
   // M9.3: in-place, so opening a row keeps the hierarchy on screen.
   const openPath = useOpenPath('in-place');
-  const hierarchy = presentation.hierarchy;
+  // M9.7: nesting is the relation levels of the ONE grouping chain.
+  const hierarchy = nestLevels(presentation.group);
 
   const resolved = useMemo(
     () => resolveColumns(presentation.columns, fields),

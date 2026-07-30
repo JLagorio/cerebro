@@ -2,14 +2,12 @@ import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
-import { chainTypes, descentOptions, descentValue, parseDescentValue } from '@/engine/hierarchyOptions';
 import { listTypes } from '@/engine/typeCatalog';
-import type { ChildrenSpec, Entry, Schema, ViewDefinition } from '@/engine/types';
-import { DEFAULT_PRESENTATION, MAX_HIERARCHY_DEPTH } from '@/engine/views';
+import type { Entry, Schema, ViewDefinition } from '@/engine/types';
+import { DEFAULT_PRESENTATION } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 
 const ANY = '__any__';
-const NONE = '__none__';
 
 /** A fresh view over a type, with that type's fields as its columns. */
 export function newViewDefinition(typeName: string | null, schema: Schema): ViewDefinition {
@@ -29,7 +27,6 @@ export function newViewDefinition(typeName: string | null, schema: Schema): View
         fields.length > 0
           ? fields.slice(0, 6).map((f) => ({ field: f.name }))
           : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
-      hierarchy: [],
     },
   };
 }
@@ -66,18 +63,6 @@ export function ViewSettingsDialog({
     .sort((a, b) => a.title.localeCompare(b.title));
 
   const sourceFields = def.source.type === null ? [] : (schema.types.get(def.source.type)?.fields ?? []);
-
-  // M9.1: the descent CHAIN, not a single relation. Level n+1's options come
-  // from the type level n lands on, which is what makes Objective → Key
-  // result → Work item expressible at all.
-  const levelTypes = chainTypes(def.source.type, def.presentation.hierarchy, schema);
-  const nextOptions = descentOptions(
-    levelTypes[def.presentation.hierarchy.length] ?? null,
-    schema,
-  );
-
-  const setHierarchy = (hierarchy: ChildrenSpec[]) =>
-    setDef({ ...def, presentation: { ...def.presentation, hierarchy } });
 
   return (
     <Dialog
@@ -131,7 +116,9 @@ export function ViewSettingsDialog({
                   presentation: {
                     ...def.presentation,
                     columns: fields.slice(0, 6).map((f) => ({ field: f.name })),
-                    hierarchy: [],
+                    // The grouping chain names properties and relations of
+                    // the OLD type; none of it survives a source change.
+                    group: [],
                   },
                 });
               }}
@@ -179,71 +166,6 @@ export function ViewSettingsDialog({
             />
           </div>
         </div>
-
-        {def.presentation.type === 'tree' && (
-          <div>
-            <span className={label}>Nest rows by</span>
-            <div className="flex flex-col gap-1.5">
-              {def.presentation.hierarchy.map((spec, i) => (
-                <div key={i} className="flex items-center gap-1.5">
-                  <span className="w-12 flex-none text-[11px] text-[var(--n-400)]">
-                    {i === 0 ? 'Then' : `Level ${i + 1}`}
-                  </span>
-                  <Dropdown
-                    size="sm"
-                    label={`Hierarchy level ${i + 1}`}
-                    width="100%"
-                    options={descentOptions(levelTypes[i] ?? null, schema).map((o) => ({
-                      value: o.value,
-                      label: o.label,
-                    }))}
-                    value={descentValue(spec)}
-                    onChange={(v) => {
-                      const next = parseDescentValue(v);
-                      // Changing a level invalidates everything under it —
-                      // those relations were resolved against the old type.
-                      if (next !== null) setHierarchy([...def.presentation.hierarchy.slice(0, i), next]);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    aria-label={`Remove hierarchy level ${i + 1}`}
-                    onClick={() => setHierarchy(def.presentation.hierarchy.slice(0, i))}
-                    className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              {def.presentation.hierarchy.length < MAX_HIERARCHY_DEPTH && nextOptions.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <span className="w-12 flex-none text-[11px] text-[var(--n-400)]">
-                    {def.presentation.hierarchy.length === 0 ? 'Then' : 'then'}
-                  </span>
-                  <Dropdown
-                    size="sm"
-                    label="Add hierarchy level"
-                    width="100%"
-                    options={[
-                      { value: NONE, label: 'Add a level…' },
-                      ...nextOptions.map((o) => ({ value: o.value, label: o.label })),
-                    ]}
-                    value={NONE}
-                    onChange={(v) => {
-                      const next = parseDescentValue(v);
-                      if (next !== null) setHierarchy([...def.presentation.hierarchy, next]);
-                    }}
-                  />
-                </div>
-              )}
-              {def.presentation.hierarchy.length === 0 && nextOptions.length === 0 && (
-                <p className="m-0 text-[11.5px] text-[var(--n-400)]">
-                  Nothing links to this type, so its rows cannot nest yet.
-                </p>
-              )}
-            </div>
-          </div>
-        )}
 
         <div>
           <span className={label}>Filters</span>

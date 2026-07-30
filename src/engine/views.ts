@@ -23,7 +23,6 @@ export const DEFAULT_PRESENTATION: Presentation = {
     { field: 'key' }, { field: 'status' }, { field: 'priority' },
     { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
   ],
-  hierarchy: [],
 };
 
 /** Deep copy — presentations are edited in component state and must not
@@ -31,10 +30,9 @@ export const DEFAULT_PRESENTATION: Presentation = {
 export function clonePresentation(p: Presentation): Presentation {
   return {
     ...p,
-    group: p.group.map((g) => ({ ...g })),
+    group: p.group.map((g) => ({ ...g, ...(g.descend ? { descend: { ...g.descend } } : {}) })),
     sort: p.sort.map((s) => ({ ...s })),
     columns: p.columns.map((c) => ({ ...c })),
-    hierarchy: p.hierarchy.map((h) => ({ ...h })),
   };
 }
 
@@ -67,8 +65,8 @@ function asRecord(raw: unknown): Record<string, unknown> {
 }
 
 const LAYOUTS = new Set(['list', 'board', 'split', 'table', 'tree', 'calendar']);
-/** Beyond this a hierarchy stops being legible and starts being a cycle. */
-export const MAX_HIERARCHY_DEPTH = 6;
+/** Beyond this a nesting chain stops being legible and starts being a cycle. */
+export const MAX_NEST_DEPTH = 6;
 /** Notion caps sub-grouping here for the same reason: nesting stops reading. */
 export const MAX_GROUP_DEPTH = 3;
 
@@ -89,7 +87,6 @@ function parsePresentation(raw: unknown): Presentation {
     group: parseGroupChain(obj),
     sort: parseSortChain(obj),
     columns: parseColumns(obj),
-    hierarchy: parseHierarchy(obj),
     rowHeight:
       obj.rowHeight === 'compact' || obj.rowHeight === 'tall' || obj.rowHeight === 'default'
         ? obj.rowHeight
@@ -97,27 +94,88 @@ function parsePresentation(raw: unknown): Presentation {
   };
 }
 
+/**
+ * The grouping chain (M9.7). A level is a property to band by, or a relation
+ * to descend — `descend:` / `relation:` marks the second kind.
+ *
+ * Also migrates the two shapes this replaces: v1's single `groupBy`, and
+ * M9.1's separate `hierarchy` array, whose levels append to the chain as
+ * relation levels.
+ */
 function parseGroupChain(obj: Record<string, unknown>): GroupSpec[] {
+  const levels: GroupSpec[] = [];
+
   if (Array.isArray(obj.group)) {
-    return obj.group
-      .map((raw): GroupSpec | null => {
-        if (typeof raw === 'string' && raw.trim() !== '') return { field: raw.trim() };
-        const g = asRecord(raw);
-        if (typeof g.field !== 'string' || g.field.trim() === '') return null;
-        const spec: GroupSpec = { field: g.field.trim() };
-        if (g.dir === 'asc' || g.dir === 'desc') spec.dir = g.dir;
-        if (g.hideEmpty === true) spec.hideEmpty = true;
-        return spec;
-      })
-      .filter((g): g is GroupSpec => g !== null)
-      .slice(0, MAX_GROUP_DEPTH);
+    for (const raw of obj.group) {
+      if (typeof raw === 'string' && raw.trim() !== '') {
+        levels.push({ field: raw.trim() });
+        continue;
+      }
+      const g = asRecord(raw);
+      // A relation level: `descend:`/`relation:` holds the spec, and `field`
+      // is optional because the spec already names the relation.
+      const descend = parseChildrenSpec(g.descend ?? g.relation);
+      if (descend !== null) {
+        levels.push({ field: descend.field, descend });
+        continue;
+      }
+      if (typeof g.field !== 'string' || g.field.trim() === '') continue;
+      const spec: GroupSpec = { field: g.field.trim() };
+      if (g.dir === 'asc' || g.dir === 'desc') spec.dir = g.dir;
+      if (g.hideEmpty === true) spec.hideEmpty = true;
+      levels.push(spec);
+    }
+  } else if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '') {
+    levels.push({ field: obj.groupBy.trim() });
+  } else if (obj.groupBy !== null && obj.hierarchy === undefined && obj.childrenVia === undefined) {
+    // No grouping stated at all — the default. An explicit `groupBy: null`,
+    // or a file that only declared a hierarchy, means "no bands" rather than
+    // "give me the default bands".
+    levels.push(...DEFAULT_PRESENTATION.group.map((g) => ({ ...g })));
   }
-  // v1: `groupBy: status` | `groupBy: null` (explicitly flat) | absent.
-  if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '') {
-    return [{ field: obj.groupBy.trim() }];
+
+  // M9.1 `hierarchy:` and v1 `childrenVia:` become relation levels.
+  const legacy: ChildrenSpec[] = Array.isArray(obj.hierarchy)
+    ? obj.hierarchy.map(parseChildrenSpec).filter((s): s is ChildrenSpec => s !== null)
+    : [];
+  const single = parseChildrenSpec(obj.childrenVia);
+  if (legacy.length === 0 && single !== null) legacy.push(single);
+  for (const descend of legacy) {
+    if (levels.some((l) => l.descend !== undefined && sameDescent(l.descend, descend))) continue;
+    levels.push({ field: descend.field, descend });
   }
-  if (obj.groupBy === null) return [];
-  return DEFAULT_PRESENTATION.group.map((g) => ({ ...g }));
+
+  return capChain(levels);
+}
+
+function sameDescent(a: ChildrenSpec, b: ChildrenSpec): boolean {
+  if (a.direction !== b.direction) return false;
+  if (a.direction === 'reverse' && b.direction === 'reverse') {
+    return a.type === b.type && a.field === b.field;
+  }
+  return a.field === b.field;
+}
+
+/**
+ * Cap each kind of level separately. Bands stop being legible past three;
+ * relation levels are bounded by the cycle guard instead, and a chain that
+ * mixes them should not have its nesting truncated by its banding.
+ */
+function capChain(levels: GroupSpec[]): GroupSpec[] {
+  const out: GroupSpec[] = [];
+  let bands = 0;
+  let nests = 0;
+  for (const level of levels) {
+    if (level.descend === undefined) {
+      if (bands >= MAX_GROUP_DEPTH) continue;
+      bands += 1;
+    } else {
+      if (nests >= MAX_NEST_DEPTH) continue;
+      nests += 1;
+    }
+    out.push(level);
+  }
+  return out;
 }
 
 function parseSortChain(obj: Record<string, unknown>): SortSpec[] {
@@ -160,17 +218,6 @@ function parseColumns(obj: Record<string, unknown>): ColumnSpec[] {
     return obj.visibleFields.map((f) => ({ field: String(f) }));
   }
   return DEFAULT_PRESENTATION.columns.map((c) => ({ ...c }));
-}
-
-function parseHierarchy(obj: Record<string, unknown>): ChildrenSpec[] {
-  if (Array.isArray(obj.hierarchy)) {
-    return obj.hierarchy
-      .map(parseChildrenSpec)
-      .filter((s): s is ChildrenSpec => s !== null)
-      .slice(0, MAX_HIERARCHY_DEPTH);
-  }
-  const single = parseChildrenSpec(obj.childrenVia);
-  return single === null ? [] : [single];
 }
 
 /** `key_results` (forward) or `{ type, field }` (reverse). The serialized
@@ -270,7 +317,6 @@ export function serializeView(def: ViewDefinition): string {
       group: p.group,
       sort: p.sort,
       columns: p.columns,
-      hierarchy: p.hierarchy,
       ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
     },
   });

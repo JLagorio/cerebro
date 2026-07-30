@@ -10,7 +10,6 @@ const DEFAULT_LIST_PRESENTATION = {
     { field: 'key' }, { field: 'status' }, { field: 'priority' },
     { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
   ],
-  hierarchy: [],
   rowHeight: undefined,
 };
 
@@ -62,7 +61,6 @@ describe('parseViewYaml', () => {
           group: [{ field: 'status' }],
           sort: [{ field: 'due', dir: 'asc' }],
           columns: [{ field: 'key' }, { field: 'status' }, { field: 'assignee' }],
-          hierarchy: [],
           rowHeight: undefined,
         },
       },
@@ -108,7 +106,6 @@ describe('parseViewYaml', () => {
         { field: 'key' }, { field: 'status' }, { field: 'priority' },
         { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
       ],
-      hierarchy: [],
       rowHeight: undefined,
     });
   });
@@ -201,7 +198,6 @@ describe('serializeView', () => {
         group: [],
         sort: [{ field: 'title', dir: 'asc' }],
         columns: [{ field: 'key' }, { field: 'status' }],
-        hierarchy: [],
       },
     };
     expect(parseViewYaml('sprint-board', serializeView(def)).definition).toEqual(def);
@@ -219,10 +215,12 @@ describe('serializeView', () => {
       filters: null,
       presentation: {
         type: 'tree',
-        group: [],
         sort: [{ field: 'title', dir: 'asc' }],
+        // M9.7: nesting is a level of the ONE grouping chain.
+        group: [
+          { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+        ],
         columns: [{ field: 'status' }, { field: 'progress' }],
-        hierarchy: [{ direction: 'reverse', type: 'Key result', field: 'objective' }],
       },
     };
     expect(parseViewYaml('okr-tree', serializeView(def)).definition).toEqual(def);
@@ -230,8 +228,8 @@ describe('serializeView', () => {
 
   it('accepts the shorthand `childrenVia: <field>` as a forward descent', () => {
     const view = parseViewYaml('t', 'presentation:\n  type: tree\n  childrenVia: key_results\n');
-    expect(view.definition.presentation.hierarchy).toEqual([
-      { direction: 'forward', field: 'key_results' },
+    expect(view.definition.presentation.group).toEqual([
+      { field: 'key_results', descend: { direction: 'forward', field: 'key_results' } },
     ]);
   });
 
@@ -251,11 +249,12 @@ describe('serializeView', () => {
         ].join('\n'),
       );
       const p = view.definition.presentation;
-      expect(p.group).toEqual([{ field: 'priority' }]);
       expect(p.sort).toEqual([{ field: 'due', dir: 'asc' }]);
       expect(p.columns).toEqual([{ field: 'status' }, { field: 'owner' }]);
-      expect(p.hierarchy).toEqual([
-        { direction: 'reverse', type: 'Key result', field: 'objective' },
+      // The legacy hierarchy becomes a relation LEVEL of the group chain.
+      expect(p.group).toEqual([
+        { field: 'priority' },
+        { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
       ]);
     });
 
@@ -285,22 +284,27 @@ describe('serializeView', () => {
         filters: null,
         presentation: {
           type: 'tree',
-          group: [{ field: 'status' }, { field: 'owner', dir: 'desc' }],
+          group: [
+            { field: 'status' },
+            { field: 'owner', dir: 'desc' },
+            { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+            { field: 'key_result', descend: { direction: 'reverse', type: 'Work item', field: 'key_result' } },
+          ],
           sort: [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'desc' }],
           columns: [{ field: 'status', width: 180 }, { field: 'owner', hidden: true }],
-          hierarchy: [
-            { direction: 'reverse', type: 'Key result', field: 'objective' },
-            { direction: 'reverse', type: 'Work item', field: 'key_result' },
-          ],
         },
       };
       expect(parseViewYaml('deep', serializeView(def)).definition).toEqual(def);
     });
 
-    it('truncates a hierarchy deeper than the depth guard', () => {
-      const levels = Array.from({ length: 9 }, () => '  - { type: X, field: y }').join('\n');
-      const view = parseViewYaml('deep', `presentation:\n  hierarchy:\n${levels}\n`);
-      expect(view.definition.presentation.hierarchy).toHaveLength(6);
+    it('caps nesting and banding separately', () => {
+      const levels = Array.from({ length: 9 }, (_, i) => `  - { type: T${i}, field: y }`).join('\n');
+      const view = parseViewYaml('deep', `presentation:\n  groupBy: null\n  hierarchy:\n${levels}\n`);
+      const p = view.definition.presentation;
+      // A chain that mixes both must not have its nesting truncated by the
+      // band cap, nor the other way round.
+      expect(p.group.filter((g) => g.descend !== undefined)).toHaveLength(6);
+      expect(p.group.filter((g) => g.descend === undefined)).toHaveLength(0);
     });
   });
 });

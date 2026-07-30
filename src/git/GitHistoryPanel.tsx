@@ -1,10 +1,6 @@
-import { useState } from 'react';
-import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
-import { DiffView } from '@/git/DiffView';
 import { useFileHistory } from '@/git/useGit';
-import { getFileDiffAtCommit } from '@/lib/gitIpc';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useUiStore } from '@/stores/uiStore';
 
 /** Relative dates, because "3d ago" answers the question "is this current?"
  * and an ISO timestamp does not. */
@@ -25,19 +21,9 @@ export function relativeDate(unixSeconds: number, now = Date.now()): string {
  * list is chrome, and a note you just created has no history to show.
  */
 export function GitHistoryPanel({ path }: { path: string }) {
-  const vaultPath = useVaultStore((s) => s.vaultPath);
   const { commits, loading } = useFileHistory(path);
-  const [open, setOpen] = useState<{ hash: string; message: string } | null>(null);
-  const [diff, setDiff] = useState<string>('');
-
-  const showDiff = (hash: string, message: string) => {
-    setOpen({ hash, message });
-    setDiff('');
-    if (vaultPath === null) return;
-    void getFileDiffAtCommit(vaultPath, path, hash)
-      .then(setDiff)
-      .catch(() => setDiff(''));
-  };
+  // M9.7: the diff replaces the editor in place rather than opening over it.
+  const openDiff = useUiStore((s) => s.openDiff);
 
   if (loading || commits.length === 0) return null;
 
@@ -56,7 +42,7 @@ export function GitHistoryPanel({ path }: { path: string }) {
           >
             <button
               type="button"
-              onClick={() => showDiff(c.hash, c.message)}
+              onClick={() => openDiff(path, c.hash)}
               className="w-full truncate border-0 bg-transparent p-0 text-left text-[12px] text-[var(--cortex-600)] hover:underline"
               title={`View what ${c.shortHash} changed`}
             >
@@ -71,17 +57,6 @@ export function GitHistoryPanel({ path }: { path: string }) {
         ))}
       </div>
 
-      {open !== null && (
-        <Dialog
-          open
-          onClose={() => setOpen(null)}
-          title={open.message}
-          width={720}
-          secondaryAction={{ label: 'Close', onClick: () => setOpen(null) }}
-        >
-          <DiffView diff={diff} emptyLabel="This commit did not change this file." />
-        </Dialog>
-      )}
     </div>
   );
 }

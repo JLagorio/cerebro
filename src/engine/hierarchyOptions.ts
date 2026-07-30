@@ -84,11 +84,11 @@ export function descentOptions(fromType: string | null, schema: Schema): Descent
  */
 export function chainTypes(
   sourceType: string | null,
-  hierarchy: ChildrenSpec[],
+  nesting: ChildrenSpec[],
   schema: Schema,
 ): (string | null)[] {
   const types: (string | null)[] = [sourceType];
-  for (const spec of hierarchy) {
+  for (const spec of nesting) {
     const current = types[types.length - 1];
     if (spec.direction === 'reverse') {
       types.push(spec.type);

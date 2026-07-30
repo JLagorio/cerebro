@@ -12,6 +12,7 @@ import { DocSidePanel } from '@/detail/DocSidePanel';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
+import { InlineDiff } from '@/git/InlineDiff';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import type { Entry, Selection } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, saveNote } from '@/lib/ipc';
@@ -108,6 +109,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   // The outline needs the live editor and the scroll container (Task 15).
   const [editor, setEditor] = useState<CerebroEditor | null>(null);
+  // M9.7: reading a diff swaps the editor out for it, in place.
+  const diffOpen = useUiStore((s) => s.diffView?.path === selection.path);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Bumped to force a reload after out-of-editor writes (template apply).
   const [reloadGen, setReloadGen] = useState(0);
@@ -396,13 +399,21 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               data-testid="doc-content"
               className={fullWidth ? 'px-6' : 'mx-auto w-full max-w-[820px] px-6'}
             >
-              <NoteBodyEditor
-                key={`${entry.path}#${reloadGen}`}
-                path={entry.path}
-                onReady={({ editor: e }) => setEditor(e)}
-              />
-              {/* M9.4 — this document's history, silent when it has none. */}
-              <GitHistoryPanel path={entry.path} />
+              {/* M9.7: reading a diff replaces the editor here rather than
+                  opening over it — same page, different lens. */}
+              {diffOpen ? (
+                <InlineDiff path={entry.path} />
+              ) : (
+                <>
+                  <NoteBodyEditor
+                    key={`${entry.path}#${reloadGen}`}
+                    path={entry.path}
+                    onReady={({ editor: e }) => setEditor(e)}
+                  />
+                  {/* M9.4 — this document's history, silent when it has none. */}
+                  <GitHistoryPanel path={entry.path} />
+                </>
+              )}
             </div>
           </div>
           {blank && !busy && <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />}

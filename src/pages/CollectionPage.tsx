@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { deleteView, updateView } from '@/app/viewActions';
-import { ViewSettingsDialog } from '@/app/ViewSettingsDialog';
+import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -45,6 +45,7 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
   );
 
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
+  // M9.7: the whole view configuration is a place, not a row of popovers.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   useEffect(() => {
@@ -113,7 +114,8 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
     view.definition.source.type === null ? 'Everything' : view.definition.source.type;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="collection-page">
+    <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex-none px-5 pb-2 pt-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <Icon
@@ -187,15 +189,18 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
         />
       )}
 
+      </div>
       {settingsOpen && (
-        <ViewSettingsDialog
-          initial={view.definition}
-          entries={entries}
+        <ViewSettingsPanel
+          definition={{ ...view.definition, presentation }}
+          fields={fields}
           schema={schema}
-          title="View settings"
-          onCancel={() => setSettingsOpen(false)}
-          onSubmit={(definition) => {
+          onClose={() => setSettingsOpen(false)}
+          onDelete={() => {
             setSettingsOpen(false);
+            setConfirmDelete(true);
+          }}
+          onChange={(definition) => {
             setPresentation(definition.presentation);
             void updateView(view, definition);
           }}
