@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
+import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import {
   DeleteTypeDialog,
   NewTypeDialog,
@@ -18,7 +19,7 @@ import { listTypes, type TypeListing } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode } from '@/engine/types';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
@@ -46,6 +47,10 @@ export function Sidebar({ onNewView }: SidebarProps) {
   const navigate = useNavStore((s) => s.navigate);
   const typesOpen = useUiStore((s) => s.typesOpen);
   const setTypesOpen = useUiStore((s) => s.setTypesOpen);
+  const width = useUiStore((s) => s.sidebarWidth);
+  const setWidth = useUiStore((s) => s.setSidebarWidth);
+  const collapsed = useUiStore((s) => s.sidebarCollapsed);
+  const setCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const openPath = useOpenPath();
 
   const collections = useVaultStore((s) => s.collections);
@@ -151,15 +156,54 @@ export function Sidebar({ onNewView }: SidebarProps) {
     return items;
   };
 
+  // M11: collapsed to a hairline rather than unmounted, so the reopen control
+  // stays where the sidebar was instead of moving to a different chrome.
+  if (collapsed) {
+    return (
+      <div className="flex w-8 flex-none items-start justify-center border-r border-[var(--n-200)] bg-[var(--n-0)] pt-3.5">
+        <button
+          type="button"
+          aria-label="Show sidebar"
+          data-testid="sidebar-expand"
+          onClick={() => setCollapsed(false)}
+          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        >
+          <Icon name="panel-left-open" size={15} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <nav
       aria-label="Sidebar"
-      className="flex w-[264px] flex-none flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      // `relative` hosts the drag handle; the width is a stored preference
+      // rather than a constant, because 264px is only right for some vaults
+      // and some window sizes (M11 responsiveness).
+      className="relative flex flex-none flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      style={{ width, maxWidth: '60vw' }}
     >
+      <ResizeHandle
+        label="Resize sidebar"
+        side="right"
+        width={width}
+        min={SIDEBAR_WIDTH_MIN}
+        max={SIDEBAR_WIDTH_MAX}
+        onResize={setWidth}
+      />
       <div className="flex items-center justify-between pb-2 pl-4 pr-3 pt-3.5">
-        <h1 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">
+        <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold text-[var(--n-900)]">
           {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
         </h1>
+        <button
+          type="button"
+          aria-label="Hide sidebar"
+          data-testid="sidebar-collapse"
+          onClick={() => setCollapsed(true)}
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        >
+          <Icon name="panel-left-close" size={15} />
+        </button>
       </div>
       {knowledgeMode && selection.kind === 'knowledge' ? (
         <KnowledgeNav nav={selection.nav ?? { tab: 'all' }} />

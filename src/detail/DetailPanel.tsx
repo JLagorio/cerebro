@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
+import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
@@ -11,12 +12,14 @@ import { typeStyle } from '@/engine/typeCatalog';
 import { setNoteTitle } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
-import { useUiStore } from '@/stores/uiStore';
+import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 
 export function DetailPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
   const closeDetail = useUiStore((s) => s.closeDetail);
   const toast = useUiStore((s) => s.toast);
+  const width = useUiStore((s) => s.detailWidth);
+  const setWidth = useUiStore((s) => s.setDetailWidth);
   const entry = useEntry(detailPath);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -86,11 +89,31 @@ export function DetailPanel() {
   };
 
   return (
+    // M11: a COLUMN of the layout, not an overlay pinned to the viewport.
+    //
+    // As `fixed right-0` it sat on top of the canvas, so the right-hand columns
+    // of a table — and the table's own horizontal scrollbar — were underneath
+    // it and could not be reached. Notion shrinks the content instead, which is
+    // the only arrangement where "open a record" and "read the rest of the row"
+    // are not mutually exclusive. `relative` hosts the drag handle.
     <aside
       data-testid="detail-panel"
       aria-label="Detail panel"
-      className="cb-panel-in fixed right-0 top-0 z-30 flex h-full w-[420px] flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      // The 50vw ceiling is what keeps the canvas usable in a narrow window:
+      // the stored width is a preference for a big screen, and honouring it at
+      // 1024px would leave the table a sliver. The record never takes more of
+      // the window than what it is annotating.
+      style={{ width, maxWidth: '50vw' }}
     >
+      <ResizeHandle
+        label="Resize detail panel"
+        side="left"
+        width={width}
+        min={DETAIL_WIDTH_MIN}
+        max={DETAIL_WIDTH_MAX}
+        onResize={setWidth}
+      />
       <header className="flex items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
         {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
             panel, the table, QuickOpen, and the assistant's transcript. */}

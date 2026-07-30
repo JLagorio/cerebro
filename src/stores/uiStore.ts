@@ -8,6 +8,21 @@ interface UiState {
   detailPath: string | null;
   openDetail(path: string): void;
   closeDetail(): void;
+  /**
+   * Width of the record side panel, in px (M11). Persisted.
+   *
+   * It is a stored preference rather than a constant because the panel is now
+   * a COLUMN of the layout rather than an overlay: how much of the window it
+   * takes is a trade the person reading is making between the record and the
+   * table beside it, and only they know which way it goes today.
+   */
+  detailWidth: number;
+  setDetailWidth(px: number): void;
+  /** Sidebar width in px, and whether it is collapsed. Both persisted. */
+  sidebarWidth: number;
+  setSidebarWidth(px: number): void;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed(v: boolean): void;
   quickOpenVisible: boolean;
   setQuickOpen(v: boolean): void;
   /**
@@ -171,6 +186,29 @@ const AUTO_LEARN_KEY = 'cerebro.autoLearn';
 const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
+const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
+const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
+const SIDEBAR_COLLAPSED_KEY = 'cerebro.sidebarCollapsed';
+
+/**
+ * Panel sizing (M11).
+ *
+ * 560 rather than the old 420: at 420 a record's properties column and its
+ * values were both cramped, and a date range wrapped. The ceiling exists so
+ * dragging it to full width cannot hide the canvas the panel is annotating.
+ */
+export const DETAIL_WIDTH_DEFAULT = 560;
+export const DETAIL_WIDTH_MIN = 360;
+export const DETAIL_WIDTH_MAX = 1000;
+export const SIDEBAR_WIDTH_DEFAULT = 264;
+export const SIDEBAR_WIDTH_MIN = 180;
+export const SIDEBAR_WIDTH_MAX = 460;
+
+function loadNumber(key: string, fallback: number, min: number, max: number): number {
+  const raw = Number(loadString(key, String(fallback)));
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(raw)));
+}
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -255,6 +293,25 @@ export const useUiStore = create<UiState>((set, get) => ({
   detailPath: null,
   openDetail: (path) => set({ detailPath: path }),
   closeDetail: () => set({ detailPath: null }),
+
+  detailWidth: loadNumber(DETAIL_WIDTH_KEY, DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MIN, DETAIL_WIDTH_MAX),
+  setDetailWidth: (px) => {
+    const clamped = Math.round(Math.min(DETAIL_WIDTH_MAX, Math.max(DETAIL_WIDTH_MIN, px)));
+    storeString(DETAIL_WIDTH_KEY, String(clamped));
+    set({ detailWidth: clamped });
+  },
+
+  sidebarWidth: loadNumber(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX),
+  setSidebarWidth: (px) => {
+    const clamped = Math.round(Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, px)));
+    storeString(SIDEBAR_WIDTH_KEY, String(clamped));
+    set({ sidebarWidth: clamped });
+  },
+  sidebarCollapsed: loadString(SIDEBAR_COLLAPSED_KEY, 'false') === 'true',
+  setSidebarCollapsed: (v) => {
+    storeString(SIDEBAR_COLLAPSED_KEY, String(v));
+    set({ sidebarCollapsed: v });
+  },
 
   quickOpenVisible: false,
   setQuickOpen: (v) => set({ quickOpenVisible: v }),

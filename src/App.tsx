@@ -179,8 +179,12 @@ function App() {
       <Sidebar onNewView={(collection) => setNewList({ collection })} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
+        {/* M11: the record panel is a COLUMN here, beside the canvas, rather
+            than a fixed overlay on top of it. That is what lets a table keep
+            its full horizontal scroll while a record is open. */}
+        <div className="flex min-h-0 min-w-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
+          <DetailPanel />
         </div>
         {/* M9.7 — everything ambient about the vault in one strip, and every
             segment of it is a control rather than a readout. */}
@@ -206,7 +210,6 @@ function App() {
           }}
         />
       )}
-      <DetailPanel />
       <QuickOpen />
       <ToastHost />
       <RemindersHost />
