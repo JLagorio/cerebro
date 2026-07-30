@@ -33,7 +33,10 @@ pub enum AgentEvent {
     TextDelta { text: String },
     ThinkingDelta { text: String },
     ToolStart { tool_name: String, tool_id: String, input: Option<String> },
-    ToolDone { tool_id: String },
+    // M9.5: the result travels with the completion. Action cards expand to
+    // show what a tool actually returned, and without a payload here there
+    // is nothing to expand to.
+    ToolDone { tool_id: String, output: Option<String>, is_error: bool },
     Result { text: String, session_id: Option<String> },
     Error { message: String },
     Done,
@@ -421,6 +424,40 @@ pub fn stream(
 }
 
 /// Map one CLI stream-json object onto zero or more normalized events.
+/// A tool result's text, however the CLI shaped it.
+///
+/// `content` is a bare string in some versions and an array of typed blocks
+/// in others; both appear in the same stream depending on the tool. Reading
+/// only one shape silently drops half the outputs.
+fn tool_result_text(block: &Value) -> Option<String> {
+    const LIMIT: usize = 2000;
+    let content = block.get("content")?;
+    let text = match content {
+        Value::String(s) => s.clone(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|i| {
+                i.get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .or_else(|| i.as_str().map(str::to_string))
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => other.to_string(),
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(if trimmed.chars().count() > LIMIT {
+        let head: String = trimmed.chars().take(LIMIT).collect();
+        format!("{head}…")
+    } else {
+        trimmed.to_string()
+    })
+}
+
 pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEvent> {
     let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
     match kind {
@@ -478,6 +515,11 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
+                // Truncated here rather than in the panel: a Read of a large
+                // note would otherwise cross the IPC boundary in full on
+                // every turn, to be thrown away by the renderer.
+                output: tool_result_text(b),
+                is_error: b.get("is_error").and_then(Value::as_bool).unwrap_or(false),
             })
             .collect(),
         "result" => {
@@ -726,13 +768,68 @@ mod tests {
             &json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1" }] } }),
             &mut session,
         );
-        assert!(matches!(done.as_slice(), [AgentEvent::ToolDone { tool_id }] if tool_id == "t1"));
+        assert!(matches!(done.as_slice(), [AgentEvent::ToolDone { tool_id, .. }] if tool_id == "t1"));
 
         let result = translate(
             &json!({ "type": "result", "subtype": "success", "result": "done", "session_id": "s-1" }),
             &mut session,
         );
         assert!(matches!(result.as_slice(), [AgentEvent::Result { text, .. }] if text == "done"));
+    }
+
+    // M9.5: the CLI shapes tool_result content two different ways in the same
+    // stream. Reading only one silently drops half the outputs.
+    #[test]
+    fn tool_results_carry_their_output_in_either_shape() {
+        let mut sid = None;
+        let string_form = translate(
+            &json!({ "type": "user", "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "  four notes  " }
+            ] } }),
+            &mut sid,
+        );
+        assert!(matches!(
+            string_form.as_slice(),
+            [AgentEvent::ToolDone { output: Some(text), is_error: false, .. }] if text == "four notes"
+        ));
+
+        let block_form = translate(
+            &json!({ "type": "user", "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "t2", "content": [
+                    { "type": "text", "text": "line one" },
+                    { "type": "text", "text": "line two" }
+                ] }
+            ] } }),
+            &mut sid,
+        );
+        assert!(matches!(
+            block_form.as_slice(),
+            [AgentEvent::ToolDone { output: Some(text), .. }] if text == "line one\nline two"
+        ));
+    }
+
+    #[test]
+    fn a_failed_tool_reports_as_such() {
+        let mut sid = None;
+        let events = translate(
+            &json!({ "type": "user", "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "nope", "is_error": true }
+            ] } }),
+            &mut sid,
+        );
+        assert!(matches!(events.as_slice(), [AgentEvent::ToolDone { is_error: true, .. }]));
+    }
+
+    #[test]
+    fn an_empty_tool_result_carries_no_output() {
+        let mut sid = None;
+        let events = translate(
+            &json!({ "type": "user", "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "t1", "content": "   " }
+            ] } }),
+            &mut sid,
+        );
+        assert!(matches!(events.as_slice(), [AgentEvent::ToolDone { output: None, .. }]));
     }
 
     #[test]
