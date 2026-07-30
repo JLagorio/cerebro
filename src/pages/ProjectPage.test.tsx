@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Entry, ViewFile } from '@/engine/types';
+import type { Entry, ListFile } from '@/engine/types';
 import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -43,22 +43,31 @@ const item = mkEntry({
   properties: { status: 'todo', key: 'FLD-1' },
 });
 
-const boardView: ViewFile = {
+const boardView: ListFile = {
   id: 'all-board',
   project: null,
+  collection: null,
+  path: 'all-board.list.yml',
   definition: {
     name: 'All board',
     icon: null,
     color: null,
     order: null,
     source: { type: null, project: null },
-    filters: null,
-    presentation: {
-      type: 'board',
-      groupBy: 'status',
-      orderBy: { field: 'modifiedAt', dir: 'desc' },
-      visibleFields: ['key', 'status'],
-    },
+    views: [
+      {
+        id: 'view',
+        name: 'View',
+        icon: null,
+        filters: null,
+        presentation: {
+          type: 'board',
+          group: [{ field: 'status' }],
+          sort: [{ field: 'modifiedAt', dir: 'desc' }],
+          columns: [{ field: 'key' }, { field: 'status' }],
+        },
+      },
+    ],
   },
 };
 
@@ -95,13 +104,13 @@ describe('ProjectPage', () => {
   });
 
   it('a view selection uses the saved presentation', () => {
-    render(<ProjectPage selection={{ kind: 'view', id: 'all-board' }} />);
+    render(<ProjectPage selection={{ kind: 'list', id: 'all-board' }} />);
     expect(screen.getByTestId('board-view')).toBeTruthy();
   });
 
   // Task 8: saved-view tabs on the project header.
   it('renders the Items tab plus project-scoped view tabs, not globals', () => {
-    const scoped: ViewFile = {
+    const scoped: ListFile = {
       ...boardView,
       id: 'delivery',
       project: FOUNDATIONS,
@@ -116,7 +125,7 @@ describe('ProjectPage', () => {
   });
 
   it('switching to a scoped view tab applies its presentation', () => {
-    const scoped: ViewFile = {
+    const scoped: ListFile = {
       ...boardView,
       id: 'delivery',
       project: FOUNDATIONS,
@@ -131,9 +140,9 @@ describe('ProjectPage', () => {
     expect(screen.getByTestId('list-view')).toBeTruthy();
   });
 
-  // Task 6+8: "New view" writes into the project's views/ dir (scope-deduped)
+  // Task 6+8: "New list" writes into the project's views/ dir (scope-deduped)
   // and activates the new tab.
-  it('creates a project-scoped view from the New view affordance', async () => {
+  it('creates a project-scoped list from the New list affordance', async () => {
     // The create flow rescans from the mock fs, so the fixture project must
     // exist there too (listViews scopes by the presence of project.md).
     (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs.set(
@@ -141,8 +150,8 @@ describe('ProjectPage', () => {
       '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n',
     );
     render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
-    fireEvent.click(screen.getByText('New view'));
-    fireEvent.change(screen.getByPlaceholderText('View name'), { target: { value: 'My board' } });
+    fireEvent.click(screen.getByText('New list'));
+    fireEvent.change(screen.getByPlaceholderText('List name'), { target: { value: 'My board' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(async () => {
       const views = await ipc.listViews('/demo-vault');
@@ -185,7 +194,7 @@ describe('ProjectPage', () => {
     const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
     fs.set(FOUNDATIONS, '---\ntype: Project\nkey: FLD\n---\n\n# Foundations\n');
     fs.set('projects/foundations/views/delivery.yml', 'name: Delivery\n');
-    const scoped: ViewFile = {
+    const scoped: ListFile = {
       ...boardView,
       id: 'delivery',
       project: FOUNDATIONS,
@@ -194,10 +203,13 @@ describe('ProjectPage', () => {
     useVaultStore.setState({ views: [scoped] });
     render(<ProjectPage selection={{ kind: 'project', path: FOUNDATIONS }} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Delivery' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
-    fireEvent.click(screen.getByRole('option', { name: 'No grouping' }));
+    // M9.1: the group control is a chain popover; removing its only level is
+    // what "no grouping" now means.
+    fireEvent.click(screen.getByTestId('group-chain'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove level 1' }));
     await waitFor(() => {
-      expect(fs.get('projects/foundations/views/delivery.yml')).toContain('groupBy: null');
+      // Written in v2 keys — an edited view converges on one shape.
+      expect(fs.get('projects/foundations/views/delivery.yml')).toContain('group: []');
     });
   });
 });

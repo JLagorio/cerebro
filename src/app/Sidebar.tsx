@@ -2,28 +2,42 @@ import { useMemo, useState } from 'react';
 import { FileTree } from '@/components/FileTree';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Icon } from '@/components/ui/Icon';
+import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import {
   DeleteTypeDialog,
   NewTypeDialog,
   RenameTypeDialog,
   TypeStyleDialog,
 } from '@/app/TypeDialogs';
+import { CollectionTree } from '@/app/CollectionTree';
+import { CollectionDialog } from '@/app/CollectionDialog';
+import { deleteCollection, deleteList } from '@/app/listActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
-import { listTypes, typeStyle, type TypeListing } from '@/engine/typeCatalog';
+import { collectionsTree, effectiveCollections } from '@/engine/collections';
+import { listTypes, type TypeListing } from '@/engine/typeCatalog';
+import type { CollectionFile, CollectionNode } from '@/engine/types';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
-  /** Opens the New-view dialog (M3.5: views are the top level). */
-  onNewView: () => void;
+  /**
+   * Opens the New-List builder for one Collection. The folder is required: a
+   * List always lives in a Collection, so there is no top-level variant to
+   * offer and no null to handle downstream.
+   */
+  onNewView: (collection: string) => void;
 }
 
 type TypeDialog =
   | { mode: 'new' }
   | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
+
+type CollectionDialogState =
+  | { mode: 'new' }
+  | { mode: 'rename'; collection: CollectionFile };
 
 export function Sidebar({ onNewView }: SidebarProps) {
   const entries = useVaultStore((s) => s.entries);
@@ -33,8 +47,14 @@ export function Sidebar({ onNewView }: SidebarProps) {
   const navigate = useNavStore((s) => s.navigate);
   const typesOpen = useUiStore((s) => s.typesOpen);
   const setTypesOpen = useUiStore((s) => s.setTypesOpen);
+  const width = useUiStore((s) => s.sidebarWidth);
+  const setWidth = useUiStore((s) => s.setSidebarWidth);
+  const collapsed = useUiStore((s) => s.sidebarCollapsed);
+  const setCollapsed = useUiStore((s) => s.setSidebarCollapsed);
   const openPath = useOpenPath();
 
+  const collections = useVaultStore((s) => s.collections);
+  const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
   const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
@@ -50,19 +70,64 @@ export function Sidebar({ onNewView }: SidebarProps) {
   // M3: every type the vault knows about — system, declared, and ghost.
   const types = useMemo(() => listTypes(entries, schema), [entries, schema]);
 
-  const sortedViews = useMemo(
-    () =>
-      views
-        // Project-scoped views render as tabs on their project page (Task 8),
-        // not in the sidebar — only vault-global views list here.
-        .filter((v) => v.project === null)
-        .sort(
-          (a, b) =>
-            (a.definition.order ?? 0) - (b.definition.order ?? 0) ||
-            a.definition.name.localeCompare(b.definition.name),
-        ),
-    [views],
+  // M10: one tree of Collections holding Lists, Folders and Docs. Project-scoped
+  // legacy views are excluded by collectionsTree — they render as project tabs.
+  const tree = useMemo(
+    () => collectionsTree(collections, views, entries, schema),
+    [collections, views, entries, schema],
   );
+  // The tree can contain Collections that declare no marker (a folder is one
+  // because it holds Lists), so menu actions resolve against the EFFECTIVE set
+  // rather than the declared one — otherwise right-clicking such a folder finds
+  // nothing and offers no actions at all.
+  const effective = useMemo(() => effectiveCollections(collections, views), [collections, views]);
+
+  const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
+    if (node.kind === 'collection') {
+      const file = effective.find((c) => c.folder === node.id);
+      if (file === undefined) return [];
+      const items: ContextMenuItem[] = [
+        {
+          icon: 'plus',
+          label: 'New list…',
+          onSelect: () => onNewView(node.id),
+        },
+        {
+          icon: 'pencil',
+          label: 'Rename…',
+          onSelect: () => setCollectionDialog({ mode: 'rename', collection: file }),
+        },
+      ];
+      // Only a declared Collection has a marker to remove. An implied one is a
+      // folder that holds Lists; "removing" it would have to move them, and
+      // offering an action that silently does nothing is worse than not
+      // offering it.
+      if (file.declared) {
+        items.push({
+          icon: 'folder-minus',
+          // Not "Delete": removing the marker un-collects the folder and leaves
+          // every List and Doc inside it on disk. The label has to say so, or
+          // people will expect their contents to be gone.
+          label: 'Remove collection (keeps contents)',
+          danger: true,
+          onSelect: () => void deleteCollection(file),
+        });
+      }
+      return items;
+    }
+    if (node.kind === 'list' && node.list !== undefined) {
+      const list = node.list;
+      return [
+        {
+          icon: 'trash-2',
+          label: 'Delete list',
+          danger: true,
+          onSelect: () => void deleteList(list),
+        },
+      ];
+    }
+    return [];
+  };
 
   const typeMenuItems = (listing: TypeListing): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [];
@@ -91,15 +156,54 @@ export function Sidebar({ onNewView }: SidebarProps) {
     return items;
   };
 
+  // M11: collapsed to a hairline rather than unmounted, so the reopen control
+  // stays where the sidebar was instead of moving to a different chrome.
+  if (collapsed) {
+    return (
+      <div className="flex w-8 flex-none items-start justify-center border-r border-[var(--n-200)] bg-[var(--n-0)] pt-3.5">
+        <button
+          type="button"
+          aria-label="Show sidebar"
+          data-testid="sidebar-expand"
+          onClick={() => setCollapsed(false)}
+          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        >
+          <Icon name="panel-left-open" size={15} />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <nav
       aria-label="Sidebar"
-      className="flex w-[264px] flex-none flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      // `relative` hosts the drag handle; the width is a stored preference
+      // rather than a constant, because 264px is only right for some vaults
+      // and some window sizes (M11 responsiveness).
+      className="relative flex flex-none flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      style={{ width, maxWidth: '60vw' }}
     >
+      <ResizeHandle
+        label="Resize sidebar"
+        side="right"
+        width={width}
+        min={SIDEBAR_WIDTH_MIN}
+        max={SIDEBAR_WIDTH_MAX}
+        onResize={setWidth}
+      />
       <div className="flex items-center justify-between pb-2 pl-4 pr-3 pt-3.5">
-        <h1 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">
+        <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold text-[var(--n-900)]">
           {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
         </h1>
+        <button
+          type="button"
+          aria-label="Hide sidebar"
+          data-testid="sidebar-collapse"
+          onClick={() => setCollapsed(true)}
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        >
+          <Icon name="panel-left-close" size={15} />
+        </button>
       </div>
       {knowledgeMode && selection.kind === 'knowledge' ? (
         <KnowledgeNav nav={selection.nav ?? { tab: 'all' }} />
@@ -115,48 +219,37 @@ export function Sidebar({ onNewView }: SidebarProps) {
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-2 pb-4">
-        {/* M3.5: Views are the top-level navigation — saved collections over
-            the type databases. A "project" is one of these, not a primitive. */}
+        {/* M10: Collections are the top-level navigation. A Collection is a
+            container — it holds Lists, Folders and Docs — where a "view" used
+            to be both the container and the query at once. */}
         <div className="flex items-center justify-between pr-1">
-          <div className={SECTION_LABEL}>Views</div>
+          <div className={SECTION_LABEL}>Collections</div>
           <button
             type="button"
-            aria-label="New view"
-            data-testid="new-view"
-            onClick={onNewView}
+            aria-label="New collection"
+            data-testid="new-collection"
+            onClick={() => setCollectionDialog({ mode: 'new' })}
             className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
           >
             <Icon name="plus" size={13} />
           </button>
         </div>
-        {sortedViews.length === 0 ? (
+        {tree.length === 0 ? (
           <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
-            No views yet — save one to collect any set of records.
+            No collections yet — make one to hold lists, folders, and docs.
           </div>
         ) : null}
-        {sortedViews.map((view) => {
-          const viewActive = selection.kind === 'view' && selection.id === view.id;
-          const sourceType = view.definition.source.type;
-          const style = sourceType === null ? null : typeStyle(sourceType, schema);
-          return (
-            <button
-              key={view.id}
-              type="button"
-              data-testid="sidebar-view"
-              onClick={() => navigate({ kind: 'view', id: view.id })}
-              className={rowClass(viewActive)}
-            >
-              <Icon
-                name={view.definition.icon ?? style?.icon ?? 'layout-list'}
-                size={15}
-                color={view.definition.color ?? style?.color ?? 'var(--n-500)'}
-              />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                {view.definition.name}
-              </span>
-            </button>
-          );
-        })}
+        {/* Everything lives in a Collection. There is deliberately no second
+            grouping beside this one: a folder holding Lists IS a Collection, so
+            a List cannot be orphaned and nothing needs a home of last resort. */}
+        <CollectionTree
+          nodes={tree}
+          selection={selection}
+          onNavigate={navigate}
+          onOpenDoc={openPath}
+          menuFor={nodeMenuItems}
+          onAdd={(node) => onNewView(node.id)}
+        />
         {/* M3: collapsible Types section — the databases themselves. */}
         <div className="flex items-center justify-between pr-1">
           <button
@@ -208,6 +301,13 @@ export function Sidebar({ onNewView }: SidebarProps) {
           y={typeMenu.y}
           items={typeMenuItems(typeMenu.listing)}
           onClose={() => setTypeMenu(null)}
+        />
+      )}
+      {collectionDialog !== null && (
+        <CollectionDialog
+          state={collectionDialog}
+          onClose={() => setCollectionDialog(null)}
+          onCreated={(folder) => navigate({ kind: 'collection', folder })}
         />
       )}
       {typeDialog?.mode === 'new' && <NewTypeDialog onClose={() => setTypeDialog(null)} />}

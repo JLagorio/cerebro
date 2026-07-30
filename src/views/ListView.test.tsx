@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ListView } from '@/views/ListView';
 import { FieldChip } from '@/views/FieldChip';
@@ -11,9 +11,9 @@ import type { Presentation } from '@/engine/types';
 
 const presentation: Presentation = {
   type: 'list',
-  groupBy: 'status',
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['status', 'priority', 'assignee'],
+  group: [{ field: 'status' }],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [{ field: 'status' }, { field: 'priority' }, { field: 'assignee' }],
 };
 
 function setup(overrides: Partial<ReturnType<typeof useVaultStore.getState>> = {}) {
@@ -50,12 +50,9 @@ describe('ListView', () => {
     const user = userEvent.setup();
     const createItem = vi.fn().mockResolvedValue('items/ship-the-fix.md');
     setup({ createItem });
-    const doingHeader = screen
-      .getAllByTestId('list-group-header')
-      .find((h) => h.textContent?.includes('Doing'))!;
-    const section = doingHeader.parentElement as HTMLElement;
-    await user.click(within(section).getByText('Add item'));
-    await user.type(within(section).getByRole('textbox'), 'Ship the fix{Enter}');
+    const add = `New item in Doing`;
+    await user.click(screen.getByRole('button', { name: add }));
+    await user.type(screen.getByRole('textbox', { name: add }), 'Ship the fix{Enter}');
     // v2: containment membership — no `project:` wikilink in the frontmatter.
     expect(createItem).toHaveBeenCalledWith({
       folder: 'projects/onboarding/items',
@@ -76,12 +73,9 @@ describe('ListView', () => {
     const user = userEvent.setup();
     const createItem = vi.fn(() => new Promise<string>(() => {}));
     setup({ createItem });
-    const todoHeader = screen
-      .getAllByTestId('list-group-header')
-      .find((h) => h.textContent?.includes('Todo'))!;
-    const section = todoHeader.parentElement as HTMLElement;
-    await user.click(within(section).getByText('Add item'));
-    await user.type(within(section).getByRole('textbox'), 'Once only{Enter}{Enter}');
+    const add = `New item in Todo`;
+    await user.click(screen.getByRole('button', { name: add }));
+    await user.type(screen.getByRole('textbox', { name: add }), 'Once only{Enter}{Enter}');
     expect(createItem).toHaveBeenCalledTimes(1);
   });
 
@@ -91,12 +85,9 @@ describe('ListView', () => {
     const user = userEvent.setup();
     const createItem = vi.fn().mockResolvedValue('items/fld-3.md');
     setup({ createItem });
-    const todoHeader = screen
-      .getAllByTestId('list-group-header')
-      .find((h) => h.textContent?.includes('Todo'))!;
-    const section = todoHeader.parentElement as HTMLElement;
-    await user.click(within(section).getByText('Add item'));
-    await user.type(within(section).getByRole('textbox'), '!!!{Enter}');
+    const add = `New item in Todo`;
+    await user.click(screen.getByRole('button', { name: add }));
+    await user.type(screen.getByRole('textbox', { name: add }), '!!!{Enter}');
     expect(createItem.mock.calls[0][0].slug).toBe('fld-3');
     expect(createItem.mock.calls[0][0].body).toBe('# !!!\n');
   });
@@ -109,31 +100,25 @@ describe('ListView', () => {
     const createItem = vi.fn().mockRejectedValue(new Error('disk full'));
     useUiStore.setState({ toasts: [] });
     setup({ createItem });
-    const todoHeader = screen
-      .getAllByTestId('list-group-header')
-      .find((h) => h.textContent?.includes('Todo'))!;
-    const section = todoHeader.parentElement as HTMLElement;
-    await user.click(within(section).getByText('Add item'));
-    await user.type(within(section).getByRole('textbox'), 'Doomed item{Enter}');
+    const add = `New item in Todo`;
+    await user.click(screen.getByRole('button', { name: add }));
+    await user.type(screen.getByRole('textbox', { name: add }), 'Doomed item{Enter}');
     await vi.waitFor(() => {
       expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
         'Couldn\'t create "Doomed item"',
       );
     });
-    expect(within(section).getByRole('textbox')).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: add })).toBeTruthy();
   });
 
   it('quick-add cancels on Escape', async () => {
     const user = userEvent.setup();
     const createItem = vi.fn();
     setup({ createItem });
-    const todoHeader = screen
-      .getAllByTestId('list-group-header')
-      .find((h) => h.textContent?.includes('Todo'))!;
-    const section = todoHeader.parentElement as HTMLElement;
-    await user.click(within(section).getByText('Add item'));
-    await user.type(within(section).getByRole('textbox'), 'never{Escape}');
-    expect(within(section).queryByRole('textbox')).toBeNull();
+    const add = `New item in Todo`;
+    await user.click(screen.getByRole('button', { name: add }));
+    await user.type(screen.getByRole('textbox', { name: add }), 'never{Escape}');
+    expect(screen.queryByRole('textbox', { name: add })).toBeNull();
     expect(createItem).not.toHaveBeenCalled();
   });
 

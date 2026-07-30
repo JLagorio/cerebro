@@ -122,8 +122,8 @@ describe('typePresentation', () => {
       }),
     ];
     const p = typePresentation('Work item', buildSchema(entries));
-    expect(p.groupBy).toBe('status');
-    expect(p.visibleFields).toEqual(['status', 'due']);
+    expect(p.group).toEqual([{ field: 'status' }]);
+    expect(p.columns).toEqual([{ field: 'status' }, { field: 'due' }]);
   });
 
   it('falls back to a flat list for types without a status field', () => {
@@ -131,7 +131,7 @@ describe('typePresentation', () => {
       typeDoc('Person', { properties: { fields: { role: { kind: 'text' } } } }),
     ];
     const p = typePresentation('Person', buildSchema(entries));
-    expect(p.groupBy).toBeNull();
-    expect(p.visibleFields).toEqual(['role']);
+    expect(p.group).toEqual([]);
+    expect(p.columns).toEqual([{ field: 'role' }]);
   });
 });

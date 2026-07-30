@@ -5,11 +5,13 @@ import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
 import { FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
+import { RelationPicker } from '@/detail/RelationPicker';
 import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
+import { typeStyle } from '@/engine/typeCatalog';
 import { formatWikilink } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import type { Entry, FieldDef, Schema } from '@/engine/types';
+import type { ChipStyle, Entry, FieldDef, Schema } from '@/engine/types';
 
 const pathStem = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '');
 
@@ -54,9 +56,17 @@ export interface FieldEditorProps {
   /** Single-line mode for table cells: multi-values clip instead of wrapping
    * onto extra rows (M3.4 — table rows are a fixed height). */
   compact?: boolean;
+  /** M11: how relation chips draw. Per view — see Presentation.chips. */
+  chips?: ChipStyle;
 }
 
-export function FieldEditor({ entry, def, schema, compact = false }: FieldEditorProps) {
+export function FieldEditor({
+  entry,
+  def,
+  schema,
+  compact = false,
+  chips = 'plain',
+}: FieldEditorProps) {
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
@@ -116,12 +126,11 @@ export function FieldEditor({ entry, def, schema, compact = false }: FieldEditor
     );
   }
 
-  if (def.kind === 'person' || def.kind === 'relation') {
-    // M3.1: people and relations hold as many targets as you pick — the
-    // popover toggles and stays open, and values render as removable chips.
-    const targetType = def.kind === 'person' ? 'Person' : (def.target ?? '');
+  if (def.kind === 'person') {
+    // M3.1: people hold as many targets as you pick — the popover toggles and
+    // stays open, and values render as avatars.
     const options: FieldPopoverOption[] = entries
-      .filter((e) => e.type === targetType)
+      .filter((e) => e.type === 'Person')
       .map((c) => ({ id: pathStem(c.path), label: c.title, color: null }));
     const values = asList(resolved.raw).map(stripWikilink);
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
@@ -133,24 +142,12 @@ export function FieldEditor({ entry, def, schema, compact = false }: FieldEditor
           className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
         >
           {values.length === 0 && <span className="text-[var(--n-400)]">Empty</span>}
-          {values.map((v) =>
-            def.kind === 'person' ? (
-              <span key={v} className="inline-flex items-center gap-[5px]">
-                <Avatar name={labelOf(v)} size={18} />
-                {labelOf(v)}
-              </span>
-            ) : (
-              // Related records read as chips: several of them in one row
-              // need a visible boundary, and they are links in spirit.
-              <span
-                key={v}
-                className="inline-flex max-w-full items-center gap-1 rounded-[5px] bg-[var(--n-50)] px-1.5 py-px leading-[17px] text-[var(--n-700)]"
-              >
-                <Icon name="arrow-up-right" size={10} color="var(--n-400)" />
-                <span className="truncate">{labelOf(v)}</span>
-              </span>
-            ),
-          )}
+          {values.map((v) => (
+            <span key={v} className="inline-flex min-w-0 items-center gap-[5px]">
+              <Avatar name={labelOf(v)} size={18} />
+              <span className="truncate">{labelOf(v)}</span>
+            </span>
+          ))}
           <Icon name="chevron-down" size={11} color="var(--n-400)" />
         </button>
         {open && (
@@ -159,6 +156,61 @@ export function FieldEditor({ entry, def, schema, compact = false }: FieldEditor
             options={options}
             activeIds={values}
             onPick={(id) => patch(toggle(values, id).map(formatWikilink))}
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </span>
+    );
+  }
+
+  if (def.kind === 'relation') {
+    const targetType = def.target ?? null;
+    const values = asList(resolved.raw).map(stripWikilink);
+    const targetOf = (id: string) =>
+      entries.find((e) => pathStem(e.path) === id) ?? null;
+    return (
+      <span className="inline-flex min-w-0 max-w-full">
+        <button
+          type="button"
+          data-testid="relation-field"
+          aria-label={`Edit ${humanize(def.name)}`}
+          onClick={() => setOpen(true)}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+        >
+          {values.length === 0 && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.map((v) => {
+            const target = targetOf(v);
+            // M11: a related record is a CHIP. It used to carry an
+            // `arrow-up-right` glyph, which said "this is a link" — something
+            // the chip shape already says — and cost a fifth of the width in a
+            // narrow cell. The per-view setting swaps it for the icon of the
+            // type it points at, which is information rather than decoration.
+            const style = chips === 'type-icon' ? typeStyle(target?.type ?? null, schema) : null;
+            return (
+              <span
+                key={v}
+                data-testid="relation-chip"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[5px] bg-[var(--n-100)] px-1.5 py-px leading-[17px] text-[var(--n-700)]"
+              >
+                {style !== null && (
+                  <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                )}
+                <span className="truncate">{target?.title ?? v}</span>
+              </span>
+            );
+          })}
+          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+        </button>
+        {open && (
+          // M11: a dialog, not a 240px popover. Choosing what to link and
+          // seeing what already is are the same question, and neither fits.
+          <RelationPicker
+            fieldName={def.name}
+            targetType={targetType === '' ? null : targetType}
+            value={values}
+            entries={entries}
+            schema={schema}
+            onChange={(next) => patch(next.length === 0 ? null : next.map(formatWikilink))}
             onClose={() => setOpen(false)}
           />
         )}
@@ -180,12 +232,15 @@ export function FieldEditor({ entry, def, schema, compact = false }: FieldEditor
     }
     const empty = resolved.display === '';
     return (
-      <span className="relative inline-flex">
+      <span className="relative inline-flex min-w-0 max-w-full">
         <button
           type="button"
           aria-label={humanize(def.name)}
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+          // whitespace-nowrap: a date range is two dates and an arrow, which
+          // wrapped onto a second line inside a fixed-height table row and
+          // clipped through the row below it (M11 item 3).
+          className="inline-flex min-w-0 max-w-full items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
         >
           <Icon name="calendar" size={12} color="var(--n-500)" />
           {empty ? (

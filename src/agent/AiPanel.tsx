@@ -3,8 +3,17 @@ import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { checkAgent } from '@/agent/agentIpc';
+import { AiActionCard } from '@/agent/AiActionCard';
+import { ChatInput } from '@/agent/ChatInput';
+import { buildSnapshot, extractReferences, renderSnapshot } from '@/agent/context';
+import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
+import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
-import { type AgentStatus, type ChatMessage, type ToolCall } from '@/agent/types';
+import { type AgentStatus, type ChatMessage } from '@/agent/types';
+import { resolveSurface } from '@/engine/surface';
+import { resolveView } from '@/engine/views';
+import { useAgentCheckpoint, useGit } from '@/git/useGit';
+import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
 import { resolveTarget } from '@/engine/wikilink';
 import { useOpenPath } from '@/app/useOpenPath';
@@ -19,49 +28,6 @@ import { useVaultStore } from '@/stores/vaultStore';
  * goes through cerebro's own MCP tools, so the panel shows the tool calls
  * inline: an agent that edits your vault should not do it invisibly.
  */
-
-/** Tool names arrive namespaced by the CLI (`mcp__cerebro__get_note`). */
-export function toolLabel(name: string): string {
-  const bare = name.replace(/^mcp__cerebro__/, '');
-  return bare.replace(/_/g, ' ');
-}
-
-/** A one-line summary of a tool's arguments, for the chip. */
-export function toolDetail(input: string | null): string | null {
-  if (input === null || input.trim() === '') return null;
-  try {
-    const parsed: unknown = JSON.parse(input);
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    const record = parsed as Record<string, unknown>;
-    for (const key of ['path', 'query', 'folder', 'to', 'slug']) {
-      const value = record[key];
-      if (typeof value === 'string' && value !== '') return value;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function ToolChip({ tool }: { tool: ToolCall }) {
-  const detail = toolDetail(tool.input);
-  return (
-    <span
-      data-testid="tool-chip"
-      className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-[var(--n-200)] bg-[var(--n-25)] px-2 py-[2px] text-[11px] text-[var(--n-600)]"
-    >
-      <Icon
-        name={tool.done ? 'check' : 'loader'}
-        size={10}
-        color={tool.done ? 'var(--success-600)' : 'var(--n-400)'}
-      />
-      <span className="font-medium">{toolLabel(tool.name)}</span>
-      {detail !== null && (
-        <span className="truncate text-[var(--n-400)] [font-family:var(--font-mono)]">{detail}</span>
-      )}
-    </span>
-  );
-}
 
 /** Renders assistant text with `[[wikilinks]]` and **bold** made real. */
 export function MessageText({ text, onOpen }: { text: string; onOpen: (target: string) => void }) {
@@ -93,7 +59,17 @@ export function MessageText({ text, onOpen }: { text: string; onOpen: (target: s
   );
 }
 
-function Message({ message, onOpen }: { message: ChatMessage; onOpen: (t: string) => void }) {
+function Message({
+  message,
+  onOpen,
+  onOpenPath,
+  onViewDiff,
+}: {
+  message: ChatMessage;
+  onOpen: (t: string) => void;
+  onOpenPath: (p: string) => void;
+  onViewDiff?: (p: string) => void;
+}) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end" data-testid="chat-message" data-role="user">
@@ -106,9 +82,14 @@ function Message({ message, onOpen }: { message: ChatMessage; onOpen: (t: string
   return (
     <div className="flex flex-col gap-1.5" data-testid="chat-message" data-role="assistant">
       {message.tools.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-col gap-1">
           {message.tools.map((tool) => (
-            <ToolChip key={tool.id} tool={tool} />
+            <AiActionCard
+              key={tool.id}
+              tool={tool}
+              onOpenPath={onOpenPath}
+              onViewDiff={onViewDiff}
+            />
           ))}
         </div>
       )}
@@ -141,21 +122,68 @@ export function AiPanel() {
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
   const pendingPrompt = useUiStore((s) => s.agentPendingPrompt);
   const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const detailPath = useUiStore((s) => s.detailPath);
   const selection = useNavStore((s) => s.selection);
   const entries = useVaultStore((s) => s.entries);
+  const views = useVaultStore((s) => s.views);
+  const schema = useSchema();
   const openPath = useOpenPath();
+  const openDiff = useUiStore((s) => s.openDiff);
 
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
+  // M9.4: an agent turn that wrote files becomes its own commit, so its work
+  // is revertible independently of the user's.
+  const { isRepo, refresh } = useGit();
+  const checkpoint = useAgentCheckpoint(refresh);
+
+  // M9.5: the rows the current surface is showing. Asking "what is at risk"
+  // from the At risk view should be answered from that view's records, not
+  // from the agent re-deriving a query it will get subtly wrong.
+  const collection = useMemo(
+    () => resolveSurface(selection, entries, schema, views),
+    [selection, entries, schema, views],
+  );
+  const activeView =
+    selection.kind === 'list'
+      ? views.find((v) => v.id === selection.id && v.project === null) ?? null
+      : null;
+
   // Context is a system-prompt suffix, not a hidden first message: it must
   // travel with every turn, because a resumed session re-reads it.
-  const systemPrompt = useMemo(
-    () => buildSystemPrompt(selection, { connectors, issuePrefixes }),
-    [connectors, issuePrefixes, selection],
+  const systemPrompt = useMemo(() => {
+    const base = buildSystemPrompt(selection, { connectors, issuePrefixes });
+    const snapshot = buildSnapshot({
+      selection,
+      entries,
+      schema,
+      activePath: detailPath,
+      visible: collection.entries,
+      // M11: the open TAB's filters — what the person is actually looking at.
+      filters:
+        activeView === null
+          ? null
+          : resolveView(
+              activeView.definition,
+              selection.kind === 'list' ? selection.view : null,
+            ).filters,
+      references: extractReferences(draft),
+    });
+    return `${base}${renderSnapshot(snapshot)}`;
+    // `draft` is deliberately excluded: rebuilding the prompt on every
+    // keystroke would thrash, and `send` reads the references it needs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectors, issuePrefixes, selection, entries, schema, detailPath, collection.entries, activeView]);
+
+  const chat = useAgentChat(
+    systemPrompt,
+    { shell, connectors },
+    null,
+    isRepo ? checkpoint : undefined,
   );
-  const chat = useAgentChat(systemPrompt, { shell, connectors }, null);
+  const conversations = useConversations(chat);
 
   useEffect(() => {
     void checkAgent().then(setStatus).catch(() => setStatus({ installed: false, version: null, path: null }));
@@ -180,6 +208,13 @@ export function AiPanel() {
     setDraft('');
   };
 
+  // M9.7: open the note and show its diff there, rather than stacking a
+  // dialog over the panel that produced it.
+  const viewDiff = (path: string) => {
+    openPath(path);
+    openDiff(path);
+  };
+
   const openTarget = (target: string) => {
     const entry = resolveTarget(target, entries);
     if (entry !== null) openPath(entry.path);
@@ -193,16 +228,18 @@ export function AiPanel() {
     >
       <header className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-3 py-2">
         <Icon name="sparkles" size={14} color="var(--synapse-500)" />
-        <span className="text-[13px] font-semibold text-[var(--n-900)]">Assistant</span>
+        {/* M9.5: conversations are kept and named, so this is a switcher
+            rather than a label beside a button that erased the transcript. */}
+        <ConversationSwitcher state={conversations} />
         {status !== null && !status.installed && (
           <span className="text-[10.5px] text-[var(--warn-600)]">not installed</span>
         )}
         <span className="flex-1" />
         <IconButton
-          icon="rotate-ccw"
+          icon="square-pen"
           label="New conversation"
           size="sm"
-          onClick={chat.reset}
+          onClick={conversations.start}
         />
         <IconButton icon="x" label="Close AI panel" size="sm" onClick={() => setAiPanelOpen(false)} />
       </header>
@@ -229,29 +266,25 @@ export function AiPanel() {
           </div>
         ) : (
           chat.messages.map((message) => (
-            <Message key={message.id} message={message} onOpen={openTarget} />
+            <Message
+              key={message.id}
+              message={message}
+              onOpen={openTarget}
+              onOpenPath={openPath}
+              onViewDiff={isRepo ? viewDiff : undefined}
+            />
           ))
         )}
       </div>
 
       <div className="flex-none border-t border-[var(--n-200)] p-2.5">
-        <textarea
-          aria-label="Message the assistant"
-          value={draft}
-          rows={2}
-          placeholder="Ask about this vault…"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          className="w-full resize-none rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] px-2.5 py-2 text-[12.5px] leading-[18px] text-[var(--n-900)] outline-none placeholder:text-[var(--n-400)] focus-visible:border-[var(--cortex-400)]"
-        />
+        {/* M9.5: `[[` completes against the vault, and the note you name
+            travels into the snapshot with its content rather than as a word
+            the agent has to go searching for. */}
+        <ChatInput value={draft} onChange={setDraft} onSubmit={submit} />
         <div className="mt-1.5 flex items-center gap-2">
           <span className="flex-1 text-[10.5px] text-[var(--n-400)]">
-            {chat.streaming ? 'Working…' : 'Enter to send'}
+            {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}
           </span>
           {chat.streaming ? (
             <Button variant="secondary" size="sm" icon="square" onClick={chat.stop}>
@@ -264,6 +297,7 @@ export function AiPanel() {
           )}
         </div>
       </div>
+
     </aside>
   );
 }
@@ -313,8 +347,8 @@ function describeSelection(selection: {
     case 'doc':
     case 'project':
       return selection.path ?? null;
-    case 'view':
-      return selection.id !== undefined ? `the saved view "${selection.id}"` : null;
+    case 'list':
+      return selection.id !== undefined ? `the list "${selection.id}"` : null;
     case 'type':
       return selection.name !== undefined ? `the ${selection.name} type screen` : null;
     case 'inbox':

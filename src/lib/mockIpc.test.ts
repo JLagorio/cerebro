@@ -134,7 +134,15 @@ describe('mockIpc', () => {
     expect(before.every((v) => v.project === null)).toBe(true);
     await mock.saveView('/demo-vault', 'my-view', 'name: My view\n');
     const after = await mock.listViews('/demo-vault');
-    expect(after).toContainEqual({ id: 'my-view', yaml: 'name: My view\n', project: null });
+    expect(after).toContainEqual(
+      expect.objectContaining({
+        id: 'my-view',
+        yaml: 'name: My view\n',
+        project: null,
+        collection: null,
+        path: 'views/my-view.yml',
+      }),
+    );
     expect(after).toHaveLength(before.length + 1);
   });
 
@@ -143,16 +151,75 @@ describe('mockIpc', () => {
     await mock.saveView('/demo-vault', 'global', 'name: G\n');
     await mock.saveView('/demo-vault', 'delivery', 'name: D\n', 'projects/guided-onboarding-ga');
     const views = await mock.listViews('/demo-vault');
-    expect(views).toContainEqual({ id: 'global', yaml: 'name: G\n', project: null });
-    expect(views).toContainEqual({
-      id: 'delivery',
-      yaml: 'name: D\n',
-      project: 'projects/guided-onboarding-ga/project.md',
-    });
-    // Globals sort ahead of project-scoped views.
-    const scopedFirst = views.findIndex((v) => v.project !== null);
-    const globalLast = views.map((v) => v.project).lastIndexOf(null);
+    expect(views).toContainEqual(
+      expect.objectContaining({ id: 'global', yaml: 'name: G\n', project: null }),
+    );
+    expect(views).toContainEqual(
+      expect.objectContaining({
+        id: 'delivery',
+        yaml: 'name: D\n',
+        project: 'projects/guided-onboarding-ga/project.md',
+      }),
+    );
+    // M10 sorts by (collection, project, id) — collection is now the PRIMARY
+    // key, because it is the container the sidebar groups by. Within one
+    // collection, globals still sort ahead of project-scoped views.
+    const keys = views.map((v) => [v.collection ?? '', v.project ?? '', v.id].join('\u0000'));
+    expect(keys).toEqual([...keys].sort());
+    const uncollected = views.filter((v) => v.collection === null);
+    const scopedFirst = uncollected.findIndex((v) => v.project !== null);
+    const globalLast = uncollected.map((v) => v.project).lastIndexOf(null);
     expect(globalLast).toBeLessThan(scopedFirst);
+  });
+
+  // --- Collections (M10) — parity with write.rs ---
+
+  it('saveList writes a *.list.yml and attributes it to its collection', async () => {
+    await mock.saveCollection('/demo-vault', 'product', 'name: Product\n');
+    await mock.saveList('/demo-vault', 'product', 'roadmap', 'name: Roadmap\n');
+    // A plain sub-folder still belongs to the Collection above it.
+    await mock.saveList('/demo-vault', 'product/q3', 'risks', 'name: Risks\n');
+    await mock.saveList('/demo-vault', '', 'triage', 'name: Triage\n');
+
+    const lists = await mock.listViews('/demo-vault');
+    const find = (id: string) => lists.find((l) => l.id === id)!;
+    expect(find('roadmap').collection).toBe('product');
+    expect(find('roadmap').path).toBe('product/roadmap.list.yml');
+    expect(find('risks').collection).toBe('product');
+    expect(find('triage').collection).toBeNull();
+    expect(find('triage').path).toBe('triage.list.yml');
+  });
+
+  it('listCollections finds every marked folder, nested ones included', async () => {
+    // The seeded demo vault ships its own Collection, so assert on the ones
+    // this test creates rather than on the whole list.
+    await mock.saveCollection('/demo-vault', 'zz-ops', 'name: Ops\n');
+    await mock.saveCollection('/demo-vault', 'zz-product', 'name: Product\n');
+    await mock.saveCollection('/demo-vault', 'zz-product/platform', 'name: Platform\n');
+    const found = await mock.listCollections('/demo-vault');
+    expect(found.map((c) => c.folder).filter((f) => f.startsWith('zz-'))).toEqual([
+      'zz-ops',
+      'zz-product',
+      'zz-product/platform',
+    ]);
+    expect(found.find((c) => c.folder === 'zz-product')!.yaml).toBe('name: Product\n');
+    // Sorted overall, so the sidebar order is stable.
+    expect(found.map((c) => c.folder)).toEqual([...found.map((c) => c.folder)].sort());
+  });
+
+  it('refuses to make the vault root a collection', async () => {
+    await expect(mock.saveCollection('/demo-vault', '', 'name: Root\n')).rejects.toThrow();
+  });
+
+  // Legacy views keep loading with no collection, so a pre-M10 vault surfaces
+  // its saved views at the top level rather than losing them.
+  it('legacy views load beside M10 lists', async () => {
+    await mock.saveView('/demo-vault', 'legacy', 'name: Legacy\n');
+    await mock.saveCollection('/demo-vault', 'product', 'name: Product\n');
+    await mock.saveList('/demo-vault', 'product', 'roadmap', 'name: Roadmap\n');
+    const lists = await mock.listViews('/demo-vault');
+    expect(lists.find((l) => l.id === 'legacy')!.collection).toBeNull();
+    expect(lists.find((l) => l.id === 'roadmap')!.collection).toBe('product');
   });
 
   // --- Vault format v2 (M2 Task 3) — parity with scan.rs / write.rs ---

@@ -1,6 +1,7 @@
 import { Avatar } from '@/components/ui/Avatar';
 import { Icon } from '@/components/ui/Icon';
 import { CreateMenu } from '@/app/CreateMenu';
+import { SyncBadge } from '@/git/SyncBadge';
 import { useUiStore } from '@/stores/uiStore';
 
 export function Topbar() {
@@ -24,6 +25,9 @@ export function Topbar() {
           </kbd>
         </button>
       </div>
+      {/* M9.4: silent on a clean, remoteless vault — it appears only when
+          it has something you can act on. */}
+      <SyncBadge />
       <CreateMenu />
       <Avatar name="You" size={28} />
     </div>

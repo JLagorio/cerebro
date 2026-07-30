@@ -2,40 +2,69 @@ import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
-import { humanize } from '@/engine/schema';
 import { listTypes } from '@/engine/typeCatalog';
-import type { Entry, Schema, ViewDefinition } from '@/engine/types';
-import { DEFAULT_PRESENTATION } from '@/engine/views';
+import type {
+  Entry,
+  Presentation,
+  Schema,
+  ListDefinition,
+  ViewDefinition,
+} from '@/engine/types';
+import { DEFAULT_PRESENTATION, layoutLabel } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
+import { VIEW_KINDS } from '@/views/viewKinds';
 
 const ANY = '__any__';
-const NONE = '__none__';
 
-/** A fresh view over a type, with that type's fields as its columns. */
-export function newViewDefinition(typeName: string | null, schema: Schema): ViewDefinition {
+/** The presentation a fresh List's first view starts from. */
+function seedPresentation(typeName: string | null, schema: Schema): Presentation {
   const fields = typeName === null ? [] : (schema.types.get(typeName)?.fields ?? []);
+  return {
+    type: 'table',
+    group: fields.some((f) => f.kind === 'status') ? [{ field: 'status' }] : [],
+    sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
+    columns:
+      fields.length > 0
+        ? fields.slice(0, 6).map((f) => ({ field: f.name }))
+        : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
+  };
+}
+
+/** A fresh List over a type, with that type's fields as its first view's columns. */
+export function newViewDefinition(typeName: string | null, schema: Schema): ListDefinition {
+  const presentation = seedPresentation(typeName, schema);
   return {
     name: '',
     icon: null,
     color: null,
     order: null,
     source: { type: typeName, project: null },
-    filters: null,
-    presentation: {
-      type: 'table',
-      groupBy: fields.some((f) => f.kind === 'status') ? 'status' : null,
-      orderBy: { ...DEFAULT_PRESENTATION.orderBy },
-      visibleFields:
-        fields.length > 0 ? fields.map((f) => f.name).slice(0, 6) : [...DEFAULT_PRESENTATION.visibleFields],
-      childrenVia: null,
-    },
+    // M11: a List is created with exactly one view, and gains more from its
+    // tab row. Naming it after its layout is what Notion does and it reads
+    // correctly the moment there are two.
+    views: [
+      {
+        id: 'table',
+        name: layoutLabel(presentation.type),
+        icon: null,
+        filters: null,
+        presentation,
+      },
+    ],
   };
+}
+
+/** The first (and, on a fresh List, only) view — what this dialog configures. */
+const firstView = (def: ListDefinition) => def.views[0];
+
+function withFirstView(def: ListDefinition, next: Partial<ViewDefinition>): ListDefinition {
+  return { ...def, views: [{ ...def.views[0], ...next }, ...def.views.slice(1)] };
 }
 
 const label = 'mb-1 block text-[11.5px] font-medium text-[var(--n-600)]';
 
 /**
- * Create/configure a saved view (M3.5): its source type, project scope,
+ * Create/configure a List (M10): its source type, project scope,
  * filters, and — for tree layouts — which relation nests the rows. This is
  * the surface that replaces "New project": a project is now a saved view
  * over Work items scoped to a folder.
@@ -48,14 +77,14 @@ export function ViewSettingsDialog({
   onCancel,
   onSubmit,
 }: {
-  initial: ViewDefinition;
+  initial: ListDefinition;
   entries: Entry[];
   schema: Schema;
   title: string;
   onCancel: () => void;
-  onSubmit: (definition: ViewDefinition) => void;
+  onSubmit: (definition: ListDefinition) => void;
 }) {
-  const [def, setDef] = useState<ViewDefinition>(initial);
+  const [def, setDef] = useState<ListDefinition>(initial);
   const [busy, setBusy] = useState(false);
 
   const types = listTypes(entries, schema);
@@ -64,42 +93,6 @@ export function ViewSettingsDialog({
     .sort((a, b) => a.title.localeCompare(b.title));
 
   const sourceFields = def.source.type === null ? [] : (schema.types.get(def.source.type)?.fields ?? []);
-  const relationFields = sourceFields.filter((f) => f.kind === 'relation' || f.kind === 'person');
-  // Reverse descent: any type declaring a relation back to this one.
-  const reverseOptions = types.flatMap((t) =>
-    (schema.types.get(t.name)?.fields ?? [])
-      .filter((f) => f.kind === 'relation' && f.target === def.source.type)
-      .map((f) => ({
-        value: `reverse:${t.name}:${f.name}`,
-        label: `${t.name} → ${humanize(f.name)}`,
-      })),
-  );
-
-  const via = def.presentation.childrenVia ?? null;
-  const childrenValue =
-    via === null
-      ? NONE
-      : via.direction === 'forward'
-        ? `forward:${via.field}`
-        : `reverse:${via.type}:${via.field}`;
-
-  const setChildrenVia = (value: string) => {
-    if (value === NONE) {
-      setDef({ ...def, presentation: { ...def.presentation, childrenVia: null } });
-      return;
-    }
-    const [direction, a, b] = value.split(':');
-    setDef({
-      ...def,
-      presentation: {
-        ...def.presentation,
-        childrenVia:
-          direction === 'forward'
-            ? { direction: 'forward', field: a }
-            : { direction: 'reverse', type: a, field: b },
-      },
-    });
-  };
 
   return (
     <Dialog
@@ -123,7 +116,7 @@ export function ViewSettingsDialog({
           <span className={label}>Name</span>
           <Input
             autoFocus
-            ariaLabel="View name"
+            ariaLabel="List name"
             placeholder="Cobra launch, My open bugs…"
             value={def.name}
             onChange={(e) => setDef({ ...def, name: e.target.value })}
@@ -146,16 +139,21 @@ export function ViewSettingsDialog({
               onChange={(v) => {
                 const type = v === ANY ? null : v;
                 const fields = type === null ? [] : (schema.types.get(type)?.fields ?? []);
-                setDef({
-                  ...def,
-                  source: { ...def.source, type },
-                  // Columns belong to the source type — reset them with it.
-                  presentation: {
-                    ...def.presentation,
-                    visibleFields: fields.map((f) => f.name).slice(0, 6),
-                    childrenVia: null,
-                  },
-                });
+                setDef(
+                  withFirstView(
+                    { ...def, source: { ...def.source, type } },
+                    {
+                      // Columns belong to the source type — reset them with it.
+                      presentation: {
+                        ...firstView(def).presentation,
+                        columns: fields.slice(0, 6).map((f) => ({ field: f.name })),
+                        // The grouping chain names properties and relations of
+                        // the OLD type; none of it survives a source change.
+                        group: [],
+                      },
+                    },
+                  ),
+                );
               }}
             />
           </div>
@@ -179,55 +177,35 @@ export function ViewSettingsDialog({
 
         <div className="flex gap-3">
           <div className="flex-1">
-            <span className={label}>Layout</span>
+            {/* M11: this names the FIRST view's layout. More tabs are added
+                from the List's own tab row, where the thing they belong to is
+                already on screen. */}
+            <span className={label}>First view</span>
             <Dropdown
               size="sm"
               label="Layout"
               width="100%"
-              options={[
-                { value: 'table', label: 'Table' },
-                { value: 'list', label: 'List' },
-                { value: 'board', label: 'Board' },
-                { value: 'tree', label: 'Hierarchy' },
-                { value: 'split', label: 'Browse' },
-              ]}
-              value={def.presentation.type}
-              onChange={(v) =>
-                setDef({
-                  ...def,
-                  presentation: { ...def.presentation, type: v as typeof def.presentation.type },
-                })
-              }
+              options={VIEW_KINDS.map((k) => ({ value: k.value, label: k.label }))}
+              value={firstView(def).presentation.type}
+              onChange={(v) => {
+                const type = v as Presentation['type'];
+                setDef(
+                  withFirstView(def, {
+                    name: layoutLabel(type),
+                    presentation: { ...firstView(def).presentation, type },
+                  }),
+                );
+              }}
             />
           </div>
-          {def.presentation.type === 'tree' && (
-            <div className="flex-1">
-              <span className={label}>Nest rows by</span>
-              <Dropdown
-                size="sm"
-                label="Child relation"
-                width="100%"
-                options={[
-                  { value: NONE, label: 'No nesting' },
-                  ...relationFields.map((f) => ({
-                    value: `forward:${f.name}`,
-                    label: `${humanize(f.name)} (this record's links)`,
-                  })),
-                  ...reverseOptions,
-                ]}
-                value={childrenValue}
-                onChange={setChildrenVia}
-              />
-            </div>
-          )}
         </div>
 
         <div>
           <span className={label}>Filters</span>
           <FilterBuilder
-            filters={def.filters}
+            filters={firstView(def).filters}
             fields={sourceFields}
-            onChange={(filters) => setDef({ ...def, filters })}
+            onChange={(filters) => setDef(withFirstView(def, { filters }))}
           />
         </div>
       </div>

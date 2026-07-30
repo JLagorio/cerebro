@@ -92,14 +92,20 @@ describe('App boot flow', () => {
 
   // M3.5: "New project" is gone — the sidebar's + builds a saved view, and a
   // project is one of those (Work items scoped to a folder).
-  it('the sidebar + opens the view builder with a source picker', async () => {
+  // M10: the sidebar + names a Collection — the container — rather than
+  // opening the query builder, because a Collection has no query.
+  it('the sidebar + creates a collection and opens its page', async () => {
     const user = userEvent.setup();
     vi.mocked(ipc.scanVault).mockResolvedValueOnce(fixtureVault());
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });
-    await user.click(screen.getByRole('button', { name: 'New view' }));
+    await user.click(screen.getByRole('button', { name: 'New collection' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('View name')).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: /Source type/ })).toBeTruthy();
+    await user.type(within(dialog).getByRole('textbox', { name: 'Collection name' }), 'Product');
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+    const page = await screen.findByTestId('collection-page');
+    expect(within(page).getByText('Product')).toBeTruthy();
+    // A container opens empty and says so, rather than showing a record canvas.
+    expect(within(page).getByText(/Nothing in here yet/)).toBeTruthy();
   });
 });

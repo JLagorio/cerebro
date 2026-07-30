@@ -105,3 +105,12 @@
   to { opacity: 1; transform: none; }
 }
 .cb-panel-in { animation: cb-panel-in 180ms cubic-bezier(0.2, 0.6, 0.2, 1); }
+
+/* Column / panel drag (M11). Set on <body> for the duration of a drag: the
+   pointer spends most of a real drag outside the 9px handle, and without this
+   it reverts to a text cursor and starts selecting the table it is resizing. */
+.cb-resizing,
+.cb-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}

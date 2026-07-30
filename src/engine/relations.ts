@@ -61,6 +61,28 @@ export function childrenOf(
 }
 
 /**
+ * Children at one level of a hierarchy chain (M9.1). Returns [] past the end
+ * of the chain, which is what terminates the descent.
+ *
+ * The one-spec `childrenOf` above was applied at EVERY depth by the tree
+ * view, so `Objective → Key result` worked and `Key result → Work item`
+ * could never render: depth 1 re-ran the depth-0 spec. A chain gives each
+ * level its own relation, which is the whole point of a hierarchy whose
+ * levels are different types.
+ */
+export function childrenAt(
+  entry: Entry,
+  hierarchy: ChildrenSpec[],
+  depth: number,
+  entries: Entry[],
+  index?: RelationIndex,
+): Entry[] {
+  const spec = hierarchy[depth];
+  if (spec === undefined) return [];
+  return childrenOf(entry, spec, entries, index);
+}
+
+/**
  * The records a rollup aggregates over. Forward form is `relation: <field>`;
  * reverse form is `from: { type, field }` — which is what lets a parent roll
  * up children that point at IT, with no duplicate link on the parent.

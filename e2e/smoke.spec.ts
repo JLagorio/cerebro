@@ -154,10 +154,10 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   await page.getByTestId('table-row').first().hover();
   await page.getByRole('button', { name: /^Open / }).first().click();
 
-  // -- Create a saved view from the tab row (scoped: the sidebar has its
-  // own New-view control now) -------------------------------------------
-  await page.getByTestId('project-tabs').getByRole('button', { name: 'New view' }).click();
-  await page.getByPlaceholder('View name').fill('Smoke board');
+  // -- Create a project-scoped List from the tab row (M10: the sidebar's own
+  // + names a Collection instead) ----------------------------------------
+  await page.getByTestId('project-tabs').getByRole('button', { name: 'New list' }).click();
+  await page.getByPlaceholder('List name').fill('Smoke board');
   await page.getByRole('button', { name: 'Save' }).click();
   const smokeTab = page.getByRole('tab', { name: 'Smoke board' });
   await expect(smokeTab).toHaveAttribute('aria-selected', 'true');

@@ -5,6 +5,7 @@ status: progress
 priority: medium
 assignee: "[[mo-byrd]]"
 due: 2026-07-30
+window: { start: 2026-07-25, end: 2026-07-30 }
 estimate: S
 ---
 

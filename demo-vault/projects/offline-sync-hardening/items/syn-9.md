@@ -5,6 +5,7 @@ status: todo
 priority: medium
 assignee: "[[sam-ito]]"
 due: 2026-08-29
+window: { start: 2026-08-20, end: 2026-08-29 }
 estimate: S
 epic: "[[epic-offline-conflict-model]]"
 ---

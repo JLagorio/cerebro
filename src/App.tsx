@@ -2,20 +2,25 @@ import { useEffect, useState } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
 import { useLearnRunner } from '@/agent/useLearnRunner';
+import { CheckpointHost } from '@/git/CheckpointHost';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
-import { createView } from '@/app/viewActions';
+import { StatusBar } from '@/app/StatusBar';
+import { createList } from '@/app/listActions';
 import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog';
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { ChangesPage } from '@/pages/ChangesPage';
 import { CollectionPage } from '@/pages/CollectionPage';
+import { ListPage } from '@/pages/ListPage';
 import { DocPage } from '@/pages/DocPage';
 import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
 import { ProjectPage } from '@/pages/ProjectPage';
+import { PulsePage } from '@/pages/PulsePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
@@ -36,9 +41,12 @@ function CanvasOutlet() {
     case 'project': return <ProjectPage selection={selection} />;
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;
-    // M3.5: saved views are their own top-level surface, not a project tab.
-    case 'view': return <CollectionPage selection={selection} />;
+    // M10: a Collection is the container's page; a List is the record canvas.
+    case 'collection': return <CollectionPage selection={selection} />;
+    case 'list': return <ListPage selection={selection} />;
     case 'type': return <TypePage selection={selection} />;
+    case 'changes': return <ChangesPage />;
+    case 'pulse': return <PulsePage />;
     case 'settings': return <SettingsPage />;
   }
 }
@@ -102,7 +110,10 @@ function App() {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
-  const [newViewOpen, setNewViewOpen] = useState(false);
+  // M10: null = the dialog is shut. Otherwise it holds the Collection folder the
+  // new List lands in — never null, because a Collection-less List is forbidden
+  // and the only entry point is a Collection's own + affordance.
+  const [newList, setNewList] = useState<{ collection: string } | null>(null);
   // M8.6 — the base reads filed captures and edited notes on its own. Mounted
   // here rather than in the AI panel: the panel unmounts when you close it,
   // and a knowledge base that only grows while a panel is open is not one.
@@ -165,34 +176,44 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar onNewView={() => setNewViewOpen(true)} />
+      <Sidebar onNewView={(collection) => setNewList({ collection })} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
-        <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">
+        {/* M11: the record panel is a COLUMN here, beside the canvas, rather
+            than a fixed overlay on top of it. That is what lets a table keep
+            its full horizontal scroll while a record is open. */}
+        <div className="flex min-h-0 min-w-0 flex-1 bg-[var(--n-0)]">
           <CanvasOutlet />
+          <DetailPanel />
         </div>
+        {/* M9.7 — everything ambient about the vault in one strip, and every
+            segment of it is a control rather than a readout. */}
+        <StatusBar />
       </div>
       {aiPanelOpen && <AiPanel />}
-      {newViewOpen && (
+      {newList !== null && (
         <ViewSettingsDialog
           initial={newViewDefinition(null, schema)}
           entries={entries}
           schema={schema}
-          title="New view"
-          onCancel={() => setNewViewOpen(false)}
+          title="New list"
+          onCancel={() => setNewList(null)}
           onSubmit={(definition) => {
-            setNewViewOpen(false);
+            const collection = newList.collection;
+            setNewList(null);
             void (async () => {
-              const id = await createView(definition);
-              if (id !== null) navigate({ kind: 'view', id });
+              const id = await createList(definition, collection);
+              // Navigate WITH the collection: ids are unique per folder, so
+              // "roadmap" alone could resolve to another collection's list.
+              if (id !== null) navigate({ kind: 'list', id, collection });
             })();
           }}
         />
       )}
-      <DetailPanel />
       <QuickOpen />
       <ToastHost />
       <RemindersHost />
+      <CheckpointHost />
       <AgentActions />
     </div>
   );

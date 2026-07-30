@@ -1,6 +1,8 @@
 pub mod agent;
 pub mod app_config;
 pub mod demo;
+pub mod git;
+pub mod git_commands;
 pub mod knowledge;
 pub mod mcp;
 pub mod vault;
@@ -11,7 +13,7 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 use vault::entry::Entry;
-use vault::write::ViewYaml;
+use vault::write::{CollectionYaml, ViewYaml};
 use vault::watcher::WatcherState;
 
 fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -122,6 +124,23 @@ fn save_view(vault: String, id: String, yaml: String, folder: Option<String>) ->
 }
 
 #[tauri::command(async)]
+fn list_collections(vault: String) -> Result<Vec<CollectionYaml>, String> {
+    vault::write::list_collections(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn save_collection(vault: String, folder: String, yaml: String) -> Result<(), String> {
+    knowledge::guard_human_write(&folder)?;
+    vault::write::save_collection(Path::new(&vault), &folder, &yaml)
+}
+
+#[tauri::command(async)]
+fn save_list(vault: String, folder: String, id: String, yaml: String) -> Result<(), String> {
+    knowledge::guard_human_write(&folder)?;
+    vault::write::save_list(Path::new(&vault), &folder, &id, &yaml)
+}
+
+#[tauri::command(async)]
 fn create_folder(vault: String, path: String) -> Result<(), String> {
     knowledge::guard_human_write(&path)?;
     vault::write::create_folder(Path::new(&vault), &path)
@@ -207,6 +226,9 @@ pub fn run() {
             set_note_title,
             list_views,
             save_view,
+            list_collections,
+            save_collection,
+            save_list,
             create_folder,
             rename_note,
             delete_note,
@@ -215,7 +237,36 @@ pub fn run() {
             check_agent,
             start_mcp,
             run_agent,
-            stop_agent
+            stop_agent,
+            // M9.4 — git tracking. Every command resolves the workspace
+            // first, so a vault nested in a larger repo scopes correctly.
+            git_commands::git_workspace_info,
+            git_commands::is_git_repo,
+            git_commands::init_git_repo,
+            git_commands::git_author_identity,
+            git_commands::get_modified_files,
+            git_commands::git_discard_file,
+            git_commands::get_file_history,
+            git_commands::get_file_diff,
+            git_commands::get_file_diff_at_commit,
+            git_commands::get_commit_diff,
+            git_commands::get_vault_pulse,
+            git_commands::get_last_commit_info,
+            git_commands::git_commit,
+            git_commands::git_has_pending_changes,
+            git_commands::git_file_url,
+            git_commands::git_remote_status,
+            git_commands::git_pull,
+            git_commands::git_push,
+            git_commands::git_add_remote,
+            git_commands::git_disconnect_remote,
+            git_commands::git_clone,
+            git_commands::get_conflict_files,
+            git_commands::get_conflict_mode,
+            git_commands::git_resolve_conflict,
+            git_commands::git_commit_conflict_resolution,
+            git_commands::git_abort_conflict,
+            git_commands::git_provider_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

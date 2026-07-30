@@ -76,10 +76,11 @@ test('knowledge: the bundle navigates by its own axes, not by Home\'s', async ({
   await boot(page);
   await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
 
-  // The sidebar stops being Home's. Views and Types describe a corpus with a
-  // different author; standing on Knowledge they have no business being here.
+  // The sidebar stops being Home's. Collections and Types describe a corpus
+  // with a different author; standing on Knowledge they have no business here.
   await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
-  await expect(page.getByTestId('sidebar-view')).toHaveCount(0);
+  await expect(page.getByTestId('collection-node-collection')).toHaveCount(0);
+  await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
 
   const nav = page.getByTestId('knowledge-nav-row');
   const total = await page.getByTestId('concept-row').count();

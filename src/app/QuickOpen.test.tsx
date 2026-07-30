@@ -9,7 +9,7 @@ import { fixtureVault } from '@/test/factories';
 
 afterEach(cleanup);
 
-const PLACEHOLDER = 'Search items, projects, and docs…';
+const PLACEHOLDER = 'Search notes, lists, types, and places…';
 
 describe('QuickOpen', () => {
   beforeEach(() => {

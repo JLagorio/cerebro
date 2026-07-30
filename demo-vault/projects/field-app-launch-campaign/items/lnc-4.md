@@ -5,6 +5,7 @@ status: idea
 priority: medium
 assignee: "[[josef-lang]]"
 due: 2026-09-02
+window: { start: 2026-08-18, end: 2026-09-02 }
 estimate: L
 ---
 

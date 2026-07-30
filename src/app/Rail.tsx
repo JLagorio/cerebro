@@ -55,6 +55,8 @@ export function Rail() {
   const settingsActive = selection.kind === 'settings';
   const inboxActive = selection.kind === 'inbox';
   const knowledgeActive = selection.kind === 'knowledge';
+  // M9.4: the two git surfaces share a rail slot's worth of "history".
+  const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
   const queued = useMemo(
     () => (inboxEnabled ? inboxCount(entries) : 0),
     [entries, inboxEnabled],
@@ -71,7 +73,9 @@ export function Rail() {
       <RailButton
         icon="house"
         label="Home"
-        active={!settingsActive && !docsActive && !inboxActive && !knowledgeActive}
+        active={
+          !settingsActive && !docsActive && !inboxActive && !knowledgeActive && !historyActive
+        }
         onClick={() => navigate({ kind: 'home' })}
       />
       {inboxEnabled && (
@@ -99,6 +103,15 @@ export function Rail() {
         label="Knowledge"
         active={knowledgeActive}
         onClick={() => navigate({ kind: 'knowledge' })}
+      />
+      {/* M9.4 — the vault's history. No badge: a count of commits is chrome
+          (the same rule that kept a review count off Knowledge). The topbar
+          SyncBadge speaks instead, and only when something needs doing. */}
+      <RailButton
+        icon="activity"
+        label="History"
+        active={historyActive}
+        onClick={() => navigate({ kind: 'pulse' })}
       />
       <div className="flex-1" />
       {/* The assistant is a companion to whatever surface you are on, so it

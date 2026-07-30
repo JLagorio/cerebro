@@ -1,22 +1,25 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildSchema } from '@/engine/schema';
 import type { Presentation } from '@/engine/types';
-import { orderToValue, slugifyViewId, valueToOrder, ViewToolbar } from './ViewToolbar';
+import { orderToValue, slugifyListId, valueToOrder, ViewToolbar } from './ViewToolbar';
+
+const emptySchema = () => buildSchema([]);
 
 const presentation: Presentation = {
   type: 'list',
-  groupBy: 'status',
-  orderBy: { field: 'modifiedAt', dir: 'desc' },
-  visibleFields: ['key', 'status', 'priority', 'assignee', 'due', 'estimate'],
+  group: [{ field: 'status' }],
+  sort: [{ field: 'modifiedAt', dir: 'desc' }],
+  columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
 };
 
-describe('slugifyViewId', () => {
+describe('slugifyListId', () => {
   it('lowercases and hyphenates', () => {
-    expect(slugifyViewId('My urgent work')).toBe('my-urgent-work');
+    expect(slugifyListId('My urgent work')).toBe('my-urgent-work');
   });
   it('strips leading and trailing separators', () => {
-    expect(slugifyViewId('  Board: Q3! ')).toBe('board-q3');
+    expect(slugifyListId('  Board: Q3! ')).toBe('board-q3');
   });
 });
 
@@ -43,28 +46,76 @@ describe('ViewToolbar', () => {
     expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'board' });
   });
 
-  it('changing group-by to none reports groupBy null', () => {
+  // M9.1: group and sort are ordered chains, so their control is a popover
+  // with a row per level rather than a single-slot dropdown.
+  it('removing the only grouping level reports a flat chain', () => {
     const onChange = vi.fn();
-    render(
-      <ViewToolbar presentation={presentation} onChange={onChange} />,
-    );
-    // M2 Task 2: the group control is a DS Dropdown, not a native select.
-    fireEvent.click(screen.getByRole('button', { name: 'Group by' }));
-    fireEvent.click(screen.getByRole('option', { name: 'No grouping' }));
-    expect(onChange).toHaveBeenCalledWith({ ...presentation, groupBy: null });
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId('group-chain'));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove level 1' }));
+    expect(onChange).toHaveBeenCalledWith({ ...presentation, group: [] });
   });
 
-  it('changing order reports the decoded orderBy', () => {
+  it('flipping a sort level direction keeps the field', () => {
     const onChange = vi.fn();
-    render(
-      <ViewToolbar presentation={presentation} onChange={onChange} />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Order by' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Due date' }));
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
+    fireEvent.click(screen.getByTestId('sort-chain'));
+    fireEvent.click(screen.getByRole('button', { name: /Level 1 direction/ }));
     expect(onChange).toHaveBeenCalledWith({
       ...presentation,
-      orderBy: { field: 'due', dir: 'asc' },
+      sort: [{ field: 'modifiedAt', dir: 'asc' }],
     });
+  });
+
+  // M10: the six views, and only those six. "Hierarchy" is gone because
+  // nesting is a grouping level, so every one of these can nest.
+  it('offers exactly the six view kinds', () => {
+    render(<ViewToolbar presentation={presentation} onChange={vi.fn()} />);
+    for (const label of ['Table', 'List', 'Board', 'Calendar', 'Gantt', 'Timeline']) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.queryByText('Hierarchy')).toBeNull();
+    expect(screen.queryByText('Browse')).toBeNull();
+  });
+
+  it('switches to a date view through the segmented control', () => {
+    const onChange = vi.fn();
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
+    fireEvent.click(screen.getByText('Gantt'));
+    expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'gantt' });
+  });
+
+  // M9.7: there is no separate nesting control. Grouping by a property bands
+  // records; grouping by a relation nests them — one chain, one question.
+  it('has one grouping control, not a group control and a nesting control', () => {
+    render(
+      <ViewToolbar
+        presentation={{ ...presentation, type: 'table' }}
+        onChange={vi.fn()}
+        schema={emptySchema()}
+      />,
+    );
+    expect(screen.getByTestId('group-chain')).toBeTruthy();
+    expect(screen.queryByTestId('hierarchy-chain')).toBeNull();
+  });
+
+  it('a relation level reads as nesting in the summary', () => {
+    render(
+      <ViewToolbar
+        presentation={{
+          ...presentation,
+          group: [
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+          ],
+        }}
+        onChange={vi.fn()}
+        schema={emptySchema()}
+      />,
+    );
+    expect(screen.getByTestId('group-chain').textContent).toContain('Nest');
   });
 
   // Task 8: the Save-view button moved to the project tab row ("New view");

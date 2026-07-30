@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { DeleteTypeDialog, RenameTypeDialog, TypeStyleDialog } from '@/app/TypeDialogs';
 import {
   addFieldToType,
+  moveFieldOnType,
   removeFieldFromType,
   renameFieldOnType,
   setFieldConfig,
+  normalizeFieldName,
   setFieldOptions,
   setTypeStatuses,
 } from '@/app/typeActions';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -16,7 +19,9 @@ import { humanize } from '@/detail/FieldEditor';
 import { OptionListEditor } from '@/detail/OptionListEditor';
 import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
 import { StatusListEditor } from '@/detail/StatusListEditor';
-import { resolveCollection, sortEntries } from '@/engine/collections';
+import { resolveSurface, sortEntries } from '@/engine/surface';
+import { columnUniverse } from '@/engine/columns';
+import { clonePresentation, toggleSort } from '@/engine/views';
 import { kindMeta } from '@/engine/properties';
 import { DEFAULT_STATUSES } from '@/engine/schema';
 import {
@@ -26,10 +31,9 @@ import {
 } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Schema, Selection, StatusDef } from '@/engine/types';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { BoardView } from '@/views/BoardView';
-import { ListView } from '@/views/ListView';
-import { SplitView } from '@/views/SplitView';
-import { TableView } from '@/views/TableView';
+import { resolveDateField } from '@/engine/schedule';
+import { useQuickAdd } from '@/views/QuickAdd';
+import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
@@ -164,6 +168,24 @@ function FieldRow({
               : 'Configure'}
           </button>
         )}
+        {/* M9.6: declaration order drives default column order everywhere,
+            so reordering here is the schema-level equivalent of dragging a
+            table header. Available on built-ins too — the lock covers a
+            property's existence, not where it sits. */}
+        <span className="inline-flex gap-0.5">
+          <IconButton
+            icon="chevron-up"
+            label={`Move ${humanize(def.name)} up`}
+            size="sm"
+            onClick={() => void moveFieldOnType(typeName, def.name, -1)}
+          />
+          <IconButton
+            icon="chevron-down"
+            label={`Move ${humanize(def.name)} down`}
+            size="sm"
+            onClick={() => void moveFieldOnType(typeName, def.name, 1)}
+          />
+        </span>
         {locked ? (
           <span
             title="Built-in property — its name and kind are fixed"
@@ -244,8 +266,12 @@ function TypePropertiesPanel({ listing }: { listing: TypeListing }) {
           </div>
         )}
         {fields.length === 0 && (
-          <div className="px-1 py-2 text-[12.5px] text-[var(--n-400)]">
-            No properties declared yet.
+          <div className="py-6">
+            <EmptyState
+              icon="settings-2"
+              title="No properties yet"
+              description="Add one below and every record of this type gains the field."
+            />
           </div>
         )}
         {fields.map((f) => (
@@ -305,28 +331,40 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   );
 
   const collection = useMemo(
-    () => resolveCollection(selection, entries, schema, views),
+    () => resolveSurface(selection, entries, schema, views),
     [selection, entries, schema, views],
   );
 
+  // M9.2: one resolution path shared with every other surface.
   const typeFields = useMemo(
-    () => schema.types.get(listing.name)?.fields ?? [],
-    [schema, listing.name],
+    () => columnUniverse({ type: listing.name, project: null }, collection.entries, schema),
+    [schema, listing.name, collection.entries],
   );
+  const scope = `type:${listing.name}`;
+  // M9.6: the type screen could only list; now it can create.
+  const quickAdd = useQuickAdd(listing.name, null);
 
   const [tab, setTab] = useState<TypeTab>('records');
   const [dialog, setDialog] = useState<TypeDialog | null>(null);
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
   useEffect(() => {
     setTab('records');
-    setPresentation(collection.presentation);
+    setPresentation(clonePresentation(collection.presentation));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name]);
 
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.orderBy, schema),
-    [collection.entries, presentation.orderBy, schema],
+    () => sortEntries(collection.entries, presentation.sort, schema),
+    [collection.entries, presentation.sort, schema],
   );
+
+  // The calendar creates WITH a date, which the band mechanism cannot carry:
+  // a band sets a grouping value, not an arbitrary property.
+  const dateField = resolveDateField(presentation, typeFields);
+  const onCreateOn =
+    dateField === null
+      ? undefined
+      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -391,39 +429,33 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
             presentation={presentation}
             onChange={setPresentation}
             fields={typeFields}
-            withSplit
+            sourceType={listing.name}
+            schema={schema}
+            onAddProperty={(name, kind) => {
+              void (async () => {
+                if (await addFieldToType(listing.name, name, kind)) {
+                  setPresentation((p) => ({
+                    ...p,
+                    columns: [...p.columns, { field: normalizeFieldName(name) }],
+                  }));
+                }
+              })();
+            }}
           />
-          {presentation.type === 'split' ? (
-            <SplitView entries={sortedEntries} schema={schema} />
-          ) : presentation.type === 'table' ? (
-            <TableView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              fields={typeFields}
-              onOrderBy={(field) =>
-                setPresentation({
-                  ...presentation,
-                  orderBy: {
-                    field,
-                    dir:
-                      presentation.orderBy.field === field && presentation.orderBy.dir === 'asc'
-                        ? 'desc'
-                        : 'asc',
-                  },
-                })
-              }
-            />
-          ) : presentation.type === 'board' ? (
-            <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
-          ) : (
-            <ListView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              project={null}
-            />
-          )}
+          <ViewCanvas
+            entries={sortedEntries}
+            allEntries={entries}
+            presentation={presentation}
+            schema={schema}
+            fields={typeFields}
+            scope={scope}
+            createType={listing.name}
+            onCreate={quickAdd}
+            onCreateOn={onCreateOn}
+            onColumnsChange={(columns) => setPresentation({ ...presentation, columns })}
+            onOrderBy={(field) => setPresentation(toggleSort(presentation, field))}
+            onZoomChange={(zoom) => setPresentation({ ...presentation, zoom })}
+          />
         </>
       )}
       {dialog === 'style' && (

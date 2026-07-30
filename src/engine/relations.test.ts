@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildRelationIndex, childrenOf, rollupSpec } from '@/engine/relations';
+import { buildRelationIndex, childrenAt, childrenOf, rollupSpec } from '@/engine/relations';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
-import type { Entry } from '@/engine/types';
+import type { ChildrenSpec, Entry } from '@/engine/types';
 
 /** Objective ← Key result (the child holds the link), plus one forward link. */
 function fixture(): Entry[] {
@@ -149,5 +149,36 @@ describe('reverse rollups', () => {
     const beta = byPath(entries, 'objs/beta.md');
     expect(schema.resolveField(beta, 'kr_count').display).toBe('1');
     expect(schema.resolveField(beta, 'avg_attainment').display).toBe('10');
+  });
+});
+
+// M9.1: the defect this fixes — one spec applied at every depth meant a
+// hierarchy could only ever be one relation deep.
+describe('childrenAt', () => {
+  const objective = makeEntry({ path: 'o.md', type: 'Objective', title: 'Ship it' });
+  const kr = makeEntry({
+    path: 'kr.md',
+    type: 'Key result',
+    title: 'KR one',
+    relationships: { objective: ['o'], deliverables: ['w'] },
+  });
+  const work = makeEntry({ path: 'w.md', type: 'Work item', title: 'W' });
+  const all = [objective, kr, work];
+  const index = buildRelationIndex(all);
+
+  const chain: ChildrenSpec[] = [
+    { direction: 'reverse', type: 'Key result', field: 'objective' },
+    { direction: 'forward', field: 'deliverables' },
+  ];
+
+  it('follows each depth with its OWN spec', () => {
+    expect(childrenAt(objective, chain, 0, all, index).map((e) => e.path)).toEqual(['kr.md']);
+    // The level that never rendered before: depth 1 uses the forward
+    // relation, not a re-run of depth 0's reverse one.
+    expect(childrenAt(kr, chain, 1, all, index).map((e) => e.path)).toEqual(['w.md']);
+  });
+
+  it('terminates past the end of the chain', () => {
+    expect(childrenAt(work, chain, 2, all, index)).toEqual([]);
   });
 });

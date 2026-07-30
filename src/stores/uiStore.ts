@@ -8,8 +8,48 @@ interface UiState {
   detailPath: string | null;
   openDetail(path: string): void;
   closeDetail(): void;
+  /**
+   * Width of the record side panel, in px (M11). Persisted.
+   *
+   * It is a stored preference rather than a constant because the panel is now
+   * a COLUMN of the layout rather than an overlay: how much of the window it
+   * takes is a trade the person reading is making between the record and the
+   * table beside it, and only they know which way it goes today.
+   */
+  detailWidth: number;
+  setDetailWidth(px: number): void;
+  /** Sidebar width in px, and whether it is collapsed. Both persisted. */
+  sidebarWidth: number;
+  setSidebarWidth(px: number): void;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed(v: boolean): void;
   quickOpenVisible: boolean;
   setQuickOpen(v: boolean): void;
+  /**
+   * Collapsed group bands and tree rows (M9.1), keyed scope → key → true.
+   * Scope is the surface's identity (`view:<id>`, `project:<path>`,
+   * `type:<name>`); key is the group path or tree row key.
+   *
+   * This lived in component `useState` in TableView and TreeView, so every
+   * expansion reset the moment you navigated away — which read as "the
+   * nesting doesn't stick". It is session state, not view configuration, so
+   * it belongs in the store and NOT in the view's YAML.
+   */
+  collapsed: Record<string, Record<string, boolean>>;
+  toggleCollapsed(scope: string, key: string): void;
+  isCollapsed(scope: string, key: string): boolean;
+  /**
+   * The diff currently being read, shown INLINE in place of the editor
+   * rather than in a dialog (M9.7).
+   *
+   * A diff is a way of looking at the note you are already on, not a
+   * separate thing that interrupts it — a modal makes it impossible to
+   * scroll the note beside its own history, and traps focus for something
+   * you are only reading.
+   */
+  diffView: { path: string; commit: string | null } | null;
+  openDiff(path: string, commit?: string | null): void;
+  closeDiff(): void;
   // File-tree expand state, persisted across sessions (M2 Task 10).
   expandedFolders: Record<string, boolean>;
   toggleFolder(path: string): void;
@@ -31,6 +71,15 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+  /**
+   * The open sidebar-tree context menu (M10), keyed by node id.
+   *
+   * In the store rather than in each row's local state because only ONE menu
+   * may be open at a time — per-row state let two menus coexist after a
+   * right-click on a second row, with two overlapping popovers on screen.
+   */
+  nodeMenu: { x: number; y: number; id: string } | null;
+  setNodeMenu(v: { x: number; y: number; id: string } | null): void;
   /** Inbox workflow (M4). Off = every note reads as organized and the Rail
    * hides the Inbox — for people who file at capture time. Persisted. */
   inboxEnabled: boolean;
@@ -38,6 +87,10 @@ interface UiState {
   /** After organizing, open the next queued capture automatically. */
   inboxAutoAdvance: boolean;
   setInboxAutoAdvance(v: boolean): void;
+  /** M9.4: commit automatically when work pauses, and after agent writes.
+   * Intent only — the repo probe decides whether it can actually run. */
+  autoCheckpoint: boolean;
+  setAutoCheckpoint(v: boolean): void;
   /** Selected Inbox period pill; persisted so the queue reopens as left. */
   inboxPeriod: InboxPeriod;
   setInboxPeriod(v: InboxPeriod): void;
@@ -132,6 +185,30 @@ const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 const AUTO_LEARN_KEY = 'cerebro.autoLearn';
 const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
+const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
+const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
+const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
+const SIDEBAR_COLLAPSED_KEY = 'cerebro.sidebarCollapsed';
+
+/**
+ * Panel sizing (M11).
+ *
+ * 560 rather than the old 420: at 420 a record's properties column and its
+ * values were both cramped, and a date range wrapped. The ceiling exists so
+ * dragging it to full width cannot hide the canvas the panel is annotating.
+ */
+export const DETAIL_WIDTH_DEFAULT = 560;
+export const DETAIL_WIDTH_MIN = 360;
+export const DETAIL_WIDTH_MAX = 1000;
+export const SIDEBAR_WIDTH_DEFAULT = 264;
+export const SIDEBAR_WIDTH_MIN = 180;
+export const SIDEBAR_WIDTH_MAX = 460;
+
+function loadNumber(key: string, fallback: number, min: number, max: number): number {
+  const raw = Number(loadString(key, String(fallback)));
+  if (!Number.isFinite(raw)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(raw)));
+}
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -212,13 +289,50 @@ function loadInboxPeriod(): InboxPeriod {
 
 let nextToastId = 1;
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore = create<UiState>((set, get) => ({
   detailPath: null,
   openDetail: (path) => set({ detailPath: path }),
   closeDetail: () => set({ detailPath: null }),
 
+  detailWidth: loadNumber(DETAIL_WIDTH_KEY, DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MIN, DETAIL_WIDTH_MAX),
+  setDetailWidth: (px) => {
+    const clamped = Math.round(Math.min(DETAIL_WIDTH_MAX, Math.max(DETAIL_WIDTH_MIN, px)));
+    storeString(DETAIL_WIDTH_KEY, String(clamped));
+    set({ detailWidth: clamped });
+  },
+
+  sidebarWidth: loadNumber(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX),
+  setSidebarWidth: (px) => {
+    const clamped = Math.round(Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, px)));
+    storeString(SIDEBAR_WIDTH_KEY, String(clamped));
+    set({ sidebarWidth: clamped });
+  },
+  sidebarCollapsed: loadString(SIDEBAR_COLLAPSED_KEY, 'false') === 'true',
+  setSidebarCollapsed: (v) => {
+    storeString(SIDEBAR_COLLAPSED_KEY, String(v));
+    set({ sidebarCollapsed: v });
+  },
+
   quickOpenVisible: false,
   setQuickOpen: (v) => set({ quickOpenVisible: v }),
+
+  autoCheckpoint: loadString(AUTO_CHECKPOINT_KEY, 'true') === 'true',
+  setAutoCheckpoint: (v) => {
+    storeString(AUTO_CHECKPOINT_KEY, String(v));
+    set({ autoCheckpoint: v });
+  },
+
+  diffView: null,
+  openDiff: (path, commit = null) => set({ diffView: { path, commit } }),
+  closeDiff: () => set({ diffView: null }),
+
+  collapsed: {},
+  toggleCollapsed: (scope, key) =>
+    set((s) => {
+      const band = s.collapsed[scope] ?? {};
+      return { collapsed: { ...s.collapsed, [scope]: { ...band, [key]: band[key] !== true } } };
+    }),
+  isCollapsed: (scope, key) => get().collapsed[scope]?.[key] === true,
 
   expandedFolders: loadExpanded(),
   toggleFolder: (path) =>
@@ -266,6 +380,8 @@ export const useUiStore = create<UiState>((set) => ({
     set({ homeTaskAssignee: v });
   },
 
+  nodeMenu: null,
+  setNodeMenu: (v) => set({ nodeMenu: v }),
   typesOpen: loadString(TYPES_OPEN_KEY, 'true') === 'true',
   setTypesOpen: (v) => {
     storeString(TYPES_OPEN_KEY, String(v));

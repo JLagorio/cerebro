@@ -22,13 +22,19 @@ filters:
           value: review
 presentation:
   type: table
-  groupBy: status
-  orderBy:
-    field: due
-    dir: asc
-  visibleFields:
-    - status
-    - priority
-    - assignee
-    - due
-    - estimate
+  # M9.1: nested grouping — status bands, each split by assignee.
+  group:
+    - field: status
+    - field: assignee
+  sort:
+    - field: due
+      dir: asc
+    - field: priority
+      dir: asc
+  columns:
+    - field: status
+    - field: priority
+    - field: assignee
+    - field: due
+      width: 120
+    - field: estimate

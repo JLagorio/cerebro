@@ -5,6 +5,7 @@ status: todo
 priority: low
 assignee: "[[dana-fox]]"
 due: 2026-08-14
+window: { start: 2026-08-04, end: 2026-08-14 }
 estimate: S
 ---
 

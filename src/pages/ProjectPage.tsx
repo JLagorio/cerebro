@@ -4,39 +4,35 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
-import { resolveCollection, sortEntries } from '@/engine/collections';
+import { resolveSurface, sortEntries } from '@/engine/surface';
+import { columnUniverse } from '@/engine/columns';
 import { typeStyle } from '@/engine/typeCatalog';
-import type { Presentation, Selection, ViewFile } from '@/engine/types';
-import { serializeView } from '@/engine/views';
+import type { FieldDef, Presentation, Selection, ListFile } from '@/engine/types';
+import { clonePresentation, replaceView, resolveView, serializeList, toggleSort } from '@/engine/views';
+import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { resolveDateField } from '@/engine/schedule';
+import { useQuickAdd } from '@/views/QuickAdd';
+import { ViewCanvas } from '@/views/ViewCanvas';
 import { EntityDossier } from '@/knowledge/EntityDossier';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { saveView } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { BoardView } from '@/views/BoardView';
-import { ListView } from '@/views/ListView';
-import { TableView } from '@/views/TableView';
-import { slugifyViewId, ViewToolbar } from '@/views/ViewToolbar';
+import { slugifyListId, ViewToolbar } from '@/views/ViewToolbar';
 
 // Task 10: the project header carries two tab groups — saved views (Items +
 // per-project views) and page tabs (Overview = project.md body, Pages = the
 // project folder's file tree).
 type ProjectTab =
   | { kind: 'items' }
-  | { kind: 'view'; id: string }
+  | { kind: 'list'; id: string }
   | { kind: 'overview' }
   | { kind: 'pages' };
 
-export type ProjectSelection = Extract<Selection, { kind: 'project' | 'view' }>;
+export type ProjectSelection = Extract<Selection, { kind: 'project' | 'list' }>;
 
 const projectDir = (projectPath: string) => projectPath.replace(/\/project\.md$/, '');
-
-const clonePresentation = (p: Presentation): Presentation => ({
-  ...p,
-  orderBy: { ...p.orderBy },
-  visibleFields: [...p.visibleFields],
-});
 
 /** Underline tab from the design mock's saved-view tab row. */
 function ViewTab({
@@ -89,7 +85,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   };
 
   const collection = useMemo(
-    () => resolveCollection(selection, entries, schema, views),
+    () => resolveSurface(selection, entries, schema, views),
     [selection, entries, schema, views],
   );
 
@@ -101,7 +97,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   // Task 8: saved-view tabs — "Items" is ephemeral, scoped-view tab edits
   // auto-persist. Task 10 adds the Overview and Pages tabs.
   const [tab, setTab] = useState<ProjectTab>({ kind: 'items' });
-  const projectViews = useMemo<ViewFile[]>(
+  const projectViews = useMemo<ListFile[]>(
     () =>
       project === null
         ? []
@@ -118,15 +114,15 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   // The view file behind the current canvas: a scoped tab on a project page,
   // or the global view file for a sidebar view selection. Null on Items.
   const activeView =
-    selection.kind === 'view'
+    selection.kind === 'list'
       ? views.find((v) => v.id === selection.id && v.project === null) ?? null
-      : tab.kind === 'view'
+      : tab.kind === 'list'
         ? projectViews.find((v) => v.id === tab.id) ?? null
         : null;
 
   // Local presentation state, re-initialized when the selection or tab changes.
   const selectionKey = selection.kind === 'project' ? selection.path : selection.id;
-  const tabKey = tab.kind === 'view' ? `view:${tab.id}` : tab.kind;
+  const tabKey = tab.kind === 'list' ? `view:${tab.id}` : tab.kind;
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
   useEffect(() => {
     setTab({ kind: 'items' });
@@ -135,26 +131,42 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   useEffect(() => {
     setPresentation(
       activeView !== null && selection.kind === 'project'
-        ? clonePresentation(activeView.definition.presentation)
+        ? clonePresentation(resolveView(activeView.definition).presentation)
         : collection.presentation,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey, tabKey]);
 
   // Deviation from the plan's verbatim body (reported): re-sort by the LIVE
-  // orderBy so the toolbar's order select works — resolveCollection sorts by
+  // orderBy so the toolbar's order select works — resolveSurface sorts by
   // the initial presentation only, and the views never re-sort.
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.orderBy, schema),
-    [collection.entries, presentation.orderBy, schema],
+    () => sortEntries(collection.entries, presentation.sort, schema),
+    [collection.entries, presentation.sort, schema],
   );
 
-  // The project canvas is Work-item-only, so its column universe is that
-  // type's declared fields (M3.4: drives the table and the property picker).
-  const workItemFields = useMemo(
-    () => schema.types.get('Work item')?.fields ?? [],
-    [schema],
+  // M9.2: the canvas is no longer Work-item-only — a scoped view tab lists
+  // whatever type its source names. Hardcoding `Work item` here showed the
+  // wrong type's properties the moment a view tab was active.
+  const activeSource = activeView?.definition.source ?? {
+    type: 'Work item',
+    project: project?.path ?? null,
+  };
+  const fields = useMemo(
+    () => columnUniverse(activeSource, collection.entries, schema),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeSource.type, activeSource.project, collection.entries, schema],
   );
+  const sourceType = activeSource.type;
+  const scope = selection.kind === 'project' ? `project:${selection.path}:${tabKey}` : `view:${selection.id}`;
+  const quickAdd = useQuickAdd(sourceType ?? 'Work item', project);
+  // Creating on a calendar day carries the date itself, which the band
+  // mechanism cannot express (it sets a grouping value, not any property).
+  const dateField = resolveDateField(presentation, fields);
+  const onCreateOn =
+    dateField === null
+      ? undefined
+      : (title: string, day: string) => quickAdd(title, {}, { [dateField]: day });
 
   // Task 8: toolbar edits auto-persist to the active saved view's file
   // (project-scoped tab or global view). The Items tab stays ephemeral.
@@ -162,7 +174,14 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     setPresentation(next);
     if (activeView === null || vaultPath === null) return;
     const folder = activeView.project === null ? null : projectDir(activeView.project);
-    const yaml = serializeView({ ...activeView.definition, presentation: next });
+    // A project tab is a single-view List, so the edit lands on its first (and
+    // only) view rather than on the List itself (M11).
+    const yaml = serializeList(
+      replaceView(activeView.definition, activeView.definition.views[0].id, {
+        ...activeView.definition.views[0],
+        presentation: next,
+      }),
+    );
     void (async () => {
       try {
         await saveView(vaultPath, activeView.id, yaml, folder);
@@ -173,20 +192,34 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
     })();
   };
 
-  // "New view" tab affordance: saves the current presentation as a
+  // M9.2: a column IS a property — adding one writes the type doc, then
+  // shows the column on this canvas.
+  const addProperty = (name: string, kind: FieldDef['kind']) => {
+    if (sourceType === null) return;
+    void (async () => {
+      if (await addFieldToType(sourceType, name, kind)) {
+        handlePresentationChange({
+          ...presentation,
+          columns: [...presentation.columns, { field: normalizeFieldName(name) }],
+        });
+      }
+    })();
+  };
+
+  // "New list" tab affordance: saves the current presentation as a
   // project-scoped view and switches to its tab.
   const [newViewOpen, setNewViewOpen] = useState(false);
   const [newViewName, setNewViewName] = useState('');
-  const createView = async () => {
+  const createList = async () => {
     const name = newViewName.trim();
     if (name === '' || project === null || vaultPath === null) return;
     // Dedupe within the project scope (M1.x): a name that slugifies to a
     // taken id must not silently overwrite that view's file.
-    const base = slugifyViewId(name) || 'view';
+    const base = slugifyListId(name) || 'view';
     const taken = new Set(projectViews.map((v) => v.id));
     let id = base;
     for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
-    const yaml = serializeView({
+    const yaml = serializeList({
       name,
       icon: null,
       color: null,
@@ -194,15 +227,14 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
       // A project tab is a view over this project's work items (M3.5) — the
       // same shape any saved view uses, no longer a special case.
       source: { type: 'Work item', project: project.path },
-      filters: null,
-      presentation,
+      views: [{ id: 'view', name, icon: null, filters: null, presentation }],
     });
     try {
       await saveView(vaultPath, id, yaml, projectDir(project.path));
       await rescan();
       setNewViewOpen(false);
       setNewViewName('');
-      setTab({ kind: 'view', id });
+      setTab({ kind: 'list', id });
       toast(`View "${name}" saved`);
     } catch {
       // Surface the failed write instead of an unhandled rejection (M1.x).
@@ -250,10 +282,10 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
             {projectViews.map((v) => (
               <ViewTab
                 key={v.id}
-                active={tab.kind === 'view' && tab.id === v.id}
+                active={tab.kind === 'list' && tab.id === v.id}
                 icon={v.definition.icon ?? 'layout-list'}
                 label={v.definition.name}
-                onClick={() => setTab({ kind: 'view', id: v.id })}
+                onClick={() => setTab({ kind: 'list', id: v.id })}
               />
             ))}
             <button
@@ -262,7 +294,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
               className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
             >
               <Icon name="plus" size={13} />
-              New view
+              New list
             </button>
             {/* Task 10: page tabs — the project folder's document surfaces. */}
             <span aria-hidden className="mx-1.5 mb-1.5 h-4 w-px bg-[var(--n-200)]" />
@@ -312,49 +344,43 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
           <ViewToolbar
             presentation={presentation}
             onChange={handlePresentationChange}
-            fields={workItemFields}
+            fields={fields}
+            sourceType={sourceType}
+            schema={schema}
+            onAddProperty={addProperty}
           />
-          {presentation.type === 'table' ? (
-            <TableView
-              entries={sortedEntries}
-              presentation={presentation}
-              schema={schema}
-              fields={workItemFields}
-              onOrderBy={(field) =>
-                handlePresentationChange({
-                  ...presentation,
-                  orderBy: {
-                    field,
-                    dir:
-                      presentation.orderBy.field === field && presentation.orderBy.dir === 'asc'
-                        ? 'desc'
-                        : 'asc',
-                  },
-                })
-              }
-            />
-          ) : presentation.type === 'board' ? (
-            <BoardView entries={sortedEntries} presentation={presentation} schema={schema} />
-          ) : (
-            <ListView entries={sortedEntries} presentation={presentation} schema={schema} project={project} />
-          )}
+          <ViewCanvas
+            entries={sortedEntries}
+            allEntries={entries}
+            presentation={presentation}
+            schema={schema}
+            fields={fields}
+            scope={scope}
+            project={project}
+            createType={sourceType ?? undefined}
+            onCreate={quickAdd}
+            onCreateOn={onCreateOn}
+            onColumnsChange={(columns) => handlePresentationChange({ ...presentation, columns })}
+            onOrderBy={(field) => handlePresentationChange(toggleSort(presentation, field))}
+            onZoomChange={(zoom) => handlePresentationChange({ ...presentation, zoom })}
+          />
         </>
       )}
       <Dialog
         open={newViewOpen}
         onClose={() => setNewViewOpen(false)}
-        title="New view"
+        title="New list"
         width={420}
         primaryAction={{
           label: 'Save',
-          onClick: () => void createView(),
+          onClick: () => void createList(),
           disabled: newViewName.trim() === '',
         }}
         secondaryAction={{ label: 'Cancel', onClick: () => setNewViewOpen(false) }}
       >
         <Input
           autoFocus
-          placeholder="View name"
+          placeholder="List name"
           value={newViewName}
           onChange={(e) => setNewViewName(e.target.value)}
           width="100%"

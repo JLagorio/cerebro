@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
 import { learnQueue } from '@/engine/learn';
+import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
@@ -199,6 +200,9 @@ export function SettingsPage() {
             className="w-[140px] flex-none"
           />
         </div>
+      </section>
+      <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
+        <GitSettings />
       </section>
       <section className="rounded-[14px] border border-[var(--n-200)] p-5">
         <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">About</h2>

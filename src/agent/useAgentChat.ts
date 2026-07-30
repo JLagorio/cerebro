@@ -13,6 +13,11 @@ export interface AgentChat {
   send(text: string): void;
   stop(): void;
   reset(): void;
+  /** M9.5: the CLI session behind this transcript, so a conversation can be
+   * resumed after a reload rather than starting over. */
+  sessionId: string | null;
+  /** Restore a persisted conversation into the hook. */
+  restore(messages: ChatMessage[], sessionId: string | null): void;
 }
 
 /**
@@ -27,6 +32,8 @@ export function useAgentChat(
   systemPrompt: string,
   { shell, connectors }: { shell: boolean; connectors: boolean },
   model: string | null,
+  /** Fires after a turn that wrote files, with a one-line summary (M9.5). */
+  onWroteFiles?: (summary: string) => void,
 ): AgentChat {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
@@ -36,7 +43,13 @@ export function useAgentChat(
   const setAgentBusy = useUiStore((s) => s.setAgentBusy);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
+  // The prompt that started the in-flight turn, so a write checkpoint can say
+  // what the agent was asked to do rather than just that it wrote.
+  const lastPrompt = useRef<string>('');
+  const onWrote = useRef(onWroteFiles);
+  onWrote.current = onWroteFiles;
   const activeRef = useRef<string | null>(null);
   const mcpRef = useRef<McpInfo | null>(null);
   // The agent writes straight to disk; a turn that touched files must end
@@ -60,6 +73,7 @@ export function useAgentChat(
       switch (event.kind) {
         case 'Init':
           sessionRef.current = event.session_id;
+          setSessionId(event.session_id);
           break;
         case 'TextDelta':
           patchActive((m) => ({ ...m, text: m.text + event.text }));
@@ -78,7 +92,9 @@ export function useAgentChat(
                 id: event.tool_id,
                 name: event.tool_name,
                 input: event.input ?? null,
+                output: null,
                 done: false,
+                failed: false,
               },
             ],
           }));
@@ -86,11 +102,23 @@ export function useAgentChat(
         case 'ToolDone':
           patchActive((m) => ({
             ...m,
-            tools: m.tools.map((t) => (t.id === event.tool_id ? { ...t, done: true } : t)),
+            tools: m.tools.map((t) =>
+              t.id === event.tool_id
+                ? {
+                    ...t,
+                    done: true,
+                    output: event.output ?? null,
+                    failed: event.is_error === true,
+                  }
+                : t,
+            ),
           }));
           break;
         case 'Result':
-          if (event.session_id) sessionRef.current = event.session_id;
+          if (event.session_id) {
+            sessionRef.current = event.session_id;
+            setSessionId(event.session_id);
+          }
           // The final result is authoritative: streamed deltas can be partial
           // when a turn is interrupted, so prefer it when it has content.
           patchActive((m) => ({
@@ -109,6 +137,10 @@ export function useAgentChat(
           if (touchedFiles.current) {
             touchedFiles.current = false;
             void rescan().catch(() => undefined);
+            // M9.5/M9.4: a turn that wrote files gets its own checkpoint, so
+            // the assistant's work is revertible on its own rather than
+            // tangled into the user's next one.
+            onWrote.current?.(lastPrompt.current);
           }
           break;
       }
@@ -121,6 +153,7 @@ export function useAgentChat(
       if (trimmed === '' || vaultPath === null) return;
       const assistantId = nextId();
       activeRef.current = assistantId;
+      lastPrompt.current = trimmed;
       setMessages((prev) => [
         ...prev,
         { id: nextId(), role: 'user', text: trimmed, tools: [] },
@@ -167,13 +200,29 @@ export function useAgentChat(
   const reset = useCallback(() => {
     void stopAgent().catch(() => undefined);
     sessionRef.current = null;
+    setSessionId(null);
     activeRef.current = null;
     setStreaming(false);
     setAgentBusy(false);
     setMessages([]);
   }, [setAgentBusy]);
 
-  return { messages, streaming, send, stop, reset };
+  /** Load a stored conversation. Stops any turn first: the events already in
+   * flight belong to the transcript being replaced. */
+  const restore = useCallback(
+    (restored: ChatMessage[], restoredSession: string | null) => {
+      void stopAgent().catch(() => undefined);
+      activeRef.current = null;
+      setStreaming(false);
+      setAgentBusy(false);
+      sessionRef.current = restoredSession;
+      setSessionId(restoredSession);
+      setMessages(restored);
+    },
+    [setAgentBusy],
+  );
+
+  return { messages, streaming, send, stop, reset, sessionId, restore };
 }
 
 /** Tools that change disk — the ones that make a rescan necessary. */

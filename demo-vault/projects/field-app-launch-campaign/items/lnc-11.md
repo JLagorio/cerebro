@@ -5,6 +5,7 @@ status: todo
 priority: medium
 assignee: "[[dana-fox]]"
 due: 2026-08-20
+window: { start: 2026-08-03, end: 2026-08-20 }
 estimate: S
 ---
 

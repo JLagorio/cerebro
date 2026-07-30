@@ -21,6 +21,7 @@ fields:
       - { id: none, color: '#7E8699' }
   assignee: { kind: person }
   due: { kind: date }
+  window: { kind: daterange }
   estimate:
     kind: select
     options:

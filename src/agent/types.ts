@@ -9,7 +9,9 @@ export type AgentEvent =
   | { kind: 'TextDelta'; text: string }
   | { kind: 'ThinkingDelta'; text: string }
   | { kind: 'ToolStart'; tool_name: string; tool_id: string; input?: string | null }
-  | { kind: 'ToolDone'; tool_id: string }
+  // M9.5: the result travels with the completion, so an action card has
+  // something to expand to.
+  | { kind: 'ToolDone'; tool_id: string; output?: string | null; is_error?: boolean }
   | { kind: 'Result'; text: string; session_id?: string | null }
   | { kind: 'Error'; message: string }
   | { kind: 'Done' };
@@ -25,12 +27,34 @@ export interface McpInfo {
   token: string;
 }
 
-/** What the agent did, shown inline in the transcript as a chip. */
+/** What the agent did, shown inline in the transcript as an action card. */
 export interface ToolCall {
   id: string;
   name: string;
   input: string | null;
+  /** What the tool returned; null while running or when it returned nothing. */
+  output: string | null;
   done: boolean;
+  failed: boolean;
+}
+
+/**
+ * A named conversation with the agent (M9.5).
+ *
+ * Persisted in app config, NOT in the vault. A transcript is a tool log, not
+ * a note — writing it into the vault would feed it to the distiller that
+ * reads the vault, which is exactly the loop M8 was designed to avoid.
+ */
+export interface Conversation {
+  id: string;
+  title: string;
+  /** False once the user renames it, so auto-titling never overwrites them. */
+  usesDefaultTitle: boolean;
+  /** The CLI session to resume; null before the first turn. */
+  sessionId: string | null;
+  messages: ChatMessage[];
+  createdAt: string;
+  archived: boolean;
 }
 
 export interface ChatMessage {

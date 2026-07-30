@@ -2,21 +2,31 @@ import { useEffect, useRef, useState } from 'react';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
+import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
+import { GitHistoryPanel } from '@/git/GitHistoryPanel';
+import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { typeStyle } from '@/engine/typeCatalog';
 import { setNoteTitle } from '@/lib/ipc';
+import { useNavStore } from '@/stores/navStore';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
-import { useUiStore } from '@/stores/uiStore';
+import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 
 export function DetailPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
   const closeDetail = useUiStore((s) => s.closeDetail);
   const toast = useUiStore((s) => s.toast);
+  const width = useUiStore((s) => s.detailWidth);
+  const setWidth = useUiStore((s) => s.setDetailWidth);
   const entry = useEntry(detailPath);
   const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
+  const entries = useVaultStore((s) => s.entries);
+  const selection = useNavStore((s) => s.selection);
+  const navigate = useNavStore((s) => s.navigate);
 
   const [title, setTitle] = useState('');
   // Task 12: the body lives in the BlockNote editor (NoteBodyEditor owns
@@ -40,8 +50,15 @@ export function DetailPanel() {
 
   if (!detailPath || !entry) return null;
 
-  const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
+
+  // The owning project, unless you are already looking at it — a crumb back
+  // to the page you are standing on is noise, not navigation.
+  const onItsProject = selection.kind === 'project' && selection.path === entry.project;
+  const project =
+    entry.project !== null && !onItsProject
+      ? entries.find((e) => e.path === entry.project) ?? null
+      : null;
 
   const commitTitle = async () => {
     const trimmed = title.trim();
@@ -72,17 +89,58 @@ export function DetailPanel() {
   };
 
   return (
+    // M11: a COLUMN of the layout, not an overlay pinned to the viewport.
+    //
+    // As `fixed right-0` it sat on top of the canvas, so the right-hand columns
+    // of a table — and the table's own horizontal scrollbar — were underneath
+    // it and could not be reached. Notion shrinks the content instead, which is
+    // the only arrangement where "open a record" and "read the rest of the row"
+    // are not mutually exclusive. `relative` hosts the drag handle.
     <aside
       data-testid="detail-panel"
       aria-label="Detail panel"
-      className="cb-panel-in fixed right-0 top-0 z-30 flex h-full w-[420px] flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      // The 50vw ceiling is what keeps the canvas usable in a narrow window:
+      // the stored width is a preference for a big screen, and honouring it at
+      // 1024px would leave the table a sliver. The record never takes more of
+      // the window than what it is annotating.
+      style={{ width, maxWidth: '50vw' }}
     >
+      <ResizeHandle
+        label="Resize detail panel"
+        side="left"
+        width={width}
+        min={DETAIL_WIDTH_MIN}
+        max={DETAIL_WIDTH_MAX}
+        onResize={setWidth}
+      />
       <header className="flex items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
-        <span className="inline-flex" style={{ color: typeDef?.color ?? 'var(--n-500)' }}>
-          <Icon name={typeDef?.icon ?? 'file-text'} size={14} />
+        {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
+            panel, the table, QuickOpen, and the assistant's transcript. */}
+        <span className="inline-flex" style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}>
+          <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
         <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
         {key !== '' && <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">{key}</span>}
+        {/* M9.3: opening a record no longer drags you to its project, so the
+            project becomes something you press rather than something that
+            happens to you. Hidden when you are already standing on it. */}
+        {project !== null && (
+          <>
+            <span aria-hidden className="text-[11px] text-[var(--n-300)]">
+              /
+            </span>
+            <button
+              type="button"
+              data-testid="detail-project-crumb"
+              onClick={() => navigate({ kind: 'project', path: project.path })}
+              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+            >
+              <Icon name={typeStyle('Project', schema).icon} size={11} />
+              <span className="truncate">{project.title}</span>
+            </button>
+          </>
+        )}
         <span className="flex-1" />
         <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
       </header>
@@ -117,6 +175,12 @@ export function DetailPanel() {
             editorRef.current = editor;
           }}
         />
+        {/* M9.4 — every version of this note, and what each one changed.
+            Renders nothing when there is no history, so a note you just
+            created does not get a heading over an empty list. */}
+        <GitHistoryPanel path={entry.path} />
+        {/* M9.7 — the diff appears under the body, not over the panel. */}
+        <InlineDiff path={entry.path} />
       </div>
       <footer className="flex items-center gap-3 border-t border-[var(--n-100)] px-4 py-2.5 [font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">
         <span>Created {entry.createdAt.slice(0, 10)}</span>
