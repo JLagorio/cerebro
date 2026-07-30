@@ -99,6 +99,10 @@ export type Selection =
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)
   | { kind: 'view'; id: string }       // id = filename stem in views/
   | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
+  // M9.4 — git surfaces. `changes` is the uncommitted working tree (with
+  // conflict resolution when there is one); `pulse` is the committed history.
+  | { kind: 'changes' }
+  | { kind: 'pulse' }
   | { kind: 'settings' };
 
 /**

@@ -204,6 +204,12 @@ export function resolveCollection(
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
     case 'docs':
       return { title: 'Docs', entries: [], presentation: defaultPresentation() };
+    case 'changes':
+      // The git surfaces draw their own layouts; they are not collections of
+      // records and deliberately cannot be filtered or grouped.
+      return { title: 'Changes', entries: [], presentation: defaultPresentation() };
+    case 'pulse':
+      return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }

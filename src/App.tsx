@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
 import { useLearnRunner } from '@/agent/useLearnRunner';
+import { CheckpointHost } from '@/git/CheckpointHost';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
 import { createView } from '@/app/viewActions';
@@ -9,6 +10,7 @@ import { newViewDefinition, ViewSettingsDialog } from '@/app/ViewSettingsDialog'
 import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { ChangesPage } from '@/pages/ChangesPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { DocPage } from '@/pages/DocPage';
 import { DocsPage } from '@/pages/DocsPage';
@@ -16,6 +18,7 @@ import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
 import { ProjectPage } from '@/pages/ProjectPage';
+import { PulsePage } from '@/pages/PulsePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
@@ -39,6 +42,8 @@ function CanvasOutlet() {
     // M3.5: saved views are their own top-level surface, not a project tab.
     case 'view': return <CollectionPage selection={selection} />;
     case 'type': return <TypePage selection={selection} />;
+    case 'changes': return <ChangesPage />;
+    case 'pulse': return <PulsePage />;
     case 'settings': return <SettingsPage />;
   }
 }
@@ -193,6 +198,7 @@ function App() {
       <QuickOpen />
       <ToastHost />
       <RemindersHost />
+      <CheckpointHost />
       <AgentActions />
     </div>
   );

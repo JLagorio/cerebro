@@ -11,6 +11,7 @@ import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
 import { DocSidePanel } from '@/detail/DocSidePanel';
 import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
+import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import type { Entry, Selection } from '@/engine/types';
 import { createFolder, deleteNote, readNote, renameNote, saveNote } from '@/lib/ipc';
@@ -400,6 +401,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                 path={entry.path}
                 onReady={({ editor: e }) => setEditor(e)}
               />
+              {/* M9.4 — this document's history, silent when it has none. */}
+              <GitHistoryPanel path={entry.path} />
             </div>
           </div>
           {blank && !busy && <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />}

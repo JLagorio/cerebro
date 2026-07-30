@@ -51,6 +51,10 @@ interface UiState {
   /** After organizing, open the next queued capture automatically. */
   inboxAutoAdvance: boolean;
   setInboxAutoAdvance(v: boolean): void;
+  /** M9.4: commit automatically when work pauses, and after agent writes.
+   * Intent only — the repo probe decides whether it can actually run. */
+  autoCheckpoint: boolean;
+  setAutoCheckpoint(v: boolean): void;
   /** Selected Inbox period pill; persisted so the queue reopens as left. */
   inboxPeriod: InboxPeriod;
   setInboxPeriod(v: InboxPeriod): void;
@@ -145,6 +149,7 @@ const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 const AUTO_LEARN_KEY = 'cerebro.autoLearn';
 const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
+const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -232,6 +237,12 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   quickOpenVisible: false,
   setQuickOpen: (v) => set({ quickOpenVisible: v }),
+
+  autoCheckpoint: loadString(AUTO_CHECKPOINT_KEY, 'true') === 'true',
+  setAutoCheckpoint: (v) => {
+    storeString(AUTO_CHECKPOINT_KEY, String(v));
+    set({ autoCheckpoint: v });
+  },
 
   collapsed: {},
   toggleCollapsed: (scope, key) =>
