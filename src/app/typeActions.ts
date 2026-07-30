@@ -342,3 +342,47 @@ export async function addPropertyToEntry(
   }
   return true;
 }
+
+/**
+ * Move a property up or down in the type's `fields:` mapping (M9.6).
+ *
+ * The declaration order drives default column order everywhere, so this is
+ * the schema-level equivalent of dragging a table header — and until now
+ * there was no way to change it except editing YAML by hand.
+ *
+ * Rebuilds the whole mapping rather than patching one key: YAML mappings
+ * have no reorder operation, and `patchFrontmatter` merges keys, so a
+ * partial write would leave the original order intact.
+ */
+export async function moveFieldOnType(
+  typeName: string,
+  fieldName: string,
+  delta: number,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return false;
+  if (!guardEditable(doc, typeName)) return false;
+
+  const fields = rawFieldsOf(doc);
+  const names = Object.keys(fields);
+  const from = names.findIndex((k) => k.toLowerCase() === fieldName.toLowerCase());
+  const to = from + delta;
+  if (from === -1 || to < 0 || to >= names.length) return false;
+
+  const reordered = [...names];
+  const [moved] = reordered.splice(from, 1);
+  reordered.splice(to, 0, moved);
+
+  const next: Record<string, unknown> = {};
+  for (const name of reordered) next[name] = fields[name];
+
+  try {
+    await patchFrontmatter(doc.path, { fields: next });
+  } catch {
+    toast(`Couldn't reorder "${fieldName}"`);
+    return false;
+  }
+  return true;
+}

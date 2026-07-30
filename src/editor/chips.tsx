@@ -14,7 +14,8 @@ import {
 import { dueBucket } from '@/engine/tasks';
 import { resolveTarget } from '@/engine/wikilink';
 import { todayIso } from '@/lib/templates';
-import { useVaultStore } from '@/stores/vaultStore';
+import { typeStyle } from '@/engine/typeCatalog';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
  * Inline chips (M2.x docs polish). Three custom inline nodes that keep the
@@ -67,6 +68,7 @@ const CHIP_BASE =
 
 function WikilinkRender({ target, alias }: { target: string; alias: string }) {
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const open = useOpenPath();
   const resolved = resolveTarget(target, entries);
   const label = alias !== '' ? alias : (resolved?.title ?? target);
@@ -86,7 +88,8 @@ function WikilinkRender({ target, alias }: { target: string; alias: string }) {
       }
       title={resolved !== null ? resolved.path : `No page named "${target}"`}
     >
-      <Icon name="file-text" size={12} />
+      {/* M9.6: the target's own type, so a linked Risk reads as a Risk. */}
+      <Icon name={typeStyle(resolved?.type ?? null, schema).icon} size={12} />
       {label}
     </button>
   );

@@ -46,7 +46,6 @@ export function DetailPanel() {
 
   if (!detailPath || !entry) return null;
 
-  const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 
   // The owning project, unless you are already looking at it — a crumb back
@@ -92,8 +91,10 @@ export function DetailPanel() {
       className="cb-panel-in fixed right-0 top-0 z-30 flex h-full w-[420px] flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
     >
       <header className="flex items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
-        <span className="inline-flex" style={{ color: typeDef?.color ?? 'var(--n-500)' }}>
-          <Icon name={typeDef?.icon ?? 'file-text'} size={14} />
+        {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
+            panel, the table, QuickOpen, and the assistant's transcript. */}
+        <span className="inline-flex" style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}>
+          <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
         <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
         {key !== '' && <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">{key}</span>}

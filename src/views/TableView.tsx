@@ -1,4 +1,5 @@
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import {
@@ -9,12 +10,14 @@ import {
   toggleColumn,
   type ColumnDef,
 } from '@/engine/columns';
-import { groupTree } from '@/engine/grouping';
+import { groupTree, leafNodes } from '@/engine/grouping';
 import { kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { ColumnSpec, Entry, GroupNode, Presentation, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { QuickAddInline } from '@/views/QuickAdd';
+import { useRowKeyboard } from '@/views/useRowKeyboard';
 import { useUiStore } from '@/stores/uiStore';
 
 const TITLE_W = 280;
@@ -192,6 +195,10 @@ export interface TableViewProps {
   onColumnsChange?: (next: ColumnSpec[]) => void;
   /** Collapse-state namespace (M9.1). */
   scope?: string;
+  /** M9.6: create a record from the grid, inheriting the band's value. */
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+  /** True when the view has filters, so an empty state can say WHY. */
+  filtered?: boolean;
 }
 
 /** One group band and everything under it — recursive, so a two- or
@@ -204,6 +211,7 @@ function TableGroup({
   scope,
   collapsedMap,
   onToggle,
+  onCreate,
 }: {
   node: GroupNode;
   columns: ColumnDef[];
@@ -212,6 +220,7 @@ function TableGroup({
   scope: string;
   collapsedMap: Record<string, boolean> | undefined;
   onToggle: (scope: string, key: string) => void;
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }) {
   const isCollapsed = collapsedMap?.[node.path] === true;
   const isLeaf = node.children.length === 0;
@@ -249,22 +258,40 @@ function TableGroup({
         </span>
       </button>
       {!isCollapsed &&
-        (isLeaf
-          ? node.entries.map((e) => (
+        (isLeaf ? (
+          <>
+            {node.entries.map((e) => (
               <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
-            ))
-          : node.children.map((child) => (
-              <TableGroup
-                key={child.path}
-                node={child}
-                columns={columns}
-                widths={widths}
-                schema={schema}
-                scope={scope}
-                collapsedMap={collapsedMap}
-                onToggle={onToggle}
-              />
-            )))}
+            ))}
+            {/* M9.6: a listing surface can create, inheriting its band. */}
+            {onCreate !== undefined && (
+              <div className="sticky left-0 w-[280px]">
+                <QuickAddInline
+                  compact
+                  label="New"
+                  ariaLabel={`New record in ${node.label}`}
+                  onCreate={(title) =>
+                    onCreate(title, { groupBy: node.field, groupValue: node.key })
+                  }
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          node.children.map((child) => (
+            <TableGroup
+              key={child.path}
+              node={child}
+              columns={columns}
+              widths={widths}
+              schema={schema}
+              scope={scope}
+              collapsedMap={collapsedMap}
+              onToggle={onToggle}
+              onCreate={onCreate}
+            />
+          ))
+        ))}
     </section>
   );
 }
@@ -342,11 +369,14 @@ export function TableView({
   onOrderBy,
   onColumnsChange,
   scope = 'table',
+  onCreate,
+  filtered,
 }: TableViewProps) {
   // M9.1: collapse lives in the store, keyed by surface — it used to be
   // component state and reset on every navigation.
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
+  const openDetail = useUiStore((s) => s.openDetail);
 
   const resolved = useMemo(
     () => resolveColumns(presentation.columns, fields),
@@ -369,6 +399,16 @@ export function TableView({
     [onColumnsChange, presentation.columns],
   );
 
+  // Flat order of the rows actually on screen, for keyboard traversal.
+  const flatRows = useMemo(
+    () => (nodes.length === 0 ? entries : leafNodes(nodes).flatMap((n) => n.entries)),
+    [nodes, entries],
+  );
+  const keyboard = useRowKeyboard({
+    count: flatRows.length,
+    onOpen: (i) => openDetail(flatRows[i].path),
+  });
+
   const primarySort = presentation.sort[0];
   const totalWidth = TITLE_W + resolved.reduce((sum, c) => sum + c.width, 0);
   const widths: Record<string, number> = {};
@@ -376,7 +416,12 @@ export function TableView({
   const columns = resolved.map((c) => c.def);
 
   return (
-    <div data-testid="table-view" role="grid" className="min-h-0 min-w-0 flex-1 overflow-auto">
+    <div
+      data-testid="table-view"
+      role="grid"
+      className="min-h-0 min-w-0 flex-1 overflow-auto outline-none"
+      {...keyboard.containerProps}
+    >
       <div style={{ width: totalWidth, minWidth: '100%' }}>
         <div
           role="row"
@@ -433,9 +478,21 @@ export function TableView({
         </div>
 
         {nodes.length === 0 ? (
-          entries.map((e) => (
-            <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
-          ))
+          <>
+            {entries.map((e) => (
+              <TableRow key={e.path} entry={e} columns={columns} widths={widths} schema={schema} />
+            ))}
+            {onCreate !== undefined && (
+              <div className="sticky left-0 w-[280px]">
+                <QuickAddInline
+                  compact
+                  label="New"
+                  ariaLabel="New record"
+                  onCreate={(title) => onCreate(title, { groupBy: '', groupValue: '' })}
+                />
+              </div>
+            )}
+          </>
         ) : (
           nodes.map((node) => (
             <TableGroup
@@ -447,12 +504,25 @@ export function TableView({
               scope={scope}
               collapsedMap={collapsedMap}
               onToggle={toggleCollapsed}
+              onCreate={onCreate}
             />
           ))
         )}
 
         {entries.length === 0 && (
-          <div className="px-3 py-6 text-[12.5px] text-[var(--n-400)]">No records yet.</div>
+          <div className="sticky left-0 px-3 py-8">
+            {/* An empty that only reports emptiness occupies the space where
+                the next action belongs (M9.6). */}
+            <EmptyState
+              icon="table-2"
+              title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
+              description={
+                filtered === true
+                  ? 'Adjust the filters in view settings to widen the query.'
+                  : 'Create the first one below.'
+              }
+            />
+          </div>
         )}
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DeleteTypeDialog, RenameTypeDialog, TypeStyleDialog } from '@/app/TypeDialogs';
 import {
   addFieldToType,
+  moveFieldOnType,
   removeFieldFromType,
   renameFieldOnType,
   setFieldConfig,
@@ -9,6 +10,7 @@ import {
   setFieldOptions,
   setTypeStatuses,
 } from '@/app/typeActions';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -34,6 +36,7 @@ import { ListView } from '@/views/ListView';
 import { SplitView } from '@/views/SplitView';
 import { TableView } from '@/views/TableView';
 import { TreeView } from '@/views/TreeView';
+import { useQuickAdd } from '@/views/QuickAdd';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
@@ -168,6 +171,24 @@ function FieldRow({
               : 'Configure'}
           </button>
         )}
+        {/* M9.6: declaration order drives default column order everywhere,
+            so reordering here is the schema-level equivalent of dragging a
+            table header. Available on built-ins too — the lock covers a
+            property's existence, not where it sits. */}
+        <span className="inline-flex gap-0.5">
+          <IconButton
+            icon="chevron-up"
+            label={`Move ${humanize(def.name)} up`}
+            size="sm"
+            onClick={() => void moveFieldOnType(typeName, def.name, -1)}
+          />
+          <IconButton
+            icon="chevron-down"
+            label={`Move ${humanize(def.name)} down`}
+            size="sm"
+            onClick={() => void moveFieldOnType(typeName, def.name, 1)}
+          />
+        </span>
         {locked ? (
           <span
             title="Built-in property — its name and kind are fixed"
@@ -248,8 +269,12 @@ function TypePropertiesPanel({ listing }: { listing: TypeListing }) {
           </div>
         )}
         {fields.length === 0 && (
-          <div className="px-1 py-2 text-[12.5px] text-[var(--n-400)]">
-            No properties declared yet.
+          <div className="py-6">
+            <EmptyState
+              icon="settings-2"
+              title="No properties yet"
+              description="Add one below and every record of this type gains the field."
+            />
           </div>
         )}
         {fields.map((f) => (
@@ -319,6 +344,8 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     [schema, listing.name, collection.entries],
   );
   const scope = `type:${listing.name}`;
+  // M9.6: the type screen could only list; now it can create.
+  const quickAdd = useQuickAdd(listing.name, null);
 
   const [tab, setTab] = useState<TypeTab>('records');
   const [dialog, setDialog] = useState<TypeDialog | null>(null);
@@ -429,6 +456,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               schema={schema}
               fields={typeFields}
               scope={scope}
+              onCreate={quickAdd}
               onColumnsChange={(columns) => setPresentation({ ...presentation, columns })}
               onOrderBy={(field) => setPresentation(toggleSort(presentation, field))}
             />
@@ -438,6 +466,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               presentation={presentation}
               schema={schema}
               scope={scope}
+              onCreate={quickAdd}
             />
           ) : (
             <ListView
@@ -446,6 +475,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               schema={schema}
               project={null}
               scope={scope}
+              createType={listing.name}
             />
           )}
         </>

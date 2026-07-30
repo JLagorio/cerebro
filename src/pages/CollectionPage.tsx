@@ -17,6 +17,7 @@ import { ListView } from '@/views/ListView';
 import { SplitView } from '@/views/SplitView';
 import { TableView } from '@/views/TableView';
 import { TreeView } from '@/views/TreeView';
+import { useQuickAdd } from '@/views/QuickAdd';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type ViewSelection = Extract<Selection, { kind: 'view' }>;
@@ -66,6 +67,13 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
   );
 
   const sourceType = view?.definition.source.type ?? null;
+  // M9.6: a typeless view has no single type to create into, so the
+  // affordance is simply absent there rather than guessing one.
+  const quickAdd = useQuickAdd(sourceType ?? '', null);
+  const onCreate =
+    sourceType === null
+      ? undefined
+      : (title: string, band: { groupBy: string; groupValue: string }) => quickAdd(title, band);
   // Collapse state is namespaced per surface so two views don't share bands.
   const scope = `view:${selection.id}`;
 
@@ -153,6 +161,8 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
           schema={schema}
           fields={fields}
           scope={scope}
+          onCreate={onCreate}
+          filtered={view.definition.filters !== null}
           onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
         />
@@ -164,6 +174,7 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
           presentation={presentation}
           schema={schema}
           scope={scope}
+          onCreate={onCreate}
         />
       ) : (
         <ListView
@@ -172,6 +183,7 @@ export function CollectionPage({ selection }: { selection: ViewSelection }) {
           schema={schema}
           project={null}
           scope={scope}
+          createType={sourceType ?? undefined}
         />
       )}
 

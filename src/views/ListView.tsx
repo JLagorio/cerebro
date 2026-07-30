@@ -1,14 +1,13 @@
-import { useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Icon } from '@/components/ui/Icon';
+import { FieldEditor } from '@/detail/FieldEditor';
 import { FieldChip } from '@/views/FieldChip';
+import { QuickAddInline, useQuickAdd } from '@/views/QuickAdd';
 import { groupTree } from '@/engine/grouping';
-import { nextItemKey } from '@/engine/itemKeys';
+import { typeStyle } from '@/engine/typeCatalog';
 import { visibleColumns } from '@/engine/views';
-import { slugify } from '@/lib/slug';
-import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
-import type { Entry, Group, GroupNode, Presentation, Schema } from '@/engine/types';
+import type { Entry, GroupNode, Presentation, Schema } from '@/engine/types';
 
 export interface ListViewProps {
   entries: Entry[];
@@ -18,85 +17,10 @@ export interface ListViewProps {
   project: Entry | null;
   /** Collapse-state namespace (M9.1) — `view:<id>`, `project:<path>`, … */
   scope?: string;
+  /** Type new records get (M9.6); defaults to the project canvas's type. */
+  createType?: string;
 }
 
-
-function QuickAddRow({ group, groupBy, project }: { group: Group; groupBy: string | null; project: Entry }) {
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState('');
-  // Double-Enter while the write is pending must not create two files with
-  // the same key (M1.x, same guard as the CreateMenu dialogs).
-  const [submitting, setSubmitting] = useState(false);
-  const createItem = useVaultStore((s) => s.createItem);
-  const allEntries = useVaultStore((s) => s.entries);
-
-  const submit = async () => {
-    const trimmed = title.trim();
-    if (trimmed === '' || submitting) return;
-    setSubmitting(true);
-    const prefix = typeof project.properties.key === 'string' ? project.properties.key : 'WRK';
-    const key = nextItemKey(prefix, allEntries);
-    // v2 containment: no `project:` wikilink — membership comes from the file
-    // landing inside the project's folder.
-    const frontmatter: Record<string, unknown> = { type: 'Work item', key };
-    // The empty-key check covers the flat "All items" fallback group (note
-    // 17a): a grouped-but-empty list must not preset `field: ''`.
-    if (groupBy && group.key !== '__none__' && group.key !== '') frontmatter[groupBy] = group.key;
-    try {
-      // slug falls back to the key for all-symbol titles (slugify → '', which
-      // create_note rejects); body carries the typed title verbatim so the H1
-      // keeps its capitalization instead of the humanized slug (M1.x).
-      await createItem({
-        folder: `${project.path.replace(/\/project\.md$/, '')}/items`,
-        slug: slugify(trimmed) || key.toLowerCase(),
-        frontmatter,
-        body: `# ${trimmed}\n`,
-      });
-    } catch {
-      // createItem throws to callers by design — surface the failure and keep
-      // the draft instead of leaving an unhandled rejection (16a).
-      useUiStore.getState().toast(`Couldn't create "${trimmed}"`);
-      setSubmitting(false); // draft stays editable for retry
-      return;
-    }
-    setTitle('');
-    setEditing(false);
-    setSubmitting(false);
-  };
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        className="flex h-[34px] w-full items-center gap-2 border-b border-[var(--n-100)] px-5 text-[12.5px] text-[var(--n-400)] hover:bg-[var(--n-25)] hover:text-[var(--n-700)]"
-      >
-        <Icon name="plus" size={13} />
-        Add item
-      </button>
-    );
-  }
-  return (
-    <div className="flex h-[34px] items-center gap-2 border-b border-[var(--n-100)] px-5">
-      <Icon name="plus" size={13} color="var(--n-400)" />
-      <input
-        autoFocus
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') void submit();
-          if (e.key === 'Escape') {
-            setTitle('');
-            setEditing(false);
-          }
-        }}
-        placeholder="Item title — Enter to create"
-        aria-label={`New item in ${group.label}`}
-        className="h-6 flex-1 border-none bg-transparent text-[13px] text-[var(--n-900)] outline-none"
-      />
-    </div>
-  );
-}
 
 function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: Presentation; schema: Schema }) {
   // M9.3: the same in-place rule the table and hierarchy use. This row
@@ -104,7 +28,6 @@ function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: 
   // a second implementation of it — switching a view from List to Table
   // silently changed what clicking a row did. One hook, four layouts.
   const openPath = useOpenPath('in-place');
-  const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 
   if (entry.parseError) {
@@ -133,16 +56,38 @@ function ListRow({ entry, presentation, schema }: { entry: Entry; presentation: 
       className="flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] px-5 hover:bg-[var(--n-50)]"
     >
       <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">{key}</span>
-      <span title={entry.type ?? undefined} className="inline-flex flex-none" style={{ color: typeDef?.color ?? 'var(--n-400)' }}>
-        <Icon name={typeDef?.icon ?? 'file-text'} size={14} />
+      <span
+        title={entry.type ?? undefined}
+        className="inline-flex flex-none"
+        style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-400)' }}
+      >
+        <Icon name={typeStyle(entry.type, schema).icon} size={14} />
       </span>
       <span className="truncate text-[13px] text-[var(--n-900)]">{entry.title}</span>
       <span className="flex-1" />
+      {/* M9.6: editable in place, the same FieldEditor the table and
+          hierarchy use. A read-only chip here meant the same property was
+          editable or not depending on which layout the view happened to be
+          in. stopPropagation so editing a value does not also open the row. */}
       {visibleColumns(presentation)
         .filter((c) => c.field !== 'key')
-        .map((c) => (
-          <FieldChip key={c.field} resolved={schema.resolveField(entry, c.field)} />
-        ))}
+        .map((c) => {
+          const def = entry.type
+            ? (schema.types.get(entry.type)?.fields ?? []).find((f) => f.name === c.field)
+            : undefined;
+          const resolved = schema.resolveField(entry, c.field);
+          if (def === undefined) return <FieldChip key={c.field} resolved={resolved} />;
+          return (
+            <span
+              key={c.field}
+              className="flex-none"
+              onClick={(e) => e.stopPropagation()}
+              role="presentation"
+            >
+              <FieldEditor entry={entry} def={def} schema={schema} compact />
+            </span>
+          );
+        })}
     </div>
   );
 }
@@ -155,12 +100,14 @@ function GroupSection({
   schema,
   project,
   scope,
+  quickAdd,
 }: {
   node: GroupNode;
   presentation: Presentation;
   schema: Schema;
   project: Entry | null;
   scope: string;
+  quickAdd: QuickAdd;
 }) {
   const collapsed = useUiStore((s) => s.collapsed[scope]?.[node.path] === true);
   const toggle = useUiStore((s) => s.toggleCollapsed);
@@ -210,7 +157,15 @@ function GroupSection({
             {node.entries.map((e) => (
               <ListRow key={e.path} entry={e} presentation={presentation} schema={schema} />
             ))}
-            {project && <QuickAddRow group={node} groupBy={node.field} project={project} />}
+            {project && (
+              <QuickAddInline
+                ariaLabel={`New item in ${node.label}`}
+                label="Add item"
+                onCreate={(title) =>
+                  quickAdd(title, { groupBy: node.field, groupValue: node.key })
+                }
+              />
+            )}
           </>
         ) : (
           node.children.map((child) => (
@@ -221,6 +176,7 @@ function GroupSection({
               schema={schema}
               project={project}
               scope={scope}
+              quickAdd={quickAdd}
             />
           ))
         ))}
@@ -228,7 +184,20 @@ function GroupSection({
   );
 }
 
-export function ListView({ entries, presentation, schema, project, scope = 'list' }: ListViewProps) {
+type QuickAdd = (
+  title: string,
+  band?: { groupBy?: string | null; groupValue?: string | null },
+) => Promise<boolean>;
+
+export function ListView({
+  entries,
+  presentation,
+  schema,
+  project,
+  scope = 'list',
+  createType = 'Work item',
+}: ListViewProps) {
+  const quickAdd = useQuickAdd(createType, project);
   // M9.1: a chain, not a single field — groupTree recurses so this view does
   // not need to know how deep the nesting goes.
   const nodes = groupTree(entries, presentation.group, schema);
@@ -267,11 +236,7 @@ export function ListView({ entries, presentation, schema, project, scope = 'list
               <ListRow key={e.path} entry={e} presentation={presentation} schema={schema} />
             ))}
             {project && (
-              <QuickAddRow
-                group={{ key: '', label: 'All items', color: null, ghost: false, entries }}
-                groupBy={null}
-                project={project}
-              />
+              <QuickAddInline ariaLabel="New item" label="Add item" onCreate={(t) => quickAdd(t)} />
             )}
           </section>
         ) : (
@@ -283,6 +248,7 @@ export function ListView({ entries, presentation, schema, project, scope = 'list
               schema={schema}
               project={project}
               scope={scope}
+              quickAdd={quickAdd}
             />
           ))
         )}

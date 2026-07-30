@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { resolveColumns, type ColumnDef } from '@/engine/columns';
@@ -9,6 +10,7 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useUiStore } from '@/stores/uiStore';
+import { useRowKeyboard } from '@/views/useRowKeyboard';
 
 const NAME_W = 340;
 const INDENT = 18;
@@ -155,8 +157,23 @@ export function TreeView({
 
   const totalWidth = NAME_W + resolved.reduce((sum, c) => sum + c.width, 0);
 
+  // M9.6: the hierarchy is the layout where keys matter most — expanding a
+  // deep tree by mouse is a lot of small targets.
+  const keyboard = useRowKeyboard({
+    count: rows.length,
+    onOpen: (i) => openPath(rows[i].entry.path),
+    onToggle: (i) => {
+      if (rows[i].childCount > 0) toggleCollapsed(scope, rows[i].key);
+    },
+  });
+
   return (
-    <div data-testid="tree-view" role="grid" className="min-h-0 min-w-0 flex-1 overflow-auto">
+    <div
+      data-testid="tree-view"
+      role="grid"
+      className="min-h-0 min-w-0 flex-1 overflow-auto outline-none"
+      {...keyboard.containerProps}
+    >
       <div style={{ width: totalWidth, minWidth: '100%' }}>
         <div
           role="row"
@@ -183,7 +200,7 @@ export function TreeView({
           ))}
         </div>
 
-        {rows.map(({ entry, depth, childCount, key }) => {
+        {rows.map(({ entry, depth, childCount, key }, rowIndex) => {
           const style = typeStyle(entry.type, schema);
           const isCollapsed = collapsedMap?.[key] === true;
           return (
@@ -193,7 +210,14 @@ export function TreeView({
               data-testid="tree-row"
               data-depth={depth}
               data-path={entry.path}
-              className="group flex h-9 border-b border-[var(--n-100)] hover:bg-[var(--n-25)]"
+              onClick={() => keyboard.setIndex(rowIndex)}
+              className={[
+                'group flex h-9 border-b border-[var(--n-100)]',
+                rowIndex === keyboard.index
+                  ? 'bg-[var(--cortex-50)]'
+                  : 'hover:bg-[var(--n-25)]',
+              ].join(' ')}
+              {...keyboard.rowProps(rowIndex)}
             >
               <div
                 role="gridcell"
@@ -245,7 +269,13 @@ export function TreeView({
         })}
 
         {rows.length === 0 && (
-          <div className="px-3 py-6 text-[12.5px] text-[var(--n-400)]">No records yet.</div>
+          <div className="px-3 py-8">
+            <EmptyState
+              icon="list-tree"
+              title="No records yet"
+              description="Records of this type will appear here, nested by the relation you chose."
+            />
+          </div>
         )}
         {hierarchy.length === 0 && rows.length > 0 && (
           <div className="px-3 py-3 text-[12px] text-[var(--n-400)]">

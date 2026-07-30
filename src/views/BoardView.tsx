@@ -9,6 +9,7 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Avatar } from '@/components/ui/Avatar';
+import { QuickAddInline } from '@/views/QuickAdd';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { StatusFlag } from '@/components/ui/StatusFlag';
@@ -24,6 +25,8 @@ export interface BoardViewProps {
   schema: Schema;
   /** Collapse-state namespace for swimlanes (M9.1). */
   scope?: string;
+  /** M9.6: create a card in a column, inheriting its value. */
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }
 
 /** Droppable id used for the trailing "No <field>" group (dnd-kit ids must be non-empty). */
@@ -116,7 +119,17 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
   );
 }
 
-function BoardColumn({ group, schema }: { group: Group; schema: Schema }) {
+function BoardColumn({
+  group,
+  schema,
+  groupBy,
+  onCreate,
+}: {
+  group: Group;
+  schema: Schema;
+  groupBy: string;
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+}) {
   const droppableId = group.key === '__none__' ? NO_VALUE_COLUMN_ID : group.key;
   const { setNodeRef, isOver } = useDroppable({ id: droppableId });
 
@@ -142,6 +155,16 @@ function BoardColumn({ group, schema }: { group: Group; schema: Schema }) {
         {group.entries.map((e) => (
           <BoardCard key={e.path} entry={e} group={group} schema={schema} />
         ))}
+        {/* M9.6: creating here presets the column's own value, so a card
+            lands in the column you pressed rather than in triage. */}
+        {onCreate !== undefined && (
+          <QuickAddInline
+            compact
+            label="New"
+            ariaLabel={`New record in ${group.label}`}
+            onCreate={(title) => onCreate(title, { groupBy, groupValue: group.key })}
+          />
+        )}
       </div>
     </div>
   );
@@ -184,7 +207,13 @@ function Swimlane({
   );
 }
 
-export function BoardView({ entries, presentation, schema, scope = 'board' }: BoardViewProps) {
+export function BoardView({
+  entries,
+  presentation,
+  schema,
+  scope = 'board',
+  onCreate,
+}: BoardViewProps) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const toast = useUiStore((s) => s.toast);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -231,7 +260,13 @@ export function BoardView({ entries, presentation, schema, scope = 'board' }: Bo
           {lanes === null ? (
             <div className="flex items-start gap-3 overflow-x-auto">
               {groups.map((g) => (
-                <BoardColumn key={g.key || g.label} group={g} schema={schema} />
+                <BoardColumn
+                  key={g.key || g.label}
+                  group={g}
+                  schema={schema}
+                  groupBy={groupBy}
+                  onCreate={onCreate}
+                />
               ))}
             </div>
           ) : (
@@ -245,7 +280,13 @@ export function BoardView({ entries, presentation, schema, scope = 'board' }: Bo
               >
                 <div className="flex items-start gap-3 overflow-x-auto">
                   {columns.map((g) => (
-                    <BoardColumn key={g.key || g.label} group={g} schema={schema} />
+                    <BoardColumn
+                      key={g.key || g.label}
+                      group={g}
+                      schema={schema}
+                      groupBy={groupBy}
+                      onCreate={onCreate}
+                    />
                   ))}
                 </div>
               </Swimlane>

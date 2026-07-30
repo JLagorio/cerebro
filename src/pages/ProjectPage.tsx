@@ -10,6 +10,7 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ViewFile } from '@/engine/types';
 import { clonePresentation, serializeView, toggleSort } from '@/engine/views';
 import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { useQuickAdd } from '@/views/QuickAdd';
 import { TreeView } from '@/views/TreeView';
 import { EntityDossier } from '@/knowledge/EntityDossier';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
@@ -160,6 +161,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
   );
   const sourceType = activeSource.type;
   const scope = selection.kind === 'project' ? `project:${selection.path}:${tabKey}` : `view:${selection.id}`;
+  const quickAdd = useQuickAdd(sourceType ?? 'Work item', project);
 
   // Task 8: toolbar edits auto-persist to the active saved view's file
   // (project-scoped tab or global view). The Items tab stays ephemeral.
@@ -352,6 +354,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
               schema={schema}
               fields={fields}
               scope={scope}
+              onCreate={quickAdd}
               onColumnsChange={(columns) =>
                 handlePresentationChange({ ...presentation, columns })
               }
@@ -363,6 +366,7 @@ export function ProjectPage({ selection }: { selection: ProjectSelection }) {
               presentation={presentation}
               schema={schema}
               scope={scope}
+              onCreate={quickAdd}
             />
           ) : (
             <ListView

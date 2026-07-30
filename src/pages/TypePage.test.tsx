@@ -133,7 +133,7 @@ describe('TypePage — Properties tab', () => {
   it('removes custom fields but never built-ins', () => {
     openProperties('Person');
     // fixture Person type declares no fields — add-only surface.
-    expect(screen.getByText('No properties declared yet.')).toBeTruthy();
+    expect(screen.getByText('No properties yet')).toBeTruthy();
     cleanup();
     // Give Person a custom field and check its remove affordance.
     useVaultStore.setState({

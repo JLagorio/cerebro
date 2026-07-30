@@ -6,11 +6,12 @@ import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { backlinksFor, outgoingFor, type DocLink } from '@/engine/links';
 import type { Entry, Schema } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
+import { typeStyle } from '@/engine/typeCatalog';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
 import { augmentDocPrompt } from '@/lib/prompts';
 import { useUiStore, type DocPanelTab } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const TABS: { id: DocPanelTab; label: string }[] = [
   { id: 'outline', label: 'Outline' },
@@ -23,6 +24,7 @@ const TABS: { id: DocPanelTab; label: string }[] = [
 
 function LinkRow({ link }: { link: DocLink }) {
   const open = useOpenPath();
+  const schema = useSchema();
   return (
     <button
       type="button"
@@ -31,9 +33,9 @@ function LinkRow({ link }: { link: DocLink }) {
       className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left hover:bg-[var(--n-50)]"
     >
       <Icon
-        name={link.entry.type === 'Person' ? 'circle-user' : 'file-text'}
+        name={typeStyle(link.entry.type, schema).icon}
         size={13}
-        color="var(--n-500)"
+        color={typeStyle(link.entry.type, schema).color ?? 'var(--n-500)'}
       />
       <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--n-800)]">
         {link.entry.title}
