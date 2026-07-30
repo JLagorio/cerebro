@@ -35,11 +35,18 @@ export const LIST_SUFFIX = '.list.yml';
 
 const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.md$/, '');
 
-/** Title-case a folder slug: "field-ops" → "Field ops". */
+/**
+ * Title-case a folder slug: "field-ops" → "Field ops".
+ *
+ * The vault root is a legitimate container — a `*.list.yml` dropped at the top
+ * level belongs to it — but its path is the empty string, which is not a name.
+ * "Vault" is, and it keeps the root from rendering as a blank sidebar row.
+ */
 export function humanizeFolder(folder: string): string {
   const name = folder.split('/').pop() ?? folder;
   const spaced = name.replace(/[-_]+/g, ' ').trim();
-  return spaced === '' ? folder : spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  if (spaced === '') return 'Vault';
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 function asRecord(raw: unknown): Record<string, unknown> {
@@ -62,6 +69,8 @@ export function parseCollectionYaml(folder: string, yamlText: string): Collectio
   const obj = asRecord(raw);
   return {
     folder,
+    // Parsing a marker means one exists.
+    declared: true,
     definition: {
       name:
         typeof obj.name === 'string' && obj.name.trim() !== ''
@@ -131,7 +140,12 @@ export function collectionTree(
   schema: Schema,
   nested: CollectionFile[] = [],
 ): CollectionNode {
-  const own = lists.filter((l) => l.collection === collection.folder);
+  // Ownership is by PATH, not by the scan's `collection` field: that field names
+  // the nearest DECLARED marker, and an undeclared Collection has none — so
+  // matching on it would leave an implicit container's own Lists out of it.
+  const own = lists.filter(
+    (l) => l.project === null && isUnder(collection.folder, dirOf(l.path)),
+  );
   const docs = entries.filter(
     (e) => isBrowsableDoc(e) && isUnder(collection.folder, e.folder),
   );
@@ -240,48 +254,71 @@ function folderChildren(
 }
 
 /**
- * The whole sidebar tree: one node per Collection, plus the Lists that belong
- * to no Collection.
+ * Every Collection the vault effectively has: the ones that declare a
+ * `collection.yml`, plus one per folder that holds a List without already
+ * sitting inside a declared Collection.
  *
- * Those top-level Lists are how a pre-M10 vault surfaces — a `views/*.yml` has
- * no Collection, and force-fitting it into an invented one would rewrite
- * someone's vault to satisfy a rename.
+ * **A Collection-less List is not representable.** This is the enforcement
+ * point for that rule, and it works by construction rather than by migration: a
+ * folder holding a List *is* a container, so it is one. Nothing is written to
+ * disk to make that true, and no List can be orphaned.
+ *
+ * The alternatives were both worse. Listing orphans under their own "Lists"
+ * heading (what M10.2 shipped) put a second top-level grouping concept in a
+ * sidebar whose whole point is that Collections are the top level. Adopting
+ * them by moving files would rewrite someone's vault on open.
+ *
+ * The marker is therefore only ever a carrier for name/icon/color/order — never
+ * the thing that makes a folder a container. An undeclared Collection is named
+ * after its folder and becomes declared the moment anyone renames or restyles
+ * it, which is when there is finally something to store.
+ */
+export function effectiveCollections(
+  declared: CollectionFile[],
+  lists: ListFile[],
+): CollectionFile[] {
+  const byFolder = new Map(declared.map((c) => [c.folder, c]));
+
+  for (const list of lists) {
+    // Project-scoped Lists are project tabs, not sidebar content — they have a
+    // home already, and it is not a Collection.
+    if (list.project !== null) continue;
+    const folder = dirOf(list.path);
+    if (byFolder.has(folder)) continue;
+    // Already inside a declared Collection higher up: that one owns it.
+    if (declared.some((c) => isUnder(c.folder, folder))) continue;
+    byFolder.set(folder, {
+      folder,
+      declared: false,
+      definition: {
+        name: humanizeFolder(folder),
+        icon: null,
+        color: null,
+        order: null,
+      },
+    });
+  }
+
+  return [...byFolder.values()].sort((a, b) => byOrderThenName(a.definition, b.definition));
+}
+
+/**
+ * The sidebar tree: one node per root Collection. Nothing sits outside one,
+ * because `effectiveCollections` guarantees every List has a home.
  */
 export function collectionsTree(
   collections: CollectionFile[],
   lists: ListFile[],
   entries: Entry[],
   schema: Schema,
-): { collections: CollectionNode[]; loose: CollectionNode[] } {
-  const sorted = [...collections].sort((a, b) => byOrderThenName(a.definition, b.definition));
+): CollectionNode[] {
+  const all = effectiveCollections(collections, lists);
   // Only the outermost Collections are roots; a nested one appears inside its
   // parent's subtree, not twice.
-  const roots = sorted.filter(
-    (c) => !sorted.some((other) => other.folder !== c.folder && isUnder(other.folder, c.folder)),
+  const roots = all.filter(
+    (c) => !all.some((other) => other.folder !== c.folder && isUnder(other.folder, c.folder)),
   );
-
-  const nodes = roots.map((c) => withNested(c, sorted, lists, entries, schema));
-
-  const loose = lists
-    .filter((l) => l.collection === null && l.project === null)
-    .sort((a, b) => byOrderThenName(a.definition, b.definition))
-    .map(
-      (list): CollectionNode => ({
-        kind: 'list',
-        id: list.id,
-        label: list.definition.name,
-        icon:
-          list.definition.icon ??
-          (list.definition.source.type === null
-            ? 'layout-list'
-            : typeStyle(list.definition.source.type, schema).icon),
-        color: list.definition.color,
-        children: [],
-        list,
-      }),
-    );
-
-  return { collections: nodes, loose };
+  return roots.map((c) => withNested(c, all, lists, entries, schema));
 }
 
 /** A Collection's node with any Collections nested inside it grafted in. */

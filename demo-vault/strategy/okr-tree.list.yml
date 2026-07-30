@@ -1,9 +1,10 @@
-# Deliberately left in the legacy `views/` directory (M10). It loads as a List
-# with no Collection and surfaces under "Lists" in the sidebar — the guarantee
-# that a vault written before M10 keeps working without anything moving. Editing
-# it rewrites THIS file rather than migrating it to a .list.yml, because
-# silently relocating someone's file on a toolbar click is a surprise, not a
-# migration.
+# A List inside the Strategy Collection. Every List lives in one — a folder
+# holding Lists IS a Collection, so there is no such thing as a loose List and
+# no "Lists" bucket in the sidebar for one to fall into.
+#
+# The pre-M10 `views/*.yml` shape still LOADS (see vault/write.rs list_views) and
+# such a file is edited in place rather than relocated; this vault simply has
+# none left.
 name: OKR tree
 icon: target
 color: null

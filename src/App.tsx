@@ -110,9 +110,10 @@ function App() {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
-  // M10: null = the dialog is shut. Otherwise it holds the Collection folder
-  // the new List lands in — `null` inside the object means top-level.
-  const [newList, setNewList] = useState<{ collection: string | null } | null>(null);
+  // M10: null = the dialog is shut. Otherwise it holds the Collection folder the
+  // new List lands in — never null, because a Collection-less List is forbidden
+  // and the only entry point is a Collection's own + affordance.
+  const [newList, setNewList] = useState<{ collection: string } | null>(null);
   // M8.6 — the base reads filed captures and edited notes on its own. Mounted
   // here rather than in the AI panel: the panel unmounts when you close it,
   // and a knowledge base that only grows while a panel is open is not one.
@@ -175,7 +176,7 @@ function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
       <Rail />
-      <Sidebar onNewView={(collection = null) => setNewList({ collection })} />
+      <Sidebar onNewView={(collection) => setNewList({ collection })} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <div className="flex min-h-0 flex-1 bg-[var(--n-0)]">

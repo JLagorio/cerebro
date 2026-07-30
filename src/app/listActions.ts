@@ -92,12 +92,16 @@ async function writeList(
 }
 
 /**
- * Create a List inside a Collection (or at the top level when null). Returns its
- * id so the caller can navigate to it.
+ * Create a List inside a Collection. Returns its id so the caller can navigate
+ * to it.
+ *
+ * `collection` is REQUIRED — this is the write-side half of "a Collection-less
+ * List is forbidden". The read side cannot represent one (see
+ * effectiveCollections); this makes sure nothing tries to author one either.
  */
 export async function createList(
   definition: ListDefinition,
-  collection: string | null = null,
+  collection: string,
 ): Promise<string | null> {
   const { views } = useVaultStore.getState();
   // Ids are unique per FOLDER, so only the siblings in this collection are taken.
@@ -180,6 +184,9 @@ export async function updateCollection(
   collection: CollectionFile,
   definition: CollectionDefinition,
 ): Promise<boolean> {
+  // Writing the marker is also what turns an IMPLIED Collection (a folder that
+  // is one because it holds Lists) into a declared one — the first rename is
+  // the first moment there is anything about it worth storing.
   const { vaultPath } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
   if (vaultPath === null) return false;

@@ -42,8 +42,8 @@ describe('Sidebar', () => {
         {
           id: 'urgent-work',
           project: null,
-          collection: null,
-          path: 'urgent-work.list.yml',
+          collection: 'work',
+          path: 'work/urgent-work.list.yml',
           definition: {
             name: 'Urgent work',
             icon: null,
@@ -73,26 +73,38 @@ describe('Sidebar', () => {
 
   afterEach(cleanup);
 
-  // M10: Collections are the top-level navigation; projects are not a sidebar
-  // primitive. A List with no Collection — which is what a pre-M10 saved view
-  // is — surfaces under "Lists" rather than being force-fitted into one.
-  it('lists collection-less Lists above the types, and no project rows', () => {
+  // M10: Collections are the top-level navigation, and the ONLY one — there is
+  // no second grouping beside it, because a folder holding Lists is a
+  // Collection so nothing can be orphaned. Projects are not a sidebar primitive.
+  it('shows Collections as the only top-level grouping, and no project rows', () => {
     render(<Sidebar onNewView={vi.fn()} />);
     expect(screen.getByText('Collections')).toBeTruthy();
-    expect(screen.getByText('Urgent work')).toBeTruthy();
+    // The folder holding the List is an implied Collection named after itself.
+    expect(screen.getByText('Work')).toBeTruthy();
+    expect(screen.queryByText('Lists')).toBeNull();
     expect(screen.queryByTestId('sidebar-project')).toBeNull();
     expect(screen.queryByText('New project')).toBeNull();
   });
 
   it('clicking a List navigates to it, carrying its collection', () => {
+    useUiStore.setState({ expandedFolders: { 'collection:work': true } });
     render(<Sidebar onNewView={vi.fn()} />);
     fireEvent.click(screen.getByText('Urgent work'));
     // The collection is part of the key: ids are unique per folder only.
     expect(useNavStore.getState().selection).toEqual({
       kind: 'list',
       id: 'urgent-work',
-      collection: null,
+      collection: 'work',
     });
+  });
+
+  // An implied Collection has no marker, so there is nothing to remove — and an
+  // action that silently does nothing is worse than one that is absent.
+  it('offers no Remove on an implied Collection, but does on a declared one', () => {
+    render(<Sidebar onNewView={vi.fn()} />);
+    fireEvent.contextMenu(screen.getByText('Work'));
+    expect(screen.getByText('Rename…')).toBeTruthy();
+    expect(screen.queryByText(/Remove collection/)).toBeNull();
   });
 
   it('the + button opens the new-collection dialog', () => {
@@ -132,7 +144,7 @@ describe('Sidebar', () => {
     };
     useVaultStore.setState({
       views: [roadmap],
-      collections: [{ folder: 'product', definition: { name: 'Product', icon: null, color: null, order: null } }],
+      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null } }],
     });
     useUiStore.setState({ expandedFolders: {} });
     render(<Sidebar onNewView={vi.fn()} />);
@@ -147,7 +159,7 @@ describe('Sidebar', () => {
     const onNewView = vi.fn();
     useVaultStore.setState({
       views: [],
-      collections: [{ folder: 'product', definition: { name: 'Product', icon: null, color: null, order: null } }],
+      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null } }],
     });
     render(<Sidebar onNewView={onNewView} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add to Product' }));
@@ -238,16 +250,23 @@ describe('Sidebar', () => {
   });
 
   // Task 6: project-scoped views belong to their project's tabs, not here.
-  it('hides project-scoped views from the Views section', () => {
+  // A project-scoped List is a project tab. It gets no sidebar node AND no
+  // implied Collection for its folder — its home is the project, not a container.
+  it('keeps project-scoped Lists out of the Collections tree entirely', () => {
     const scoped = {
       ...useVaultStore.getState().views[0],
       id: 'delivery',
       project: 'projects/foundations/project.md',
+      collection: null,
+      path: 'projects/foundations/views/delivery.yml',
       definition: { ...useVaultStore.getState().views[0].definition, name: 'Delivery' },
     };
     useVaultStore.setState({ views: [...useVaultStore.getState().views, scoped] });
+    useUiStore.setState({ expandedFolders: { 'collection:work': true } });
     render(<Sidebar onNewView={vi.fn()} />);
     expect(screen.getByText('Urgent work')).toBeTruthy();
     expect(screen.queryByText('Delivery')).toBeNull();
+    // No "Views"/"Foundations" container conjured from its folder either.
+    expect(screen.queryByText('Views')).toBeNull();
   });
 });

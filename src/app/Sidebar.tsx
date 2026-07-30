@@ -13,7 +13,7 @@ import { CollectionDialog } from '@/app/CollectionDialog';
 import { deleteCollection, deleteList } from '@/app/listActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { rowClass, SECTION_LABEL } from '@/app/sidebarChrome';
-import { collectionsTree } from '@/engine/collections';
+import { collectionsTree, effectiveCollections } from '@/engine/collections';
 import { listTypes, type TypeListing } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode } from '@/engine/types';
 import { KnowledgeNav } from '@/knowledge/KnowledgeNav';
@@ -23,10 +23,11 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 export interface SidebarProps {
   /**
-   * Opens the New-List builder. `collection` is the folder the List lands in —
-   * null for a top-level one.
+   * Opens the New-List builder for one Collection. The folder is required: a
+   * List always lives in a Collection, so there is no top-level variant to
+   * offer and no null to handle downstream.
    */
-  onNewView: (collection?: string | null) => void;
+  onNewView: (collection: string) => void;
 }
 
 type TypeDialog =
@@ -70,12 +71,17 @@ export function Sidebar({ onNewView }: SidebarProps) {
     () => collectionsTree(collections, views, entries, schema),
     [collections, views, entries, schema],
   );
+  // The tree can contain Collections that declare no marker (a folder is one
+  // because it holds Lists), so menu actions resolve against the EFFECTIVE set
+  // rather than the declared one — otherwise right-clicking such a folder finds
+  // nothing and offers no actions at all.
+  const effective = useMemo(() => effectiveCollections(collections, views), [collections, views]);
 
   const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
     if (node.kind === 'collection') {
-      const file = collections.find((c) => c.folder === node.id);
+      const file = effective.find((c) => c.folder === node.id);
       if (file === undefined) return [];
-      return [
+      const items: ContextMenuItem[] = [
         {
           icon: 'plus',
           label: 'New list…',
@@ -86,7 +92,13 @@ export function Sidebar({ onNewView }: SidebarProps) {
           label: 'Rename…',
           onSelect: () => setCollectionDialog({ mode: 'rename', collection: file }),
         },
-        {
+      ];
+      // Only a declared Collection has a marker to remove. An implied one is a
+      // folder that holds Lists; "removing" it would have to move them, and
+      // offering an action that silently does nothing is worse than not
+      // offering it.
+      if (file.declared) {
+        items.push({
           icon: 'folder-minus',
           // Not "Delete": removing the marker un-collects the folder and leaves
           // every List and Doc inside it on disk. The label has to say so, or
@@ -94,8 +106,9 @@ export function Sidebar({ onNewView }: SidebarProps) {
           label: 'Remove collection (keeps contents)',
           danger: true,
           onSelect: () => void deleteCollection(file),
-        },
-      ];
+        });
+      }
+      return items;
     }
     if (node.kind === 'list' && node.list !== undefined) {
       const list = node.list;
@@ -177,33 +190,22 @@ export function Sidebar({ onNewView }: SidebarProps) {
             <Icon name="plus" size={13} />
           </button>
         </div>
-        {tree.collections.length === 0 && tree.loose.length === 0 ? (
+        {tree.length === 0 ? (
           <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
             No collections yet — make one to hold lists, folders, and docs.
           </div>
         ) : null}
+        {/* Everything lives in a Collection. There is deliberately no second
+            grouping beside this one: a folder holding Lists IS a Collection, so
+            a List cannot be orphaned and nothing needs a home of last resort. */}
         <CollectionTree
-          nodes={tree.collections}
+          nodes={tree}
           selection={selection}
           onNavigate={navigate}
           onOpenDoc={openPath}
           menuFor={nodeMenuItems}
           onAdd={(node) => onNewView(node.id)}
         />
-        {/* Lists that belong to no Collection — which is how a vault written
-            before M10 surfaces its saved views. Nothing had to move. */}
-        {tree.loose.length > 0 && (
-          <>
-            <div className={SECTION_LABEL}>Lists</div>
-            <CollectionTree
-              nodes={tree.loose}
-              selection={selection}
-              onNavigate={navigate}
-              onOpenDoc={openPath}
-              menuFor={nodeMenuItems}
-            />
-          </>
-        )}
         {/* M3: collapsible Types section — the databases themselves. */}
         <div className="flex items-center justify-between pr-1">
           <button

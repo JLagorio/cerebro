@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectionsTree,
+  effectiveCollections,
   humanizeFolder,
   newCollectionDefinition,
   nodeCount,
@@ -51,6 +52,7 @@ describe('parseCollectionYaml', () => {
       'name: Product\nicon: package\ncolor: "#3D8BE8"\norder: 2\n',
     );
     expect(c.folder).toBe('product');
+    expect(c.declared).toBe(true);
     expect(c.definition).toEqual({
       name: 'Product',
       icon: 'package',
@@ -80,6 +82,56 @@ describe('parseCollectionYaml', () => {
   });
 });
 
+/**
+ * The invariant: a Collection-less List cannot be represented. A folder holding
+ * a List IS a Collection, so nothing can be orphaned — which is why there is no
+ * "Lists" bucket in the sidebar and no load-time migration.
+ */
+describe('effectiveCollections', () => {
+  it('returns the declared ones as declared', () => {
+    const found = effectiveCollections([collection('product', 'Product')], []);
+    expect(found.map((c) => [c.folder, c.declared])).toEqual([['product', true]]);
+  });
+
+  it('implies a Collection for a folder that holds a List but declares nothing', () => {
+    const found = effectiveCollections([], [list('views/okr.list.yml', 'OKR tree', null)]);
+    expect(found.map((c) => [c.folder, c.declared, c.definition.name])).toEqual([
+      ['views', false, 'Views'],
+    ]);
+  });
+
+  it('does not imply one when a declared Collection already contains the List', () => {
+    const found = effectiveCollections(
+      [collection('product', 'Product')],
+      [list('product/q3/risks.list.yml', 'Risks', 'product')],
+    );
+    // The declared Collection above owns it; `product/q3` is a Folder, not a
+    // second container.
+    expect(found.map((c) => c.folder)).toEqual(['product']);
+  });
+
+  it('never implies one for a project-scoped List — those are project tabs', () => {
+    const scoped = parseListYaml('delivery', 'name: Delivery\n', {
+      project: 'projects/atlas/project.md',
+      path: 'projects/atlas/views/delivery.yml',
+    });
+    expect(effectiveCollections([], [scoped])).toEqual([]);
+  });
+
+  it('leaves no List without a home, whatever shape it is on disk', () => {
+    const lists = [
+      list('product/roadmap.list.yml', 'Roadmap', 'product'),
+      list('views/legacy.yml', 'Legacy', null),
+      list('random/place/thing.list.yml', 'Thing', null),
+    ];
+    const found = effectiveCollections([collection('product', 'Product')], lists);
+    for (const l of lists) {
+      const dir = l.path.slice(0, l.path.lastIndexOf('/'));
+      expect(found.some((c) => dir === c.folder || dir.startsWith(`${c.folder}/`))).toBe(true);
+    }
+  });
+});
+
 describe('collectionsTree', () => {
   it('nests Folders, Lists, and Docs under their Collection', () => {
     const tree = collectionsTree(
@@ -91,7 +143,7 @@ describe('collectionsTree', () => {
       [doc('product/charter.md', 'Charter'), doc('product/q3/plan.md', 'Q3 plan')],
       schema,
     );
-    expect(shape(tree.collections)).toEqual([
+    expect(shape(tree)).toEqual([
       'collection:Product',
       // Folders first, then Lists, then Docs — containers above contents.
       '  folder:Q3',
@@ -112,7 +164,7 @@ describe('collectionsTree', () => {
       [],
       schema,
     );
-    expect(shape(tree.collections)).toEqual(['collection:Product', '  list:Roadmap']);
+    expect(shape(tree)).toEqual(['collection:Product', '  list:Roadmap']);
   });
 
   it('gives a nested Collection its own subtree, and does not double-count it', () => {
@@ -127,7 +179,7 @@ describe('collectionsTree', () => {
     );
     // Platform appears ONCE, inside Product — not also as a root, and not as a
     // plain folder duplicating what the nested collection already owns.
-    expect(shape(tree.collections)).toEqual([
+    expect(shape(tree)).toEqual([
       'collection:Product',
       '  collection:Platform',
       '    list:Services',
@@ -147,13 +199,13 @@ describe('collectionsTree', () => {
       [],
       schema,
     );
-    expect(tree.collections.map((c) => c.label)).toEqual(['Bravo', 'Charlie', 'Alpha']);
+    expect(tree.map((c) => c.label)).toEqual(['Bravo', 'Charlie', 'Alpha']);
   });
 
-  // The migration guarantee, at the UI layer: a pre-M10 vault's saved views
-  // have no Collection, so they surface at the top level instead of being
-  // force-fitted into an invented container.
-  it('surfaces collection-less Lists separately rather than inventing a home', () => {
+  // A pre-M10 vault's saved views have no marker, so their folder becomes an
+  // implied Collection named after itself. There is no second bucket for them
+  // to sit in, and nothing is hidden.
+  it('gives a legacy views/ folder its own implied Collection', () => {
     const tree = collectionsTree(
       [collection('product', 'Product')],
       [
@@ -163,8 +215,12 @@ describe('collectionsTree', () => {
       [],
       schema,
     );
-    expect(shape(tree.collections)).toEqual(['collection:Product', '  list:Roadmap']);
-    expect(shape(tree.loose)).toEqual(['list:At risk']);
+    expect(shape(tree)).toEqual([
+      'collection:Product',
+      '  list:Roadmap',
+      'collection:Views',
+      '  list:At risk',
+    ]);
   });
 
   it('leaves project-scoped legacy views out of the tree — they are project tabs', () => {
@@ -172,9 +228,29 @@ describe('collectionsTree', () => {
       project: 'projects/atlas/project.md',
       path: 'projects/atlas/views/delivery.yml',
     });
-    const tree = collectionsTree([], [scoped], [], schema);
-    expect(tree.collections).toEqual([]);
-    expect(tree.loose).toEqual([]);
+    expect(collectionsTree([], [scoped], [], schema)).toEqual([]);
+  });
+
+  it('never renders a List outside a Collection', () => {
+    const tree = collectionsTree(
+      [],
+      [
+        list('a/one.list.yml', 'One', null),
+        list('b/deep/two.list.yml', 'Two', null),
+        list('three.list.yml', 'Three', null),
+      ],
+      [],
+      schema,
+    );
+    // Every list node is a descendant of some collection node — the invariant
+    // the "Lists" section used to violate.
+    const walk = (nodes: CollectionNode[], insideCollection: boolean): string[] =>
+      nodes.flatMap((n) => [
+        ...(n.kind === 'list' && !insideCollection ? [n.label] : []),
+        ...walk(n.children, insideCollection || n.kind === 'collection'),
+      ]);
+    expect(walk(tree, false)).toEqual([]);
+    expect(tree.every((n) => n.kind === 'collection')).toBe(true);
   });
 
   // Type docs are the schema, templates are stationery, and the knowledge
@@ -192,7 +268,7 @@ describe('collectionsTree', () => {
       ],
       schema,
     );
-    expect(shape(tree.collections)).toEqual(['collection:Everything', '  doc:Real doc']);
+    expect(shape(tree)).toEqual(['collection:Everything', '  doc:Real doc']);
   });
 
   it('counts everything inside a node, folders excluded from the total', () => {
@@ -206,6 +282,6 @@ describe('collectionsTree', () => {
       schema,
     );
     // Roadmap + Risks + Q3 plan = 3; the Q3 folder itself is not a thing.
-    expect(nodeCount(tree.collections[0])).toBe(3);
+    expect(nodeCount(tree[0])).toBe(3);
   });
 });

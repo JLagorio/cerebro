@@ -287,6 +287,15 @@ export interface CollectionFile {
   /** Vault-relative folder path, e.g. "product". Its identity. */
   folder: string;
   definition: CollectionDefinition;
+  /**
+   * True when a `collection.yml` exists on disk.
+   *
+   * False for a folder that is a Collection purely because it holds Lists — the
+   * rule that makes a Collection-less List unrepresentable. Such a folder has
+   * nothing stored about it, so there is nothing to remove and its name is its
+   * folder; it becomes declared the first time someone renames or restyles it.
+   */
+  declared: boolean;
 }
 
 /**

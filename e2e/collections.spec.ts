@@ -35,7 +35,7 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   await expect(delivery).toBeVisible();
 
   // Collapsed, its contents are not on screen; expanding reveals them.
-  await expect(page.getByTestId('collection-node-list')).toHaveCount(1); // the legacy loose one
+  await expect(page.getByTestId('collection-node-list')).toHaveCount(0);
   await expand(page, 'Delivery');
   await expect(
     page.getByTestId('collection-node-list').filter({ hasText: 'Delivery schedule' }),
@@ -59,38 +59,60 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   await expect(page.getByTestId('table-view')).toBeVisible();
 });
 
-test('collections: a pre-M10 vault keeps working — legacy views load as loose Lists', async ({ page }) => {
+test('collections: nothing sits outside a Collection — there is no Lists bucket', async ({ page }) => {
   await boot(page);
 
-  // okr-tree.yml is deliberately still in the legacy `views/` directory. It has
-  // no Collection, so it surfaces under "Lists" rather than being force-fitted
-  // into an invented container.
-  await expect(page.getByText('Lists', { exact: true })).toBeVisible();
-  const loose = page.getByTestId('collection-node-list').filter({ hasText: 'OKR tree' });
-  await expect(loose).toBeVisible();
-  await loose.getByRole('button', { name: 'OKR tree', exact: true }).click();
+  // The one and only top-level grouping. A folder holding Lists IS a Collection,
+  // so no List can be orphaned and no home-of-last-resort is needed.
+  await expect(page.getByText('Collections', { exact: true })).toBeVisible();
+  await expect(page.getByText('Lists', { exact: true })).toHaveCount(0);
 
-  // It was written as `type: tree` — the retired Hierarchy view. It opens as a
-  // TABLE that nests, because the nesting always lived in the grouping chain.
+  // Every List node in the sidebar is nested under a Collection, never a sibling
+  // of one.
+  await expand(page, 'Delivery');
+  await expand(page, 'Strategy');
+  const listCount = await page.getByTestId('collection-node-list').count();
+  expect(listCount).toBeGreaterThan(0);
+  const orphans = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="collection-node-list"]')].filter((el) => {
+      // A list row is legitimate only if a collection row precedes it at a
+      // shallower indent — which is what nesting looks like in this flat DOM.
+      const indent = parseInt((el as HTMLElement).style.paddingLeft || '0', 10);
+      let prev = el.previousElementSibling;
+      while (prev !== null) {
+        if (prev.getAttribute('data-testid') === 'collection-node-collection') {
+          return parseInt((prev as HTMLElement).style.paddingLeft || '0', 10) >= indent;
+        }
+        prev = prev.previousElementSibling;
+      }
+      return true;
+    }).length,
+  );
+  expect(orphans).toBe(0);
+});
+
+test('collections: a nested table renders the retired hierarchy view’s job', async ({ page }) => {
+  await boot(page);
+  await expand(page, 'Strategy');
+  await page
+    .getByTestId('collection-node-list')
+    .filter({ hasText: 'OKR tree' })
+    .getByRole('button', { name: 'OKR tree', exact: true })
+    .click();
+
+  // Written as `type: tree` — the retired Hierarchy view. It opens as a TABLE
+  // that nests, because the nesting always lived in the grouping chain.
   await expect(page.getByTestId('table-view')).toBeVisible();
-  const rows = page.getByTestId('table-row');
-  await expect(rows.first()).toBeVisible();
-  // Depth > 0 rows prove the relation levels actually rendered.
   await expect(page.locator('[data-testid="table-row"][data-depth="1"]').first()).toBeVisible();
 
-  // Editing it rewrites THAT file rather than migrating it to a .list.yml —
-  // silently relocating someone's file on a toolbar click is a surprise.
+  // Switching the view persists to the List's own file, in place.
   await page.getByTestId('view-switch-list').click();
   await expect(page.getByTestId('list-view')).toBeVisible();
   await expect
     .poll(async () =>
-      page.evaluate(() => window.__cerebroMockFs.get('views/okr-tree.yml') ?? ''),
+      page.evaluate(() => window.__cerebroMockFs.get('strategy/okr-tree.list.yml') ?? ''),
     )
     .toContain('type: list');
-  const migrated = await page.evaluate(() =>
-    [...window.__cerebroMockFs.keys()].filter((k) => k.endsWith('okr-tree.list.yml')),
-  );
-  expect(migrated).toEqual([]);
 });
 
 test('collections: creating one writes a folder marker and opens its empty page', async ({ page }) => {
@@ -170,6 +192,7 @@ test('views: a table nests when its grouping chain descends a relation', async (
   await boot(page);
   // The OKR list bands nothing and descends two relations: Objective → Key
   // result → Work item. This is what the retired Hierarchy view was for.
+  await expand(page, 'Strategy');
   await page
     .getByTestId('collection-node-list')
     .filter({ hasText: 'OKR tree' })
@@ -184,7 +207,13 @@ test('views: a table nests when its grouping chain descends a relation', async (
 
   // Collapsing a parent hides its descendants but keeps the parent.
   const before = await depth1.count();
-  await page.getByRole('button', { name: /^Collapse / }).first().click();
+  // Scoped to the grid: the sidebar's expanded Collections have their own
+  // "Collapse …" carets, and an unscoped match hits one of those instead.
+  await page
+    .getByTestId('table-view')
+    .getByRole('button', { name: /^Collapse / })
+    .first()
+    .click();
   await expect.poll(async () => depth1.count()).toBeLessThan(before);
   await expect(depth0.first()).toBeVisible();
 });

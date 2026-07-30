@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { useOpenPath } from '@/app/useOpenPath';
-import { collectionsTree, nodeCount } from '@/engine/collections';
+import { collectionsTree, effectiveCollections, nodeCount } from '@/engine/collections';
 import type { CollectionNode, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -32,10 +32,16 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
   const [renaming, setRenaming] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
 
-  const collection = collections.find((c) => c.folder === selection.folder) ?? null;
+  // Resolve against the EFFECTIVE set: a folder that holds Lists is a
+  // Collection even with no marker, and looking only at declared ones would
+  // send you to "this collection no longer exists" for a folder plainly in the
+  // sidebar.
+  const collection = useMemo(
+    () => effectiveCollections(collections, views).find((c) => c.folder === selection.folder) ?? null,
+    [collections, views, selection.folder],
+  );
 
   const node = useMemo(() => {
-    const tree = collectionsTree(collections, views, entries, schema);
     const find = (nodes: CollectionNode[]): CollectionNode | null => {
       for (const n of nodes) {
         if (n.kind === 'collection' && n.id === selection.folder) return n;
@@ -44,7 +50,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
       }
       return null;
     };
-    return find(tree.collections);
+    return find(collectionsTree(collections, views, entries, schema));
   }, [collections, views, entries, schema, selection.folder]);
 
   if (collection === null || node === null) {
@@ -90,11 +96,15 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           </span>
           <span className="flex-1" />
           <IconButton icon="pencil" label="Rename collection" onClick={() => setRenaming(true)} />
-          <IconButton
-            icon="folder-minus"
-            label="Remove collection"
-            onClick={() => setConfirmRemove(true)}
-          />
+          {/* An implied Collection — a folder that is one because it holds
+              Lists — has no marker to remove. */}
+          {collection.declared && (
+            <IconButton
+              icon="folder-minus"
+              label="Remove collection"
+              onClick={() => setConfirmRemove(true)}
+            />
+          )}
         </div>
       </div>
 
