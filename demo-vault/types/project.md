@@ -16,4 +16,4 @@ fields:
 
 # Project
 
-A project is a folder: project.md carries its metadata, items/ holds its work items, and any other folders and notes are the project's docs.
+A project is an ordinary record: it carries the key and state, and work items point at it with a `project:` relation.

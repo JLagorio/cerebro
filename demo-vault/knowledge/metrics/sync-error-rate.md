@@ -11,7 +11,7 @@ stale_after: 2026-07-26
 generated: { by: claude-code, at: 2026-07-19T16:40:00Z }
 sources:
   - id: syn-project
-    resource: /projects/offline-sync-hardening/project.md
+    resource: /records/projects/offline-sync-hardening.md
     title: Offline sync hardening
     author: human:tom-keller
     last_modified: 2026-07-23

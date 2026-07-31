@@ -1,7 +1,7 @@
 ---
 type: Work item
 key: LNC-6
-status: drafting
+status: progress
 priority: high
 assignee: "[[maya-chen]]"
 due: 2026-08-26

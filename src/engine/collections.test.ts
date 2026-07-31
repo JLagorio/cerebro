@@ -149,6 +149,17 @@ describe('effectiveCollections', () => {
     });
   });
 
+  it('does not mistake a Type doc named project.md for a project marker', () => {
+    const typeDoc = makeEntry({
+      path: 'types/project.md',
+      filename: 'project.md',
+      folder: 'types',
+      title: 'Project',
+      type: 'Type',
+    });
+    expect(effectiveCollections([], [], [typeDoc])).toHaveLength(0);
+  });
+
   it('leaves no List without a home, whatever shape it is on disk', () => {
     const lists = [
       list('product/roadmap.list.yml', 'Roadmap', 'product'),

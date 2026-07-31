@@ -10,7 +10,7 @@ lifecycle: draft
 generated: { by: claude-code, at: 2026-07-28T09:05:00Z }
 sources:
   - id: ops-project
-    resource: /projects/phoenix-warehouse-rollout/project.md
+    resource: /records/projects/phoenix-warehouse-rollout.md
     title: Phoenix warehouse rollout
     author: human:marcus-webb
     last_modified: 2026-07-26

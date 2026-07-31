@@ -20,8 +20,10 @@ describe('mockIpc', () => {
     expect(item?.title).toBe('First-run walkthrough GA');
     expect(item?.type).toBe('Work item');
     expect(item?.properties.key).toBe('FLD-1');
-    // v2 containment: membership from the folder, not a `project:` link.
-    expect(item?.project).toBe('projects/guided-onboarding-ga/project.md');
+    // M12.5 aftermath: the demo vault carries no project.md markers — projects
+    // are ordinary records under records/projects/, so containment is null.
+    expect(item?.project).toBeNull();
+    expect(entries.some((e) => e.path === 'records/projects/guided-onboarding-ga.md')).toBe(true);
     expect(item?.relationships.assignee).toEqual(['ana-rios']);
   });
 
@@ -148,8 +150,10 @@ describe('mockIpc', () => {
 
   // Task 6 parity with write.rs: a views/ dir next to a project.md is scoped.
   it('listViews scopes project views and sorts globals first', async () => {
+    // The demo vault has no legacy project folders left, so seed one here.
+    await mock.createNote('/demo-vault', 'projects/atlas', 'project', { type: 'Project' }, '');
     await mock.saveView('/demo-vault', 'global', 'name: G\n');
-    await mock.saveView('/demo-vault', 'delivery', 'name: D\n', 'projects/guided-onboarding-ga');
+    await mock.saveView('/demo-vault', 'delivery', 'name: D\n', 'projects/atlas');
     const views = await mock.listViews('/demo-vault');
     expect(views).toContainEqual(
       expect.objectContaining({ id: 'global', yaml: 'name: G\n', project: null }),
@@ -158,7 +162,7 @@ describe('mockIpc', () => {
       expect.objectContaining({
         id: 'delivery',
         yaml: 'name: D\n',
-        project: 'projects/guided-onboarding-ga/project.md',
+        project: 'projects/atlas/project.md',
       }),
     );
     // M10 sorts by (collection, project, id) — collection is now the PRIMARY

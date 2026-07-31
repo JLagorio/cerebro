@@ -1,7 +1,7 @@
 ---
 type: Work item
 key: OPS-2
-status: blocked
+status: todo
 priority: urgent
 assignee: "[[marcus-webb]]"
 due: 2026-07-23

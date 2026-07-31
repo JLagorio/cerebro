@@ -303,6 +303,10 @@ export function effectiveCollections(
 
   for (const e of entries) {
     if (e.filename !== 'project.md') continue;
+    // A Type doc that happens to be named project.md (types/project.md is
+    // the conventional home of a "Project" Type) is schema, not a marker —
+    // adopting it would turn the types/ folder into a phantom Collection.
+    if (e.type === 'Type') continue;
     adopt(e.folder, e.title !== '' ? e.title : humanizeFolder(e.folder));
   }
 

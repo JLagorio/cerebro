@@ -1,7 +1,7 @@
 ---
 type: Work item
 key: LNC-5
-status: idea
+status: backlog
 priority: low
 assignee: "[[maya-chen]]"
 due: 2026-09-16

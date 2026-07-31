@@ -14,16 +14,13 @@ verified:
 A record's available statuses are resolved by walking a chain and taking the
 first set that exists:
 
-1. `statuses:` on the owning **project.md**
-2. `statuses:` on the record's **own Type doc**
-3. `statuses:` on the **Work item** Type doc
-4. The built-in defaults
+1. `statuses:` on the record's **own Type doc**
+2. The built-in defaults
 
 # Why a chain
 
-A team wants one vocabulary most of the time and a different one for a
-specific project — the chain gives both without forcing every project to
-redeclare the whole set.
+Each Type owns its vocabulary — no type inherits another's statuses, so a
+Type doc either declares its full set or gets the app defaults.
 
 # Groups
 
