@@ -99,6 +99,43 @@ export function organizePrompt(path: string): string {
 }
 
 /**
+ * Run one agent record unattended (M13.4).
+ *
+ * Same additive-only spine as a scheduled skill, plus the two things that
+ * make an agent an AGENT rather than a prompt: an identity its writes are
+ * attributed to, and a memory it must leave for its next run. The memory
+ * lives in the record's own `memory:` frontmatter — rewritten through
+ * update_frontmatter, bounded, and visible as an ordinary property — so what
+ * the agent carries forward is never hidden from the person it works for.
+ */
+export function agentRunPrompt(
+  path: string,
+  title: string,
+  actor: string,
+  memory: string,
+  body: string,
+): string {
+  return [
+    `You are "${title}", the agent defined at ${path} in this vault, on an unattended scheduled run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
+    '',
+    'Rules for unattended runs, which override anything your instructions say:',
+    '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
+    '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
+    '- If a step would be destructive or needs an answer only the user has, skip it and note that in what you write.',
+    '',
+    memory === ''
+      ? 'This is your first run — you have no memory yet.'
+      : `Your memory from previous runs:\n${memory}`,
+    '',
+    `Before you finish, rewrite your memory with update_frontmatter on ${path}, patching the \`memory\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+    '',
+    'Your instructions:',
+    '',
+    body,
+  ].join('\n');
+}
+
+/**
  * Refresh one stale cached source (M13.3).
  *
  * "Do nothing without a connector" is load-bearing: a model told to refresh

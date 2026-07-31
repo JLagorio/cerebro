@@ -57,6 +57,9 @@ pub struct AgentRequest {
     pub connectors: Option<bool>,
     pub mcp_url: Option<String>,
     pub mcp_token: Option<String>,
+    /// Who this run's MCP writes are attributed to (M13.4) — `process:<slug>`
+    /// for an agent record's run. Absent reads as the default actor.
+    pub actor: Option<String>,
 }
 
 #[derive(Default)]
@@ -579,6 +582,7 @@ mod tests {
                 connectors: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -626,6 +630,7 @@ mod tests {
                 connectors: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -657,6 +662,7 @@ mod tests {
                 connectors: Some(true),
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
             },
             Path::new("/tmp/mcp.json"),
             false,
@@ -688,6 +694,7 @@ mod tests {
                 connectors: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
             },
             Path::new("/tmp/mcp.json"),
             true,

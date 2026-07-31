@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp } from './agentIpc';
 import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
+import { agentRef, isAgentEntry } from '@/engine/agents';
 import { jobQueue, type AgentJob } from '@/engine/jobs';
 import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
 import { readNote } from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
 import {
+  agentRunPrompt,
   distillPrompt,
   refreshSourcePrompt,
   reviewConceptPrompt,
@@ -63,7 +65,11 @@ export function useJobRunner(): void {
   // lives in JobRunnerHost (a null-rendering component) for the same reason:
   // its state churn must not reconcile the whole App tree.
   const hasSchedules = useMemo(
-    () => entries.some((e) => isSkillEntry(e) && parseSchedule(e.properties.schedule) !== null),
+    () =>
+      entries.some(
+        (e) =>
+          (isSkillEntry(e) || isAgentEntry(e)) && parseSchedule(e.properties.schedule) !== null,
+      ),
     [entries],
   );
   const [now, setNow] = useState(() => new Date());
@@ -126,23 +132,43 @@ export function useJobRunner(): void {
       if (job.kind === 'scheduled') ui.recordSkillRun(job.path, job.runKey);
       else ui.recordLearnAttempt(job.path, job.runKey);
 
+      // An agent job runs AS the agent: its record's identity in the
+      // provenance stamps, its memory in the prompt, and shell only when the
+      // record asks for it AND the Settings ceiling allows it.
+      const agent =
+        job.kind === 'agent'
+          ? (() => {
+              const entry = useVaultStore.getState().entries.find((e) => e.path === job.path);
+              return entry === undefined ? null : agentRef(entry);
+            })()
+          : null;
+
       void (async () => {
         try {
           const message =
-            job.kind === 'scheduled'
-              ? scheduledSkillPrompt(
+            job.kind === 'agent'
+              ? agentRunPrompt(
                   job.path,
                   job.title,
+                  agent?.actor ?? 'process:agent',
+                  agent?.memory ?? '',
                   splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
                 )
-              : job.kind === 'refresh'
-                ? refreshSourcePrompt(job.path, job.title)
-                : job.kind === 'stale'
-                  ? reviewConceptPrompt(job.path, job.title)
-                  : distillPrompt(job.path, job.title);
+              : job.kind === 'scheduled'
+                ? scheduledSkillPrompt(
+                    job.path,
+                    job.title,
+                    splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
+                  )
+                : job.kind === 'refresh'
+                  ? refreshSourcePrompt(job.path, job.title)
+                  : job.kind === 'stale'
+                    ? reviewConceptPrompt(job.path, job.title)
+                    : distillPrompt(job.path, job.title);
           mcp.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
             message,
+            actor: agent?.actor ?? null,
             // The same rules the panel's agent gets — the conventions about
             // sources, anchors and never self-certifying are the contract, not
             // panel decoration. `selection` is 'none': a background reader is
@@ -153,7 +179,10 @@ export function useJobRunner(): void {
             // context would carry one note's framing into the next one's.
             sessionId: null,
             model: null,
-            shell,
+            // An agent's own `tools:` caps its run inside the Settings
+            // ceiling: a safe agent stays safe with shell globally on, and
+            // no record can grant itself what Settings denies.
+            shell: job.kind === 'agent' ? shell && (agent?.shell ?? false) : shell,
             connectors,
             mcp: mcp.current,
           });

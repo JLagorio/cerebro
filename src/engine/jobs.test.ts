@@ -161,6 +161,51 @@ describe('jobQueue', () => {
     expect(jobs.map((j) => j.kind)).toEqual(['filed', 'scheduled', 'behind', 'stale']);
   });
 
+  it('a scheduled Agent record derives an agent job, ledgered like a skill, and never distils', () => {
+    const scout = makeEntry({
+      path: 'records/agents/scout.md',
+      title: 'Scout',
+      type: 'Agent',
+      snippet: 'instructions',
+      properties: { schedule: 'daily 09:00', tools: 'safe' },
+    });
+    const due = jobQueue([scout], [], { ...EMPTY, filed: ['records/agents/scout.md'], now });
+    // One job, and it is the RUN — the filed entry is inert because an
+    // agent's body is schema for behavior, exactly like a skill's.
+    expect(due.map((j) => [j.kind, j.runKey])).toEqual([['agent', '2026-07-31 09:00']]);
+    expect(
+      jobQueue([scout], [], {
+        ...EMPTY,
+        skillRuns: { 'records/agents/scout.md': '2026-07-31 09:00' },
+        now,
+      }),
+    ).toEqual([]);
+  });
+
+  it('an agent run ranks after a scheduled skill and before maintenance', () => {
+    const entries = [
+      makeEntry({
+        path: 'records/agents/scout.md',
+        title: 'Scout',
+        type: 'Agent',
+        snippet: 'x',
+        properties: { schedule: 'daily 09:00' },
+      }),
+      skill('Digest', 'daily 09:00'),
+      makeEntry({ path: 'docs/edited.md', title: 'Edited', snippet: 'x', modifiedAt: '2026-07-31T09:00:00Z' }),
+      makeEntry({
+        path: 'knowledge/systems/cites-edited.md',
+        title: 'Cites edited',
+        properties: {
+          sources: [{ id: 's', resource: 'docs/edited.md' }],
+          generated: { by: 'claude-code', at: '2026-07-30T00:00:00Z' },
+        },
+      }),
+    ];
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    expect(jobs.map((j) => j.kind)).toEqual(['scheduled', 'agent', 'behind']);
+  });
+
   it('derives a refresh for a stale cached source only while connectors are on', () => {
     const source = makeEntry({
       path: 'sources/issues/ops-121.md',

@@ -33,11 +33,18 @@ pub struct McpState {
     inner: Mutex<Option<Running>>,
 }
 
+pub const DEFAULT_ACTOR: &str = "claude-code";
+
 #[derive(Clone)]
 struct Running {
     port: u16,
     token: String,
     vault: Arc<Mutex<PathBuf>>,
+    /// Who the CURRENT run's writes are attributed to (M13.4). Set by
+    /// run_agent before each spawn; "claude-code" for the panel and the
+    /// anonymous background jobs, `process:<slug>` for an agent record's
+    /// run. One child process globally means one actor at a time.
+    actor: Arc<Mutex<String>>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -78,6 +85,7 @@ impl McpState {
             port,
             token: random_token(),
             vault: Arc::new(Mutex::new(vault.to_path_buf())),
+            actor: Arc::new(Mutex::new(DEFAULT_ACTOR.to_string())),
         };
 
         let handler = running.clone();
@@ -122,6 +130,18 @@ impl McpState {
         };
         *guard = Some(running);
         Ok(info)
+    }
+
+    /// Attribute the NEXT run's writes (M13.4). None restores the default.
+    pub fn set_actor(&self, actor: Option<&str>) -> Result<(), String> {
+        let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
+        if let Some(running) = guard.as_ref() {
+            *running.actor.lock().map_err(|_| "actor lock poisoned")? = actor
+                .filter(|a| !a.trim().is_empty())
+                .unwrap_or(DEFAULT_ACTOR)
+                .to_string();
+        }
+        Ok(())
     }
 
     pub fn info(&self) -> Option<McpInfo> {
@@ -355,6 +375,11 @@ fn call_tool(
         .lock()
         .map_err(|_| "vault lock poisoned")?
         .clone();
+    let actor = running
+        .actor
+        .lock()
+        .map_err(|_| "actor lock poisoned")?
+        .clone();
 
     let outcome = match name {
         "get_vault_context" => tool_vault_context(&vault),
@@ -364,8 +389,8 @@ fn call_tool(
         "create_note" => tool_create_note(&vault, args),
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
         "append_to_note" => tool_append(&vault, args),
-        "write_concept" => tool_write_concept(&vault, args),
-        "cache_source" => tool_cache_source(&vault, args),
+        "write_concept" => tool_write_concept(&vault, args, &actor),
+        "cache_source" => tool_cache_source(&vault, args, &actor),
         "propose_organize" => tool_propose_organize(app, args),
         "open_note" => tool_ui(app, "open_note", args),
         "navigate" => tool_ui(app, "navigate", args),
@@ -589,7 +614,7 @@ fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     Ok(text_result(format!("Appended to {path}")))
 }
 
-fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("write_concept needs a path")?;
     if !crate::knowledge::is_knowledge_path(&path) {
         return Err(format!(
@@ -632,7 +657,7 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>) -> Result<Value, 
     // choose its own `generated.by` could disclaim its own output.
     frontmatter.insert(
         "generated".into(),
-        json!({ "by": "claude-code", "at": now_iso() }),
+        json!({ "by": actor, "at": now_iso() }),
     );
     if let Some(sources) = args.get("sources") {
         frontmatter.insert("sources".into(), sources.clone());
@@ -728,7 +753,7 @@ fn source_slug(kind: &str, id: &str) -> String {
 /// something it cannot read, and writes the answer down here. What makes that
 /// affordable is exactly this file — one fetch, a permanent local copy, and
 /// every later turn reads markdown instead of calling an API.
-fn tool_cache_source(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
+fn tool_cache_source(vault: &Path, args: &Map<String, Value>, actor: &str) -> Result<Value, String> {
     let id = arg_str(args, "id").ok_or("cache_source needs an id")?;
     let kind = arg_str(args, "kind").unwrap_or_else(|| "web".into());
     if kind != "issue" && kind != "web" {
@@ -761,7 +786,7 @@ fn tool_cache_source(vault: &Path, args: &Map<String, Value>) -> Result<Value, S
     // agent that can author its own `generated` can disclaim its own work.
     frontmatter.insert(
         "generated".into(),
-        json!({ "by": "claude-code", "at": now_iso() }),
+        json!({ "by": actor, "at": now_iso() }),
     );
 
     let doc = format!("# {title}\n\n{}\n", body.trim());
@@ -863,6 +888,22 @@ mod tests {
             );
             assert!(tool.get("inputSchema").is_some());
         }
+    }
+
+    #[test]
+    fn writes_are_stamped_with_the_runs_actor_never_self_declared() {
+        let dir = std::env::temp_dir().join("cerebro-actor-stamp");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut args = Map::new();
+        args.insert("path".into(), json!("knowledge/systems/scouted.md"));
+        args.insert("title".into(), json!("Scouted"));
+        args.insert("body".into(), json!("What the scout learned."));
+        tool_write_concept(&dir, &args, "process:release-scout").unwrap();
+        let written =
+            std::fs::read_to_string(dir.join("knowledge/systems/scouted.md")).unwrap();
+        assert!(written.contains("process:release-scout"));
+        assert!(!written.contains("claude-code"));
     }
 
     #[test]

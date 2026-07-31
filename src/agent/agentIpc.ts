@@ -39,6 +39,9 @@ export interface RunOptions {
   shell: boolean;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
+  /** Attribute this run's writes to a process identity (M13.4) —
+   * `process:<slug>` for an agent record's run; omitted = the default. */
+  actor?: string | null;
   mcp: McpInfo | null;
 }
 
@@ -62,6 +65,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<void
       model: options.model ?? null,
       shell: options.shell,
       connectors: options.connectors,
+      actor: options.actor ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },

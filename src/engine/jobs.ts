@@ -1,3 +1,4 @@
+import { isAgentEntry } from './agents';
 import { SOURCES_DIR } from './ingest';
 import { learnQueue, type LearnQueueInput } from './learn';
 import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
@@ -19,7 +20,7 @@ import type { Entry } from './types';
  * rechecking stale concepts remain maintenance.
  */
 
-export type JobKind = 'filed' | 'scheduled' | 'behind' | 'refresh' | 'stale';
+export type JobKind = 'filed' | 'scheduled' | 'agent' | 'behind' | 'refresh' | 'stale';
 
 export interface AgentJob {
   kind: JobKind;
@@ -45,12 +46,12 @@ export function jobQueue(
   concepts: readonly Concept[],
   { filed, attempts, skillRuns, now, connectors = false }: JobQueueInput,
 ): AgentJob[] {
-  // Skills are excluded from learning for the same reason types/ is: a
-  // skill's body is schema for behavior, not material. Distilling a playbook
-  // yields concepts about the playbook, and then every edit to it re-queues
-  // a re-read forever. The filter lives here rather than in isLearnable so
-  // engine/learn.ts stays untouched by M13.
-  const material = entries.filter((e) => !isSkillEntry(e));
+  // Skills and Agents are excluded from learning for the same reason types/
+  // is: their bodies are schema for behavior, not material. Distilling a
+  // playbook yields concepts about the playbook, and then every edit to it
+  // re-queues a re-read forever. The filter lives here rather than in
+  // isLearnable so engine/learn.ts stays untouched by M13.
+  const material = entries.filter((e) => !isSkillEntry(e) && !isAgentEntry(e));
   const learn: AgentJob[] = learnQueue(material, concepts, { filed, attempts }).map((j) => ({
     kind: j.reason,
     path: j.path,
@@ -58,14 +59,22 @@ export function jobQueue(
     runKey: j.modifiedAt,
   }));
 
+  // Scheduled skills and scheduled agent runs share the derivation and the
+  // fire-key ledger (both are path-keyed); they differ in kind because the
+  // runner builds a different prompt, tool policy, and actor for an agent.
   const scheduled: AgentJob[] = [];
   for (const entry of entries) {
-    if (!isSkillEntry(entry)) continue;
+    const kind: JobKind | null = isSkillEntry(entry)
+      ? 'scheduled'
+      : isAgentEntry(entry)
+        ? 'agent'
+        : null;
+    if (kind === null) continue;
     const schedule = parseSchedule(entry.properties.schedule);
     if (schedule === null) continue;
     const key = lastFireKey(schedule, now);
     if (skillRuns[entry.path] === key) continue;
-    scheduled.push({ kind: 'scheduled', path: entry.path, title: entry.title, runKey: key });
+    scheduled.push({ kind, path: entry.path, title: entry.title, runKey: key });
   }
 
   // A cached source past its refresh date becomes a re-fetch (M13.3) —
@@ -91,7 +100,14 @@ export function jobQueue(
   // Give two kinds one rank and the sort silently orders by format.
   // Refresh sits before stale on purpose: a concept recheck reads its
   // sources, and rechecking against a copy about to be replaced is wasted.
-  const RANK: Record<JobKind, number> = { filed: 0, scheduled: 1, behind: 2, refresh: 3, stale: 4 };
+  const RANK: Record<JobKind, number> = {
+    filed: 0,
+    scheduled: 1,
+    agent: 2,
+    behind: 3,
+    refresh: 4,
+    stale: 5,
+  };
   return [...learn, ...scheduled, ...refresh].sort(
     (a, b) =>
       RANK[a.kind] - RANK[b.kind] ||

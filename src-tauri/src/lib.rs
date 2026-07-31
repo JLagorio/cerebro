@@ -186,9 +186,14 @@ fn start_mcp(
 fn run_agent(
     app: tauri::AppHandle,
     state: tauri::State<'_, agent::AgentState>,
+    mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
 ) -> Result<(), String> {
+    // The attribution slot rides the run, not the request into the CLI: the
+    // MCP server stamps `generated.by` from it (M13.4), and there is exactly
+    // one child process, so one actor at a time is the truth.
+    mcp_state.set_actor(request.actor.as_deref())?;
     let dir = config_dir(&app)?;
     agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
 }
