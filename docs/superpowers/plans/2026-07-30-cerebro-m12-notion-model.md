@@ -64,7 +64,7 @@ Decisions made (recommended in the assessment, confirmed by full-send):
   AdoptSchemaDialog (wand in the Types section) reviews per field; `applyAdoption`
   writes Type docs first, then batched per-record patches. Idempotent; counts reported.
 
-- **M12.7 `51974af` — the knowledge loop follows records.** The Playwright suite
+- **M12.7 `b21e2e6` — the knowledge loop follows records.** The Playwright suite
   caught the orphan: Spec/Source records lost the doc side panel's Knowledge tab
   when `display: doc` died. The record panel gained the same commit state +
   related-concepts view (collapsed until asked); the entity dossier moved from
