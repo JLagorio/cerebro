@@ -551,6 +551,24 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+          // M12.4b: the header menu's Filter seeds a rule on the open tab;
+          // Edit property opens the type's configuration aside.
+          onFilterField={(field) =>
+            changeView({
+              ...activeView,
+              filters: {
+                all: [
+                  ...(activeView.filters !== null && 'all' in activeView.filters
+                    ? activeView.filters.all
+                    : activeView.filters !== null
+                      ? [activeView.filters]
+                      : []),
+                  { field, op: 'is_not_empty', value: '' },
+                ],
+              },
+            })
+          }
+          onEditProperty={() => setPropertiesOpen(true)}
         />
       </div>
       {propertiesOpen && (

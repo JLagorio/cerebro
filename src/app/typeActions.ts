@@ -12,6 +12,7 @@
 
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
+import { coerceValueToKind } from '@/engine/properties';
 import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
 import { serializeViewList } from '@/engine/views';
 import type { Entry, FieldKind, FieldOption, StatusDef, ViewDefinition } from '@/engine/types';
@@ -141,6 +142,178 @@ export async function addRelationProperty(
   return addFieldToType(config.target, reciprocal, 'relation', {
     from: { type: typeName, field: name },
   });
+}
+
+/** Spec keys that only make sense for certain kinds — dropped on conversion. */
+const KIND_KEYS: Record<string, string[]> = {
+  select: ['options'],
+  multiselect: ['options'],
+  status: ['options'],
+  relation: ['target', 'limit', 'from'],
+  rollup: ['relation', 'property', 'calculate', 'from', 'format', 'precision'],
+  number: ['format', 'precision'],
+};
+
+/**
+ * Change a declared field's kind, coercing every record's stored value into
+ * the new shape (M12.4b — the header menu's Change type). Values with no
+ * honest reading in the new kind are cleared, never mangled; converting to a
+ * select-family kind seeds the option set from the values that survive.
+ */
+export async function changeFieldKind(
+  typeName: string,
+  fieldName: string,
+  kind: FieldKind,
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return false;
+  if (!guardEditable(doc, typeName)) return false;
+  const fields = rawFieldsOf(doc);
+  const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
+  if (actual === undefined) return false;
+
+  const raw = fields[actual];
+  const oldSpec: Record<string, unknown> =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) }
+      : {};
+  const oldKind = typeof oldSpec.kind === 'string' ? oldSpec.kind : typeof raw === 'string' ? raw : 'text';
+  if (oldKind === kind) return true;
+
+  // Coerce first, so the option seed below sees the final values.
+  const records = entries.filter((e) => e.type === typeName && e.path !== doc.path);
+  const conversions: { path: string; value: unknown }[] = [];
+  for (const record of records) {
+    const stored =
+      record.relationships[actual] !== undefined
+        ? record.relationships[actual]
+        : record.properties[actual];
+    if (stored === undefined || stored === null || stored === '') continue;
+    const next = coerceValueToKind(stored, kind);
+    conversions.push({ path: record.path, value: next });
+  }
+
+  // The new spec keeps only what the new kind understands. Options survive a
+  // move within the select family; everything else kind-specific is dropped.
+  const keep = new Set(KIND_KEYS[kind] ?? []);
+  const spec: Record<string, unknown> = { kind };
+  if (keep.has('options') && Array.isArray(oldSpec.options)) spec.options = oldSpec.options;
+  if (
+    (kind === 'select' || kind === 'multiselect') &&
+    !Array.isArray(spec.options)
+  ) {
+    const distinct = [
+      ...new Set(
+        conversions
+          .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]))
+          .filter((v): v is string => typeof v === 'string' && v !== ''),
+      ),
+    ];
+    if (distinct.length > 0) spec.options = distinct;
+  }
+  fields[actual] = spec;
+
+  try {
+    // Schema first: patchFrontmatter validates records against the CURRENT
+    // schema, and the optimistic update makes the new kind visible before
+    // the value writes run.
+    await patchFrontmatter(doc.path, { fields });
+    for (const c of conversions) {
+      await patchFrontmatter(c.path, { [actual]: c.value });
+    }
+  } catch {
+    toast(`Couldn't change "${fieldName}" to ${kind}`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Duplicate a declared field: same spec under a fresh name, values copied on
+ * every record (M12.4b — the header menu's Duplicate property).
+ */
+export async function duplicateFieldOnType(typeName: string, fieldName: string): Promise<string | null> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return null;
+  if (!guardEditable(doc, typeName)) return null;
+  const fields = rawFieldsOf(doc);
+  const actual = Object.keys(fields).find((k) => k.toLowerCase() === fieldName.toLowerCase());
+  if (actual === undefined) return null;
+
+  let copy = `${actual}_copy`;
+  for (let n = 2; Object.keys(fields).some((k) => k.toLowerCase() === copy); n += 1) {
+    copy = `${actual}_copy_${n}`;
+  }
+  const rebuilt: Record<string, unknown> = {};
+  for (const [key, spec] of Object.entries(fields)) {
+    rebuilt[key] = spec;
+    if (key === actual) {
+      rebuilt[copy] = typeof spec === 'object' && spec !== null ? { ...(spec as object) } : spec;
+    }
+  }
+  try {
+    await patchFrontmatter(doc.path, { fields: rebuilt });
+    for (const record of entries) {
+      if (record.type !== typeName || record.path === doc.path) continue;
+      const stored =
+        record.relationships[actual] !== undefined
+          ? // Relationships come back bracket-stripped; re-wrap for disk.
+            record.relationships[actual].map((v) => `[[${v}]]`)
+          : record.properties[actual];
+      if (stored === undefined || stored === null || stored === '') continue;
+      await patchFrontmatter(record.path, { [copy]: stored });
+    }
+  } catch {
+    toast(`Couldn't duplicate "${fieldName}"`);
+    return null;
+  }
+  return copy;
+}
+
+/**
+ * Declare a new text field positioned beside an existing one (M12.4b — the
+ * header menu's Insert left/right). Returns the new field's name.
+ */
+export async function insertFieldOnType(
+  typeName: string,
+  anchor: string,
+  side: 'left' | 'right',
+): Promise<string | null> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, typeName);
+  if (doc === null) return null;
+  if (!guardEditable(doc, typeName)) return null;
+  const fields = rawFieldsOf(doc);
+  let name = 'property';
+  for (let n = 2; Object.keys(fields).some((k) => k.toLowerCase() === name) || RESERVED.has(name); n += 1) {
+    name = `property_${n}`;
+  }
+  const rebuilt: Record<string, unknown> = {};
+  let placed = false;
+  for (const [key, spec] of Object.entries(fields)) {
+    if (key === anchor && side === 'left') {
+      rebuilt[name] = 'text';
+      placed = true;
+    }
+    rebuilt[key] = spec;
+    if (key === anchor && side === 'right') {
+      rebuilt[name] = 'text';
+      placed = true;
+    }
+  }
+  if (!placed) rebuilt[name] = 'text';
+  try {
+    await patchFrontmatter(doc.path, { fields: rebuilt });
+  } catch {
+    toast(`Couldn't insert a property`);
+    return null;
+  }
+  return name;
 }
 
 /** Remove a custom field from a type. System-locked fields refuse. */

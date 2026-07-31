@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeRollup, formatTimestamp, validatePatch, validateValue } from './properties';
+import { coerceValueToKind, computeRollup, formatTimestamp, validatePatch, validateValue } from './properties';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { FieldDef } from './types';
@@ -154,5 +154,46 @@ describe('computeRollup', () => {
 describe('formatTimestamp', () => {
   it('shows date and minutes', () => {
     expect(formatTimestamp('2026-07-24T09:30:12.000Z')).toBe('2026-07-24 09:30');
+  });
+});
+
+// M12.4b: value conversion when a field changes kind.
+describe('coerceValueToKind', () => {
+  it('empty always clears', () => {
+    expect(coerceValueToKind(null, 'number')).toBeNull();
+    expect(coerceValueToKind('', 'text')).toBeNull();
+  });
+
+  it('to text joins lists', () => {
+    expect(coerceValueToKind(['a', 'b'], 'text')).toBe('a, b');
+    expect(coerceValueToKind(42, 'text')).toBe('42');
+  });
+
+  it('to number keeps a numeric reading and drops the rest', () => {
+    expect(coerceValueToKind('42', 'number')).toBe(42);
+    expect(coerceValueToKind('$1,200', 'number')).toBe(1200);
+    expect(coerceValueToKind('high', 'number')).toBeNull();
+  });
+
+  it('to checkbox maps the usual spellings and drops prose', () => {
+    expect(coerceValueToKind('yes', 'checkbox')).toBe(true);
+    expect(coerceValueToKind('no', 'checkbox')).toBe(false);
+    expect(coerceValueToKind(true, 'checkbox')).toBe(true);
+    expect(coerceValueToKind('maybe', 'checkbox')).toBeNull();
+  });
+
+  it('to date keeps only real dates', () => {
+    expect(coerceValueToKind('2026-07-30T10:00:00Z', 'date')).toBe('2026-07-30');
+    expect(coerceValueToKind('next week', 'date')).toBeNull();
+  });
+
+  it('select vs multiselect: scalar vs list', () => {
+    expect(coerceValueToKind(['a', 'b'], 'select')).toBe('a');
+    expect(coerceValueToKind('a', 'multiselect')).toEqual(['a']);
+  });
+
+  it('to relation wraps names as wikilinks, splitting comma lists', () => {
+    expect(coerceValueToKind('alpha, beta', 'relation')).toEqual(['[[alpha]]', '[[beta]]']);
+    expect(coerceValueToKind(['[[gamma]]'], 'relation')).toEqual(['[[gamma]]']);
   });
 });

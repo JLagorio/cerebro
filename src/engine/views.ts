@@ -56,6 +56,24 @@ export function toggleSort(p: Presentation, field: string): Presentation {
   return { ...p, sort: [{ field, dir }, ...p.sort.filter((s) => s.field !== field)] };
 }
 
+/** Promote `field` to the primary sort with an explicit direction (M12.4b —
+ * the header menu says which way, unlike the label's toggle). */
+export function sortBy(p: Presentation, field: string, dir: 'asc' | 'desc'): Presentation {
+  return { ...p, sort: [{ field, dir }, ...p.sort.filter((s) => s.field !== field)] };
+}
+
+/**
+ * Toggle banding by `field` (M12.4b — the header menu's Group). Relation
+ * (nest) levels survive: banding and nesting are different levels of the one
+ * chain, and grouping by status must not flatten a hierarchy.
+ */
+export function groupByField(p: Presentation, field: string): Presentation {
+  const nests = p.group.filter((g) => g.descend !== undefined);
+  const bandsNow = p.group.filter((g) => g.descend === undefined);
+  const already = bandsNow.length === 1 && bandsNow[0].field === field;
+  return { ...p, group: already ? nests : [{ field }, ...nests] };
+}
+
 const FILTER_OPS: FilterOp[] = [
   'equals', 'not_equals', 'contains', 'any_of', 'none_of',
   'is_empty', 'is_not_empty', 'before', 'after',

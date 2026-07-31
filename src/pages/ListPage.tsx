@@ -318,6 +318,23 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+          // M12.4b: the header menu's Filter seeds a rule; the toolbar's
+          // filter pill is where it gets refined.
+          onFilterField={(field) =>
+            changeView({
+              ...activeView,
+              filters: {
+                all: [
+                  ...(activeView.filters !== null && 'all' in activeView.filters
+                    ? activeView.filters.all
+                    : activeView.filters !== null
+                      ? [activeView.filters]
+                      : []),
+                  { field, op: 'is_not_empty', value: '' },
+                ],
+              },
+            })
+          }
         />
       </div>
       {settingsOpen && (

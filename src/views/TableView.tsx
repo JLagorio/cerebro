@@ -1,19 +1,23 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { Input } from '@/components/ui/Input';
 import { FieldEditor } from '@/detail/FieldEditor';
 import {
   MIN_COL_W,
+  insertColumn,
   moveColumn,
   resolveColumns,
   setColumnWidth,
+  setColumnWrap,
   toggleColumn,
   type ColumnDef,
 } from '@/engine/columns';
 import { buildRows, entryRows } from '@/engine/rows';
-import { kindMeta, progressRatio } from '@/engine/properties';
+import { CREATABLE_PROPERTY_KINDS, kindMeta, progressRatio } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
+import { groupByField, sortBy } from '@/engine/views';
 import type {
   ChipStyle,
   ColumnSpec,
@@ -22,6 +26,14 @@ import type {
   Presentation,
   Schema,
 } from '@/engine/types';
+import {
+  changeFieldKind,
+  duplicateFieldOnType,
+  insertFieldOnType,
+  normalizeFieldName,
+  removeFieldFromType,
+  renameFieldOnType,
+} from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { QuickAddInline } from '@/views/QuickAdd';
 import { useRowKeyboard } from '@/views/useRowKeyboard';
@@ -79,12 +91,16 @@ const TableCell = memo(function TableCell({
   schema,
   index,
   chips,
+  wrap = false,
 }: {
   entry: Entry;
   def: ColumnDef;
   schema: Schema;
   index: number;
   chips: ChipStyle;
+  /** M12.4b: the column's Wrap content setting — values flow onto extra
+   * lines instead of clipping, and the row grows to hold them. */
+  wrap?: boolean;
 }) {
   const resolved = schema.resolveField(entry, def.name);
   const readOnly = READ_ONLY.has(def.kind);
@@ -93,23 +109,36 @@ const TableCell = memo(function TableCell({
   return (
     <div
       role="gridcell"
-      className="flex flex-none items-center overflow-hidden border-r border-[var(--n-100)] px-2"
+      className={[
+        'flex flex-none overflow-hidden border-r border-[var(--n-100)] px-2',
+        wrap ? 'items-start py-1.5' : 'items-center',
+      ].join(' ')}
       style={{ width: `var(${widthVar(index)})` }}
     >
       {readOnly || isProgress ? (
         isProgress ? (
           <ProgressCell display={resolved.display} />
         ) : (
-          <span className="truncate whitespace-nowrap text-[12.5px] text-[var(--n-600)]">
+          <span
+            className={[
+              'text-[12.5px] text-[var(--n-600)]',
+              wrap ? 'whitespace-normal [overflow-wrap:anywhere]' : 'truncate whitespace-nowrap',
+            ].join(' ')}
+          >
             {resolved.display === '' ? '—' : resolved.display}
           </span>
         )
       ) : (
         // Editing happens in place: the same FieldEditor the panel uses, so
         // validation and popovers behave identically in both surfaces. The
-        // wrapper clamps it to one line — cells are a fixed 36px tall.
-        <div className="flex min-w-0 flex-1 items-center overflow-hidden [&>*]:max-w-full">
-          <FieldEditor entry={entry} def={def} schema={schema} compact chips={chips} />
+        // wrapper clamps it to one line unless the column wraps (M12.4b).
+        <div
+          className={[
+            'flex min-w-0 flex-1 overflow-hidden [&>*]:max-w-full',
+            wrap ? 'items-start' : 'items-center',
+          ].join(' ')}
+        >
+          <FieldEditor entry={entry} def={def} schema={schema} compact={!wrap} chips={chips} />
         </div>
       )}
     </div>
@@ -121,7 +150,8 @@ const INDENT = 16;
 
 const TableRow = memo(function TableRow({
   entry,
-  columns,
+  cells,
+  autoHeight,
   schema,
   depth,
   childCount,
@@ -132,7 +162,9 @@ const TableRow = memo(function TableRow({
   onSelect,
 }: {
   entry: Entry;
-  columns: ColumnDef[];
+  cells: { def: ColumnDef; wrap: boolean }[];
+  /** True when any column wraps — rows grow instead of clipping (M12.4b). */
+  autoHeight: boolean;
   schema: Schema;
   /** M10: nesting depth from the grouping chain's relation levels. */
   depth: number;
@@ -160,7 +192,8 @@ const TableRow = memo(function TableRow({
       // `group` sits on the ROW so hovering anywhere reveals Open, not only
       // over the name cell.
       className={[
-        'group flex h-9 border-b border-[var(--n-100)]',
+        'group flex border-b border-[var(--n-100)]',
+        autoHeight ? 'min-h-9' : 'h-9',
         selected ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-25)]',
       ].join(' ')}
     >
@@ -213,7 +246,7 @@ const TableRow = memo(function TableRow({
           Open
         </button>
       </div>
-      {columns.map((def, i) => (
+      {cells.map(({ def, wrap }, i) => (
         <TableCell
           key={def.name}
           entry={entry}
@@ -221,6 +254,7 @@ const TableRow = memo(function TableRow({
           schema={schema}
           index={i}
           chips={chips}
+          wrap={wrap}
         />
       ))}
     </div>
@@ -339,6 +373,14 @@ export interface TableViewProps {
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
   /** True when the view has filters, so an empty state can say WHY. */
   filtered?: boolean;
+  /** M12.4b: the single type behind this table, which is what makes the
+   * header menu's property operations (rename, change type, insert,
+   * duplicate, delete) possible. Null on mixed/typeless views. */
+  sourceType?: string | null;
+  /** M12.4b: adds a starter filter rule for the field to the open view. */
+  onFilterField?: (field: string) => void;
+  /** M12.4b: opens the property's full configuration surface. */
+  onEditProperty?: (field: string) => void;
 }
 
 /**
@@ -393,55 +435,248 @@ function BandHeader({
   );
 }
 
-/** Per-column header menu (M9.2): move, hide. The header is the schema, so
- * the things you can do to a column live on the column. */
-function ColumnMenu({
+interface HeaderItem {
+  label: string;
+  icon: string;
+  run: () => void;
+  danger?: boolean;
+  /** Renders a trailing check — used for stateful toggles like Wrap. */
+  active?: boolean;
+  /** Starts a new visual section. */
+  section?: boolean;
+}
+
+/**
+ * The column header menu (M12.4b): Notion's, for a markdown vault. The
+ * LABEL is the trigger now — sorting moved inside, where it can say which
+ * direction it means instead of silently toggling.
+ *
+ * Property operations (rename, change type, insert, duplicate, delete) write
+ * the type's schema and need a single source type behind the table; view
+ * operations (sort, group, filter, wrap, hide, move) write the open view and
+ * work everywhere a view file exists.
+ */
+function HeaderMenu({
   def,
+  wrap,
   columns,
-  onChange,
+  presentation,
+  sourceType,
+  onColumnsChange,
+  onPresentationChange,
+  onFilterField,
+  onEditProperty,
 }: {
   def: ColumnDef;
+  wrap: boolean;
   columns: ColumnSpec[];
-  onChange: (next: ColumnSpec[]) => void;
+  presentation: Presentation;
+  sourceType: string | null;
+  onColumnsChange?: (next: ColumnSpec[]) => void;
+  onPresentationChange?: (next: Presentation) => void;
+  onFilterField?: (field: string) => void;
+  onEditProperty?: (field: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [changingKind, setChangingKind] = useState(false);
+  const [draft, setDraft] = useState(humanize(def.name));
   const name = humanize(def.name);
+  // Schema operations need one agreed-on declaration to edit.
+  const canEditSchema = sourceType !== null && def.heterogeneous !== true;
+
+  useEffect(() => {
+    if (open) {
+      setDraft(humanize(def.name));
+      setChangingKind(false);
+    }
+  }, [open, def.name]);
+
+  const close = () => setOpen(false);
+
+  const commitRename = () => {
+    const next = draft.trim();
+    if (!canEditSchema || sourceType === null || next === '' || humanize(def.name) === next) return;
+    void (async () => {
+      if (await renameFieldOnType(sourceType, def.name, next)) {
+        // The view addresses the column by field name — follow the rename.
+        onColumnsChange?.(
+          columns.map((c) =>
+            c.field === def.name ? { ...c, field: normalizeFieldName(next) } : c,
+          ),
+        );
+      }
+    })();
+  };
+
+  const items: HeaderItem[] = [];
+  if (onEditProperty !== undefined && canEditSchema) {
+    items.push({ label: 'Edit property', icon: 'settings-2', run: () => onEditProperty(def.name) });
+  }
+  if (onFilterField !== undefined) {
+    items.push({ label: 'Filter', icon: 'list-filter', run: () => onFilterField(def.name) });
+  }
+  if (onPresentationChange !== undefined) {
+    items.push(
+      {
+        label: 'Sort ascending',
+        icon: 'arrow-up',
+        run: () => onPresentationChange(sortBy(presentation, def.name, 'asc')),
+      },
+      {
+        label: 'Sort descending',
+        icon: 'arrow-down',
+        run: () => onPresentationChange(sortBy(presentation, def.name, 'desc')),
+      },
+      {
+        label: 'Group by',
+        icon: 'rows-3',
+        active: presentation.group.some((g) => g.descend === undefined && g.field === def.name),
+        run: () => onPresentationChange(groupByField(presentation, def.name)),
+      },
+    );
+  }
+  if (onColumnsChange !== undefined) {
+    items.push(
+      {
+        label: 'Wrap content',
+        icon: 'wrap-text',
+        active: wrap,
+        section: true,
+        run: () => onColumnsChange(setColumnWrap(columns, def.name)),
+      },
+      { label: 'Hide column', icon: 'eye-off', run: () => onColumnsChange(toggleColumn(columns, def.name)) },
+      { label: 'Move left', icon: 'arrow-left', run: () => onColumnsChange(moveColumn(columns, def.name, -1)) },
+      { label: 'Move right', icon: 'arrow-right', run: () => onColumnsChange(moveColumn(columns, def.name, 1)) },
+    );
+    if (canEditSchema && sourceType !== null) {
+      const insert = (side: 'left' | 'right') => {
+        void (async () => {
+          const created = await insertFieldOnType(sourceType, def.name, side);
+          if (created !== null) onColumnsChange(insertColumn(columns, created, def.name, side));
+        })();
+      };
+      items.push(
+        { label: 'Insert left', icon: 'arrow-left-to-line', section: true, run: () => insert('left') },
+        { label: 'Insert right', icon: 'arrow-right-to-line', run: () => insert('right') },
+        {
+          label: 'Duplicate property',
+          icon: 'copy',
+          run: () => {
+            void (async () => {
+              const copy = await duplicateFieldOnType(sourceType, def.name);
+              if (copy !== null) onColumnsChange(insertColumn(columns, copy, def.name, 'right'));
+            })();
+          },
+        },
+        {
+          label: 'Delete property',
+          icon: 'trash-2',
+          danger: true,
+          run: () => {
+            void (async () => {
+              if (await removeFieldFromType(sourceType, def.name)) {
+                onColumnsChange(columns.filter((c) => c.field !== def.name));
+              }
+            })();
+          },
+        },
+      );
+    }
+  }
 
   return (
-    <span className="relative inline-flex flex-none">
+    <span className="relative inline-flex min-w-0 flex-1">
       <button
         type="button"
-        aria-label={`${name} column options`}
+        aria-label={`${name} column menu`}
         onClick={() => setOpen(!open)}
-        className="hidden h-4 w-4 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] group-hover/header:inline-flex"
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-medium text-[var(--n-600)] hover:text-[var(--n-900)]"
       >
-        <Icon name="chevron-down" size={11} />
+        {name}
       </button>
       {open && (
         <>
           <button
             type="button"
-            aria-label="Close column options"
-            onClick={() => setOpen(false)}
+            aria-label="Close column menu"
+            onClick={close}
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
-          <div className="absolute right-0 top-5 z-50 w-[168px] rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
-            {[
-              { label: 'Move left', icon: 'arrow-left', run: () => onChange(moveColumn(columns, def.name, -1)) },
-              { label: 'Move right', icon: 'arrow-right', run: () => onChange(moveColumn(columns, def.name, 1)) },
-              { label: 'Hide column', icon: 'eye-off', run: () => onChange(toggleColumn(columns, def.name)) },
-            ].map((item) => (
+          <div className="absolute left-0 top-6 z-50 w-[224px] rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
+            {canEditSchema && sourceType !== null ? (
+              <div className="px-1 pb-1 pt-0.5">
+                <Input
+                  size="sm"
+                  ariaLabel={`Rename ${name}`}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    if (e.key === 'Escape') setDraft(humanize(def.name));
+                  }}
+                  width="100%"
+                />
+              </div>
+            ) : (
+              <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">{name}</div>
+            )}
+            {canEditSchema && sourceType !== null && (
+              <button
+                type="button"
+                data-testid="change-type"
+                onClick={() => setChangingKind(!changingKind)}
+                className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+              >
+                <Icon name="repeat-2" size={12} color="var(--n-500)" />
+                <span className="min-w-0 flex-1">Change type</span>
+                <span className="flex items-center gap-1 text-[11px] text-[var(--n-400)]">
+                  {kindMeta(def.kind).label}
+                  <Icon name={changingKind ? 'chevron-down' : 'chevron-right'} size={11} />
+                </span>
+              </button>
+            )}
+            {changingKind && sourceType !== null && (
+              <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-[var(--n-25)] p-0.5">
+                {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
+                  <button
+                    key={k.kind}
+                    type="button"
+                    data-testid={`change-type-${k.kind}`}
+                    onClick={() => {
+                      close();
+                      void changeFieldKind(sourceType, def.name, k.kind);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                  >
+                    <Icon name={k.icon} size={12} color="var(--n-500)" />
+                    <span className="min-w-0 flex-1">{k.label}</span>
+                    {k.kind === def.kind && <Icon name="check" size={12} color="var(--cortex-600)" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            {items.map((item) => (
               <button
                 key={item.label}
                 type="button"
                 onClick={() => {
                   item.run();
-                  setOpen(false);
+                  close();
                 }}
-                className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                className={[
+                  'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] hover:bg-[var(--n-50)]',
+                  item.danger === true ? 'text-[var(--danger-600,#c5372c)]' : 'text-[var(--n-700)]',
+                  item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
+                ].join(' ')}
               >
-                <Icon name={item.icon} size={12} color="var(--n-500)" />
-                {item.label}
+                <Icon
+                  name={item.icon}
+                  size={12}
+                  color={item.danger === true ? 'var(--danger-600, #c5372c)' : 'var(--n-500)'}
+                />
+                <span className="min-w-0 flex-1">{item.label}</span>
+                {item.active === true && <Icon name="check" size={12} color="var(--cortex-600)" />}
               </button>
             ))}
           </div>
@@ -471,12 +706,14 @@ export function TableView({
   schema,
   allEntries = entries,
   fields,
-  onOrderBy,
   onColumnsChange,
   onPresentationChange,
   scope = 'table',
   onCreate,
   filtered,
+  sourceType = null,
+  onFilterField,
+  onEditProperty,
 }: TableViewProps) {
   // M9.1: collapse lives in the store, keyed by surface — it used to be
   // component state and reset on every navigation.
@@ -586,7 +823,13 @@ export function TableView({
   });
 
   const primarySort = presentation.sort[0];
-  const columns = useMemo(() => resolved.map((c) => c.def), [resolved]);
+  // M12.4b: wrap rides with each cell; any wrapped column releases the rows
+  // from their fixed height.
+  const cells = useMemo(
+    () => resolved.map((c) => ({ def: c.def, wrap: c.spec.wrap === true })),
+    [resolved],
+  );
+  const anyWrap = useMemo(() => cells.some((c) => c.wrap), [cells]);
   const chips: ChipStyle = presentation.chips ?? 'plain';
 
   // Widths ride as custom properties on the grid so a drag can repaint them
@@ -634,7 +877,7 @@ export function TableView({
               />
             )}
           </div>
-          {resolved.map(({ def }, i) => (
+          {resolved.map(({ def, spec }, i) => (
             <div
               key={def.name}
               role="columnheader"
@@ -642,13 +885,19 @@ export function TableView({
               style={{ width: `var(${widthVar(i)})` }}
             >
               <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
-              <button
-                type="button"
-                onClick={() => onOrderBy?.(def.name)}
-                className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-medium text-[var(--n-600)] hover:text-[var(--n-900)]"
-              >
-                {humanize(def.name)}
-              </button>
+              {/* M12.4b: the label opens the column menu (Notion's header).
+                  Sorting lives inside it now, with an explicit direction. */}
+              <HeaderMenu
+                def={def}
+                wrap={spec.wrap === true}
+                columns={presentation.columns}
+                presentation={presentation}
+                sourceType={sourceType ?? null}
+                onColumnsChange={onColumnsChange}
+                onPresentationChange={onPresentationChange}
+                onFilterField={onFilterField}
+                onEditProperty={onEditProperty}
+              />
               {def.heterogeneous === true && (
                 <span
                   title="Declared with different kinds across the types in this view"
@@ -665,20 +914,13 @@ export function TableView({
                 />
               )}
               {onColumnsChange !== undefined && (
-                <>
-                  <ColumnMenu
-                    def={def}
-                    columns={presentation.columns}
-                    onChange={onColumnsChange}
-                  />
-                  <ColumnResizer
-                    label={humanize(def.name)}
-                    width={layout.columns[i]}
-                    min={MIN_COL_W}
-                    onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
-                    onCommit={(w) => commitColumn(def.name, w)}
-                  />
-                </>
+                <ColumnResizer
+                  label={humanize(def.name)}
+                  width={layout.columns[i]}
+                  min={MIN_COL_W}
+                  onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
+                  onCommit={(w) => commitColumn(def.name, w)}
+                />
               )}
             </div>
           ))}
@@ -720,7 +962,8 @@ export function TableView({
             <TableRow
               key={row.key}
               entry={row.entry}
-              columns={columns}
+              cells={cells}
+              autoHeight={anyWrap}
               schema={schema}
               depth={row.depth}
               childCount={row.childCount}
