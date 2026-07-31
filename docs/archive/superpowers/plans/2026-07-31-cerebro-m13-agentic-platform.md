@@ -70,12 +70,14 @@ instead of building four systems.
   refreshed file's `modifiedAt` makes citing concepts `behind`; the distiller
   re-checks them. Ingest → distill starts ticking on external data.
 - **An agent is a record** (`type: Agent`): instructions, allowed tools
-  (safe/shell), triggers (mention, schedule), and a bounded, *visible* memory —
-  a `## Memory` section in the record body (the crew repo's post-it, but
-  auditable and git-tracked). Identity is `process:<slug>` — the actor slot the
-  OKF schema already reserves (`verified.by: process:metrics-nightly` is in the
-  demo vault today). Agent work products are ordinary records/concepts with
-  attribution.
+  (safe/shell), triggers (mention, schedule), and a bounded, *visible* memory.
+  (Built as the `memory:` frontmatter property rather than a body section:
+  agents rewrite it atomically through update_frontmatter — no
+  section-replace tool exists, and append-only body memory is a log, not a
+  memory. Still visible as an ordinary property, still git-tracked.)
+  Identity is `process:<slug>` — the actor slot the OKF schema already
+  reserves (`verified.by: process:metrics-nightly` is in the demo vault
+  today). Agent work products are ordinary records/concepts with attribution.
 - **The agent proposes types; it never silently creates them.** Type creation
   via `create_note` is currently ungated — M13 routes schema changes through the
   propose-pattern (`analyzeVault` from M12.6 as the read-only analyzer, proposal
@@ -115,10 +117,48 @@ instead of building four systems.
   contradiction-flagging (never resolution); schema changes agent-side routed
   through proposals.
 
+## What shipped, commit by commit
+
+- **M13.1 `b1a6580` — a skill is a record.** `engine/skills.ts` catalog
+  (name+description in every prompt, body loads on invoke), `/name` composer
+  completion + expansion (transcript shows what was typed), Skill type + two
+  seeds. Adversarially reviewed (12 confirmed findings fixed): taken-set slug
+  allocation, wikilink-description recovery, slash menu derived from the
+  draft alone (no render-time caret), shared highlight index reset, expansion
+  inside send() (no interleave window), leading-space literal escape.
+- **M13.2 `face99e` — the runner generalizes; skills get schedules.** One
+  derived queue (filed | scheduled | behind | stale), parseSchedule grammar,
+  lastFireKey ledger keys, useJobRunner replaces useLearnRunner as a
+  null-rendering host, additive-only preamble on unattended runs. Review (10
+  confirmed) fixed both DST bugs (schedule-time keys; UTC hourly), the
+  stream-ownership collision (learningPath claims the stream; chat stops a
+  background child deliberately), tick gating, skill-distillation exclusion.
+- **M13.3 `3dab9e5` — connectors get a face; sources get a pulse.**
+  `.cerebro/connectors.json` + Settings UI; enabled servers merge beside the
+  loopback with --strict-mcp-config kept ON (legacy open mode only when no
+  config exists; broken config fails closed; cerebro never shadowed);
+  `refresh` jobs re-fetch stale cached sources, ranked before concept
+  rechecks.
+- **M13.4 `7efb0aa` — agents are teammates.** Agent records; run_agent sets
+  the actor on the MCP server and write_concept/cache_source stamp
+  `generated.by` from it; runs carry identity + memory + additive-only rules;
+  record `tools:` capped by the Settings ceiling; memory rewritten via
+  update_frontmatter (max 30 lines); create-an-agent interview skill drafts
+  with NO schedule — activation is the user's act.
+- **M13.5 `d8dc862` — knowledge stays honest.** Freshness rule (timeless /
+  dated / pointer) in distill + recheck prompts; type-doc edits make
+  `about`-linked concepts due a lazy `schema` recheck — one job under one
+  composite ledger key (two keys on one path would ping-pong a no-op recheck
+  forever); the agent is barred from creating/modifying Type docs — schema
+  changes go through people.
+
 ## State
 
-In progress. Each phase lands as its own commit, green (vitest + cargo + tsc +
-build) before commit, following the M12 discipline.
+All five phases BUILT and committed on `m13-agentic-platform`, each green
+before commit. At tip: 986 vitest / 85 files, 150 cargo, tsc + build clean.
+M13.1 and M13.2 adversarially reviewed (workflows, findings fixed in-phase);
+combined review of M13.3–M13.5 run at milestone end. Playwright suite and
+real-vault (tauri dev) shakeout pending. Not merged, not pushed.
 
 ## Known follow-ups (declared up front)
 
