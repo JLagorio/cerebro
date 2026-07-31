@@ -16,9 +16,10 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
-    // tolaria-main/ is a vendored reference repo (gitignored) with its own tests — never run them,
-    // wherever it lives (it has moved between repo root and docs/). e2e/ holds
-    // Playwright specs (@playwright/test crashes under vitest).
-    exclude: [...configDefaults.exclude, '**/tolaria-main/**', 'e2e/**'],
+    // docs/ holds vendored reference repos (gitignored) with test suites of
+    // their own — never run them. tolaria-main kept by name because it has
+    // lived at the repo root too. e2e/ holds Playwright specs
+    // (@playwright/test crashes under vitest).
+    exclude: [...configDefaults.exclude, 'docs/**', '**/tolaria-main/**', 'e2e/**'],
   },
 });

@@ -10,7 +10,13 @@ const nextId = (): string => `m-${++messageCounter}`;
 export interface AgentChat {
   messages: ChatMessage[];
   streaming: boolean;
-  send(text: string): void;
+  /** `message` is what the agent runs when it differs from what the transcript
+   * shows — a skill invocation displays as `/name` but sends the body (M13.1).
+   * As a FUNCTION it is awaited inside the turn, so the transcript appends and
+   * the busy flag rises synchronously on send — an async expansion must not
+   * open a window where a second send can interleave. If it rejects, the turn
+   * falls back to sending `text` as typed. */
+  send(text: string, message?: string | (() => Promise<string>)): void;
   stop(): void;
   reset(): void;
   /** M9.5: the CLI session behind this transcript, so a conversation can be
@@ -148,7 +154,7 @@ export function useAgentChat(
   }, [patchActive, rescan, setAgentBusy]);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, message?: string | (() => Promise<string>)) => {
       const trimmed = text.trim();
       if (trimmed === '' || vaultPath === null) return;
       const assistantId = nextId();
@@ -164,9 +170,14 @@ export function useAgentChat(
 
       void (async () => {
         try {
+          const expanded =
+            typeof message === 'function'
+              ? await message().catch(() => trimmed)
+              : message?.trim();
+          const outgoing = expanded === undefined || expanded === '' ? trimmed : expanded;
           mcpRef.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
-            message: trimmed,
+            message: outgoing,
             systemPrompt,
             sessionId: sessionRef.current,
             model,
