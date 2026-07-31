@@ -9,6 +9,7 @@ import {
   RenameTypeDialog,
   TypeStyleDialog,
 } from '@/app/TypeDialogs';
+import { AdoptSchemaDialog } from '@/app/AdoptSchemaDialog';
 import { CollectionTree } from '@/app/CollectionTree';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { deleteCollection, deleteList } from '@/app/listActions';
@@ -56,6 +57,7 @@ export function Sidebar({ onNewView }: SidebarProps) {
   const collections = useVaultStore((s) => s.collections);
   const [collectionDialog, setCollectionDialog] = useState<CollectionDialogState | null>(null);
   const [typeDialog, setTypeDialog] = useState<TypeDialog | null>(null);
+  const [adopting, setAdopting] = useState(false);
   const [typeMenu, setTypeMenu] = useState<{ x: number; y: number; listing: TypeListing } | null>(
     null,
   );
@@ -264,14 +266,26 @@ export function Sidebar({ onNewView }: SidebarProps) {
             <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
             Types
           </button>
-          <button
-            type="button"
-            aria-label="New type"
-            onClick={() => setTypeDialog({ mode: 'new' })}
-            className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
-          >
-            <Icon name="plus" size={13} />
-          </button>
+          <span className="inline-flex">
+            {/* M12.6: the schema doctor — adopt an existing vault's freeform
+                frontmatter into declared types, one reviewed pass. */}
+            <button
+              type="button"
+              aria-label="Adopt vault schema"
+              onClick={() => setAdopting(true)}
+              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+            >
+              <Icon name="wand-2" size={12} />
+            </button>
+            <button
+              type="button"
+              aria-label="New type"
+              onClick={() => setTypeDialog({ mode: 'new' })}
+              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+            >
+              <Icon name="plus" size={13} />
+            </button>
+          </span>
         </div>
         {typesOpen &&
           types.map((t) => {
@@ -323,6 +337,7 @@ export function Sidebar({ onNewView }: SidebarProps) {
       {typeDialog?.mode === 'delete' && (
         <DeleteTypeDialog listing={typeDialog.listing} onClose={() => setTypeDialog(null)} />
       )}
+      {adopting && <AdoptSchemaDialog onClose={() => setAdopting(false)} />}
     </nav>
   );
 }
