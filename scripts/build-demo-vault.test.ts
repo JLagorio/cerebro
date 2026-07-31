@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -91,7 +92,9 @@ describe('seedItemToFrontmatter', () => {
   });
 });
 
-describe('loadSeedModule', () => {
+// The prototype seed files live under docs/, which is not committed, so these
+// tests only run on machines that have them.
+describe.skipIf(!existsSync(SEED_DIR))('loadSeedModule', () => {
   it('evaluates the prototype seed file and returns the requested constants', () => {
     const { SPACES, PROJECTS, WORK_ITEMS } = loadSeedModule(
       join(SEED_DIR, 'cerebro-work-data.js'),
