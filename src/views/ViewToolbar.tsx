@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import type { RelationConfig } from '@/detail/AddPropertyPanel';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { ChainBuilder, type ChainRow } from '@/views/ChainBuilder';
 import { FilterBuilder } from '@/views/FilterBuilder';
-import { PropertyVisibility } from '@/views/PropertyVisibility';
 import type { ColumnDef } from '@/engine/columns';
 import {
   chainTypes,
@@ -45,9 +43,10 @@ export const ORDER_OPTIONS = [
 ];
 
 /** Kinds whose values bucket meaningfully (M3 fix: the dropdowns used to be
- * hardcoded to Work-item fields, so grouping on any other type was a no-op). */
-const GROUPABLE_KINDS = new Set(['status', 'select', 'multiselect', 'person', 'checkbox', 'relation']);
-const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
+ * hardcoded to Work-item fields, so grouping on any other type was a no-op).
+ * Exported for the tab-row icon cluster's quick pickers (M12.8). */
+export const GROUPABLE_KINDS = new Set(['status', 'select', 'multiselect', 'person', 'checkbox', 'relation']);
+export const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
 
 /** Group options for a collection whose type declares `fields`. */
 export function groupOptionsFor(fields: FieldDef[] | undefined) {
@@ -113,7 +112,7 @@ function dedupe(options: { value: string; label: string }[]) {
 }
 
 /** Sortable fields include the entry metadata every record has. */
-const META_SORTS = [
+export const META_SORTS = [
   { value: 'modifiedAt', label: 'Last modified' },
   { value: 'createdAt', label: 'Created' },
   { value: 'title', label: 'Title' },
@@ -128,9 +127,6 @@ export interface ViewToolbarProps {
   /** Source type + schema drive the hierarchy chain's per-level options. */
   sourceType?: string | null;
   schema?: Schema;
-  /** M9.2: create a property on the source type from the property picker.
-   * M12.4: relations carry their config (target/limit/reciprocal). */
-  onAddProperty?: (name: string, kind: FieldDef['kind'], relation?: RelationConfig) => void;
   /**
    * The layout pills (M11).
    *
@@ -155,7 +151,6 @@ export function ViewToolbar({
   fields,
   sourceType = null,
   schema,
-  onAddProperty,
   showLayout = true,
   filters = null,
   onFiltersChange,
@@ -319,15 +314,8 @@ export function ViewToolbar({
         onAdd={(v) => setSort([...presentation.sort, { field: v, dir: 'asc' }])}
       />
 
-      {/* M3.4: every view controls which properties it shows. */}
-      <PropertyVisibility
-        fields={declared}
-        columns={presentation.columns}
-        onChange={(columns) => onChange({ ...presentation, columns })}
-        onAddProperty={onAddProperty}
-        canAddProperty={sourceType !== null}
-        ownerType={sourceType}
-      />
+      {/* M12.8: Properties moved to the tab row's icon cluster, beside the
+          other view controls — this bar is the chip drawer now. */}
       <span className="flex-1" />
     </div>
   );
@@ -339,7 +327,7 @@ function labelForSort(field: string): string {
 }
 
 /** Count the leaf conditions in a filter tree — what the pill reports. */
-function countRules(group: FilterGroup | null): number {
+export function countRules(group: FilterGroup | null): number {
   if (group === null) return 0;
   const children = 'all' in group ? group.all : group.any;
   return children.reduce(
@@ -391,6 +379,7 @@ function FilterControl({
             type="button"
             aria-label="Close filter"
             onClick={() => setOpen(false)}
+            onWheel={() => setOpen(false)}
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>

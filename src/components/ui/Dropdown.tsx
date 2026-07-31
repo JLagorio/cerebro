@@ -111,13 +111,16 @@ export function Dropdown({
             aria-label="Close menu"
             tabIndex={-1}
             onClick={() => setOpen(false)}
+            // A full-screen backdrop swallows wheel events — the app "stops
+            // scrolling" while any menu is open. Scrolling dismisses instead.
+            onWheel={() => setOpen(false)}
             className="fixed inset-0 z-40 cursor-default bg-transparent"
           />
           <div
             id={listId}
             role="listbox"
             aria-label={label}
-            className="absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
           >
             <div className="max-h-[264px] overflow-y-auto">
               {options.map((o, i) => (

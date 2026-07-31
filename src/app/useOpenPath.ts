@@ -33,12 +33,15 @@ const dirOf = (path: string) => {
  * content types, so they keep their document form.
  */
 export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void {
-  const entries = useVaultStore((s) => s.entries);
-  const selection = useNavStore((s) => s.selection);
   const navigate = useNavStore((s) => s.navigate);
   const openDetail = useUiStore((s) => s.openDetail);
 
   return (path) => {
+    // Resolved at CALL time, not render time (M12.8): the New button creates
+    // a record and opens it in the same tick — a render-time snapshot predates
+    // the record, fails the lookup, and misroutes a typed record to Docs.
+    const entries = useVaultStore.getState().entries;
+    const selection = useNavStore.getState().selection;
     const entry = entries.find((e) => e.path === path);
     if (entry === undefined) {
       navigate({ kind: 'doc', path });

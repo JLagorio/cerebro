@@ -35,6 +35,7 @@ import {
   renameFieldOnType,
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
+import { PropertyEditor } from '@/views/PropertyEditor';
 import { QuickAddInline } from '@/views/QuickAdd';
 import { useRowKeyboard } from '@/views/useRowKeyboard';
 import { useUiStore } from '@/stores/uiStore';
@@ -151,6 +152,8 @@ const INDENT = 16;
 const TableRow = memo(function TableRow({
   entry,
   cells,
+  titlePos,
+  titleFrozen,
   autoHeight,
   schema,
   depth,
@@ -163,6 +166,10 @@ const TableRow = memo(function TableRow({
 }: {
   entry: Entry;
   cells: { def: ColumnDef; wrap: boolean }[];
+  /** M12.8: the name column's index among the visible columns. */
+  titlePos: number;
+  /** M12.8: false lets the name column scroll with the grid. */
+  titleFrozen: boolean;
   /** True when any column wraps — rows grow instead of clipping (M12.4b). */
   autoHeight: boolean;
   schema: Schema;
@@ -197,10 +204,22 @@ const TableRow = memo(function TableRow({
         selected ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-25)]',
       ].join(' ')}
     >
+      {cells.slice(0, titlePos).map(({ def, wrap }, i) => (
+        <TableCell
+          key={def.name}
+          entry={entry}
+          def={def}
+          schema={schema}
+          index={i}
+          chips={chips}
+          wrap={wrap}
+        />
+      ))}
       <div
         role="gridcell"
         className={[
-          'sticky left-0 z-10 flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
+          titleFrozen ? 'sticky left-0 z-10' : '',
+          'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
           selected ? 'bg-[var(--cortex-50)]' : 'bg-[var(--n-0)] group-hover:bg-[var(--n-25)]',
         ].join(' ')}
         style={{ width: `var(${TITLE_VAR})`, paddingLeft: 12 + depth * INDENT }}
@@ -246,13 +265,13 @@ const TableRow = memo(function TableRow({
           Open
         </button>
       </div>
-      {cells.map(({ def, wrap }, i) => (
+      {cells.slice(titlePos).map(({ def, wrap }, i) => (
         <TableCell
           key={def.name}
           entry={entry}
           def={def}
           schema={schema}
-          index={i}
+          index={titlePos + i}
           chips={chips}
           wrap={wrap}
         />
@@ -379,8 +398,6 @@ export interface TableViewProps {
   sourceType?: string | null;
   /** M12.4b: adds a starter filter rule for the field to the open view. */
   onFilterField?: (field: string) => void;
-  /** M12.4b: opens the property's full configuration surface. */
-  onEditProperty?: (field: string) => void;
 }
 
 /**
@@ -407,29 +424,36 @@ function BandHeader({
       data-testid="table-group-header"
       data-depth={node.depth}
       onClick={onToggle}
-      className="sticky left-0 flex h-8 w-full items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
-      style={{ paddingLeft: 12 + node.depth * INDENT, paddingRight: 12 }}
+      className="flex h-8 w-full items-center border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
     >
-      <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
+      {/* The band spans the full scroll width, so the band itself cannot be
+          sticky (a sticky box as wide as its container has no room to shift).
+          The label cluster is the sticky part instead. */}
       <span
-        className="box-border h-[10px] w-[10px] flex-none rounded-full"
-        style={
-          node.ghost || !node.color
-            ? { border: '1.5px solid var(--n-400)' }
-            : { background: node.color, border: `1.5px solid ${node.color}` }
-        }
-      />
-      <span
-        className={
-          node.depth === 0
-            ? 'text-[12.5px] font-semibold text-[var(--n-800)]'
-            : 'text-[12px] font-medium text-[var(--n-700)]'
-        }
+        className="sticky left-0 flex items-center gap-2 pr-3"
+        style={{ paddingLeft: 12 + node.depth * INDENT }}
       >
-        {node.label}
-      </span>
-      <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-        {node.count}
+        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
+        <span
+          className="box-border h-[10px] w-[10px] flex-none rounded-full"
+          style={
+            node.ghost || !node.color
+              ? { border: '1.5px solid var(--n-400)' }
+              : { background: node.color, border: `1.5px solid ${node.color}` }
+          }
+        />
+        <span
+          className={
+            node.depth === 0
+              ? 'text-[12.5px] font-semibold text-[var(--n-800)]'
+              : 'text-[12px] font-medium text-[var(--n-700)]'
+          }
+        >
+          {node.label}
+        </span>
+        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+          {node.count}
+        </span>
       </span>
     </button>
   );
@@ -461,24 +485,30 @@ function HeaderMenu({
   wrap,
   columns,
   presentation,
+  schema,
   sourceType,
   onColumnsChange,
   onPresentationChange,
   onFilterField,
-  onEditProperty,
+  onMove,
 }: {
   def: ColumnDef;
   wrap: boolean;
   columns: ColumnSpec[];
   presentation: Presentation;
+  schema: Schema;
   sourceType: string | null;
   onColumnsChange?: (next: ColumnSpec[]) => void;
   onPresentationChange?: (next: Presentation) => void;
   onFilterField?: (field: string) => void;
-  onEditProperty?: (field: string) => void;
+  /** M12.8: display-aware move — steps across the name column too. */
+  onMove?: (field: string, delta: -1 | 1) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [changingKind, setChangingKind] = useState(false);
+  // M12.8: the full property editor, flown out IN this popover next to the
+  // column it configures — config never docks a side panel.
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(humanize(def.name));
   const name = humanize(def.name);
   // Schema operations need one agreed-on declaration to edit.
@@ -488,6 +518,7 @@ function HeaderMenu({
     if (open) {
       setDraft(humanize(def.name));
       setChangingKind(false);
+      setEditing(false);
     }
   }, [open, def.name]);
 
@@ -509,9 +540,6 @@ function HeaderMenu({
   };
 
   const items: HeaderItem[] = [];
-  if (onEditProperty !== undefined && canEditSchema) {
-    items.push({ label: 'Edit property', icon: 'settings-2', run: () => onEditProperty(def.name) });
-  }
   if (onFilterField !== undefined) {
     items.push({ label: 'Filter', icon: 'list-filter', run: () => onFilterField(def.name) });
   }
@@ -545,8 +573,22 @@ function HeaderMenu({
         run: () => onColumnsChange(setColumnWrap(columns, def.name)),
       },
       { label: 'Hide column', icon: 'eye-off', run: () => onColumnsChange(toggleColumn(columns, def.name)) },
-      { label: 'Move left', icon: 'arrow-left', run: () => onColumnsChange(moveColumn(columns, def.name, -1)) },
-      { label: 'Move right', icon: 'arrow-right', run: () => onColumnsChange(moveColumn(columns, def.name, 1)) },
+      {
+        label: 'Move left',
+        icon: 'arrow-left',
+        run: () =>
+          onMove !== undefined
+            ? onMove(def.name, -1)
+            : onColumnsChange(moveColumn(columns, def.name, -1)),
+      },
+      {
+        label: 'Move right',
+        icon: 'arrow-right',
+        run: () =>
+          onMove !== undefined
+            ? onMove(def.name, 1)
+            : onColumnsChange(moveColumn(columns, def.name, 1)),
+      },
     );
     if (canEditSchema && sourceType !== null) {
       const insert = (side: 'left' | 'right') => {
@@ -600,9 +642,44 @@ function HeaderMenu({
             type="button"
             aria-label="Close column menu"
             onClick={close}
+            onWheel={close}
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
-          <div className="absolute left-0 top-6 z-50 w-[224px] rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
+          <div
+            className={[
+              'cb-menu-in absolute left-0 top-6 z-50 rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]',
+              editing ? 'w-[300px] p-2' : 'w-[224px]',
+            ].join(' ')}
+          >
+            {editing && canEditSchema && sourceType !== null && onColumnsChange !== undefined ? (
+              // The Notion flyout: the menu becomes the property editor,
+              // anchored where the column is (M12.8).
+              <div className="cb-panel-in">
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    aria-label="Back to column menu"
+                    onClick={() => setEditing(false)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)]"
+                  >
+                    <Icon name="arrow-left" size={13} />
+                  </button>
+                  <span className="text-[12.5px] font-semibold text-[var(--n-900)]">
+                    Edit property
+                  </span>
+                </div>
+                <PropertyEditor
+                  key={def.name}
+                  def={def}
+                  sourceType={sourceType}
+                  schema={schema}
+                  columns={columns}
+                  onColumnsChange={onColumnsChange}
+                  onDeleted={close}
+                />
+              </div>
+            ) : (
+            <>
             {canEditSchema && sourceType !== null ? (
               <div className="px-1 pb-1 pt-0.5">
                 <Input
@@ -620,6 +697,18 @@ function HeaderMenu({
               </div>
             ) : (
               <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">{name}</div>
+            )}
+            {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
+              <button
+                type="button"
+                data-testid="edit-property"
+                onClick={() => setEditing(true)}
+                className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+              >
+                <Icon name="settings-2" size={12} color="var(--n-500)" />
+                <span className="min-w-0 flex-1">Edit property</span>
+                <Icon name="chevron-right" size={11} color="var(--n-400)" />
+              </button>
             )}
             {canEditSchema && sourceType !== null && (
               <button
@@ -679,6 +768,119 @@ function HeaderMenu({
                 {item.active === true && <Icon name="check" size={12} color="var(--cortex-600)" />}
               </button>
             ))}
+            </>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The name column's menu (M12.8). The first column stopped being the one
+ * header without controls: it sorts, filters, freezes, and moves like the
+ * rest. What it cannot do is hide or delete — a table of records with no
+ * names is not a table, and the title is not a schema property to remove.
+ */
+function TitleHeaderMenu({
+  presentation,
+  frozen,
+  canFreeze,
+  atStart,
+  atEnd,
+  onPresentationChange,
+  onFilterField,
+  onMove,
+}: {
+  presentation: Presentation;
+  frozen: boolean;
+  /** Freezing only means anything while the name column is first. */
+  canFreeze: boolean;
+  atStart: boolean;
+  atEnd: boolean;
+  onPresentationChange?: (next: Presentation) => void;
+  onFilterField?: (field: string) => void;
+  onMove: (delta: -1 | 1) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
+
+  const items: HeaderItem[] = [];
+  if (onFilterField !== undefined) {
+    items.push({ label: 'Filter', icon: 'list-filter', run: () => onFilterField('title') });
+  }
+  if (onPresentationChange !== undefined) {
+    items.push(
+      {
+        label: 'Sort ascending',
+        icon: 'arrow-up',
+        run: () => onPresentationChange(sortBy(presentation, 'title', 'asc')),
+      },
+      {
+        label: 'Sort descending',
+        icon: 'arrow-down',
+        run: () => onPresentationChange(sortBy(presentation, 'title', 'desc')),
+      },
+    );
+    if (canFreeze) {
+      items.push({
+        label: frozen ? 'Unfreeze column' : 'Freeze column',
+        icon: frozen ? 'pin-off' : 'pin',
+        section: true,
+        run: () => onPresentationChange({ ...presentation, titleFrozen: !frozen }),
+      });
+    }
+    if (!atStart) {
+      items.push({ label: 'Move left', icon: 'arrow-left', section: atStart || canFreeze ? undefined : true, run: () => onMove(-1) });
+    }
+    if (!atEnd) {
+      items.push({ label: 'Move right', icon: 'arrow-right', run: () => onMove(1) });
+    }
+  }
+
+  if (items.length === 0) {
+    return <span className="min-w-0 flex-1 truncate">Name</span>;
+  }
+
+  return (
+    <span className="relative inline-flex min-w-0 flex-1">
+      <button
+        type="button"
+        aria-label="Name column menu"
+        onClick={() => setOpen(!open)}
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-semibold text-[var(--n-600)] hover:text-[var(--n-900)]"
+      >
+        Name
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close column menu"
+            onClick={close}
+            onWheel={close}
+            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+          />
+          <div className="cb-menu-in absolute left-0 top-6 z-50 w-[224px] rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
+            <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">Name</div>
+            {items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => {
+                  item.run();
+                  close();
+                }}
+                className={[
+                  'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                  item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
+                ].join(' ')}
+              >
+                <Icon name={item.icon} size={12} color="var(--n-500)" />
+                <span className="min-w-0 flex-1">{item.label}</span>
+              </button>
+            ))}
           </div>
         </>
       )}
@@ -713,7 +915,6 @@ export function TableView({
   filtered,
   sourceType = null,
   onFilterField,
-  onEditProperty,
 }: TableViewProps) {
   // M9.1: collapse lives in the store, keyed by surface — it used to be
   // component state and reset on every navigation.
@@ -832,6 +1033,126 @@ export function TableView({
   const anyWrap = useMemo(() => cells.some((c) => c.wrap), [cells]);
   const chips: ChipStyle = presentation.chips ?? 'plain';
 
+  // --- M12.8: the name column is a peer of the data columns --------------
+  const titlePos = Math.max(0, Math.min(presentation.titlePosition ?? 0, resolved.length));
+  const titleFrozen = (presentation.titleFrozen ?? true) && titlePos === 0;
+
+  /** Header keys in display order — the data fields with 'title' interleaved. */
+  const displayKeys = useMemo(() => {
+    const keys = resolved.map((c) => c.def.name);
+    keys.splice(titlePos, 0, 'title');
+    return keys;
+  }, [resolved, titlePos]);
+
+  /**
+   * Reorder by display slot: remove `key`, re-insert at `slot` (an index into
+   * the display list). Writes titlePosition AND the column order in ONE
+   * presentation update, so a drag across the name column cannot tear them
+   * into two writes that disagree.
+   */
+  const reorderDisplay = useCallback(
+    (key: string, slot: number) => {
+      if (onPresentationChange === undefined) return;
+      const from = displayKeys.indexOf(key);
+      if (from === -1) return;
+      const next = [...displayKeys];
+      next.splice(from, 1);
+      next.splice(Math.max(0, Math.min(slot > from ? slot - 1 : slot, next.length)), 0, key);
+      const order = next.filter((k) => k !== 'title');
+      const visible = [...presentation.columns.filter((c) => c.hidden !== true)].sort(
+        (a, b) => order.indexOf(a.field) - order.indexOf(b.field),
+      );
+      onPresentationChange({
+        ...presentation,
+        titlePosition: next.indexOf('title'),
+        columns: [...visible, ...presentation.columns.filter((c) => c.hidden === true)],
+      });
+    },
+    [displayKeys, onPresentationChange, presentation],
+  );
+
+  /** One-step move for the header menus' Move left / Move right. */
+  const moveDisplay = useCallback(
+    (key: string, delta: -1 | 1) => {
+      const from = displayKeys.indexOf(key);
+      if (from === -1) return;
+      reorderDisplay(key, delta === -1 ? from - 1 : from + 2);
+    },
+    [displayKeys, reorderDisplay],
+  );
+
+  // --- M12.8: drag a header to reorder -----------------------------------
+  const headerRowRef = useRef<HTMLDivElement | null>(null);
+  // The header label doubles as the menu trigger, so a completed drag must
+  // swallow the click that follows its pointerup.
+  const suppressClick = useRef(false);
+  const [drag, setDrag] = useState<{ key: string; slot: number } | null>(null);
+
+  const startHeaderDrag = useCallback(
+    (key: string) => (e: React.PointerEvent) => {
+      if (onPresentationChange === undefined || e.button !== 0) return;
+      const row = headerRowRef.current;
+      if (row === null) return;
+      // Cell midpoints decide which slot the pointer is over. Measured once at
+      // drag start — the cells do not move during the drag.
+      const mids = Array.from(row.children).map((c) => {
+        const r = (c as HTMLElement).getBoundingClientRect();
+        return r.left + r.width / 2;
+      });
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const slotAt = (x: number) => mids.filter((m) => x > m).length;
+      let started = false;
+      const move = (ev: PointerEvent) => {
+        // 5px threshold keeps a plain click on the label opening the menu.
+        if (!started && Math.abs(ev.clientX - startX) < 5 && Math.abs(ev.clientY - startY) < 5) {
+          return;
+        }
+        if (!started) {
+          started = true;
+          suppressClick.current = true;
+          document.body.classList.add('cb-col-dragging');
+        }
+        setDrag({ key, slot: slotAt(ev.clientX) });
+      };
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        document.body.classList.remove('cb-col-dragging');
+        setDrag(null);
+        if (!started) return;
+        reorderDisplay(key, slotAt(ev.clientX));
+        // Cleared on a timeout so the click event this pointerup produces is
+        // still inside the suppression window.
+        setTimeout(() => {
+          suppressClick.current = false;
+        }, 0);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    },
+    [onPresentationChange, reorderDisplay],
+  );
+
+  const swallowDraggedClick = (e: React.MouseEvent) => {
+    if (suppressClick.current) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  /** Insert-line painted on the cell at the drop slot. */
+  const dropStyle = (displayIndex: number): React.CSSProperties | undefined => {
+    if (drag === null) return undefined;
+    if (drag.slot === displayIndex) return { boxShadow: 'inset 2px 0 0 var(--cortex-500)' };
+    if (drag.slot === displayKeys.length && displayIndex === displayKeys.length - 1) {
+      return { boxShadow: 'inset -2px 0 0 var(--cortex-500)' };
+    }
+    return undefined;
+  };
+
   // Widths ride as custom properties on the grid so a drag can repaint them
   // without React seeing anything.
   const widthVars = useMemo(() => {
@@ -855,75 +1176,115 @@ export function TableView({
         style={{ width: layout.total, minWidth: '100%', ...widthVars } as React.CSSProperties}
       >
         <div
+          ref={headerRowRef}
           role="row"
           className="sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
         >
-          <div
-            role="columnheader"
-            className="sticky left-0 z-30 flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]"
-            style={{ width: `var(${TITLE_VAR})`, position: 'sticky' }}
-          >
-            <Icon name="type" size={12} color="var(--n-400)" />
-            <span className="min-w-0 flex-1 truncate">Name</span>
-            {/* M11: the name column resizes too. It is the widest thing on the
-                row and was the one width nobody could change. */}
-            {onPresentationChange !== undefined && (
-              <ColumnResizer
-                label="Name"
-                width={layout.title}
-                min={MIN_TITLE_W}
-                onDrag={(w) => paint(TITLE_VAR, w, w - layout.title)}
-                onCommit={commitTitle}
-              />
-            )}
-          </div>
-          {resolved.map(({ def, spec }, i) => (
-            <div
-              key={def.name}
-              role="columnheader"
-              className="group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]"
-              style={{ width: `var(${widthVar(i)})` }}
-            >
-              <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
-              {/* M12.4b: the label opens the column menu (Notion's header).
-                  Sorting lives inside it now, with an explicit direction. */}
-              <HeaderMenu
-                def={def}
-                wrap={spec.wrap === true}
-                columns={presentation.columns}
-                presentation={presentation}
-                sourceType={sourceType ?? null}
-                onColumnsChange={onColumnsChange}
-                onPresentationChange={onPresentationChange}
-                onFilterField={onFilterField}
-                onEditProperty={onEditProperty}
-              />
-              {def.heterogeneous === true && (
-                <span
-                  title="Declared with different kinds across the types in this view"
-                  className="flex-none text-[var(--warn-500)]"
+          {/* M12.8: headers render in DISPLAY order — the name column is one
+              of them now, not a fixture bolted to the front. */}
+          {displayKeys.map((key, d) => {
+            if (key === 'title') {
+              return (
+                <div
+                  key="title"
+                  role="columnheader"
+                  onPointerDown={startHeaderDrag('title')}
+                  onClickCapture={swallowDraggedClick}
+                  className={[
+                    titleFrozen ? 'sticky left-0 z-30' : 'relative',
+                    'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
+                    drag?.key === 'title' ? 'opacity-60' : '',
+                  ].join(' ')}
+                  style={{ width: `var(${TITLE_VAR})`, ...dropStyle(d) }}
                 >
-                  <Icon name="triangle-alert" size={10} />
-                </span>
-              )}
-              {primarySort?.field === def.name && (
-                <Icon
-                  name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
-                  size={11}
-                  color="var(--cortex-600)"
+                  <Icon name="type" size={12} color="var(--n-400)" />
+                  <TitleHeaderMenu
+                    presentation={presentation}
+                    frozen={titleFrozen}
+                    canFreeze={titlePos === 0}
+                    atStart={titlePos === 0}
+                    atEnd={titlePos === resolved.length}
+                    onPresentationChange={onPresentationChange}
+                    onFilterField={onFilterField}
+                    onMove={(delta) => moveDisplay('title', delta)}
+                  />
+                  {primarySort?.field === 'title' && (
+                    <Icon
+                      name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
+                      size={11}
+                      color="var(--cortex-600)"
+                    />
+                  )}
+                  {/* M11: the name column resizes too. It is the widest thing
+                      on the row and was the one width nobody could change. */}
+                  {onPresentationChange !== undefined && (
+                    <ColumnResizer
+                      label="Name"
+                      width={layout.title}
+                      min={MIN_TITLE_W}
+                      onDrag={(w) => paint(TITLE_VAR, w, w - layout.title)}
+                      onCommit={commitTitle}
+                    />
+                  )}
+                </div>
+              );
+            }
+            const i = d < titlePos ? d : d - 1;
+            const { def, spec } = resolved[i];
+            return (
+              <div
+                key={def.name}
+                role="columnheader"
+                onPointerDown={startHeaderDrag(def.name)}
+                onClickCapture={swallowDraggedClick}
+                className={[
+                  'group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]',
+                  drag?.key === def.name ? 'opacity-60' : '',
+                ].join(' ')}
+                style={{ width: `var(${widthVar(i)})`, ...dropStyle(d) }}
+              >
+                <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
+                {/* M12.4b: the label opens the column menu (Notion's header).
+                    Sorting lives inside it now, with an explicit direction. */}
+                <HeaderMenu
+                  def={def}
+                  wrap={spec.wrap === true}
+                  columns={presentation.columns}
+                  presentation={presentation}
+                  schema={schema}
+                  sourceType={sourceType ?? null}
+                  onColumnsChange={onColumnsChange}
+                  onPresentationChange={onPresentationChange}
+                  onFilterField={onFilterField}
+                  onMove={onPresentationChange !== undefined ? moveDisplay : undefined}
                 />
-              )}
-              {onColumnsChange !== undefined && (
-                <ColumnResizer
-                  label={humanize(def.name)}
-                  width={layout.columns[i]}
-                  min={MIN_COL_W}
-                  onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
-                  onCommit={(w) => commitColumn(def.name, w)}
-                />
-              )}
-            </div>
-          ))}
+                {def.heterogeneous === true && (
+                  <span
+                    title="Declared with different kinds across the types in this view"
+                    className="flex-none text-[var(--warn-500)]"
+                  >
+                    <Icon name="triangle-alert" size={10} />
+                  </span>
+                )}
+                {primarySort?.field === def.name && (
+                  <Icon
+                    name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
+                    size={11}
+                    color="var(--cortex-600)"
+                  />
+                )}
+                {onColumnsChange !== undefined && (
+                  <ColumnResizer
+                    label={humanize(def.name)}
+                    width={layout.columns[i]}
+                    min={MIN_COL_W}
+                    onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
+                    onCommit={(w) => commitColumn(def.name, w)}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {rows.map((row) => {
@@ -963,6 +1324,8 @@ export function TableView({
               key={row.key}
               entry={row.entry}
               cells={cells}
+              titlePos={titlePos}
+              titleFrozen={titleFrozen}
               autoHeight={anyWrap}
               schema={schema}
               depth={row.depth}

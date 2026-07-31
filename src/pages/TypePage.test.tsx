@@ -87,29 +87,40 @@ describe('TypePage — Records tab', () => {
   it('treats Work item like any other type — no system lock (M12.2)', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
     expect(screen.queryByText('System type')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Customize icon & color' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Change display name' })).toBeTruthy();
+    // M12.8: the icon and the name ARE the edit affordances — the corner
+    // pencil/palette buttons are gone.
+    expect(screen.getByTestId('type-icon-edit').getAttribute('title')).toBe('Change icon & color');
+    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe(
+      'Change display name',
+    );
+    // Delete moved into the floating view-settings menu with the rest of the
+    // configuration — no destructive affordance sits in the header.
+    fireEvent.click(screen.getByTestId('view-control-settings'));
     expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
 
   it('offers rename and delete for custom types', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Person' }} />);
-    expect(screen.getByRole('button', { name: 'Change display name' })).toBeTruthy();
+    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe(
+      'Change display name',
+    );
+    fireEvent.click(screen.getByTestId('view-control-settings'));
     expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
 });
 
-describe('TypePage — Properties aside', () => {
-  // M12.3: Properties moved from a page tab to a right-hand aside, so the
-  // records surface (now the saved-views strip) never leaves the screen.
+describe('TypePage — property configuration (M12.8: floating, never an aside)', () => {
+  // Properties live behind the tab row's sliders icon → Properties page, a
+  // floating menu; per-property config drills into the same panel.
   const openProperties = (name: string) => {
     render(<TypePage selection={{ kind: 'type', name }} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Type properties' }));
+    fireEvent.click(screen.getByTestId('view-control-settings'));
+    fireEvent.click(screen.getByTestId('view-settings-properties'));
   };
 
   it('lists declared fields with nothing locked (M12.2)', () => {
     openProperties('Work item');
-    const rows = screen.getAllByTestId('type-field-row');
+    const rows = screen.getAllByTestId(/^property-row-/);
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining('Status'),
       expect.stringContaining('Priority'),
@@ -123,7 +134,7 @@ describe('TypePage — Properties aside', () => {
 
   it('adds a custom property to the type doc via the add panel', async () => {
     openProperties('Work item');
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByTestId('new-property'));
     fireEvent.change(screen.getByLabelText('Property name'), {
       target: { value: 'Severity' },
     });
@@ -149,7 +160,7 @@ describe('TypePage — Properties aside', () => {
 
   it('names the property after the kind when none is typed (kind-first flow)', async () => {
     openProperties('Work item');
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByTestId('new-property'));
     fireEvent.click(screen.getByTestId('property-kind-checkbox'));
     await waitFor(() => {
       expect(patches).toEqual([
@@ -165,8 +176,10 @@ describe('TypePage — Properties aside', () => {
 
   it('removes custom fields but never built-ins', () => {
     openProperties('Person');
-    // fixture Person type declares no fields — add-only surface.
-    expect(screen.getByText('No properties yet')).toBeTruthy();
+    // Fixture Person declares no fields. The panel lists the column universe
+    // (observed frontmatter keys included), so the durable contract here is
+    // that creation is offered, not that the list is empty.
+    expect(screen.getByTestId('new-property')).toBeTruthy();
     cleanup();
     // Give Person a custom field and check its remove affordance.
     useVaultStore.setState({
@@ -183,7 +196,8 @@ describe('TypePage — Properties aside', () => {
       ),
     });
     openProperties('Person');
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Pronouns' }));
+    fireEvent.click(screen.getByTestId('property-row-pronouns'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete property' }));
     expect(patches).toEqual([{ path: 'types/person.md', patch: { fields: {} } }]);
   });
 
@@ -204,8 +218,8 @@ describe('TypePage — Properties aside', () => {
       ],
     });
     openProperties('Recipe');
-    // M3.1: the value editor lives behind the row's "1 options" expander.
-    fireEvent.click(screen.getByRole('button', { name: /1 options/ }));
+    // M12.8: the value editor lives inside the property's flyout page.
+    fireEvent.click(screen.getByTestId('property-row-cuisine'));
     expect(screen.getByText('Thai')).toBeTruthy();
     const input = screen.getByLabelText('Add option to Cuisine');
     fireEvent.change(input, { target: { value: 'Oaxacan' } });
@@ -232,7 +246,7 @@ describe('TypePage — Properties aside', () => {
       ],
     });
     openProperties('Recipe');
-    fireEvent.click(screen.getByRole('button', { name: /1 options/ }));
+    fireEvent.click(screen.getByTestId('property-row-cuisine'));
     fireEvent.click(screen.getByRole('button', { name: 'Thai' }));
     const input = screen.getByLabelText('Rename Thai');
     fireEvent.change(input, { target: { value: 'Thai (street)' } });
@@ -259,11 +273,10 @@ describe('TypePage — Properties aside', () => {
     });
     cleanup();
     openProperties('Person');
-    // The aside renders BESIDE the table now, so the field name also appears
-    // as a column header — scope to the aside.
-    const aside = within(screen.getByTestId('type-properties-aside'));
-    fireEvent.click(aside.getByRole('button', { name: 'Pronouns' }));
-    const input = aside.getByLabelText('Rename Pronouns');
+    // The field name also appears as a column header — the panel's row has
+    // its own testid, and the rename input lives only in the flyout editor.
+    fireEvent.click(screen.getByTestId('property-row-pronouns'));
+    const input = screen.getByLabelText('Rename Pronouns');
     fireEvent.change(input, { target: { value: 'Uses pronouns' } });
     fireEvent.blur(input);
     await waitFor(() => {

@@ -104,6 +104,20 @@ export function toggleColumn(columns: ColumnSpec[], field: string): ColumnSpec[]
   return columns.map((c) => (c.field === field ? { ...c, hidden: c.hidden !== true } : c));
 }
 
+/** Move a column to an absolute index among the VISIBLE columns (M12.8 —
+ * the settings panel's drag reorder drops on a slot, not a direction). */
+export function moveColumnTo(columns: ColumnSpec[], field: string, to: number): ColumnSpec[] {
+  const visible = columns.filter((c) => c.hidden !== true);
+  const from = visible.findIndex((c) => c.field === field);
+  if (from === -1) return columns;
+  const clamped = Math.max(0, Math.min(to, visible.length - 1));
+  if (clamped === from) return columns;
+  const reordered = [...visible];
+  const [moved] = reordered.splice(from, 1);
+  reordered.splice(clamped, 0, moved);
+  return [...reordered, ...columns.filter((c) => c.hidden === true)];
+}
+
 /** Move a column to a new index among the VISIBLE columns. */
 export function moveColumn(columns: ColumnSpec[], field: string, delta: number): ColumnSpec[] {
   const visible = columns.filter((c) => c.hidden !== true);

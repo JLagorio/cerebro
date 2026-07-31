@@ -3,25 +3,10 @@ import { DeleteTypeDialog, RenameTypeDialog, TypeStyleDialog } from '@/app/TypeD
 import {
   addFieldToType,
   addRelationProperty,
-  moveFieldOnType,
-  removeFieldFromType,
-  renameFieldOnType,
-  setFieldConfig,
   normalizeFieldName,
-  setFieldOptions,
-  setTypeStatuses,
   setTypeViews,
 } from '@/app/typeActions';
-import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import { IconButton } from '@/components/ui/IconButton';
-import { Input } from '@/components/ui/Input';
-import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
-import { humanize } from '@/detail/FieldEditor';
-import { OptionListEditor } from '@/detail/OptionListEditor';
-import { RelationConfigEditor } from '@/detail/RelationConfigEditor';
-import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
-import { StatusListEditor } from '@/detail/StatusListEditor';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
 import {
@@ -31,284 +16,27 @@ import {
   nextViewId,
   toggleSort,
 } from '@/engine/views';
-import { kindMeta } from '@/engine/properties';
-import { DEFAULT_STATUSES } from '@/engine/schema';
-import {
-  isLockedField,
-  listTypes,
-  typeViews,
-  type TypeListing,
-} from '@/engine/typeCatalog';
+import { listTypes, typeViews, type TypeListing } from '@/engine/typeCatalog';
 import type {
   FieldDef,
   Presentation,
-  Schema,
   Selection,
-  StatusDef,
   ViewDefinition,
   ViewType,
 } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
-import { useQuickAdd } from '@/views/QuickAdd';
+import { useNewRecord, useQuickAdd } from '@/views/QuickAdd';
+import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { ViewCanvas } from '@/views/ViewCanvas';
+import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
 
 type TypeDialog = 'rename' | 'style' | 'delete';
-
-/**
- * One declared field: kind icon, editable name, and — for option-bearing
- * kinds — its expandable value editor. The name and the option set are
- * editable for custom fields; system built-ins show the lock instead
- * (M3.1: renaming/option editing were the top gaps in the feedback round).
- */
-function FieldRow({
-  typeName,
-  def,
-  schema,
-  statuses,
-  onStatusesChange,
-}: {
-  typeName: string;
-  def: FieldDef;
-  schema: Schema;
-  /** Status set this type's records use — only read for `status` fields. */
-  statuses: StatusDef[];
-  onStatusesChange: (next: StatusDef[]) => void;
-}) {
-  const locked = isLockedField(typeName, def.name);
-  const meta = kindMeta(def.kind);
-  const options = def.options ?? [];
-  const hasValues = def.kind === 'select' || def.kind === 'multiselect' || def.kind === 'status';
-  // M3.4: rollups need wiring, numbers need a display format — both live in
-  // the same expander as option sets so every field configures in one place.
-  // M12.4: relations configure their target, limit, and two-way property.
-  const hasConfig = def.kind === 'rollup' || def.kind === 'number' || def.kind === 'relation';
-
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(humanize(def.name));
-  const [expanded, setExpanded] = useState(false);
-
-  const commitRename = () => {
-    setRenaming(false);
-    const next = draft.trim();
-    if (next === '' || next === humanize(def.name)) {
-      setDraft(humanize(def.name));
-      return;
-    }
-    void (async () => {
-      if (!(await renameFieldOnType(typeName, def.name, next))) setDraft(humanize(def.name));
-    })();
-  };
-
-  const valueCount = def.kind === 'status' ? statuses.length : options.length;
-
-  return (
-    <div
-      data-testid="type-field-row"
-      className="flex flex-col gap-1.5 rounded-[10px] border border-[var(--n-200)] px-3 py-2.5"
-    >
-      <div className="flex items-center gap-2">
-        <Icon name={meta.icon} size={14} color="var(--n-500)" />
-        {renaming ? (
-          <Input
-            autoFocus
-            size="sm"
-            ariaLabel={`Rename ${humanize(def.name)}`}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              if (e.key === 'Escape') {
-                setDraft(humanize(def.name));
-                setRenaming(false);
-              }
-            }}
-            width={200}
-          />
-        ) : (
-          <button
-            type="button"
-            disabled={locked}
-            title={locked ? undefined : 'Rename property'}
-            onClick={() => setRenaming(true)}
-            className="rounded-md border-0 bg-transparent px-1 py-0.5 text-[13px] font-medium text-[var(--n-900)] enabled:hover:bg-[var(--n-50)] disabled:cursor-default"
-          >
-            {humanize(def.name)}
-          </button>
-        )}
-        <span className="text-[11.5px] text-[var(--n-400)]">{meta.label}</span>
-        <span className="flex-1" />
-        {(hasValues || hasConfig) && (
-          <button
-            type="button"
-            onClick={() => setExpanded(!expanded)}
-            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[11.5px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
-          >
-            <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />
-            {hasValues
-              ? `${valueCount} ${def.kind === 'status' ? 'statuses' : 'options'}`
-              : 'Configure'}
-          </button>
-        )}
-        {/* M9.6: declaration order drives default column order everywhere,
-            so reordering here is the schema-level equivalent of dragging a
-            table header. Available on built-ins too — the lock covers a
-            property's existence, not where it sits. */}
-        <span className="inline-flex gap-0.5">
-          <IconButton
-            icon="chevron-up"
-            label={`Move ${humanize(def.name)} up`}
-            size="sm"
-            onClick={() => void moveFieldOnType(typeName, def.name, -1)}
-          />
-          <IconButton
-            icon="chevron-down"
-            label={`Move ${humanize(def.name)} down`}
-            size="sm"
-            onClick={() => void moveFieldOnType(typeName, def.name, 1)}
-          />
-        </span>
-        {locked ? (
-          <span
-            title="Built-in property — its name and kind are fixed"
-            className="inline-flex items-center gap-1 text-[11px] text-[var(--n-400)]"
-          >
-            <Icon name="lock" size={11} />
-            Built-in
-          </span>
-        ) : (
-          <IconButton
-            icon="trash-2"
-            label={`Remove ${humanize(def.name)}`}
-            size="sm"
-            onClick={() => void removeFieldFromType(typeName, def.name)}
-          />
-        )}
-      </div>
-      {(hasValues || hasConfig) && expanded && (
-        <div className="border-t border-[var(--n-100)] pt-1.5">
-          {def.kind === 'status' ? (
-            // Statuses are the type's workflow, editable even on system
-            // types: the lock covers the field, not the team's stages.
-            <StatusListEditor statuses={statuses} onChange={onStatusesChange} />
-          ) : def.kind === 'rollup' ? (
-            <RollupConfigEditor
-              typeName={typeName}
-              def={def}
-              schema={schema}
-              onChange={(config) => void setFieldConfig(typeName, def.name, config)}
-            />
-          ) : def.kind === 'number' ? (
-            <FormatRow
-              def={def}
-              onChange={(config) => void setFieldConfig(typeName, def.name, config)}
-            />
-          ) : def.kind === 'relation' ? (
-            <RelationConfigEditor
-              typeName={typeName}
-              def={def}
-              schema={schema}
-              onChange={(config) => void setFieldConfig(typeName, def.name, config)}
-              onAddReciprocal={(name) => {
-                if (def.target === undefined) return;
-                void addFieldToType(def.target, name, 'relation', {
-                  from: { type: typeName, field: def.name },
-                });
-              }}
-            />
-          ) : (
-            <OptionListEditor
-              options={options}
-              label={humanize(def.name)}
-              onChange={(next) => void setFieldOptions(typeName, def.name, next)}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The single-pane property configuration surface for a type. */
-function TypePropertiesPanel({ listing }: { listing: TypeListing }) {
-  const schema = useSchema();
-  const typeDef = schema.types.get(listing.name);
-  const fields = typeDef?.fields ?? [];
-  const [adding, setAdding] = useState(false);
-
-  // A type with no `statuses:` of its own starts from the app defaults —
-  // showing that set is what makes "edit statuses" work on a fresh type:
-  // saving writes the (possibly edited) list onto this Type doc. M12.2: no
-  // type inherits from another type's statuses anymore.
-  const statuses =
-    typeDef !== undefined && typeDef.statuses.length > 0 ? typeDef.statuses : DEFAULT_STATUSES;
-
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-3">
-      <div className="mx-auto flex w-full max-w-[640px] flex-col gap-2">
-        {listing.system && (
-          <div className="mb-1 flex items-start gap-2 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-25)] px-3 py-2.5 text-[12.5px] leading-[18px] text-[var(--n-600)]">
-            <Icon name="lock" size={13} style={{ marginTop: 2 }} />
-            <span>
-              <strong className="font-semibold text-[var(--n-800)]">{listing.name}</strong> is a
-              system type: its name and built-in properties are locked. Custom properties you add
-              here are fully yours.
-            </span>
-          </div>
-        )}
-        {fields.length === 0 && (
-          <div className="py-6">
-            <EmptyState
-              icon="settings-2"
-              title="No properties yet"
-              description="Add one below and every record of this type gains the field."
-            />
-          </div>
-        )}
-        {fields.map((f) => (
-          <FieldRow
-            key={f.name}
-            typeName={listing.name}
-            def={f}
-            schema={schema}
-            statuses={statuses}
-            onStatusesChange={(next) => void setTypeStatuses(listing, next)}
-          />
-        ))}
-        {adding ? (
-          <AddPropertyPanel
-            existingNames={fields.map((f) => humanize(f.name))}
-            ownerType={listing.name}
-            onAdd={(name, kind, relation) => {
-              void (async () => {
-                const ok =
-                  kind === 'relation' && relation !== undefined
-                    ? await addRelationProperty(listing.name, name, relation)
-                    : await addFieldToType(listing.name, name, kind);
-                if (ok) setAdding(false);
-              })();
-            }}
-            onCancel={() => setAdding(false)}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="mt-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-          >
-            + Add property
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /**
  * M3 type screen: the record list for one type (rows open in the right-hand
@@ -346,6 +74,8 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const scope = `type:${listing.name}`;
   // M9.6: the type screen could only list; now it can create.
   const quickAdd = useQuickAdd(listing.name, null);
+  // M12.8: the tab row's New button — creates untitled, opens the panel.
+  const newRecord = useNewRecord(listing.name);
 
   // M12.3: a type keeps saved views like a List does — the tabs live on the
   // Type doc under `views:`, and the open one rides on the selection.
@@ -356,7 +86,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const activeId = activeView.id;
 
   const [dialog, setDialog] = useState<TypeDialog | null>(null);
-  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  // M12.8: the chip bar below the tabs, engaged from the tab-row icons.
+  const [controlsOpen, setControlsOpen] = useState(false);
+  // M12.8: the view-settings menu, floating from the tab row's sliders icon.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
   // Re-seed when the TYPE or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
@@ -386,6 +119,27 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const changePresentation = (next: Presentation) => {
     setPresentation(next);
     changeView({ ...activeView, presentation: next });
+  };
+
+  // M9.2: a column IS a property — shared by the settings panel's "+ New
+  // property" and anything else that declares one from here.
+  const addProperty = (
+    name: string,
+    kind: FieldDef['kind'],
+    relation?: { target: string; limit?: 1; reciprocalName?: string },
+  ) => {
+    void (async () => {
+      const ok =
+        kind === 'relation' && relation !== undefined
+          ? await addRelationProperty(listing.name, name, relation)
+          : await addFieldToType(listing.name, name, kind);
+      if (ok) {
+        changePresentation({
+          ...presentation,
+          columns: [...presentation.columns, { field: normalizeFieldName(name) }],
+        });
+      }
+    })();
   };
 
   const createView = (name: string, type: ViewType) => {
@@ -443,10 +197,29 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex-none px-5 pt-3.5">
           <div className="mb-2.5 flex min-w-0 items-center gap-2">
-            <Icon name={listing.icon} size={16} color={listing.color ?? 'var(--n-600)'} />
-            <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">
-              {listing.name}
-            </h1>
+            {/* M12.8: the icon and the name ARE the edit affordance (Notion's
+                header) — the pencil and palette buttons this replaces sat in
+                the corner pretending to be about something else. */}
+            <button
+              type="button"
+              data-testid="type-icon-edit"
+              title="Change icon & color"
+              onClick={() => setDialog('style')}
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-[var(--n-50)]"
+            >
+              <Icon name={listing.icon} size={16} color={listing.color ?? 'var(--n-600)'} />
+            </button>
+            <button
+              type="button"
+              data-testid="type-title-edit"
+              title={listing.system ? 'Change icon & color' : 'Change display name'}
+              onClick={() => setDialog(listing.system ? 'style' : 'rename')}
+              className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-[var(--n-50)]"
+            >
+              <h1 className="m-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+                {listing.name}
+              </h1>
+            </button>
             <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
               {listing.count}
             </span>
@@ -457,32 +230,8 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               </span>
             )}
             <span className="flex-1" />
-            <IconButton
-              icon="settings-2"
-              label="Type properties"
-              onClick={() => setPropertiesOpen((open) => !open)}
-            />
-            <IconButton
-              icon="palette"
-              label="Customize icon & color"
-              onClick={() => setDialog('style')}
-            />
-            {!listing.system && (
-              <>
-                <IconButton
-                  icon="pencil"
-                  label="Change display name"
-                  onClick={() => setDialog('rename')}
-                />
-                {listing.docPath !== null && (
-                  <IconButton
-                    icon="trash-2"
-                    label="Delete type"
-                    onClick={() => setDialog('delete')}
-                  />
-                )}
-              </>
-            )}
+            {/* M12.8: no config buttons up here — properties and Delete type
+                live in the view-settings menu on the tab row. */}
           </div>
         </div>
         {/* M12.3: the same saved-views strip a List has. The tab row owns
@@ -511,31 +260,67 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           }
           onDuplicate={duplicateTab}
           onDelete={removeView}
-        />
-        <ViewToolbar
-          presentation={presentation}
-          onChange={changePresentation}
-          fields={typeFields}
-          sourceType={listing.name}
-          schema={schema}
-          showLayout={false}
-          filters={activeView.filters}
-          onFiltersChange={(filters) => changeView({ ...activeView, filters })}
-          onAddProperty={(name, kind, relation) => {
-            void (async () => {
-              const ok =
-                kind === 'relation' && relation !== undefined
-                  ? await addRelationProperty(listing.name, name, relation)
-                  : await addFieldToType(listing.name, name, kind);
-              if (ok) {
-                changePresentation({
-                  ...presentation,
-                  columns: [...presentation.columns, { field: normalizeFieldName(name) }],
-                });
+          // M12.8: the view controls live in the tab row (Notion's toolbar).
+          trailing={
+            <ViewControlIcons
+              presentation={presentation}
+              filters={activeView.filters}
+              fields={typeFields}
+              onChange={changePresentation}
+              onFiltersChange={(filters) => changeView({ ...activeView, filters })}
+              barOpen={controlsOpen}
+              onBarOpenChange={setControlsOpen}
+              settingsOpen={settingsOpen}
+              onSettingsOpenChange={setSettingsOpen}
+              settingsPanel={
+                <ViewSettingsPanel
+                  // A type's saved views configure through the same menu a
+                  // List uses; this wrapper is the menu's ListDefinition
+                  // shape, not a real List — surface="type" hides "This list".
+                  list={{
+                    name: listing.name,
+                    icon: listing.icon,
+                    color: listing.color,
+                    order: null,
+                    source: { type: listing.name, project: null },
+                    views: savedViews.map((v) =>
+                      v.id === activeId ? { ...v, presentation } : v,
+                    ),
+                  }}
+                  viewId={activeId}
+                  fields={typeFields}
+                  schema={schema}
+                  surface="type"
+                  onAddProperty={addProperty}
+                  onClose={() => setSettingsOpen(false)}
+                  onDeleteView={savedViews.length > 1 ? () => removeView(activeId) : undefined}
+                  onDeleteList={
+                    !listing.system && listing.docPath !== null
+                      ? () => {
+                          setSettingsOpen(false);
+                          setDialog('delete');
+                        }
+                      : undefined
+                  }
+                  onChange={(next) => changeViews(next.views)}
+                />
               }
-            })();
-          }}
+              onNew={() => void newRecord()}
+            />
+          }
         />
+        {controlsOpen && (
+          <ViewToolbar
+            presentation={presentation}
+            onChange={changePresentation}
+            fields={typeFields}
+            sourceType={listing.name}
+            schema={schema}
+            showLayout={false}
+            filters={activeView.filters}
+            onFiltersChange={(filters) => changeView({ ...activeView, filters })}
+          />
+        )}
         <ViewCanvas
           entries={sortedEntries}
           allEntries={entries}
@@ -551,8 +336,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
-          // M12.4b: the header menu's Filter seeds a rule on the open tab;
-          // Edit property opens the type's configuration aside.
+          // M12.4b: the header menu's Filter seeds a rule on the open tab.
           onFilterField={(field) =>
             changeView({
               ...activeView,
@@ -568,28 +352,8 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               },
             })
           }
-          onEditProperty={() => setPropertiesOpen(true)}
         />
       </div>
-      {propertiesOpen && (
-        <aside
-          data-testid="type-properties-aside"
-          aria-label="Type properties"
-          className="flex w-[340px] flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
-        >
-          <div className="flex flex-none items-center gap-2 border-b border-[var(--n-100)] px-4 pb-2 pt-3">
-            <Icon name="settings-2" size={13} color="var(--n-500)" />
-            <span className="flex-1 text-[13px] font-semibold text-[var(--n-900)]">Properties</span>
-            <IconButton
-              icon="x"
-              label="Close type properties"
-              size="sm"
-              onClick={() => setPropertiesOpen(false)}
-            />
-          </div>
-          <TypePropertiesPanel listing={listing} />
-        </aside>
-      )}
       {dialog === 'style' && (
         <TypeStyleDialog listing={listing} onClose={() => setDialog(null)} />
       )}

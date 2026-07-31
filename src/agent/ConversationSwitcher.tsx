@@ -37,9 +37,10 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
             type="button"
             aria-label="Close conversations"
             onClick={() => setOpen(false)}
+            onWheel={() => setOpen(false)}
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
-          <div className="absolute left-0 top-6 z-50 w-[260px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
+          <div className="cb-menu-in absolute left-0 top-6 z-50 w-[260px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
             <button
               type="button"
               onClick={() => {

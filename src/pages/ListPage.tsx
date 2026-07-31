@@ -26,8 +26,9 @@ import { clonePresentation, layoutLabel, newView, resolveView, toggleSort } from
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
-import { useQuickAdd } from '@/views/QuickAdd';
+import { useNewRecord, useQuickAdd } from '@/views/QuickAdd';
 import { ViewCanvas } from '@/views/ViewCanvas';
+import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
 
@@ -74,6 +75,9 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   const [presentation, setPresentation] = useState<Presentation>(surface.presentation);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // M12.8: the chip bar below the tabs. Hidden until an icon engages it —
+  // the icons tint when an axis is active, so nothing is silently filtered.
+  const [controlsOpen, setControlsOpen] = useState(false);
   // Re-seed when the LIST or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
@@ -98,6 +102,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   // M9.6: a typeless view has no single type to create into, so the
   // affordance is simply absent there rather than guessing one.
   const quickAdd = useQuickAdd(sourceType ?? '', null);
+  // M12.8: the tab row's New button — creates untitled, opens the panel.
+  const newRecord = useNewRecord(sourceType ?? '');
   const onCreate =
     sourceType === null
       ? undefined
@@ -219,14 +225,24 @@ export function ListPage({ selection }: { selection: ListSelection }) {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex-none px-5 pb-2 pt-3.5">
           <div className="flex min-w-0 items-center gap-2">
-            <Icon
-              name={list.definition.icon ?? 'layout-list'}
-              size={16}
-              color={list.definition.color ?? 'var(--n-600)'}
-            />
-            <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
-              {list.definition.name}
-            </h1>
+            {/* M12.8: the icon and the name ARE the edit affordance (Notion's
+                header). Both open view settings, where "This list" renames. */}
+            <button
+              type="button"
+              data-testid="list-title-edit"
+              title="Edit list name & settings"
+              onClick={() => setSettingsOpen(true)}
+              className="flex min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-[var(--n-50)]"
+            >
+              <Icon
+                name={list.definition.icon ?? 'layout-list'}
+                size={16}
+                color={list.definition.color ?? 'var(--n-600)'}
+              />
+              <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+                {list.definition.name}
+              </h1>
+            </button>
             <span className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
               {surface.entries.length}
             </span>
@@ -235,11 +251,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               {filtered && ' · filtered'}
             </span>
             <span className="flex-1" />
-            <IconButton
-              icon="settings-2"
-              label="View settings"
-              onClick={() => setSettingsOpen(true)}
-            />
+            {/* M12.8: view settings opens from the title or the tab row's
+                sliders icon — a third door in the corner was clutter. */}
             <IconButton icon="trash-2" label="Delete list" onClick={() => setConfirmDelete(true)} />
           </div>
         </div>
@@ -285,21 +298,64 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             if (id !== activeId) openTab(id);
             setSettingsOpen(true);
           }}
+          // M12.8: the view controls live in the tab row (Notion's toolbar).
+          trailing={
+            <ViewControlIcons
+              presentation={presentation}
+              filters={activeView.filters}
+              fields={fields}
+              onChange={changePresentation}
+              onFiltersChange={(filters) => changeView({ ...activeView, filters })}
+              barOpen={controlsOpen}
+              onBarOpenChange={setControlsOpen}
+              settingsOpen={settingsOpen}
+              onSettingsOpenChange={setSettingsOpen}
+              settingsPanel={
+                <ViewSettingsPanel
+                  list={{
+                    ...list.definition,
+                    views: list.definition.views.map((v) =>
+                      v.id === activeId ? { ...v, presentation } : v,
+                    ),
+                  }}
+                  viewId={activeId}
+                  fields={fields}
+                  schema={schema}
+                  onAddProperty={addProperty}
+                  onClose={() => setSettingsOpen(false)}
+                  onDeleteList={() => {
+                    setSettingsOpen(false);
+                    setConfirmDelete(true);
+                  }}
+                  onDeleteView={
+                    list.definition.views.length > 1 ? () => removeView(activeId) : undefined
+                  }
+                  onChange={(next) => {
+                    const active = next.views.find((v) => v.id === activeId);
+                    if (active !== undefined) setPresentation(active.presentation);
+                    changeList(next);
+                  }}
+                />
+              }
+              onNew={sourceType === null ? undefined : () => void newRecord()}
+            />
+          }
         />
-        <ViewToolbar
-          presentation={presentation}
-          onChange={changePresentation}
-          fields={fields}
-          sourceType={sourceType}
-          schema={schema}
-          onAddProperty={addProperty}
-          // M11: no layout pills here. The tab row above owns layout, and a
-          // pill that changed it in place would rewrite the open tab rather
-          // than take you to another one.
-          showLayout={false}
-          filters={activeView.filters}
-          onFiltersChange={(filters) => changeView({ ...activeView, filters })}
-        />
+        {controlsOpen && (
+          <ViewToolbar
+            presentation={presentation}
+            onChange={changePresentation}
+            fields={fields}
+            sourceType={sourceType}
+            schema={schema}
+            // M11: no layout pills here. The tab row above owns layout, and a
+            // pill that changed it in place would rewrite the open tab rather
+            // than take you to another one.
+            showLayout={false}
+            filters={activeView.filters}
+            onFiltersChange={(filters) => changeView({ ...activeView, filters })}
+          />
+        )}
         <ViewCanvas
           entries={sortedEntries}
           allEntries={entries}
@@ -334,30 +390,6 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           }
         />
       </div>
-      {settingsOpen && (
-        <ViewSettingsPanel
-          list={{
-            ...list.definition,
-            views: list.definition.views.map((v) =>
-              v.id === activeId ? { ...v, presentation } : v,
-            ),
-          }}
-          viewId={activeId}
-          fields={fields}
-          schema={schema}
-          onClose={() => setSettingsOpen(false)}
-          onDeleteList={() => {
-            setSettingsOpen(false);
-            setConfirmDelete(true);
-          }}
-          onDeleteView={list.definition.views.length > 1 ? () => removeView(activeId) : undefined}
-          onChange={(next) => {
-            const active = next.views.find((v) => v.id === activeId);
-            if (active !== undefined) setPresentation(active.presentation);
-            changeList(next);
-          }}
-        />
-      )}
       {confirmDelete && (
         <Dialog
           open

@@ -33,6 +33,9 @@ export interface ViewTabsProps {
   /** Opens the full settings panel for a view. Absent on surfaces that have
    * no settings aside (M12.3: the type screen) — the menu item is omitted. */
   onConfigure?: (id: string) => void;
+  /** M12.8: the view-control icon cluster, pinned to the row's right edge
+   * outside the scrollable tab strip (Notion's toolbar-in-the-tab-row). */
+  trailing?: React.ReactNode;
 }
 
 export function ViewTabs({
@@ -45,6 +48,7 @@ export function ViewTabs({
   onDuplicate,
   onDelete,
   onConfigure,
+  trailing,
 }: ViewTabsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [layoutFor, setLayoutFor] = useState<string | null>(null);
@@ -73,14 +77,16 @@ export function ViewTabs({
   };
 
   return (
-    <div
-      role="tablist"
-      aria-label="Views"
-      data-testid="view-tabs"
-      // Scrolls rather than wraps: a tab row that reflows onto a second line
-      // moves every other tab under the cursor as the window narrows.
-      className="flex min-w-0 flex-none items-end gap-0.5 overflow-x-auto border-b border-[var(--n-200)] px-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
+    <div className="flex min-w-0 flex-none items-end border-b border-[var(--n-200)] px-5">
+      <div
+        role="tablist"
+        aria-label="Views"
+        data-testid="view-tabs"
+        // Scrolls rather than wraps: a tab row that reflows onto a second line
+        // moves every other tab under the cursor as the window narrows. The
+        // trailing icons sit OUTSIDE this strip so they cannot scroll away.
+        className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
       {views.map((view) => {
         const active = view.id === activeId;
         const kind = viewKind(view.presentation.type);
@@ -168,7 +174,12 @@ export function ViewTabs({
             }}
           />
         )}
+        </div>
       </div>
+
+      {trailing !== undefined && (
+        <div className="flex flex-none items-center gap-0.5 pb-1 pl-2">{trailing}</div>
+      )}
 
       {menu !== null && (
         <ContextMenu
@@ -230,6 +241,7 @@ function LayoutPicker({
         type="button"
         aria-label="Close layout picker"
         onClick={onClose}
+        onWheel={onClose}
         className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
       />
       {/* Fixed, not absolute: the tab row scrolls horizontally, and an
@@ -307,6 +319,7 @@ function NewViewForm({
         type="button"
         aria-label="Close new view"
         onClick={onCancel}
+        onWheel={onCancel}
         className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
       />
       {/* Fixed for the same reason the layout picker is: the tab row is a

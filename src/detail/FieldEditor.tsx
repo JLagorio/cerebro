@@ -301,6 +301,7 @@ export function FieldEditor({
               type="button"
               aria-label="Close popover"
               onClick={() => setOpen(false)}
+              onWheel={() => setOpen(false)}
               className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
             />
             <FixedBelowAnchor>

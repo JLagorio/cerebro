@@ -106,11 +106,28 @@
 }
 .cb-panel-in { animation: cb-panel-in 180ms cubic-bezier(0.2, 0.6, 0.2, 1); }
 
+/* Menu/popover entrance (M12.8): a short drop-and-fade. Translate only — no
+   scale, because FixedBelowAnchor measures its content to clamp it inside the
+   viewport and a scaling first frame would measure small. */
+@keyframes cb-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.cb-menu-in { animation: cb-menu-in 140ms cubic-bezier(0.2, 0.6, 0.2, 1); }
+
 /* Column / panel drag (M11). Set on <body> for the duration of a drag: the
    pointer spends most of a real drag outside the 9px handle, and without this
    it reverts to a text cursor and starts selecting the table it is resizing. */
 .cb-resizing,
 .cb-resizing * {
   cursor: col-resize !important;
+  user-select: none !important;
+}
+
+/* Column reorder drag (M12.8) — same rationale as cb-resizing: the pointer
+   leaves the header cell almost immediately on a real drag. */
+.cb-col-dragging,
+.cb-col-dragging * {
+  cursor: grabbing !important;
   user-select: none !important;
 }

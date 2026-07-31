@@ -224,6 +224,11 @@ export interface Presentation {
   rowHeight?: 'compact' | 'default' | 'tall';
   /** Width of the sticky name column. Omitted = the layout's default. */
   titleWidth?: number;
+  /** False = the name column scrolls with the grid instead of pinning left.
+   * Only meaningful while the name column is first (M12.8). */
+  titleFrozen?: boolean;
+  /** The name column's index among the visible columns. Omitted = first. */
+  titlePosition?: number;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
   /**

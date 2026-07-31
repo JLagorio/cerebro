@@ -126,6 +126,13 @@ function parsePresentation(raw: unknown): Presentation {
     ...(typeof obj.titleWidth === 'number' && Number.isFinite(obj.titleWidth)
       ? { titleWidth: obj.titleWidth }
       : {}),
+    // Both stored only off their defaults, so existing files stay untouched.
+    ...(obj.titleFrozen === false ? { titleFrozen: false } : {}),
+    ...(typeof obj.titlePosition === 'number' &&
+    Number.isInteger(obj.titlePosition) &&
+    obj.titlePosition > 0
+      ? { titlePosition: obj.titlePosition }
+      : {}),
     ...(obj.chips === 'plain' || obj.chips === 'type-icon'
       ? { chips: obj.chips as ChipStyle }
       : {}),
@@ -532,6 +539,10 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     columns: p.columns,
     ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
     ...(p.titleWidth !== undefined ? { titleWidth: p.titleWidth } : {}),
+    ...(p.titleFrozen === false ? { titleFrozen: false } : {}),
+    ...(p.titlePosition !== undefined && p.titlePosition > 0
+      ? { titlePosition: p.titlePosition }
+      : {}),
     ...(p.chips !== undefined ? { chips: p.chips } : {}),
     // M10 axis configuration — written only when set, so a table's YAML
     // does not carry three keys about date axes it has no use for.

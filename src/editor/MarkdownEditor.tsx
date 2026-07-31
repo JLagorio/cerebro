@@ -501,6 +501,9 @@ export function MarkdownEditor({
         <div
           className="fixed inset-0 z-40"
           onMouseDown={() => setAssign(null)}
+          onWheel={(e) => {
+            if (e.target === e.currentTarget) setAssign(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setAssign(null);
           }}
