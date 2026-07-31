@@ -22,9 +22,9 @@ describe('navStore', () => {
   it('navigate pushes onto history and moves the index', () => {
     const { navigate } = useNavStore.getState();
     navigate({ kind: 'list', id: 'all-items' });
-    navigate({ kind: 'project', path: 'projects/foundations/project.md' });
+    navigate({ kind: 'collection', folder: 'projects/foundations' });
     const s = useNavStore.getState();
-    expect(s.selection).toEqual({ kind: 'project', path: 'projects/foundations/project.md' });
+    expect(s.selection).toEqual({ kind: 'collection', folder: 'projects/foundations' });
     expect(s.history).toHaveLength(3);
     expect(s.historyIndex).toBe(2);
   });
@@ -32,7 +32,7 @@ describe('navStore', () => {
   it('navigate after back truncates the forward stack', () => {
     const { navigate, back, forward } = useNavStore.getState();
     navigate({ kind: 'list', id: 'all-items' });
-    navigate({ kind: 'project', path: 'projects/foundations/project.md' });
+    navigate({ kind: 'collection', folder: 'projects/foundations' });
     back();
     navigate({ kind: 'settings' });
     const s = useNavStore.getState();

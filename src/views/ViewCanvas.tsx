@@ -42,6 +42,8 @@ export interface ViewCanvasProps {
   onOrderBy?: (field: string) => void;
   /** Persists an axis zoom change to the view file. */
   onZoomChange?: (zoom: Zoom) => void;
+  /** M12.4b: adds a starter filter rule for a field to the open view. */
+  onFilterField?: (field: string) => void;
   /** Overridable "today" for deterministic tests. */
   today?: string;
 }
@@ -62,6 +64,7 @@ export function ViewCanvas({
   onPresentationChange,
   onOrderBy,
   onZoomChange,
+  onFilterField,
   today,
 }: ViewCanvasProps) {
   switch (presentation.type) {
@@ -79,6 +82,10 @@ export function ViewCanvas({
           onColumnsChange={onColumnsChange}
           onPresentationChange={onPresentationChange}
           onOrderBy={onOrderBy}
+          // M12.4b: the header menu's property operations act on the single
+          // type behind the table — the same one quick-add creates into.
+          sourceType={createType ?? null}
+          onFilterField={onFilterField}
         />
       );
     case 'board':

@@ -10,9 +10,6 @@ import type { ChildrenSpec, Entry, Schema } from './types';
  * row's "Add child", and the type screen all agree.
  */
 
-/** Types whose records live inside their project folder by containment. */
-const PROJECT_SCOPED = new Set(['Work item']);
-
 export interface CreateTarget {
   folder: string;
   frontmatter: Record<string, unknown>;
@@ -32,9 +29,13 @@ export function createTarget(
   const { project, entries, groupBy, groupValue } = options;
   const frontmatter: Record<string, unknown> = { type: typeName };
 
-  if (PROJECT_SCOPED.has(typeName) && project !== null) {
-    const prefix = typeof project.properties.key === 'string' ? project.properties.key : 'WRK';
-    frontmatter.key = nextItemKey(prefix, entries);
+  // M12.2: containment is a property of the CONTEXT, not of the type. Any
+  // record created inside a project lands in the project and takes a key
+  // from its prefix; the same type created from its type screen lands in
+  // its records folder. No type name is special.
+  if (project !== null) {
+    const prefix = typeof project.properties.key === 'string' ? project.properties.key : null;
+    if (prefix !== null && prefix !== '') frontmatter.key = nextItemKey(prefix, entries);
   }
 
   // The band's value, unless it is the synthetic no-value or all-items group
@@ -50,17 +51,24 @@ export function createTarget(
   }
 
   const folder =
-    PROJECT_SCOPED.has(typeName) && project !== null
+    project !== null
       ? `${project.path.replace(/\/project\.md$/, '')}/items`
-      : recordsFolder(typeName);
+      : (declaredFolder(typeName, entries) ?? recordsFolder(typeName));
 
   return { folder, frontmatter };
 }
 
+/** `folder:` on the Type doc pins where its records land (M12.2). */
+function declaredFolder(typeName: string, entries: Entry[]): string | null {
+  const doc = entries.find((e) => e.type === 'Type' && e.title === typeName);
+  const folder = doc?.properties.folder;
+  if (typeof folder !== 'string' || folder.trim() === '') return null;
+  return folder.trim().replace(/^\/+|\/+$/g, '');
+}
+
 /**
  * `records/<plural-slug>/` — the convention M3.3 made concrete in the demo
- * vault. Not configurable yet; when it becomes so, it becomes a property of
- * the Type doc and only this function changes.
+ * vault, used when the Type doc pins nothing with `folder:`.
  */
 export function recordsFolder(typeName: string): string {
   const slug = typeName

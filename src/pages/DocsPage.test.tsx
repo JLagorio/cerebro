@@ -5,7 +5,7 @@ import { isDocEntry } from '@/engine/typeCatalog';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
-import { getSchema, useVaultStore } from '@/stores/vaultStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { DocsPage } from './DocsPage';
 
 describe('DocsPage', () => {
@@ -32,15 +32,13 @@ describe('DocsPage', () => {
     expect(paths.length).toBeGreaterThan(0);
     expect(paths.length).toBeLessThanOrEqual(6);
     const byPath = new Map(useVaultStore.getState().entries.map((e) => [e.path, e]));
-    const schema = getSchema(useVaultStore.getState().entries);
     for (const path of paths) {
       const entry = byPath.get(path);
       expect(entry).toBeDefined();
-      // M3.1 (isDocEntry): Docs holds untyped notes PLUS types that opt in
-      // with `display: doc` — meeting notes and journals are written, not
-      // tracked. Records (Work item, Person, Project) and `type: Type`
-      // declarations live on their type screen and never appear here.
-      expect(entry !== undefined && isDocEntry(entry, schema)).toBe(true);
+      // M12.1 (isDocEntry): Docs holds untyped notes and nothing else. Every
+      // typed entry is a record and lives on its type screen — the old
+      // `display: doc` opt-in is gone.
+      expect(entry !== undefined && isDocEntry(entry)).toBe(true);
       expect(entry?.type).not.toBe('Type');
       expect(path.startsWith('templates/')).toBe(false);
     }

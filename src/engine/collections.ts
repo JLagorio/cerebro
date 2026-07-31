@@ -1,6 +1,5 @@
 import { parse, stringify } from 'yaml';
 import { isTemplate } from '@/lib/templates';
-import { isKnowledgePath } from './okf';
 import type {
   CollectionDefinition,
   CollectionFile,
@@ -9,7 +8,7 @@ import type {
   ListFile,
   Schema,
 } from './types';
-import { typeStyle } from './typeCatalog';
+import { isDocEntry, typeStyle } from './typeCatalog';
 
 /**
  * Collections (M10): the container model.
@@ -108,14 +107,15 @@ const byOrderThenName = <T extends { order: number | null; name: string }>(a: T,
 /**
  * Is this doc something a Collection should show?
  *
- * Type docs are the schema, templates are stationery, and the knowledge bundle
- * has its own surface with its own author — none of them are content a person
- * put in this folder, so listing them here would bury what is.
+ * M12.1: only DOCS are docs. Typed records used to appear here as "docs" of
+ * their collection while the Docs tab excluded them — the same file was a doc
+ * in one tree and not the other. Records reach a Collection through its Lists;
+ * the doc rows are for prose. Templates are stationery, and `isDocEntry`
+ * already rules out records, Type docs, and the knowledge bundle.
  */
 function isBrowsableDoc(entry: Entry): boolean {
-  if (entry.type === 'Type') return false;
+  if (!isDocEntry(entry)) return false;
   if (isTemplate(entry)) return false;
-  if (isKnowledgePath(entry.path)) return false;
   // A project.md and a collection's own marker describe the container, not its
   // contents — the container itself is already the node they'd sit under.
   return entry.filename !== 'project.md';
@@ -148,9 +148,8 @@ export function collectionTree(
   // Ownership is by PATH, not by the scan's `collection` field: that field names
   // the nearest DECLARED marker, and an undeclared Collection has none — so
   // matching on it would leave an implicit container's own Lists out of it.
-  const own = lists.filter(
-    (l) => l.project === null && isUnder(collection.folder, dirOf(l.path)),
-  );
+  // M12.5: project-scoped Lists belong to their folder like any other.
+  const own = lists.filter((l) => isUnder(collection.folder, dirOf(l.path)));
   const docs = entries.filter(
     (e) => isBrowsableDoc(e) && isUnder(collection.folder, e.folder),
   );
@@ -230,8 +229,10 @@ function folderChildren(
         kind: 'doc',
         id: doc.path,
         label: doc.title || stem(doc.path),
-        icon: doc.type === null ? 'file-text' : typeStyle(doc.type, schema).icon,
-        color: doc.type === null ? null : typeStyle(doc.type, schema).color,
+        // Docs are untyped by definition now (M12.1), so there is no type
+        // style to borrow.
+        icon: 'file-text',
+        color: null,
         children: [],
         path: doc.path,
       });
@@ -261,17 +262,15 @@ function folderChildren(
 /**
  * Every Collection the vault effectively has: the ones that declare a
  * `collection.yml`, plus one per folder that holds a List without already
- * sitting inside a declared Collection.
+ * sitting inside a declared Collection, plus — M12.5 — one per legacy
+ * project folder (a folder holding `project.md` was a container all along).
  *
  * **A Collection-less List is not representable.** This is the enforcement
  * point for that rule, and it works by construction rather than by migration: a
  * folder holding a List *is* a container, so it is one. Nothing is written to
- * disk to make that true, and no List can be orphaned.
- *
- * The alternatives were both worse. Listing orphans under their own "Lists"
- * heading (what M10.2 shipped) put a second top-level grouping concept in a
- * sidebar whose whole point is that Collections are the top level. Adopting
- * them by moving files would rewrite someone's vault on open.
+ * disk to make that true, and no List can be orphaned. Retiring projects used
+ * the same move: nothing rewrites the vault — a project folder simply reads as
+ * the Collection it always was, named after its project.md.
  *
  * The marker is therefore only ever a carrier for name/icon/color/order — never
  * the thing that makes a folder a container. An undeclared Collection is named
@@ -281,28 +280,34 @@ function folderChildren(
 export function effectiveCollections(
   declared: CollectionFile[],
   lists: ListFile[],
+  entries: Entry[] = [],
 ): CollectionFile[] {
   const byFolder = new Map(declared.map((c) => [c.folder, c]));
 
-  for (const list of lists) {
-    // Project-scoped Lists are project tabs, not sidebar content — they have a
-    // home already, and it is not a Collection.
-    if (list.project !== null) continue;
-    const folder = dirOf(list.path);
-    if (byFolder.has(folder)) continue;
+  const adopt = (folder: string, name: string) => {
+    if (byFolder.has(folder)) return;
     // Already inside a declared Collection higher up: that one owns it.
-    if (declared.some((c) => isUnder(c.folder, folder))) continue;
+    if (declared.some((c) => isUnder(c.folder, folder))) return;
     byFolder.set(folder, {
       folder,
       declared: false,
-      definition: {
-        name: humanizeFolder(folder),
-        icon: null,
-        color: null,
-        order: null,
-        description: null,
-      },
+      definition: { name, icon: null, color: null, order: null, description: null },
     });
+  };
+
+  for (const list of lists) {
+    // M12.5: project-scoped Lists used to be project tabs; with projects
+    // retired they are ordinary Lists, and their folder is their container.
+    adopt(dirOf(list.path), humanizeFolder(dirOf(list.path)));
+  }
+
+  for (const e of entries) {
+    if (e.filename !== 'project.md') continue;
+    // A Type doc that happens to be named project.md (types/project.md is
+    // the conventional home of a "Project" Type) is schema, not a marker —
+    // adopting it would turn the types/ folder into a phantom Collection.
+    if (e.type === 'Type') continue;
+    adopt(e.folder, e.title !== '' ? e.title : humanizeFolder(e.folder));
   }
 
   return [...byFolder.values()].sort((a, b) => byOrderThenName(a.definition, b.definition));
@@ -318,7 +323,7 @@ export function collectionsTree(
   entries: Entry[],
   schema: Schema,
 ): CollectionNode[] {
-  const all = effectiveCollections(collections, lists);
+  const all = effectiveCollections(collections, lists, entries);
   // Only the outermost Collections are roots; a nested one appears inside its
   // parent's subtree, not twice.
   const roots = all.filter(

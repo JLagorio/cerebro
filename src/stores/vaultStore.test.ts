@@ -51,8 +51,9 @@ describe('vaultStore', () => {
     expect(Array.isArray(s.views)).toBe(true);
     const item = findEntry('projects/guided-onboarding-ga/items/fld-1.md');
     expect(item?.title).toBe('First-run walkthrough GA');
-    // v2 containment: the owning project comes from the folder, not a link.
-    expect(item?.project).toBe('projects/guided-onboarding-ga/project.md');
+    // M12.5 aftermath: no project.md markers in the demo vault — projects are
+    // ordinary records, so folder containment resolves to null.
+    expect(item?.project).toBeNull();
     // Task 10: directories load alongside entries for the file trees.
     expect(s.folders).toContain('projects/guided-onboarding-ga/items');
     expect(s.folders).toContain('inbox');

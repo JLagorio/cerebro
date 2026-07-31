@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -32,7 +33,6 @@ interface Target {
 export function QuickOpen() {
   const visible = useUiStore((s) => s.quickOpenVisible);
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
-  const openDetail = useUiStore((s) => s.openDetail);
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
@@ -46,22 +46,13 @@ export function QuickOpen() {
     navigate(selection);
   };
 
+  // One routing rule for the whole app (M12.1): records panel over a backdrop,
+  // docs open full-page. QuickOpen keeps the navigate mode deliberately: there
+  // may be no relevant canvas behind it (M9.3).
+  const openPath = useOpenPath();
   const openEntry = (entry: Entry) => {
     close();
-    if (entry.type === 'Project') {
-      navigate({ kind: 'project', path: entry.path });
-      return;
-    }
-    // Work items open in the detail panel on their project canvas (v2
-    // containment); every other markdown file is a document (Task 10).
-    // QuickOpen keeps the navigate mode deliberately: there may be no
-    // relevant canvas behind it (M9.3).
-    if (entry.type === 'Work item') {
-      if (entry.project !== null) navigate({ kind: 'project', path: entry.project });
-      openDetail(entry.path);
-      return;
-    }
-    navigate({ kind: 'doc', path: entry.path });
+    openPath(entry.path);
   };
 
   const targets = useMemo<Target[]>(() => {
@@ -80,9 +71,7 @@ export function QuickOpen() {
       };
     });
 
-    const viewTargets: Target[] = views
-      .filter((v) => v.project === null)
-      .map((v) => ({
+    const viewTargets: Target[] = views.map((v) => ({
         // Ids are unique per folder, so the collection is part of the target's
         // identity AND of where it navigates — otherwise two collections'
         // "roadmap" lists collapse into one entry that opens the wrong one.

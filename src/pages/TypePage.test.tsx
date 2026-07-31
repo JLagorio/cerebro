@@ -44,18 +44,33 @@ describe('TypePage — Records tab', () => {
     expect(screen.queryByTestId('view-switch-tree')).toBeNull();
   });
 
-  it('offers the six view kinds and switches between them', () => {
+  // M12.3: the tab row owns layout — switching goes through the active tab's
+  // menu, exactly like a List. The default (unsaved) view carries id 'all'.
+  const switchLayout = (kind: string) => {
+    fireEvent.click(screen.getByTestId('view-tab-all'));
+    fireEvent.click(screen.getByText('Change layout…'));
+    fireEvent.click(screen.getByTestId(`view-switch-${kind}`));
+  };
+
+  it('offers the six view kinds from the tab menu and switches between them', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    expect(screen.getByTestId('view-tabs')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('view-tab-all'));
+    fireEvent.click(screen.getByText('Change layout…'));
     for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
       expect(screen.getByTestId(`view-switch-${kind}`)).toBeTruthy();
     }
     fireEvent.click(screen.getByTestId('view-switch-board'));
     expect(screen.getByTestId('board-view')).toBeTruthy();
+    // The change persisted to the Type doc — a type's views are saved views.
+    expect(
+      patches.some((p) => p.path === 'types/work-item.md' && 'views' in p.patch),
+    ).toBe(true);
   });
 
   it('shows the calendar keyed on the type’s date property', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    fireEvent.click(screen.getByTestId('view-switch-calendar'));
+    switchLayout('calendar');
     const calendar = screen.getByTestId('calendar-view');
     // Work item declares `due: { kind: date }` and nothing else dated, so the
     // view infers it rather than rendering blank until someone configures one.
@@ -64,50 +79,62 @@ describe('TypePage — Records tab', () => {
 
   it('opens a record in the right-hand detail panel from the list layout', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    fireEvent.click(screen.getByTestId('view-switch-list'));
+    switchLayout('list');
     fireEvent.click(screen.getByText('Design first-run flow'));
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
   });
 
-  it('marks system types with a locked badge', () => {
+  it('treats Work item like any other type — no system lock (M12.2)', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    expect(screen.getByText('System type')).toBeTruthy();
-    // Rename/delete are system-locked; customize stays available.
-    expect(screen.getByRole('button', { name: 'Customize icon & color' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Change display name' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete type' })).toBeNull();
+    expect(screen.queryByText('System type')).toBeNull();
+    // M12.8: the icon and the name ARE the edit affordances — the corner
+    // pencil/palette buttons are gone.
+    expect(screen.getByTestId('type-icon-edit').getAttribute('title')).toBe('Change icon & color');
+    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe(
+      'Change display name',
+    );
+    // Delete moved into the floating view-settings menu with the rest of the
+    // configuration — no destructive affordance sits in the header.
+    fireEvent.click(screen.getByTestId('view-control-settings'));
+    expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
 
   it('offers rename and delete for custom types', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Person' }} />);
-    expect(screen.getByRole('button', { name: 'Change display name' })).toBeTruthy();
+    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe(
+      'Change display name',
+    );
+    fireEvent.click(screen.getByTestId('view-control-settings'));
     expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
 });
 
-describe('TypePage — Properties tab', () => {
+describe('TypePage — property configuration (M12.8: floating, never an aside)', () => {
+  // Properties live behind the tab row's sliders icon → Properties page, a
+  // floating menu; per-property config drills into the same panel.
   const openProperties = (name: string) => {
     render(<TypePage selection={{ kind: 'type', name }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Properties' }));
+    fireEvent.click(screen.getByTestId('view-control-settings'));
+    fireEvent.click(screen.getByTestId('view-settings-properties'));
   };
 
-  it('lists declared fields, locking built-ins on system types', () => {
+  it('lists declared fields with nothing locked (M12.2)', () => {
     openProperties('Work item');
-    const rows = screen.getAllByTestId('type-field-row');
+    const rows = screen.getAllByTestId(/^property-row-/);
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining('Status'),
       expect.stringContaining('Priority'),
       expect.stringContaining('Assignee'),
       expect.stringContaining('Due'),
     ]);
-    // All four demo fields are built-ins of the system type: locked.
-    expect(screen.getAllByText('Built-in')).toHaveLength(4);
-    expect(screen.getByText(/system type/)).toBeTruthy();
+    // No standard objects: every declared field is the user's to edit.
+    expect(screen.queryByText('Built-in')).toBeNull();
+    expect(screen.queryByText(/system type/)).toBeNull();
   });
 
   it('adds a custom property to the type doc via the add panel', async () => {
     openProperties('Work item');
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByTestId('new-property'));
     fireEvent.change(screen.getByLabelText('Property name'), {
       target: { value: 'Severity' },
     });
@@ -133,7 +160,7 @@ describe('TypePage — Properties tab', () => {
 
   it('names the property after the kind when none is typed (kind-first flow)', async () => {
     openProperties('Work item');
-    fireEvent.click(screen.getByText('+ Add property'));
+    fireEvent.click(screen.getByTestId('new-property'));
     fireEvent.click(screen.getByTestId('property-kind-checkbox'));
     await waitFor(() => {
       expect(patches).toEqual([
@@ -149,8 +176,10 @@ describe('TypePage — Properties tab', () => {
 
   it('removes custom fields but never built-ins', () => {
     openProperties('Person');
-    // fixture Person type declares no fields — add-only surface.
-    expect(screen.getByText('No properties yet')).toBeTruthy();
+    // Fixture Person declares no fields. The panel lists the column universe
+    // (observed frontmatter keys included), so the durable contract here is
+    // that creation is offered, not that the list is empty.
+    expect(screen.getByTestId('new-property')).toBeTruthy();
     cleanup();
     // Give Person a custom field and check its remove affordance.
     useVaultStore.setState({
@@ -167,7 +196,8 @@ describe('TypePage — Properties tab', () => {
       ),
     });
     openProperties('Person');
-    fireEvent.click(screen.getByRole('button', { name: 'Remove Pronouns' }));
+    fireEvent.click(screen.getByTestId('property-row-pronouns'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete property' }));
     expect(patches).toEqual([{ path: 'types/person.md', patch: { fields: {} } }]);
   });
 
@@ -188,8 +218,8 @@ describe('TypePage — Properties tab', () => {
       ],
     });
     openProperties('Recipe');
-    // M3.1: the value editor lives behind the row's "1 options" expander.
-    fireEvent.click(screen.getByRole('button', { name: /1 options/ }));
+    // M12.8: the value editor lives inside the property's flyout page.
+    fireEvent.click(screen.getByTestId('property-row-cuisine'));
     expect(screen.getByText('Thai')).toBeTruthy();
     const input = screen.getByLabelText('Add option to Cuisine');
     fireEvent.change(input, { target: { value: 'Oaxacan' } });
@@ -216,7 +246,7 @@ describe('TypePage — Properties tab', () => {
       ],
     });
     openProperties('Recipe');
-    fireEvent.click(screen.getByRole('button', { name: /1 options/ }));
+    fireEvent.click(screen.getByTestId('property-row-cuisine'));
     fireEvent.click(screen.getByRole('button', { name: 'Thai' }));
     const input = screen.getByLabelText('Rename Thai');
     fireEvent.change(input, { target: { value: 'Thai (street)' } });
@@ -243,7 +273,9 @@ describe('TypePage — Properties tab', () => {
     });
     cleanup();
     openProperties('Person');
-    fireEvent.click(screen.getByRole('button', { name: 'Pronouns' }));
+    // The field name also appears as a column header — the panel's row has
+    // its own testid, and the rename input lives only in the flyout editor.
+    fireEvent.click(screen.getByTestId('property-row-pronouns'));
     const input = screen.getByLabelText('Rename Pronouns');
     fireEvent.change(input, { target: { value: 'Uses pronouns' } });
     fireEvent.blur(input);

@@ -21,26 +21,29 @@ const typeDoc = (title: string, patch: Parameters<typeof makeEntry>[0] = {}): En
   });
 
 describe('system types', () => {
-  it('marks Project, Work item, and Type as system', () => {
-    expect(isSystemType('Project')).toBe(true);
-    expect(isSystemType('Work item')).toBe(true);
+  // M12.2: the metamodel is the only system type. Project and Work item are
+  // ordinary types — rename them, delete them, or never declare them.
+  it('marks only Type as system', () => {
     expect(isSystemType('Type')).toBe(true);
+    expect(isSystemType('Project')).toBe(false);
+    expect(isSystemType('Work item')).toBe(false);
     expect(isSystemType('Recipe')).toBe(false);
   });
 
-  it('locks built-in fields but not custom ones', () => {
-    expect(isLockedField('Work item', 'status')).toBe(true);
-    expect(isLockedField('Work item', 'severity')).toBe(false);
-    expect(isLockedField('Project', 'key')).toBe(true);
+  it('locks only the metamodel schema keys', () => {
+    expect(isLockedField('Type', 'fields')).toBe(true);
+    expect(isLockedField('Type', 'statuses')).toBe(true);
+    expect(isLockedField('Work item', 'status')).toBe(false);
+    expect(isLockedField('Project', 'key')).toBe(false);
     expect(isLockedField('Recipe', 'anything')).toBe(false);
   });
 });
 
 describe('listTypes', () => {
-  it('always includes system types, even in an empty vault', () => {
+  it('lists only the metamodel in an empty vault', () => {
     const listing = listTypes([], buildSchema([]));
     const names = listing.map((t) => t.name);
-    expect(names).toEqual(['Project', 'Type', 'Work item']);
+    expect(names).toEqual(['Type']);
     expect(listing.every((t) => t.system)).toBe(true);
     expect(listing.every((t) => t.count === 0)).toBe(true);
   });
@@ -68,16 +71,16 @@ describe('listTypes', () => {
     expect(ghost).toMatchObject({ count: 1, system: false, docPath: null, icon: 'file-text' });
   });
 
-  it('uses system fallbacks when no Type doc styles them', () => {
-    const project = listTypes([], buildSchema([])).find((t) => t.name === 'Project');
-    expect(project).toMatchObject({ icon: 'folder-kanban', docPath: null });
+  it('uses the metamodel fallback style when its Type doc declares none', () => {
+    const meta = listTypes([], buildSchema([])).find((t) => t.name === 'Type');
+    expect(meta).toMatchObject({ icon: 'shapes', docPath: null });
   });
 
   it('prefers the Type doc styling over the system fallback', () => {
-    const entries = [typeDoc('Project', { properties: { icon: 'rocket', color: '#DE3B4E' } })];
-    const project = listTypes(entries, buildSchema(entries)).find((t) => t.name === 'Project');
-    expect(project).toMatchObject({ icon: 'rocket', color: '#DE3B4E', system: true });
-    expect(systemTypeSpec('Project')?.fallbackIcon).toBe('folder-kanban');
+    const entries = [typeDoc('Type', { properties: { icon: 'rocket', color: '#DE3B4E' } })];
+    const meta = listTypes(entries, buildSchema(entries)).find((t) => t.name === 'Type');
+    expect(meta).toMatchObject({ icon: 'rocket', color: '#DE3B4E', system: true });
+    expect(systemTypeSpec('Type')?.fallbackIcon).toBe('shapes');
   });
 });
 
@@ -104,11 +107,13 @@ describe('serializeFields', () => {
 });
 
 describe('typeStyle', () => {
-  it('resolves declared styling, system fallbacks, and the default', () => {
+  it('resolves declared styling, the metamodel fallback, and the default', () => {
     const entries = [typeDoc('Recipe', { properties: { icon: 'chef-hat', color: '#DE8F0A' } })];
     const schema = buildSchema(entries);
     expect(typeStyle('Recipe', schema)).toEqual({ icon: 'chef-hat', color: '#DE8F0A' });
-    expect(typeStyle('Project', schema)).toEqual({ icon: 'folder-kanban', color: '#14B8A6' });
+    expect(typeStyle('Type', schema)).toEqual({ icon: 'shapes', color: '#8B7CF6' });
+    // M12.2: Project is nobody special — undeclared, it styles like any ghost.
+    expect(typeStyle('Project', schema)).toEqual({ icon: 'file-text', color: null });
     expect(typeStyle(null, schema)).toEqual({ icon: 'file-text', color: null });
     expect(typeStyle('Mystery', schema)).toEqual({ icon: 'file-text', color: null });
   });

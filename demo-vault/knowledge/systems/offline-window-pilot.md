@@ -9,7 +9,7 @@ lifecycle: stable
 generated: { by: claude-code, at: 2026-05-14T10:05:00Z }
 sources:
   - id: pilot-brief
-    resource: /projects/offline-sync-hardening/project.md
+    resource: /records/projects/offline-sync-hardening.md
     title: Offline sync hardening
     last_modified: 2026-05-12
 ---

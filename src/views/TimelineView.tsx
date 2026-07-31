@@ -133,19 +133,26 @@ export function TimelineView({
                     data-testid="timeline-band"
                     data-depth={row.node.depth}
                     onClick={() => toggle(scope, row.key)}
-                    className="sticky left-0 z-10 flex h-7 w-full items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
-                    style={{ paddingLeft: 12 + row.node.depth * 16, width: '100%' }}
+                    className="relative z-10 flex h-7 w-full items-center border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
+                    style={{ width: '100%' }}
                   >
-                    <Icon
-                      name={collapsed ? 'chevron-right' : 'chevron-down'}
-                      size={12}
-                      color="var(--n-400)"
-                    />
-                    <span className="text-[12px] font-semibold text-[var(--n-800)]">
-                      {row.node.label}
-                    </span>
-                    <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-                      {row.node.count}
+                    {/* Full-width band cannot be sticky itself (no room to
+                        shift); the label cluster sticks instead. */}
+                    <span
+                      className="sticky left-0 flex items-center gap-2"
+                      style={{ paddingLeft: 12 + row.node.depth * 16 }}
+                    >
+                      <Icon
+                        name={collapsed ? 'chevron-right' : 'chevron-down'}
+                        size={12}
+                        color="var(--n-400)"
+                      />
+                      <span className="text-[12px] font-semibold text-[var(--n-800)]">
+                        {row.node.label}
+                      </span>
+                      <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                        {row.node.count}
+                      </span>
                     </span>
                   </button>
                 );

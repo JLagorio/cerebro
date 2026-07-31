@@ -56,7 +56,9 @@ export type CerebroEditor = typeof cerebroSchema.BlockNoteEditor;
 
 const stem = (e: Entry): string => e.filename.replace(/\.md$/, '');
 
-const isLinkableDoc = (e: Entry): boolean => e.type !== 'Work item' && !isTemplate(e);
+// M12.1: anything that is content can be linked — docs AND records. Only the
+// schema itself and stationery stay out of the `[[` picker.
+const isLinkableDoc = (e: Entry): boolean => e.type !== 'Type' && !isTemplate(e);
 
 /** Case-insensitive title/subtext/alias filter (filterSuggestionItems isn't
  * exported by @blocknote/core 0.46). */
@@ -499,6 +501,9 @@ export function MarkdownEditor({
         <div
           className="fixed inset-0 z-40"
           onMouseDown={() => setAssign(null)}
+          onWheel={(e) => {
+            if (e.target === e.currentTarget) setAssign(null);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') setAssign(null);
           }}

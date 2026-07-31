@@ -9,7 +9,8 @@ import type {
   TypeDef,
 } from './types';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
-import { buildRelationIndex } from './relations';
+import { buildRelationIndex, childrenOf } from './relations';
+import { parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
 /** Spec "simple" status template — fallback when no type/project declares statuses. */
@@ -74,6 +75,8 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
       .filter((o): o is FieldOption => o !== null);
   }
   if (typeof s.target === 'string') def.target = s.target;
+  // Relation cardinality (M12.4): `limit: 1` means a single linked record.
+  if (s.limit === 1 || s.limit === '1') def.limit = 1;
   // Rollup config: which relation to follow, what to read, how to fold it.
   if (typeof s.relation === 'string') def.relation = s.relation;
   if (typeof s.property === 'string') def.property = s.property;
@@ -141,10 +144,12 @@ export function buildSchema(entries: Entry[]): Schema {
       icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
       color: typeof e.properties.color === 'string' ? e.properties.color : null,
       fields: parseFields((e.properties as Record<string, unknown>).fields),
-      // Records are the default surface; `display: doc` opts a type into the
-      // Docs file tree as well (M3.1 — one surface per shape).
-      display: e.properties.display === 'doc' ? 'doc' : 'record',
       statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
+      folder:
+        typeof e.properties.folder === 'string' && e.properties.folder.trim() !== ''
+          ? e.properties.folder.trim().replace(/^\/+|\/+$/g, '')
+          : null,
+      views: parseViewList((e.properties as Record<string, unknown>).views),
     });
   }
 
@@ -152,14 +157,6 @@ export function buildSchema(entries: Entry[]): Schema {
   // Built once per schema so reverse rollups/trees are O(1) lookups instead
   // of a full scan per row (M3.5).
   const relations = buildRelationIndex(entries);
-
-  // Vault-level default statuses live on the Work item Type doc (locked
-  // decision 4); parsed once per schema build.
-  const workItemTypeEntry = entries.find((e) => e.type === 'Type' && e.title === 'Work item');
-  const vaultStatuses =
-    workItemTypeEntry !== undefined
-      ? parseStatuses((workItemTypeEntry.properties as Record<string, unknown>).statuses)
-      : [];
 
   function projectForEntry(e: Entry): Entry | null {
     if (e.project === null) return null;
@@ -174,11 +171,12 @@ export function buildSchema(entries: Entry[]): Schema {
         if (override.length > 0) return override;
       }
     }
-    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
+    return DEFAULT_STATUSES;
   }
 
-  /** Project override → the entry's own type's `statuses:` → Work item's →
-   * defaults. Lets a Bug type carry a status set Work items never see. */
+  /** Project override → the entry's own type's `statuses:` → app defaults.
+   * M12.2: no type inherits from another — Work item used to be the vault's
+   * status source, which meant one type name the app could never let go of. */
   function statusSetFor(e: Entry): StatusDef[] {
     if (e.project !== null) {
       const project = byPath.get(e.project);
@@ -189,7 +187,7 @@ export function buildSchema(entries: Entry[]): Schema {
     }
     const own = e.type !== null ? types.get(e.type)?.statuses : undefined;
     if (own !== undefined && own.length > 0) return own;
-    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
+    return DEFAULT_STATUSES;
   }
 
   function resolveField(e: Entry, field: string): ResolvedField {
@@ -211,6 +209,28 @@ export function buildSchema(entries: Entry[]): Schema {
         def,
         raw: computed,
         display: applyFormat(computed, def),
+        color: null,
+        ghost: false,
+      };
+    }
+
+    // A two-way relation's reciprocal side stores nothing (M12.4): its value
+    // is derived — the records of `from.type` whose `from.field` links here.
+    // Edits write through to that owning side, never to this frontmatter.
+    if (def?.kind === 'relation' && def.from !== undefined) {
+      const sources = childrenOf(
+        e,
+        { direction: 'reverse', type: def.from.type, field: def.from.field },
+        entries,
+        relations,
+      );
+      const stems = sources.map(
+        (s) => (s.path.split('/').pop() ?? s.path).replace(/\.md$/, ''),
+      );
+      return {
+        def,
+        raw: stems,
+        display: sources.map((s) => s.title).join(', '),
         color: null,
         ghost: false,
       };

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useOpenPath } from '@/app/useOpenPath';
 import { createTarget } from '@/engine/createRecord';
 import type { Entry } from '@/engine/types';
 import { slugify } from '@/lib/slug';
@@ -48,6 +49,38 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
     } catch {
       toast(`Couldn't create "${trimmed}"`);
       return false;
+    }
+  };
+}
+
+/**
+ * The tab row's New button (M12.8): creates an untitled record of the view's
+ * type and opens it in the panel, where the title gets written — Notion's
+ * "New", where naming happens on the page rather than in a prompt.
+ */
+export function useNewRecord(typeName: string) {
+  const createItem = useVaultStore((s) => s.createItem);
+  const entries = useVaultStore((s) => s.entries);
+  const toast = useUiStore((s) => s.toast);
+  const openPath = useOpenPath('in-place');
+
+  return async () => {
+    const target = createTarget(typeName, { project: null, entries });
+    const key = target.frontmatter.key;
+    const slug =
+      typeof key === 'string' && key !== ''
+        ? key.toLowerCase()
+        : `untitled-${Date.now().toString(36)}`;
+    try {
+      const path = await createItem({
+        folder: target.folder,
+        slug,
+        frontmatter: target.frontmatter,
+        body: '# Untitled\n',
+      });
+      openPath(path);
+    } catch {
+      toast("Couldn't create a record");
     }
   };
 }

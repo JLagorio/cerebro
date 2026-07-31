@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   columnUniverse,
   hiddenColumns,
+  insertColumn,
   moveColumn,
   resolveColumns,
   setColumnWidth,
+  setColumnWrap,
   toggleColumn,
 } from '@/engine/columns';
 import { buildSchema } from '@/engine/schema';
@@ -122,5 +124,47 @@ describe('column specs', () => {
   it('lists the fields not currently shown', () => {
     const fields = [{ name: 'a', kind: 'text' as const }, { name: 'z', kind: 'text' as const }];
     expect(hiddenColumns(columns, fields).map((f) => f.name)).toEqual(['z']);
+  });
+});
+
+// M12.4b: the header menu's column operations.
+describe('setColumnWrap', () => {
+  it('toggles the wrap flag, creating the spec when absent', () => {
+    const columns: ColumnSpec[] = [{ field: 'status' }];
+    const on = setColumnWrap(columns, 'status');
+    expect(on).toEqual([{ field: 'status', wrap: true }]);
+    expect(setColumnWrap(on, 'status')).toEqual([{ field: 'status', wrap: false }]);
+    expect(setColumnWrap(columns, 'notes')).toEqual([
+      { field: 'status' },
+      { field: 'notes', wrap: true },
+    ]);
+  });
+});
+
+describe('insertColumn', () => {
+  const columns: ColumnSpec[] = [{ field: 'a' }, { field: 'b' }, { field: 'c' }];
+
+  it('inserts a fresh spec beside the anchor', () => {
+    expect(insertColumn(columns, 'x', 'b', 'left').map((c) => c.field)).toEqual([
+      'a', 'x', 'b', 'c',
+    ]);
+    expect(insertColumn(columns, 'x', 'b', 'right').map((c) => c.field)).toEqual([
+      'a', 'b', 'x', 'c',
+    ]);
+  });
+
+  it('moves an existing spec (unhiding it) rather than duplicating', () => {
+    const withHidden: ColumnSpec[] = [...columns, { field: 'x', hidden: true, width: 90 }];
+    const next = insertColumn(withHidden, 'x', 'a', 'right');
+    expect(next.map((c) => c.field)).toEqual(['a', 'x', 'b', 'c']);
+    const moved = next.find((c) => c.field === 'x')!;
+    expect(moved.hidden).toBeUndefined();
+    expect(moved.width).toBe(90); // configuration survives the move
+  });
+
+  it('appends when the anchor is unknown', () => {
+    expect(insertColumn(columns, 'x', 'gone', 'left').map((c) => c.field)).toEqual([
+      'a', 'b', 'c', 'x',
+    ]);
   });
 });

@@ -71,6 +71,7 @@ export function ContextMenu({
         data-testid="context-menu-backdrop"
         className="fixed inset-0 z-40"
         onClick={onClose}
+        onWheel={onClose}
         onContextMenu={(e) => {
           e.preventDefault();
           onClose();
@@ -81,7 +82,7 @@ export function ContextMenu({
         role="menu"
         onKeyDown={onKeyDown}
         style={{ left, top, width: MENU_WIDTH }}
-        className="fixed z-50 rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
+        className="cb-menu-in fixed z-50 rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
       >
         {items.map((item) => (
           <button

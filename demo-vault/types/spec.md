@@ -2,7 +2,6 @@
 type: Type
 icon: file-text
 color: '#0EA5E9'
-display: doc
 fields:
   status: { kind: select, options: [draft, in review, approved] }
   owner: { kind: person }
@@ -11,4 +10,5 @@ fields:
 
 # Spec
 
-Written specifications — PRDs, design docs, proposals. `display: doc` because a spec is authored, not tracked: it lives in the Docs tree beside the project it belongs to.
+Written specifications — PRDs, design docs, proposals. A spec is a record with
+a status and an owner; its prose lives in the record's body.

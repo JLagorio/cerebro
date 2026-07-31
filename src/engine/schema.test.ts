@@ -204,27 +204,26 @@ describe('projectForEntry', () => {
 });
 
 describe('statusSetForProject', () => {
-  it('null path uses the Work item Type doc statuses with humanized labels', () => {
-    expect(schema.statusSetForProject(null)).toEqual([
-      { id: 'triage', label: 'Triage', color: '#A8AFC2', group: 'active' },
-      { id: 'doing', label: 'Doing', color: '#EFB428', group: 'active' },
-      { id: 'shipped', label: 'Shipped', color: '#34B764', group: 'done' },
-    ]);
+  // M12.2: no type's statuses stand in for the vault's. The Work item Type
+  // doc used to be the default source — now a type's statuses are its own,
+  // and everything else gets the app defaults.
+  it('null path uses the app defaults, not any Type doc', () => {
+    expect(schema.statusSetForProject(null)).toBe(DEFAULT_STATUSES);
   });
 
-  it('a project statuses override wins over the type-doc default', () => {
+  it('a project statuses override wins over the defaults', () => {
     expect(schema.statusSetForProject('projects/labs/project.md')).toEqual([
       { id: 'poc', label: 'Poc', color: '#8250DC', group: 'active' },
       { id: 'proven', label: 'Proven', color: '#34B764', group: 'done' },
     ]);
   });
 
-  it('a project without an override uses the type-doc default', () => {
-    expect(schema.statusSetForProject('projects/flight-deck/project.md')[0].id).toBe('triage');
+  it('a project without an override uses the app defaults', () => {
+    expect(schema.statusSetForProject('projects/flight-deck/project.md')).toBe(DEFAULT_STATUSES);
   });
 
-  it('an unknown project path uses the type-doc default', () => {
-    expect(schema.statusSetForProject('projects/nowhere/project.md')[0].id).toBe('triage');
+  it('an unknown project path uses the app defaults', () => {
+    expect(schema.statusSetForProject('projects/nowhere/project.md')).toBe(DEFAULT_STATUSES);
   });
 
   it('falls back to DEFAULT_STATUSES when no type doc declares statuses', () => {
@@ -334,5 +333,60 @@ describe('resolveField', () => {
       color: null,
       ghost: false,
     });
+  });
+});
+
+// M12.4: two-way relations — the reciprocal is DERIVED from the reverse
+// index, so one link is stored once and two files can never disagree.
+describe('derived two-way relations', () => {
+  const objectiveType = makeEntry({
+    path: 'types/objective.md',
+    title: 'Objective',
+    type: 'Type',
+    properties: {
+      fields: {
+        key_results: { kind: 'relation', from: { type: 'Key result', field: 'objective' } },
+      },
+    } as unknown as ReturnType<typeof makeEntry>['properties'],
+  });
+  const keyResultType = makeEntry({
+    path: 'types/key-result.md',
+    title: 'Key result',
+    type: 'Type',
+    properties: {
+      fields: { objective: { kind: 'relation', target: 'Objective', limit: 1 } },
+    } as unknown as ReturnType<typeof makeEntry>['properties'],
+  });
+  const objective = makeEntry({
+    path: 'records/objectives/obj-1.md',
+    filename: 'obj-1.md',
+    folder: 'records/objectives',
+    title: 'Ship the split',
+    type: 'Objective',
+  });
+  // Relationships arrive bracket-stripped from the parser (see the assignee
+  // fixture above) — the [[ ]] live only in the frontmatter on disk.
+  const kr = makeEntry({
+    path: 'records/key-results/kr-1.md',
+    filename: 'kr-1.md',
+    folder: 'records/key-results',
+    title: 'Routing inverted',
+    type: 'Key result',
+    relationships: { objective: ['obj-1'] },
+  });
+
+  it('resolves the reciprocal side from records linking back', () => {
+    const schema = buildSchema([objectiveType, keyResultType, objective, kr]);
+    const resolved = schema.resolveField(objective, 'key_results');
+    expect(resolved.raw).toEqual(['kr-1']);
+    expect(resolved.display).toBe('Routing inverted');
+    expect(resolved.ghost).toBe(false);
+  });
+
+  it('parses limit: 1 on the owning side', () => {
+    const schema = buildSchema([objectiveType, keyResultType]);
+    const owning = schema.types.get('Key result')!.fields.find((f) => f.name === 'objective')!;
+    expect(owning.limit).toBe(1);
+    expect(owning.target).toBe('Objective');
   });
 });

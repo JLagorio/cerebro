@@ -45,8 +45,10 @@ async function switchLayout(page: Page, kind: string): Promise<void> {
 test('collections: a container holds lists and docs, and the sidebar walks it', async ({ page }) => {
   await boot(page);
 
-  // The sidebar's top-level concept is Collections, not Views.
-  await expect(page.getByText('Collections', { exact: true })).toBeVisible();
+  // The sidebar's top-level concept is Collections, not Views. (Scoped to
+  // the sidebar: since M12.5 Home's grid carries the same heading.)
+  const sidebar = page.getByLabel('Sidebar', { exact: true });
+  await expect(sidebar.getByText('Collections', { exact: true })).toBeVisible();
 
   // The demo vault ships one: `delivery/`, holding three Lists and a Doc.
   const delivery = page.getByTestId('collection-node-collection').filter({ hasText: 'Delivery' });
@@ -82,9 +84,11 @@ test('collections: nothing sits outside a Collection — there is no Lists bucke
   await boot(page);
 
   // The one and only top-level grouping. A folder holding Lists IS a Collection,
-  // so no List can be orphaned and no home-of-last-resort is needed.
-  await expect(page.getByText('Collections', { exact: true })).toBeVisible();
-  await expect(page.getByText('Lists', { exact: true })).toHaveCount(0);
+  // so no List can be orphaned and no home-of-last-resort is needed. (Scoped
+  // to the sidebar: since M12.5 Home's grid carries the same heading.)
+  const sidebar = page.getByLabel('Sidebar', { exact: true });
+  await expect(sidebar.getByText('Collections', { exact: true })).toBeVisible();
+  await expect(sidebar.getByText('Lists', { exact: true })).toHaveCount(0);
 
   // Every List node in the sidebar is nested under a Collection, never a sibling
   // of one.

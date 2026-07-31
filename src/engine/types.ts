@@ -39,11 +39,18 @@ export interface FieldDef {
   name: string;
   kind: FieldKind;
   options?: FieldOption[];
+  /** Relation: the TYPE this field may point at (M12.4: enforced — the
+   * picker only offers records of it). Absent means any record (legacy). */
   target?: string;
+  /** Relation: at most one linked record when 1 (M12.4); absent = no limit. */
+  limit?: 1;
   /** rollup config: aggregate `property` across the `relation` field's targets. */
   relation?: string;
-  /** Reverse rollup source (M3.5): aggregate the records of `type` whose
-   * `field` points back at this one — no duplicate link on the parent. */
+  /** Reverse source, two uses: on a rollup (M3.5), aggregate the records of
+   * `type` whose `field` points back at this one; on a RELATION (M12.4), this
+   * field is the derived reciprocal of a two-way pair — it stores nothing,
+   * shows the records of `type` linking here through `field`, and edits write
+   * through to that owning side. */
   from?: { type: string; field: string };
   property?: string;
   calculate?: RollupCalc;
@@ -58,12 +65,14 @@ export interface TypeDef {
   icon: string | null;
   color: string | null;
   fields: FieldDef[];
-  /** Where the type's notes live in the UI: 'record' (its type screen only —
-   * the default) or 'doc' (also browsable in the Docs file tree). Declared as
-   * `display:` on the Type doc; keeps one surface per shape (M3.1). */
-  display: 'doc' | 'record';
   /** `statuses:` declared on this Type doc; [] when it declares none. */
   statuses: StatusDef[];
+  /** `folder:` on the Type doc — where new records land (M12.2). Null means
+   * the records/<plural-slug> convention. */
+  folder: string | null;
+  /** Saved views of the type screen (M12.3), stored under `views:` on the
+   * Type doc — the same shape a List keeps. [] means none saved yet. */
+  views: ViewDefinition[];
 }
 
 export interface ResolvedField {
@@ -94,7 +103,8 @@ export type Selection =
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
-  | { kind: 'project'; path: string }  // path of the project.md (vault format v2)
+  // M12.5: `project` retired — a project is a folder, and a folder with
+  // things in it is a Collection. Legacy project.md files open as records.
   | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)
   // M10 — a Collection is a container (a folder holding collection.yml); a List
@@ -104,7 +114,9 @@ export type Selection =
   // the first one. It rides on the selection rather than in component state so
   // that "the board tab of Delivery" is a place you can navigate back to.
   | { kind: 'list'; id: string; collection?: string | null; view?: string }
-  | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
+  // `view` names which of the type's saved view tabs is open (M12.3), same
+  // contract as a List's; omitted means the first one.
+  | { kind: 'type'; name: string; view?: string }
   // M9.4 — git surfaces. `changes` is the uncommitted working tree (with
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
@@ -212,6 +224,11 @@ export interface Presentation {
   rowHeight?: 'compact' | 'default' | 'tall';
   /** Width of the sticky name column. Omitted = the layout's default. */
   titleWidth?: number;
+  /** False = the name column scrolls with the grid instead of pinning left.
+   * Only meaningful while the name column is first (M12.8). */
+  titleFrozen?: boolean;
+  /** The name column's index among the visible columns. Omitted = first. */
+  titlePosition?: number;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
   /**

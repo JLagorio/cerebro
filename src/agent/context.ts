@@ -53,8 +53,9 @@ function summarize(entry: Entry, schema: Schema, fields?: string[]): RecordSumma
 function describeSelection(selection: Selection): Record<string, unknown> {
   switch (selection.kind) {
     case 'doc':
-    case 'project':
       return { kind: selection.kind, path: selection.path };
+    case 'collection':
+      return { kind: 'collection', folder: selection.folder };
     case 'list':
       return { kind: 'list', id: selection.id };
     case 'type':

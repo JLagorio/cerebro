@@ -2,7 +2,7 @@ import { isTemplate } from '@/lib/templates';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
 import type { Entry, Presentation, Schema, Selection, SortSpec, ListFile, ListSource } from './types';
-import { typePresentation } from './typeCatalog';
+import { typeViews } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { clonePresentation, DEFAULT_PRESENTATION, resolveView } from './views';
 
@@ -113,13 +113,6 @@ export function sortEntries(entries: Entry[], sort: SortSpec[], schema: Schema):
   });
 }
 
-/** Vault format v2: project membership is containment — Entry.project points
- * at the owning project.md. The item canvas shows the project's Work items
- * only; docs inside the folder belong to the Pages surface, not the board. */
-function itemsOfProject(project: Entry, entries: Entry[]): Entry[] {
-  return entries.filter((e) => e.project === project.path && e.type === 'Work item');
-}
-
 /**
  * The records a view's source selects, before its filters run (M3.5): every
  * record of a type, optionally narrowed to one project by containment. This
@@ -152,27 +145,14 @@ export function resolveSurface(
   views: ListFile[],
 ): Surface {
   switch (sel.kind) {
-    case 'project': {
-      const project = entries.find((e) => e.path === sel.path) ?? null;
-      const presentation = defaultPresentation();
-      if (project === null) return { title: stem(sel.path), entries: [], presentation };
-      return {
-        title: project.title,
-        entries: sortEntries(itemsOfProject(project, entries), presentation.sort, schema),
-        presentation,
-      };
-    }
     case 'list': {
       // Ids are unique per FOLDER, not per vault — two Collections may each
       // hold a "roadmap" — so the selection's collection is part of the key.
       // Project-scoped legacy views are rendered by their project's tabs.
+      // M12.5: project-scoped legacy Lists resolve like any other — their
+      // project field is history, not an address.
       const view =
-        views.find(
-          (v) =>
-            v.id === sel.id &&
-            v.project === null &&
-            v.collection === (sel.collection ?? null),
-        ) ?? null;
+        views.find((v) => v.id === sel.id && v.collection === (sel.collection ?? null)) ?? null;
       if (view === null) return { title: sel.id, entries: [], presentation: defaultPresentation() };
       const { name, source } = view.definition;
       // M11: filters and presentation belong to the VIEW, so which tab is open
@@ -192,15 +172,23 @@ export function resolveSurface(
       };
     }
     case 'type': {
-      // M3 type screen: every record carrying `type: <name>`, presented with
-      // the type's own declared fields.
-      const presentation = typePresentation(sel.name, schema);
+      // M12.3: a type keeps saved views exactly like a List — the selection's
+      // `view` names the open tab, and filters belong to the view.
+      const tabs = typeViews(sel.name, schema);
+      const active =
+        (sel.view != null ? tabs.find((v) => v.id === sel.view) : undefined) ?? tabs[0];
+      const { filters, presentation } = active;
       return {
         title: sel.name,
         entries: sortEntries(
           // Templates declare a type so new pages inherit it; they are not
           // records of it (M3.1).
-          entries.filter((e) => e.type === sel.name && !isTemplate(e)),
+          entries.filter(
+            (e) =>
+              e.type === sel.name &&
+              !isTemplate(e) &&
+              (filters === null || evaluateFilters(e, filters, schema)),
+          ),
           presentation.sort,
           schema,
         ),

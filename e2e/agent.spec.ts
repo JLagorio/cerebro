@@ -100,7 +100,7 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
   const capturePath = PROPOSED;
   const card = page.getByTestId('proposal-card');
   await expect(card).toBeVisible();
-  await expect(card).toContainText('reads as a work item');
+  await expect(card).toContainText('reads as a task-like record');
   await expect(card).toContainText('Work item');
 
   // Still untyped: a proposal is a suggestion until the user acts on it.

@@ -1,7 +1,7 @@
 ---
 type: Work item
 key: OPS-3
-status: blocked
+status: todo
 priority: high
 assignee: "[[mo-byrd]]"
 due: 2026-08-01

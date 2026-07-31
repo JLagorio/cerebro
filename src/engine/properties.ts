@@ -199,10 +199,23 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
         ? null
         : `${label} must be a list of options`;
     case 'person':
-    case 'relation':
       return isScalarString(value) || isStringArray(value)
         ? null
         : `${label} must reference other pages`;
+    case 'relation': {
+      // The reciprocal of a two-way pair is derived — writing it here would
+      // store a mirror that the owning side immediately contradicts (M12.4).
+      if (def.from !== undefined) {
+        return `${label} is the other side of a relation — edit it from the linked records`;
+      }
+      if (!(isScalarString(value) || isStringArray(value))) {
+        return `${label} must reference other pages`;
+      }
+      if (def.limit === 1 && Array.isArray(value) && value.length > 1) {
+        return `${label} links a single record`;
+      }
+      return null;
+    }
     case 'url':
       return isScalarString(value) && (value === '' || URL_SHAPE.test(value))
         ? null
@@ -215,6 +228,71 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
     case 'created_time':
     case 'last_edited_time':
       return `${label} is computed and can't be edited`;
+  }
+}
+
+/**
+ * Best-effort value conversion when a field changes kind (M12.4b — the
+ * header menu's Change type). Returns the value to store, or null when the
+ * old value has no honest representation in the new kind (the key is then
+ * cleared rather than left holding a shape the schema now rejects).
+ *
+ * Deliberately lossy in one direction only: a value is kept whenever a
+ * reasonable reading exists (Notion's behavior), and dropped otherwise —
+ * never mangled into something that looks authored.
+ */
+export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const list = (Array.isArray(raw) ? raw : [raw]).map(String).filter((v) => v !== '');
+  const first = list[0] ?? '';
+  switch (kind) {
+    case 'text':
+    case 'url':
+      return list.join(', ');
+    case 'number': {
+      const cleaned = String(first).replace(/[^0-9.eE+-]/g, '');
+      // Number('') is 0 — prose must clear, not silently become zero.
+      if (!/\d/.test(cleaned)) return null;
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+    case 'checkbox': {
+      if (typeof raw === 'boolean') return raw;
+      const v = first.toLowerCase();
+      if (['true', 'yes', 'x', 'on', '1'].includes(v)) return true;
+      if (['false', 'no', 'off', '0'].includes(v)) return false;
+      return null;
+    }
+    case 'date': {
+      const m = /^(\d{4}-\d{2}-\d{2})/.exec(first);
+      return m !== null ? m[1] : null;
+    }
+    case 'daterange': {
+      const m = /^(\d{4}-\d{2}-\d{2})/.exec(first);
+      return m !== null ? { start: m[1], end: null } : null;
+    }
+    case 'select':
+    case 'status':
+      return first === '' ? null : first;
+    case 'multiselect':
+    case 'files':
+      return list.length > 0 ? list : null;
+    case 'person':
+    case 'relation':
+      // Relation values live in frontmatter as wikilinks; splitting a text
+      // like "alpha, beta" gives each name its own link.
+      return list.length > 0
+        ? list
+            .flatMap((v) => v.split(','))
+            .map((v) => v.trim().replace(/^\[\[/, '').replace(/\]\]$/, ''))
+            .filter((v) => v !== '')
+            .map((v) => `[[${v}]]`)
+        : null;
+    case 'rollup':
+    case 'created_time':
+    case 'last_edited_time':
+      // Computed kinds ignore stored values; leave the frontmatter alone.
+      return raw;
   }
 }
 

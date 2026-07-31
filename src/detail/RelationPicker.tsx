@@ -37,6 +37,8 @@ export interface RelationPickerProps {
   targetType: string | null;
   /** Currently linked ids (filename stems), in order. */
   value: string[];
+  /** 1 → a single linked record: picking replaces and closes (M12.4). */
+  limit?: 1;
   entries: Entry[];
   schema: Schema;
   onChange: (next: string[]) => void;
@@ -47,6 +49,7 @@ export function RelationPicker({
   fieldName,
   targetType,
   value,
+  limit,
   entries,
   schema,
   onChange,
@@ -89,6 +92,17 @@ export function RelationPicker({
   const exactExists = candidates.some((e) => e.title.toLowerCase() === trimmed.toLowerCase());
   const canCreate = targetType !== null && trimmed !== '' && !exactExists;
 
+  /** Linking under a limit of 1 replaces the link and finishes the errand. */
+  const link = (stem: string) => {
+    if (limit === 1) {
+      onChange([stem]);
+      onClose();
+      return;
+    }
+    onChange([...value, stem]);
+    setQuery('');
+  };
+
   const move = (index: number, delta: number) => {
     const to = index + delta;
     if (to < 0 || to >= value.length) return;
@@ -111,8 +125,7 @@ export function RelationPicker({
       });
       // Link the record that was just written, by the stem it landed on —
       // create_note may have deduplicated the slug.
-      onChange([...value, pathStem(path)]);
-      setQuery('');
+      link(pathStem(path));
     } catch {
       toast(`Couldn't create "${trimmed}"`);
     } finally {
@@ -148,6 +161,7 @@ export function RelationPicker({
           </h2>
           <span className="rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
             {targetType ?? 'Any record'}
+            {limit === 1 && ' · single'}
           </span>
           <span className="flex-1" />
           <button
@@ -175,8 +189,7 @@ export function RelationPicker({
               // the whole flow without leaving the keyboard.
               if (e.key !== 'Enter') return;
               if (results.length > 0) {
-                onChange([...value, pathStem(results[0].path)]);
-                setQuery('');
+                link(pathStem(results[0].path));
               } else if (canCreate) {
                 void create();
               }
@@ -259,10 +272,7 @@ export function RelationPicker({
                   key={entry.path}
                   type="button"
                   data-testid="relation-result-row"
-                  onClick={() => {
-                    onChange([...value, pathStem(entry.path)]);
-                    setQuery('');
-                  }}
+                  onClick={() => link(pathStem(entry.path))}
                   className="flex items-center gap-2 rounded-[8px] border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
                 >
                   <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />

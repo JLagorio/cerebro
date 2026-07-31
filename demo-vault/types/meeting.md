@@ -2,7 +2,6 @@
 type: Type
 icon: calendar-days
 color: '#8B7CF6'
-display: doc
 fields:
   date: { kind: date }
   attendees: { kind: person }
@@ -11,5 +10,5 @@ fields:
 
 # Meeting
 
-Meeting notes. `display: doc` keeps them in the Docs tree — they are written,
-not tracked — while still carrying properties like attendees and decisions.
+Meeting notes. A meeting is a record: it opens in the record panel, carries
+its date and attendees as properties, and shows up in views — never in Docs.

@@ -1,19 +1,18 @@
 /**
- * Type catalog (M3): the single source for "what types exist" and which of
- * them are system-owned.
+ * Type catalog (M3, rewritten M12.2): the single source for "what types
+ * exist".
  *
- * System types mirror the Salesforce standard-object model: the app depends
- * on their names and built-in fields (routing in useOpenPath, item keys,
- * the status chain), so users may not rename or delete them — nor remove
- * their built-in fields — but they MAY add custom properties and restyle
- * the icon/color. Custom types (any other `type: Type` doc) are fully
- * editable.
+ * M12 removed the Salesforce-style standard objects. Project and Work item
+ * are ordinary types now — declare them, rename them, delete them, or never
+ * have them at all; nothing in the app depends on their names. The one
+ * system type left is `Type` itself: the metamodel is the single name the
+ * app must know, because `type: Type` docs ARE the schema.
  */
 
 import { isTemplate } from '@/lib/templates';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
-import type { Entry, FieldDef, FieldOption, Presentation, Schema } from './types';
+import type { Entry, FieldDef, FieldOption, Presentation, Schema, ViewDefinition } from './types';
 import { DEFAULT_PRESENTATION } from './views';
 
 export interface SystemTypeSpec {
@@ -27,22 +26,10 @@ export interface SystemTypeSpec {
 
 export const SYSTEM_TYPES: SystemTypeSpec[] = [
   {
-    name: 'Project',
-    lockedFields: ['key', 'state'],
-    fallbackIcon: 'folder-kanban',
-    fallbackColor: '#14B8A6',
-  },
-  {
-    name: 'Work item',
-    lockedFields: ['status', 'priority', 'assignee', 'due', 'estimate'],
-    fallbackIcon: 'check-square',
-    fallbackColor: '#3D8BE8',
-  },
-  {
     // The meta-type: `type: Type` docs ARE the schema. Fully locked — its
     // reserved frontmatter keys are the schema format itself.
     name: 'Type',
-    lockedFields: ['fields', 'statuses', 'icon', 'color'],
+    lockedFields: ['fields', 'statuses', 'icon', 'color', 'folder', 'views'],
     fallbackIcon: 'shapes',
     fallbackColor: '#8B7CF6',
   },
@@ -119,23 +106,49 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
 }
 
 /**
- * True when this entry belongs in the Docs file tree (M3.1: one surface per
- * shape — records live on their type screen, docs live in Docs).
+ * True when this entry belongs in the Docs file tree (M12.1: docs are docs).
  *
- * Untyped notes are always docs. `type: Type` docs are the schema itself and
- * never appear as content. Everything else follows its type's `display:`,
- * which defaults to 'record' — a type opts back into Docs with `display: doc`
- * (meeting notes, journals: things you write rather than track).
+ * The rule is absolute now: a doc is an UNTYPED note, full stop. A typed
+ * entry is a record and lives on its type's screens and in Lists — never in
+ * Docs. The old `display: doc` escape hatch let a type opt its records back
+ * into the Docs tree, which gave "is this a doc?" three answers; M12 removes
+ * it so the two worlds cannot blend.
  */
-export function isDocEntry(entry: Entry, schema: Schema): boolean {
+export function isDocEntry(entry: Entry): boolean {
   // The whole knowledge bundle (M5) has its own read-only surface and is
   // never yours to edit. Keyed on the PATH, not on isConcept: `index.md`
   // and `log.md` are not concepts but are still bundle files, and being
   // untyped they would otherwise sail through the next branch into Docs.
   if (isKnowledgePath(entry.path)) return false;
-  if (entry.type === null || entry.type === '') return true;
-  if (entry.type === 'Type') return false;
-  return schema.types.get(entry.type)?.display === 'doc';
+  return entry.type === null || entry.type === '';
+}
+
+/**
+ * True when this entry is a RECORD: a typed note that lives on its type's
+ * screens, in views, and in Lists (M12.1/M12.2). The complement of
+ * isDocEntry over content — templates are stationery, Type docs are the
+ * schema, and the knowledge bundle is its own corpus, so none of them are
+ * records even though they carry a `type:`.
+ */
+export function isRecordEntry(entry: Entry): boolean {
+  return (
+    entry.type !== null &&
+    entry.type !== '' &&
+    entry.type !== 'Type' &&
+    !isTemplate(entry) &&
+    !isKnowledgePath(entry.path)
+  );
+}
+
+/**
+ * A record whose type declares a status field is a commitment — a task in
+ * the My-Tasks sense (M12.2: capability-based, since no type name is
+ * special). Its body checklists are its own subtasks, not the vault's.
+ */
+export function isTaskRecord(entry: Entry, schema: Schema): boolean {
+  if (!isRecordEntry(entry)) return false;
+  const def = entry.type === null ? undefined : schema.types.get(entry.type);
+  return def !== undefined && def.fields.some((f) => f.kind === 'status');
 }
 
 /** Icon + color for an entry's type, with the same fallbacks as listTypes —
@@ -173,6 +186,7 @@ function fieldToSpec(def: FieldDef): unknown {
     spec.options = def.options.map(optionToSpec);
   }
   if (def.target !== undefined) spec.target = def.target;
+  if (def.limit !== undefined) spec.limit = def.limit;
   if (def.relation !== undefined) spec.relation = def.relation;
   if (def.from !== undefined) spec.from = def.from;
   if (def.property !== undefined) spec.property = def.property;
@@ -211,4 +225,23 @@ export function typePresentation(typeName: string, schema: Schema): Presentation
         ? fields.slice(0, 6).map((f) => ({ field: f.name }))
         : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
   };
+}
+
+/**
+ * The saved views of a type's screen (M12.3) — the same contract a List's
+ * tabs have. A type that saved none renders a default table, but nothing is
+ * written to its Type doc until the user makes a view their own.
+ */
+export function typeViews(typeName: string, schema: Schema): ViewDefinition[] {
+  const saved = schema.types.get(typeName)?.views ?? [];
+  if (saved.length > 0) return saved;
+  return [
+    {
+      id: 'all',
+      name: 'Table',
+      icon: null,
+      filters: null,
+      presentation: typePresentation(typeName, schema),
+    },
+  ];
 }

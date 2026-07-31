@@ -30,21 +30,26 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
     await demoButton.click();
   }
 
-  // -- M3.5: projects are no longer a sidebar primitive. Reach one through
-  // the Project type's records, then open it with the row's Open button.
+  // -- M12: records live on their type screens, and a type keeps saved
+  // views like a List — layout switching goes through the active tab's menu.
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('sidebar-type').filter({ hasText: 'Project' }).first().click();
-  await page.getByTestId('view-switch-table').click();
-  await page.getByTestId('table-row').first().hover();
-  await page.getByRole('button', { name: /^Open / }).first().click();
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
+  await expect(page.getByTestId('table-view')).toBeVisible();
+
+  const switchLayout = async (kind: string) => {
+    await page.getByTestId('view-tabs').getByRole('tab').first().click();
+    await page.getByText('Change layout…').click();
+    await page.getByTestId(`view-switch-${kind}`).click();
+  };
 
   // -- List view: grouped section headers visible ----------------------
+  await switchLayout('list');
   const groupHeaders = page.getByTestId('list-group-header');
   await expect(groupHeaders.first()).toBeVisible();
   expect(await groupHeaders.count()).toBeGreaterThanOrEqual(1);
 
-  // -- Switch to board via the toolbar ---------------------------------
-  await page.getByTestId('view-switch-board').click();
+  // -- Switch to board via the tab menu --------------------------------
+  await switchLayout('board');
   const columns = page.getByTestId('board-column');
   await expect(columns.first()).toBeVisible();
   expect(await columns.count()).toBeGreaterThanOrEqual(2);
@@ -147,41 +152,37 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   if (await demoButton.isVisible()) {
     await demoButton.click();
   }
-  // M3.5: reach a project through the Project type's records.
+  // -- M12: a List is created in a Collection, from the sidebar ----------
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('sidebar-type').filter({ hasText: 'Project' }).first().click();
-  await page.getByTestId('view-switch-table').click();
-  await page.getByTestId('table-row').first().hover();
-  await page.getByRole('button', { name: /^Open / }).first().click();
+  const deliveryRow = page
+    .getByTestId('collection-node-collection')
+    .filter({ hasText: 'Delivery' });
+  await expect(deliveryRow).toBeVisible();
+  await deliveryRow.hover();
+  await page.getByRole('button', { name: 'Add to Delivery' }).click();
+  await page.getByLabel('List name').fill('Smoke board');
+  await page.getByRole('button', { name: 'Save view' }).click();
 
-  // -- Create a project-scoped List from the tab row (M10: the sidebar's own
-  // + names a Collection instead) ----------------------------------------
-  await page.getByTestId('project-tabs').getByRole('button', { name: 'New list' }).click();
-  await page.getByPlaceholder('List name').fill('Smoke board');
-  await page.getByRole('button', { name: 'Save' }).click();
-  const smokeTab = page.getByRole('tab', { name: 'Smoke board' });
-  await expect(smokeTab).toHaveAttribute('aria-selected', 'true');
-
-  // Locate the view file on the mock disk (project dir derived from it).
+  // Lands on the new List; its file lives in the collection's folder.
   const findViewPath = () =>
     page.evaluate(() =>
-      [...window.__cerebroMockFs.keys()].find((k) => k.endsWith('/views/smoke-board.yml')),
+      [...window.__cerebroMockFs.keys()].find((k) => k.endsWith('/smoke-board.list.yml')),
     );
   await expect.poll(findViewPath, { timeout: 5_000 }).toBeDefined();
   const viewPath = await findViewPath();
-  if (!viewPath) throw new Error('smoke-board view file missing from mock fs');
+  if (!viewPath) throw new Error('smoke-board list file missing from mock fs');
 
-  // -- Tab switching keeps working, toolbar edits auto-persist ------------
-  await page.getByRole('tab', { name: 'Items' }).click();
-  await smokeTab.click();
+  // -- The tab row owns layout; changing it persists to the List file -----
+  await page.getByTestId('view-tabs').getByRole('tab').first().click();
+  await page.getByText('Change layout…').click();
   await page.getByTestId('view-switch-board').click();
   await expect(page.getByTestId('board-column').first()).toBeVisible();
   await expect
     .poll(() => readMockFile(page, viewPath), { timeout: 5_000 })
     .toContain('type: board');
 
-  // -- Pages tab: new folder, new page inside it --------------------------
-  await page.getByRole('tab', { name: 'Pages' }).click();
+  // -- Docs: new folder, new page inside it (the docs sidebar's tree) -----
+  await page.getByTestId('rail').getByRole('button', { name: 'Docs' }).click();
   await page.getByRole('button', { name: 'New folder' }).click();
   await page.getByPlaceholder('Folder name').fill('Notes');
   await page.getByRole('button', { name: 'Create' }).click();

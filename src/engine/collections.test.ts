@@ -120,12 +120,44 @@ describe('effectiveCollections', () => {
     expect(found.map((c) => c.folder)).toEqual(['product']);
   });
 
-  it('never implies one for a project-scoped List — those are project tabs', () => {
+  it('implies one for a project-scoped List — projects retired (M12.5)', () => {
     const scoped = parseListYaml('delivery', 'name: Delivery\n', {
       project: 'projects/atlas/project.md',
       path: 'projects/atlas/views/delivery.yml',
     });
-    expect(effectiveCollections([], [scoped])).toEqual([]);
+    // The old project tab is an ordinary List now, and its folder is its
+    // container like anyone else's.
+    expect(effectiveCollections([], [scoped]).map((c) => c.folder)).toEqual([
+      'projects/atlas/views',
+    ]);
+  });
+
+  it('implies one per legacy project folder, named after its project.md', () => {
+    const projectDoc = makeEntry({
+      path: 'projects/atlas/project.md',
+      filename: 'project.md',
+      folder: 'projects/atlas',
+      title: 'Atlas',
+      type: 'Project',
+    });
+    const found = effectiveCollections([], [], [projectDoc]);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      folder: 'projects/atlas',
+      declared: false,
+      definition: { name: 'Atlas' },
+    });
+  });
+
+  it('does not mistake a Type doc named project.md for a project marker', () => {
+    const typeDoc = makeEntry({
+      path: 'types/project.md',
+      filename: 'project.md',
+      folder: 'types',
+      title: 'Project',
+      type: 'Type',
+    });
+    expect(effectiveCollections([], [], [typeDoc])).toHaveLength(0);
   });
 
   it('leaves no List without a home, whatever shape it is on disk', () => {
@@ -233,12 +265,16 @@ describe('collectionsTree', () => {
     ]);
   });
 
-  it('leaves project-scoped legacy views out of the tree — they are project tabs', () => {
+  it('renders project-scoped legacy views in the tree (M12.5)', () => {
     const scoped = parseListYaml('delivery', 'name: Delivery\n', {
       project: 'projects/atlas/project.md',
       path: 'projects/atlas/views/delivery.yml',
     });
-    expect(collectionsTree([], [scoped], [], schema)).toEqual([]);
+    const tree = collectionsTree([], [scoped], [], schema);
+    expect(tree).toHaveLength(1);
+    const listNodes = (n: (typeof tree)[number]): string[] =>
+      n.kind === 'list' ? [n.label] : n.children.flatMap(listNodes);
+    expect(tree.flatMap(listNodes)).toEqual(['Delivery']);
   });
 
   it('never renders a List outside a Collection', () => {

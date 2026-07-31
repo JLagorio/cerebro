@@ -1,4 +1,5 @@
 import type { Entry } from './types';
+import { isDocEntry } from './typeCatalog';
 
 /**
  * Multi-page docs (M2.x docs polish) use the folder-note convention so the
@@ -40,7 +41,9 @@ export function docPagesFor(entry: Entry, entries: Entry[]): DocPages | null {
         e.folder === entry.folder &&
         e.path !== main.path &&
         e.filename !== 'project.md' &&
-        e.type !== 'Work item',
+        // Records sharing the folder are not pages of the doc (M12.1) — a
+        // work item beside a spec used to show up as one of its tabs.
+        isDocEntry(e),
     )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.title.localeCompare(b.title));
   return { folder: entry.folder, main, pages: [main, ...rest] };

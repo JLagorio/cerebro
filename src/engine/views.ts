@@ -56,6 +56,24 @@ export function toggleSort(p: Presentation, field: string): Presentation {
   return { ...p, sort: [{ field, dir }, ...p.sort.filter((s) => s.field !== field)] };
 }
 
+/** Promote `field` to the primary sort with an explicit direction (M12.4b —
+ * the header menu says which way, unlike the label's toggle). */
+export function sortBy(p: Presentation, field: string, dir: 'asc' | 'desc'): Presentation {
+  return { ...p, sort: [{ field, dir }, ...p.sort.filter((s) => s.field !== field)] };
+}
+
+/**
+ * Toggle banding by `field` (M12.4b — the header menu's Group). Relation
+ * (nest) levels survive: banding and nesting are different levels of the one
+ * chain, and grouping by status must not flatten a hierarchy.
+ */
+export function groupByField(p: Presentation, field: string): Presentation {
+  const nests = p.group.filter((g) => g.descend !== undefined);
+  const bandsNow = p.group.filter((g) => g.descend === undefined);
+  const already = bandsNow.length === 1 && bandsNow[0].field === field;
+  return { ...p, group: already ? nests : [{ field }, ...nests] };
+}
+
 const FILTER_OPS: FilterOp[] = [
   'equals', 'not_equals', 'contains', 'any_of', 'none_of',
   'is_empty', 'is_not_empty', 'before', 'after',
@@ -107,6 +125,13 @@ function parsePresentation(raw: unknown): Presentation {
         : undefined,
     ...(typeof obj.titleWidth === 'number' && Number.isFinite(obj.titleWidth)
       ? { titleWidth: obj.titleWidth }
+      : {}),
+    // Both stored only off their defaults, so existing files stay untouched.
+    ...(obj.titleFrozen === false ? { titleFrozen: false } : {}),
+    ...(typeof obj.titlePosition === 'number' &&
+    Number.isInteger(obj.titlePosition) &&
+    obj.titlePosition > 0
+      ? { titlePosition: obj.titlePosition }
       : {}),
     ...(obj.chips === 'plain' || obj.chips === 'type-icon'
       ? { chips: obj.chips as ChipStyle }
@@ -427,6 +452,31 @@ function parseViews(obj: Record<string, unknown>): ViewDefinition[] {
   ];
 }
 
+/**
+ * Views persisted on a Type doc (M12.3): an array under the `views:`
+ * frontmatter key, one entry per tab — the same shape a List keeps. Unlike a
+ * List file there is no legacy single-view shape to migrate: absent or
+ * malformed simply means "no saved views yet" and the type screen renders
+ * its default table.
+ */
+export function parseViewList(raw: unknown): ViewDefinition[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const taken = new Set<string>();
+  return raw.map((r, i) => parseView(r, i, taken));
+}
+
+/** ViewDefinition[] → the plain objects stored under `views:` (frontmatter or
+ * List YAML alike). Inverse of parseViewList. */
+export function serializeViewList(views: ViewDefinition[]): unknown[] {
+  return views.map((v) => ({
+    id: v.id,
+    name: v.name,
+    icon: v.icon,
+    filters: v.filters,
+    presentation: serializePresentation(v.presentation),
+  }));
+}
+
 /** The view a selection names, or the first tab when it names none. */
 export function resolveView(def: ListDefinition, viewId?: string | null): ViewDefinition {
   if (viewId != null) {
@@ -489,6 +539,10 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     columns: p.columns,
     ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
     ...(p.titleWidth !== undefined ? { titleWidth: p.titleWidth } : {}),
+    ...(p.titleFrozen === false ? { titleFrozen: false } : {}),
+    ...(p.titlePosition !== undefined && p.titlePosition > 0
+      ? { titlePosition: p.titlePosition }
+      : {}),
     ...(p.chips !== undefined ? { chips: p.chips } : {}),
     // M10 axis configuration — written only when set, so a table's YAML
     // does not carry three keys about date axes it has no use for.
@@ -510,12 +564,6 @@ export function serializeList(def: ListDefinition): string {
     color: def.color,
     order: def.order,
     source: def.source,
-    views: def.views.map((v) => ({
-      id: v.id,
-      name: v.name,
-      icon: v.icon,
-      filters: v.filters,
-      presentation: serializePresentation(v.presentation),
-    })),
+    views: serializeViewList(def.views),
   });
 }

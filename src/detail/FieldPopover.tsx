@@ -28,7 +28,9 @@ export function FixedBelowAnchor({ children }: { children: React.ReactNode }) {
       className="fixed z-50"
       style={pos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: pos.left, top: pos.top }}
     >
-      {children}
+      {/* Animated on an inner wrapper so the entrance transform never skews
+          the measurement above (M12.8). */}
+      <div className="cb-menu-in">{children}</div>
     </div>
   );
 }
@@ -84,6 +86,7 @@ export function FieldPopover({
         type="button"
         aria-label="Close popover"
         onClick={onClose}
+        onWheel={onClose}
         className="fixed inset-0 z-40 cursor-default bg-transparent"
       />
       <FixedBelowAnchor>

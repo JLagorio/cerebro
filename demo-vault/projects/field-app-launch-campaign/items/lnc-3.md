@@ -1,7 +1,7 @@
 ---
 type: Work item
 key: LNC-3
-status: idea
+status: backlog
 priority: medium
 assignee: "[[josef-lang]]"
 due: 2026-08-18

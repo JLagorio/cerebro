@@ -104,6 +104,20 @@ export function toggleColumn(columns: ColumnSpec[], field: string): ColumnSpec[]
   return columns.map((c) => (c.field === field ? { ...c, hidden: c.hidden !== true } : c));
 }
 
+/** Move a column to an absolute index among the VISIBLE columns (M12.8 —
+ * the settings panel's drag reorder drops on a slot, not a direction). */
+export function moveColumnTo(columns: ColumnSpec[], field: string, to: number): ColumnSpec[] {
+  const visible = columns.filter((c) => c.hidden !== true);
+  const from = visible.findIndex((c) => c.field === field);
+  if (from === -1) return columns;
+  const clamped = Math.max(0, Math.min(to, visible.length - 1));
+  if (clamped === from) return columns;
+  const reordered = [...visible];
+  const [moved] = reordered.splice(from, 1);
+  reordered.splice(clamped, 0, moved);
+  return [...reordered, ...columns.filter((c) => c.hidden === true)];
+}
+
 /** Move a column to a new index among the VISIBLE columns. */
 export function moveColumn(columns: ColumnSpec[], field: string, delta: number): ColumnSpec[] {
   const visible = columns.filter((c) => c.hidden !== true);
@@ -133,4 +147,36 @@ export function setColumnWidth(
     }
     return { ...c, width: Math.max(MIN_COL_W, Math.round(width)) };
   });
+}
+
+/** Toggle wrapping for one column (M12.4b — the header menu's Wrap content). */
+export function setColumnWrap(columns: ColumnSpec[], field: string): ColumnSpec[] {
+  const existing = columns.find((c) => c.field === field);
+  if (existing === undefined) return [...columns, { field, wrap: true }];
+  return columns.map((c) => (c.field === field ? { ...c, wrap: c.wrap !== true } : c));
+}
+
+/**
+ * Insert a column beside another (M12.4b — Insert left / Insert right). A
+ * spec the view already holds (even hidden) is moved rather than duplicated.
+ */
+export function insertColumn(
+  columns: ColumnSpec[],
+  field: string,
+  anchor: string,
+  side: 'left' | 'right',
+): ColumnSpec[] {
+  const rest = columns.filter((c) => c.field !== field);
+  const at = rest.findIndex((c) => c.field === anchor);
+  if (at === -1) return [...rest, { field }];
+  const index = side === 'left' ? at : at + 1;
+  const existing = columns.find((c) => c.field === field);
+  let spec: ColumnSpec = { field };
+  if (existing !== undefined) {
+    const { hidden: _shown, ...kept } = existing;
+    spec = kept;
+  }
+  const next = [...rest];
+  next.splice(index, 0, spec);
+  return next;
 }

@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Entry, Schema, StatusDef } from '@/engine/types';
+import type { Entry } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import { greetingForHour, HomePage, projectProgress } from './HomePage';
+import { greetingForHour, HomePage } from './HomePage';
 
 function mkEntry(partial: Partial<Entry> & { path: string }): Entry {
   return {
@@ -50,20 +50,6 @@ const itemOpen = mkEntry({
   properties: { status: 'todo' },
 });
 
-const STATUSES: StatusDef[] = [
-  { id: 'todo', label: 'Todo', color: '#3D8BE8', group: 'active' },
-  { id: 'done', label: 'Done', color: '#34B764', group: 'done' },
-];
-
-const fakeSchema: Schema = {
-  types: new Map(),
-  projectForEntry: () => project,
-  relations: new Map(),
-  statusSetForProject: () => STATUSES,
-  statusSetFor: () => STATUSES,
-  resolveField: () => ({ def: null, raw: null, display: '', color: null, ghost: false }),
-};
-
 describe('greetingForHour', () => {
   it('says good morning before noon', () => {
     expect(greetingForHour(0)).toBe('Good morning');
@@ -79,43 +65,13 @@ describe('greetingForHour', () => {
   });
 });
 
-describe('projectProgress', () => {
-  const entries = [project, itemDone, itemOpen];
-
-  it('counts done-group items over total contained Work items', () => {
-    expect(projectProgress(project, entries, fakeSchema)).toEqual({ total: 2, done: 1 });
-  });
-
-  it('returns zeros for a project with no items', () => {
-    const empty = mkEntry({
-      path: 'projects/empty/project.md',
-      title: 'Empty',
-      type: 'Project',
-    });
-    expect(projectProgress(empty, entries, fakeSchema)).toEqual({ total: 0, done: 0 });
-  });
-
-  it('does not count items whose status is not in the status set', () => {
-    const ghost = mkEntry({
-      path: 'projects/foundations/items/fld-3.md',
-      filename: 'fld-3.md',
-      project: FOUNDATIONS,
-      type: 'Work item',
-      properties: { status: 'someday' },
-    });
-    expect(projectProgress(project, [...entries, ghost], fakeSchema)).toEqual({
-      total: 3,
-      done: 1,
-    });
-  });
-});
-
 describe('HomePage', () => {
   beforeEach(() => {
     useVaultStore.setState({
       vaultPath: '/demo-vault',
       entries: [project, itemDone, itemOpen],
       views: [],
+      collections: [],
       status: 'ready',
       error: null,
     });
@@ -128,20 +84,26 @@ describe('HomePage', () => {
 
   afterEach(cleanup);
 
-  it('renders the projects grid with key tags and progress', () => {
+  // M12.5: the grid shows Collections. A legacy project folder reads as one
+  // — named after its project.md, nothing rewritten on disk.
+  it('renders a legacy project folder as a collection card', () => {
     render(<HomePage />);
-    expect(screen.getByText('1 project')).toBeTruthy();
-    expect(screen.getByText('Foundations')).toBeTruthy();
-    expect(screen.getByText('FLD')).toBeTruthy();
-    expect(screen.getByText('1/2 done')).toBeTruthy();
+    expect(screen.getByText('1 collection')).toBeTruthy();
+    const card = screen.getByTestId('home-collection-card');
+    expect(card.textContent).toContain('Foundations');
+    fireEvent.click(card);
+    expect(useNavStore.getState().selection).toEqual({
+      kind: 'collection',
+      folder: 'projects/foundations',
+    });
   });
 
   // M1.x fresh-vault empty state: a brand-new vault rendered a bare section
   // heading with nothing actionable under it.
-  it('shows an empty state when the vault has no projects', () => {
+  it('shows an empty state when the vault has no collections', () => {
     useVaultStore.setState({ entries: [] });
     render(<HomePage />);
     expect(screen.getByText('Nothing here yet')).toBeTruthy();
-    expect(screen.getByText('Use New to create your first project.')).toBeTruthy();
+    expect(screen.getByText('Use New to create your first collection.')).toBeTruthy();
   });
 });
