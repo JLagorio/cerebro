@@ -30,7 +30,34 @@ pub fn read_raw(vault: &Path) -> Option<String> {
     std::fs::read_to_string(vault.join(CONFIG_PATH)).ok()
 }
 
+/// Absent, unreadable, and readable are THREE cases, not two: an absent file
+/// means "no explicit list" (legacy open mode), but an unreadable one —
+/// permissions, IO error, non-UTF-8 from a hand-edit — is a list we cannot
+/// see, and must fail closed exactly like an unparseable one.
+enum ConfigRead {
+    Absent,
+    Unreadable,
+    Content(String),
+}
+
+fn read_config(vault: &Path) -> ConfigRead {
+    match std::fs::read_to_string(vault.join(CONFIG_PATH)) {
+        Ok(raw) => ConfigRead::Content(raw),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ConfigRead::Absent,
+        Err(_) => ConfigRead::Unreadable,
+    }
+}
+
 pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
+    // An empty payload DELETES the file — the one way back to the legacy
+    // "inherit my global config" mode once a list has existed. Removing the
+    // last server keeps the file (strict, zero servers): pinned-to-none is
+    // the safe reading of an empty list, and widening back to everything
+    // must be its own explicit act (the Settings reset button).
+    if json.trim().is_empty() {
+        let _ = std::fs::remove_file(vault.join(CONFIG_PATH));
+        return Ok(());
+    }
     let parsed: Value =
         serde_json::from_str(json).map_err(|e| format!("connectors.json is not valid JSON: {e}"))?;
     if !parsed.is_object() {
@@ -56,9 +83,10 @@ pub fn connector_context(vault: &Path, connectors: bool) -> (Map<String, Value>,
     if !connectors {
         return (Map::new(), true);
     }
-    match read_raw(vault) {
-        None => (Map::new(), false),
-        Some(raw) => match serde_json::from_str::<Value>(&raw) {
+    match read_config(vault) {
+        ConfigRead::Absent => (Map::new(), false),
+        ConfigRead::Unreadable => (Map::new(), true),
+        ConfigRead::Content(raw) => match serde_json::from_str::<Value>(&raw) {
             Err(_) => (Map::new(), true),
             Ok(parsed) => (enabled_servers(&parsed), true),
         },
@@ -166,6 +194,19 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_config_fails_closed_like_a_broken_one() {
+        let vault = temp_vault("unreadable");
+        std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
+        // Invalid UTF-8: read_to_string errors with kind InvalidData, which
+        // must NOT be conflated with the file being absent — an explicit
+        // list we cannot read must not widen into "everything".
+        std::fs::write(vault.join(CONFIG_PATH), [0xff, 0xfe, 0xfd]).unwrap();
+        let (servers, strict) = connector_context(&vault, true);
+        assert!(servers.is_empty());
+        assert!(strict);
+    }
+
+    #[test]
     fn a_broken_config_fails_closed_rather_than_open() {
         let vault = temp_vault("broken");
         std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
@@ -182,5 +223,18 @@ mod tests {
         assert!(save_raw(&vault, "{not json").is_err());
         assert!(save_raw(&vault, "{\"servers\":{}}").is_ok());
         assert_eq!(read_raw(&vault).unwrap(), "{\"servers\":{}}");
+    }
+
+    #[test]
+    fn saving_empty_deletes_the_file_and_restores_legacy_mode() {
+        let vault = temp_vault("reset");
+        save_raw(&vault, "{\"servers\":{}}").unwrap();
+        // An empty LIST is not legacy — it pins the run to no servers.
+        assert!(connector_context(&vault, true).1, "empty list stays strict");
+        save_raw(&vault, "").unwrap();
+        assert!(read_raw(&vault).is_none());
+        let (servers, strict) = connector_context(&vault, true);
+        assert!(servers.is_empty());
+        assert!(!strict, "deleting the list is the explicit way back to legacy");
     }
 }

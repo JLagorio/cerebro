@@ -35,6 +35,12 @@ pub struct McpState {
 
 pub const DEFAULT_ACTOR: &str = "claude-code";
 
+/// None and blank both read as the default — a panel run AFTER an agent run
+/// must reset the attribution, never inherit it.
+fn normalize_actor(actor: Option<&str>) -> &str {
+    actor.filter(|a| !a.trim().is_empty()).unwrap_or(DEFAULT_ACTOR)
+}
+
 #[derive(Clone)]
 struct Running {
     port: u16,
@@ -136,10 +142,8 @@ impl McpState {
     pub fn set_actor(&self, actor: Option<&str>) -> Result<(), String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         if let Some(running) = guard.as_ref() {
-            *running.actor.lock().map_err(|_| "actor lock poisoned")? = actor
-                .filter(|a| !a.trim().is_empty())
-                .unwrap_or(DEFAULT_ACTOR)
-                .to_string();
+            *running.actor.lock().map_err(|_| "actor lock poisoned")? =
+                normalize_actor(actor).to_string();
         }
         Ok(())
     }
@@ -904,6 +908,26 @@ mod tests {
             std::fs::read_to_string(dir.join("knowledge/systems/scouted.md")).unwrap();
         assert!(written.contains("process:release-scout"));
         assert!(!written.contains("claude-code"));
+
+        // Both stamping tools, not just one — cache_source regressing to a
+        // hardcoded actor would misattribute every fetched copy.
+        let mut cache = Map::new();
+        cache.insert("id".into(), json!("https://wiki.test/x/page"));
+        cache.insert("title".into(), json!("Page"));
+        cache.insert("body".into(), json!("fetched content"));
+        tool_cache_source(&dir, &cache, "process:release-scout").unwrap();
+        let cached =
+            std::fs::read_to_string(dir.join("sources/web/wiki.test-x-page.md")).unwrap();
+        assert!(cached.contains("process:release-scout"));
+        assert!(!cached.contains("claude-code"));
+    }
+
+    #[test]
+    fn a_missing_or_blank_actor_resets_to_the_default_never_inherits() {
+        assert_eq!(normalize_actor(None), DEFAULT_ACTOR);
+        assert_eq!(normalize_actor(Some("")), DEFAULT_ACTOR);
+        assert_eq!(normalize_actor(Some("   ")), DEFAULT_ACTOR);
+        assert_eq!(normalize_actor(Some("process:scout")), "process:scout");
     }
 
     #[test]

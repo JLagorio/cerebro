@@ -366,6 +366,12 @@ export async function readConnectors(_vault: string): Promise<string> {
 }
 
 export async function saveConnectors(_vault: string, json: string): Promise<void> {
+  // Parity with connectors.rs: an empty payload deletes the config, which
+  // is the one way back to inheriting the user's global MCP setup.
+  if (json.trim() === '') {
+    connectorsJson = '';
+    return;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);

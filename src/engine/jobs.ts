@@ -37,6 +37,14 @@ export interface AgentJob {
   /** What the ledger records at start: the note's modifiedAt for learn jobs,
    * the schedule's fire key for scheduled runs. */
   runKey: string;
+  /**
+   * WHICH ledger suppresses this job — decided here, where each kind's
+   * derivation gates on one, and never re-derived in the runner. The
+   * review's worst finding was exactly that drift: agent jobs gated on
+   * skillRuns but recorded in attempts, which re-ran a scheduled agent
+   * back-to-back forever.
+   */
+  ledger: 'attempts' | 'skillRuns';
 }
 
 export interface JobQueueInput extends LearnQueueInput {
@@ -54,12 +62,41 @@ export function jobQueue(
   concepts: readonly Concept[],
   { filed, attempts, skillRuns, now, connectors = false }: JobQueueInput,
 ): AgentJob[] {
+  // A cached source past its refresh date becomes a re-fetch (M13.3) —
+  // cache_source stamps stale_after for exactly this, and the refreshed
+  // file's new mtime makes citing concepts `behind`, so the distiller
+  // re-checks them with no extra wiring. Derived FIRST because a
+  // refresh-due source must be exactly ONE job: its own `behind`
+  // re-distillation shares the same attempts key, and letting that run
+  // first would record the key and starve the re-fetch forever. The
+  // re-distill resumes on its own once the refresh changes the mtime.
+  const refresh: AgentJob[] = [];
+  if (connectors) {
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    for (const entry of entries) {
+      if (!entry.path.startsWith(`${SOURCES_DIR}/`) || entry.parseError !== null) continue;
+      const stale = entry.properties.stale_after;
+      if (typeof stale !== 'string' || stale > today) continue;
+      if (attempts[entry.path] === entry.modifiedAt) continue;
+      refresh.push({
+        kind: 'refresh',
+        path: entry.path,
+        title: entry.title,
+        runKey: entry.modifiedAt,
+        ledger: 'attempts',
+      });
+    }
+  }
+  const refreshing = new Set(refresh.map((j) => j.path));
+
   // Skills and Agents are excluded from learning for the same reason types/
   // is: their bodies are schema for behavior, not material. Distilling a
   // playbook yields concepts about the playbook, and then every edit to it
   // re-queues a re-read forever. The filter lives here rather than in
   // isLearnable so engine/learn.ts stays untouched by M13.
-  const material = entries.filter((e) => !isSkillEntry(e) && !isAgentEntry(e));
+  const material = entries.filter(
+    (e) => !isSkillEntry(e) && !isAgentEntry(e) && !refreshing.has(e.path),
+  );
   // Learn's own `stale` jobs are dropped here and re-derived below with the
   // schema trigger folded in — a concept due for BOTH reasons must be ONE
   // job under ONE ledger key, or a no-op recheck ping-pongs between the two
@@ -71,6 +108,7 @@ export function jobQueue(
       path: j.path,
       title: j.title,
       runKey: j.modifiedAt,
+      ledger: 'attempts' as const,
     }));
 
   // Re-synthesis is staleness (M13.5): when a Type doc changes after a
@@ -111,6 +149,7 @@ export function jobQueue(
       path: concept.entry.path,
       title: concept.title,
       runKey,
+      ledger: 'attempts',
     });
   }
 
@@ -129,24 +168,13 @@ export function jobQueue(
     if (schedule === null) continue;
     const key = lastFireKey(schedule, now);
     if (skillRuns[entry.path] === key) continue;
-    scheduled.push({ kind, path: entry.path, title: entry.title, runKey: key });
-  }
-
-  // A cached source past its refresh date becomes a re-fetch (M13.3) —
-  // cache_source stamps stale_after for exactly this. The refreshed file's
-  // modifiedAt then makes citing concepts `behind`, so the distiller
-  // re-checks them with no extra wiring: the loop ticks on external data.
-  // The attempts ledger is shared with learning; same discipline, same key.
-  const refresh: AgentJob[] = [];
-  if (connectors) {
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    for (const entry of entries) {
-      if (!entry.path.startsWith(`${SOURCES_DIR}/`) || entry.parseError !== null) continue;
-      const stale = entry.properties.stale_after;
-      if (typeof stale !== 'string' || stale > today) continue;
-      if (attempts[entry.path] === entry.modifiedAt) continue;
-      refresh.push({ kind: 'refresh', path: entry.path, title: entry.title, runKey: entry.modifiedAt });
-    }
+    scheduled.push({
+      kind,
+      path: entry.path,
+      title: entry.title,
+      runKey: key,
+      ledger: 'skillRuns',
+    });
   }
 
   // Every kind has a DISTINCT rank, and that is load-bearing for the tie-

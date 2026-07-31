@@ -20,16 +20,26 @@ export function ConnectorSettings() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
   const [specs, setSpecs] = useState<ConnectorSpec[] | null>(null);
+  // True while `.cerebro/connectors.json` exists — an EMPTY list with the
+  // file present still pins runs to no servers, so the two need telling
+  // apart to say so, and to offer the way back.
+  const [filePresent, setFilePresent] = useState(false);
   const [name, setName] = useState('');
   const [transport, setTransport] = useState<'http' | 'stdio'>('http');
   const [target, setTarget] = useState('');
 
   useEffect(() => {
+    // Cleared FIRST: the previous vault's rows must not stay interactive
+    // while the new vault's config loads — a click would write them there.
+    setSpecs(null);
+    setFilePresent(false);
     if (vaultPath === null) return;
     let stale = false;
     void readConnectors(vaultPath)
       .then((raw) => {
-        if (!stale) setSpecs(parseConnectors(raw));
+        if (stale) return;
+        setSpecs(parseConnectors(raw));
+        setFilePresent(raw.trim() !== '');
       })
       .catch(() => {
         if (!stale) setSpecs([]);
@@ -41,11 +51,30 @@ export function ConnectorSettings() {
 
   if (vaultPath === null || specs === null) return null;
 
+  const reload = () =>
+    readConnectors(vaultPath).then((raw) => {
+      setSpecs(parseConnectors(raw));
+      setFilePresent(raw.trim() !== '');
+    });
+
   const persist = (next: ConnectorSpec[]) => {
     setSpecs(next);
-    void saveConnectors(vaultPath, serializeConnectors(next)).catch((e) =>
-      toast(e instanceof Error ? e.message : String(e)),
-    );
+    setFilePresent(true);
+    void saveConnectors(vaultPath, serializeConnectors(next)).catch((e) => {
+      toast(e instanceof Error ? e.message : String(e));
+      // A failed save must not leave the UI describing a list the run will
+      // not use — show what is actually on disk.
+      void reload().catch(() => undefined);
+    });
+  };
+
+  const resetToGlobal = () => {
+    setSpecs([]);
+    setFilePresent(false);
+    void saveConnectors(vaultPath, '').catch((e) => {
+      toast(e instanceof Error ? e.message : String(e));
+      void reload().catch(() => undefined);
+    });
   };
 
   const add = () => {
@@ -126,10 +155,22 @@ export function ConnectorSettings() {
           Add
         </Button>
       </div>
+      {specs.length === 0 && filePresent && (
+        <p className="m-0 text-[10.5px] leading-[14px] text-[var(--warn-600)]">
+          The list exists but is empty — runs are pinned to no connectors at all.{' '}
+          <button
+            type="button"
+            onClick={resetToGlobal}
+            className="cursor-pointer border-0 bg-transparent p-0 text-[10.5px] underline"
+          >
+            Use my global MCP config instead
+          </button>
+        </p>
+      )}
       <p className="m-0 text-[10.5px] leading-[14px] text-[var(--n-400)]">
-        Stored in .cerebro/connectors.json — headers and env vars are edited there, and your
-        credentials never leave this vault. Naming servers here pins the assistant to exactly this
-        list.
+        Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of
+        git checkpoints, and your credentials never leave this vault. Naming servers here pins
+        the assistant to exactly this list; with no list it inherits your global MCP config.
       </p>
     </div>
   );

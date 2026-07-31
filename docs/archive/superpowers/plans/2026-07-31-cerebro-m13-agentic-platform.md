@@ -160,7 +160,40 @@ M13.1 and M13.2 adversarially reviewed (workflows, findings fixed in-phase);
 combined review of M13.3–M13.5 run at milestone end. Playwright suite and
 real-vault (tauri dev) shakeout pending. Not merged, not pushed.
 
+## Review round: M13.3-M13.5 (15 confirmed findings, 7 unique - fixed at tip)
+
+- **Critical, fixed:** agent jobs were gated on skillRuns but recorded in
+  learnAttempts - a scheduled agent re-ran back-to-back until the next fire.
+  The job now NAMES its ledger (`AgentJob.ledger`, decided and tested in
+  jobs.ts); the runner only dispatches on it.
+- **Critical, fixed:** `.cerebro/connectors.json` (documented home of
+  Authorization headers / env keys) was swept into automatic git checkpoints
+  and pushed by sync. `.cerebro/` is now gitignored per-entry,
+  ensure_gitignore is self-healing on every checkpoint (existing repos
+  included), and an already-tracked config is untracked from the index.
+- **Major, fixed:** unreadable connectors.json (permissions, non-UTF-8) fell
+  into legacy OPEN mode; absent/unreadable/broken are now three cases and
+  unreadable fails closed.
+- **Major, fixed:** a refresh-due source that was also `behind` derived two
+  jobs on one attempts key; behind ran first and starved the re-fetch
+  forever - a refresh-due source is now exactly one job.
+- **Major, fixed:** removing the last connector stranded the vault pinned to
+  zero servers with no way back - saving empty deletes the file (explicit
+  reset button; an empty list stays strict on purpose).
+- **Minor, fixed:** ConnectorSettings stale rows across a vault switch;
+  optimistic state kept after failed saves; actor tests extended to
+  cache_source + normalize_actor reset.
+
 ## Known follow-ups (declared up front)
+
+- A child killed mid-write can land one in-flight MCP write stamped with the
+  NEXT run's actor (set_actor precedes spawn; one shared server). Real fix is
+  a per-run token in the MCP auth; accepted for v1 - the window is one write
+  wide and both actors are machine tiers, never `human:`.
+- The schema-recheck trigger compares type-doc file mtime to `generated.at`,
+  so a fresh clone/pull can queue a bundle-wide recheck sweep. It is lazy
+  (one job per drain), each concept runs once (attempts ledger), and "still
+  true, date extended" is cheap - accepted; revisit if it ever bites.
 
 - One global agent child process (`AgentState`) — agents queue single-flight in
   v1; concurrency needs the Rust change first.

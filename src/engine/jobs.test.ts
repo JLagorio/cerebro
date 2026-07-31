@@ -173,6 +173,10 @@ describe('jobQueue', () => {
     // One job, and it is the RUN — the filed entry is inert because an
     // agent's body is schema for behavior, exactly like a skill's.
     expect(due.map((j) => [j.kind, j.runKey])).toEqual([['agent', '2026-07-31 09:00']]);
+    // The job names the ledger that gates it, and for an agent that is the
+    // fire-key ledger. Recording it anywhere else re-runs the agent forever
+    // — the review's worst finding, pinned here.
+    expect(due[0].ledger).toBe('skillRuns');
     expect(
       jobQueue([scout], [], {
         ...EMPTY,
@@ -224,6 +228,7 @@ describe('jobQueue', () => {
     });
     const on = jobQueue([source, fresh], [], { ...EMPTY, now, connectors: true });
     expect(on.map((j) => [j.kind, j.path])).toEqual([['refresh', 'sources/issues/ops-121.md']]);
+    expect(on[0].ledger).toBe('attempts');
     // Without a connector there is nothing to re-fetch with — no job.
     expect(jobQueue([source], [], { ...EMPTY, now })).toEqual([]);
     // The shared attempts ledger stops the spin after one try.
@@ -235,6 +240,40 @@ describe('jobQueue', () => {
         connectors: true,
       }),
     ).toEqual([]);
+  });
+
+  it('a refresh-due source is ONE job even when it is also behind — the re-fetch is never starved', () => {
+    // The source is cited by a concept with an older stamp, so without the
+    // exclusion it would ALSO derive a behind job (rank 3) sharing the same
+    // attempts key — running first and suppressing the re-fetch forever.
+    const source = makeEntry({
+      path: 'sources/issues/ops-121.md',
+      title: 'OPS-121',
+      type: 'Source',
+      snippet: 'cached ticket',
+      properties: { stale_after: '2026-07-01' },
+      modifiedAt: '2026-07-20T00:00:00Z',
+    });
+    const entries = [
+      source,
+      makeEntry({
+        path: 'knowledge/systems/cites-source.md',
+        title: 'Cites source',
+        properties: {
+          sources: [{ id: 's', resource: 'sources/issues/ops-121.md' }],
+          generated: { by: 'claude-code', at: '2026-07-10T00:00:00Z' },
+        },
+      }),
+    ];
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
+      ...EMPTY,
+      now,
+      connectors: true,
+    });
+    expect(jobs.map((j) => j.kind)).toEqual(['refresh']);
+    // With connectors OFF there is no refresh to protect — behind proceeds.
+    const off = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    expect(off.map((j) => j.kind)).toEqual(['behind']);
   });
 
   it('refresh outranks a stale concept recheck — the copy is replaced before it is re-read', () => {

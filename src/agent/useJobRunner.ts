@@ -129,8 +129,10 @@ export function useJobRunner(): void {
       const ui = useUiStore.getState();
       ui.setAgentBusy(true);
       ui.setLearningPath(job.path);
-      // Recorded first, on purpose — see the header.
-      if (job.kind === 'scheduled') ui.recordSkillRun(job.path, job.runKey);
+      // Recorded first, on purpose — see the header. The job SAYS which
+      // ledger gates it (jobs.ts decides both sides); re-deriving that here
+      // is how agent runs briefly looped forever.
+      if (job.ledger === 'skillRuns') ui.recordSkillRun(job.path, job.runKey);
       else ui.recordLearnAttempt(job.path, job.runKey);
 
       // An agent job runs AS the agent: its record's identity in the
