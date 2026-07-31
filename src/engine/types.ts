@@ -63,6 +63,9 @@ export interface TypeDef {
   /** `folder:` on the Type doc — where new records land (M12.2). Null means
    * the records/<plural-slug> convention. */
   folder: string | null;
+  /** Saved views of the type screen (M12.3), stored under `views:` on the
+   * Type doc — the same shape a List keeps. [] means none saved yet. */
+  views: ViewDefinition[];
 }
 
 export interface ResolvedField {
@@ -103,7 +106,9 @@ export type Selection =
   // the first one. It rides on the selection rather than in component state so
   // that "the board tab of Delivery" is a place you can navigate back to.
   | { kind: 'list'; id: string; collection?: string | null; view?: string }
-  | { kind: 'type'; name: string }     // type screen: records + configuration (M3)
+  // `view` names which of the type's saved view tabs is open (M12.3), same
+  // contract as a List's; omitted means the first one.
+  | { kind: 'type'; name: string; view?: string }
   // M9.4 — git surfaces. `changes` is the uncommitted working tree (with
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }

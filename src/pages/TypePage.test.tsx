@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TypePage } from '@/pages/TypePage';
 import { fixtureVault, makeEntry } from '@/test/factories';
@@ -44,18 +44,33 @@ describe('TypePage — Records tab', () => {
     expect(screen.queryByTestId('view-switch-tree')).toBeNull();
   });
 
-  it('offers the six view kinds and switches between them', () => {
+  // M12.3: the tab row owns layout — switching goes through the active tab's
+  // menu, exactly like a List. The default (unsaved) view carries id 'all'.
+  const switchLayout = (kind: string) => {
+    fireEvent.click(screen.getByTestId('view-tab-all'));
+    fireEvent.click(screen.getByText('Change layout…'));
+    fireEvent.click(screen.getByTestId(`view-switch-${kind}`));
+  };
+
+  it('offers the six view kinds from the tab menu and switches between them', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    expect(screen.getByTestId('view-tabs')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('view-tab-all'));
+    fireEvent.click(screen.getByText('Change layout…'));
     for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
       expect(screen.getByTestId(`view-switch-${kind}`)).toBeTruthy();
     }
     fireEvent.click(screen.getByTestId('view-switch-board'));
     expect(screen.getByTestId('board-view')).toBeTruthy();
+    // The change persisted to the Type doc — a type's views are saved views.
+    expect(
+      patches.some((p) => p.path === 'types/work-item.md' && 'views' in p.patch),
+    ).toBe(true);
   });
 
   it('shows the calendar keyed on the type’s date property', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    fireEvent.click(screen.getByTestId('view-switch-calendar'));
+    switchLayout('calendar');
     const calendar = screen.getByTestId('calendar-view');
     // Work item declares `due: { kind: date }` and nothing else dated, so the
     // view infers it rather than rendering blank until someone configures one.
@@ -64,7 +79,7 @@ describe('TypePage — Records tab', () => {
 
   it('opens a record in the right-hand detail panel from the list layout', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    fireEvent.click(screen.getByTestId('view-switch-list'));
+    switchLayout('list');
     fireEvent.click(screen.getByText('Design first-run flow'));
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
   });
@@ -84,10 +99,12 @@ describe('TypePage — Records tab', () => {
   });
 });
 
-describe('TypePage — Properties tab', () => {
+describe('TypePage — Properties aside', () => {
+  // M12.3: Properties moved from a page tab to a right-hand aside, so the
+  // records surface (now the saved-views strip) never leaves the screen.
   const openProperties = (name: string) => {
     render(<TypePage selection={{ kind: 'type', name }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Properties' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Type properties' }));
   };
 
   it('lists declared fields with nothing locked (M12.2)', () => {
@@ -242,8 +259,11 @@ describe('TypePage — Properties tab', () => {
     });
     cleanup();
     openProperties('Person');
-    fireEvent.click(screen.getByRole('button', { name: 'Pronouns' }));
-    const input = screen.getByLabelText('Rename Pronouns');
+    // The aside renders BESIDE the table now, so the field name also appears
+    // as a column header — scope to the aside.
+    const aside = within(screen.getByTestId('type-properties-aside'));
+    fireEvent.click(aside.getByRole('button', { name: 'Pronouns' }));
+    const input = aside.getByLabelText('Rename Pronouns');
     fireEvent.change(input, { target: { value: 'Uses pronouns' } });
     fireEvent.blur(input);
     await waitFor(() => {

@@ -427,6 +427,31 @@ function parseViews(obj: Record<string, unknown>): ViewDefinition[] {
   ];
 }
 
+/**
+ * Views persisted on a Type doc (M12.3): an array under the `views:`
+ * frontmatter key, one entry per tab — the same shape a List keeps. Unlike a
+ * List file there is no legacy single-view shape to migrate: absent or
+ * malformed simply means "no saved views yet" and the type screen renders
+ * its default table.
+ */
+export function parseViewList(raw: unknown): ViewDefinition[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const taken = new Set<string>();
+  return raw.map((r, i) => parseView(r, i, taken));
+}
+
+/** ViewDefinition[] → the plain objects stored under `views:` (frontmatter or
+ * List YAML alike). Inverse of parseViewList. */
+export function serializeViewList(views: ViewDefinition[]): unknown[] {
+  return views.map((v) => ({
+    id: v.id,
+    name: v.name,
+    icon: v.icon,
+    filters: v.filters,
+    presentation: serializePresentation(v.presentation),
+  }));
+}
+
 /** The view a selection names, or the first tab when it names none. */
 export function resolveView(def: ListDefinition, viewId?: string | null): ViewDefinition {
   if (viewId != null) {
@@ -510,12 +535,6 @@ export function serializeList(def: ListDefinition): string {
     color: def.color,
     order: def.order,
     source: def.source,
-    views: def.views.map((v) => ({
-      id: v.id,
-      name: v.name,
-      icon: v.icon,
-      filters: v.filters,
-      presentation: serializePresentation(v.presentation),
-    })),
+    views: serializeViewList(def.views),
   });
 }

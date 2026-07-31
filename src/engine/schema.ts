@@ -10,6 +10,7 @@ import type {
 } from './types';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex } from './relations';
+import { parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
 /** Spec "simple" status template — fallback when no type/project declares statuses. */
@@ -146,6 +147,7 @@ export function buildSchema(entries: Entry[]): Schema {
         typeof e.properties.folder === 'string' && e.properties.folder.trim() !== ''
           ? e.properties.folder.trim().replace(/^\/+|\/+$/g, '')
           : null,
+      views: parseViewList((e.properties as Record<string, unknown>).views),
     });
   }
 

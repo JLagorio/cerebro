@@ -30,8 +30,9 @@ export interface ViewTabsProps {
   onChangeLayout: (id: string, type: ViewType) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
-  /** Opens the full settings panel for a view. */
-  onConfigure: (id: string) => void;
+  /** Opens the full settings panel for a view. Absent on surfaces that have
+   * no settings aside (M12.3: the type screen) — the menu item is omitted. */
+  onConfigure?: (id: string) => void;
 }
 
 export function ViewTabs({
@@ -58,7 +59,9 @@ export function ViewTabs({
         label: 'Change layout…',
         onSelect: () => setLayoutFor(view.id),
       },
-      { icon: 'settings-2', label: 'View settings…', onSelect: () => onConfigure(view.id) },
+      ...(onConfigure !== undefined
+        ? [{ icon: 'settings-2', label: 'View settings…', onSelect: () => onConfigure(view.id) }]
+        : []),
       { icon: 'copy', label: 'Duplicate', onSelect: () => onDuplicate(view.id) },
     ];
     // The last view is the only way to look at the List; removing it would

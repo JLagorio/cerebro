@@ -2,7 +2,7 @@ import { isTemplate } from '@/lib/templates';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
 import type { Entry, Presentation, Schema, Selection, SortSpec, ListFile, ListSource } from './types';
-import { isRecordEntry, typePresentation } from './typeCatalog';
+import { isRecordEntry, typeViews } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { clonePresentation, DEFAULT_PRESENTATION, resolveView } from './views';
 
@@ -196,15 +196,23 @@ export function resolveSurface(
       };
     }
     case 'type': {
-      // M3 type screen: every record carrying `type: <name>`, presented with
-      // the type's own declared fields.
-      const presentation = typePresentation(sel.name, schema);
+      // M12.3: a type keeps saved views exactly like a List — the selection's
+      // `view` names the open tab, and filters belong to the view.
+      const tabs = typeViews(sel.name, schema);
+      const active =
+        (sel.view != null ? tabs.find((v) => v.id === sel.view) : undefined) ?? tabs[0];
+      const { filters, presentation } = active;
       return {
         title: sel.name,
         entries: sortEntries(
           // Templates declare a type so new pages inherit it; they are not
           // records of it (M3.1).
-          entries.filter((e) => e.type === sel.name && !isTemplate(e)),
+          entries.filter(
+            (e) =>
+              e.type === sel.name &&
+              !isTemplate(e) &&
+              (filters === null || evaluateFilters(e, filters, schema)),
+          ),
           presentation.sort,
           schema,
         ),

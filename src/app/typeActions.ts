@@ -13,7 +13,8 @@
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { isLockedField, serializeOptions } from '@/engine/typeCatalog';
-import type { Entry, FieldKind, FieldOption, StatusDef } from '@/engine/types';
+import { serializeViewList } from '@/engine/views';
+import type { Entry, FieldKind, FieldOption, StatusDef, ViewDefinition } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -299,6 +300,33 @@ export async function setTypeStatuses(
     }
   } catch {
     toast(`Couldn't update ${listing.name} statuses`);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Persist a type screen's saved views onto its Type doc (M12.3). The whole
+ * array is written each time — a saved view IS its configuration, same
+ * contract as a List's `.list.yml`.
+ */
+export async function setTypeViews(
+  listing: { name: string; docPath: string | null },
+  views: ViewDefinition[],
+): Promise<boolean> {
+  const { entries, patchFrontmatter } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  const doc = findTypeDoc(entries, listing.name);
+  if (!guardEditable(doc, listing.name)) return false;
+  const serialized = serializeViewList(views);
+  try {
+    if (doc === null) {
+      await ensureTypeDoc({ name: listing.name, docPath: null }, { views: serialized });
+    } else {
+      await patchFrontmatter(doc.path, { views: serialized });
+    }
+  } catch {
+    toast(`Couldn't update ${listing.name} views`);
     return false;
   }
   return true;

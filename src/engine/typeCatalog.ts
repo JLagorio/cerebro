@@ -12,7 +12,7 @@
 import { isTemplate } from '@/lib/templates';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
-import type { Entry, FieldDef, FieldOption, Presentation, Schema } from './types';
+import type { Entry, FieldDef, FieldOption, Presentation, Schema, ViewDefinition } from './types';
 import { DEFAULT_PRESENTATION } from './views';
 
 export interface SystemTypeSpec {
@@ -224,4 +224,23 @@ export function typePresentation(typeName: string, schema: Schema): Presentation
         ? fields.slice(0, 6).map((f) => ({ field: f.name }))
         : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
   };
+}
+
+/**
+ * The saved views of a type's screen (M12.3) — the same contract a List's
+ * tabs have. A type that saved none renders a default table, but nothing is
+ * written to its Type doc until the user makes a view their own.
+ */
+export function typeViews(typeName: string, schema: Schema): ViewDefinition[] {
+  const saved = schema.types.get(typeName)?.views ?? [];
+  if (saved.length > 0) return saved;
+  return [
+    {
+      id: 'all',
+      name: 'Table',
+      icon: null,
+      filters: null,
+      presentation: typePresentation(typeName, schema),
+    },
+  ];
 }
