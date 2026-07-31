@@ -80,7 +80,10 @@ export function Sidebar({ onNewView }: SidebarProps) {
   // because it holds Lists), so menu actions resolve against the EFFECTIVE set
   // rather than the declared one — otherwise right-clicking such a folder finds
   // nothing and offers no actions at all.
-  const effective = useMemo(() => effectiveCollections(collections, views), [collections, views]);
+  const effective = useMemo(
+    () => effectiveCollections(collections, views, entries),
+    [collections, views, entries],
+  );
 
   const nodeMenuItems = (node: CollectionNode): ContextMenuItem[] => {
     if (node.kind === 'collection') {

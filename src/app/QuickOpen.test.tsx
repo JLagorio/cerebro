@@ -26,26 +26,30 @@ describe('QuickOpen', () => {
     expect(options[0].textContent).toContain('Guided onboarding');
   });
 
-  it('Enter navigates to the top result and closes the palette', async () => {
+  it('Enter opens the top result and closes the palette', async () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'guided{Enter}');
+    // M12.5: a legacy project.md is an ordinary record now — panel over its
+    // folder's Collection, never a page of its own.
     expect(useNavStore.getState().selection).toEqual({
-      kind: 'project',
-      path: 'projects/onboarding/project.md',
+      kind: 'collection',
+      folder: 'projects/onboarding',
     });
+    expect(useUiStore.getState().detailPath).toBe('projects/onboarding/project.md');
     expect(useUiStore.getState().quickOpenVisible).toBe(false);
   });
 
-  it('picking an item opens its detail and navigates to its containing project', async () => {
+  it('picking an item opens its detail over its containing Collection', async () => {
     const user = userEvent.setup();
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'wire');
     await user.click(screen.getAllByRole('option')[0]);
-    // v2: the owning project comes from Entry.project (containment).
+    // M12.5: containment still gives the backdrop, but the backdrop is the
+    // folder's Collection — the project page is gone.
     expect(useNavStore.getState().selection).toEqual({
-      kind: 'project',
-      path: 'projects/onboarding/project.md',
+      kind: 'collection',
+      folder: 'projects/onboarding',
     });
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-2.md');
   });

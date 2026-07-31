@@ -71,9 +71,7 @@ export function QuickOpen() {
       };
     });
 
-    const viewTargets: Target[] = views
-      .filter((v) => v.project === null)
-      .map((v) => ({
+    const viewTargets: Target[] = views.map((v) => ({
         // Ids are unique per folder, so the collection is part of the target's
         // identity AND of where it navigates — otherwise two collections'
         // "roadmap" lists collapse into one entry that opens the wrong one.

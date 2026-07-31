@@ -52,12 +52,18 @@ export function DetailPanel() {
 
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 
-  // The owning project, unless you are already looking at it — a crumb back
-  // to the page you are standing on is noise, not navigation.
-  const onItsProject = selection.kind === 'project' && selection.path === entry.project;
-  const project =
-    entry.project !== null && !onItsProject
-      ? entries.find((e) => e.path === entry.project) ?? null
+  // The containing Collection (M12.5: the folder a legacy project.md marks),
+  // unless you are already looking at it — a crumb back to the page you are
+  // standing on is noise, not navigation.
+  const containerFolder =
+    entry.project === null
+      ? null
+      : entry.project.slice(0, Math.max(entry.project.lastIndexOf('/'), 0));
+  const onItsCollection =
+    selection.kind === 'collection' && selection.folder === containerFolder;
+  const container =
+    containerFolder !== null && !onItsCollection
+      ? (entries.find((e) => e.path === entry.project) ?? null)
       : null;
 
   const commitTitle = async () => {
@@ -122,22 +128,22 @@ export function DetailPanel() {
         </span>
         <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
         {key !== '' && <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">{key}</span>}
-        {/* M9.3: opening a record no longer drags you to its project, so the
-            project becomes something you press rather than something that
-            happens to you. Hidden when you are already standing on it. */}
-        {project !== null && (
+        {/* M9.3/M12.5: opening a record no longer drags you to its container,
+            so the container becomes something you press rather than something
+            that happens to you. Hidden when you are already standing on it. */}
+        {container !== null && containerFolder !== null && (
           <>
             <span aria-hidden className="text-[11px] text-[var(--n-300)]">
               /
             </span>
             <button
               type="button"
-              data-testid="detail-project-crumb"
-              onClick={() => navigate({ kind: 'project', path: project.path })}
+              data-testid="detail-collection-crumb"
+              onClick={() => navigate({ kind: 'collection', folder: containerFolder })}
               className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
             >
-              <Icon name={typeStyle('Project', schema).icon} size={11} />
-              <span className="truncate">{project.title}</span>
+              <Icon name="folder-open" size={11} />
+              <span className="truncate">{container.title}</span>
             </button>
           </>
         )}

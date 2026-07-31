@@ -54,7 +54,7 @@ describe('TableView row opening (M9.3)', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'list', id: 'at-risk-work' });
   });
 
-  it('still navigates when the row is a Project record', async () => {
+  it('opens a Project record in the panel too — no type moves you (M12.5)', async () => {
     const user = userEvent.setup();
     const entries = fixtureVault();
     useVaultStore.setState({ entries });
@@ -71,8 +71,10 @@ describe('TableView row opening (M9.3)', () => {
 
     await user.click(screen.getByLabelText(`Open ${project.title}`));
 
-    // A project is a page, not a panel — it is the one kind that still moves.
-    expect(useNavStore.getState().selection).toEqual({ kind: 'project', path: project.path });
+    // The project page is retired: a legacy project.md is an ordinary record,
+    // and in-place callers keep the view they were reading.
+    expect(useUiStore.getState().detailPath).toBe(project.path);
+    expect(useNavStore.getState().selection).toEqual({ kind: 'list', id: 'at-risk-work' });
   });
 });
 

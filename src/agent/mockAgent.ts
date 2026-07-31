@@ -56,9 +56,9 @@ function scriptFor(message: string): Script {
         path: DEMO_CAPTURE,
         type: 'Work item',
         properties: { status: 'todo', priority: 'high' },
-        reasoning: 'It names an action and an owner, so it reads as a work item.',
+        reasoning: 'It names an action and an owner, so it reads as a task-like record.',
       },
-      text: 'There are captures waiting. The one about the warehouse cutover reads like a **Work item** for Phoenix warehouse rollout — it names an owner and an action. I have proposed a filing for it; accept or reject it in the Inbox.',
+      text: 'There are captures waiting. The one about the warehouse cutover reads like a **Work item** record — it names an owner and an action, and that type declares a status. I have proposed a filing for it; accept or reject it in the Inbox.',
     };
   }
   if (prompt.includes('risk') || prompt.includes('at risk')) {

@@ -144,36 +144,9 @@ function mkView(
 }
 
 describe('resolveSurface', () => {
-  it('a project selection collects its contained records only', () => {
-    const { entries, schema } = fixture();
-    const collection = resolveSurface(
-      { kind: 'project', path: FOUNDATIONS },
-      entries,
-      schema,
-      [],
-    );
-    expect(collection.title).toBe('Foundations');
-    // Docs and the project.md itself are excluded — records only, sorted
-    // (M12.2: records of ANY type, not just Work items).
-    expect(collection.entries.map((e) => e.path)).toEqual([
-      'projects/foundations/items/fld-2.md',
-      'projects/foundations/items/fld-1.md',
-    ]);
-    expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
-  });
-
-  it('a missing project yields an empty collection titled by the path stem', () => {
-    const { entries, schema } = fixture();
-    const collection = resolveSurface(
-      { kind: 'project', path: 'projects/gone/project.md' },
-      entries,
-      schema,
-      [],
-    );
-    expect(collection.title).toBe('project');
-    expect(collection.entries).toEqual([]);
-    expect(collection.presentation).toEqual(DEFAULT_LIST_PRESENTATION);
-  });
+  // M12.5: the `project` selection kind is retired — a project folder reads
+  // as a Collection, and a List scoped to it queries it by containment. The
+  // containment query itself is covered by the selectSource cases below.
 
   it('a view selection applies its filters and presentation', () => {
     const { entries, schema } = fixture();

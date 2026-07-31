@@ -20,14 +20,15 @@ describe('Rail', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'docs' });
   });
 
-  it('keeps Docs active on a doc page, Home active on projects', () => {
+  it('keeps Docs active on a doc page, Home active on collections', () => {
     useNavStore.setState({ selection: { kind: 'doc', path: 'inbox/welcome.md' } });
     render(<Rail />);
     expect(screen.getByRole('button', { name: 'Docs' }).className).toContain('cortex');
     expect(screen.getByRole('button', { name: 'Home' }).className).not.toContain('cortex');
     cleanup();
 
-    useNavStore.setState({ selection: { kind: 'project', path: 'projects/x/project.md' } });
+    // M12.5: projects retired — a container selection is a Collection.
+    useNavStore.setState({ selection: { kind: 'collection', folder: 'projects/x' } });
     render(<Rail />);
     expect(screen.getByRole('button', { name: 'Home' }).className).toContain('cortex');
     expect(screen.getByRole('button', { name: 'Docs' }).className).not.toContain('cortex');

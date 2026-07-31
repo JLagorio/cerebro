@@ -50,7 +50,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
   // sidebar.
   const collection = useMemo(
     () =>
-      effectiveCollections(collections, views).find((c) => c.folder === selection.folder) ?? null,
+      effectiveCollections(collections, views, entries).find((c) => c.folder === selection.folder) ?? null,
     [collections, views, selection.folder],
   );
 

@@ -103,7 +103,8 @@ export type Selection =
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
-  | { kind: 'project'; path: string }  // path of the project.md (vault format v2)
+  // M12.5: `project` retired — a project is a folder, and a folder with
+  // things in it is a Collection. Legacy project.md files open as records.
   | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
   | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)
   // M10 — a Collection is a container (a folder holding collection.yml); a List

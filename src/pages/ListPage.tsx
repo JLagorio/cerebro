@@ -54,10 +54,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     // Collections may each hold a "roadmap".
     () =>
       views.find(
-        (v) =>
-          v.id === selection.id &&
-          v.project === null &&
-          v.collection === (selection.collection ?? null),
+        (v) => v.id === selection.id && v.collection === (selection.collection ?? null),
       ) ?? null,
     [views, selection.id, selection.collection],
   );

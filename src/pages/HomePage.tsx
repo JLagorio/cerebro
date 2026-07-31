@@ -3,11 +3,9 @@ import { useOpenPath } from '@/app/useOpenPath';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import { ProgressBar } from '@/components/ui/ProgressBar';
-import { Tag } from '@/components/ui/Tag';
+import { collectionsTree, nodeCount } from '@/engine/collections';
 import { dueBucket, formatDue, type DocTask, type DueBucket } from '@/engine/tasks';
-import { typeStyle } from '@/engine/typeCatalog';
-import type { Entry, Schema } from '@/engine/types';
+import type { CollectionNode } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { useDocTasks } from '@/hooks/useDocTasks';
 import { LearnedCard } from '@/knowledge/LearnedCard';
@@ -22,63 +20,29 @@ export function greetingForHour(hour: number): string {
   return 'Good evening';
 }
 
-/** Items belonging to the project (containment, v2), done-group count. */
-export function projectProgress(
-  project: Entry,
-  entries: Entry[],
-  schema: Schema,
-): { total: number; done: number } {
-  const items = entries.filter((e) => e.project === project.path && e.type === 'Work item');
-  let done = 0;
-  for (const item of items) {
-    const statuses = schema.statusSetForProject(item.project);
-    const def = statuses.find((s) => s.id === item.properties.status);
-    if (def?.group === 'done') done += 1;
-  }
-  return { total: items.length, done };
-}
-
 const CARD =
   'flex min-w-0 flex-col gap-2 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-[14px] py-[13px] text-left hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)]';
 
-export function ProjectCard({ project, subtitle }: { project: Entry; subtitle: string }) {
-  const entries = useVaultStore((s) => s.entries);
-  const schema = useSchema();
+/** One root Collection (M12.5 — the grid used to be projects). */
+export function CollectionCard({ node }: { node: CollectionNode }) {
   const navigate = useNavStore((s) => s.navigate);
-  const { total, done } = useMemo(
-    () => projectProgress(project, entries, schema),
-    [project, entries, schema],
-  );
-  const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-  const projectKey =
-    typeof project.properties.key === 'string' ? project.properties.key : null;
+  const count = nodeCount(node);
 
   return (
     <button
       type="button"
-      onClick={() => navigate({ kind: 'project', path: project.path })}
+      data-testid="home-collection-card"
+      onClick={() => navigate({ kind: 'collection', folder: node.id })}
       className={CARD}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <Icon
-          name={typeStyle('Project', schema).icon}
-          size={15}
-          color={typeStyle('Project', schema).color ?? 'var(--n-500)'}
-        />
+        <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
         <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-[var(--n-900)]">
-          {project.title}
+          {node.label}
         </span>
-        <span className="flex-1" />
-        {projectKey ? (
-          <Tag style={{ fontFamily: 'var(--font-mono)' }}>{projectKey}</Tag>
-        ) : null}
       </div>
-      <div className="text-[11.5px] text-[var(--n-500)]">{subtitle}</div>
-      <div className="flex items-center gap-2">
-        <ProgressBar value={percent} width={150} />
-        <span className="text-[11px] text-[var(--n-600)] [font-family:var(--font-mono)]">
-          {done}/{total} done
-        </span>
+      <div className="text-[11.5px] text-[var(--n-500)]">
+        {count} {count === 1 ? 'thing' : 'things'} inside
       </div>
     </button>
   );
@@ -253,22 +217,17 @@ export function HomeTasks() {
   );
 }
 
-/** 'execution' → 'Execution' — light display casing for project states. */
-function humanizeState(value: unknown): string | null {
-  if (typeof value !== 'string' || value === '') return null;
-  const words = value.replace(/[-_]+/g, ' ');
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 export function HomePage() {
   const entries = useVaultStore((s) => s.entries);
+  const views = useVaultStore((s) => s.views);
+  const collections = useVaultStore((s) => s.collections);
+  const schema = useSchema();
 
-  const projects = useMemo(
-    () =>
-      entries
-        .filter((e) => e.type === 'Project')
-        .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt)),
-    [entries],
+  // M12.5: the grid shows Collections — the containers — where it used to
+  // show a hardcoded Project type nobody has anymore.
+  const roots = useMemo(
+    () => collectionsTree(collections, views, entries, schema),
+    [collections, views, entries, schema],
   );
 
   const greeting = greetingForHour(new Date().getHours());
@@ -281,17 +240,17 @@ export function HomePage() {
             {greeting}
           </h1>
           <span className="text-[12px] text-[var(--n-500)]">
-            {projects.length} {projects.length === 1 ? 'project' : 'projects'}
+            {roots.length} {roots.length === 1 ? 'collection' : 'collections'}
           </span>
         </div>
 
-        {projects.length === 0 && (
+        {roots.length === 0 && (
           // Fresh-vault empty state (M1.x): a brand-new vault rendered a bare
           // section heading with nothing actionable under it.
           <EmptyState
-            icon="folder-kanban"
+            icon="folder-open"
             title="Nothing here yet"
-            description="Use New to create your first project."
+            description="Use New to create your first collection."
           />
         )}
 
@@ -302,15 +261,11 @@ export function HomePage() {
         <HomeTasks />
 
         <div className="mb-2.5 flex items-center gap-2">
-          <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Projects</h2>
+          <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Collections</h2>
         </div>
         <div className="grid grid-cols-2 gap-2.5">
-          {projects.map((project) => (
-            <ProjectCard
-              key={project.path}
-              project={project}
-              subtitle={humanizeState(project.properties.state) ?? project.folder}
-            />
+          {roots.map((node) => (
+            <CollectionCard key={node.id} node={node} />
           ))}
         </div>
       </div>

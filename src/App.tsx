@@ -19,7 +19,6 @@ import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
-import { ProjectPage } from '@/pages/ProjectPage';
 import { PulsePage } from '@/pages/PulsePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
@@ -38,7 +37,8 @@ function CanvasOutlet() {
     case 'home': return <HomePage />;
     case 'inbox': return <InboxPage />;
     case 'knowledge': return <KnowledgePage selection={selection} />;
-    case 'project': return <ProjectPage selection={selection} />;
+    // M12.5: `project` retired — a project is a folder, and a folder on
+    // screen is a Collection.
     case 'doc': return <DocPage selection={selection} />;
     case 'docs': return <DocsPage />;
     // M10: a Collection is the container's page; a List is the record canvas.
