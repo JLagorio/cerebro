@@ -70,12 +70,17 @@ export function useAgentChat(
 
   useEffect(() => {
     return onAgentEvent((event: AgentEvent) => {
-      // The stream is shared with the background distiller (M8.6), which runs
-      // whole turns of its own. With no active message this conversation is
-      // not the one being answered, and `Init` in particular must not land —
-      // adopting the reader's session id would make your next question resume
-      // its transcript instead of yours.
+      // The stream is shared with the background runner (M8.6/M13.2), which
+      // runs whole turns of its own. With no active message this conversation
+      // is not the one being answered, and `Init` in particular must not land
+      // — adopting the runner's session id would make your next question
+      // resume its transcript instead of yours.
       if (activeRef.current === null) return;
+      // While learningPath is set, the runner OWNS the stream — including the
+      // terminal Done of a background child this send just killed. Without
+      // this, that stray Done ends the chat's turn before it begins: the
+      // bubble freezes empty and every real event is dropped (M13.2 review).
+      if (useUiStore.getState().learningPath !== null) return;
       switch (event.kind) {
         case 'Init':
           sessionRef.current = event.session_id;
@@ -170,6 +175,13 @@ export function useAgentChat(
 
       void (async () => {
         try {
+          // A typed question outranks a background read: if the runner is
+          // mid-turn, stop its child deliberately and let its finish() (on
+          // the resulting Done, which the runner still owns) release the
+          // stream before this turn's child speaks.
+          if (useUiStore.getState().learningPath !== null) {
+            await stopAgent().catch(() => undefined);
+          }
           const expanded =
             typeof message === 'function'
               ? await message().catch(() => trimmed)

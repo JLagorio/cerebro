@@ -97,3 +97,28 @@ export function reviewConceptPrompt(path: string, title: string): string {
 export function organizePrompt(path: string): string {
   return `Look at the Inbox capture at ${path} and propose how to file it. Use propose_organize.`;
 }
+
+/**
+ * Run one scheduled skill unattended (M13.2).
+ *
+ * The additive-only rules are the load-bearing part, and they are stated
+ * here rather than trusted to each skill's author: an unattended run may
+ * add and may flag, but the destructive verbs belong to interactive
+ * sessions where a person is watching. The same principle as the nightly
+ * agents in every second-brain system worth copying — and the reason a
+ * scheduled run can be on by default without being frightening.
+ */
+export function scheduledSkillPrompt(path: string, title: string, body: string): string {
+  return [
+    `This is an unattended scheduled run of the skill "${title}" (${path}). Nobody is watching and no chat reply will be read — everything you produce must be written into the vault through the tools.`,
+    '',
+    'Rules for unattended runs, which override anything the skill says:',
+    '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
+    '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
+    '- If a step would be destructive or needs an answer only the user has, skip it and note that in what you write.',
+    '',
+    'The skill:',
+    '',
+    body,
+  ].join('\n');
+}

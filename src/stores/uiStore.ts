@@ -144,6 +144,13 @@ interface UiState {
    */
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
+  /**
+   * Skill path → the schedule fire key last run (M13.2). Persisted; the same
+   * loop-stopper discipline as learnAttempts — recorded before the run, so a
+   * scheduled run that dies is not retried until its next fire time.
+   */
+  skillRuns: Record<string, string>;
+  recordSkillRun(path: string, fireKey: string): void;
   /** True while ANY agent turn is in flight — the chat's or the runner's. */
   agentBusy: boolean;
   setAgentBusy(v: boolean): void;
@@ -185,6 +192,7 @@ const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 const AUTO_LEARN_KEY = 'cerebro.autoLearn';
 const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
+const SKILL_RUNS_KEY = 'cerebro.skillRuns';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
@@ -463,6 +471,13 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
       storeString(FILED_LEARN_KEY, JSON.stringify(filed));
       return { learnAttempts: next, filedForLearning: filed };
+    }),
+  skillRuns: loadStringMap(SKILL_RUNS_KEY),
+  recordSkillRun: (path, fireKey) =>
+    set((s) => {
+      const next = { ...s.skillRuns, [path]: fireKey };
+      storeString(SKILL_RUNS_KEY, JSON.stringify(next));
+      return { skillRuns: next };
     }),
   agentBusy: false,
   setAgentBusy: (v) => set({ agentBusy: v }),

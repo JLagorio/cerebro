@@ -98,6 +98,88 @@ export function skillPrompt(skill: SkillRef, raw: string, request: string): stri
   return lines.join('\n');
 }
 
+// --- Schedules (M13.2) ------------------------------------------------------
+//
+// A skill with a `schedule:` runs unattended. The grammar is deliberately
+// small — `hourly`, `daily 09:00`, `weekdays 09:00`, `weekly fri 17:00` —
+// and the derivation is the same shape as the rest of the knowledge layer:
+// nothing stores a job list. The most recent fire time that has passed is
+// computed from the wall clock, and the run ledger records which fire each
+// skill has answered. An app that was closed all week owes ONE catch-up run,
+// not seven.
+
+export type Schedule =
+  | { kind: 'hourly' }
+  | { kind: 'daily'; hour: number; minute: number }
+  | { kind: 'weekdays'; hour: number; minute: number }
+  | { kind: 'weekly'; day: number; hour: number; minute: number };
+
+const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/** `schedule:` frontmatter → a Schedule, or null for anything malformed —
+ * a skill with a schedule nobody can parse is simply not scheduled. */
+export function parseSchedule(raw: unknown): Schedule | null {
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim().toLowerCase();
+  if (text === 'hourly') return { kind: 'hourly' };
+
+  const time = (t: string): { hour: number; minute: number } | null => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(t);
+    if (m === null) return null;
+    const hour = Number(m[1]);
+    const minute = Number(m[2]);
+    return hour < 24 && minute < 60 ? { hour, minute } : null;
+  };
+
+  const daily = /^(daily|weekdays)\s+(\S+)$/.exec(text);
+  if (daily !== null) {
+    const at = time(daily[2]);
+    return at === null ? null : { kind: daily[1] as 'daily' | 'weekdays', ...at };
+  }
+
+  const weekly = /^weekly\s+(\S+)\s+(\S+)$/.exec(text);
+  if (weekly !== null) {
+    const day = DAY_NAMES.findIndex((d) => weekly[1] === d || weekly[1].startsWith(d));
+    const at = time(weekly[2]);
+    return day === -1 || at === null ? null : { kind: 'weekly', day, ...at };
+  }
+
+  return null;
+}
+
+const pad = (n: number): string => String(n).padStart(2, '0');
+
+/**
+ * The most recent fire time at or before `now`, as a key the run ledger
+ * stores. A scheduled job is due exactly when the ledger holds a different
+ * key than this — so the ONE property a key must have is stability: the same
+ * fire must derive the same key from every tick that observes it.
+ *
+ * DST is where that property goes to die, so the two branches dodge it in
+ * different ways. The hourly key is UTC: during fall-back the local clock
+ * reads 01:xx twice and a local key would collide, silently swallowing one
+ * run. Dated keys take their HH:MM from the SCHEDULE, never from the
+ * walked-back Date: setHours on a spring-forward day normalizes a skipped
+ * 02:30 to 03:30, and stamping that normalized time onto a previous day's
+ * fire mints a phantom key no other derivation produces — one duplicate
+ * unattended run per transition.
+ */
+export function lastFireKey(schedule: Schedule, now: Date): string {
+  const at = new Date(now);
+  if (schedule.kind === 'hourly') {
+    return `${at.toISOString().slice(0, 13)}:00Z`;
+  }
+  at.setHours(schedule.hour, schedule.minute, 0, 0);
+  if (at.getTime() > now.getTime()) at.setDate(at.getDate() - 1);
+  if (schedule.kind === 'weekdays') {
+    while (at.getDay() === 0 || at.getDay() === 6) at.setDate(at.getDate() - 1);
+  }
+  if (schedule.kind === 'weekly') {
+    while (at.getDay() !== schedule.day) at.setDate(at.getDate() - 1);
+  }
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(schedule.hour)}:${pad(schedule.minute)}`;
+}
+
 /**
  * The system-prompt catalog: what exists and how to reach it, in one line per
  * skill. Null when the vault defines none — a paragraph explaining an empty

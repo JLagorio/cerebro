@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
-import { learnQueue } from '@/engine/learn';
+import { jobQueue } from '@/engine/jobs';
 import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
@@ -64,9 +64,18 @@ export function SettingsPage() {
   // The one place the outstanding count is shown at all. It belongs in
   // Settings and nowhere else: a number on the Rail that ticks up is the
   // "you have 47 unread" pattern the knowledge surfaces are barred from.
+  const skillRuns = useUiStore((s) => s.skillRuns);
   const pending = useMemo(
-    () => learnQueue(entries, listConcepts(entries, todayIso()), { filed, attempts }).length,
-    [attempts, entries, filed],
+    () =>
+      jobQueue(entries, listConcepts(entries, todayIso()), {
+        filed,
+        attempts,
+        skillRuns,
+        // Render-time clock is honest enough here: this page re-renders on
+        // every visit, and a due schedule missing until then costs a label.
+        now: new Date(),
+      }).length,
+    [attempts, entries, filed, skillRuns],
   );
 
   const changeVault = async () => {
@@ -172,7 +181,7 @@ export function SettingsPage() {
         </p>
         <SettingRow
           label="Learn on its own"
-          hint="Read filed captures, and re-read notes you have edited since the base last read them. Runs in the background and never interrupts — it only writes into knowledge/. Off: the base grows only when you press Learn from this."
+          hint="Read filed captures, re-read notes you have edited since the base last read them, and run any skills that carry a schedule. Runs in the background, never interrupts, and unattended runs are additive-only. Off: the base grows only when you press Learn from this, and schedules do not fire."
           checked={autoLearn}
           onChange={setAutoLearn}
         />
@@ -180,7 +189,7 @@ export function SettingsPage() {
           <p className="m-0 mb-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
             {learningPath !== null
               ? `Reading ${learningPath} now.`
-              : `${pending} note${pending === 1 ? '' : 's'} waiting to be read.`}
+              : `${pending} background job${pending === 1 ? '' : 's'} waiting.`}
           </p>
         )}
         <div className="flex items-start gap-3 py-2">

@@ -16,3 +16,7 @@ Prepare a weekly review of this vault. Work only from what is written down.
    dates, blockers, or contradicting knowledge say so — cite the note).
 4. Do not create or edit any note. This skill reads; filing follow-ups is the
    user's call.
+
+Add `schedule: weekly fri 17:00` to the frontmatter and this runs itself every
+Friday afternoon while the app is open. The demo vault ships it unscheduled so
+the demo's background agent stays predictable.

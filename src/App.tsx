@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
-import { useLearnRunner } from '@/agent/useLearnRunner';
+import { JobRunnerHost } from '@/agent/useJobRunner';
 import { CheckpointHost } from '@/git/CheckpointHost';
 import { Rail } from '@/app/Rail';
 import { Sidebar } from '@/app/Sidebar';
@@ -114,10 +114,6 @@ function App() {
   // new List lands in — never null, because a Collection-less List is forbidden
   // and the only entry point is a Collection's own + affordance.
   const [newList, setNewList] = useState<{ collection: string } | null>(null);
-  // M8.6 — the base reads filed captures and edited notes on its own. Mounted
-  // here rather than in the AI panel: the panel unmounts when you close it,
-  // and a knowledge base that only grows while a panel is open is not one.
-  useLearnRunner();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -214,6 +210,12 @@ function App() {
       <ToastHost />
       <RemindersHost />
       <CheckpointHost />
+      {/* M8.6/M13.2 — the base reads filed captures and edited notes on its
+          own, and scheduled skills fire, from one background runner. Mounted
+          at the root rather than in the AI panel (the panel unmounts when
+          closed, and a knowledge base that only grows while a panel is open
+          is not one), and as a HOST so its minute tick re-renders nothing. */}
+      <JobRunnerHost />
       <AgentActions />
     </div>
   );
