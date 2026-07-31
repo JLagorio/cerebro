@@ -44,20 +44,27 @@ describe('DocProperties', () => {
   });
   afterEach(cleanup);
 
-  it('assigns a type through the dropdown', async () => {
+  // M12.1: docs are docs. The type is not a dropdown — the only way a doc
+  // becomes a record is the explicit Convert action, which names the change.
+  it('shows Type: Doc with no dropdown', () => {
+    setup();
+    expect(screen.getByText('Doc')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
+  });
+
+  it('converts a doc to a record through the explicit Convert action', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter } = setup();
-    await user.click(screen.getByRole('button', { name: 'Type' }));
+    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
     await user.click(screen.getByRole('option', { name: 'Work item' }));
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { type: 'Work item' });
   });
 
-  it('clearing the type writes null', async () => {
-    const user = userEvent.setup();
-    const { patchFrontmatter } = setup({ type: 'Person', properties: { type: 'Person' } });
-    await user.click(screen.getByRole('button', { name: 'Type' }));
-    await user.click(screen.getByRole('option', { name: 'None' }));
-    expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { type: null });
+  it('never offers Convert on an already-typed entry', () => {
+    setup({ type: 'Person', properties: { type: 'Person' } });
+    expect(screen.getByText('Person')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Convert to record…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Type' })).toBeNull();
   });
 
   it('renders declared fields for a typed doc', () => {

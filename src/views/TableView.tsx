@@ -482,7 +482,9 @@ export function TableView({
   // component state and reset on every navigation.
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggleCollapsed = useUiStore((s) => s.toggleCollapsed);
-  const openDetail = useUiStore((s) => s.openDetail);
+  // M12.1: keyboard Enter follows the same routing rule as the hover Open
+  // button — it used to force the panel open for docs too.
+  const openPath = useOpenPath('in-place');
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -577,7 +579,7 @@ export function TableView({
   const flatRows = useMemo(() => entryRows(rows), [rows]);
   const keyboard = useRowKeyboard({
     count: flatRows.length,
-    onOpen: (i) => openDetail(flatRows[i].entry.path),
+    onOpen: (i) => openPath(flatRows[i].entry.path),
     onToggle: (i) => {
       if (flatRows[i].childCount > 0) toggleCollapsed(scope, flatRows[i].key);
     },

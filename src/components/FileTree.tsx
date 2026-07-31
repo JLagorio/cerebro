@@ -193,9 +193,9 @@ export function FileTree({
       if (hide(path)) return true;
       const entry = entryByPath.get(path);
       if (entry === undefined) return false; // folders fall through to pruning
-      return isTemplate(entry) || !isDocEntry(entry, schema);
+      return isTemplate(entry) || !isDocEntry(entry);
     };
-  }, [docsOnly, hide, entryByPath, schema]);
+  }, [docsOnly, hide, entryByPath]);
 
   const tree = useMemo(
     () => buildTree(root, entries, folders, hidePath, treeOrder, docsOnly),

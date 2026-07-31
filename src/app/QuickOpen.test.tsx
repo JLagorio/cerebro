@@ -50,17 +50,18 @@ describe('QuickOpen', () => {
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-2.md');
   });
 
-  // Task 10: non-work-item files are documents and open full-page.
-  it('picking a doc navigates to its page instead of the detail panel', async () => {
+  // M12.1: every typed entry is a record. A Person has no project, so its
+  // backdrop is its type screen, and it opens in the panel — never in Docs.
+  it('picking a record without a project lands on its type screen with the panel', async () => {
     const user = userEvent.setup();
     useUiStore.setState({ detailPath: null });
     render(<QuickOpen />);
     await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'ana');
     await user.click(screen.getAllByRole('option')[0]);
     expect(useNavStore.getState().selection).toEqual({
-      kind: 'doc',
-      path: 'people/ana-rios.md',
+      kind: 'type',
+      name: 'Person',
     });
-    expect(useUiStore.getState().detailPath).toBeNull();
+    expect(useUiStore.getState().detailPath).toBe('people/ana-rios.md');
   });
 });

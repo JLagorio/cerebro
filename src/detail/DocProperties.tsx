@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { addPropertyToEntry, normalizeFieldName } from '@/app/typeActions';
-import { Dropdown } from '@/components/ui/Dropdown';
+import { useOpenPath } from '@/app/useOpenPath';
+import { Dialog } from '@/components/ui/Dialog';
+import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { visibleProperties } from '@/engine/properties';
+import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -78,10 +81,20 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
     (k) => !declaredNames.has(k),
   );
 
-  const typeOptions = [
-    { value: 'none', label: 'None' },
-    ...[...schema.types.keys()].sort().map((t) => ({ value: t, label: t })),
-  ];
+  const [converting, setConverting] = useState(false);
+  const openPath = useOpenPath();
+
+  // M12.1: a doc's type is not a dropdown. Docs are docs — the only way out
+  // is the explicit Convert action, which says what it does to the note.
+  const convertTo = (typeName: string) => {
+    setConverting(false);
+    void (async () => {
+      await patchFrontmatter(entry.path, { type: typeName });
+      toast(`Now a ${typeName} record — this note left Docs`);
+      openPath(entry.path);
+    })();
+  };
+  const convertTargets = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
 
   // Adding a property to a TYPED doc extends the type's YAML schema (the
   // properties engine's source of truth); untyped docs get plain
@@ -107,15 +120,27 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
       <div className="flex flex-col gap-[7px]">
         <div className="flex items-center gap-2">
           <span className={LABEL}>Type</span>
-          <Dropdown
-            size="sm"
-            label="Type"
-            options={typeOptions}
-            value={entry.type ?? 'none'}
-            onChange={(v) =>
-              void patchFrontmatter(entry.path, { type: v === 'none' ? null : v })
-            }
-          />
+          <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--n-700)]">
+            <Icon
+              name={entry.type === null ? 'file-text' : typeStyle(entry.type, schema).icon}
+              size={13}
+              color={
+                entry.type === null
+                  ? 'var(--n-400)'
+                  : (typeStyle(entry.type, schema).color ?? 'var(--n-400)')
+              }
+            />
+            {entry.type ?? 'Doc'}
+          </span>
+          {entry.type === null && (
+            <button
+              type="button"
+              onClick={() => setConverting(true)}
+              className="rounded-md border-0 bg-transparent px-1 py-0.5 text-[11px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            >
+              Convert to record…
+            </button>
+          )}
         </div>
         {declared.map((f) => (
           <div key={f.name} className="flex items-center gap-2">
@@ -158,6 +183,40 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         <div>Created {entry.createdAt.slice(0, 10)}</div>
         <div>Modified {entry.modifiedAt.slice(0, 10)}</div>
       </div>
+      {converting && (
+        <Dialog open onClose={() => setConverting(false)} title="Convert to record" width={420}>
+          <p className="mb-2 text-[12px] leading-relaxed text-[var(--n-500)]">
+            A record belongs to a type: it opens in the record panel, appears in that
+            type&apos;s views and Lists, and leaves the Docs tree. Its text and
+            properties come along unchanged.
+          </p>
+          <div role="listbox" aria-label="Convert to type" className="flex max-h-[300px] flex-col overflow-y-auto">
+            {convertTargets.map((t) => {
+              const style = typeStyle(t, schema);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => convertTo(t)}
+                  className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left hover:bg-[var(--n-50)]"
+                >
+                  <span className="inline-flex flex-none" style={{ color: style.color ?? 'var(--n-400)' }}>
+                    <Icon name={style.icon} size={14} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">{t}</span>
+                </button>
+              );
+            })}
+            {convertTargets.length === 0 && (
+              <div className="px-2.5 py-4 text-[12px] text-[var(--n-500)]">
+                No types yet — create one from the Types section of the sidebar first.
+              </div>
+            )}
+          </div>
+        </Dialog>
+      )}
     </div>
   );
 }

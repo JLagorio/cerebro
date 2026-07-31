@@ -58,10 +58,6 @@ export interface TypeDef {
   icon: string | null;
   color: string | null;
   fields: FieldDef[];
-  /** Where the type's notes live in the UI: 'record' (its type screen only —
-   * the default) or 'doc' (also browsable in the Docs file tree). Declared as
-   * `display:` on the Type doc; keeps one surface per shape (M3.1). */
-  display: 'doc' | 'record';
   /** `statuses:` declared on this Type doc; [] when it declares none. */
   statuses: StatusDef[];
 }

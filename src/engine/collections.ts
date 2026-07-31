@@ -1,6 +1,5 @@
 import { parse, stringify } from 'yaml';
 import { isTemplate } from '@/lib/templates';
-import { isKnowledgePath } from './okf';
 import type {
   CollectionDefinition,
   CollectionFile,
@@ -9,7 +8,7 @@ import type {
   ListFile,
   Schema,
 } from './types';
-import { typeStyle } from './typeCatalog';
+import { isDocEntry, typeStyle } from './typeCatalog';
 
 /**
  * Collections (M10): the container model.
@@ -108,14 +107,15 @@ const byOrderThenName = <T extends { order: number | null; name: string }>(a: T,
 /**
  * Is this doc something a Collection should show?
  *
- * Type docs are the schema, templates are stationery, and the knowledge bundle
- * has its own surface with its own author — none of them are content a person
- * put in this folder, so listing them here would bury what is.
+ * M12.1: only DOCS are docs. Typed records used to appear here as "docs" of
+ * their collection while the Docs tab excluded them — the same file was a doc
+ * in one tree and not the other. Records reach a Collection through its Lists;
+ * the doc rows are for prose. Templates are stationery, and `isDocEntry`
+ * already rules out records, Type docs, and the knowledge bundle.
  */
 function isBrowsableDoc(entry: Entry): boolean {
-  if (entry.type === 'Type') return false;
+  if (!isDocEntry(entry)) return false;
   if (isTemplate(entry)) return false;
-  if (isKnowledgePath(entry.path)) return false;
   // A project.md and a collection's own marker describe the container, not its
   // contents — the container itself is already the node they'd sit under.
   return entry.filename !== 'project.md';
@@ -230,8 +230,10 @@ function folderChildren(
         kind: 'doc',
         id: doc.path,
         label: doc.title || stem(doc.path),
-        icon: doc.type === null ? 'file-text' : typeStyle(doc.type, schema).icon,
-        color: doc.type === null ? null : typeStyle(doc.type, schema).color,
+        // Docs are untyped by definition now (M12.1), so there is no type
+        // style to borrow.
+        icon: 'file-text',
+        color: null,
         children: [],
         path: doc.path,
       });

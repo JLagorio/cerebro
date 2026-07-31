@@ -119,23 +119,21 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
 }
 
 /**
- * True when this entry belongs in the Docs file tree (M3.1: one surface per
- * shape — records live on their type screen, docs live in Docs).
+ * True when this entry belongs in the Docs file tree (M12.1: docs are docs).
  *
- * Untyped notes are always docs. `type: Type` docs are the schema itself and
- * never appear as content. Everything else follows its type's `display:`,
- * which defaults to 'record' — a type opts back into Docs with `display: doc`
- * (meeting notes, journals: things you write rather than track).
+ * The rule is absolute now: a doc is an UNTYPED note, full stop. A typed
+ * entry is a record and lives on its type's screens and in Lists — never in
+ * Docs. The old `display: doc` escape hatch let a type opt its records back
+ * into the Docs tree, which gave "is this a doc?" three answers; M12 removes
+ * it so the two worlds cannot blend.
  */
-export function isDocEntry(entry: Entry, schema: Schema): boolean {
+export function isDocEntry(entry: Entry): boolean {
   // The whole knowledge bundle (M5) has its own read-only surface and is
   // never yours to edit. Keyed on the PATH, not on isConcept: `index.md`
   // and `log.md` are not concepts but are still bundle files, and being
   // untyped they would otherwise sail through the next branch into Docs.
   if (isKnowledgePath(entry.path)) return false;
-  if (entry.type === null || entry.type === '') return true;
-  if (entry.type === 'Type') return false;
-  return schema.types.get(entry.type)?.display === 'doc';
+  return entry.type === null || entry.type === '';
 }
 
 /** Icon + color for an entry's type, with the same fallbacks as listTypes —

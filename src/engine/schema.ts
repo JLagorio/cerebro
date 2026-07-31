@@ -141,9 +141,6 @@ export function buildSchema(entries: Entry[]): Schema {
       icon: typeof e.properties.icon === 'string' ? e.properties.icon : null,
       color: typeof e.properties.color === 'string' ? e.properties.color : null,
       fields: parseFields((e.properties as Record<string, unknown>).fields),
-      // Records are the default surface; `display: doc` opts a type into the
-      // Docs file tree as well (M3.1 — one surface per shape).
-      display: e.properties.display === 'doc' ? 'doc' : 'record',
       statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
     });
   }

@@ -2,16 +2,16 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { useOpenPath } from '@/app/useOpenPath';
 import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
-import type { Entry, Schema } from '@/engine/types';
+import type { Entry } from '@/engine/types';
 import { isTemplate } from '@/lib/templates';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 const RECENTS_SHOWN = 6;
 
-/** A document here is a note that lives in Docs (M3.1 `isDocEntry`: untyped
- * notes plus types marked `display: doc`). Records belong to their type
- * screen, and templates are scaffolding, not content. */
-const isDoc = (e: Entry, schema: Schema) => isDocEntry(e, schema) && !isTemplate(e);
+/** A document here is a note that lives in Docs (M12.1 `isDocEntry`: untyped
+ * notes, nothing else). Records belong to their type screen, and templates
+ * are scaffolding, not content. */
+const isDoc = (e: Entry) => isDocEntry(e) && !isTemplate(e);
 
 function formatDay(iso: string): string {
   return iso.slice(0, 10);
@@ -27,7 +27,7 @@ export function DocsPage() {
   const open = useOpenPath();
 
   const recents = entries
-    .filter((e) => isDoc(e, schema))
+    .filter(isDoc)
     .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
     .slice(0, RECENTS_SHOWN);
 
