@@ -39,11 +39,18 @@ export interface FieldDef {
   name: string;
   kind: FieldKind;
   options?: FieldOption[];
+  /** Relation: the TYPE this field may point at (M12.4: enforced — the
+   * picker only offers records of it). Absent means any record (legacy). */
   target?: string;
+  /** Relation: at most one linked record when 1 (M12.4); absent = no limit. */
+  limit?: 1;
   /** rollup config: aggregate `property` across the `relation` field's targets. */
   relation?: string;
-  /** Reverse rollup source (M3.5): aggregate the records of `type` whose
-   * `field` points back at this one — no duplicate link on the parent. */
+  /** Reverse source, two uses: on a rollup (M3.5), aggregate the records of
+   * `type` whose `field` points back at this one; on a RELATION (M12.4), this
+   * field is the derived reciprocal of a two-way pair — it stores nothing,
+   * shows the records of `type` linking here through `field`, and edits write
+   * through to that owning side. */
   from?: { type: string; field: string };
   property?: string;
   calculate?: RollupCalc;

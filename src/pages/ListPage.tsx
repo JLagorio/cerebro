@@ -21,7 +21,7 @@ import type {
   ViewDefinition,
   ViewType,
 } from '@/engine/types';
-import { addFieldToType, normalizeFieldName } from '@/app/typeActions';
+import { addFieldToType, addRelationProperty, normalizeFieldName } from '@/app/typeActions';
 import { clonePresentation, layoutLabel, newView, resolveView, toggleSort } from '@/engine/views';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -168,10 +168,18 @@ export function ListPage({ selection }: { selection: ListSelection }) {
 
   // M9.2: a column IS a property, so adding one writes the type doc and then
   // shows the column here. Guarded to typed views by the toolbar.
-  const addProperty = (name: string, kind: FieldDef['kind']) => {
+  const addProperty = (
+    name: string,
+    kind: FieldDef['kind'],
+    relation?: { target: string; limit?: 1; reciprocalName?: string },
+  ) => {
     if (sourceType === null) return;
     void (async () => {
-      if (await addFieldToType(sourceType, name, kind)) {
+      const ok =
+        kind === 'relation' && relation !== undefined
+          ? await addRelationProperty(sourceType, name, relation)
+          : await addFieldToType(sourceType, name, kind);
+      if (ok) {
         changePresentation({
           ...presentation,
           columns: [...presentation.columns, { field: normalizeFieldName(name) }],

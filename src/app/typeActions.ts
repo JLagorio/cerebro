@@ -80,6 +80,9 @@ export async function addFieldToType(
   typeName: string,
   rawName: string,
   kind: FieldKind,
+  /** Extra spec keys written with the field (M12.4: a relation's `target`,
+   * `limit`, or derived-reciprocal `from`). */
+  config: Record<string, unknown> = {},
 ): Promise<boolean> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
@@ -96,7 +99,11 @@ export async function addFieldToType(
     toast('Property already exists');
     return false;
   }
-  fields[name] = kind === 'text' ? 'text' : { kind };
+  const extras = Object.fromEntries(
+    Object.entries(config).filter(([, v]) => v !== undefined && v !== null && v !== ''),
+  );
+  fields[name] =
+    kind === 'text' && Object.keys(extras).length === 0 ? 'text' : { kind, ...extras };
   try {
     if (doc === null) {
       await ensureTypeDoc({ name: typeName, docPath: null }, { fields });
@@ -108,6 +115,32 @@ export async function addFieldToType(
     return false;
   }
   return true;
+}
+
+/**
+ * Declare a relation property, optionally with its reciprocal (M12.4).
+ *
+ * The forward side owns the data: `target` constrains the picker and `limit`
+ * the cardinality. When `reciprocalName` is given, the TARGET type gets a
+ * derived relation back — `from: { type, field }` — which stores nothing and
+ * reads the reverse index, so two files never disagree about one link.
+ */
+export async function addRelationProperty(
+  typeName: string,
+  rawName: string,
+  config: { target: string; limit?: 1; reciprocalName?: string },
+): Promise<boolean> {
+  const name = normalizeFieldName(rawName);
+  const added = await addFieldToType(typeName, rawName, 'relation', {
+    target: config.target,
+    ...(config.limit === 1 ? { limit: 1 } : {}),
+  });
+  if (!added) return false;
+  const reciprocal = config.reciprocalName?.trim() ?? '';
+  if (reciprocal === '') return true;
+  return addFieldToType(config.target, reciprocal, 'relation', {
+    from: { type: typeName, field: name },
+  });
 }
 
 /** Remove a custom field from a type. System-locked fields refuse. */
@@ -240,7 +273,12 @@ export async function setFieldOptions(
 export async function setFieldConfig(
   typeName: string,
   fieldName: string,
-  config: Partial<Record<'relation' | 'property' | 'calculate' | 'format' | 'precision', unknown>>,
+  config: Partial<
+    Record<
+      'relation' | 'property' | 'calculate' | 'format' | 'precision' | 'target' | 'limit' | 'from',
+      unknown
+    >
+  >,
 ): Promise<boolean> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
@@ -341,6 +379,7 @@ export async function addPropertyToEntry(
   entry: Entry,
   rawName: string,
   kind: FieldKind,
+  relation?: { target: string; limit?: 1; reciprocalName?: string },
 ): Promise<boolean> {
   const { patchFrontmatter } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
@@ -356,6 +395,9 @@ export async function addPropertyToEntry(
     return false;
   }
   if (entry.type !== null) {
+    if (kind === 'relation' && relation !== undefined) {
+      return addRelationProperty(entry.type, name, relation);
+    }
     return addFieldToType(entry.type, name, kind);
   }
   if (kindMeta(kind).computed) {

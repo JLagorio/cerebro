@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import type { RelationConfig } from '@/detail/AddPropertyPanel';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { ChainBuilder, type ChainRow } from '@/views/ChainBuilder';
 import { FilterBuilder } from '@/views/FilterBuilder';
@@ -127,8 +128,9 @@ export interface ViewToolbarProps {
   /** Source type + schema drive the hierarchy chain's per-level options. */
   sourceType?: string | null;
   schema?: Schema;
-  /** M9.2: create a property on the source type from the property picker. */
-  onAddProperty?: (name: string, kind: FieldDef['kind']) => void;
+  /** M9.2: create a property on the source type from the property picker.
+   * M12.4: relations carry their config (target/limit/reciprocal). */
+  onAddProperty?: (name: string, kind: FieldDef['kind'], relation?: RelationConfig) => void;
   /**
    * The layout pills (M11).
    *
@@ -324,6 +326,7 @@ export function ViewToolbar({
         onChange={(columns) => onChange({ ...presentation, columns })}
         onAddProperty={onAddProperty}
         canAddProperty={sourceType !== null}
+        ownerType={sourceType}
       />
       <span className="flex-1" />
     </div>

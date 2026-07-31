@@ -63,8 +63,13 @@ export interface ViewSettingsPanelProps {
   onDeleteList?: () => void;
   /** Deletes just this tab; absent when it is the only one. */
   onDeleteView?: () => void;
-  /** M9.2: create a property on the source type. */
-  onAddProperty?: (name: string, kind: FieldDef['kind']) => void;
+  /** M9.2: create a property on the source type. M12.4: relations carry
+   * their config (target/limit/reciprocal). */
+  onAddProperty?: (
+    name: string,
+    kind: FieldDef['kind'],
+    relation?: { target: string; limit?: 1; reciprocalName?: string },
+  ) => void;
 }
 
 const CHIP_STYLES: { value: ChipStyle; label: string; hint: string }[] = [

@@ -335,3 +335,58 @@ describe('resolveField', () => {
     });
   });
 });
+
+// M12.4: two-way relations — the reciprocal is DERIVED from the reverse
+// index, so one link is stored once and two files can never disagree.
+describe('derived two-way relations', () => {
+  const objectiveType = makeEntry({
+    path: 'types/objective.md',
+    title: 'Objective',
+    type: 'Type',
+    properties: {
+      fields: {
+        key_results: { kind: 'relation', from: { type: 'Key result', field: 'objective' } },
+      },
+    } as unknown as ReturnType<typeof makeEntry>['properties'],
+  });
+  const keyResultType = makeEntry({
+    path: 'types/key-result.md',
+    title: 'Key result',
+    type: 'Type',
+    properties: {
+      fields: { objective: { kind: 'relation', target: 'Objective', limit: 1 } },
+    } as unknown as ReturnType<typeof makeEntry>['properties'],
+  });
+  const objective = makeEntry({
+    path: 'records/objectives/obj-1.md',
+    filename: 'obj-1.md',
+    folder: 'records/objectives',
+    title: 'Ship the split',
+    type: 'Objective',
+  });
+  // Relationships arrive bracket-stripped from the parser (see the assignee
+  // fixture above) — the [[ ]] live only in the frontmatter on disk.
+  const kr = makeEntry({
+    path: 'records/key-results/kr-1.md',
+    filename: 'kr-1.md',
+    folder: 'records/key-results',
+    title: 'Routing inverted',
+    type: 'Key result',
+    relationships: { objective: ['obj-1'] },
+  });
+
+  it('resolves the reciprocal side from records linking back', () => {
+    const schema = buildSchema([objectiveType, keyResultType, objective, kr]);
+    const resolved = schema.resolveField(objective, 'key_results');
+    expect(resolved.raw).toEqual(['kr-1']);
+    expect(resolved.display).toBe('Routing inverted');
+    expect(resolved.ghost).toBe(false);
+  });
+
+  it('parses limit: 1 on the owning side', () => {
+    const schema = buildSchema([objectiveType, keyResultType]);
+    const owning = schema.types.get('Key result')!.fields.find((f) => f.name === 'objective')!;
+    expect(owning.limit).toBe(1);
+    expect(owning.target).toBe('Objective');
+  });
+});

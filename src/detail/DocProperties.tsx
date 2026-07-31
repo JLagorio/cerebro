@@ -100,7 +100,11 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   // properties engine's source of truth); untyped docs get plain
   // frontmatter seeded by kind (M2.x). M3: routed through typeActions so
   // the type screen and the panels share one hardened write path.
-  const addProperty = (rawName: string, kind: FieldKind) => {
+  const addProperty = (
+    rawName: string,
+    kind: FieldKind,
+    relation?: { target: string; limit?: 1; reciprocalName?: string },
+  ) => {
     const name = normalizeFieldName(rawName);
     if (name === '') return;
     if (declaredNames.has(name)) {
@@ -108,7 +112,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
       return;
     }
     void (async () => {
-      if (await addPropertyToEntry(entry, name, kind)) {
+      if (await addPropertyToEntry(entry, name, kind, relation)) {
         if (entry.type !== null) toast(`Added "${humanize(name)}" to every ${entry.type}`);
         setAdding(false);
       }
@@ -166,6 +170,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
               ...undeclaredScalars.map(humanize),
               ...undeclaredRelations.map(humanize),
             ]}
+            ownerType={entry.type}
             onAdd={addProperty}
             onCancel={() => setAdding(false)}
           />

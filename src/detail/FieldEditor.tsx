@@ -8,7 +8,7 @@ import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import { RelationPicker } from '@/detail/RelationPicker';
 import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
-import { formatWikilink } from '@/engine/wikilink';
+import { formatWikilink, resolveTarget } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ChipStyle, Entry, FieldDef, Schema } from '@/engine/types';
@@ -164,10 +164,51 @@ export function FieldEditor({
   }
 
   if (def.kind === 'relation') {
-    const targetType = def.target ?? null;
+    // A derived reciprocal (M12.4) points at the OWNING side: its candidates
+    // are records of `from.type`, and edits patch those records' `from.field`
+    // rather than this entry's frontmatter — one link, stored once.
+    const derived = def.from !== undefined ? def.from : null;
+    const targetType = derived !== null ? derived.type : (def.target ?? null);
     const values = asList(resolved.raw).map(stripWikilink);
     const targetOf = (id: string) =>
       entries.find((e) => pathStem(e.path) === id) ?? null;
+
+    // Entry.relationships holds bracket-stripped targets; frontmatter wants
+    // them back as wikilinks, so every write re-wraps the whole list.
+    const pointsHere = (raw: string) =>
+      resolveTarget(raw, entries)?.path === entry.path ||
+      stripWikilink(raw) === pathStem(entry.path);
+    const patchReciprocal = (next: string[]) => {
+      if (derived === null) return;
+      const current = new Set(values);
+      const wanted = new Set(next);
+      const jobs: Promise<void>[] = [];
+      for (const id of next) {
+        if (current.has(id)) continue;
+        const other = targetOf(id);
+        if (other === null) continue;
+        const links = other.relationships[derived.field] ?? [];
+        jobs.push(
+          patchFrontmatter(other.path, {
+            [derived.field]: [...links, pathStem(entry.path)].map(formatWikilink),
+          }),
+        );
+      }
+      for (const id of values) {
+        if (wanted.has(id)) continue;
+        const other = targetOf(id);
+        if (other === null) continue;
+        const links = (other.relationships[derived.field] ?? []).filter(
+          (raw) => !pointsHere(raw),
+        );
+        jobs.push(
+          patchFrontmatter(other.path, {
+            [derived.field]: links.length === 0 ? null : links.map(formatWikilink),
+          }),
+        );
+      }
+      void Promise.all(jobs);
+    };
     return (
       <span className="inline-flex min-w-0 max-w-full">
         <button
@@ -208,9 +249,14 @@ export function FieldEditor({
             fieldName={def.name}
             targetType={targetType === '' ? null : targetType}
             value={values}
+            limit={def.limit}
             entries={entries}
             schema={schema}
-            onChange={(next) => patch(next.length === 0 ? null : next.map(formatWikilink))}
+            onChange={(next) =>
+              derived !== null
+                ? patchReciprocal(next)
+                : patch(next.length === 0 ? null : next.map(formatWikilink))
+            }
             onClose={() => setOpen(false)}
           />
         )}

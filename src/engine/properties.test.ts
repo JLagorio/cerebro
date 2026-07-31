@@ -64,6 +64,20 @@ describe('validateValue (shape enforcement)', () => {
     expect(validateValue(def('created_time'), 'x')).toMatch(/computed/);
     expect(validateValue(def('last_edited_time'), 'x')).toMatch(/computed/);
   });
+
+  // M12.4: enforced relations.
+  it('relation honors limit: 1', () => {
+    expect(validateValue(def('relation'), ['[[a]]'])).toBeNull();
+    expect(validateValue(def('relation'), ['[[a]]', '[[b]]'])).toBeNull();
+    expect(validateValue(def('relation', { limit: 1 }), '[[a]]')).toBeNull();
+    expect(validateValue(def('relation', { limit: 1 }), ['[[a]]'])).toBeNull();
+    expect(validateValue(def('relation', { limit: 1 }), ['[[a]]', '[[b]]'])).toMatch(/single/);
+  });
+
+  it('the derived side of a two-way relation rejects direct writes', () => {
+    const derived = def('relation', { from: { type: 'Key result', field: 'objective' } });
+    expect(validateValue(derived, ['[[kr-1]]'])).toMatch(/other side/);
+  });
 });
 
 describe('validatePatch (schema-aware)', () => {

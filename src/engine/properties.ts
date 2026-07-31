@@ -199,10 +199,23 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
         ? null
         : `${label} must be a list of options`;
     case 'person':
-    case 'relation':
       return isScalarString(value) || isStringArray(value)
         ? null
         : `${label} must reference other pages`;
+    case 'relation': {
+      // The reciprocal of a two-way pair is derived — writing it here would
+      // store a mirror that the owning side immediately contradicts (M12.4).
+      if (def.from !== undefined) {
+        return `${label} is the other side of a relation — edit it from the linked records`;
+      }
+      if (!(isScalarString(value) || isStringArray(value))) {
+        return `${label} must reference other pages`;
+      }
+      if (def.limit === 1 && Array.isArray(value) && value.length > 1) {
+        return `${label} links a single record`;
+      }
+      return null;
+    }
     case 'url':
       return isScalarString(value) && (value === '' || URL_SHAPE.test(value))
         ? null

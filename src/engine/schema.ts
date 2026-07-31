@@ -9,7 +9,7 @@ import type {
   TypeDef,
 } from './types';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
-import { buildRelationIndex } from './relations';
+import { buildRelationIndex, childrenOf } from './relations';
 import { parseViewList } from './views';
 import { resolveTarget } from './wikilink';
 
@@ -75,6 +75,8 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
       .filter((o): o is FieldOption => o !== null);
   }
   if (typeof s.target === 'string') def.target = s.target;
+  // Relation cardinality (M12.4): `limit: 1` means a single linked record.
+  if (s.limit === 1 || s.limit === '1') def.limit = 1;
   // Rollup config: which relation to follow, what to read, how to fold it.
   if (typeof s.relation === 'string') def.relation = s.relation;
   if (typeof s.property === 'string') def.property = s.property;
@@ -207,6 +209,28 @@ export function buildSchema(entries: Entry[]): Schema {
         def,
         raw: computed,
         display: applyFormat(computed, def),
+        color: null,
+        ghost: false,
+      };
+    }
+
+    // A two-way relation's reciprocal side stores nothing (M12.4): its value
+    // is derived — the records of `from.type` whose `from.field` links here.
+    // Edits write through to that owning side, never to this frontmatter.
+    if (def?.kind === 'relation' && def.from !== undefined) {
+      const sources = childrenOf(
+        e,
+        { direction: 'reverse', type: def.from.type, field: def.from.field },
+        entries,
+        relations,
+      );
+      const stems = sources.map(
+        (s) => (s.path.split('/').pop() ?? s.path).replace(/\.md$/, ''),
+      );
+      return {
+        def,
+        raw: stems,
+        display: sources.map((s) => s.title).join(', '),
         color: null,
         ghost: false,
       };

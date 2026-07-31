@@ -50,9 +50,10 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
       {addingProp ? (
         <AddPropertyPanel
           existingNames={[...declared.map((f) => humanize(f.name)), ...undeclared.map(humanize)]}
-          onAdd={(name, kind) => {
+          ownerType={entry.type}
+          onAdd={(name, kind, relation) => {
             void (async () => {
-              if (await addPropertyToEntry(entry, name, kind)) setAddingProp(false);
+              if (await addPropertyToEntry(entry, name, kind, relation)) setAddingProp(false);
             })();
           }}
           onCancel={() => setAddingProp(false)}

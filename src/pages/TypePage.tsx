@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DeleteTypeDialog, RenameTypeDialog, TypeStyleDialog } from '@/app/TypeDialogs';
 import {
   addFieldToType,
+  addRelationProperty,
   moveFieldOnType,
   removeFieldFromType,
   renameFieldOnType,
@@ -18,6 +19,7 @@ import { Input } from '@/components/ui/Input';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { humanize } from '@/detail/FieldEditor';
 import { OptionListEditor } from '@/detail/OptionListEditor';
+import { RelationConfigEditor } from '@/detail/RelationConfigEditor';
 import { FormatRow, RollupConfigEditor } from '@/detail/RollupConfigEditor';
 import { StatusListEditor } from '@/detail/StatusListEditor';
 import { resolveSurface, sortEntries } from '@/engine/surface';
@@ -84,7 +86,8 @@ function FieldRow({
   const hasValues = def.kind === 'select' || def.kind === 'multiselect' || def.kind === 'status';
   // M3.4: rollups need wiring, numbers need a display format — both live in
   // the same expander as option sets so every field configures in one place.
-  const hasConfig = def.kind === 'rollup' || def.kind === 'number';
+  // M12.4: relations configure their target, limit, and two-way property.
+  const hasConfig = def.kind === 'rollup' || def.kind === 'number' || def.kind === 'relation';
 
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(humanize(def.name));
@@ -206,6 +209,19 @@ function FieldRow({
               def={def}
               onChange={(config) => void setFieldConfig(typeName, def.name, config)}
             />
+          ) : def.kind === 'relation' ? (
+            <RelationConfigEditor
+              typeName={typeName}
+              def={def}
+              schema={schema}
+              onChange={(config) => void setFieldConfig(typeName, def.name, config)}
+              onAddReciprocal={(name) => {
+                if (def.target === undefined) return;
+                void addFieldToType(def.target, name, 'relation', {
+                  from: { type: typeName, field: def.name },
+                });
+              }}
+            />
           ) : (
             <OptionListEditor
               options={options}
@@ -268,9 +284,14 @@ function TypePropertiesPanel({ listing }: { listing: TypeListing }) {
         {adding ? (
           <AddPropertyPanel
             existingNames={fields.map((f) => humanize(f.name))}
-            onAdd={(name, kind) => {
+            ownerType={listing.name}
+            onAdd={(name, kind, relation) => {
               void (async () => {
-                if (await addFieldToType(listing.name, name, kind)) setAdding(false);
+                const ok =
+                  kind === 'relation' && relation !== undefined
+                    ? await addRelationProperty(listing.name, name, relation)
+                    : await addFieldToType(listing.name, name, kind);
+                if (ok) setAdding(false);
               })();
             }}
             onCancel={() => setAdding(false)}
@@ -500,9 +521,13 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           showLayout={false}
           filters={activeView.filters}
           onFiltersChange={(filters) => changeView({ ...activeView, filters })}
-          onAddProperty={(name, kind) => {
+          onAddProperty={(name, kind, relation) => {
             void (async () => {
-              if (await addFieldToType(listing.name, name, kind)) {
+              const ok =
+                kind === 'relation' && relation !== undefined
+                  ? await addRelationProperty(listing.name, name, relation)
+                  : await addFieldToType(listing.name, name, kind);
+              if (ok) {
                 changePresentation({
                   ...presentation,
                   columns: [...presentation.columns, { field: normalizeFieldName(name) }],

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
+import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { moveColumn, toggleColumn, type ColumnDef } from '@/engine/columns';
 import { kindMeta } from '@/engine/properties';
@@ -22,15 +22,19 @@ export function PropertyVisibility({
   onChange,
   onAddProperty,
   canAddProperty = false,
+  ownerType = null,
 }: {
   /** Every property the collection's type declares. */
   fields: ColumnDef[];
   columns: ColumnSpec[];
   onChange: (next: ColumnSpec[]) => void;
-  /** M9.2: creates the property on the source type, then adds the column. */
-  onAddProperty?: (name: string, kind: FieldDef['kind']) => void;
+  /** M9.2: creates the property on the source type, then adds the column.
+   * M12.4: relations carry their config (target/limit/reciprocal). */
+  onAddProperty?: (name: string, kind: FieldDef['kind'], relation?: RelationConfig) => void;
   /** False on typeless views — there is no single type to add a property to. */
   canAddProperty?: boolean;
+  /** The source type — seeds the relation step's reciprocal name (M12.4). */
+  ownerType?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -153,8 +157,9 @@ export function PropertyVisibility({
                   {adding ? (
                     <AddPropertyPanel
                       existingNames={fields.map((f) => humanize(f.name))}
-                      onAdd={(name, kind) => {
-                        onAddProperty(name, kind);
+                      ownerType={ownerType}
+                      onAdd={(name, kind, relation) => {
+                        onAddProperty(name, kind, relation);
                         setAdding(false);
                       }}
                       onCancel={() => setAdding(false)}
