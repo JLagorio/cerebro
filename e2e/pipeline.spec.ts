@@ -103,8 +103,11 @@ test('commit: any note says what the base took from it, not just Inbox captures'
   await page.getByTestId('quick-open-input').fill('phx-421');
   await page.getByTestId('quick-open-result').filter({ hasText: 'Rehearse' }).first().click();
 
-  const panel = page.getByTestId('doc-side-panel');
-  await panel.getByTestId('doc-panel-tab-knowledge').click();
+  // M12: the cached ticket is a Source RECORD — it opens in the record
+  // panel, where the knowledge loop lives collapsed until asked.
+  const panel = page.getByTestId('detail-panel');
+  await expect(panel).toBeVisible();
+  await panel.getByTestId('detail-knowledge-toggle').click();
   const commit = panel.getByTestId('knowledge-commit');
   await expect(commit).toHaveAttribute('data-state', 'committed');
   await expect(commit.getByTestId('committed-concept')).toContainText(['Pick queue drain time']);
@@ -140,14 +143,16 @@ test('augment: knowledge surfaces beside the PRD, and only when asked', async ({
   await quickOpen.fill('go-live');
   await page.getByTestId('quick-open-result').filter({ hasText: 'PRD' }).first().click();
 
-  const panel = page.getByTestId('doc-side-panel');
+  // M12: the PRD is a Spec RECORD now — it opens in the record panel, and
+  // the knowledge view lives there too.
+  const panel = page.getByTestId('detail-panel');
   await expect(panel).toBeVisible();
 
-  // Nothing has spoken yet: the knowledge tab exists but is not selected, so
-  // the draft is not annotated until the user opens it.
+  // Nothing has spoken yet: the section exists but is collapsed, so the
+  // draft is not annotated until the user opens it.
   await expect(panel.getByTestId('related-knowledge')).toHaveCount(0);
 
-  await panel.getByTestId('doc-panel-tab-knowledge').click();
+  await panel.getByTestId('detail-knowledge-toggle').click();
   const related = panel.getByTestId('related-knowledge');
   await expect(related).toBeVisible();
   // The PRD never names the concept; it is found through the project it lives in.
@@ -255,7 +260,10 @@ test('dossier: a project page says what the base believes, doubts, and no longer
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('offline sync hardening');
   await page.getByTestId('quick-open-result').first().click();
-  await page.getByRole('tab', { name: 'Overview' }).click();
+  // M12.5: the project page is gone — the folder reads as a Collection whose
+  // page hosts the dossier, behind the record panel project.md opened in.
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('collection-page')).toBeVisible();
 
   const dossier = page.getByTestId('entity-dossier');
   await expect(dossier).toBeVisible();

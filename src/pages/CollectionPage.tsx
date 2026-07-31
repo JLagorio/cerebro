@@ -12,6 +12,7 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { CollectionFile, CollectionNode, Entry, Selection } from '@/engine/types';
 import { evaluateFilters } from '@/engine/viewFilters';
 import { resolveView } from '@/engine/views';
+import { EntityDossier } from '@/knowledge/EntityDossier';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { viewKind } from '@/views/viewKinds';
@@ -51,7 +52,16 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
   const collection = useMemo(
     () =>
       effectiveCollections(collections, views, entries).find((c) => c.folder === selection.folder) ?? null,
-    [collections, views, selection.folder],
+    [collections, views, entries, selection.folder],
+  );
+
+  // M12.5: a legacy project folder reads as a Collection, and the entity
+  // dossier that lived on the deleted project page follows it here — what
+  // the base believes about this container's work (M8.9).
+  const projectDoc = useMemo(
+    () =>
+      entries.find((e) => e.filename === 'project.md' && e.folder === selection.folder) ?? null,
+    [entries, selection.folder],
   );
 
   const node = useMemo(() => {
@@ -168,6 +178,17 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
       </header>
 
       <div className="min-h-0 flex-1 px-8 pb-10">
+        {/* M12.5: the entity dossier that lived on the deleted project page —
+            rendered whenever the folder carries a project.md, INCLUDING when
+            the collection lists nothing else: a legacy project whose records
+            all live on type screens still has beliefs worth reading. */}
+        {projectDoc !== null && (
+          <div className="mb-7">
+            <Section title="Knowledge">
+              <EntityDossier entry={projectDoc} />
+            </Section>
+          </div>
+        )}
         {empty ? (
           <EmptyState
             icon="folder-open"
@@ -370,16 +391,19 @@ function Section({
   children,
 }: {
   title: string;
-  count: number;
+  /** Omitted for sections that are not a countable list (Knowledge). */
+  count?: number;
   children: React.ReactNode;
 }) {
   return (
     <section>
       <h2 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-[var(--n-500)]">
         {title}
-        <span className="[font-family:var(--font-mono)] text-[10.5px] font-normal text-[var(--n-400)]">
-          {count}
-        </span>
+        {count !== undefined && (
+          <span className="[font-family:var(--font-mono)] text-[10.5px] font-normal text-[var(--n-400)]">
+            {count}
+          </span>
+        )}
       </h2>
       {children}
     </section>

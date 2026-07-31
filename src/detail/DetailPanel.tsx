@@ -9,10 +9,51 @@ import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { spliceTitleIntoBlocks } from '@/editor/markdown';
 import { typeStyle } from '@/engine/typeCatalog';
+import type { Entry } from '@/engine/types';
+import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
+import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
 import { setNoteTitle } from '@/lib/ipc';
+import { augmentDocPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
+
+/**
+ * Knowledge beside a RECORD (M12): what this note gave the base, and what
+ * the base can give it back. The doc side panel carried this as a tab;
+ * records open here instead now, so the loop follows them. Collapsed until
+ * asked — opening it IS the ask (M8.3: nothing speaks first).
+ */
+function KnowledgeSection({ entry }: { entry: Entry }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section data-testid="detail-knowledge" className="mb-3.5 border-t border-[var(--n-100)] pt-2">
+      <button
+        type="button"
+        data-testid="detail-knowledge-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)] hover:text-[var(--n-800)]"
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
+        Knowledge
+      </button>
+      {open && (
+        <div className="flex flex-col gap-4 pb-1 pt-2">
+          <KnowledgeCommit entry={entry} variant="panel" />
+          <div className="border-t border-[var(--n-100)] pt-3.5">
+            <RelatedKnowledge
+              entry={entry}
+              variant="panel"
+              askPrompt={augmentDocPrompt(entry.path, entry.title)}
+              askLabel="What am I missing?"
+            />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export function DetailPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
@@ -170,6 +211,11 @@ export function DetailPanel() {
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
             on the path) so the add-property flyout closes on switch. */}
         <RecordProperties key={`props:${entry.path}`} entry={entry} schema={schema} />
+        {/* M12: records lost the doc side panel when display:doc died, and
+            the knowledge loop must not die with it — the same commit state
+            and related-concepts view, collapsed until asked (M8.3's rule:
+            the assistant never speaks first). */}
+        <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">Description</div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
             path so switching items reloads cleanly. */}

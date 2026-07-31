@@ -64,11 +64,18 @@ Decisions made (recommended in the assessment, confirmed by full-send):
   AdoptSchemaDialog (wand in the Types section) reviews per field; `applyAdoption`
   writes Type docs first, then batched per-record patches. Idempotent; counts reported.
 
+- **M12.7 `51974af` — the knowledge loop follows records.** The Playwright suite
+  caught the orphan: Spec/Source records lost the doc side panel's Knowledge tab
+  when `display: doc` died. The record panel gained the same commit state +
+  related-concepts view (collapsed until asked); the entity dossier moved from
+  the deleted project page to the Collection page (rendered even on "empty"
+  legacy project collections). E2e specs rewritten to the new model.
+
 ## State
 
-931→940 vitest green throughout (every phase committed green), 143 cargo green,
-tsc + vite build clean. Playwright run + real-vault (tauri dev) shakeout pending at
-time of writing. Not merged to main; no push.
+ALL GREEN at tip: 940 vitest / 79 files, 143 cargo, 27 Playwright, tsc + vite
+build clean. Every phase was committed green. Real-vault (tauri dev) shakeout
+pending. Not merged to main; no push.
 
 ## Known follow-ups
 
