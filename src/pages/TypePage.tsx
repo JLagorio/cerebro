@@ -241,16 +241,12 @@ function TypePropertiesPanel({ listing }: { listing: TypeListing }) {
   const fields = typeDef?.fields ?? [];
   const [adding, setAdding] = useState(false);
 
-  // A type with no `statuses:` of its own inherits the vault's — showing that
-  // inherited set is what makes "edit statuses" work on a fresh type: saving
-  // writes the (possibly edited) list onto this Type doc.
-  const inherited = schema.types.get('Work item')?.statuses ?? [];
+  // A type with no `statuses:` of its own starts from the app defaults —
+  // showing that set is what makes "edit statuses" work on a fresh type:
+  // saving writes the (possibly edited) list onto this Type doc. M12.2: no
+  // type inherits from another type's statuses anymore.
   const statuses =
-    typeDef !== undefined && typeDef.statuses.length > 0
-      ? typeDef.statuses
-      : inherited.length > 0
-        ? inherited
-        : DEFAULT_STATUSES;
+    typeDef !== undefined && typeDef.statuses.length > 0 ? typeDef.statuses : DEFAULT_STATUSES;
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6 pt-3">

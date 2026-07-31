@@ -1,13 +1,12 @@
 /**
- * Type catalog (M3): the single source for "what types exist" and which of
- * them are system-owned.
+ * Type catalog (M3, rewritten M12.2): the single source for "what types
+ * exist".
  *
- * System types mirror the Salesforce standard-object model: the app depends
- * on their names and built-in fields (routing in useOpenPath, item keys,
- * the status chain), so users may not rename or delete them — nor remove
- * their built-in fields — but they MAY add custom properties and restyle
- * the icon/color. Custom types (any other `type: Type` doc) are fully
- * editable.
+ * M12 removed the Salesforce-style standard objects. Project and Work item
+ * are ordinary types now — declare them, rename them, delete them, or never
+ * have them at all; nothing in the app depends on their names. The one
+ * system type left is `Type` itself: the metamodel is the single name the
+ * app must know, because `type: Type` docs ARE the schema.
  */
 
 import { isTemplate } from '@/lib/templates';
@@ -27,22 +26,10 @@ export interface SystemTypeSpec {
 
 export const SYSTEM_TYPES: SystemTypeSpec[] = [
   {
-    name: 'Project',
-    lockedFields: ['key', 'state'],
-    fallbackIcon: 'folder-kanban',
-    fallbackColor: '#14B8A6',
-  },
-  {
-    name: 'Work item',
-    lockedFields: ['status', 'priority', 'assignee', 'due', 'estimate'],
-    fallbackIcon: 'check-square',
-    fallbackColor: '#3D8BE8',
-  },
-  {
     // The meta-type: `type: Type` docs ARE the schema. Fully locked — its
     // reserved frontmatter keys are the schema format itself.
     name: 'Type',
-    lockedFields: ['fields', 'statuses', 'icon', 'color'],
+    lockedFields: ['fields', 'statuses', 'icon', 'color', 'folder', 'views'],
     fallbackIcon: 'shapes',
     fallbackColor: '#8B7CF6',
   },
@@ -134,6 +121,34 @@ export function isDocEntry(entry: Entry): boolean {
   // untyped they would otherwise sail through the next branch into Docs.
   if (isKnowledgePath(entry.path)) return false;
   return entry.type === null || entry.type === '';
+}
+
+/**
+ * True when this entry is a RECORD: a typed note that lives on its type's
+ * screens, in views, and in Lists (M12.1/M12.2). The complement of
+ * isDocEntry over content — templates are stationery, Type docs are the
+ * schema, and the knowledge bundle is its own corpus, so none of them are
+ * records even though they carry a `type:`.
+ */
+export function isRecordEntry(entry: Entry): boolean {
+  return (
+    entry.type !== null &&
+    entry.type !== '' &&
+    entry.type !== 'Type' &&
+    !isTemplate(entry) &&
+    !isKnowledgePath(entry.path)
+  );
+}
+
+/**
+ * A record whose type declares a status field is a commitment — a task in
+ * the My-Tasks sense (M12.2: capability-based, since no type name is
+ * special). Its body checklists are its own subtasks, not the vault's.
+ */
+export function isTaskRecord(entry: Entry, schema: Schema): boolean {
+  if (!isRecordEntry(entry)) return false;
+  const def = entry.type === null ? undefined : schema.types.get(entry.type);
+  return def !== undefined && def.fields.some((f) => f.kind === 'status');
 }
 
 /** Icon + color for an entry's type, with the same fallbacks as listTypes —

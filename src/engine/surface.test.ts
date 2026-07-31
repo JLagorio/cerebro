@@ -144,7 +144,7 @@ function mkView(
 }
 
 describe('resolveSurface', () => {
-  it('a project selection collects its contained Work items only', () => {
+  it('a project selection collects its contained records only', () => {
     const { entries, schema } = fixture();
     const collection = resolveSurface(
       { kind: 'project', path: FOUNDATIONS },
@@ -153,7 +153,8 @@ describe('resolveSurface', () => {
       [],
     );
     expect(collection.title).toBe('Foundations');
-    // Docs and the project.md itself are excluded — items only, sorted.
+    // Docs and the project.md itself are excluded — records only, sorted
+    // (M12.2: records of ANY type, not just Work items).
     expect(collection.entries.map((e) => e.path)).toEqual([
       'projects/foundations/items/fld-2.md',
       'projects/foundations/items/fld-1.md',

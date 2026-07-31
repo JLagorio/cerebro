@@ -69,13 +69,12 @@ describe('TypePage — Records tab', () => {
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
   });
 
-  it('marks system types with a locked badge', () => {
+  it('treats Work item like any other type — no system lock (M12.2)', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
-    expect(screen.getByText('System type')).toBeTruthy();
-    // Rename/delete are system-locked; customize stays available.
+    expect(screen.queryByText('System type')).toBeNull();
     expect(screen.getByRole('button', { name: 'Customize icon & color' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Change display name' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete type' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Change display name' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
 
   it('offers rename and delete for custom types', () => {
@@ -91,7 +90,7 @@ describe('TypePage — Properties tab', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Properties' }));
   };
 
-  it('lists declared fields, locking built-ins on system types', () => {
+  it('lists declared fields with nothing locked (M12.2)', () => {
     openProperties('Work item');
     const rows = screen.getAllByTestId('type-field-row');
     expect(rows.map((r) => r.textContent)).toEqual([
@@ -100,9 +99,9 @@ describe('TypePage — Properties tab', () => {
       expect.stringContaining('Assignee'),
       expect.stringContaining('Due'),
     ]);
-    // All four demo fields are built-ins of the system type: locked.
-    expect(screen.getAllByText('Built-in')).toHaveLength(4);
-    expect(screen.getByText(/system type/)).toBeTruthy();
+    // No standard objects: every declared field is the user's to edit.
+    expect(screen.queryByText('Built-in')).toBeNull();
+    expect(screen.queryByText(/system type/)).toBeNull();
   });
 
   it('adds a custom property to the type doc via the add panel', async () => {

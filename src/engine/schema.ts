@@ -142,6 +142,10 @@ export function buildSchema(entries: Entry[]): Schema {
       color: typeof e.properties.color === 'string' ? e.properties.color : null,
       fields: parseFields((e.properties as Record<string, unknown>).fields),
       statuses: parseStatuses((e.properties as Record<string, unknown>).statuses),
+      folder:
+        typeof e.properties.folder === 'string' && e.properties.folder.trim() !== ''
+          ? e.properties.folder.trim().replace(/^\/+|\/+$/g, '')
+          : null,
     });
   }
 
@@ -149,14 +153,6 @@ export function buildSchema(entries: Entry[]): Schema {
   // Built once per schema so reverse rollups/trees are O(1) lookups instead
   // of a full scan per row (M3.5).
   const relations = buildRelationIndex(entries);
-
-  // Vault-level default statuses live on the Work item Type doc (locked
-  // decision 4); parsed once per schema build.
-  const workItemTypeEntry = entries.find((e) => e.type === 'Type' && e.title === 'Work item');
-  const vaultStatuses =
-    workItemTypeEntry !== undefined
-      ? parseStatuses((workItemTypeEntry.properties as Record<string, unknown>).statuses)
-      : [];
 
   function projectForEntry(e: Entry): Entry | null {
     if (e.project === null) return null;
@@ -171,11 +167,12 @@ export function buildSchema(entries: Entry[]): Schema {
         if (override.length > 0) return override;
       }
     }
-    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
+    return DEFAULT_STATUSES;
   }
 
-  /** Project override → the entry's own type's `statuses:` → Work item's →
-   * defaults. Lets a Bug type carry a status set Work items never see. */
+  /** Project override → the entry's own type's `statuses:` → app defaults.
+   * M12.2: no type inherits from another — Work item used to be the vault's
+   * status source, which meant one type name the app could never let go of. */
   function statusSetFor(e: Entry): StatusDef[] {
     if (e.project !== null) {
       const project = byPath.get(e.project);
@@ -186,7 +183,7 @@ export function buildSchema(entries: Entry[]): Schema {
     }
     const own = e.type !== null ? types.get(e.type)?.statuses : undefined;
     if (own !== undefined && own.length > 0) return own;
-    return vaultStatuses.length > 0 ? vaultStatuses : DEFAULT_STATUSES;
+    return DEFAULT_STATUSES;
   }
 
   function resolveField(e: Entry, field: string): ResolvedField {

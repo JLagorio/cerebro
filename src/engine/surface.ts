@@ -2,7 +2,7 @@ import { isTemplate } from '@/lib/templates';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
 import type { Entry, Presentation, Schema, Selection, SortSpec, ListFile, ListSource } from './types';
-import { typePresentation } from './typeCatalog';
+import { isRecordEntry, typePresentation } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { clonePresentation, DEFAULT_PRESENTATION, resolveView } from './views';
 
@@ -114,10 +114,14 @@ export function sortEntries(entries: Entry[], sort: SortSpec[], schema: Schema):
 }
 
 /** Vault format v2: project membership is containment — Entry.project points
- * at the owning project.md. The item canvas shows the project's Work items
- * only; docs inside the folder belong to the Pages surface, not the board. */
+ * at the owning project.md. The item canvas shows every record contained in
+ * the project (M12.2: any type, not one hardcoded name); docs inside the
+ * folder belong to the Pages surface, not the board, and the project.md is
+ * the container, not its own content. */
 function itemsOfProject(project: Entry, entries: Entry[]): Entry[] {
-  return entries.filter((e) => e.project === project.path && e.type === 'Work item');
+  return entries.filter(
+    (e) => e.project === project.path && e.path !== project.path && isRecordEntry(e),
+  );
 }
 
 /**

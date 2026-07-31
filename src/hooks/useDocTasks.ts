@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { parseTasks, toggleTaskLine, type DocTask } from '@/engine/tasks';
-import type { Entry } from '@/engine/types';
+import { isTaskRecord } from '@/engine/typeCatalog';
+import type { Entry, Schema } from '@/engine/types';
 import { readNote, saveNote } from '@/lib/ipc';
 import { isTemplate } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
-/** Any markdown note can carry tasks except work items (their tasks are the
- * item itself) and templates (scaffolding, not commitments). */
-const isTaskSource = (e: Entry): boolean => e.type !== 'Work item' && !isTemplate(e);
+/** Any markdown note can carry tasks except task-like records (M12.2: a
+ * record with a status IS the task — its checklists are its own subtasks),
+ * Type docs (schema), and templates (scaffolding, not commitments). */
+const isTaskSource = (e: Entry, schema: Schema): boolean =>
+  e.type !== 'Type' && !isTemplate(e) && !isTaskRecord(e, schema);
 
 // Body cache keyed by path — invalidated by modifiedAt, so the watcher's
 // rescans keep the rollup fresh without rereading unchanged files.
@@ -27,6 +30,7 @@ export function useDocTasks(): {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
+  const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
   const [tasks, setTasks] = useState<DocTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,7 +38,7 @@ export function useDocTasks(): {
   useEffect(() => {
     if (vaultPath === null) return;
     let cancelled = false;
-    const sources = entries.filter(isTaskSource);
+    const sources = entries.filter((e) => isTaskSource(e, schema));
     void (async () => {
       const results = await Promise.all(
         sources.map(async (e) => {
@@ -57,7 +61,7 @@ export function useDocTasks(): {
     return () => {
       cancelled = true;
     };
-  }, [entries, vaultPath]);
+  }, [entries, vaultPath, schema]);
 
   const toggle = useCallback(
     async (task: DocTask, done: boolean) => {

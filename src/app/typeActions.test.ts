@@ -120,10 +120,24 @@ describe('removeFieldFromType', () => {
     expect(patches).toEqual([{ path: 'types/recipe.md', patch: { fields: {} } }]);
   });
 
-  it('refuses built-in fields of system types', async () => {
-    expect(await removeFieldFromType('Work item', 'status')).toBe(false);
-    expect(patches).toEqual([]);
-    expect(toasts[0]).toMatch(/built-in/);
+  it('removes what used to be a locked built-in — no type is system anymore', async () => {
+    // M12.2: Work item lost its standard-object status; its fields are as
+    // editable as anyone's. (The metamodel's own keys stay locked, but they
+    // are reserved keys, not declared fields — covered by addFieldToType.)
+    useVaultStore.setState({
+      entries: [
+        {
+          ...typeDoc,
+          path: 'types/work-item.md',
+          title: 'Work item',
+          properties: {
+            fields: { status: { kind: 'status' } },
+          } as unknown as typeof typeDoc.properties,
+        },
+      ],
+    });
+    expect(await removeFieldFromType('Work item', 'status')).toBe(true);
+    expect(patches).toEqual([{ path: 'types/work-item.md', patch: { fields: {} } }]);
   });
 });
 

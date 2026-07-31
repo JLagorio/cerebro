@@ -60,6 +60,9 @@ export interface TypeDef {
   fields: FieldDef[];
   /** `statuses:` declared on this Type doc; [] when it declares none. */
   statuses: StatusDef[];
+  /** `folder:` on the Type doc — where new records land (M12.2). Null means
+   * the records/<plural-slug> convention. */
+  folder: string | null;
 }
 
 export interface ResolvedField {

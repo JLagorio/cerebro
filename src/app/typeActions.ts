@@ -19,7 +19,7 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /** Frontmatter keys with schema meaning on a Type doc — never field names. */
-const RESERVED = new Set(['type', 'icon', 'color', 'fields', 'statuses']);
+const RESERVED = new Set(['type', 'icon', 'color', 'fields', 'statuses', 'folder', 'views']);
 
 /** Leading underscores are stripped: `_`-prefixed keys are the app-managed
  * namespace (M4, see engine/properties.isSystemProperty) and a user-declared

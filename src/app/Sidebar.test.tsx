@@ -210,7 +210,7 @@ describe('Sidebar', () => {
       properties: { icon: 'chef-hat', color: '#DE8F0A' },
     });
 
-    it('lists system types plus declared types with record counts', () => {
+    it('lists declared and referenced types with record counts', () => {
       useVaultStore.setState({
         entries: [
           project,
@@ -222,14 +222,17 @@ describe('Sidebar', () => {
       render(<Sidebar onNewView={vi.fn()} />);
       const rows = screen.getAllByTestId('sidebar-type');
       const labels = rows.map((r) => r.textContent);
-      // Project (1 record), Recipe (2), Type (1 type doc), Work item (0).
-      expect(labels).toEqual(['Project1', 'Recipe2', 'Type1', 'Work item0']);
+      // M12.2: no standing system rows — Project appears because a record
+      // references it (ghost), Recipe because it is declared, Type because
+      // the metamodel always exists. No phantom "Work item 0".
+      expect(labels).toEqual(['Project1', 'Recipe2', 'Type1']);
     });
 
     it('clicking a type navigates to the type screen', () => {
+      useVaultStore.setState({ entries: [project, recipeType] });
       render(<Sidebar onNewView={vi.fn()} />);
-      fireEvent.click(screen.getByText('Work item'));
-      expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Work item' });
+      fireEvent.click(screen.getByText('Recipe'));
+      expect(useNavStore.getState().selection).toEqual({ kind: 'type', name: 'Recipe' });
     });
 
     it('collapses via the section header', () => {
@@ -254,9 +257,11 @@ describe('Sidebar', () => {
       expect(screen.getByText('Delete type')).toBeTruthy();
     });
 
-    it('right-click on a system type only offers customize (locked)', () => {
+    it('right-click on the metamodel only offers customize (locked)', () => {
+      // M12.2: `Type` is the one remaining system type — the schema cannot
+      // rename or delete itself. Every other type is fully editable.
       render(<Sidebar onNewView={vi.fn()} />);
-      fireEvent.contextMenu(screen.getByText('Work item'));
+      fireEvent.contextMenu(screen.getByText('Type'));
       expect(screen.getByText('Customize icon & color…')).toBeTruthy();
       expect(screen.queryByText('Change display name…')).toBeNull();
       expect(screen.queryByText('Delete type')).toBeNull();

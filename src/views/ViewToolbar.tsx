@@ -26,8 +26,8 @@ import type {
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 import { VIEW_SEGMENTS } from '@/views/viewKinds';
 
-// Fallback options for surfaces that don't pass declared fields (the project
-// canvas is Work-item-only, so its groupable fields are known statically).
+// Fallback options for surfaces that don't pass declared fields — common
+// field names, nothing type-specific (M12.2).
 export const GROUP_OPTIONS = [
   { value: 'none', label: 'No grouping' },
   { value: 'status', label: 'Group: status' },

@@ -1,5 +1,4 @@
-import { isKnowledgePath } from '@/engine/okf';
-import { isTemplate } from '@/lib/templates';
+import { isRecordEntry } from '@/engine/typeCatalog';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -49,12 +48,7 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
       navigate({ kind: 'type', name: entry.title });
       return;
     }
-    if (
-      entry.type !== null &&
-      entry.type !== '' &&
-      !isTemplate(entry) &&
-      !isKnowledgePath(entry.path)
-    ) {
+    if (isRecordEntry(entry) && entry.type !== null) {
       // The project jump is what made opening a row in a saved view land you
       // on a project page. In-place callers get the panel and nothing else;
       // DetailPanel's breadcrumb is how you reach the backdrop deliberately.

@@ -204,27 +204,26 @@ describe('projectForEntry', () => {
 });
 
 describe('statusSetForProject', () => {
-  it('null path uses the Work item Type doc statuses with humanized labels', () => {
-    expect(schema.statusSetForProject(null)).toEqual([
-      { id: 'triage', label: 'Triage', color: '#A8AFC2', group: 'active' },
-      { id: 'doing', label: 'Doing', color: '#EFB428', group: 'active' },
-      { id: 'shipped', label: 'Shipped', color: '#34B764', group: 'done' },
-    ]);
+  // M12.2: no type's statuses stand in for the vault's. The Work item Type
+  // doc used to be the default source — now a type's statuses are its own,
+  // and everything else gets the app defaults.
+  it('null path uses the app defaults, not any Type doc', () => {
+    expect(schema.statusSetForProject(null)).toBe(DEFAULT_STATUSES);
   });
 
-  it('a project statuses override wins over the type-doc default', () => {
+  it('a project statuses override wins over the defaults', () => {
     expect(schema.statusSetForProject('projects/labs/project.md')).toEqual([
       { id: 'poc', label: 'Poc', color: '#8250DC', group: 'active' },
       { id: 'proven', label: 'Proven', color: '#34B764', group: 'done' },
     ]);
   });
 
-  it('a project without an override uses the type-doc default', () => {
-    expect(schema.statusSetForProject('projects/flight-deck/project.md')[0].id).toBe('triage');
+  it('a project without an override uses the app defaults', () => {
+    expect(schema.statusSetForProject('projects/flight-deck/project.md')).toBe(DEFAULT_STATUSES);
   });
 
-  it('an unknown project path uses the type-doc default', () => {
-    expect(schema.statusSetForProject('projects/nowhere/project.md')[0].id).toBe('triage');
+  it('an unknown project path uses the app defaults', () => {
+    expect(schema.statusSetForProject('projects/nowhere/project.md')).toBe(DEFAULT_STATUSES);
   });
 
   it('falls back to DEFAULT_STATUSES when no type doc declares statuses', () => {
