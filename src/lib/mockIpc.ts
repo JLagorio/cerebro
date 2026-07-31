@@ -27,6 +27,8 @@ const seededYaml = import.meta.glob('/demo-vault/**/*.yml', {
 }) as Record<string, string>;
 
 const files = new Map<string, string>();
+// Connector config (M13.3) — config, not a note; scan never sees it.
+let connectorsJson = '';
 const times = new Map<string, { createdAt: string; modifiedAt: string }>();
 // Directories created explicitly (create_folder) — the file map alone can't
 // represent an empty folder. Parity with real dirs on disk.
@@ -37,6 +39,7 @@ export function resetMockFs(): void {
   files.clear();
   times.clear();
   folders.clear();
+  connectorsJson = '';
   for (const [absPath, raw] of Object.entries({ ...seededNotes, ...seededYaml })) {
     const rel = absPath.replace(/^\/demo-vault\//, '');
     files.set(rel, raw);
@@ -351,6 +354,28 @@ export async function saveList(
 
 export async function startWatcher(_vault: string): Promise<void> {
   // No-op: the mock has no file watcher; writers trigger rescans directly.
+}
+
+// --- Connectors (M13.3) ----------------------------------------------------
+// Mirrors src-tauri/src/connectors.rs: raw JSON string, object-validated on
+// save, empty when absent. Lives outside the files map — it is config, not a
+// note, and scan must never see it.
+
+export async function readConnectors(_vault: string): Promise<string> {
+  return connectorsJson;
+}
+
+export async function saveConnectors(_vault: string, json: string): Promise<void> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (e) {
+    throw new Error(`connectors.json is not valid JSON: ${String(e)}`);
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('connectors.json must be a JSON object');
+  }
+  connectorsJson = json;
 }
 
 // --- Vault format v2 file operations (M2 Task 3) ---

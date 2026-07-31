@@ -7,7 +7,12 @@ import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
 import { readNote } from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
-import { distillPrompt, reviewConceptPrompt, scheduledSkillPrompt } from '@/lib/prompts';
+import {
+  distillPrompt,
+  refreshSourcePrompt,
+  reviewConceptPrompt,
+  scheduledSkillPrompt,
+} from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -72,10 +77,15 @@ export function useJobRunner(): void {
   const next: AgentJob | null = useMemo(() => {
     if (!autoLearn) return null;
     return (
-      jobQueue(entries, listConcepts(entries, today), { filed, attempts, skillRuns, now })[0] ??
-      null
+      jobQueue(entries, listConcepts(entries, today), {
+        filed,
+        attempts,
+        skillRuns,
+        now,
+        connectors,
+      })[0] ?? null
     );
-  }, [attempts, autoLearn, entries, filed, now, skillRuns, today]);
+  }, [attempts, autoLearn, connectors, entries, filed, now, skillRuns, today]);
 
   // Owns the run: the event stream is shared with the chat, so both sides need
   // to know whose turn the events belong to.
@@ -125,9 +135,11 @@ export function useJobRunner(): void {
                   job.title,
                   splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
                 )
-              : job.kind === 'stale'
-                ? reviewConceptPrompt(job.path, job.title)
-                : distillPrompt(job.path, job.title);
+              : job.kind === 'refresh'
+                ? refreshSourcePrompt(job.path, job.title)
+                : job.kind === 'stale'
+                  ? reviewConceptPrompt(job.path, job.title)
+                  : distillPrompt(job.path, job.title);
           mcp.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
             message,

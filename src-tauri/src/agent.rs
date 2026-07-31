@@ -292,7 +292,7 @@ fn tool_policy(shell: bool) -> Vec<&'static str> {
     tools
 }
 
-pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
+pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Vec<String> {
     let tools = tool_policy(req.shell.unwrap_or(false));
     let mut args: Vec<String> = vec![
         "-p".into(),
@@ -310,12 +310,12 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
         "--allowedTools".into(),
         tools.join(","),
     ];
-    // Without connectors, --strict-mcp-config keeps the agent from loading the
-    // user's other MCP servers into a session they opened inside a notes app.
-    // WITH connectors, those servers are the whole point: they are how a Jira
-    // key in a note becomes a cached source doc. Off by default — reaching
-    // other systems is a choice, never one inherited from opening the panel.
-    if !req.connectors.unwrap_or(false) {
+    // Strictness is decided by connectors::connector_context (M13.3): a vault
+    // with an explicit connector list is pinned to it (strict, the enabled
+    // servers merged into our config); a vault without one keeps the legacy
+    // open mode when connectors are on. Off stays strict — reaching other
+    // systems is a choice, never one inherited from opening the panel.
+    if strict_mcp {
         args.push("--strict-mcp-config".into());
     }
     if let Some(prompt) = req.system_prompt.as_ref().filter(|p| !p.trim().is_empty()) {
@@ -333,17 +333,23 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
     args
 }
 
-pub fn mcp_config_json(url: &str, token: &str) -> String {
-    serde_json::json!({
-        "mcpServers": {
-            "cerebro": {
-                "type": "http",
-                "url": url,
-                "headers": { "Authorization": format!("Bearer {token}") }
-            }
-        }
-    })
-    .to_string()
+pub fn mcp_config_json(
+    url: &str,
+    token: &str,
+    extra: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    // Connector entries first, cerebro last: on a name collision the loopback
+    // wins, because a config that shadows our own tools is a broken run.
+    let mut servers = extra.clone();
+    servers.insert(
+        "cerebro".into(),
+        serde_json::json!({
+            "type": "http",
+            "url": url,
+            "headers": { "Authorization": format!("Bearer {token}") }
+        }),
+    );
+    serde_json::json!({ "mcpServers": servers }).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -367,9 +373,13 @@ pub fn stream(
     };
     std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
     let config_path = config_dir.join("mcp-config.json");
-    std::fs::write(&config_path, mcp_config_json(&url, &token)).map_err(|e| e.to_string())?;
+    let (extra_servers, strict_mcp) =
+        crate::connectors::connector_context(vault, req.connectors.unwrap_or(false));
+    std::fs::write(&config_path, mcp_config_json(&url, &token, &extra_servers))
+        .map_err(|e| e.to_string())?;
 
-    let mut child = with_login_path(Command::new(&binary).args(build_args(&req, &config_path)))
+    let mut child =
+        with_login_path(Command::new(&binary).args(build_args(&req, &config_path, strict_mcp)))
         // The vault is the working directory, so shell-capable modes and the
         // CLI's own file tools stay pointed at the user's notes.
         .current_dir(vault)
@@ -571,6 +581,7 @@ mod tests {
                 mcp_token: None,
             },
             Path::new("/tmp/mcp.json"),
+            true,
         )
     }
 
@@ -617,6 +628,7 @@ mod tests {
                 mcp_token: None,
             },
             Path::new("/tmp/mcp.json"),
+            true,
         );
         assert!(!allowed_tools(&args).contains("Bash"));
     }
@@ -632,7 +644,9 @@ mod tests {
     }
 
     #[test]
-    fn connectors_open_the_users_own_mcp_servers_and_nothing_else() {
+    fn a_non_strict_run_opens_the_users_own_mcp_servers_and_nothing_else() {
+        // connector_context decides strictness (see connectors.rs tests);
+        // this pins what the flag changes at the args level: MCP scope only.
         let args = build_args(
             &AgentRequest {
                 message: "hi".into(),
@@ -645,9 +659,8 @@ mod tests {
                 mcp_token: None,
             },
             Path::new("/tmp/mcp.json"),
+            false,
         );
-        // The connector inlet needs Atlassian and friends reachable; that is
-        // the ONLY thing this flag changes.
         assert!(!args.contains(&"--strict-mcp-config".to_string()));
         assert!(!allowed_tools(&args).contains("Bash"));
     }
@@ -677,6 +690,7 @@ mod tests {
                 mcp_token: None,
             },
             Path::new("/tmp/mcp.json"),
+            true,
         );
         assert!(full.windows(2).any(|w| w[0] == "--resume" && w[1] == "abc"));
         assert!(full.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-5"));
@@ -727,9 +741,20 @@ mod tests {
 
     #[test]
     fn mcp_config_carries_the_bearer_token() {
-        let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret");
+        let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret", &serde_json::Map::new());
         assert!(config.contains("\"type\":\"http\""));
         assert!(config.contains("Bearer secret"));
+    }
+
+    #[test]
+    fn connector_servers_merge_beside_cerebro_and_never_shadow_it() {
+        let mut extra = serde_json::Map::new();
+        extra.insert("jira".into(), json!({"type": "http", "url": "https://jira/mcp"}));
+        extra.insert("cerebro".into(), json!({"type": "http", "url": "https://evil/mcp"}));
+        let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret", &extra);
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(parsed["mcpServers"]["jira"]["url"], "https://jira/mcp");
+        assert_eq!(parsed["mcpServers"]["cerebro"]["url"], "http://127.0.0.1:9/mcp");
     }
 
     #[test]

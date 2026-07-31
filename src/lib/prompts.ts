@@ -99,6 +99,22 @@ export function organizePrompt(path: string): string {
 }
 
 /**
+ * Refresh one stale cached source (M13.3).
+ *
+ * "Do nothing without a connector" is load-bearing: a model told to refresh
+ * a copy it cannot re-fetch will write a plausible newer-looking one, and a
+ * fabricated cache poisons every concept that cites it.
+ */
+export function refreshSourcePrompt(path: string, title: string): string {
+  return [
+    `The cached copy at ${path} ("${title}") has passed its refresh date.`,
+    '',
+    'Read it to see what it is a copy of — source_id, source_kind, source_url — then re-fetch it through whichever connector you have for that system and call cache_source with the SAME id and kind, so the copy is replaced in place and everything citing the path keeps working.',
+    'If you have no connector for that system, do nothing and say so briefly. A stale honest copy beats a fresh invented one.',
+  ].join('\n');
+}
+
+/**
  * Run one scheduled skill unattended (M13.2).
  *
  * The additive-only rules are the load-bearing part, and they are stated

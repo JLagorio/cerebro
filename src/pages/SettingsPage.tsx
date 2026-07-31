@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
+import { ConnectorSettings } from '@/app/ConnectorSettings';
 import { jobQueue } from '@/engine/jobs';
 import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
@@ -71,11 +72,12 @@ export function SettingsPage() {
         filed,
         attempts,
         skillRuns,
+        connectors,
         // Render-time clock is honest enough here: this page re-renders on
         // every visit, and a due schedule missing until then costs a label.
         now: new Date(),
       }).length,
-    [attempts, entries, filed, skillRuns],
+    [attempts, connectors, entries, filed, skillRuns],
   );
 
   const changeVault = async () => {
@@ -148,10 +150,11 @@ export function SettingsPage() {
         />
         <SettingRow
           label="Connectors"
-          hint="Let the assistant use your other MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once."
+          hint="Let the assistant use MCP servers — Jira, Confluence — to fetch what a note refers to. Anything it fetches is written down under sources/, so the same ticket is only ever fetched once, and a cached copy past its refresh date is re-fetched in the background."
           checked={connectors}
           onChange={setConnectors}
         />
+        {connectors && <ConnectorSettings />}
         <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium text-[var(--n-800)]">Issue keys</div>

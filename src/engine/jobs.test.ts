@@ -161,6 +161,63 @@ describe('jobQueue', () => {
     expect(jobs.map((j) => j.kind)).toEqual(['filed', 'scheduled', 'behind', 'stale']);
   });
 
+  it('derives a refresh for a stale cached source only while connectors are on', () => {
+    const source = makeEntry({
+      path: 'sources/issues/ops-121.md',
+      title: 'OPS-121',
+      type: 'Source',
+      snippet: 'cached ticket',
+      properties: { stale_after: '2026-07-01' },
+      modifiedAt: '2026-06-01T00:00:00Z',
+    });
+    const fresh = makeEntry({
+      path: 'sources/issues/ops-200.md',
+      title: 'OPS-200',
+      type: 'Source',
+      snippet: 'cached ticket',
+      properties: { stale_after: '2026-12-01' },
+    });
+    const on = jobQueue([source, fresh], [], { ...EMPTY, now, connectors: true });
+    expect(on.map((j) => [j.kind, j.path])).toEqual([['refresh', 'sources/issues/ops-121.md']]);
+    // Without a connector there is nothing to re-fetch with — no job.
+    expect(jobQueue([source], [], { ...EMPTY, now })).toEqual([]);
+    // The shared attempts ledger stops the spin after one try.
+    expect(
+      jobQueue([source], [], {
+        ...EMPTY,
+        attempts: { 'sources/issues/ops-121.md': '2026-06-01T00:00:00Z' },
+        now,
+        connectors: true,
+      }),
+    ).toEqual([]);
+  });
+
+  it('refresh outranks a stale concept recheck — the copy is replaced before it is re-read', () => {
+    const entries = [
+      makeEntry({
+        path: 'sources/issues/ops-121.md',
+        title: 'OPS-121',
+        type: 'Source',
+        snippet: 'x',
+        properties: { stale_after: '2026-07-01' },
+      }),
+      makeEntry({
+        path: 'knowledge/systems/old.md',
+        title: 'Old',
+        properties: {
+          generated: { by: 'claude-code', at: '2026-06-01T00:00:00Z' },
+          stale_after: '2026-07-01',
+        },
+      }),
+    ];
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
+      ...EMPTY,
+      now,
+      connectors: true,
+    });
+    expect(jobs.map((j) => j.kind)).toEqual(['refresh', 'stale']);
+  });
+
   it('never distils a skill: filed or edited, its body is schema for behavior', () => {
     const playbook = skill('Playbook');
     const entries = [

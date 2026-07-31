@@ -1,3 +1,4 @@
+import { SOURCES_DIR } from './ingest';
 import { learnQueue, type LearnQueueInput } from './learn';
 import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
 import type { Concept } from './okf';
@@ -18,7 +19,7 @@ import type { Entry } from './types';
  * rechecking stale concepts remain maintenance.
  */
 
-export type JobKind = 'filed' | 'scheduled' | 'behind' | 'stale';
+export type JobKind = 'filed' | 'scheduled' | 'behind' | 'refresh' | 'stale';
 
 export interface AgentJob {
   kind: JobKind;
@@ -34,12 +35,15 @@ export interface JobQueueInput extends LearnQueueInput {
   skillRuns: Readonly<Record<string, string>>;
   /** The wall clock — passed in so the queue stays a pure derivation. */
   now: Date;
+  /** Connectors enabled (uiStore.agentConnectors). A stale cached source is
+   * only work when the agent can actually reach the system it came from. */
+  connectors?: boolean;
 }
 
 export function jobQueue(
   entries: readonly Entry[],
   concepts: readonly Concept[],
-  { filed, attempts, skillRuns, now }: JobQueueInput,
+  { filed, attempts, skillRuns, now, connectors = false }: JobQueueInput,
 ): AgentJob[] {
   // Skills are excluded from learning for the same reason types/ is: a
   // skill's body is schema for behavior, not material. Distilling a playbook
@@ -64,12 +68,31 @@ export function jobQueue(
     scheduled.push({ kind: 'scheduled', path: entry.path, title: entry.title, runKey: key });
   }
 
+  // A cached source past its refresh date becomes a re-fetch (M13.3) —
+  // cache_source stamps stale_after for exactly this. The refreshed file's
+  // modifiedAt then makes citing concepts `behind`, so the distiller
+  // re-checks them with no extra wiring: the loop ticks on external data.
+  // The attempts ledger is shared with learning; same discipline, same key.
+  const refresh: AgentJob[] = [];
+  if (connectors) {
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    for (const entry of entries) {
+      if (!entry.path.startsWith(`${SOURCES_DIR}/`) || entry.parseError !== null) continue;
+      const stale = entry.properties.stale_after;
+      if (typeof stale !== 'string' || stale > today) continue;
+      if (attempts[entry.path] === entry.modifiedAt) continue;
+      refresh.push({ kind: 'refresh', path: entry.path, title: entry.title, runKey: entry.modifiedAt });
+    }
+  }
+
   // Every kind has a DISTINCT rank, and that is load-bearing for the tie-
   // break below: learn runKeys are ISO timestamps, scheduled runKeys are
   // fire keys, and the two formats only ever compare within their own kind.
   // Give two kinds one rank and the sort silently orders by format.
-  const RANK: Record<JobKind, number> = { filed: 0, scheduled: 1, behind: 2, stale: 3 };
-  return [...learn, ...scheduled].sort(
+  // Refresh sits before stale on purpose: a concept recheck reads its
+  // sources, and rechecking against a copy about to be replaced is wasted.
+  const RANK: Record<JobKind, number> = { filed: 0, scheduled: 1, behind: 2, refresh: 3, stale: 4 };
+  return [...learn, ...scheduled, ...refresh].sort(
     (a, b) =>
       RANK[a.kind] - RANK[b.kind] ||
       b.runKey.localeCompare(a.runKey) ||

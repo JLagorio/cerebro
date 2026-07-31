@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod app_config;
+pub mod connectors;
 pub mod demo;
 pub mod git;
 pub mod git_commands;
@@ -193,6 +194,16 @@ fn run_agent(
 }
 
 #[tauri::command(async)]
+fn read_connectors(vault: String) -> Result<String, String> {
+    Ok(connectors::read_raw(Path::new(&vault)).unwrap_or_default())
+}
+
+#[tauri::command(async)]
+fn save_connectors(vault: String, json: String) -> Result<(), String> {
+    connectors::save_raw(Path::new(&vault), &json)
+}
+
+#[tauri::command(async)]
 fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<(), String> {
     state.stop()
 }
@@ -234,6 +245,8 @@ pub fn run() {
             delete_note,
             list_folders,
             start_watcher,
+            read_connectors,
+            save_connectors,
             check_agent,
             start_mcp,
             run_agent,
