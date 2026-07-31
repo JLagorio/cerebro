@@ -14,6 +14,7 @@ import {
   refreshSourcePrompt,
   reviewConceptPrompt,
   scheduledSkillPrompt,
+  schemaRecheckPrompt,
 } from '@/lib/prompts';
 import { todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
@@ -162,9 +163,11 @@ export function useJobRunner(): void {
                   )
                 : job.kind === 'refresh'
                   ? refreshSourcePrompt(job.path, job.title)
-                  : job.kind === 'stale'
-                    ? reviewConceptPrompt(job.path, job.title)
-                    : distillPrompt(job.path, job.title);
+                  : job.kind === 'schema'
+                    ? schemaRecheckPrompt(job.path, job.title)
+                    : job.kind === 'stale'
+                      ? reviewConceptPrompt(job.path, job.title)
+                      : distillPrompt(job.path, job.title);
           mcp.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
             message,

@@ -263,6 +263,63 @@ describe('jobQueue', () => {
     expect(jobs.map((j) => j.kind)).toEqual(['refresh', 'stale']);
   });
 
+  it('a type-doc edit after a concept was written queues a schema recheck — lazily, never in bulk', () => {
+    const record = makeEntry({ path: 'records/epics/phoenix.md', title: 'Phoenix', type: 'Epic' });
+    const typeDoc = makeEntry({
+      path: 'types/epic.md',
+      title: 'Epic',
+      type: 'Type',
+      modifiedAt: '2026-07-30T12:00:00Z',
+    });
+    const concept = makeEntry({
+      path: 'knowledge/systems/phoenix-shape.md',
+      title: 'Phoenix shape',
+      modifiedAt: '2026-07-01T00:00:00Z',
+      properties: { generated: { by: 'claude-code', at: '2026-07-01T00:00:00Z' } },
+      relationships: { about: ['Phoenix'] },
+    });
+    const entries = [record, typeDoc, concept];
+    const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    expect(jobs.map((j) => [j.kind, j.path, j.runKey])).toEqual([
+      ['schema', 'knowledge/systems/phoenix-shape.md', '2026-07-30T12:00:00Z'],
+    ]);
+    // A type edited BEFORE the concept was generated is not a change to it.
+    const older = [record, { ...typeDoc, modifiedAt: '2026-06-01T00:00:00Z' }, concept];
+    expect(jobQueue(older, listConcepts(older, TODAY), { ...EMPTY, now })).toEqual([]);
+  });
+
+  it('stale + schema on one concept is ONE job under ONE ledger key — a no-op recheck cannot ping-pong', () => {
+    const record = makeEntry({ path: 'records/epics/phoenix.md', title: 'Phoenix', type: 'Epic' });
+    const typeDoc = makeEntry({
+      path: 'types/epic.md',
+      title: 'Epic',
+      type: 'Type',
+      modifiedAt: '2026-07-30T12:00:00Z',
+    });
+    const concept = makeEntry({
+      path: 'knowledge/systems/phoenix-shape.md',
+      title: 'Phoenix shape',
+      modifiedAt: '2026-07-05T00:00:00Z',
+      properties: {
+        generated: { by: 'claude-code', at: '2026-07-01T00:00:00Z' },
+        stale_after: '2026-07-15',
+      },
+      relationships: { about: ['Phoenix'] },
+    });
+    const entries = [record, typeDoc, concept];
+    const due = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
+    expect(due).toHaveLength(1);
+    expect(due[0].kind).toBe('schema');
+    expect(due[0].runKey).toBe('2026-07-30T12:00:00Z');
+    // Recording the composite key suppresses BOTH triggers.
+    const after = jobQueue(entries, listConcepts(entries, TODAY), {
+      ...EMPTY,
+      attempts: { 'knowledge/systems/phoenix-shape.md': '2026-07-30T12:00:00Z' },
+      now,
+    });
+    expect(after).toEqual([]);
+  });
+
   it('never distils a skill: filed or edited, its body is schema for behavior', () => {
     const playbook = skill('Playbook');
     const entries = [

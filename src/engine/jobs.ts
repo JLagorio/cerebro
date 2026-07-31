@@ -2,6 +2,7 @@ import { isAgentEntry } from './agents';
 import { SOURCES_DIR } from './ingest';
 import { learnQueue, type LearnQueueInput } from './learn';
 import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
+import { resolveTarget } from './wikilink';
 import type { Concept } from './okf';
 import type { Entry } from './types';
 
@@ -20,7 +21,14 @@ import type { Entry } from './types';
  * rechecking stale concepts remain maintenance.
  */
 
-export type JobKind = 'filed' | 'scheduled' | 'agent' | 'behind' | 'refresh' | 'stale';
+export type JobKind =
+  | 'filed'
+  | 'scheduled'
+  | 'agent'
+  | 'behind'
+  | 'refresh'
+  | 'stale'
+  | 'schema';
 
 export interface AgentJob {
   kind: JobKind;
@@ -52,12 +60,59 @@ export function jobQueue(
   // re-queues a re-read forever. The filter lives here rather than in
   // isLearnable so engine/learn.ts stays untouched by M13.
   const material = entries.filter((e) => !isSkillEntry(e) && !isAgentEntry(e));
-  const learn: AgentJob[] = learnQueue(material, concepts, { filed, attempts }).map((j) => ({
-    kind: j.reason,
-    path: j.path,
-    title: j.title,
-    runKey: j.modifiedAt,
-  }));
+  // Learn's own `stale` jobs are dropped here and re-derived below with the
+  // schema trigger folded in — a concept due for BOTH reasons must be ONE
+  // job under ONE ledger key, or a no-op recheck ping-pongs between the two
+  // keys forever, one drain at a time. See recheck derivation.
+  const learn: AgentJob[] = learnQueue(material, concepts, { filed, attempts })
+    .filter((j) => j.reason !== 'stale')
+    .map((j) => ({
+      kind: j.reason,
+      path: j.path,
+      title: j.title,
+      runKey: j.modifiedAt,
+    }));
+
+  // Re-synthesis is staleness (M13.5): when a Type doc changes after a
+  // concept was generated, every concept `about` records of that type is due
+  // a recheck — lazily, one at a time, never as a bulk reprocess. The run
+  // key is max(concept mtime, newest relevant type-doc mtime): recorded on
+  // attempt, it suppresses both triggers at once, and a LATER type edit or
+  // concept edit raises it again.
+  const typeDocs = new Map<string, Entry>();
+  for (const e of entries) {
+    if (e.type === 'Type') typeDocs.set(e.title, e);
+  }
+  const all = [...entries];
+  const recheck: AgentJob[] = [];
+  for (const concept of concepts) {
+    if (concept.supersededBy !== null || concept.lifecycle === 'deprecated') continue;
+    const generatedAt = concept.generated?.at ?? null;
+    let newestTypeChange: string | null = null;
+    if (generatedAt !== null) {
+      for (const target of concept.about) {
+        const entry = resolveTarget(target, all);
+        if (entry === null || entry.type === null) continue;
+        const doc = typeDocs.get(entry.type);
+        if (doc === undefined || doc.modifiedAt <= generatedAt) continue;
+        if (newestTypeChange === null || doc.modifiedAt > newestTypeChange) {
+          newestTypeChange = doc.modifiedAt;
+        }
+      }
+    }
+    if (!concept.stale && newestTypeChange === null) continue;
+    const runKey =
+      newestTypeChange !== null && newestTypeChange > concept.entry.modifiedAt
+        ? newestTypeChange
+        : concept.entry.modifiedAt;
+    if (attempts[concept.entry.path] === runKey) continue;
+    recheck.push({
+      kind: newestTypeChange !== null ? 'schema' : 'stale',
+      path: concept.entry.path,
+      title: concept.title,
+      runKey,
+    });
+  }
 
   // Scheduled skills and scheduled agent runs share the derivation and the
   // fire-key ledger (both are path-keyed); they differ in kind because the
@@ -107,8 +162,9 @@ export function jobQueue(
     behind: 3,
     refresh: 4,
     stale: 5,
+    schema: 6,
   };
-  return [...learn, ...scheduled, ...refresh].sort(
+  return [...learn, ...scheduled, ...refresh, ...recheck].sort(
     (a, b) =>
       RANK[a.kind] - RANK[b.kind] ||
       b.runKey.localeCompare(a.runKey) ||

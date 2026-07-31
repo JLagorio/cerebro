@@ -337,6 +337,7 @@ export function buildSystemPrompt(
     'When you mention a note, write it as [[note-name]] so it is clickable.',
     'You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user\'s stamp, and claiming it would defeat the review model.',
     'To file an Inbox capture, use propose_organize so the user can accept or reject it. Do not edit captures directly.',
+    'Never create or modify `type: Type` docs on your own — schema is the user\'s to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (the Types screen and the adoption wizard are the human path).',
     'Be concise.',
   ];
 

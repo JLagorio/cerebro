@@ -22,6 +22,8 @@ export function distillPrompt(path: string, title: string): string {
     '3. For each durable thing it establishes, write or revise a concept with write_concept.',
     `4. Anchor every concept with \`about\`, and cite this note in \`sources\` (resource: ${path}).`,
     '',
+    'Every fact you store must be timeless, dated, or a pointer (M13.5). "The pipeline has 13 open deals" becomes a lie next Tuesday while still reading as truth — write "2026-07-31: pipeline at 13 open deals", or point at where the live number lives, or store only what does not move.',
+    '',
     'Adding a second concept about something the bundle already covers is the failure mode here, not the goal. Revise the existing one in place when the note refines or extends it.',
     'When the note establishes something that REPLACES an existing concept, write the new one and set `supersedes: ["[[old-concept]]"]` — that retires the old one without deleting the record of what was believed before.',
     'When two concepts genuinely disagree and you cannot tell which is right, say so with `contradicts` rather than picking a winner. That is a judgement for the person who owns the work.',
@@ -89,7 +91,31 @@ export function reviewConceptPrompt(path: string, title: string): string {
     '- **No longer true** — set `lifecycle: deprecated`. A wrong concept that stays stable is worse than one that is gone.',
     '',
     'Do not rewrite it just to have done something. "Still true, date extended" is a real answer and often the right one.',
+    'While you are in there: any volatile present-tense claim without a date becomes a dated snapshot or a pointer to where truth lives — an undated "currently" is the sentence that rots silently.',
     'Say which verdict you reached and what evidence decided it.',
+  ].join('\n');
+}
+
+/**
+ * Recheck a concept because the SCHEMA of what it describes changed (M13.5).
+ *
+ * This is how "we added/removed a type" avoids a bulk re-synthesis: each
+ * affected concept comes through here lazily, one at a time, when the queue
+ * gets to it. Same four verdicts as an ordinary recheck — a schema change
+ * often changes nothing about what is true.
+ */
+export function schemaRecheckPrompt(path: string, title: string): string {
+  return [
+    `Recheck the knowledge concept at ${path} ("${title}"). The schema of what it is about has changed: a Type it references was edited after this concept was written — fields may have been added, renamed, or removed, and the concept may describe a shape that no longer exists.`,
+    '',
+    'Read it, its sources, and the current Type docs of the records it is about. Reach one of four verdicts:',
+    '',
+    '- **Still true** — the schema change does not affect it; extend `stale_after` with write_concept and change nothing else.',
+    '- **Needs revising** — rewrite it in place to match the current shape, keeping the sources that still hold.',
+    '- **Replaced** — write the concept that replaces it and set `supersedes` on the NEW one. Do not edit the old one.',
+    '- **No longer true** — set `lifecycle: deprecated`.',
+    '',
+    'Say which verdict you reached and what the schema change turned out to mean.',
   ].join('\n');
 }
 
