@@ -38,7 +38,11 @@ import { useVaultStore } from '@/stores/vaultStore';
  * 3. **It must not spin.** Every job is recorded in its ledger BEFORE the run
  *    — learn jobs by note version, scheduled runs by fire key — so a run that
  *    produces nothing, or dies, is not retried until the note changes or the
- *    schedule fires again.
+ *    schedule fires again. One refinement (PR #5 review): a scheduled run
+ *    consumes its fire key only once its record's body has actually been
+ *    read — a failed READ is not a run, and must not eat the whole period.
+ *    The failed read itself is remembered in memory (failedReads) so it
+ *    cannot hot-loop within the session either.
  */
 
 /** Let a burst of edits settle before reading anything. */
@@ -90,19 +94,29 @@ export function useJobRunner(): void {
     for (const path of unlearnableFiled(entries, filed)) ui.unfileForLearning(path);
   }, [entries, filed]);
 
+  // Scheduled runs whose record could not be READ this session, path →
+  // fire key. A failed read leaves the fire key unconsumed so the run is
+  // retried — but retried on the next app start or the next fire, not in a
+  // read→fail→rescan hot loop. State rather than a ref so recording a
+  // failure re-derives `next` and lets the jobs behind it proceed.
+  const [failedReads, setFailedReads] = useState<Record<string, string>>({});
+
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
-    if (!autoLearn) return null;
+    if (!autoLearn || vaultPath === null) return null;
     return (
       jobQueue(entries, listConcepts(entries, today), {
         filed,
         attempts,
-        skillRuns,
+        // The ledger is vault-scoped (PR #5 review): fire keys are calendar
+        // values, so a flat map would let the same relative path in another
+        // vault read as already run.
+        skillRuns: skillRuns[vaultPath] ?? {},
         now,
         connectors,
-      })[0] ?? null
+      }).find((j) => failedReads[j.path] !== j.runKey) ?? null
     );
-  }, [attempts, autoLearn, connectors, entries, filed, now, skillRuns, today]);
+  }, [attempts, autoLearn, connectors, entries, failedReads, filed, now, skillRuns, today, vaultPath]);
 
   // Owns the run: the event stream is shared with the chat, so both sides need
   // to know whose turn the events belong to.
@@ -148,9 +162,10 @@ export function useJobRunner(): void {
       ui.setLearningPath(job.path);
       // Recorded first, on purpose — see the header. The job SAYS which
       // ledger gates it (jobs.ts decides both sides); re-deriving that here
-      // is how agent runs briefly looped forever.
-      if (job.ledger === 'skillRuns') ui.recordSkillRun(job.path, job.runKey);
-      else ui.recordLearnAttempt(job.path, job.runKey);
+      // is how agent runs briefly looped forever. Fire-key jobs are the one
+      // exception: they must read their record's body before anything else
+      // can fail, so their record sits after that read, below.
+      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.path, job.runKey);
 
       // An agent job runs AS the agent: its record's identity in the
       // provenance stamps, its memory in the prompt, and shell only when the
@@ -164,6 +179,7 @@ export function useJobRunner(): void {
           : null;
 
       void (async () => {
+        let recorded = job.ledger === 'attempts';
         try {
           const message =
             job.kind === 'agent'
@@ -187,6 +203,14 @@ export function useJobRunner(): void {
                     : job.kind === 'stale'
                       ? reviewConceptPrompt(job.path, job.title)
                       : distillPrompt(job.path, job.title);
+          // The body is in hand: NOW the fire key is consumed — still before
+          // the run itself, so a run that dies waits for the next fire, but
+          // after the read, so a read that dies surrenders the key instead
+          // of eating the whole period (PR #5 review).
+          if (job.ledger === 'skillRuns') {
+            useUiStore.getState().recordSkillRun(vaultPath, job.path, job.runKey);
+            recorded = true;
+          }
           mcp.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
             message,
@@ -213,6 +237,7 @@ export function useJobRunner(): void {
           // Silent by construction. A background runner that could raise a
           // toast would be a notification, which is the one thing this whole
           // surface is not allowed to be.
+          if (!recorded) setFailedReads((m) => ({ ...m, [job.path]: job.runKey }));
           finish();
         }
       })();

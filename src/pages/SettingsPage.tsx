@@ -71,13 +71,15 @@ export function SettingsPage() {
       jobQueue(entries, listConcepts(entries, todayIso()), {
         filed,
         attempts,
-        skillRuns,
+        // The fire-key ledger is vault-scoped (PR #5 review) — the count
+        // must read the same slice of it the runner does.
+        skillRuns: vaultPath === null ? {} : (skillRuns[vaultPath] ?? {}),
         connectors,
         // Render-time clock is honest enough here: this page re-renders on
         // every visit, and a due schedule missing until then costs a label.
         now: new Date(),
       }).length,
-    [attempts, connectors, entries, filed, skillRuns],
+    [attempts, connectors, entries, filed, skillRuns, vaultPath],
   );
 
   const changeVault = async () => {

@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/Switch';
 import {
   parseConnectors,
   serializeConnectors,
+  stdioEnv,
   stdioFingerprint,
   type ConnectorSpec,
 } from '@/engine/connectors';
@@ -126,14 +127,31 @@ export function ConnectorSettings() {
         const unapproved =
           spec.transport === 'stdio' &&
           (fp === null || !(stdioApprovals[vaultPath] ?? []).includes(fp));
+        // What Approve approves is name+command+args+ENV — so the env pairs
+        // must be on the table, not just the command line (PR #5 security
+        // review): an env value can redirect a benign-looking command.
+        // Rendered shell-style, sorted like the fingerprint sorts them.
+        const shown =
+          spec.transport === 'http'
+            ? spec.url
+            : [
+                ...Object.entries(stdioEnv(spec) ?? {})
+                  .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+                  .map(([k, v]) => `${k}=${v}`),
+                spec.command,
+                ...spec.args,
+              ].join(' ');
         return (
           <div
             key={spec.name}
             className="flex items-center gap-2 rounded-[9px] border border-[var(--n-200)] px-2.5 py-1.5"
           >
             <span className="text-[12px] font-medium text-[var(--n-800)]">{spec.name}</span>
-            <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--n-500)] [font-family:var(--font-mono)]">
-              {spec.transport === 'http' ? spec.url : [spec.command, ...spec.args].join(' ')}
+            <span
+              title={shown}
+              className="min-w-0 flex-1 truncate text-[11px] text-[var(--n-500)] [font-family:var(--font-mono)]"
+            >
+              {shown}
             </span>
             {unapproved && (
               <>

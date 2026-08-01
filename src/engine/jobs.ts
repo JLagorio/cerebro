@@ -48,7 +48,8 @@ export interface AgentJob {
 }
 
 export interface JobQueueInput extends LearnQueueInput {
-  /** Skill path → fire key last run (uiStore.skillRuns). */
+  /** Skill path → fire key last run — the OPEN VAULT's slice of
+   * uiStore.skillRuns, which is vault-scoped (PR #5 review). */
   skillRuns: Readonly<Record<string, string>>;
   /** The wall clock — passed in so the queue stays a pure derivation. */
   now: Date;

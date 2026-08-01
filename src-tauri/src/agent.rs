@@ -9,6 +9,7 @@
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -360,6 +361,39 @@ pub fn mcp_config_json(
     serde_json::json!({ "mcpServers": servers }).to_string()
 }
 
+/// The merged MCP config carries secrets — the vault's connector headers/env
+/// and this run's loopback token — so it must not take up residence in the
+/// app config dir (PR #5 security review). Owner-readable only, and swept:
+/// every run removes whatever configs earlier runs (or crashes) left behind.
+fn write_run_config(path: &Path, contents: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        file.write_all(contents.as_bytes()).map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, contents).map_err(|e| e.to_string())
+}
+
+pub fn sweep_run_configs(config_dir: &Path) {
+    let Ok(dir) = std::fs::read_dir(config_dir) else { return };
+    for entry in dir.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("mcp-config") && name.ends_with(".json") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Streaming
 // ---------------------------------------------------------------------------
@@ -380,14 +414,20 @@ pub fn stream(
         _ => return Err("the MCP endpoint is not running".into()),
     };
     std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
-    let config_path = config_dir.join("mcp-config.json");
+    // A UNIQUE path per run: the sweep below or a killed run's late cleanup
+    // must never delete the config a just-spawned CLI has not read yet. This
+    // also retires the old persistent `mcp-config.json`, which sat in the
+    // app config dir holding connector credentials between runs.
+    static RUN_SEQ: AtomicU64 = AtomicU64::new(0);
+    sweep_run_configs(config_dir);
+    let config_path =
+        config_dir.join(format!("mcp-config-{}.json", RUN_SEQ.fetch_add(1, Ordering::Relaxed)));
     let (extra_servers, strict_mcp) = crate::connectors::connector_context(
         vault,
         req.connectors.unwrap_or(false),
         req.approved_stdio.as_deref().unwrap_or(&[]),
     );
-    std::fs::write(&config_path, mcp_config_json(&url, &token, &extra_servers))
-        .map_err(|e| e.to_string())?;
+    write_run_config(&config_path, &mcp_config_json(&url, &token, &extra_servers))?;
 
     let mut child =
         with_login_path(Command::new(&binary).args(build_args(&req, &config_path, strict_mcp)))
@@ -404,6 +444,7 @@ pub fn stream(
     let stderr = child.stderr.take();
     state.set(child);
 
+    let run_config = config_path.clone();
     std::thread::spawn(move || {
         let mut session_id: Option<String> = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -438,6 +479,10 @@ pub fn stream(
                 }
             }
         }
+        // The child has exited; its config's job is done. Secrets end their
+        // residency with the run — the sweep at the next spawn is only the
+        // backstop for a crash between here and there.
+        let _ = std::fs::remove_file(&run_config);
         let _ = app.emit(AGENT_EVENT, AgentEvent::Done);
     });
 
@@ -603,6 +648,40 @@ mod tests {
             .position(|a| a == "--allowedTools")
             .map(|i| args[i + 1].clone())
             .expect("--allowedTools is always passed")
+    }
+
+    #[test]
+    fn a_run_config_is_owner_readable_only() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-perms");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mcp-config-0.json");
+        write_run_config(&path, "{\"secret\":true}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"secret\":true}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "the merged config carries bearer tokens");
+        }
+        // Re-writing an existing path must truncate, not append.
+        write_run_config(&path, "{}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+    }
+
+    #[test]
+    fn the_sweep_removes_every_leftover_run_config_and_nothing_else() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-sweep");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // The legacy persistent name, a per-run name, and a bystander.
+        std::fs::write(dir.join("mcp-config.json"), "old").unwrap();
+        std::fs::write(dir.join("mcp-config-7.json"), "crashed run").unwrap();
+        std::fs::write(dir.join("app-config.json"), "keep").unwrap();
+        sweep_run_configs(&dir);
+        assert!(!dir.join("mcp-config.json").exists(), "legacy residency must end");
+        assert!(!dir.join("mcp-config-7.json").exists());
+        assert!(dir.join("app-config.json").exists());
     }
 
     #[test]

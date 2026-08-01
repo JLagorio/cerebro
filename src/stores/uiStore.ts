@@ -162,12 +162,14 @@ interface UiState {
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
   /**
-   * Skill path → the schedule fire key last run (M13.2). Persisted; the same
-   * loop-stopper discipline as learnAttempts — recorded before the run, so a
-   * scheduled run that dies is not retried until its next fire time.
+   * Vault path → skill path → the schedule fire key last run (M13.2).
+   * Persisted; the same loop-stopper discipline as learnAttempts. Scoped by
+   * vault like stdioApprovals (PR #5 review): fire keys are calendar values,
+   * identical everywhere, so a flat map would let `records/skills/digest.md`
+   * in one vault mark the same path in another vault as already run.
    */
-  skillRuns: Record<string, string>;
-  recordSkillRun(path: string, fireKey: string): void;
+  skillRuns: Record<string, Record<string, string>>;
+  recordSkillRun(vault: string, path: string, fireKey: string): void;
   /** True while ANY agent turn is in flight — the chat's or the runner's. */
   agentBusy: boolean;
   setAgentBusy(v: boolean): void;
@@ -282,6 +284,30 @@ function loadStringMap(key: string): Record<string, string> {
         (pair): pair is [string, string] => typeof pair[1] === 'string',
       ),
     );
+  } catch {
+    return {};
+  }
+}
+
+/** vault → path → value. Entries whose value is not itself a string map are
+ * dropped — which also migrates the pre-scoping flat `skillRuns` format by
+ * discarding it (worst case each schedule fires once more, its fresh-vault
+ * behavior anyway). */
+function loadNestedStringMap(key: string): Record<string, Record<string, string>> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, Record<string, string>> = {};
+    for (const [vault, map] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof map !== 'object' || map === null || Array.isArray(map)) continue;
+      out[vault] = Object.fromEntries(
+        Object.entries(map as Record<string, unknown>).filter(
+          (pair): pair is [string, string] => typeof pair[1] === 'string',
+        ),
+      );
+    }
+    return out;
   } catch {
     return {};
   }
@@ -530,10 +556,11 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(FILED_LEARN_KEY, JSON.stringify(filed));
       return { learnAttempts: next, filedForLearning: filed };
     }),
-  skillRuns: loadStringMap(SKILL_RUNS_KEY),
-  recordSkillRun: (path, fireKey) =>
+  skillRuns: loadNestedStringMap(SKILL_RUNS_KEY),
+  recordSkillRun: (vault, path, fireKey) =>
     set((s) => {
-      const next = { ...s.skillRuns, [path]: fireKey };
+      const scoped = { ...(s.skillRuns[vault] ?? {}), [path]: fireKey };
+      const next = { ...s.skillRuns, [vault]: scoped };
       storeString(SKILL_RUNS_KEY, JSON.stringify(next));
       return { skillRuns: next };
     }),
