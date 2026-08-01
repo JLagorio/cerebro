@@ -176,11 +176,19 @@ export function useAgentChat(
       void (async () => {
         try {
           // A typed question outranks a background read: if the runner is
-          // mid-turn, stop its child deliberately and let its finish() (on
-          // the resulting Done, which the runner still owns) release the
-          // stream before this turn's child speaks.
+          // mid-turn, stop its child deliberately, then WAIT for its finish()
+          // (on the resulting Done, which the runner still owns) to release
+          // the stream. Running before that handoff lands would put this
+          // turn's events on a stream the handler above is still ignoring —
+          // the bubble would stay empty (PR #5 review).
           if (useUiStore.getState().learningPath !== null) {
             await stopAgent().catch(() => undefined);
+            await streamReleased(RELEASE_TIMEOUT_MS);
+            // The runner's finish() dropped agentBusy on its way out. Claim
+            // it back before this turn's child starts, or the runner reads
+            // the agent as idle and schedules a background run that would
+            // replace the child mid-answer (PR #5 review).
+            setAgentBusy(true);
           }
           const expanded =
             typeof message === 'function'
@@ -195,6 +203,7 @@ export function useAgentChat(
             model,
             shell,
             connectors,
+            approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcpRef.current,
           });
         } catch (err) {
@@ -251,4 +260,34 @@ export function useAgentChat(
 /** Tools that change disk — the ones that make a rescan necessary. */
 export function isWriteTool(name: string): boolean {
   return /create_note|update_frontmatter|append_to_note|write_concept|^Write$|^Edit$/.test(name);
+}
+
+/** How long send() waits for the runner to hand the stream over. A killed
+ * child's Done arrives within milliseconds; the bound exists so a lost event
+ * degrades into taking the stream rather than a send that never runs. */
+const RELEASE_TIMEOUT_MS = 5_000;
+
+/** Resolves once the job runner has released the shared event stream — its
+ * finish(), riding the killed child's terminal Done, clears learningPath.
+ * On timeout the stream is taken anyway: the runner's own handler is
+ * idempotent and self-heals on the next terminal event it sees. */
+function streamReleased(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (useUiStore.getState().learningPath === null) {
+      resolve();
+      return;
+    }
+    let timer = 0;
+    const unsubscribe = useUiStore.subscribe((s) => {
+      if (s.learningPath !== null) return;
+      window.clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    });
+    timer = window.setTimeout(() => {
+      unsubscribe();
+      useUiStore.getState().setLearningPath(null);
+      resolve();
+    }, timeoutMs);
+  });
 }

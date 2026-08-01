@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { jobQueue } from './jobs';
+import { jobQueue, unlearnableFiled } from './jobs';
 import { lastFireKey, parseSchedule } from './skills';
 import { listConcepts } from './okf';
 import { makeEntry } from './testHelpers';
@@ -380,5 +380,33 @@ describe('jobQueue', () => {
       now,
     });
     expect(jobs).toEqual([]);
+  });
+});
+
+describe('unlearnableFiled (PR #5 review: filed skills never dequeue)', () => {
+  it('surfaces filed paths that point at Skill or Agent records, and only those', () => {
+    const entries = [
+      skill('Weekly Review'),
+      makeEntry({
+        path: 'records/agents/scout.md',
+        title: 'Scout',
+        type: 'Agent',
+        snippet: 'instructions',
+      }),
+      makeEntry({ path: 'notes/idea.md', title: 'Idea', snippet: 'a real capture' }),
+    ];
+    // A learnable note stays filed; a path with no entry (deleted note) is
+    // learn.ts's business, not this filter's.
+    const filed = [
+      'records/skills/weekly-review.md',
+      'records/agents/scout.md',
+      'notes/idea.md',
+      'notes/deleted.md',
+    ];
+    expect(unlearnableFiled(entries, filed)).toEqual([
+      'records/skills/weekly-review.md',
+      'records/agents/scout.md',
+    ]);
+    expect(unlearnableFiled(entries, ['notes/idea.md'])).toEqual([]);
   });
 });

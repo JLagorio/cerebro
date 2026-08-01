@@ -57,6 +57,24 @@ export interface JobQueueInput extends LearnQueueInput {
   connectors?: boolean;
 }
 
+/**
+ * Filed paths that can never produce a job: the entry they point at is a
+ * Skill or Agent record, which learning excludes as schema-for-behavior.
+ * Surfaced so the runner can drop them from the persisted filed ledger —
+ * left alone they read as "filed" forever, because only a learn attempt
+ * consumes a filing and these never get one (PR #5 review).
+ */
+export function unlearnableFiled(
+  entries: readonly Entry[],
+  filed: readonly string[],
+): string[] {
+  const byPath = new Map(entries.map((e) => [e.path, e]));
+  return filed.filter((path) => {
+    const entry = byPath.get(path);
+    return entry !== undefined && (isSkillEntry(entry) || isAgentEntry(entry));
+  });
+}
+
 export function jobQueue(
   entries: readonly Entry[],
   concepts: readonly Concept[],

@@ -3,7 +3,12 @@ import { Button } from '@/components/ui/Button';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
-import { parseConnectors, serializeConnectors, type ConnectorSpec } from '@/engine/connectors';
+import {
+  parseConnectors,
+  serializeConnectors,
+  stdioFingerprint,
+  type ConnectorSpec,
+} from '@/engine/connectors';
 import { readConnectors, saveConnectors } from '@/lib/ipc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -19,6 +24,11 @@ import { useVaultStore } from '@/stores/vaultStore';
 export function ConnectorSettings() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const toast = useUiStore((s) => s.toast);
+  // stdio approvals live in the store — OUTSIDE the vault — so the file
+  // cannot approve itself; see uiStore.stdioApprovals (PR #5 security review).
+  const stdioApprovals = useUiStore((s) => s.stdioApprovals);
+  const approveStdio = useUiStore((s) => s.approveStdio);
+  const revokeStdio = useUiStore((s) => s.revokeStdio);
   const [specs, setSpecs] = useState<ConnectorSpec[] | null>(null);
   // True while `.cerebro/connectors.json` exists — an EMPTY list with the
   // file present still pins runs to no servers, so the two need telling
@@ -86,48 +96,76 @@ export function ConnectorSettings() {
       return;
     }
     const [command, ...args] = trimmedTarget.split(/\s+/);
-    persist([
-      ...specs,
-      {
-        name: trimmedName,
-        transport,
-        url: transport === 'http' ? trimmedTarget : '',
-        command: transport === 'stdio' ? command : '',
-        args: transport === 'stdio' ? args : [],
-        enabled: true,
-        extra: {},
-      },
-    ]);
+    const spec: ConnectorSpec = {
+      name: trimmedName,
+      transport,
+      url: transport === 'http' ? trimmedTarget : '',
+      command: transport === 'stdio' ? command : '',
+      args: transport === 'stdio' ? args : [],
+      enabled: true,
+      extra: {},
+    };
+    persist([...specs, spec]);
+    // Typing the command right here IS the approval — the ledger just
+    // records it (outside the vault) so a later hand-edit to the file has
+    // to be approved again.
+    const fp = stdioFingerprint(spec);
+    if (fp !== null) approveStdio(vaultPath, fp);
     setName('');
     setTarget('');
   };
 
   return (
     <div className="mt-1 flex flex-col gap-1.5" data-testid="connector-settings">
-      {specs.map((spec) => (
-        <div
-          key={spec.name}
-          className="flex items-center gap-2 rounded-[9px] border border-[var(--n-200)] px-2.5 py-1.5"
-        >
-          <span className="text-[12px] font-medium text-[var(--n-800)]">{spec.name}</span>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--n-500)] [font-family:var(--font-mono)]">
-            {spec.transport === 'http' ? spec.url : [spec.command, ...spec.args].join(' ')}
-          </span>
-          <Switch
-            ariaLabel={`Enable ${spec.name}`}
-            checked={spec.enabled}
-            onChange={(v) =>
-              persist(specs.map((s) => (s.name === spec.name ? { ...s, enabled: v } : s)))
-            }
-          />
-          <IconButton
-            icon="trash-2"
-            label={`Remove ${spec.name}`}
-            size="sm"
-            onClick={() => persist(specs.filter((s) => s.name !== spec.name))}
-          />
-        </div>
-      ))}
+      {specs.map((spec) => {
+        // A stdio entry names a command this app would EXECUTE, and the file
+        // naming it travels with the vault — so it stays out of runs until a
+        // person approves this exact command line on this machine. null =
+        // malformed (non-string env), which can never be approved.
+        const fp = stdioFingerprint(spec);
+        const unapproved =
+          spec.transport === 'stdio' &&
+          (fp === null || !(stdioApprovals[vaultPath] ?? []).includes(fp));
+        return (
+          <div
+            key={spec.name}
+            className="flex items-center gap-2 rounded-[9px] border border-[var(--n-200)] px-2.5 py-1.5"
+          >
+            <span className="text-[12px] font-medium text-[var(--n-800)]">{spec.name}</span>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--n-500)] [font-family:var(--font-mono)]">
+              {spec.transport === 'http' ? spec.url : [spec.command, ...spec.args].join(' ')}
+            </span>
+            {unapproved && (
+              <>
+                <span className="flex-none text-[10.5px] text-[var(--warn-600)]">
+                  {fp === null ? 'malformed env' : 'runs a local command'}
+                </span>
+                {fp !== null && (
+                  <Button variant="secondary" size="sm" onClick={() => approveStdio(vaultPath, fp)}>
+                    Approve
+                  </Button>
+                )}
+              </>
+            )}
+            <Switch
+              ariaLabel={`Enable ${spec.name}`}
+              checked={spec.enabled}
+              onChange={(v) =>
+                persist(specs.map((s) => (s.name === spec.name ? { ...s, enabled: v } : s)))
+              }
+            />
+            <IconButton
+              icon="trash-2"
+              label={`Remove ${spec.name}`}
+              size="sm"
+              onClick={() => {
+                if (fp !== null) revokeStdio(vaultPath, fp);
+                persist(specs.filter((s) => s.name !== spec.name));
+              }}
+            />
+          </div>
+        );
+      })}
       <div className="flex items-center gap-1.5">
         <div className="w-28 flex-none">
           <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -171,6 +209,9 @@ export function ConnectorSettings() {
         Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of
         git checkpoints, and your credentials never leave this vault. Naming servers here pins
         the assistant to exactly this list; with no list it inherits your global MCP config.
+        stdio connectors run a local command, so one the file names on its own stays out of
+        runs until you approve that exact command here — approval is per machine and any edit
+        to the file asks again.
       </p>
     </div>
   );

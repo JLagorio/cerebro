@@ -60,6 +60,11 @@ pub struct AgentRequest {
     /// Who this run's MCP writes are attributed to (M13.4) — `process:<slug>`
     /// for an agent record's run. Absent reads as the default actor.
     pub actor: Option<String>,
+    /// Fingerprints of the vault's stdio connectors the user approved on
+    /// this machine (PR #5 security review) — connectors::stdio_fingerprint.
+    /// Absent reads as none approved: a missing field must never widen
+    /// access, least of all to executing commands a vault file names.
+    pub approved_stdio: Option<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -376,8 +381,11 @@ pub fn stream(
     };
     std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
     let config_path = config_dir.join("mcp-config.json");
-    let (extra_servers, strict_mcp) =
-        crate::connectors::connector_context(vault, req.connectors.unwrap_or(false));
+    let (extra_servers, strict_mcp) = crate::connectors::connector_context(
+        vault,
+        req.connectors.unwrap_or(false),
+        req.approved_stdio.as_deref().unwrap_or(&[]),
+    );
     std::fs::write(&config_path, mcp_config_json(&url, &token, &extra_servers))
         .map_err(|e| e.to_string())?;
 
@@ -583,6 +591,7 @@ mod tests {
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -631,6 +640,7 @@ mod tests {
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -663,6 +673,7 @@ mod tests {
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
             false,
@@ -695,6 +706,7 @@ mod tests {
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
             true,

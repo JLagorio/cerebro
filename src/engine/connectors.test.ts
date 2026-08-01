@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { parseConnectors, serializeConnectors } from './connectors';
+import {
+  parseConnectors,
+  serializeConnectors,
+  stdioFingerprint,
+  type ConnectorSpec,
+} from './connectors';
 
 describe('connectors config', () => {
   it('round-trips both transports and preserves unmodeled keys', () => {
@@ -40,5 +45,39 @@ describe('connectors config', () => {
   it('treats anything but explicit enabled: true as off', () => {
     const specs = parseConnectors('{"servers": {"a": {"transport": "http", "url": "u"}}}');
     expect(specs[0].enabled).toBe(false);
+  });
+});
+
+describe('stdio approval fingerprints (PR #5 security review)', () => {
+  const spec = (over: Partial<ConnectorSpec> = {}): ConnectorSpec => ({
+    name: 'linear',
+    transport: 'stdio',
+    url: '',
+    command: 'npx',
+    args: ['-y', '@linear/mcp'],
+    enabled: true,
+    extra: { env: { KEY: 'v' } },
+    ...over,
+  });
+
+  it('pins the exact literal the Rust merge computes', () => {
+    // connectors.rs#the_fingerprint_format_is_pinned_to_the_frontends pins
+    // the SAME strings — if either side drifts, its own suite fails before
+    // the two can disagree at runtime.
+    expect(stdioFingerprint(spec())).toBe('["linear","npx",["-y","@linear/mcp"],[["KEY","v"]]]');
+    expect(
+      stdioFingerprint(spec({ name: 'a', command: 'b', args: [], extra: {} })),
+    ).toBe('["a","b",[],[]]');
+  });
+
+  it('is env-order independent, and null for http or an env it cannot cover', () => {
+    expect(stdioFingerprint(spec({ extra: { env: { B: '2', A: '1' } } }))).toBe(
+      stdioFingerprint(spec({ extra: { env: { A: '1', B: '2' } } })),
+    );
+    expect(stdioFingerprint(spec({ transport: 'http' }))).toBeNull();
+    // A non-string env value would run with content the fingerprint never
+    // described, so the spec is not approvable at all.
+    expect(stdioFingerprint(spec({ extra: { env: { KEY: 7 } } }))).toBeNull();
+    expect(stdioFingerprint(spec({ extra: { env: 'PATH=x' } }))).toBeNull();
   });
 });

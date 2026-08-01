@@ -3,7 +3,7 @@ import { onAgentEvent, runAgent, startMcp } from './agentIpc';
 import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
-import { jobQueue, type AgentJob } from '@/engine/jobs';
+import { jobQueue, unlearnableFiled, type AgentJob } from '@/engine/jobs';
 import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
 import { readNote } from '@/lib/ipc';
@@ -79,6 +79,16 @@ export function useJobRunner(): void {
     const timer = window.setInterval(() => setNow(new Date()), TICK_MS);
     return () => window.clearInterval(timer);
   }, [hasSchedules]);
+
+  // A filed path that points at a Skill or Agent record can never become a
+  // job — their bodies are schema for behavior, excluded from learning — and
+  // only a learn attempt consumes a filing, so left alone it sits in the
+  // persisted ledger as "filed" forever. Unfiled on sight, which also heals
+  // entries persisted before a capture was (re)typed (PR #5 review).
+  useEffect(() => {
+    const ui = useUiStore.getState();
+    for (const path of unlearnableFiled(entries, filed)) ui.unfileForLearning(path);
+  }, [entries, filed]);
 
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
@@ -189,6 +199,7 @@ export function useJobRunner(): void {
             // no record can grant itself what Settings denies.
             shell: job.kind === 'agent' ? shell && (agent?.shell ?? false) : shell,
             connectors,
+            approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
           });
         } catch {

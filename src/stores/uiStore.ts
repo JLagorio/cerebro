@@ -116,6 +116,18 @@ interface UiState {
   /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
+  /**
+   * stdio connector fingerprints approved to RUN, keyed by vault path
+   * (PR #5 security review). Persisted HERE — outside the vault — on
+   * purpose: `.cerebro/connectors.json` travels with the vault, so an
+   * untrusted vault could otherwise name an arbitrary command and have the
+   * agent runtime spawn it. A stdio entry runs only after a person approved
+   * that exact name+command+args+env on THIS machine — see
+   * engine/connectors.stdioFingerprint.
+   */
+  stdioApprovals: Record<string, string[]>;
+  approveStdio(vault: string, fingerprint: string): void;
+  revokeStdio(vault: string, fingerprint: string): void;
   /** Comma-separated issue-tracker project keys, e.g. "PHX, SYN". Issue
    * references cannot be recognised by shape, only declared — see
    * engine/ingest.ts. Persisted. */
@@ -137,6 +149,11 @@ interface UiState {
   /** Captures handed to the distiller when they were filed. Persisted. */
   filedForLearning: string[];
   fileForLearning(path: string): void;
+  /** Drop a filed path that can never produce a learn job — a capture that
+   * is (or became) a Skill/Agent record. Only a learn attempt consumes a
+   * filing, and these never get one, so without this the path reads as
+   * "filed" in the persisted ledger forever (PR #5 review). */
+  unfileForLearning(path: string): void;
   /**
    * path → the note version last handed to the distiller. Persisted, and the
    * only thing stopping a note nobody could learn anything from being read
@@ -191,6 +208,7 @@ const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 const AUTO_LEARN_KEY = 'cerebro.autoLearn';
 const FILED_LEARN_KEY = 'cerebro.filedForLearning';
+const STDIO_APPROVALS_KEY = 'cerebro.stdioApprovals';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 const SKILL_RUNS_KEY = 'cerebro.skillRuns';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
@@ -262,6 +280,22 @@ function loadStringMap(key: string): Record<string, string> {
     return Object.fromEntries(
       Object.entries(parsed as Record<string, unknown>).filter(
         (pair): pair is [string, string] => typeof pair[1] === 'string',
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function loadStringListMap(key: string): Record<string, string[]> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).flatMap(
+        ([k, v]): [string, string[]][] =>
+          Array.isArray(v) ? [[k, v.filter((x): x is string => typeof x === 'string')]] : [],
       ),
     );
   } catch {
@@ -439,6 +473,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AGENT_CONNECTORS_KEY, String(v));
     set({ agentConnectors: v });
   },
+  stdioApprovals: loadStringListMap(STDIO_APPROVALS_KEY),
+  approveStdio: (vault, fingerprint) =>
+    set((s) => {
+      const list = s.stdioApprovals[vault] ?? [];
+      if (list.includes(fingerprint)) return s;
+      const next = { ...s.stdioApprovals, [vault]: [...list, fingerprint] };
+      storeString(STDIO_APPROVALS_KEY, JSON.stringify(next));
+      return { stdioApprovals: next };
+    }),
+  revokeStdio: (vault, fingerprint) =>
+    set((s) => {
+      const list = s.stdioApprovals[vault] ?? [];
+      if (!list.includes(fingerprint)) return s;
+      const next = { ...s.stdioApprovals, [vault]: list.filter((f) => f !== fingerprint) };
+      storeString(STDIO_APPROVALS_KEY, JSON.stringify(next));
+      return { stdioApprovals: next };
+    }),
   issuePrefixes: loadString(ISSUE_PREFIXES_KEY, ''),
   setIssuePrefixes: (v) => {
     storeString(ISSUE_PREFIXES_KEY, v);
@@ -457,6 +508,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     set((s) => {
       if (s.filedForLearning.includes(path)) return s;
       const next = [...s.filedForLearning, path];
+      storeString(FILED_LEARN_KEY, JSON.stringify(next));
+      return { filedForLearning: next };
+    }),
+  unfileForLearning: (path) =>
+    set((s) => {
+      if (!s.filedForLearning.includes(path)) return s;
+      const next = s.filedForLearning.filter((p) => p !== path);
       storeString(FILED_LEARN_KEY, JSON.stringify(next));
       return { filedForLearning: next };
     }),

@@ -10,6 +10,7 @@ vi.mock('./agentIpc', () => ({
 
 import * as agentIpc from './agentIpc';
 import { useAgentChat } from './useAgentChat';
+import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
@@ -70,5 +71,55 @@ describe('useAgentChat send expansion', () => {
         expect.objectContaining({ message: 'sent' }),
       ),
     );
+  });
+});
+
+/**
+ * Preempting the background runner (PR #5 review). Two races lived here:
+ * send() fired runAgent before the runner's finish() released the stream
+ * (the new turn's events were dropped while learningPath was set — empty
+ * bubble), and finish() dropped agentBusy on its way out, letting the
+ * runner read the agent as idle and schedule a background run that would
+ * replace the chat's child mid-answer.
+ */
+describe('useAgentChat preempting the background runner', () => {
+  const opts = { shell: false, connectors: false };
+
+  beforeEach(() => {
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ learningPath: null, agentBusy: false });
+  });
+
+  it('waits for the runner to release the stream, then re-claims the busy flag', async () => {
+    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+
+    // The kill was issued…
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
+    // …but the runner still owns the stream, so the new child must not
+    // start: its events would land while the handler is ignoring them.
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // The killed child's terminal Done lands: the runner's finish()
+    // releases the stream and drops agentBusy on its way out.
+    act(() => {
+      useUiStore.getState().setLearningPath(null);
+      useUiStore.getState().setAgentBusy(false);
+    });
+
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    // The chat re-claimed the agent — the runner cannot read it as idle
+    // and schedule a background run over this turn.
+    expect(useUiStore.getState().agentBusy).toBe(true);
+  });
+
+  it('starts immediately when no background run owns the stream', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
 });

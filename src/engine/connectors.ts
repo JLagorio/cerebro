@@ -53,6 +53,43 @@ export function parseConnectors(raw: string): ConnectorSpec[] {
   return out;
 }
 
+/**
+ * The env block of a stdio spec, or null when malformed. Values must all be
+ * strings — a non-string value makes the spec ineligible to run, mirrored in
+ * the Rust merge (connectors.rs), so the fingerprint below always covers the
+ * whole environment the command would receive.
+ */
+export function stdioEnv(spec: ConnectorSpec): Record<string, string> | null {
+  const env = spec.extra.env;
+  if (env === undefined) return {};
+  if (env === null || typeof env !== 'object' || Array.isArray(env)) return null;
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== 'string') return null;
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * What a person approves when they approve a stdio connector: this exact
+ * name + command + args + env, byte for byte (PR #5 security review). The
+ * approval ledger lives in uiStore — OUTSIDE the vault — because
+ * `.cerebro/connectors.json` travels with the vault, and an untrusted vault
+ * must not get to run a command by writing its own config. Rust computes
+ * the identical string when merging (connectors::stdio_fingerprint) and
+ * drops entries with no match; any edit to the file invalidates the
+ * approval, which is the point. Null = not a stdio spec, or one whose env
+ * cannot be represented — never approvable.
+ */
+export function stdioFingerprint(spec: ConnectorSpec): string | null {
+  if (spec.transport !== 'stdio') return null;
+  const env = stdioEnv(spec);
+  if (env === null) return null;
+  const pairs = Object.entries(env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([spec.name, spec.command, spec.args, pairs]);
+}
+
 export function serializeConnectors(specs: ConnectorSpec[]): string {
   const servers: Record<string, unknown> = {};
   for (const spec of specs) {

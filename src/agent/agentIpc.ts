@@ -42,6 +42,10 @@ export interface RunOptions {
   /** Attribute this run's writes to a process identity (M13.4) —
    * `process:<slug>` for an agent record's run; omitted = the default. */
   actor?: string | null;
+  /** Fingerprints of the vault's stdio connectors approved to run on this
+   * machine (PR #5 security review) — engine/connectors.stdioFingerprint.
+   * Absent reads as none approved: a missing field must never widen access. */
+  approvedStdio?: string[];
   mcp: McpInfo | null;
 }
 
@@ -66,6 +70,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<void
       shell: options.shell,
       connectors: options.connectors,
       actor: options.actor ?? null,
+      approved_stdio: options.approvedStdio ?? [],
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },
