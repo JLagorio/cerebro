@@ -113,8 +113,15 @@ export function useJobRunner(): void {
     if (!running.current) return;
     running.current = false;
     const ui = useUiStore.getState();
-    ui.setLearningPath(null);
-    ui.setAgentBusy(false);
+    // learningPath already null means the chat's release wait timed out and
+    // it took the stream (useAgentChat#streamReleased). The busy flag is the
+    // chat's now — clearing it here would let this runner read the agent as
+    // idle mid-answer and start a run that replaces the chat's child (PR #5
+    // review). Drop the claim; touch nothing the chat owns.
+    if (ui.learningPath !== null) {
+      ui.setLearningPath(null);
+      ui.setAgentBusy(false);
+    }
     // Whatever it just wrote is on disk and nowhere else until this runs.
     void rescan().catch(() => undefined);
   }, [rescan]);

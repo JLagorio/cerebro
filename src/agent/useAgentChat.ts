@@ -269,8 +269,10 @@ const RELEASE_TIMEOUT_MS = 5_000;
 
 /** Resolves once the job runner has released the shared event stream — its
  * finish(), riding the killed child's terminal Done, clears learningPath.
- * On timeout the stream is taken anyway: the runner's own handler is
- * idempotent and self-heals on the next terminal event it sees. */
+ * On timeout the stream is taken anyway; clearing learningPath here is how
+ * the runner's finish() knows the takeover happened, so the child's late
+ * terminal event drops the runner's claim without touching the busy flag
+ * this send is about to raise (PR #5 review). */
 function streamReleased(timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
     if (useUiStore.getState().learningPath === null) {

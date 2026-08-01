@@ -26,6 +26,11 @@ describe('parseSchedule', () => {
     expect(parseSchedule('weekly monday 09:15')).toEqual({ kind: 'weekly', day: 1, hour: 9, minute: 15 });
   });
 
+  it('resolves full day names to their own day — saturday is not sunday (PR #5 review)', () => {
+    expect(parseSchedule('weekly saturday 10:00')).toEqual({ kind: 'weekly', day: 6, hour: 10, minute: 0 });
+    expect(parseSchedule('weekly sunday 08:00')).toEqual({ kind: 'weekly', day: 0, hour: 8, minute: 0 });
+  });
+
   it('rejects everything malformed rather than guessing', () => {
     for (const bad of [undefined, null, 42, '', 'sometimes', 'daily', 'daily 25:00', 'daily 9:60', 'weekly 09:00', 'weekly noday 09:00', 'monthly 1 09:00']) {
       expect(parseSchedule(bad)).toBeNull();
