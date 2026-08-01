@@ -176,7 +176,7 @@ export function useAgentChat(
           setAgentBusy(false);
           if (touchedFiles.current) {
             touchedFiles.current = false;
-            void rescan().catch(() => undefined);
+            void rescan();
             // M9.5/M9.4: a turn that wrote files gets its own checkpoint, so
             // the assistant's work is revertible on its own rather than
             // tangled into the user's next one.

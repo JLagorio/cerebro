@@ -215,15 +215,21 @@ describe('vaultStore', () => {
       expect(useVaultStore.getState().status).toBe('ready');
       expect(listenMock).toHaveBeenCalledTimes(2);
 
-      // A failing rescan inside the listener lands in store error state
-      // instead of becoming an unhandled rejection.
+      // A failing rescan inside the listener keeps the last good snapshot
+      // and toasts (M14.8) — the app stays usable instead of flipping into
+      // the dead error shell, and nothing becomes an unhandled rejection.
+      const entriesBefore = useVaultStore.getState().entries;
+      useUiStore.setState({ toasts: [] });
       const handler = listenMock.mock.calls[1][1] as () => void;
       vi.mocked(ipc.scanVault).mockRejectedValueOnce(new Error('scan failed'));
       handler();
       await vi.waitFor(() => {
-        expect(useVaultStore.getState().status).toBe('error');
-        expect(useVaultStore.getState().error).toBe('scan failed');
+        expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
+          "Couldn't refresh vault",
+        );
       });
+      expect(useVaultStore.getState().status).toBe('ready');
+      expect(useVaultStore.getState().entries).toBe(entriesBefore);
     } finally {
       exitTauri();
       vi.mocked(ipc.scanVault).mockReset();

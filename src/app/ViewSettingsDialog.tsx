@@ -76,7 +76,9 @@ export function ViewSettingsDialog({
   schema: Schema;
   title: string;
   onCancel: () => void;
-  onSubmit: (definition: ListDefinition) => void;
+  /** Resolve true on success — the dialog closes only then, so a failed
+   * write keeps the configuration the user just built on screen (M14.8). */
+  onSubmit: (definition: ListDefinition) => Promise<boolean>;
 }) {
   const [def, setDef] = useState<ListDefinition>(initial);
   const [busy, setBusy] = useState(false);
@@ -100,7 +102,12 @@ export function ViewSettingsDialog({
         onClick: () => {
           if (def.name.trim() === '' || busy) return;
           setBusy(true);
-          onSubmit({ ...def, name: def.name.trim() });
+          void (async () => {
+            const ok = await onSubmit({ ...def, name: def.name.trim() });
+            // On success the parent unmounts us; on failure the action has
+            // already toasted and the form stays editable.
+            if (!ok) setBusy(false);
+          })();
         },
         disabled: def.name.trim() === '' || busy,
       }}

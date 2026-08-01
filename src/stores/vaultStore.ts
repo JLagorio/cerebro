@@ -95,11 +95,10 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       if (inTauri() && !watcherBound) {
         const { listen } = await import('@tauri-apps/api/event');
         await listen('vault-changed', () => {
-          get()
-            .rescan()
-            .catch((err) => {
-              set({ status: 'error', error: err instanceof Error ? err.message : String(err) });
-            });
+          // rescan() contains its own failures (toast + keep the last good
+          // snapshot, M14.8) — a transient scan error on a watcher event must
+          // not flip the whole app into the dead error shell.
+          void get().rescan();
         });
         // Only latch after listen resolves: a failed bind must leave the
         // next openVault free to retry, or the watcher is dead for the whole
@@ -121,10 +120,20 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
   async rescan() {
     const vault = get().vaultPath;
     if (vault === null) return;
-    const entries = await ipc.scanVault(vault);
-    const { views, collections } = await loadCollections(vault);
-    const folders = await ipc.listFolders(vault);
-    set({ entries, views, collections, folders, status: 'ready' });
+    // Store-layer invariant (M14.8): actions never throw. Before this, a
+    // scan failure was toasted, swallowed, or an unhandled rejection
+    // depending on which of a dozen call sites you arrived through — and a
+    // rescan inside another action's catch block could throw OUT of it.
+    try {
+      const entries = await ipc.scanVault(vault);
+      const { views, collections } = await loadCollections(vault);
+      const folders = await ipc.listFolders(vault);
+      set({ entries, views, collections, folders, status: 'ready' });
+    } catch {
+      // The store keeps its last good snapshot; disk truth returns on the
+      // next successful scan (watcher event, write, or vault reopen).
+      useUiStore.getState().toast("Couldn't refresh vault");
+    }
   },
 
   async patchFrontmatter(path, patch) {
@@ -165,6 +174,11 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
     }
   },
 
+  // The documented EXCEPTION to the never-throw invariant (M14.8): callers
+  // need the created path to navigate, and each of them wants its own
+  // context-specific failure message — so failure stays an exception the
+  // caller catches, not a null every caller would have to branch on anyway.
+  // Every call site awaits inside try/catch; keep it that way.
   async createItem({ folder, slug, frontmatter, body = '' }) {
     const vault = get().vaultPath;
     if (vault === null) throw new Error('No vault open');

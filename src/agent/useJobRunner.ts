@@ -145,7 +145,7 @@ export function useJobRunner(): void {
     ui.setLearningPath(null);
     ui.setAgentBusy(false);
     // Whatever it just wrote is on disk and nowhere else until this runs.
-    void rescan().catch(() => undefined);
+    void rescan();
   }, [rescan]);
 
   // The chat's release wait can take the stream by TIMEOUT: streamReleased

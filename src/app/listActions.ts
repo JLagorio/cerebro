@@ -54,13 +54,8 @@ export function nextCollectionFolder(name: string, taken: Iterable<string>): str
   }
 }
 
-async function refresh(): Promise<void> {
-  try {
-    await useVaultStore.getState().rescan();
-  } catch {
-    useUiStore.getState().toast("Couldn't refresh vault");
-  }
-}
+// rescan() toasts its own failures and never throws (M14.8).
+const refresh = (): Promise<void> => useVaultStore.getState().rescan();
 
 // --- Lists -----------------------------------------------------------------
 
@@ -111,18 +106,10 @@ export async function createList(
   return (await writeList(id, definition, { collection })) ? id : null;
 }
 
-/** Create a legacy project-scoped view (a project tab). */
-export async function createProjectList(
-  definition: ListDefinition,
-  project: string,
-): Promise<string | null> {
-  const { views } = useVaultStore.getState();
-  const taken = views.filter((v) => v.project === project).map((v) => v.id);
-  const id = nextListId(definition.name, taken);
-  return (await writeList(id, definition, { collection: null, legacy: { project } })) ? id : null;
-}
-
-/** Persist edits to an existing List — in place, whatever shape it is on disk. */
+/** Persist edits to an existing List — in place, whatever shape it is on disk.
+ * This is the surviving consumer of the `legacy` shape: creating project
+ * views died with M12.5, but a pre-M10 file on disk is still UPDATED where
+ * it lives rather than silently relocated. */
 export async function updateList(list: ListFile, definition: ListDefinition): Promise<boolean> {
   const legacy = isLegacy(list) ? { project: list.project } : undefined;
   return writeList(list.id, definition, { collection: list.collection, legacy });

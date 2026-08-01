@@ -209,15 +209,17 @@ function App() {
           schema={schema}
           title="New list"
           onCancel={() => setNewList(null)}
-          onSubmit={(definition) => {
+          onSubmit={async (definition) => {
             const collection = newList.collection;
+            const id = await createList(definition, collection);
+            // Close only on success (M14.8) — a failed write already toasted,
+            // and the dialog keeps the view the user configured.
+            if (id === null) return false;
             setNewList(null);
-            void (async () => {
-              const id = await createList(definition, collection);
-              // Navigate WITH the collection: ids are unique per folder, so
-              // "roadmap" alone could resolve to another collection's list.
-              if (id !== null) navigate({ kind: 'list', id, collection });
-            })();
+            // Navigate WITH the collection: ids are unique per folder, so
+            // "roadmap" alone could resolve to another collection's list.
+            navigate({ kind: 'list', id, collection });
+            return true;
           }}
         />
       )}
