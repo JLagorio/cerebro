@@ -252,7 +252,7 @@ test('retire: a replaced concept says so, and stops asking to be verified', asyn
   ).toHaveCount(0);
 });
 
-test('dossier: a project page says what the base believes, doubts, and no longer believes', async ({
+test('dossier: a project record says what the base believes, doubts, and no longer believes', async ({
   page,
 }) => {
   await boot(page);
@@ -260,10 +260,12 @@ test('dossier: a project page says what the base believes, doubts, and no longer
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('offline sync hardening');
   await page.getByTestId('quick-open-result').first().click();
-  // M12.5: the project page is gone — the folder reads as a Collection whose
-  // page hosts the dossier, behind the record panel project.md opened in.
-  await page.keyboard.press('Escape');
-  await expect(page.getByTestId('collection-page')).toBeVisible();
+  // M12.5 aftermath: a project is an ordinary record under records/projects/,
+  // so its dossier rides the record panel (M14.2). The base holds concepts
+  // ABOUT this record, which is what swaps the panel's related list for the
+  // full dossier — capability, not type, decides.
+  await expect(page.getByTestId('detail-panel')).toBeVisible();
+  await page.getByTestId('detail-knowledge-toggle').click();
 
   const dossier = page.getByTestId('entity-dossier');
   await expect(dossier).toBeVisible();

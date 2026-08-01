@@ -11,7 +11,10 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   clearScreen: false,
-  server: { port: 5173, strictPort: true },
+  // PORT lets a second checkout (worktree, CI lane) run its own dev server
+  // beside an interactive one; strictPort keeps a taken port an error instead
+  // of a silent drift onto a server built from different sources.
+  server: { port: Number(process.env.PORT ?? 5173), strictPort: true },
   test: {
     environment: 'jsdom',
     globals: true,

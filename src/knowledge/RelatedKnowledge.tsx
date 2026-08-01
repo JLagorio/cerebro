@@ -43,6 +43,7 @@ export function RelatedKnowledge({
   const navigate = useNavStore((s) => s.navigate);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const closeDetail = useUiStore((s) => s.closeDetail);
 
   const today = todayIso();
   const related = useMemo(
@@ -92,9 +93,12 @@ export function RelatedKnowledge({
                 type="button"
                 data-testid="related-concept"
                 data-path={concept.entry.path}
-                onClick={() =>
-                  navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path })
-                }
+                onClick={() => {
+                  // Same rule as the dossier (M14.2): following a concept
+                  // leaves the record, so the panel goes with it.
+                  closeDetail();
+                  navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path });
+                }}
                 className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
               >
                 <span className="min-w-0 flex-1">

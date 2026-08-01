@@ -7,7 +7,7 @@ import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
-import { fixtureVault } from '@/test/factories';
+import { fixtureVault, makeEntry } from '@/test/factories';
 
 vi.mock('@/lib/ipc', () => ({
   readNote: vi.fn().mockResolvedValue('Existing body'),
@@ -125,6 +125,38 @@ describe('DetailPanel', () => {
       },
       { timeout: 3_000 },
     );
+  });
+
+  // M14.2: which knowledge surface answers is capability-gated — a record the
+  // base holds concepts ABOUT gets its dossier (projects became ordinary
+  // records in the M12.5 aftermath, so the dossier rides the panel now); any
+  // other record keeps the wide-net related list.
+  it('shows the entity dossier when the base holds concepts about the record', async () => {
+    const user = userEvent.setup();
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'knowledge/systems/first-run.md',
+          title: 'First-run flow',
+          // The scanner hands wikilink fields over bracket-stripped, in
+          // relationships — not properties (M12.4a).
+          relationships: { about: ['fld-1'] },
+        }),
+      ],
+    });
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('entity-dossier')).toBeTruthy();
+    expect(screen.queryByTestId('related-knowledge')).toBeNull();
+  });
+
+  it('keeps the related list when the base only knows around the record', async () => {
+    const user = userEvent.setup();
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('related-knowledge')).toBeTruthy();
+    expect(screen.queryByTestId('entity-dossier')).toBeNull();
   });
 });
 
