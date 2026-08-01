@@ -45,10 +45,11 @@ async function startJob(): Promise<void> {
 /**
  * Ownership of the shared event stream when chat preempts on TIMEOUT (PR #5
  * review). streamReleased clears learningPath and the chat proceeds without
- * the runner ever running finish(); the killed child's terminal Done arrives
- * later, mid-chat-turn. finish() firing whole would clear agentBusy — the
- * runner would read the agent as idle and start a background run that
- * replaces the chat's child mid-answer.
+ * the runner ever running finish(); the takeover transition itself drops the
+ * runner's claim. The killed child's terminal Done may arrive later,
+ * mid-chat-turn — it must not clear agentBusy (the runner would read the
+ * agent as idle and start a run that replaces the chat's child mid-answer) —
+ * or it may never arrive at all, and the runner must not stay wedged on it.
  */
 describe('useJobRunner stream ownership', () => {
   beforeEach(() => {
@@ -113,6 +114,27 @@ describe('useJobRunner stream ownership', () => {
       useUiStore.getState().setAgentBusy(false);
       // The first attempt consumed the filing and recorded the ledger; put
       // both back so the same note derives a fresh job.
+      useUiStore.setState({ learnAttempts: {}, filedForLearning: ['items/note.md'] });
+    });
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+  });
+
+  it('a takeover whose killed child never emits Done still frees the runner', async () => {
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(useUiStore.getState().learningPath).toBe('items/note.md');
+
+    // The chat's streamReleased timed out BECAUSE the killed child's terminal
+    // Done was lost — so no terminal event for this run will ever arrive.
+    // The takeover transition alone must drop the runner's claim.
+    act(() => useUiStore.getState().setLearningPath(null));
+
+    // The chat's turn ends; the note is refiled. If the runner were still
+    // waiting on the lost Done to clear `running`, no job would ever be
+    // scheduled again this session.
+    act(() => {
+      useUiStore.getState().setAgentBusy(false);
       useUiStore.setState({ learnAttempts: {}, filedForLearning: ['items/note.md'] });
     });
     await startJob();

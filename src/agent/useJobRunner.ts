@@ -127,18 +127,33 @@ export function useJobRunner(): void {
     if (!running.current) return;
     running.current = false;
     const ui = useUiStore.getState();
-    // learningPath already null means the chat's release wait timed out and
-    // it took the stream (useAgentChat#streamReleased). The busy flag is the
-    // chat's now — clearing it here would let this runner read the agent as
-    // idle mid-answer and start a run that replaces the chat's child (PR #5
-    // review). Drop the claim; touch nothing the chat owns.
-    if (ui.learningPath !== null) {
-      ui.setLearningPath(null);
-      ui.setAgentBusy(false);
-    }
+    ui.setLearningPath(null);
+    ui.setAgentBusy(false);
     // Whatever it just wrote is on disk and nowhere else until this runs.
     void rescan().catch(() => undefined);
   }, [rescan]);
+
+  // The chat's release wait can take the stream by TIMEOUT: streamReleased
+  // clears learningPath itself when the killed child's terminal Done is lost
+  // (useAgentChat). That lost Done is the very event finish() rides, so
+  // waiting for a terminal event to drop this claim could wedge the runner
+  // for the session — `running` stuck true, no job ever scheduled again
+  // (PR #5 review). The takeover transition itself is the signal: the path
+  // going null while the claim is still held can only be the chat's timeout,
+  // because finish() drops the claim BEFORE clearing the path. Drop the
+  // claim and rescan; the busy flag is the chat's now — clearing it would
+  // let this runner read the agent as idle and start a run that replaces
+  // the chat's child mid-answer.
+  useEffect(
+    () =>
+      useUiStore.subscribe((state, prev) => {
+        if (prev.learningPath === null || state.learningPath !== null) return;
+        if (!running.current) return;
+        running.current = false;
+        void rescan().catch(() => undefined);
+      }),
+    [rescan],
+  );
 
   useEffect(
     () =>
