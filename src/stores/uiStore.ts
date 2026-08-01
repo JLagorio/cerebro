@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { OrganizeProposal } from '@/agent/types';
+import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
@@ -117,13 +118,15 @@ interface UiState {
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
   /**
-   * stdio connector fingerprints approved to RUN, keyed by vault path
-   * (PR #5 security review). Persisted HERE — outside the vault — on
-   * purpose: `.cerebro/connectors.json` travels with the vault, so an
-   * untrusted vault could otherwise name an arbitrary command and have the
-   * agent runtime spawn it. A stdio entry runs only after a person approved
-   * that exact name+command+args+env on THIS machine — see
-   * engine/connectors.stdioFingerprint.
+   * stdio connector approval KEYS — SHA-256 digests of the approved
+   * fingerprints — keyed by vault path (PR #5 security review). Persisted
+   * HERE — outside the vault — on purpose: `.cerebro/connectors.json`
+   * travels with the vault, so an untrusted vault could otherwise name an
+   * arbitrary command and have the agent runtime spawn it. A stdio entry
+   * runs only after a person approved that exact name+command+args+env on
+   * THIS machine. Digests, never the fingerprints themselves: a spec's env
+   * carries credentials, and localStorage must not become a second
+   * plaintext home for them — see engine/connectors.stdioApprovalKey.
    */
   stdioApprovals: Record<string, string[]>;
   approveStdio(vault: string, fingerprint: string): void;
@@ -313,6 +316,17 @@ function loadNestedStringMap(key: string): Record<string, Record<string, string>
   }
 }
 
+/** stdio approvals persisted before PR #5 round 7 were raw fingerprints —
+ * env values included, i.e. credential material in localStorage. Scrub on
+ * load: hash any pre-digest entry to its approval key and persist the
+ * cleaned map immediately, so the approval survives and the plaintext is
+ * gone after one launch. */
+function loadStdioApprovals(key: string): Record<string, string[]> {
+  const scrubbed = scrubStdioApprovals(loadStringListMap(key));
+  if (scrubbed.changed) storeString(key, JSON.stringify(scrubbed.map));
+  return scrubbed.map;
+}
+
 function loadStringListMap(key: string): Record<string, string[]> {
   try {
     const raw = window.localStorage.getItem(key);
@@ -499,7 +513,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AGENT_CONNECTORS_KEY, String(v));
     set({ agentConnectors: v });
   },
-  stdioApprovals: loadStringListMap(STDIO_APPROVALS_KEY),
+  stdioApprovals: loadStdioApprovals(STDIO_APPROVALS_KEY),
   approveStdio: (vault, fingerprint) =>
     set((s) => {
       const list = s.stdioApprovals[vault] ?? [];

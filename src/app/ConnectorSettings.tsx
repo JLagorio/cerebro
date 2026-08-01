@@ -6,8 +6,8 @@ import { Switch } from '@/components/ui/Switch';
 import {
   parseConnectors,
   serializeConnectors,
+  stdioApprovalKey,
   stdioEnv,
-  stdioFingerprint,
   type ConnectorSpec,
 } from '@/engine/connectors';
 import { readConnectors, saveConnectors } from '@/lib/ipc';
@@ -108,9 +108,9 @@ export function ConnectorSettings() {
     };
     persist([...specs, spec]);
     // Typing the command right here IS the approval — the ledger just
-    // records it (outside the vault) so a later hand-edit to the file has
-    // to be approved again.
-    const fp = stdioFingerprint(spec);
+    // records its digest (outside the vault) so a later hand-edit to the
+    // file has to be approved again.
+    const fp = stdioApprovalKey(spec);
     if (fp !== null) approveStdio(vaultPath, fp);
     setName('');
     setTarget('');
@@ -122,8 +122,9 @@ export function ConnectorSettings() {
         // A stdio entry names a command this app would EXECUTE, and the file
         // naming it travels with the vault — so it stays out of runs until a
         // person approves this exact command line on this machine. null =
-        // malformed (non-string env), which can never be approved.
-        const fp = stdioFingerprint(spec);
+        // malformed (non-string env), which can never be approved. The
+        // ledger holds digests, never the env-bearing fingerprint itself.
+        const fp = stdioApprovalKey(spec);
         const unapproved =
           spec.transport === 'stdio' &&
           (fp === null || !(stdioApprovals[vaultPath] ?? []).includes(fp));

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('@/lib/ipc', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/ipc')>();
@@ -47,6 +47,31 @@ describe('ConnectorSettings stdio approval surface', () => {
     expect(await screen.findByText('API_KEY=sekrit npx -y @linear/mcp')).toBeTruthy();
     expect(screen.getByText('runs a local command')).toBeTruthy();
     expect(screen.getByText('Approve')).toBeTruthy();
+  });
+
+  it('approving stores a digest — the secret never reaches the ledger', async () => {
+    // The ledger persists to localStorage, so what Approve records must be
+    // the approval KEY, not the env-bearing fingerprint (PR #5 security
+    // review round 7).
+    vi.mocked(ipc.readConnectors).mockResolvedValue(
+      JSON.stringify({
+        servers: {
+          linear: {
+            transport: 'stdio',
+            command: 'npx',
+            args: ['-y', '@linear/mcp'],
+            env: { API_KEY: 'sekrit' },
+            enabled: true,
+          },
+        },
+      }),
+    );
+    render(<ConnectorSettings />);
+    fireEvent.click(await screen.findByText('Approve'));
+    const ledger = useUiStore.getState().stdioApprovals['/vault'];
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(useUiStore.getState().stdioApprovals)).not.toContain('sekrit');
   });
 
   it('an http connector still shows its url', async () => {

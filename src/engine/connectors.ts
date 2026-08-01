@@ -9,6 +9,8 @@
  * (a broken explicit list must never widen into "everything").
  */
 
+import { sha256Hex } from '@/lib/sha256';
+
 export interface ConnectorSpec {
   name: string;
   transport: 'http' | 'stdio';
@@ -81,6 +83,10 @@ export function stdioEnv(spec: ConnectorSpec): Record<string, string> | null {
  * drops entries with no match; any edit to the file invalidates the
  * approval, which is the point. Null = not a stdio spec, or one whose env
  * cannot be represented — never approvable.
+ *
+ * The fingerprint itself never leaves this computation: its env pairs are
+ * credential material, so the LEDGER stores only its digest — see
+ * stdioApprovalKey below.
  */
 export function stdioFingerprint(spec: ConnectorSpec): string | null {
   if (spec.transport !== 'stdio') return null;
@@ -88,6 +94,45 @@ export function stdioFingerprint(spec: ConnectorSpec): string | null {
   if (env === null) return null;
   const pairs = Object.entries(env).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return JSON.stringify([spec.name, spec.command, spec.args, pairs]);
+}
+
+/**
+ * What the approval ledger actually stores: the SHA-256 of the fingerprint
+ * (PR #5 security review). The fingerprint embeds env VALUES — an API key
+ * a connector needs is exactly the kind of thing a spec's env carries —
+ * and the ledger persists to localStorage, so storing it raw would copy
+ * credentials into a second plaintext location outside the vault boundary.
+ * The digest keeps the exact-match semantics (any edit to the spec still
+ * invalidates the approval) while nothing recoverable resides in app
+ * storage. Rust hashes its identically-computed fingerprint the same way
+ * (connectors::stdio_approval_key); the twin hex literals pinned in both
+ * suites keep the two from drifting apart.
+ */
+export function stdioApprovalKey(spec: ConnectorSpec): string | null {
+  const fingerprint = stdioFingerprint(spec);
+  return fingerprint === null ? null : sha256Hex(fingerprint);
+}
+
+/**
+ * Heals a ledger persisted before approvals were digests: any entry that is
+ * not a SHA-256 hex string is a raw fingerprint from an earlier build —
+ * hash it in place, so the approval survives and the plaintext does not.
+ * (Hashing a non-fingerprint stray is harmless: the key matches nothing.)
+ */
+export function scrubStdioApprovals(map: Record<string, string[]>): {
+  map: Record<string, string[]>;
+  changed: boolean;
+} {
+  let changed = false;
+  const out: Record<string, string[]> = {};
+  for (const [vault, list] of Object.entries(map)) {
+    out[vault] = list.map((entry) => {
+      if (/^[0-9a-f]{64}$/.test(entry)) return entry;
+      changed = true;
+      return sha256Hex(entry);
+    });
+  }
+  return { map: out, changed };
 }
 
 export function serializeConnectors(specs: ConnectorSpec[]): string {

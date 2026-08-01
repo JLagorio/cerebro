@@ -27,9 +27,13 @@
 //! connectors.json that points at any binary. So stdio entries are merged
 //! only when their exact name+command+args+env matches a fingerprint the
 //! user approved on this machine; the approval ledger lives in the app's
-//! own storage, outside the vault, and rides in on each run request.
+//! own storage, outside the vault, and rides in on each run request. The
+//! ledger holds SHA-256 digests of those fingerprints, never the strings —
+//! a fingerprint embeds env VALUES, which is credential material, and app
+//! storage must not become a second plaintext home for it.
 
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub const CONFIG_PATH: &str = ".cerebro/connectors.json";
@@ -136,6 +140,7 @@ pub fn connector_context(
 /// byte-identical to engine/connectors.ts#stdioFingerprint:
 /// `JSON.stringify([name, command, args, sortedEnvPairs])`. Both sides pin
 /// the exact literal in their tests so the formats cannot drift apart.
+/// Never stored: the ledger holds its digest — see stdio_approval_key.
 pub fn stdio_fingerprint(
     name: &str,
     command: &str,
@@ -143,6 +148,22 @@ pub fn stdio_fingerprint(
     env: &[(String, String)],
 ) -> String {
     serde_json::to_string(&(name, command, args, env)).unwrap_or_default()
+}
+
+/// What the approval ledger actually stores and what the merge matches on:
+/// the SHA-256 hex of the fingerprint (PR #5 security review). Exact-match
+/// semantics are unchanged — any edit to the spec still changes the key —
+/// but env values, which carry credentials, never reside in app storage.
+/// Byte-identical to engine/connectors.ts#stdioApprovalKey; the twin hex
+/// literals pinned in both suites keep the two from drifting apart.
+pub fn stdio_approval_key(
+    name: &str,
+    command: &str,
+    args: &[String],
+    env: &[(String, String)],
+) -> String {
+    let digest = Sha256::digest(stdio_fingerprint(name, command, args, env).as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn enabled_servers(config: &Value, approved_stdio: &[String]) -> Map<String, Value> {
@@ -205,8 +226,9 @@ fn enabled_servers(config: &Value, approved_stdio: &[String]) -> Map<String, Val
                 env.sort();
                 // The execution boundary (PR #5 security review): a command
                 // named by a file that travels with the vault runs only if a
-                // person approved this exact spec on this machine.
-                if !approved_stdio.contains(&stdio_fingerprint(name, command, &args, &env)) {
+                // person approved this exact spec on this machine. The
+                // ledger holds digests — a raw fingerprint can never match.
+                if !approved_stdio.contains(&stdio_approval_key(name, command, &args, &env)) {
                     continue;
                 }
                 entry.insert("type".into(), Value::String("stdio".into()));
@@ -244,9 +266,20 @@ mod tests {
         dir
     }
 
-    /// The fingerprint the linear fixture below would need approved.
+    /// The fingerprint of the linear fixture below — the approved PREIMAGE,
+    /// never itself a valid ledger entry.
     fn linear_fp() -> String {
         stdio_fingerprint(
+            "linear",
+            "npx",
+            &["-y".into(), "@linear/mcp".into()],
+            &[("KEY".into(), "v".into())],
+        )
+    }
+
+    /// The approval key the linear fixture below would need in the ledger.
+    fn linear_key() -> String {
+        stdio_approval_key(
             "linear",
             "npx",
             &["-y".into(), "@linear/mcp".into()],
@@ -292,7 +325,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, true, &[linear_fp()]);
+        let (servers, strict) = connector_context(&vault, true, &[linear_key()]);
         assert!(strict, "an explicit list pins the run to it");
         assert_eq!(servers.len(), 2, "disabled and url-less entries stay out");
         assert_eq!(servers["jira"]["type"], "http");
@@ -337,7 +370,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, _) = connector_context(&vault, true, &[linear_fp()]);
+        let (servers, _) = connector_context(&vault, true, &[linear_key()]);
         assert!(servers.is_empty(), "an edited spec is a new spec: approval gone");
     }
 
@@ -356,8 +389,8 @@ mod tests {
         )
         .unwrap();
         let approved = [
-            stdio_fingerprint("odd-env", "npx", &[], &[]),
-            stdio_fingerprint("odd-args", "npx", &[], &[]),
+            stdio_approval_key("odd-env", "npx", &[], &[]),
+            stdio_approval_key("odd-args", "npx", &[], &[]),
         ];
         let (servers, _) = connector_context(&vault, true, &approved);
         assert!(servers.is_empty());
@@ -372,6 +405,40 @@ mod tests {
             r#"["linear","npx",["-y","@linear/mcp"],[["KEY","v"]]]"#
         );
         assert_eq!(stdio_fingerprint("a", "b", &[], &[]), r#"["a","b",[],[]]"#);
+    }
+
+    #[test]
+    fn the_approval_key_is_pinned_to_the_frontends() {
+        // engine/connectors.test.ts pins the SAME hex literals — the ledger
+        // format cannot drift between the side that approves and the side
+        // that matches without one suite failing first.
+        assert_eq!(
+            linear_key(),
+            "4292a8986901db1abb3288b95ff7b6ab150dbda22d2fe4699e88f143e67a5ad6"
+        );
+        assert_eq!(
+            stdio_approval_key("a", "b", &[], &[]),
+            "c7c7371a155e18e5c9f39283b6a98a2b6f3d946306f494a04ece6c6d3c4fbccb"
+        );
+    }
+
+    #[test]
+    fn a_raw_fingerprint_in_the_ledger_unlocks_nothing() {
+        // The residency contract's enforcement side (PR #5 security review):
+        // the ledger holds digests, so an env-bearing fingerprint string —
+        // the pre-digest format, or one written by hand — never matches.
+        let vault = temp_vault("raw-fp");
+        save_raw(
+            &vault,
+            &json!({"servers": {
+                "linear": {"transport": "stdio", "command": "npx", "args": ["-y", "@linear/mcp"],
+                            "env": {"KEY": "v"}, "enabled": true}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let (servers, _) = connector_context(&vault, true, &[linear_fp()]);
+        assert!(servers.is_empty());
     }
 
     #[test]

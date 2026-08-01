@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseConnectors,
+  scrubStdioApprovals,
   serializeConnectors,
+  stdioApprovalKey,
   stdioFingerprint,
   type ConnectorSpec,
 } from './connectors';
@@ -79,5 +81,37 @@ describe('stdio approval fingerprints (PR #5 security review)', () => {
     // described, so the spec is not approvable at all.
     expect(stdioFingerprint(spec({ extra: { env: { KEY: 7 } } }))).toBeNull();
     expect(stdioFingerprint(spec({ extra: { env: 'PATH=x' } }))).toBeNull();
+  });
+
+  it('the approval key pins the exact hex the Rust merge computes', () => {
+    // connectors.rs#the_approval_key_is_pinned_to_the_frontends pins the
+    // SAME literals. The ledger stores this digest, never the fingerprint:
+    // env values are credential material, and localStorage must not become
+    // a second plaintext home for them (PR #5 security review).
+    expect(stdioApprovalKey(spec())).toBe(
+      '4292a8986901db1abb3288b95ff7b6ab150dbda22d2fe4699e88f143e67a5ad6',
+    );
+    expect(stdioApprovalKey(spec({ name: 'a', command: 'b', args: [], extra: {} }))).toBe(
+      'c7c7371a155e18e5c9f39283b6a98a2b6f3d946306f494a04ece6c6d3c4fbccb',
+    );
+    // Null propagates: what cannot be fingerprinted cannot be approved.
+    expect(stdioApprovalKey(spec({ transport: 'http' }))).toBeNull();
+    expect(stdioApprovalKey(spec({ extra: { env: { KEY: 7 } } }))).toBeNull();
+  });
+
+  it('scrubbing a pre-digest ledger hashes raw fingerprints in place', () => {
+    const raw = stdioFingerprint(spec())!;
+    const key = stdioApprovalKey(spec())!;
+    const scrubbed = scrubStdioApprovals({
+      '/vault': [raw, key],
+      '/other': [key],
+    });
+    // The raw entry became its key — the approval survives, the env-bearing
+    // plaintext does not — and already-hashed entries pass through.
+    expect(scrubbed.changed).toBe(true);
+    expect(scrubbed.map).toEqual({ '/vault': [key, key], '/other': [key] });
+    // An all-digest ledger reports unchanged, so nothing re-persists on
+    // every launch.
+    expect(scrubStdioApprovals(scrubbed.map).changed).toBe(false);
   });
 });
