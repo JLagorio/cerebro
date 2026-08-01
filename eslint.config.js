@@ -19,6 +19,7 @@ export default tseslint.config(
       'src-tauri/gen/**',
       'test-results/**',
       'playwright-report/**',
+      'coverage/**',
       '.claude/**',
       '.vite/**',
       // Tracked-by-accident prototype export; relocated in M14.7.

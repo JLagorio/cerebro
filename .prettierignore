@@ -11,3 +11,4 @@ playwright-report
 .vite
 pnpm-lock.yaml
 HardwareSoftware Security Engineering Tool
+coverage

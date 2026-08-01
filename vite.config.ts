@@ -22,5 +22,18 @@ export default defineConfig({
     // lived at the repo root too. e2e/ holds Playwright specs
     // (@playwright/test crashes under vitest).
     exclude: [...configDefaults.exclude, 'docs/**', '**/tolaria-main/**', 'e2e/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'lcov'],
+      // RATCHET floors (M14.4): set a hair under measured reality
+      // (49.45 / 59.15 / 81.8 on 2026-08-01) so they can only move UP.
+      // Never edit downward — raise them as coverage grows.
+      thresholds: {
+        lines: 48,
+        statements: 48,
+        functions: 58,
+        branches: 80,
+      },
+    },
   },
 });
