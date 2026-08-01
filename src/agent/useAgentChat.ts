@@ -58,6 +58,12 @@ export function useAgentChat(
   onWrote.current = onWroteFiles;
   const activeRef = useRef<string | null>(null);
   const mcpRef = useRef<McpInfo | null>(null);
+  // Runs this hook has killed (PR #5 review). A killed child's trailing
+  // events — its terminal Done above all — must be recognizable as dead
+  // history, because they can land in the same dispatch that hands the
+  // stream over OR seconds after a timeout takeover, and timing alone
+  // cannot tell them from the live turn's.
+  const deadRuns = useRef<Set<number>>(new Set());
   // The agent writes straight to disk; a turn that touched files must end
   // with a rescan or the UI keeps showing the pre-agent vault.
   const touchedFiles = useRef(false);
@@ -70,6 +76,13 @@ export function useAgentChat(
 
   useEffect(() => {
     return onAgentEvent((event: AgentEvent) => {
+      // A run this hook killed is dead history: drop everything it emits,
+      // and forget it once its terminal Done — the last event a run can
+      // produce — has been swallowed (PR #5 review).
+      if (deadRuns.current.has(event.run)) {
+        if (event.kind === 'Done') deadRuns.current.delete(event.run);
+        return;
+      }
       // The stream is shared with the background runner (M8.6/M13.2), which
       // runs whole turns of its own. With no active message this conversation
       // is not the one being answered, and `Init` in particular must not land
@@ -163,7 +176,6 @@ export function useAgentChat(
       const trimmed = text.trim();
       if (trimmed === '' || vaultPath === null) return;
       const assistantId = nextId();
-      activeRef.current = assistantId;
       lastPrompt.current = trimmed;
       setMessages((prev) => [
         ...prev,
@@ -182,7 +194,8 @@ export function useAgentChat(
           // turn's events on a stream the handler above is still ignoring —
           // the bubble would stay empty (PR #5 review).
           if (useUiStore.getState().learningPath !== null) {
-            await stopAgent().catch(() => undefined);
+            const dead = await stopAgent().catch(() => null);
+            if (typeof dead === 'number') deadRuns.current.add(dead);
             await streamReleased(RELEASE_TIMEOUT_MS);
             // The runner's finish() dropped agentBusy on its way out. Claim
             // it back before this turn's child starts, or the runner reads
@@ -190,6 +203,12 @@ export function useAgentChat(
             // replace the child mid-answer (PR #5 review).
             setAgentBusy(true);
           }
+          // The stream is claimed only NOW, after the handoff: the killed
+          // child's terminal events can be delivered in the very dispatch
+          // that released the stream — before its dead-run id is even
+          // knowable — and an earlier claim would adopt them as this turn's
+          // Done, freezing the bubble empty (PR #5 review).
+          activeRef.current = assistantId;
           const expanded =
             typeof message === 'function'
               ? await message().catch(() => trimmed)
@@ -221,29 +240,41 @@ export function useAgentChat(
     [connectors, model, setAgentBusy, shell, systemPrompt, toast, vaultPath],
   );
 
+  /** Kill the in-flight run and remember it as dead, so its trailing events
+   * cannot end a turn started right after (PR #5 review). Fire-and-forget:
+   * these callers null activeRef synchronously, which already ignores the
+   * strays that beat the id back. */
+  const killRun = useCallback(() => {
+    void stopAgent()
+      .then((dead) => {
+        if (typeof dead === 'number') deadRuns.current.add(dead);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const stop = useCallback(() => {
-    void stopAgent().catch(() => undefined);
+    killRun();
     patchActive((m) => ({ ...m, streaming: false }));
     activeRef.current = null;
     setStreaming(false);
     setAgentBusy(false);
-  }, [patchActive, setAgentBusy]);
+  }, [killRun, patchActive, setAgentBusy]);
 
   const reset = useCallback(() => {
-    void stopAgent().catch(() => undefined);
+    killRun();
     sessionRef.current = null;
     setSessionId(null);
     activeRef.current = null;
     setStreaming(false);
     setAgentBusy(false);
     setMessages([]);
-  }, [setAgentBusy]);
+  }, [killRun, setAgentBusy]);
 
   /** Load a stored conversation. Stops any turn first: the events already in
    * flight belong to the transcript being replaced. */
   const restore = useCallback(
     (restored: ChatMessage[], restoredSession: string | null) => {
-      void stopAgent().catch(() => undefined);
+      killRun();
       activeRef.current = null;
       setStreaming(false);
       setAgentBusy(false);
@@ -251,7 +282,7 @@ export function useAgentChat(
       setSessionId(restoredSession);
       setMessages(restored);
     },
-    [setAgentBusy],
+    [killRun, setAgentBusy],
   );
 
   return { messages, streaming, send, stop, reset, sessionId, restore };

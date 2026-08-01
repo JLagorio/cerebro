@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runMockAgent } from './mockAgent';
-import type { AgentEvent, UiAction } from './types';
+import type { AgentStreamEvent, UiAction } from './types';
 
 /**
  * The mock is what browser dev, vitest, and Playwright see instead of the real
@@ -13,8 +13,8 @@ import type { AgentEvent, UiAction } from './types';
  * the least trustworthy thing on screen.
  */
 
-function drain(message: string): Promise<{ events: AgentEvent[]; actions: UiAction[] }> {
-  const events: AgentEvent[] = [];
+function drain(message: string): Promise<{ events: AgentStreamEvent[]; actions: UiAction[] }> {
+  const events: AgentStreamEvent[] = [];
   const actions: UiAction[] = [];
   return new Promise((resolve) => {
     runMockAgent(
@@ -28,7 +28,7 @@ function drain(message: string): Promise<{ events: AgentEvent[]; actions: UiActi
   });
 }
 
-const toolNames = (events: AgentEvent[]): string[] =>
+const toolNames = (events: AgentStreamEvent[]): string[] =>
   events.flatMap((e) => (e.kind === 'ToolStart' ? [e.tool_name] : []));
 
 describe('runMockAgent', () => {

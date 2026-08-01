@@ -177,6 +177,21 @@ pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
     write_file(&safe_join(vault, rel)?, &compose(block, body))
 }
 
+/// The `type` a note's frontmatter declares, if the file exists and parses.
+/// The MCP layer uses this to refuse agent writes to `type: Type` docs — the
+/// vault's schema (M13.5). Malformed frontmatter reads as untyped, which is
+/// also how scan.rs reads it: a doc the scanner does not type is not schema.
+pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
+    let content = read_file(vault, rel).ok()?;
+    let (block, _) = parse::split_frontmatter(&content);
+    let mapping = parse::parse_frontmatter(block?).ok()?;
+    mapping
+        .iter()
+        .find(|(key, _)| parse::yaml_key_string(key) == "type")
+        .and_then(|(_, value)| value.as_str())
+        .map(str::to_string)
+}
+
 /// Return the note body only (frontmatter stripped).
 pub fn read_note(vault: &Path, rel: &str) -> Result<String, String> {
     let content = read_file(vault, rel)?;

@@ -182,6 +182,7 @@ fn start_mcp(
     state.ensure(&app, Path::new(&vault))
 }
 
+/// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
 fn run_agent(
     app: tauri::AppHandle,
@@ -189,11 +190,15 @@ fn run_agent(
     mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
-) -> Result<(), String> {
-    // The attribution slot rides the run, not the request into the CLI: the
-    // MCP server stamps `generated.by` from it (M13.4), and there is exactly
-    // one child process, so one actor at a time is the truth.
-    mcp_state.set_actor(request.actor.as_deref())?;
+) -> Result<u64, String> {
+    // Attribution rides the run's own bearer token (M13.4): the MCP server
+    // stamps `generated.by` from the token each request presents, so a
+    // child killed while a write is in flight still stamps as itself.
+    // Shared "current actor" state had a window — set here, before the old
+    // child was gone — where the outgoing run's trailing writes stamped as
+    // the incoming run (PR #5 security review).
+    let mut request = request;
+    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref())?);
     let dir = config_dir(&app)?;
     agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
 }
@@ -208,8 +213,10 @@ fn save_connectors(vault: String, json: String) -> Result<(), String> {
     connectors::save_raw(Path::new(&vault), &json)
 }
 
+/// Returns the killed run's id (if anything was running) so the frontend can
+/// recognize and drop that run's trailing events (PR #5 review).
 #[tauri::command(async)]
-fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<(), String> {
+fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<Option<u64>, String> {
     state.stop()
 }
 

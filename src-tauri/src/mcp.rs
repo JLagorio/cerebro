@@ -46,11 +46,33 @@ struct Running {
     port: u16,
     token: String,
     vault: Arc<Mutex<PathBuf>>,
-    /// Who the CURRENT run's writes are attributed to (M13.4). Set by
-    /// run_agent before each spawn; "claude-code" for the panel and the
-    /// anonymous background jobs, `process:<slug>` for an agent record's
-    /// run. One child process globally means one actor at a time.
-    actor: Arc<Mutex<String>>,
+    /// token → actor for recent runs (M13.4). Attribution rides the bearer
+    /// each request PRESENTS rather than shared "current actor" state
+    /// (PR #5 security review): a child killed while a write is in flight
+    /// can only present the token it was spawned with, so its trailing
+    /// writes stamp as ITS actor and never as the incoming run's.
+    run_actors: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+/// How many run tokens stay valid at once. A killed child's writes can still
+/// be in flight when the next run is minted, so its token must outlive the
+/// mint — briefly, and never unboundedly.
+const RUN_TOKEN_WINDOW: usize = 4;
+
+fn push_run_token(runs: &mut Vec<(String, String)>, token: String, actor: String) {
+    runs.push((token, actor));
+    let excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
+    runs.drain(..excess);
+}
+
+/// The actor a presented bearer resolves to: the endpoint's own token (from
+/// `ensure`) is the default actor, a minted run token is its run's actor,
+/// and anything else is unauthorized.
+fn resolve_actor(presented: &str, base: &str, runs: &[(String, String)]) -> Option<String> {
+    if presented == base {
+        return Some(DEFAULT_ACTOR.to_string());
+    }
+    runs.iter().rev().find(|(t, _)| t == presented).map(|(_, a)| a.clone())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -91,7 +113,7 @@ impl McpState {
             port,
             token: random_token(),
             vault: Arc::new(Mutex::new(vault.to_path_buf())),
-            actor: Arc::new(Mutex::new(DEFAULT_ACTOR.to_string())),
+            run_actors: Arc::new(Mutex::new(Vec::new())),
         };
 
         let handler = running.clone();
@@ -100,20 +122,27 @@ impl McpState {
             for mut request in server.incoming_requests() {
                 let mut body = String::new();
                 let _ = request.as_reader().read_to_string(&mut body);
-                let authorized = request.headers().iter().any(|h| {
-                    h.field.equiv("Authorization")
-                        && h.value.as_str() == format!("Bearer {}", handler.token)
+                // Authorization and attribution are one act: the bearer the
+                // request presents names the run it came from, and that
+                // run's actor stamps its writes (PR #5 security review).
+                let actor = request.headers().iter().find_map(|h| {
+                    if !h.field.equiv("Authorization") {
+                        return None;
+                    }
+                    let presented = h.value.as_str().strip_prefix("Bearer ")?;
+                    let runs = handler.run_actors.lock().ok()?;
+                    resolve_actor(presented, &handler.token, &runs)
                 });
                 // JSON-RPC notifications carry no id and take no response
                 // body. Verified against the real CLI: it sends
                 // `notifications/initialized` right after `initialize` and is
                 // happy with a bodyless 202.
-                if authorized && is_notification(&body) {
+                if actor.is_some() && is_notification(&body) {
                     let _ = request.respond(tiny_http::Response::empty(202));
                     continue;
                 }
-                let response = if authorized {
-                    handle_rpc(&app, &handler, &body)
+                let response = if let Some(actor) = actor.as_deref() {
+                    handle_rpc(&app, &handler, actor, &body)
                 } else {
                     json!({
                         "jsonrpc": "2.0", "id": Value::Null,
@@ -138,14 +167,16 @@ impl McpState {
         Ok(info)
     }
 
-    /// Attribute the NEXT run's writes (M13.4). None restores the default.
-    pub fn set_actor(&self, actor: Option<&str>) -> Result<(), String> {
+    /// Mint a bearer token for ONE run, bound to that run's actor (M13.4).
+    /// None reads as the default actor. Written into that run's private MCP
+    /// config and nowhere else; only the last few run tokens stay valid.
+    pub fn run_token(&self, actor: Option<&str>) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
-        if let Some(running) = guard.as_ref() {
-            *running.actor.lock().map_err(|_| "actor lock poisoned")? =
-                normalize_actor(actor).to_string();
-        }
-        Ok(())
+        let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
+        let token = random_token();
+        let mut runs = running.run_actors.lock().map_err(|_| "run token lock poisoned")?;
+        push_run_token(&mut runs, token.clone(), normalize_actor(actor).to_string());
+        Ok(token)
     }
 
     pub fn info(&self) -> Option<McpInfo> {
@@ -169,7 +200,7 @@ fn is_notification(body: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn handle_rpc(app: &AppHandle, running: &Running, body: &str) -> Value {
+fn handle_rpc(app: &AppHandle, running: &Running, actor: &str, body: &str) -> Value {
     let request: Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => {
@@ -200,7 +231,7 @@ fn handle_rpc(app: &AppHandle, running: &Running, body: &str) -> Value {
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
-            call_tool(app, running, name, &args)
+            call_tool(app, running, actor, name, &args)
         }
         other => Err(format!("unknown method: {other}")),
     };
@@ -371,6 +402,7 @@ fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
 fn call_tool(
     app: &AppHandle,
     running: &Running,
+    actor: &str,
     name: &str,
     args: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -378,11 +410,6 @@ fn call_tool(
         .vault
         .lock()
         .map_err(|_| "vault lock poisoned")?
-        .clone();
-    let actor = running
-        .actor
-        .lock()
-        .map_err(|_| "actor lock poisoned")?
         .clone();
 
     let outcome = match name {
@@ -393,8 +420,8 @@ fn call_tool(
         "create_note" => tool_create_note(&vault, args),
         "update_frontmatter" => tool_update_frontmatter(&vault, args),
         "append_to_note" => tool_append(&vault, args),
-        "write_concept" => tool_write_concept(&vault, args, &actor),
-        "cache_source" => tool_cache_source(&vault, args, &actor),
+        "write_concept" => tool_write_concept(&vault, args, actor),
+        "cache_source" => tool_cache_source(&vault, args, actor),
         "propose_organize" => tool_propose_organize(app, args),
         "open_note" => tool_ui(app, "open_note", args),
         "navigate" => tool_ui(app, "navigate", args),
@@ -585,6 +612,21 @@ fn tool_list_inbox(vault: &Path) -> Result<Value, String> {
     }))
 }
 
+/// M13.5 tells the agent it never creates or modifies `type: Type` docs —
+/// they are the vault's schema, and schema changes go through people. A rule
+/// only the prompt holds is a suggestion to an unattended run (PR #5 review),
+/// so the write tools refuse here rather than trusting the model to remember.
+const TYPE_DOC_REFUSAL: &str = "type: Type docs are the vault's schema and are changed by \
+     people, not by agent runs. Tell the user what schema change you need instead.";
+
+fn is_type_doc(vault: &Path, rel: &str) -> bool {
+    vault::write::note_type(vault, rel).as_deref() == Some("Type")
+}
+
+fn declares_type_doc(frontmatter: &Map<String, Value>) -> bool {
+    frontmatter.get("type").and_then(Value::as_str) == Some("Type")
+}
+
 fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
     let folder = arg_str(args, "folder").unwrap_or_default();
     let slug = arg_str(args, "slug").ok_or("create_note needs a slug")?;
@@ -594,6 +636,9 @@ fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, St
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+    if declares_type_doc(&frontmatter) {
+        return Err(TYPE_DOC_REFUSAL.into());
+    }
     let path = vault::write::create_note(vault, &folder, &slug, &frontmatter, &body)?;
     Ok(text_result(format!("Created {path}")))
 }
@@ -605,6 +650,11 @@ fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Va
         .and_then(Value::as_object)
         .cloned()
         .ok_or("update_frontmatter needs a patch object")?;
+    // Both directions are schema changes: editing a Type doc, and retyping
+    // an ordinary note INTO one.
+    if is_type_doc(vault, &path) || declares_type_doc(&patch) {
+        return Err(TYPE_DOC_REFUSAL.into());
+    }
     vault::write::update_frontmatter(vault, &path, &patch)?;
     Ok(text_result(format!("Updated frontmatter on {path}")))
 }
@@ -612,6 +662,9 @@ fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Va
 fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("append_to_note needs a path")?;
     let content = arg_str(args, "content").ok_or("append_to_note needs content")?;
+    if is_type_doc(vault, &path) {
+        return Err(TYPE_DOC_REFUSAL.into());
+    }
     let existing = vault::write::read_note(vault, &path)?;
     let joined = format!("{}\n\n{}\n", existing.trim_end(), content.trim());
     vault::write::save_note(vault, &path, &joined)?;
@@ -624,6 +677,11 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> R
         return Err(format!(
             "write_concept only writes into the knowledge/ bundle; {path} is outside it"
         ));
+    }
+    // A concept typed "Type" would scan as schema (the scanner reads the
+    // frontmatter, not the folder) — the one thing no agent tool may author.
+    if arg_str(args, "type").as_deref() == Some("Type") {
+        return Err(TYPE_DOC_REFUSAL.into());
     }
     let body = arg_str(args, "body").ok_or("write_concept needs a body")?;
 
@@ -928,6 +986,99 @@ mod tests {
         assert_eq!(normalize_actor(Some("")), DEFAULT_ACTOR);
         assert_eq!(normalize_actor(Some("   ")), DEFAULT_ACTOR);
         assert_eq!(normalize_actor(Some("process:scout")), "process:scout");
+    }
+
+    #[test]
+    fn an_actor_rides_its_runs_token_never_shared_state() {
+        // The race this retires (PR #5 review): with one shared "current
+        // actor", a child killed mid-write had its trailing writes stamped
+        // as whatever run was being spawned. Bound to the token, the killed
+        // run can only ever present its own identity.
+        let mut runs = Vec::new();
+        push_run_token(&mut runs, "tok-agent".into(), "process:scout".into());
+        push_run_token(&mut runs, "tok-chat".into(), DEFAULT_ACTOR.into());
+        assert_eq!(
+            resolve_actor("tok-agent", "base", &runs).as_deref(),
+            Some("process:scout"),
+            "the outgoing run's trailing write still stamps as the outgoing run"
+        );
+        assert_eq!(resolve_actor("tok-chat", "base", &runs).as_deref(), Some(DEFAULT_ACTOR));
+        assert_eq!(
+            resolve_actor("base", "base", &runs).as_deref(),
+            Some(DEFAULT_ACTOR),
+            "the endpoint's own token is the default actor"
+        );
+        assert_eq!(resolve_actor("unknown", "base", &runs), None, "unminted tokens are refused");
+    }
+
+    #[test]
+    fn run_tokens_expire_beyond_the_window() {
+        let mut runs = Vec::new();
+        for i in 0..(RUN_TOKEN_WINDOW + 2) {
+            push_run_token(&mut runs, format!("tok-{i}"), format!("actor-{i}"));
+        }
+        assert_eq!(runs.len(), RUN_TOKEN_WINDOW, "the ledger never grows unboundedly");
+        assert_eq!(resolve_actor("tok-0", "base", &runs), None, "old credentials retire");
+        let newest = format!("tok-{}", RUN_TOKEN_WINDOW + 1);
+        assert!(resolve_actor(&newest, "base", &runs).is_some());
+    }
+
+    #[test]
+    fn the_agent_cannot_create_or_modify_type_docs() {
+        // M13.5 as a rule rather than a prompt suggestion (PR #5 review):
+        // every MCP write path refuses schema, in both directions.
+        let dir = std::env::temp_dir().join("cerebro-type-doc-guard");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("types")).unwrap();
+        std::fs::create_dir_all(dir.join("records/decisions")).unwrap();
+        let schema_doc = "---\ntype: Type\nfields:\n  - status\n---\n\n# Decision\n";
+        std::fs::write(dir.join("types/decision.md"), schema_doc).unwrap();
+        std::fs::write(
+            dir.join("records/decisions/d-1.md"),
+            "---\ntype: Decision\nstatus: open\n---\n\n# D-1\n",
+        )
+        .unwrap();
+
+        // Creating a new Type doc, wherever it is aimed.
+        let mut create = Map::new();
+        create.insert("folder".into(), json!("types"));
+        create.insert("slug".into(), json!("sneaky"));
+        create.insert("body".into(), json!("# Sneaky"));
+        create.insert("frontmatter".into(), json!({ "type": "Type" }));
+        assert!(tool_create_note(&dir, &create).is_err());
+
+        // Patching an existing Type doc.
+        let mut patch = Map::new();
+        patch.insert("path".into(), json!("types/decision.md"));
+        patch.insert("patch".into(), json!({ "fields": ["status", "owner"] }));
+        assert!(tool_update_frontmatter(&dir, &patch).is_err());
+
+        // Retyping an ordinary record INTO schema.
+        let mut retype = Map::new();
+        retype.insert("path".into(), json!("records/decisions/d-1.md"));
+        retype.insert("patch".into(), json!({ "type": "Type" }));
+        assert!(tool_update_frontmatter(&dir, &retype).is_err());
+
+        // Appending to a Type doc's body — its keys ARE the schema.
+        let mut append = Map::new();
+        append.insert("path".into(), json!("types/decision.md"));
+        append.insert("content".into(), json!("statuses:\n  - sneaky"));
+        assert!(tool_append(&dir, &append).is_err());
+
+        // Smuggling one into knowledge/ through write_concept.
+        let mut concept = Map::new();
+        concept.insert("path".into(), json!("knowledge/systems/x.md"));
+        concept.insert("type".into(), json!("Type"));
+        concept.insert("title".into(), json!("X"));
+        concept.insert("body".into(), json!("b"));
+        assert!(tool_write_concept(&dir, &concept, DEFAULT_ACTOR).is_err());
+
+        // The doc survived all of it, and ordinary writes still land.
+        assert_eq!(std::fs::read_to_string(dir.join("types/decision.md")).unwrap(), schema_doc);
+        let mut ok = Map::new();
+        ok.insert("path".into(), json!("records/decisions/d-1.md"));
+        ok.insert("patch".into(), json!({ "status": "done" }));
+        assert!(tool_update_frontmatter(&dir, &ok).is_ok());
     }
 
     #[test]

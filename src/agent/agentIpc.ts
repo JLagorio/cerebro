@@ -50,17 +50,25 @@ export interface RunOptions {
 }
 
 let mockRun: MockRun | null = null;
+let mockRunSeq = 0;
+let mockRunId: number | null = null;
 
-export async function runAgent(vault: string, options: RunOptions): Promise<void> {
+/** Start a run. Resolves to the RUN ID whose tag every event of this run
+ * carries — the same id stopAgent reports back when the run is killed. */
+export async function runAgent(vault: string, options: RunOptions): Promise<number> {
   if (!inTauri()) {
+    const run = ++mockRunSeq;
+    mockRunId = run;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.
-    mockRun = runMockAgent(options.message, (event) => emitLocal(event), {
+    // Tagging happens here for the same reason it happens in agent.rs: the
+    // script only knows its own stream, the runtime knows which run it is.
+    mockRun = runMockAgent(options.message, (event) => emitLocal({ ...event, run }), {
       onUiAction: emitUiAction,
     });
-    return;
+    return run;
   }
-  await invokeTauri('run_agent', {
+  return invokeTauri<number>('run_agent', {
     vault,
     request: {
       message: options.message,
@@ -77,13 +85,18 @@ export async function runAgent(vault: string, options: RunOptions): Promise<void
   });
 }
 
-export async function stopAgent(): Promise<void> {
+/** Kill the current run. Resolves to the killed run's id (null when nothing
+ * was running) so the caller can drop that run's trailing events — its
+ * terminal Done arrives AFTER the kill (PR #5 review). */
+export async function stopAgent(): Promise<number | null> {
   if (!inTauri()) {
     mockRun?.cancel();
     mockRun = null;
-    return;
+    const dead = mockRunId;
+    mockRunId = null;
+    return dead;
   }
-  await invokeTauri('stop_agent');
+  return invokeTauri<number | null>('stop_agent');
 }
 
 // --- Event fan-out ---------------------------------------------------------

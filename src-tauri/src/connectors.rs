@@ -30,18 +30,42 @@
 //! own storage, outside the vault, and rides in on each run request.
 
 use serde_json::{Map, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const CONFIG_PATH: &str = ".cerebro/connectors.json";
 
+/// Resolve the config's path WITHOUT trusting the vault's contents to name
+/// it (PR #5 security review): `.cerebro` travels with the vault, so a
+/// crafted vault could ship it — or connectors.json itself — as a symlink
+/// and point these reads and writes at arbitrary files under the user's
+/// account. A symlink on either component we own fails the operation; the
+/// read paths then treat that exactly like an unreadable config.
+fn checked_config_path(vault: &Path) -> Result<PathBuf, String> {
+    let dir = vault.join(".cerebro");
+    let file = dir.join("connectors.json");
+    for candidate in [&dir, &file] {
+        if let Ok(meta) = std::fs::symlink_metadata(candidate) {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "{} is a symlink; cerebro refuses to follow it outside the vault",
+                    candidate.display()
+                ));
+            }
+        }
+    }
+    Ok(file)
+}
+
 pub fn read_raw(vault: &Path) -> Option<String> {
-    std::fs::read_to_string(vault.join(CONFIG_PATH)).ok()
+    let path = checked_config_path(vault).ok()?;
+    std::fs::read_to_string(path).ok()
 }
 
 /// Absent, unreadable, and readable are THREE cases, not two: an absent file
 /// means "no explicit list" (legacy open mode), but an unreadable one —
-/// permissions, IO error, non-UTF-8 from a hand-edit — is a list we cannot
-/// see, and must fail closed exactly like an unparseable one.
+/// permissions, IO error, non-UTF-8 from a hand-edit, a symlink where a file
+/// should be — is a list we cannot see (or cannot trust), and must fail
+/// closed exactly like an unparseable one.
 enum ConfigRead {
     Absent,
     Unreadable,
@@ -49,7 +73,10 @@ enum ConfigRead {
 }
 
 fn read_config(vault: &Path) -> ConfigRead {
-    match std::fs::read_to_string(vault.join(CONFIG_PATH)) {
+    let Ok(path) = checked_config_path(vault) else {
+        return ConfigRead::Unreadable;
+    };
+    match std::fs::read_to_string(path) {
         Ok(raw) => ConfigRead::Content(raw),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ConfigRead::Absent,
         Err(_) => ConfigRead::Unreadable,
@@ -57,13 +84,14 @@ fn read_config(vault: &Path) -> ConfigRead {
 }
 
 pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
+    let path = checked_config_path(vault)?;
     // An empty payload DELETES the file — the one way back to the legacy
     // "inherit my global config" mode once a list has existed. Removing the
     // last server keeps the file (strict, zero servers): pinned-to-none is
     // the safe reading of an empty list, and widening back to everything
     // must be its own explicit act (the Settings reset button).
     if json.trim().is_empty() {
-        let _ = std::fs::remove_file(vault.join(CONFIG_PATH));
+        let _ = std::fs::remove_file(&path);
         return Ok(());
     }
     let parsed: Value =
@@ -71,7 +99,6 @@ pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
     if !parsed.is_object() {
         return Err("connectors.json must be a JSON object".into());
     }
-    let path = vault.join(CONFIG_PATH);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -368,6 +395,52 @@ mod tests {
         let (servers, strict) = connector_context(&vault, true, &[]);
         assert!(servers.is_empty());
         assert!(strict, "an unreadable explicit list must not widen into everything");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_cerebro_dir_fails_closed_and_is_never_followed() {
+        // The attack (PR #5 security review): a cloned vault ships .cerebro
+        // as a symlink, and reading or saving connector settings walks out
+        // of the vault into arbitrary files under the user's account.
+        let vault = temp_vault("symlink-dir");
+        let target = temp_vault("symlink-dir-target");
+        std::fs::write(
+            target.join("connectors.json"),
+            json!({"servers": {"a": {"transport": "http", "url": "https://x/mcp", "enabled": true}}})
+                .to_string(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&target, vault.join(".cerebro")).unwrap();
+
+        // Reads refuse — and fail CLOSED, not into legacy open mode.
+        let (servers, strict) = connector_context(&vault, true, &[]);
+        assert!(servers.is_empty(), "a config reached through a symlink is never merged");
+        assert!(strict);
+        assert!(read_raw(&vault).is_none());
+
+        // Writes refuse — including the empty-payload delete branch, which
+        // would otherwise remove a file the symlink points at.
+        assert!(save_raw(&vault, "{\"servers\":{}}").is_err());
+        assert!(save_raw(&vault, "").is_err());
+        assert!(target.join("connectors.json").exists(), "the target survives untouched");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_connectors_file_fails_closed_the_same_way() {
+        let vault = temp_vault("symlink-file");
+        let target = temp_vault("symlink-file-target");
+        std::fs::write(target.join("secrets.json"), "{}").unwrap();
+        std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
+        std::os::unix::fs::symlink(target.join("secrets.json"), vault.join(CONFIG_PATH)).unwrap();
+
+        let (servers, strict) = connector_context(&vault, true, &[]);
+        assert!(servers.is_empty());
+        assert!(strict);
+        assert!(read_raw(&vault).is_none());
+        assert!(save_raw(&vault, "{\"servers\":{}}").is_err());
+        assert_eq!(std::fs::read_to_string(target.join("secrets.json")).unwrap(), "{}");
     }
 
     #[test]
