@@ -76,7 +76,10 @@ export function RollupConfigEditor({
             label="Property to aggregate"
             width={200}
             options={[
-              { value: NONE, label: targetType === '' ? 'Pick a relation first' : 'Pick a property…' },
+              {
+                value: NONE,
+                label: targetType === '' ? 'Pick a relation first' : 'Pick a property…',
+              },
               ...targetFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
             ]}
             value={def.property ?? NONE}

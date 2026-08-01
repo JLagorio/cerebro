@@ -53,7 +53,7 @@ describe('detectFormat', () => {
   });
 
   it('tolerates a BOM in front of the header', () => {
-    expect(detectFormat('x.txt', `﻿${VTT}`)).toBe('vtt');
+    expect(detectFormat('x.txt', `\uFEFF${VTT}`)).toBe('vtt');
   });
 
   it('falls back to plain text', () => {
@@ -221,10 +221,17 @@ describe('external references', () => {
   const PHX = { issuePrefixes: ['PHX'] };
 
   it('finds declared issue keys and urls, and says where each would be cached', () => {
-    const refs = findExternalRefs('Blocked on PHX-421, see https://wiki.test/x/Rollback plan.', PHX);
+    const refs = findExternalRefs(
+      'Blocked on PHX-421, see https://wiki.test/x/Rollback plan.',
+      PHX,
+    );
     expect(refs).toEqual([
       { kind: 'issue', id: 'PHX-421', cachePath: 'sources/issues/phx-421.md' },
-      { kind: 'url', id: 'https://wiki.test/x/Rollback', cachePath: 'sources/web/wiki.test-x-rollback.md' },
+      {
+        kind: 'url',
+        id: 'https://wiki.test/x/Rollback',
+        cachePath: 'sources/web/wiki.test-x-rollback.md',
+      },
     ]);
   });
 

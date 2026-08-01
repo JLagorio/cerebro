@@ -32,13 +32,9 @@ export interface SidebarProps {
   onNewView: (collection: string) => void;
 }
 
-type TypeDialog =
-  | { mode: 'new' }
-  | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
+type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
-type CollectionDialogState =
-  | { mode: 'new' }
-  | { mode: 'rename'; collection: CollectionFile };
+type CollectionDialogState = { mode: 'new' } | { mode: 'rename'; collection: CollectionFile };
 
 export function Sidebar({ onNewView }: SidebarProps) {
   const entries = useVaultStore((s) => s.entries);
@@ -223,94 +219,94 @@ export function Sidebar({ onNewView }: SidebarProps) {
           />
         </div>
       ) : (
-      <div className="flex-1 overflow-y-auto px-2 pb-4">
-        {/* M10: Collections are the top-level navigation. A Collection is a
+        <div className="flex-1 overflow-y-auto px-2 pb-4">
+          {/* M10: Collections are the top-level navigation. A Collection is a
             container — it holds Lists, Folders and Docs — where a "view" used
             to be both the container and the query at once. */}
-        <div className="flex items-center justify-between pr-1">
-          <div className={SECTION_LABEL}>Collections</div>
-          <button
-            type="button"
-            aria-label="New collection"
-            data-testid="new-collection"
-            onClick={() => setCollectionDialog({ mode: 'new' })}
-            className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
-          >
-            <Icon name="plus" size={13} />
-          </button>
-        </div>
-        {tree.length === 0 ? (
-          <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
-            No collections yet — make one to hold lists, folders, and docs.
-          </div>
-        ) : null}
-        {/* Everything lives in a Collection. There is deliberately no second
-            grouping beside this one: a folder holding Lists IS a Collection, so
-            a List cannot be orphaned and nothing needs a home of last resort. */}
-        <CollectionTree
-          nodes={tree}
-          selection={selection}
-          onNavigate={navigate}
-          onOpenDoc={openPath}
-          menuFor={nodeMenuItems}
-          onAdd={(node) => onNewView(node.id)}
-        />
-        {/* M3: collapsible Types section — the databases themselves. */}
-        <div className="flex items-center justify-between pr-1">
-          <button
-            type="button"
-            aria-expanded={typesOpen}
-            onClick={() => setTypesOpen(!typesOpen)}
-            className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-[var(--n-700)]`}
-          >
-            <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
-            Types
-          </button>
-          <span className="inline-flex">
-            {/* M12.6: the schema doctor — adopt an existing vault's freeform
-                frontmatter into declared types, one reviewed pass. */}
+          <div className="flex items-center justify-between pr-1">
+            <div className={SECTION_LABEL}>Collections</div>
             <button
               type="button"
-              aria-label="Adopt vault schema"
-              onClick={() => setAdopting(true)}
-              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
-            >
-              <Icon name="wand-2" size={12} />
-            </button>
-            <button
-              type="button"
-              aria-label="New type"
-              onClick={() => setTypeDialog({ mode: 'new' })}
+              aria-label="New collection"
+              data-testid="new-collection"
+              onClick={() => setCollectionDialog({ mode: 'new' })}
               className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
             >
               <Icon name="plus" size={13} />
             </button>
-          </span>
-        </div>
-        {typesOpen &&
-          types.map((t) => {
-            const typeActive = selection.kind === 'type' && selection.name === t.name;
-            return (
+          </div>
+          {tree.length === 0 ? (
+            <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
+              No collections yet — make one to hold lists, folders, and docs.
+            </div>
+          ) : null}
+          {/* Everything lives in a Collection. There is deliberately no second
+            grouping beside this one: a folder holding Lists IS a Collection, so
+            a List cannot be orphaned and nothing needs a home of last resort. */}
+          <CollectionTree
+            nodes={tree}
+            selection={selection}
+            onNavigate={navigate}
+            onOpenDoc={openPath}
+            menuFor={nodeMenuItems}
+            onAdd={(node) => onNewView(node.id)}
+          />
+          {/* M3: collapsible Types section — the databases themselves. */}
+          <div className="flex items-center justify-between pr-1">
+            <button
+              type="button"
+              aria-expanded={typesOpen}
+              onClick={() => setTypesOpen(!typesOpen)}
+              className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-[var(--n-700)]`}
+            >
+              <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+              Types
+            </button>
+            <span className="inline-flex">
+              {/* M12.6: the schema doctor — adopt an existing vault's freeform
+                frontmatter into declared types, one reviewed pass. */}
               <button
-                key={t.name}
                 type="button"
-                data-testid="sidebar-type"
-                onClick={() => navigate({ kind: 'type', name: t.name })}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setTypeMenu({ x: e.clientX, y: e.clientY, listing: t });
-                }}
-                className={rowClass(typeActive)}
+                aria-label="Adopt vault schema"
+                onClick={() => setAdopting(true)}
+                className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
               >
-                <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
-                <span className="overflow-hidden text-ellipsis whitespace-nowrap">{t.name}</span>
-                <span className="ml-auto [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-                  {t.count}
-                </span>
+                <Icon name="wand-2" size={12} />
               </button>
-            );
-          })}
-      </div>
+              <button
+                type="button"
+                aria-label="New type"
+                onClick={() => setTypeDialog({ mode: 'new' })}
+                className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+              >
+                <Icon name="plus" size={13} />
+              </button>
+            </span>
+          </div>
+          {typesOpen &&
+            types.map((t) => {
+              const typeActive = selection.kind === 'type' && selection.name === t.name;
+              return (
+                <button
+                  key={t.name}
+                  type="button"
+                  data-testid="sidebar-type"
+                  onClick={() => navigate({ kind: 'type', name: t.name })}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setTypeMenu({ x: e.clientX, y: e.clientY, listing: t });
+                  }}
+                  className={rowClass(typeActive)}
+                >
+                  <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">{t.name}</span>
+                  <span className="ml-auto [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                    {t.count}
+                  </span>
+                </button>
+              );
+            })}
+        </div>
       )}
       {typeMenu !== null && (
         <ContextMenu

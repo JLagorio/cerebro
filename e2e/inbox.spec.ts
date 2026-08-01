@@ -75,7 +75,10 @@ test('inbox: queue untyped captures, organize one, and watch it leave', async ({
 
 test('inbox: quick capture writes an untyped note into the queue', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
 
   const rows = page.getByTestId('inbox-row');
   const before = await rows.count();

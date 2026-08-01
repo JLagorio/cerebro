@@ -58,7 +58,12 @@ pub fn clone_repo(url: &str, destination: &str) -> Result<String, String> {
     }
 
     let dest = Path::new(destination);
-    if dest.exists() && dest.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false) {
+    if dest.exists()
+        && dest
+            .read_dir()
+            .map(|mut d| d.next().is_some())
+            .unwrap_or(false)
+    {
         return Err("That folder already has something in it.".into());
     }
     let parent = dest.parent().unwrap_or(Path::new("."));

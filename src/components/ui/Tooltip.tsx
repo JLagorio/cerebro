@@ -25,9 +25,19 @@ export interface TooltipProps {
   className?: string;
 }
 
-export function Tooltip({ content, kbd, side = 'top', children, style, className = '' }: TooltipProps) {
+export function Tooltip({
+  content,
+  kbd,
+  side = 'top',
+  children,
+  style,
+  className = '',
+}: TooltipProps) {
   return (
-    <span className={`cb-tip ${side === 'bottom' ? 'cb-tip-bottom' : ''} ${className}`} style={style}>
+    <span
+      className={`cb-tip ${side === 'bottom' ? 'cb-tip-bottom' : ''} ${className}`}
+      style={style}
+    >
       {children}
       <span className="cb-tip-bubble" role="tooltip">
         {content}

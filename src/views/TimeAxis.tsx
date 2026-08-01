@@ -56,13 +56,7 @@ export function TimeAxisHeader({
 }
 
 /** Vertical rules behind the bars, aligned to the header's ticks. */
-export function TimeGridLines({
-  ticks,
-  zoom,
-}: {
-  ticks: AxisTick[];
-  zoom: Zoom;
-}) {
+export function TimeGridLines({ ticks, zoom }: { ticks: AxisTick[]; zoom: Zoom }) {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 flex">
       {ticks.map((tick) => (
@@ -83,15 +77,7 @@ export function TimeGridLines({
  * The now marker. Rendered only when today is actually on the axis — a line
  * pinned to the edge because "now" is off-screen reads as a real date boundary.
  */
-export function TodayLine({
-  axis,
-  zoom,
-  today,
-}: {
-  axis: Span;
-  zoom: Zoom;
-  today: string;
-}) {
+export function TodayLine({ axis, zoom, today }: { axis: Span; zoom: Zoom; today: string }) {
   if (today < axis.start || today > axis.end) return null;
   return (
     <div
@@ -103,13 +89,7 @@ export function TodayLine({
   );
 }
 
-export function ZoomControl({
-  zoom,
-  onChange,
-}: {
-  zoom: Zoom;
-  onChange: (zoom: Zoom) => void;
-}) {
+export function ZoomControl({ zoom, onChange }: { zoom: Zoom; onChange: (zoom: Zoom) => void }) {
   return (
     <SegmentedControl
       size="sm"

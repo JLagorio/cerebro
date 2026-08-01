@@ -42,7 +42,9 @@ describe('DetailPanel', () => {
     render(<DetailPanel />);
     await user.click(screen.getByRole('button', { name: 'Todo' }));
     await user.click(screen.getByRole('option', { name: 'Doing' }));
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: 'doing' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      status: 'doing',
+    });
   });
 
   it('shows undeclared frontmatter keys as advisory text', () => {
@@ -85,9 +87,7 @@ describe('DetailPanel', () => {
     fireEvent.change(input, { target: { value: 'Renamed flow' } });
     fireEvent.blur(input);
     await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't rename item",
-      );
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't rename item");
     });
     expect(input.value).toBe('Design first-run flow');
   });
@@ -175,9 +175,7 @@ describe('FieldEditor number guard', () => {
     const entry = entries.find((e) => e.path === 'projects/onboarding/items/fld-1.md')!;
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     useVaultStore.setState({ entries, patchFrontmatter });
-    render(
-      <FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />,
-    );
+    render(<FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />);
     return patchFrontmatter;
   }
 
@@ -197,6 +195,8 @@ describe('FieldEditor number guard', () => {
     await user.click(screen.getByRole('button'));
     await user.type(screen.getByLabelText('Effort'), '5');
     fireEvent.blur(screen.getByLabelText('Effort'));
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { effort: 5 });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      effort: 5,
+    });
   });
 });

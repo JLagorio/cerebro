@@ -22,9 +22,7 @@ function setup() {
   const schema = buildSchema(entries);
   const items = entries.filter((e) => e.type === 'Work item');
   const fields = schema.types.get('Work item')?.fields ?? [];
-  render(
-    <TableView entries={items} presentation={presentation} schema={schema} fields={fields} />,
-  );
+  render(<TableView entries={items} presentation={presentation} schema={schema} fields={fields} />);
   return { items };
 }
 
@@ -111,8 +109,7 @@ describe('TableView column resizing (M11)', () => {
   // falls back to a bare Event, which silently drops clientX. Dispatching a
   // MouseEvent named `pointerdown` reaches the same listener with coordinates
   // intact — the listeners are registered by name, not by event class.
-  const at = (type: string, clientX: number) =>
-    new MouseEvent(type, { clientX, bubbles: true });
+  const at = (type: string, clientX: number) => new MouseEvent(type, { clientX, bubbles: true });
 
   const drag = (handle: HTMLElement, from: number, to: number) => {
     fireEvent(handle, at('pointerdown', from));

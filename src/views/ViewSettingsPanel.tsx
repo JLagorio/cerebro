@@ -58,7 +58,12 @@ const DATED_LAYOUTS = new Set(['calendar', 'timeline', 'gantt']);
 const CHIP_LAYOUTS = new Set(['table', 'list', 'board']);
 
 const GROUPABLE_KINDS = new Set([
-  'status', 'select', 'multiselect', 'person', 'checkbox', 'relation',
+  'status',
+  'select',
+  'multiselect',
+  'person',
+  'checkbox',
+  'relation',
 ]);
 const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
 const META_SORTS = [
@@ -170,7 +175,12 @@ export function ViewSettingsPanel({
                 width="100%"
               />
             </div>
-            <Row icon="table-2" label="Layout" value={layoutName} onClick={() => setPage('layout')} />
+            <Row
+              icon="table-2"
+              label="Layout"
+              value={layoutName}
+              onClick={() => setPage('layout')}
+            />
             <Row
               icon="eye"
               label="Properties"
@@ -220,41 +230,41 @@ export function ViewSettingsPanel({
             {/* M11: how related records draw, per view. A dense table wants
                 bare chips; a mixed one wants to see which type each points at. */}
             {CHIP_LAYOUTS.has(p.type) && (
-            <div className="mt-2 border-t border-[var(--n-100)] pt-2">
-              <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
-                Related records
-              </div>
-              <div className="flex flex-col gap-0.5">
-                {CHIP_STYLES.map((style) => (
-                  <button
-                    key={style.value}
-                    type="button"
-                    data-testid={`chip-style-${style.value}`}
-                    aria-pressed={chipStyle === style.value}
-                    onClick={() => setPresentation({ ...p, chips: style.value })}
-                    className={[
-                      'flex items-start gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
-                      chipStyle === style.value
-                        ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                        : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
-                    ].join(' ')}
-                  >
-                    <Icon
-                      name={style.value === 'plain' ? 'tag' : 'shapes'}
-                      size={13}
-                      color={chipStyle === style.value ? 'var(--cortex-600)' : 'var(--n-500)'}
-                    />
-                    <span className="min-w-0 flex-1">
-                      {style.label}
-                      <span className="mt-px block text-[11px] leading-[15px] text-[var(--n-400)]">
-                        {style.hint}
+              <div className="mt-2 border-t border-[var(--n-100)] pt-2">
+                <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+                  Related records
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {CHIP_STYLES.map((style) => (
+                    <button
+                      key={style.value}
+                      type="button"
+                      data-testid={`chip-style-${style.value}`}
+                      aria-pressed={chipStyle === style.value}
+                      onClick={() => setPresentation({ ...p, chips: style.value })}
+                      className={[
+                        'flex items-start gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                        chipStyle === style.value
+                          ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
+                          : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                      ].join(' ')}
+                    >
+                      <Icon
+                        name={style.value === 'plain' ? 'tag' : 'shapes'}
+                        size={13}
+                        color={chipStyle === style.value ? 'var(--cortex-600)' : 'var(--n-500)'}
+                      />
+                      <span className="min-w-0 flex-1">
+                        {style.label}
+                        <span className="mt-px block text-[11px] leading-[15px] text-[var(--n-400)]">
+                          {style.hint}
+                        </span>
                       </span>
-                    </span>
-                    {chipStyle === style.value && <Icon name="check" size={12} />}
-                  </button>
-                ))}
+                      {chipStyle === style.value && <Icon name="check" size={12} />}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
             )}
 
             <div className="mt-2 border-t border-[var(--n-100)] pt-2">
@@ -314,8 +324,8 @@ export function ViewSettingsPanel({
               <span className="font-medium text-[var(--n-800)]">
                 {list.source.type ?? 'everything in the vault'}
               </span>
-              . The source is what the list IS — changing it would invalidate every view's
-              columns, so it is fixed once created.
+              . The source is what the list IS — changing it would invalidate every view's columns,
+              so it is fixed once created.
             </p>
             <div className="border-t border-[var(--n-100)] pt-2">
               <div className="pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
@@ -327,7 +337,11 @@ export function ViewSettingsPanel({
                   className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12.5px] text-[var(--n-700)]"
                 >
                   <Icon
-                    name={v.icon ?? VIEW_KINDS.find((k) => k.value === v.presentation.type)?.icon ?? 'table-2'}
+                    name={
+                      v.icon ??
+                      VIEW_KINDS.find((k) => k.value === v.presentation.type)?.icon ??
+                      'table-2'
+                    }
                     size={13}
                     color="var(--n-500)"
                   />
@@ -394,8 +408,8 @@ export function ViewSettingsPanel({
           editingField !== null &&
           (list.source.type === null ? (
             <p className="m-0 px-2 py-3 text-[12px] leading-[17px] text-[var(--n-500)]">
-              This property can't be edited here — the view has no single
-              source type that declares it.
+              This property can't be edited here — the view has no single source type that declares
+              it.
             </p>
           ) : (
             <PropertyEditor
@@ -419,11 +433,7 @@ export function ViewSettingsPanel({
           ))}
 
         {page === 'axis' && (
-          <AxisPage
-            presentation={p}
-            fields={fields}
-            onChange={setPresentation}
-          />
+          <AxisPage presentation={p} fields={fields} onChange={setPresentation} />
         )}
 
         {page === 'filter' && (
@@ -458,16 +468,26 @@ export function ViewSettingsPanel({
 
 function titleFor(page: Page): string {
   switch (page) {
-    case 'layout': return 'Layout';
-    case 'properties': return 'Properties';
-    case 'filter': return 'Filter';
-    case 'sort': return 'Sort';
-    case 'group': return 'Group';
-    case 'axis': return 'Date axis';
-    case 'list': return 'This list';
-    case 'newProperty': return 'New property';
-    case 'field': return 'Edit property';
-    default: return 'View settings';
+    case 'layout':
+      return 'Layout';
+    case 'properties':
+      return 'Properties';
+    case 'filter':
+      return 'Filter';
+    case 'sort':
+      return 'Sort';
+    case 'group':
+      return 'Group';
+    case 'axis':
+      return 'Date axis';
+    case 'list':
+      return 'This list';
+    case 'newProperty':
+      return 'New property';
+    case 'field':
+      return 'Edit property';
+    default:
+      return 'View settings';
   }
 }
 
@@ -496,7 +516,9 @@ function Row({
   );
   if (onClick === undefined) {
     return (
-      <div className="flex items-center gap-2 rounded-[7px] px-2 py-1.5 text-[12.5px]">{content}</div>
+      <div className="flex items-center gap-2 rounded-[7px] px-2 py-1.5 text-[12.5px]">
+        {content}
+      </div>
     );
   }
   return (
@@ -790,8 +812,7 @@ function AxisPage({
             width="100%"
           />
           <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
-            The relation naming what each record waits on — the arrows the
-            gantt draws.
+            The relation naming what each record waits on — the arrows the gantt draws.
           </p>
         </div>
       )}
@@ -825,10 +846,9 @@ function SortPage({
           <Select
             size="sm"
             value={s.field}
-            options={[
-              { value: s.field, label: labelFor(s.field) },
-              ...available,
-            ].filter((o, j, all) => all.findIndex((x) => x.value === o.value) === j)}
+            options={[{ value: s.field, label: labelFor(s.field) }, ...available].filter(
+              (o, j, all) => all.findIndex((x) => x.value === o.value) === j,
+            )}
             onChange={(e) =>
               onChange(sort.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
             }
@@ -901,8 +921,7 @@ function GroupPage({
   const optionsAt = (index: number) => {
     const before = group.slice(0, index);
     const typeHere = chainTypes(sourceType, nestLevels(before), schema).pop() ?? null;
-    const fieldsHere =
-      typeHere === null ? fields : (schema.types.get(typeHere)?.fields ?? fields);
+    const fieldsHere = typeHere === null ? fields : (schema.types.get(typeHere)?.fields ?? fields);
     const own = group[index];
     const properties = fieldsHere
       .filter((f) => GROUPABLE_KINDS.has(f.kind))
@@ -939,7 +958,9 @@ function GroupPage({
           </span>
           <Select
             size="sm"
-            value={level.descend === undefined ? `property:${level.field}` : descentValue(level.descend)}
+            value={
+              level.descend === undefined ? `property:${level.field}` : descentValue(level.descend)
+            }
             options={optionsAt(i)}
             onChange={(e) => {
               const next = decode(e.target.value);
@@ -947,9 +968,7 @@ function GroupPage({
               // Changing a relation level re-types everything below it, so
               // the tail's options no longer apply.
               const tail =
-                level.descend !== undefined || next.descend !== undefined
-                  ? []
-                  : group.slice(i + 1);
+                level.descend !== undefined || next.descend !== undefined ? [] : group.slice(i + 1);
               onChange([...group.slice(0, i), next, ...tail]);
             }}
             width="100%"
@@ -996,8 +1015,7 @@ function GroupPage({
       )}
 
       <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
-        A property bands records by its value. A relation (↳) nests them under
-        what they link to.
+        A property bands records by its value. A relation (↳) nests them under what they link to.
       </p>
     </div>
   );

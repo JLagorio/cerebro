@@ -32,7 +32,15 @@ export interface SwitchProps {
   className?: string;
 }
 
-export function Switch({ checked, onChange, label, ariaLabel, disabled, style, className = '' }: SwitchProps) {
+export function Switch({
+  checked,
+  onChange,
+  label,
+  ariaLabel,
+  disabled,
+  style,
+  className = '',
+}: SwitchProps) {
   return (
     <label
       className={`cb-switch ${checked ? 'cb-switch-on' : ''} ${disabled ? 'cb-switch-disabled' : ''} ${className}`}

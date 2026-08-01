@@ -69,7 +69,5 @@ export function dueReminders(
   const cutoffIso = `${cutoff.getFullYear()}-${pad(cutoff.getMonth() + 1)}-${pad(
     cutoff.getDate(),
   )}T${pad(cutoff.getHours())}:${pad(cutoff.getMinutes())}`;
-  return reminders.filter(
-    (r) => r.at <= now && r.at >= cutoffIso && !fired.has(reminderKey(r)),
-  );
+  return reminders.filter((r) => r.at <= now && r.at >= cutoffIso && !fired.has(reminderKey(r)));
 }

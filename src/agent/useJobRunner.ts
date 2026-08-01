@@ -120,7 +120,18 @@ export function useJobRunner(): void {
         connectors,
       }).find((j) => failedReads[vaultPath]?.[j.path] !== j.runKey) ?? null
     );
-  }, [attempts, autoLearn, connectors, entries, failedReads, filed, now, skillRuns, today, vaultPath]);
+  }, [
+    attempts,
+    autoLearn,
+    connectors,
+    entries,
+    failedReads,
+    filed,
+    now,
+    skillRuns,
+    today,
+    vaultPath,
+  ]);
 
   // Owns the run: the event stream is shared with the chat, so both sides need
   // to know whose turn the events belong to.

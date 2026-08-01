@@ -22,7 +22,11 @@ const concept = (
   makeEntry({
     path,
     filename: path.split('/').pop(),
-    properties: { title, generated: { by: 'claude-code', at: '2026-07-20T09:00:00Z' }, ...properties },
+    properties: {
+      title,
+      generated: { by: 'claude-code', at: '2026-07-20T09:00:00Z' },
+      ...properties,
+    },
     relationships: { about: ['phoenix'], ...relationships },
   });
 
@@ -69,9 +73,9 @@ describe('buildDossier', () => {
       concept('knowledge/b.md', 'Old rate', { stale_after: '2026-07-01' }),
       concept('knowledge/c.md', 'New rate', {}, { supersedes: ['b'] }),
     ]);
-    expect(dossier.unsettled.filter((u) => u.reason === 'stale').map((u) => u.concept.entry.path)).toEqual(
-      ['knowledge/a.md'],
-    );
+    expect(
+      dossier.unsettled.filter((u) => u.reason === 'stale').map((u) => u.concept.entry.path),
+    ).toEqual(['knowledge/a.md']);
   });
 
   it('dedupes the reading list and ranks by how often a source is cited', () => {
@@ -94,17 +98,26 @@ describe('buildDossier', () => {
   it('leaves a replaced concept out of the reading list', () => {
     const dossier = build([
       concept('knowledge/a.md', 'Old', { sources: [{ id: 's', resource: 'inbox/old.md' }] }),
-      concept('knowledge/b.md', 'New', { sources: [{ id: 's', resource: 'inbox/new.md' }] }, {
-        supersedes: ['a'],
-      }),
+      concept(
+        'knowledge/b.md',
+        'New',
+        { sources: [{ id: 's', resource: 'inbox/new.md' }] },
+        {
+          supersedes: ['a'],
+        },
+      ),
     ]);
     expect(dossier.readFrom.map((s) => s.resource)).toEqual(['inbox/new.md']);
   });
 
   it('brackets when the base started and last learned about this', () => {
     const dossier = build([
-      concept('knowledge/a.md', 'A', { generated: { by: 'claude-code', at: '2026-05-14T10:00:00Z' } }),
-      concept('knowledge/b.md', 'B', { generated: { by: 'claude-code', at: '2026-07-26T10:00:00Z' } }),
+      concept('knowledge/a.md', 'A', {
+        generated: { by: 'claude-code', at: '2026-05-14T10:00:00Z' },
+      }),
+      concept('knowledge/b.md', 'B', {
+        generated: { by: 'claude-code', at: '2026-07-26T10:00:00Z' },
+      }),
     ]);
     expect(dossier.firstLearned).toBe('2026-05-14T10:00:00Z');
     expect(dossier.lastLearned).toBe('2026-07-26T10:00:00Z');

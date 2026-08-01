@@ -41,11 +41,19 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
       <span className="inline-flex flex-none items-center gap-1.5 text-[12px] text-[var(--n-700)]">
         <span
           className="box-border h-[9px] w-[9px] flex-none rounded-full"
-          style={hollow ? { border: `1.5px solid ${color}` } : { background: color, border: `1.5px solid ${color}` }}
+          style={
+            hollow
+              ? { border: `1.5px solid ${color}` }
+              : { background: color, border: `1.5px solid ${color}` }
+          }
         />
         {resolved.display}
       </span>
     );
   }
-  return <span className="inline-flex flex-none text-[12px] text-[var(--n-600)]">{resolved.display}</span>;
+  return (
+    <span className="inline-flex flex-none text-[12px] text-[var(--n-600)]">
+      {resolved.display}
+    </span>
+  );
 }

@@ -82,7 +82,9 @@ export function PulsePage() {
                 {c.added > 0 && (
                   <span className="text-[var(--success-600,#1F9D61)]">+{c.added}</span>
                 )}
-                {c.modified > 0 && <span className="text-[var(--warn-600,#B87503)]">~{c.modified}</span>}
+                {c.modified > 0 && (
+                  <span className="text-[var(--warn-600,#B87503)]">~{c.modified}</span>
+                )}
                 {c.deleted > 0 && <span className="text-[var(--danger-500)]">−{c.deleted}</span>}
               </div>
               {c.files.length > 0 && (

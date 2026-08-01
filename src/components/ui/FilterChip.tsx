@@ -34,9 +34,24 @@ export interface FilterChipProps {
   className?: string;
 }
 
-export function FilterChip({ label, value, icon, active, dot, onClick, onRemove, style, className = '' }: FilterChipProps) {
+export function FilterChip({
+  label,
+  value,
+  icon,
+  active,
+  dot,
+  onClick,
+  onRemove,
+  style,
+  className = '',
+}: FilterChipProps) {
   return (
-    <button type="button" className={`cb-fchip ${active ? 'cb-fchip-on' : ''} ${className}`} onClick={onClick} style={style}>
+    <button
+      type="button"
+      className={`cb-fchip ${active ? 'cb-fchip-on' : ''} ${className}`}
+      onClick={onClick}
+      style={style}
+    >
       {icon ? <Icon name={icon} size={13} /> : null}
       <span>
         {label}

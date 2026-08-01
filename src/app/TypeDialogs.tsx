@@ -13,8 +13,14 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /** The Tolaria-style 8-swatch palette for type colors. */
 export const TYPE_COLORS = [
-  '#DE3B4E', '#DE8F0A', '#EFB428', '#1F9D61',
-  '#3D8BE8', '#8B7CF6', '#EC4899', '#A8AFC2',
+  '#DE3B4E',
+  '#DE8F0A',
+  '#EFB428',
+  '#1F9D61',
+  '#3D8BE8',
+  '#8B7CF6',
+  '#EC4899',
+  '#A8AFC2',
 ];
 
 const DEFAULT_ICON = 'file-text';
@@ -121,12 +127,16 @@ export function RenameTypeDialog({
   const [submitting, setSubmitting] = useState(false);
 
   const trimmed = name.trim();
-  const duplicate = trimmed.toLowerCase() !== listing.name.toLowerCase() && taken.has(trimmed.toLowerCase());
+  const duplicate =
+    trimmed.toLowerCase() !== listing.name.toLowerCase() && taken.has(trimmed.toLowerCase());
   // System types are locked at the system level — the menu never offers
   // rename for them, but guard here too.
   const invalid =
-    trimmed === '' || trimmed === listing.name || duplicate ||
-    isSystemType(trimmed) || isSystemType(listing.name);
+    trimmed === '' ||
+    trimmed === listing.name ||
+    duplicate ||
+    isSystemType(trimmed) ||
+    isSystemType(listing.name);
 
   const rename = async () => {
     if (invalid || submitting) return;
@@ -168,16 +178,15 @@ export function RenameTypeDialog({
         disabled: invalid || submitting,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
-      footerNote={listing.count > 0 ? `Updates ${listing.count} ${listing.count === 1 ? 'record' : 'records'}` : undefined}
+      footerNote={
+        listing.count > 0
+          ? `Updates ${listing.count} ${listing.count === 1 ? 'record' : 'records'}`
+          : undefined
+      }
     >
       <label className="flex flex-col gap-1 text-[12px] text-[var(--n-600)]">
         Display name
-        <Input
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          width="100%"
-        />
+        <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} width="100%" />
         {duplicate && (
           <span className="text-[11px] text-[var(--danger-500)]">
             A type named "{trimmed}" already exists.

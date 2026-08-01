@@ -42,9 +42,18 @@ export function SegmentedControl({
   className = '',
 }: SegmentedControlProps) {
   return (
-    <span className={`cb-seg ${size === 'md' ? 'cb-seg-md' : ''} ${className}`} style={style} role="tablist">
+    <span
+      className={`cb-seg ${size === 'md' ? 'cb-seg-md' : ''} ${className}`}
+      style={style}
+      role="tablist"
+    >
       {options.map((o) => (
-        <button key={o.value} data-testid={o.testId} className={o.value === value ? 'cb-seg-on' : ''} onClick={() => onChange && onChange(o.value)}>
+        <button
+          key={o.value}
+          data-testid={o.testId}
+          className={o.value === value ? 'cb-seg-on' : ''}
+          onClick={() => onChange && onChange(o.value)}
+        >
           {o.icon ? <Icon name={o.icon} size={14} /> : null}
           {o.label}
         </button>

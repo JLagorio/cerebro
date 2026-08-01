@@ -35,10 +35,7 @@ const substitute = (text: string, vars: { title: string; date: string }): string
   text.replaceAll('{{title}}', vars.title).replaceAll('{{date}}', vars.date);
 
 /** Apply placeholders to a template body; guarantee the new page has an H1. */
-export function applyTemplateBody(
-  body: string,
-  vars: { title: string; date: string },
-): string {
+export function applyTemplateBody(body: string, vars: { title: string; date: string }): string {
   const filled = substitute(body, vars);
   const hasH1 = filled.split('\n').some((l) => l.trim().startsWith('# '));
   return hasH1 ? filled : `# ${vars.title}\n\n${filled}`;
@@ -53,7 +50,8 @@ export function applyTemplateFrontmatter(
   const frontmatter: Record<string, unknown> = {};
   if (template.type !== null) frontmatter.type = template.type;
   for (const [key, value] of Object.entries(template.properties)) {
-    frontmatter[key] = typeof value === 'string' ? substitute(value, vars) : (value as Scalar | Scalar[]);
+    frontmatter[key] =
+      typeof value === 'string' ? substitute(value, vars) : (value as Scalar | Scalar[]);
   }
   for (const [key, targets] of Object.entries(template.relationships)) {
     frontmatter[key] = targets.map((t) => `[[${t}]]`);

@@ -8,7 +8,13 @@ import { diffStats, parseDiff } from '@/engine/git';
  * else the user put there, and a wrong highlighter is worse than none. The
  * +/− gutter carries all the meaning that matters here.
  */
-export function DiffView({ diff, emptyLabel = 'No changes.' }: { diff: string; emptyLabel?: string }) {
+export function DiffView({
+  diff,
+  emptyLabel = 'No changes.',
+}: {
+  diff: string;
+  emptyLabel?: string;
+}) {
   const lines = useMemo(() => parseDiff(diff), [diff]);
   const stats = useMemo(() => diffStats(diff), [diff]);
 

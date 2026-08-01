@@ -35,7 +35,11 @@ impl Entry {
         Entry {
             path: path.to_string(),
             filename: path.rsplit('/').next().unwrap_or(path).to_string(),
-            folder: path.rsplit_once('/').map(|(d, _)| d).unwrap_or("").to_string(),
+            folder: path
+                .rsplit_once('/')
+                .map(|(d, _)| d)
+                .unwrap_or("")
+                .to_string(),
             project: None,
             title: "Untitled".into(),
             entry_type: None,
@@ -52,10 +56,22 @@ impl Entry {
 
 /// Build an Entry from a vault-relative path (forward slashes) and raw file
 /// content. Timestamps are passed in by the scanner (ISO 8601 strings).
-pub fn build_entry(rel_path: &str, content: &str, created_at: String, modified_at: String) -> Entry {
+pub fn build_entry(
+    rel_path: &str,
+    content: &str,
+    created_at: String,
+    modified_at: String,
+) -> Entry {
     let filename = rel_path.rsplit('/').next().unwrap_or(rel_path).to_string();
-    let folder = rel_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("").to_string();
-    let stem = filename.strip_suffix(".md").unwrap_or(&filename).to_string();
+    let folder = rel_path
+        .rsplit_once('/')
+        .map(|(d, _)| d)
+        .unwrap_or("")
+        .to_string();
+    let stem = filename
+        .strip_suffix(".md")
+        .unwrap_or(&filename)
+        .to_string();
     let (block, body) = parse::split_frontmatter(content);
     let (mapping, parse_error) = match block {
         Some(b) => match parse::parse_frontmatter(b) {
@@ -145,7 +161,10 @@ mod tests {
         assert_eq!(e.entry_type.as_deref(), Some("Work item"));
         assert_eq!(e.properties["key"], "ATL-1");
         assert_eq!(e.properties["status"], "in-progress");
-        assert_eq!(e.properties["tags"], serde_json::json!(["engine", "parser"]));
+        assert_eq!(
+            e.properties["tags"],
+            serde_json::json!(["engine", "parser"])
+        );
         assert_eq!(e.properties["estimate"], 3);
         assert!(!e.properties.contains_key("project"));
         assert_eq!(e.relationships["project"], vec!["atlas"]);
@@ -158,7 +177,8 @@ mod tests {
 
     #[test]
     fn wikilink_arrays_become_relationships() {
-        let content = "---\nmembers:\n  - \"[[maya-chen]]\"\n  - \"[[joss-b|Joss]]\"\n---\n\n# Team\n";
+        let content =
+            "---\nmembers:\n  - \"[[maya-chen]]\"\n  - \"[[joss-b|Joss]]\"\n---\n\n# Team\n";
         let e = build("people/team.md", content);
         assert_eq!(e.relationships["members"], vec!["maya-chen", "joss-b"]);
         assert!(!e.properties.contains_key("members"));
@@ -248,7 +268,10 @@ mod tests {
         assert!(!e.properties.contains_key("project"));
         assert_eq!(e.relationships["project"], vec!["guided-onboarding-ga"]);
         assert_eq!(e.outgoing_links, vec!["offline-sync-hardening"]);
-        assert_eq!(e.snippet, "Steps to reproduce the stall, see offline-sync-hardening.");
+        assert_eq!(
+            e.snippet,
+            "Steps to reproduce the stall, see offline-sync-hardening."
+        );
         assert!(e.parse_error.is_none());
     }
 
@@ -269,7 +292,10 @@ mod tests {
         assert_eq!(e.entry_type, None);
         assert!(e.properties.is_empty());
         assert_eq!(e.outgoing_links, vec!["field-platform"]);
-        assert_eq!(e.snippet, "Just a plain paragraph that links to field-platform.");
+        assert_eq!(
+            e.snippet,
+            "Just a plain paragraph that links to field-platform."
+        );
         assert!(e.parse_error.is_none());
     }
 }

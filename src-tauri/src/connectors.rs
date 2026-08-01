@@ -113,8 +113,8 @@ pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
         let _ = std::fs::remove_file(&path);
         return Ok(());
     }
-    let parsed: Value =
-        serde_json::from_str(json).map_err(|e| format!("connectors.json is not valid JSON: {e}"))?;
+    let parsed: Value = serde_json::from_str(json)
+        .map_err(|e| format!("connectors.json is not valid JSON: {e}"))?;
     if !parsed.is_object() {
         return Err("connectors.json must be a JSON object".into());
     }
@@ -315,7 +315,10 @@ mod tests {
         let vault = temp_vault("legacy");
         let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
-        assert!(!strict, "no explicit list yet: the user's own config still works");
+        assert!(
+            !strict,
+            "no explicit list yet: the user's own config still works"
+        );
     }
 
     #[test]
@@ -352,7 +355,11 @@ mod tests {
     #[test]
     fn read_raw_checked_tells_absent_and_content_apart_from_unreadable() {
         let vault = temp_vault("checked-read");
-        assert_eq!(read_raw_checked(&vault).unwrap(), "", "absent is an empty Ok");
+        assert_eq!(
+            read_raw_checked(&vault).unwrap(),
+            "",
+            "absent is an empty Ok"
+        );
         save_raw(&vault, "{\"servers\":{}}").unwrap();
         assert_eq!(read_raw_checked(&vault).unwrap(), "{\"servers\":{}}");
         // Invalid UTF-8 is a file that EXISTS but cannot be read — Settings
@@ -438,7 +445,10 @@ mod tests {
         )
         .unwrap();
         let (servers, _) = connector_context(&vault, true, true, &[linear_key()]);
-        assert!(servers.is_empty(), "an edited spec is a new spec: approval gone");
+        assert!(
+            servers.is_empty(),
+            "an edited spec is a new spec: approval gone"
+        );
     }
 
     #[test]
@@ -528,7 +538,10 @@ mod tests {
         std::fs::write(vault.join(CONFIG_PATH), "{not json").unwrap();
         let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
-        assert!(strict, "an unreadable explicit list must not widen into everything");
+        assert!(
+            strict,
+            "an unreadable explicit list must not widen into everything"
+        );
     }
 
     #[cfg(unix)]
@@ -549,7 +562,10 @@ mod tests {
 
         // Reads refuse — and fail CLOSED, not into legacy open mode.
         let (servers, strict) = connector_context(&vault, true, true, &[]);
-        assert!(servers.is_empty(), "a config reached through a symlink is never merged");
+        assert!(
+            servers.is_empty(),
+            "a config reached through a symlink is never merged"
+        );
         assert!(strict);
         assert!(read_raw(&vault).is_none());
         // Settings reads through the checked variant and must hear BLOCKED —
@@ -561,7 +577,10 @@ mod tests {
         // would otherwise remove a file the symlink points at.
         assert!(save_raw(&vault, "{\"servers\":{}}").is_err());
         assert!(save_raw(&vault, "").is_err());
-        assert!(target.join("connectors.json").exists(), "the target survives untouched");
+        assert!(
+            target.join("connectors.json").exists(),
+            "the target survives untouched"
+        );
     }
 
     #[cfg(unix)]
@@ -579,7 +598,10 @@ mod tests {
         assert!(read_raw(&vault).is_none());
         assert!(read_raw_checked(&vault).is_err());
         assert!(save_raw(&vault, "{\"servers\":{}}").is_err());
-        assert_eq!(std::fs::read_to_string(target.join("secrets.json")).unwrap(), "{}");
+        assert_eq!(
+            std::fs::read_to_string(target.join("secrets.json")).unwrap(),
+            "{}"
+        );
     }
 
     #[test]
@@ -596,11 +618,17 @@ mod tests {
         let vault = temp_vault("reset");
         save_raw(&vault, "{\"servers\":{}}").unwrap();
         // An empty LIST is not legacy — it pins the run to no servers.
-        assert!(connector_context(&vault, true, true, &[]).1, "empty list stays strict");
+        assert!(
+            connector_context(&vault, true, true, &[]).1,
+            "empty list stays strict"
+        );
         save_raw(&vault, "").unwrap();
         assert!(read_raw(&vault).is_none());
         let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
-        assert!(!strict, "deleting the list is the explicit way back to legacy");
+        assert!(
+            !strict,
+            "deleting the list is the explicit way back to legacy"
+        );
     }
 }

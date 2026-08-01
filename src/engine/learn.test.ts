@@ -79,9 +79,9 @@ describe('learnQueue', () => {
     // runner picks it up again on every tick, forever.
     const entries = [note('inbox/a.md')];
     const attempts = { 'inbox/a.md': '2026-07-28T09:00:00Z' };
-    expect(learnQueue(entries, listConcepts([], TODAY), { filed: ['inbox/a.md'], attempts })).toEqual(
-      [],
-    );
+    expect(
+      learnQueue(entries, listConcepts([], TODAY), { filed: ['inbox/a.md'], attempts }),
+    ).toEqual([]);
     // Edit it again and it comes back — the attempt was against one version.
     const edited = [note('inbox/a.md', { modifiedAt: '2026-07-30T09:00:00Z' })];
     expect(

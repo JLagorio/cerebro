@@ -51,7 +51,9 @@ describe('columnUniverse', () => {
 
   it('includes undeclared frontmatter keys the records actually carry', () => {
     const schema = buildSchema([typeDoc('Work item', { status: { kind: 'status' } })]);
-    const entries = [makeEntry({ path: 'a.md', type: 'Work item', properties: { vendor: 'acme' } })];
+    const entries = [
+      makeEntry({ path: 'a.md', type: 'Work item', properties: { vendor: 'acme' } }),
+    ];
     expect(
       columnUniverse({ type: null, project: null }, entries, schema).map((f) => f.name),
     ).toContain('vendor');
@@ -105,7 +107,11 @@ describe('column specs', () => {
   });
 
   it('clamps width to the minimum and clears back to auto', () => {
-    expect(setColumnWidth(columns, 'a', 10)).toEqual([{ field: 'a', width: 60 }, { field: 'b' }, { field: 'c' }]);
+    expect(setColumnWidth(columns, 'a', 10)).toEqual([
+      { field: 'a', width: 60 },
+      { field: 'b' },
+      { field: 'c' },
+    ]);
     const sized = setColumnWidth(columns, 'a', 220);
     expect(setColumnWidth(sized, 'a', undefined)).toEqual(columns);
   });
@@ -122,7 +128,10 @@ describe('column specs', () => {
   });
 
   it('lists the fields not currently shown', () => {
-    const fields = [{ name: 'a', kind: 'text' as const }, { name: 'z', kind: 'text' as const }];
+    const fields = [
+      { name: 'a', kind: 'text' as const },
+      { name: 'z', kind: 'text' as const },
+    ];
     expect(hiddenColumns(columns, fields).map((f) => f.name)).toEqual(['z']);
   });
 });
@@ -146,10 +155,16 @@ describe('insertColumn', () => {
 
   it('inserts a fresh spec beside the anchor', () => {
     expect(insertColumn(columns, 'x', 'b', 'left').map((c) => c.field)).toEqual([
-      'a', 'x', 'b', 'c',
+      'a',
+      'x',
+      'b',
+      'c',
     ]);
     expect(insertColumn(columns, 'x', 'b', 'right').map((c) => c.field)).toEqual([
-      'a', 'b', 'x', 'c',
+      'a',
+      'b',
+      'x',
+      'c',
     ]);
   });
 
@@ -164,7 +179,10 @@ describe('insertColumn', () => {
 
   it('appends when the anchor is unknown', () => {
     expect(insertColumn(columns, 'x', 'gone', 'left').map((c) => c.field)).toEqual([
-      'a', 'b', 'c', 'x',
+      'a',
+      'b',
+      'c',
+      'x',
     ]);
   });
 });

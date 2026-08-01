@@ -163,8 +163,18 @@ export function isSameMonth(a: string, b: string): boolean {
 }
 
 const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
 export function monthLabel(iso: string): string {
@@ -285,11 +295,7 @@ export function axisTicks(span: Span, zoom: Zoom): AxisTick[] {
 }
 
 /** Left offset and width in px for a record's bar on the axis. */
-export function barGeometry(
-  span: Span,
-  axis: Span,
-  zoom: Zoom,
-): { left: number; width: number } {
+export function barGeometry(span: Span, axis: Span, zoom: Zoom): { left: number; width: number } {
   const px = PX_PER_DAY[zoom];
   return {
     left: dayOffset(axis, span.start) * px,
@@ -312,11 +318,7 @@ export function axisWidth(axis: Span, zoom: Zoom): number {
  * would draw a critical path the data does not claim, and a schedule that
  * invents its own constraints is worse than one that draws none.
  */
-export function dependenciesOf(
-  entry: Entry,
-  field: string | undefined,
-  entries: Entry[],
-): Entry[] {
+export function dependenciesOf(entry: Entry, field: string | undefined, entries: Entry[]): Entry[] {
   if (field === undefined || field === '') return [];
   return (entry.relationships[field] ?? [])
     .map((raw) => resolveTarget(raw, entries))

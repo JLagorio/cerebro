@@ -24,7 +24,15 @@ export interface StatusFlagProps {
   className?: string;
 }
 
-export function StatusFlag({ status = 'idea', label, color, bare, size = 'md', style, className = '' }: StatusFlagProps) {
+export function StatusFlag({
+  status = 'idea',
+  label,
+  color,
+  bare,
+  size = 'md',
+  style,
+  className = '',
+}: StatusFlagProps) {
   const s = STATUSES[status] || STATUSES.idea;
   const c = color || s.color;
   const flag = (
@@ -42,7 +50,11 @@ export function StatusFlag({ status = 'idea', label, color, bare, size = 'md', s
   );
   if (bare)
     return (
-      <span title={label || s.label} className={className} style={{ display: 'inline-flex', ...style }}>
+      <span
+        title={label || s.label}
+        className={className}
+        style={{ display: 'inline-flex', ...style }}
+      >
         {flag}
       </span>
     );

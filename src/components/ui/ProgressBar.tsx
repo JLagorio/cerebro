@@ -13,7 +13,14 @@ export interface ProgressBarProps {
   className?: string;
 }
 
-export function ProgressBar({ value = 0, width = 120, tone = 'default', showLabel, style, className = '' }: ProgressBarProps) {
+export function ProgressBar({
+  value = 0,
+  width = 120,
+  tone = 'default',
+  showLabel,
+  style,
+  className = '',
+}: ProgressBarProps) {
   const v = Math.max(0, Math.min(100, value));
   const fill =
     tone === 'success'
@@ -24,8 +31,20 @@ export function ProgressBar({ value = 0, width = 120, tone = 'default', showLabe
           ? 'var(--danger-500)'
           : 'var(--cortex-400)';
   return (
-    <span className={className} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, ...style }}>
-      <span style={{ width, height: 4, borderRadius: 'var(--r-full)', background: 'var(--n-100)', overflow: 'hidden', flex: 'none' }}>
+    <span
+      className={className}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 8, ...style }}
+    >
+      <span
+        style={{
+          width,
+          height: 4,
+          borderRadius: 'var(--r-full)',
+          background: 'var(--n-100)',
+          overflow: 'hidden',
+          flex: 'none',
+        }}
+      >
         <span
           style={{
             display: 'block',

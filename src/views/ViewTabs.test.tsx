@@ -4,7 +4,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ViewDefinition } from '@/engine/types';
 import { ViewTabs } from '@/views/ViewTabs';
 
-const view = (id: string, name: string, type: ViewDefinition['presentation']['type']): ViewDefinition => ({
+const view = (
+  id: string,
+  name: string,
+  type: ViewDefinition['presentation']['type'],
+): ViewDefinition => ({
   id,
   name,
   icon: null,

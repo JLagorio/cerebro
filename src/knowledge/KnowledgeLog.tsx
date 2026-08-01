@@ -133,7 +133,12 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
               {day.entries.map((entry, i) => {
                 const style = KIND_STYLE[entry.kind];
                 return (
-                  <li key={i} data-testid="log-entry" data-kind={entry.kind} className="flex gap-2.5">
+                  <li
+                    key={i}
+                    data-testid="log-entry"
+                    data-kind={entry.kind}
+                    className="flex gap-2.5"
+                  >
                     <span className="mt-[3px] flex-none">
                       <Icon name={style.icon} size={14} color={style.color} />
                     </span>

@@ -25,9 +25,7 @@ export function LearnedCard() {
 
   const today = todayIso();
   const learned = useMemo(() => {
-    const concepts = listConcepts(entries, today).filter(
-      (c) => !dismissed.includes(c.entry.path),
-    );
+    const concepts = listConcepts(entries, today).filter((c) => !dismissed.includes(c.entry.path));
     return recentlyLearned(concepts, new Date());
   }, [dismissed, entries, today]);
 
@@ -45,7 +43,11 @@ export function LearnedCard() {
       </div>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {learned.map((concept) => (
-          <li key={concept.entry.path} data-testid="learned-item" className="flex items-center gap-1">
+          <li
+            key={concept.entry.path}
+            data-testid="learned-item"
+            className="flex items-center gap-1"
+          >
             <button
               type="button"
               data-path={concept.entry.path}

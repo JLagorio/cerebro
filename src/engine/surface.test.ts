@@ -8,7 +8,14 @@ const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
-  columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
+  columns: [
+    { field: 'key' },
+    { field: 'status' },
+    { field: 'priority' },
+    { field: 'assignee' },
+    { field: 'due' },
+    { field: 'estimate' },
+  ],
 };
 
 const FOUNDATIONS = 'projects/foundations/project.md';
@@ -179,12 +186,7 @@ describe('resolveSurface', () => {
   it('a filterless, typeless view collects every entry but the schema docs', () => {
     const { entries, schema } = fixture();
     const view = mkView({ id: 'everything' });
-    const collection = resolveSurface(
-      { kind: 'list', id: 'everything' },
-      entries,
-      schema,
-      [view],
-    );
+    const collection = resolveSurface({ kind: 'list', id: 'everything' }, entries, schema, [view]);
     // M3.5: `type: Type` docs are the model, so a content view leaves them out.
     const typeDocs = entries.filter((e) => e.type === 'Type').length;
     expect(typeDocs).toBeGreaterThan(0);
@@ -232,12 +234,7 @@ describe('resolveSurface', () => {
         columns: [{ field: 'key' }],
       },
     });
-    const collection = resolveSurface(
-      { kind: 'list', id: 'by-priority' },
-      entries,
-      schema,
-      [view],
-    );
+    const collection = resolveSurface({ kind: 'list', id: 'by-priority' }, entries, schema, [view]);
     // urgent -> high -> low per the declared options, not alphabetical
     expect(collection.entries.map((e) => e.path)).toEqual([
       'projects/foundations/items/fld-2.md',
@@ -310,7 +307,10 @@ describe('sortEntries — multi-key', () => {
     ];
     const sorted = sortEntries(
       entries,
-      [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'asc' }],
+      [
+        { field: 'priority', dir: 'asc' },
+        { field: 'due', dir: 'asc' },
+      ],
       schema,
     );
     expect(sorted.map((e) => e.path)).toEqual(['b.md', 'a.md', 'c.md']);
@@ -326,7 +326,10 @@ describe('sortEntries — multi-key', () => {
     ];
     const sorted = sortEntries(
       entries,
-      [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'asc' }],
+      [
+        { field: 'priority', dir: 'asc' },
+        { field: 'due', dir: 'asc' },
+      ],
       schema,
     );
     expect(sorted.map((e) => e.path)).toEqual(['c.md', 'b.md', 'a.md']);

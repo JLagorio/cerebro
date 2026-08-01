@@ -23,8 +23,12 @@ export const DEFAULT_PRESENTATION: Presentation = {
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
   columns: [
-    { field: 'key' }, { field: 'status' }, { field: 'priority' },
-    { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
+    { field: 'key' },
+    { field: 'status' },
+    { field: 'priority' },
+    { field: 'assignee' },
+    { field: 'due' },
+    { field: 'estimate' },
   ],
 };
 
@@ -51,8 +55,7 @@ export function visibleColumns(p: Presentation): ColumnSpec[] {
  */
 export function toggleSort(p: Presentation, field: string): Presentation {
   const leading = p.sort[0];
-  const dir: 'asc' | 'desc' =
-    leading?.field === field && leading.dir === 'asc' ? 'desc' : 'asc';
+  const dir: 'asc' | 'desc' = leading?.field === field && leading.dir === 'asc' ? 'desc' : 'asc';
   return { ...p, sort: [{ field, dir }, ...p.sort.filter((s) => s.field !== field)] };
 }
 
@@ -75,8 +78,15 @@ export function groupByField(p: Presentation, field: string): Presentation {
 }
 
 const FILTER_OPS: FilterOp[] = [
-  'equals', 'not_equals', 'contains', 'any_of', 'none_of',
-  'is_empty', 'is_not_empty', 'before', 'after',
+  'equals',
+  'not_equals',
+  'contains',
+  'any_of',
+  'none_of',
+  'is_empty',
+  'is_not_empty',
+  'before',
+  'after',
 ];
 
 function asRecord(raw: unknown): Record<string, unknown> {
@@ -85,9 +95,7 @@ function asRecord(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-const LAYOUTS = new Set<ViewType>([
-  'table', 'list', 'board', 'calendar', 'gantt', 'timeline',
-]);
+const LAYOUTS = new Set<ViewType>(['table', 'list', 'board', 'calendar', 'gantt', 'timeline']);
 
 /**
  * The two view kinds M10 retired, and what they become (see types.ts for why).
@@ -506,7 +514,7 @@ export function parseListYaml(
    */
   location: { project?: string | null; collection?: string | null; path?: string } = {},
 ): ListFile {
-  let raw: unknown = null;
+  let raw: unknown;
   try {
     raw = parse(yamlText);
   } catch {

@@ -192,7 +192,10 @@ mod tests {
 
         copy_atomically(&from, &destination).unwrap();
 
-        assert!(!staging.exists(), "the staging folder is not left lying around");
+        assert!(
+            !staging.exists(),
+            "the staging folder is not left lying around"
+        );
         assert!(
             !destination.join("half.md").exists(),
             "content from the abandoned run must not survive into the vault"
@@ -238,7 +241,10 @@ mod tests {
         // Guards the bundling config: if the resource glob ever stops matching,
         // this is the test that says so before a user finds out on first run.
         let in_tree = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../demo-vault");
-        assert!(in_tree.is_dir(), "demo-vault is missing from the source tree");
+        assert!(
+            in_tree.is_dir(),
+            "demo-vault is missing from the source tree"
+        );
         assert!(is_populated(&in_tree));
     }
 }

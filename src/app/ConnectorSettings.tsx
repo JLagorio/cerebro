@@ -74,8 +74,8 @@ export function ConnectorSettings() {
     return (
       <div className="mt-1" data-testid="connector-settings-blocked">
         <p className="m-0 text-[10.5px] leading-[14px] text-[var(--warn-600)]">
-          The connector list can’t be read, so agent runs are pinned to no connectors until this
-          is fixed: {loadError}{' '}
+          The connector list can’t be read, so agent runs are pinned to no connectors until this is
+          fixed: {loadError}{' '}
           <button
             type="button"
             onClick={() => setLoadSeq((n) => n + 1)}
@@ -257,13 +257,12 @@ export function ConnectorSettings() {
         </p>
       )}
       <p className="m-0 text-[10.5px] leading-[14px] text-[var(--n-400)]">
-        Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of
-        git checkpoints, and your credentials never leave this vault. Naming servers here pins
-        the assistant to exactly this list; with no list, turns you watch inherit your global
-        MCP config — background jobs never do, they only ever get this list. stdio connectors
-        run a local command, so one the file names on its own stays out of runs until you
-        approve that exact command here — approval is per machine and any edit to the file
-        asks again.
+        Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of git
+        checkpoints, and your credentials never leave this vault. Naming servers here pins the
+        assistant to exactly this list; with no list, turns you watch inherit your global MCP config
+        — background jobs never do, they only ever get this list. stdio connectors run a local
+        command, so one the file names on its own stays out of runs until you approve that exact
+        command here — approval is per machine and any edit to the file asks again.
       </p>
     </div>
   );

@@ -112,7 +112,9 @@ fn serialize_mapping(mapping: &serde_yaml::Mapping) -> Result<Option<String>, St
     if mapping.is_empty() {
         return Ok(None);
     }
-    serde_yaml::to_string(mapping).map(Some).map_err(|e| e.to_string())
+    serde_yaml::to_string(mapping)
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 /// Convert a JSON patch value to YAML for insertion into a mapping.
@@ -167,7 +169,10 @@ pub fn update_frontmatter(
         }
     }
     let new_block = serialize_mapping(&mapping)?;
-    write_file(&safe_join(vault, rel)?, &compose(new_block.as_deref(), body))
+    write_file(
+        &safe_join(vault, rel)?,
+        &compose(new_block.as_deref(), body),
+    )
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
@@ -303,7 +308,9 @@ pub fn write_source(
     body: &str,
 ) -> Result<(), String> {
     if !(rel == SOURCES_DIR || rel.starts_with(&format!("{SOURCES_DIR}/"))) {
-        return Err(format!("cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"));
+        return Err(format!(
+            "cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"
+        ));
     }
     write_concept(vault, rel, frontmatter, body)
 }
@@ -418,7 +425,9 @@ pub fn list_collections(vault: &Path) -> Result<Vec<CollectionYaml>, String> {
         if !item.file_type().is_file() || item.file_name().to_string_lossy() != COLLECTION_MARKER {
             continue;
         }
-        let Some(dir) = item.path().parent() else { continue };
+        let Some(dir) = item.path().parent() else {
+            continue;
+        };
         out.push(CollectionYaml {
             folder: rel_path(vault, dir)?,
             yaml: std::fs::read_to_string(item.path()).map_err(|e| e.to_string())?,
@@ -459,9 +468,16 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
 
         // Legacy project-scoped views: a views/ dir next to any project.md.
         if name == "project.md" {
-            let Some(project_dir) = item.path().parent() else { continue };
+            let Some(project_dir) = item.path().parent() else {
+                continue;
+            };
             let rel_project = rel_path(vault, item.path())?;
-            collect_views_dir(vault, &project_dir.join("views"), Some(&rel_project), &mut views)?;
+            collect_views_dir(
+                vault,
+                &project_dir.join("views"),
+                Some(&rel_project),
+                &mut views,
+            )?;
             continue;
         }
 
@@ -576,14 +592,22 @@ mod tests {
     }
 
     fn patch(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
-        pairs.iter().cloned().map(|(k, v)| (k.to_string(), v)).collect()
+        pairs
+            .iter()
+            .cloned()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
     }
 
     #[test]
     fn update_preserves_order_and_unknown_keys_byte_for_byte() {
         let vault = vault_with_note("wfm-update");
-        update_frontmatter(&vault, "items/atl-1.md", &patch(&[("status", serde_json::json!("done"))]))
-            .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
         assert_eq!(
             read(&vault, "items/atl-1.md"),
             "---\ntype: Work item\nkey: ATL-1\nstatus: done\ncustom_field: kept\n---\n\n# Ship the scanner\n\nBody stays.\n"
@@ -594,8 +618,12 @@ mod tests {
     #[test]
     fn null_patch_value_deletes_the_key_preserving_order() {
         let vault = vault_with_note("wfm-delete");
-        update_frontmatter(&vault, "items/atl-1.md", &patch(&[("key", serde_json::Value::Null)]))
-            .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("key", serde_json::Value::Null)]),
+        )
+        .unwrap();
         assert_eq!(
             read(&vault, "items/atl-1.md"),
             "---\ntype: Work item\nstatus: todo\ncustom_field: kept\n---\n\n# Ship the scanner\n\nBody stays.\n"
@@ -606,10 +634,17 @@ mod tests {
     #[test]
     fn new_keys_are_appended_at_the_end() {
         let vault = vault_with_note("wfm-append");
-        update_frontmatter(&vault, "items/atl-1.md", &patch(&[("due", serde_json::json!("2026-08-01"))]))
-            .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("due", serde_json::json!("2026-08-01"))]),
+        )
+        .unwrap();
         let raw = read(&vault, "items/atl-1.md");
-        assert!(raw.contains("custom_field: kept\ndue: 2026-08-01\n---\n"), "{raw}");
+        assert!(
+            raw.contains("custom_field: kept\ndue: 2026-08-01\n---\n"),
+            "{raw}"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -624,15 +659,22 @@ mod tests {
             "items/crlf.md",
             "---\r\ntype: Work item\r\nstatus: todo\r\n---\r\n\r\n# Crlf note\r\n\r\nBody stays.\r\n",
         );
-        update_frontmatter(&vault, "items/crlf.md", &patch(&[("status", serde_json::json!("done"))]))
-            .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/crlf.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
         let raw = read(&vault, "items/crlf.md");
         // No duplicated or dropped fences.
         assert_eq!(raw.matches("---").count(), 2, "{raw}");
         // Frontmatter survives the patch (fences may be normalized to LF).
         let (block, body) = parse::split_frontmatter(&raw);
         let mapping = parse::parse_frontmatter(block.expect("frontmatter kept")).unwrap();
-        assert_eq!(mapping.get("type").and_then(|v| v.as_str()), Some("Work item"));
+        assert_eq!(
+            mapping.get("type").and_then(|v| v.as_str()),
+            Some("Work item")
+        );
         assert_eq!(mapping.get("status").and_then(|v| v.as_str()), Some("done"));
         // Body is untouched.
         assert_eq!(body, "\r\n# Crlf note\r\n\r\nBody stays.\r\n");
@@ -642,7 +684,12 @@ mod tests {
     #[test]
     fn save_note_replaces_body_and_keeps_frontmatter_bytes() {
         let vault = vault_with_note("wfm-save");
-        save_note(&vault, "items/atl-1.md", "\n# Ship the scanner\n\nNew body.\n").unwrap();
+        save_note(
+            &vault,
+            "items/atl-1.md",
+            "\n# Ship the scanner\n\nNew body.\n",
+        )
+        .unwrap();
         assert_eq!(
             read(&vault, "items/atl-1.md"),
             "---\ntype: Work item\nkey: ATL-1\nstatus: todo\ncustom_field: kept\n---\n\n# Ship the scanner\n\nNew body.\n"
@@ -705,7 +752,10 @@ mod tests {
         let vault = testutil::temp_vault("wfm-title-insert");
         testutil::write(&vault, "items/no-title.md", "Just prose.\n");
         set_note_title(&vault, "items/no-title.md", "Now titled").unwrap();
-        assert_eq!(read(&vault, "items/no-title.md"), "# Now titled\n\nJust prose.\n");
+        assert_eq!(
+            read(&vault, "items/no-title.md"),
+            "# Now titled\n\nJust prose.\n"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -732,16 +782,26 @@ mod tests {
         let vault = testutil::temp_vault("wfm-title-fence-only");
         testutil::write(&vault, "items/code.md", "```\n# only in code\n```\n");
         set_note_title(&vault, "items/code.md", "Now titled").unwrap();
-        assert_eq!(read(&vault, "items/code.md"), "# Now titled\n\n```\n# only in code\n```\n");
+        assert_eq!(
+            read(&vault, "items/code.md"),
+            "# Now titled\n\n```\n# only in code\n```\n"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
     #[test]
     fn set_note_title_preserves_crlf_body_bytes_outside_the_h1_line() {
         let vault = testutil::temp_vault("wfm-title-crlf");
-        testutil::write(&vault, "items/crlf-title.md", "# Old title\r\n\r\nBody stays.\r\n");
+        testutil::write(
+            &vault,
+            "items/crlf-title.md",
+            "# Old title\r\n\r\nBody stays.\r\n",
+        );
         set_note_title(&vault, "items/crlf-title.md", "New title").unwrap();
-        assert_eq!(read(&vault, "items/crlf-title.md"), "# New title\r\n\r\nBody stays.\r\n");
+        assert_eq!(
+            read(&vault, "items/crlf-title.md"),
+            "# New title\r\n\r\nBody stays.\r\n"
+        );
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -749,13 +809,21 @@ mod tests {
     fn views_round_trip_as_raw_yaml() {
         let vault = testutil::temp_vault("wfm-views");
         assert!(list_views(&vault).unwrap().is_empty());
-        save_view(&vault, "all-items", "name: All items\npresentation:\n  type: list\n", None)
-            .unwrap();
+        save_view(
+            &vault,
+            "all-items",
+            "name: All items\npresentation:\n  type: list\n",
+            None,
+        )
+        .unwrap();
         save_view(&vault, "board", "name: Board\n", None).unwrap();
         let views = list_views(&vault).unwrap();
         assert_eq!(views.len(), 2);
         assert_eq!(views[0].id, "all-items");
-        assert_eq!(views[0].yaml, "name: All items\npresentation:\n  type: list\n");
+        assert_eq!(
+            views[0].yaml,
+            "name: All items\npresentation:\n  type: list\n"
+        );
         assert_eq!(views[0].project, None);
         assert_eq!(views[1].id, "board");
         let _ = std::fs::remove_dir_all(&vault);
@@ -814,9 +882,19 @@ mod tests {
     #[test]
     fn legacy_views_load_beside_m10_lists() {
         let vault = testutil::temp_vault("wfm-legacy-lists");
-        testutil::write(&vault, "projects/atlas/project.md", "---\ntype: Project\n---\n\n# Atlas\n");
+        testutil::write(
+            &vault,
+            "projects/atlas/project.md",
+            "---\ntype: Project\n---\n\n# Atlas\n",
+        );
         save_view(&vault, "old-global", "name: Old global\n", None).unwrap();
-        save_view(&vault, "old-scoped", "name: Old scoped\n", Some("projects/atlas")).unwrap();
+        save_view(
+            &vault,
+            "old-scoped",
+            "name: Old scoped\n",
+            Some("projects/atlas"),
+        )
+        .unwrap();
         save_collection(&vault, "product", "name: Product\n").unwrap();
         save_list(&vault, "product", "roadmap", "name: Roadmap\n").unwrap();
 
@@ -826,7 +904,10 @@ mod tests {
         // Legacy views carry no collection, so they list at the top level.
         assert_eq!(by_id("old-global").collection, None);
         assert_eq!(by_id("old-global").path, "views/old-global.yml");
-        assert_eq!(by_id("old-scoped").project.as_deref(), Some("projects/atlas/project.md"));
+        assert_eq!(
+            by_id("old-scoped").project.as_deref(),
+            Some("projects/atlas/project.md")
+        );
         assert_eq!(by_id("roadmap").collection.as_deref(), Some("product"));
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -846,15 +927,28 @@ mod tests {
     #[test]
     fn project_views_carry_their_project_and_sort_after_globals() {
         let vault = testutil::temp_vault("wfm-project-views");
-        testutil::write(&vault, "projects/atlas/project.md", "---\ntype: Project\n---\n\n# Atlas\n");
+        testutil::write(
+            &vault,
+            "projects/atlas/project.md",
+            "---\ntype: Project\n---\n\n# Atlas\n",
+        );
         save_view(&vault, "global", "name: Global\n", None).unwrap();
-        save_view(&vault, "delivery", "name: Delivery\n", Some("projects/atlas")).unwrap();
+        save_view(
+            &vault,
+            "delivery",
+            "name: Delivery\n",
+            Some("projects/atlas"),
+        )
+        .unwrap();
         let views = list_views(&vault).unwrap();
         assert_eq!(views.len(), 2);
         assert_eq!(views[0].id, "global");
         assert_eq!(views[0].project, None);
         assert_eq!(views[1].id, "delivery");
-        assert_eq!(views[1].project.as_deref(), Some("projects/atlas/project.md"));
+        assert_eq!(
+            views[1].project.as_deref(),
+            Some("projects/atlas/project.md")
+        );
         assert!(vault.join("projects/atlas/views/delivery.yml").is_file());
         // Escaping folders are rejected.
         assert!(save_view(&vault, "evil", "name: E\n", Some("../outside")).is_err());
@@ -868,7 +962,10 @@ mod tests {
         let vault = vault_with_note("wfm-escape");
         // A real file one level above the vault root: without containment,
         // "../<name>" reaches and modifies it.
-        let victim = vault.parent().unwrap().join(format!("cerebro-victim-{}.md", std::process::id()));
+        let victim = vault
+            .parent()
+            .unwrap()
+            .join(format!("cerebro-victim-{}.md", std::process::id()));
         const VICTIM: &str = "---\nsafe: true\n---\nUntouched.\n";
         std::fs::write(&victim, VICTIM).unwrap();
         let victim_rel = format!("../{}", victim.file_name().unwrap().to_str().unwrap());
@@ -955,8 +1052,12 @@ mod tests {
             "items/ws.md",
             "---\ntype: Work item\nstatus: todo\n--- \nBody stays.\n",
         );
-        update_frontmatter(&vault, "items/ws.md", &patch(&[("status", serde_json::json!("done"))]))
-            .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/ws.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
         assert_eq!(
             read(&vault, "items/ws.md"),
             "---\ntype: Work item\nstatus: done\n---\nBody stays.\n"

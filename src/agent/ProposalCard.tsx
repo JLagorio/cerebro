@@ -50,7 +50,9 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
           Suggested filing
         </span>
       </div>
-      <p className="m-0 mb-2 text-[12px] leading-[17px] text-[var(--n-700)]">{proposal.reasoning}</p>
+      <p className="m-0 mb-2 text-[12px] leading-[17px] text-[var(--n-700)]">
+        {proposal.reasoning}
+      </p>
       {changes.length > 0 && (
         <dl className="m-0 mb-2.5 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1">
           {changes.map(([label, value]) => (
@@ -67,11 +69,7 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
         <Button variant="primary" size="sm" icon="check" onClick={accept}>
           Apply
         </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => dismissProposal(proposal.path)}
-        >
+        <Button variant="secondary" size="sm" onClick={() => dismissProposal(proposal.path)}>
           Dismiss
         </Button>
       </div>

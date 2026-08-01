@@ -120,7 +120,9 @@ describe('skillIndex', () => {
   });
 
   it('lists each skill as /name — description', () => {
-    const line = skillIndex(listSkills([skill('Weekly review'), skill('Bare', { properties: {} })]));
+    const line = skillIndex(
+      listSkills([skill('Weekly review'), skill('Bare', { properties: {} })]),
+    );
     expect(line).toContain('/weekly-review — Run Weekly review.');
     expect(line).toContain('/bare;');
   });

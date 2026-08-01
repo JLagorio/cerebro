@@ -249,9 +249,7 @@ export function useAgentChat(
           // Done, freezing the bubble empty (PR #5 review).
           activeRef.current = assistantId;
           const expanded =
-            typeof message === 'function'
-              ? await message().catch(() => trimmed)
-              : message?.trim();
+            typeof message === 'function' ? await message().catch(() => trimmed) : message?.trim();
           const outgoing = expanded === undefined || expanded === '' ? trimmed : expanded;
           mcpRef.current ??= await startMcp(vaultPath);
           // The last checkpoint before a child exists. A cancel landing
@@ -275,7 +273,9 @@ export function useAgentChat(
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           setMessages((prev) =>
-            prev.map((m) => (m.id === assistantId ? { ...m, error: message, streaming: false } : m)),
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, error: message, streaming: false } : m,
+            ),
           );
           activeRef.current = null;
           turnInFlight.current = false;

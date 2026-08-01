@@ -59,16 +59,16 @@ export function CalendarView({
     () => entries.filter((e) => spanOf(e, dateField) !== null),
     [entries, dateField],
   );
-  const undatedCount = useMemo(
-    () => unscheduled(entries, dateField).length,
-    [entries, dateField],
-  );
+  const undatedCount = useMemo(() => unscheduled(entries, dateField).length, [entries, dateField]);
 
   // No date property anywhere on this collection's type — the view cannot be
   // made to work by paging months, so say what would fix it.
   if (dateField === null) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center" data-testid="calendar-view">
+      <div
+        className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
+        data-testid="calendar-view"
+      >
         <EmptyState
           icon="calendar-days"
           title="Nothing here carries a date"
@@ -114,9 +114,7 @@ export function CalendarView({
         {/* Honest about coverage: a calendar that silently omits a third of
             the collection looks complete and is not. */}
         {undatedCount > 0 && (
-          <span className="text-[11.5px] text-[var(--n-500)]">
-            {undatedCount} without a date
-          </span>
+          <span className="text-[11.5px] text-[var(--n-500)]">{undatedCount} without a date</span>
         )}
       </div>
 
@@ -162,9 +160,7 @@ export function CalendarView({
                   {Number(day.slice(8, 10))}
                 </span>
                 <span className="flex-1" />
-                {onCreateOn !== undefined && (
-                  <DayAdd day={day} onCreate={onCreateOn} />
-                )}
+                {onCreateOn !== undefined && <DayAdd day={day} onCreate={onCreateOn} />}
               </div>
               {visible.map((entry) => {
                 const style = typeStyle(entry.type, schema);

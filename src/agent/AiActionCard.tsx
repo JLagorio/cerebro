@@ -57,8 +57,14 @@ export function toolIcon(name: string): string {
  * as a read.
  */
 const WRITE_TOOLS = new Set([
-  'Write', 'Edit', 'NotebookEdit',
-  'create_note', 'update_frontmatter', 'append_to_note', 'write_concept', 'cache_source',
+  'Write',
+  'Edit',
+  'NotebookEdit',
+  'create_note',
+  'update_frontmatter',
+  'append_to_note',
+  'write_concept',
+  'cache_source',
 ]);
 
 export function isWrite(name: string): boolean {

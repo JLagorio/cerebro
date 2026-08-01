@@ -44,8 +44,14 @@ function deleteInlineNodeAt(editor: unknown, dom: HTMLElement | null): void {
   try {
     if (dom === null) return;
     const e = editor as {
-      prosemirrorView?: { posAtDOM(n: Node, o: number): number; state: any; dispatch(tr: any): void };
-      _tiptapEditor?: { view: { posAtDOM(n: Node, o: number): number; state: any; dispatch(tr: any): void } };
+      prosemirrorView?: {
+        posAtDOM(n: Node, o: number): number;
+        state: any;
+        dispatch(tr: any): void;
+      };
+      _tiptapEditor?: {
+        view: { posAtDOM(n: Node, o: number): number; state: any; dispatch(tr: any): void };
+      };
     };
     const view = e.prosemirrorView ?? e._tiptapEditor?.view;
     if (view === undefined) return;

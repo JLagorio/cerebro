@@ -55,13 +55,7 @@ const BUCKET_META: { id: DueBucket; label: string; tone: string }[] = [
   { id: 'none', label: 'No due date', tone: 'text-[var(--n-500)]' },
 ];
 
-function TaskRow({
-  task,
-  onToggle,
-}: {
-  task: DocTask;
-  onToggle: (done: boolean) => void;
-}) {
+function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) => void }) {
   const entries = useVaultStore((s) => s.entries);
   const open = useOpenPath();
   const source = entries.find((e) => e.path === task.sourcePath) ?? null;
@@ -160,7 +154,9 @@ export function HomeTasks() {
   const byBucket = (bucket: DueBucket) =>
     filtered
       .filter((t) => dueBucket(t.due, today) === bucket)
-      .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.text.localeCompare(b.text));
+      .sort(
+        (a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.text.localeCompare(b.text),
+      );
 
   const doneCount = tasks.length - open.length;
 
@@ -189,8 +185,8 @@ export function HomeTasks() {
       {loading && filtered.length === 0 && <div data-testid="home-tasks-loading" />}
       {!loading && filtered.length === 0 && (
         <p className="m-0 rounded-[10px] border border-dashed border-[var(--n-200)] px-4 py-3 text-[12.5px] text-[var(--n-500)]">
-          No open tasks. Add one in any doc with a checklist item — assign with @, set a due
-          date with the calendar chip.
+          No open tasks. Add one in any doc with a checklist item — assign with @, set a due date
+          with the calendar chip.
         </p>
       )}
       {BUCKET_META.map(({ id, label, tone }) => {
@@ -198,7 +194,9 @@ export function HomeTasks() {
         if (group.length === 0) return null;
         return (
           <div key={id} className="mb-2">
-            <h3 className={`mb-0.5 mt-2 text-[11px] font-semibold uppercase tracking-[0.06em] ${tone}`}>
+            <h3
+              className={`mb-0.5 mt-2 text-[11px] font-semibold uppercase tracking-[0.06em] ${tone}`}
+            >
               {label} · {group.length}
             </h3>
             <div className="flex flex-col">

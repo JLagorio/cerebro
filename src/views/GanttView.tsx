@@ -120,7 +120,10 @@ export function GanttView({
 
   if (dateField === null) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center" data-testid="gantt-view">
+      <div
+        className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
+        data-testid="gantt-view"
+      >
         <EmptyState
           icon="chart-gantt"
           title="Nothing here carries a date"
@@ -158,9 +161,7 @@ export function GanttView({
           </span>
         )}
         {undated.length > 0 && (
-          <span className="text-[11.5px] text-[var(--n-500)]">
-            {undated.length} without a date
-          </span>
+          <span className="text-[11.5px] text-[var(--n-500)]">{undated.length} without a date</span>
         )}
       </div>
 

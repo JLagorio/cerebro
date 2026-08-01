@@ -26,7 +26,8 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [applying, setApplying] = useState(false);
 
-  const included = (typeName: string, fieldName: string) => !excluded.has(keyOf(typeName, fieldName));
+  const included = (typeName: string, fieldName: string) =>
+    !excluded.has(keyOf(typeName, fieldName));
   const toggle = (typeName: string, fieldName: string) => {
     const key = keyOf(typeName, fieldName);
     setExcluded((prev) => {
@@ -57,8 +58,8 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
         <div className="flex items-start gap-2.5 py-2">
           <Icon name="badge-check" size={18} color="var(--success-500, #1F9D61)" />
           <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
-            Nothing to adopt. Every type in this vault is declared, and every stored value
-            fits its declared kind.
+            Nothing to adopt. Every type in this vault is declared, and every stored value fits its
+            declared kind.
           </p>
         </div>
       </Dialog>
@@ -74,17 +75,19 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
       title="Adopt vault schema"
       width={760}
       primaryAction={{
-        label: applying ? 'Adopting…' : `Adopt ${fieldCount} ${fieldCount === 1 ? 'field' : 'fields'}`,
+        label: applying
+          ? 'Adopting…'
+          : `Adopt ${fieldCount} ${fieldCount === 1 ? 'field' : 'fields'}`,
         onClick: apply,
         disabled: applying,
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
       <p className="m-0 mb-3 text-[12.5px] leading-relaxed text-[var(--n-500)]">
-        These types were found in frontmatter without a full declaration. Adopting writes a
-        Type doc per type, declares the checked fields with the inferred kinds, and converts
-        stored values that don&apos;t fit — or clears the ones with no honest reading. Records
-        themselves stay where they are.
+        These types were found in frontmatter without a full declaration. Adopting writes a Type doc
+        per type, declares the checked fields with the inferred kinds, and converts stored values
+        that don&apos;t fit — or clears the ones with no honest reading. Records themselves stay
+        where they are.
       </p>
       <div className="flex min-h-0 gap-3" style={{ height: 380 }}>
         <div className="flex w-[200px] flex-none flex-col gap-px overflow-y-auto rounded-[10px] border border-[var(--n-200)] p-1">
@@ -186,8 +189,8 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
           })}
           {current.fields.length === 0 && (
             <p className="m-0 px-2 py-4 text-[12.5px] text-[var(--n-500)]">
-              No fields to declare — adopting simply writes the Type doc so “{current.name}”
-              stops being a ghost.
+              No fields to declare — adopting simply writes the Type doc so “{current.name}” stops
+              being a ghost.
             </p>
           )}
         </div>

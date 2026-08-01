@@ -20,9 +20,7 @@ describe('inferKind', () => {
 
   it('does not read prose or unique values as select', () => {
     expect(inferKind('note', ['every value different', 'another one', 'third'])).toBe('text');
-    expect(inferKind('summary', ['a genuinely long sentence about the thing itself'])).toBe(
-      'text',
-    );
+    expect(inferKind('summary', ['a genuinely long sentence about the thing itself'])).toBe('text');
   });
 
   it('status is status by name', () => {

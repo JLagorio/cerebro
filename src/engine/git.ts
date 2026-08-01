@@ -17,8 +17,7 @@ export interface GitWorkspaceInfo {
   resolutionFailure: string | null;
 }
 
-export type FileStatus =
-  | 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
 
 export interface ModifiedFile {
   path: string;
@@ -55,7 +54,7 @@ export interface LastCommitInfo {
 }
 
 export type IdentitySource =
-  | 'repository' | 'global' | 'system' | 'environment' | 'fallback' | 'unknown';
+  'repository' | 'global' | 'system' | 'environment' | 'fallback' | 'unknown';
 
 export interface GitAuthorIdentity {
   name: string;
@@ -79,8 +78,15 @@ export interface GitRemoteStatus {
  * first". Collapsing them makes all three unfixable.
  */
 export type RemoteOutcome =
-  | 'ok' | 'up_to_date' | 'updated' | 'conflict'
-  | 'rejected' | 'auth_error' | 'network_error' | 'no_remote' | 'error';
+  | 'ok'
+  | 'up_to_date'
+  | 'updated'
+  | 'conflict'
+  | 'rejected'
+  | 'auth_error'
+  | 'network_error'
+  | 'no_remote'
+  | 'error';
 
 export interface RemoteResult {
   status: RemoteOutcome;

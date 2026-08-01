@@ -67,11 +67,7 @@ export function getFileDiff(vault: string, path: string): Promise<string> {
   return inTauri() ? invokeTauri('get_file_diff', { vault, path }) : mock.getFileDiff(vault, path);
 }
 
-export function getFileDiffAtCommit(
-  vault: string,
-  path: string,
-  commit: string,
-): Promise<string> {
+export function getFileDiffAtCommit(vault: string, path: string, commit: string): Promise<string> {
   return inTauri()
     ? invokeTauri('get_file_diff_at_commit', { vault, path, commit })
     : mock.getFileDiffAtCommit(vault, path, commit);
@@ -88,9 +84,7 @@ export function getVaultPulse(vault: string): Promise<PulseCommit[]> {
 }
 
 export function getLastCommitInfo(vault: string): Promise<LastCommitInfo | null> {
-  return inTauri()
-    ? invokeTauri('get_last_commit_info', { vault })
-    : mock.getLastCommitInfo(vault);
+  return inTauri() ? invokeTauri('get_last_commit_info', { vault }) : mock.getLastCommitInfo(vault);
 }
 
 export function gitCommit(vault: string, message: string): Promise<string | null> {
@@ -130,7 +124,9 @@ export function gitDisconnectRemote(vault: string): Promise<void> {
 }
 
 export function gitClone(url: string, destination: string): Promise<string> {
-  return inTauri() ? invokeTauri('git_clone', { url, destination }) : mock.gitClone(url, destination);
+  return inTauri()
+    ? invokeTauri('git_clone', { url, destination })
+    : mock.gitClone(url, destination);
 }
 
 export function getConflictFiles(vault: string): Promise<string[]> {
@@ -141,11 +137,7 @@ export function getConflictMode(vault: string): Promise<ConflictMode> {
   return inTauri() ? invokeTauri('get_conflict_mode', { vault }) : mock.getConflictMode(vault);
 }
 
-export function gitResolveConflict(
-  vault: string,
-  path: string,
-  keep: Resolution,
-): Promise<void> {
+export function gitResolveConflict(vault: string, path: string, keep: Resolution): Promise<void> {
   return inTauri()
     ? invokeTauri('git_resolve_conflict', { vault, path, keep })
     : mock.gitResolveConflict(vault, path, keep);

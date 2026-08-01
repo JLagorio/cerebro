@@ -62,9 +62,7 @@ function seed(): MockState {
         message: 'Start tracking this vault with cerebro',
         author: 'Ana Rios',
         date: 1_753_700_000,
-        files: [
-          { path: 'projects/atlas/project.md', status: 'added', title: 'Project' },
-        ],
+        files: [{ path: 'projects/atlas/project.md', status: 'added', title: 'Project' }],
         added: 1,
         modified: 0,
         deleted: 0,
@@ -254,10 +252,20 @@ export async function gitPull(_vault: string): Promise<RemoteResult> {
   if (forced !== null) return forced;
   const s = state();
   if (s.remoteUrl === null) {
-    return { status: 'no_remote', message: 'No remote is configured.', updatedFiles: [], conflictFiles: [] };
+    return {
+      status: 'no_remote',
+      message: 'No remote is configured.',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
   }
   if (s.behind === 0) {
-    return { status: 'up_to_date', message: 'Already up to date.', updatedFiles: [], conflictFiles: [] };
+    return {
+      status: 'up_to_date',
+      message: 'Already up to date.',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
   }
   s.behind = 0;
   return {
@@ -273,7 +281,12 @@ export async function gitPush(_vault: string): Promise<RemoteResult> {
   if (forced !== null) return forced;
   const s = state();
   if (s.remoteUrl === null) {
-    return { status: 'no_remote', message: 'No remote is configured.', updatedFiles: [], conflictFiles: [] };
+    return {
+      status: 'no_remote',
+      message: 'No remote is configured.',
+      updatedFiles: [],
+      conflictFiles: [],
+    };
   }
   if (s.behind > 0) {
     return {

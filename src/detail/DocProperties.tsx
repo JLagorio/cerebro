@@ -191,11 +191,14 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
       {converting && (
         <Dialog open onClose={() => setConverting(false)} title="Convert to record" width={420}>
           <p className="mb-2 text-[12px] leading-relaxed text-[var(--n-500)]">
-            A record belongs to a type: it opens in the record panel, appears in that
-            type&apos;s views and Lists, and leaves the Docs tree. Its text and
-            properties come along unchanged.
+            A record belongs to a type: it opens in the record panel, appears in that type&apos;s
+            views and Lists, and leaves the Docs tree. Its text and properties come along unchanged.
           </p>
-          <div role="listbox" aria-label="Convert to type" className="flex max-h-[300px] flex-col overflow-y-auto">
+          <div
+            role="listbox"
+            aria-label="Convert to type"
+            className="flex max-h-[300px] flex-col overflow-y-auto"
+          >
             {convertTargets.map((t) => {
               const style = typeStyle(t, schema);
               return (
@@ -207,10 +210,15 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                   onClick={() => convertTo(t)}
                   className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left hover:bg-[var(--n-50)]"
                 >
-                  <span className="inline-flex flex-none" style={{ color: style.color ?? 'var(--n-400)' }}>
+                  <span
+                    className="inline-flex flex-none"
+                    style={{ color: style.color ?? 'var(--n-400)' }}
+                  >
                     <Icon name={style.icon} size={14} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">{t}</span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
+                    {t}
+                  </span>
                 </button>
               );
             })}

@@ -119,9 +119,7 @@ export async function createProjectList(
   const { views } = useVaultStore.getState();
   const taken = views.filter((v) => v.project === project).map((v) => v.id);
   const id = nextListId(definition.name, taken);
-  return (await writeList(id, definition, { collection: null, legacy: { project } }))
-    ? id
-    : null;
+  return (await writeList(id, definition, { collection: null, legacy: { project } })) ? id : null;
 }
 
 /** Persist edits to an existing List — in place, whatever shape it is on disk. */
@@ -143,7 +141,10 @@ export async function updateView(
 export async function addView(list: ListFile, view: ViewDefinition): Promise<string | null> {
   // Re-key against the siblings that actually exist: the caller built this
   // view from a stale copy if the file changed underneath it.
-  const id = nextViewId(view.name, list.definition.views.map((v) => v.id));
+  const id = nextViewId(
+    view.name,
+    list.definition.views.map((v) => v.id),
+  );
   const next: ListDefinition = {
     ...list.definition,
     views: [...list.definition.views, { ...view, id }],
@@ -210,7 +211,10 @@ export async function createCollection(name: string): Promise<string | null> {
   if (vaultPath === null) return null;
   const trimmed = name.trim();
   if (trimmed === '') return null;
-  const folder = nextCollectionFolder(trimmed, collections.map((c) => c.folder));
+  const folder = nextCollectionFolder(
+    trimmed,
+    collections.map((c) => c.folder),
+  );
   try {
     await saveCollection(vaultPath, folder, serializeCollection(newCollectionDefinition(trimmed)));
   } catch {

@@ -1,0 +1,13 @@
+dist
+dist-mac
+docs
+demo-vault
+node_modules
+src-tauri/target
+src-tauri/gen
+test-results
+playwright-report
+.claude
+.vite
+pnpm-lock.yaml
+HardwareSoftware Security Engineering Tool

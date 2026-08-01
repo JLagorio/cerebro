@@ -10,7 +10,13 @@ import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
-import { listSkills, matchSkillInvocation, skillIndex, skillPrompt, type SkillRef } from '@/engine/skills';
+import {
+  listSkills,
+  matchSkillInvocation,
+  skillIndex,
+  skillPrompt,
+  type SkillRef,
+} from '@/engine/skills';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { readNote } from '@/lib/ipc';
@@ -151,7 +157,7 @@ export function AiPanel() {
   );
   const activeView =
     selection.kind === 'list'
-      ? views.find((v) => v.id === selection.id && v.project === null) ?? null
+      ? (views.find((v) => v.id === selection.id && v.project === null) ?? null)
       : null;
 
   // M13.1: the skill catalog — names and descriptions only; a body loads when
@@ -172,17 +178,25 @@ export function AiPanel() {
       filters:
         activeView === null
           ? null
-          : resolveView(
-              activeView.definition,
-              selection.kind === 'list' ? selection.view : null,
-            ).filters,
+          : resolveView(activeView.definition, selection.kind === 'list' ? selection.view : null)
+              .filters,
       references: extractReferences(draft),
     });
     return `${base}${renderSnapshot(snapshot)}`;
     // `draft` is deliberately excluded: rebuilding the prompt on every
     // keystroke would thrash, and `send` reads the references it needs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectors, issuePrefixes, skills, selection, entries, schema, detailPath, collection.entries, activeView]);
+  }, [
+    connectors,
+    issuePrefixes,
+    skills,
+    selection,
+    entries,
+    schema,
+    detailPath,
+    collection.entries,
+    activeView,
+  ]);
 
   const chat = useAgentChat(
     systemPrompt,
@@ -193,7 +207,9 @@ export function AiPanel() {
   const conversations = useConversations(chat);
 
   useEffect(() => {
-    void checkAgent().then(setStatus).catch(() => setStatus({ installed: false, version: null, path: null }));
+    void checkAgent()
+      .then(setStatus)
+      .catch(() => setStatus({ installed: false, version: null, path: null }));
   }, []);
 
   useEffect(() => {
@@ -271,7 +287,12 @@ export function AiPanel() {
           size="sm"
           onClick={conversations.start}
         />
-        <IconButton icon="x" label="Close AI panel" size="sm" onClick={() => setAiPanelOpen(false)} />
+        <IconButton
+          icon="x"
+          label="Close AI panel"
+          size="sm"
+          onClick={() => setAiPanelOpen(false)}
+        />
       </header>
 
       <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
@@ -327,7 +348,6 @@ export function AiPanel() {
           )}
         </div>
       </div>
-
     </aside>
   );
 }
@@ -342,9 +362,9 @@ export function buildSystemPrompt(
     'Notes are markdown files with YAML frontmatter. A project is a folder holding project.md; its work items live in <folder>/items/. Types are declared by `type: Type` docs in types/.',
     'Use the cerebro MCP tools: get_vault_context to orient, search_notes and get_note to read, and the write tools to change things. Call open_note so the user sees what you are referring to.',
     'When you mention a note, write it as [[note-name]] so it is clickable.',
-    'You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user\'s stamp, and claiming it would defeat the review model.',
+    "You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user's stamp, and claiming it would defeat the review model.",
     'To file an Inbox capture, use propose_organize so the user can accept or reject it. Do not edit captures directly.',
-    'Never create or modify `type: Type` docs on your own — schema is the user\'s to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (the Types screen and the adoption wizard are the human path).',
+    "Never create or modify `type: Type` docs on your own — schema is the user's to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (the Types screen and the adoption wizard are the human path).",
     'Be concise.',
   ];
 

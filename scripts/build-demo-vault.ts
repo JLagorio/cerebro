@@ -244,8 +244,10 @@ export function buildVault(): Map<string, string> {
 
   const projectSlugById = new Map(work.PROJECTS.map((p) => [p.id, slugify(p.name)]));
 
-  const bySlug = <T>(slugOf: (x: T) => string) => (a: T, b: T) =>
-    slugOf(a).localeCompare(slugOf(b));
+  const bySlug =
+    <T>(slugOf: (x: T) => string) =>
+    (a: T, b: T) =>
+      slugOf(a).localeCompare(slugOf(b));
 
   const mapStatuses = (statuses: SeedStatus[]) =>
     statuses.map((st) => ({

@@ -63,9 +63,7 @@ describe('TypePage — Records tab', () => {
     fireEvent.click(screen.getByTestId('view-switch-board'));
     expect(screen.getByTestId('board-view')).toBeTruthy();
     // The change persisted to the Type doc — a type's views are saved views.
-    expect(
-      patches.some((p) => p.path === 'types/work-item.md' && 'views' in p.patch),
-    ).toBe(true);
+    expect(patches.some((p) => p.path === 'types/work-item.md' && 'views' in p.patch)).toBe(true);
   });
 
   it('shows the calendar keyed on the type’s date property', () => {
@@ -90,9 +88,7 @@ describe('TypePage — Records tab', () => {
     // M12.8: the icon and the name ARE the edit affordances — the corner
     // pencil/palette buttons are gone.
     expect(screen.getByTestId('type-icon-edit').getAttribute('title')).toBe('Change icon & color');
-    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe(
-      'Change display name',
-    );
+    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe('Change display name');
     // Delete moved into the floating view-settings menu with the rest of the
     // configuration — no destructive affordance sits in the header.
     fireEvent.click(screen.getByTestId('view-control-settings'));
@@ -101,9 +97,7 @@ describe('TypePage — Records tab', () => {
 
   it('offers rename and delete for custom types', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Person' }} />);
-    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe(
-      'Change display name',
-    );
+    expect(screen.getByTestId('type-title-edit').getAttribute('title')).toBe('Change display name');
     fireEvent.click(screen.getByTestId('view-control-settings'));
     expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
@@ -251,7 +245,10 @@ describe('TypePage — property configuration (M12.8: floating, never an aside)'
     const input = screen.getByLabelText('Rename Thai');
     fireEvent.change(input, { target: { value: 'Thai (street)' } });
     fireEvent.blur(input);
-    const fields = patches[0].patch.fields as Record<string, { options: { id: string; label: string }[] }>;
+    const fields = patches[0].patch.fields as Record<
+      string,
+      { options: { id: string; label: string }[] }
+    >;
     expect(fields.cuisine.options[0]).toMatchObject({ id: 'thai', label: 'Thai (street)' });
   });
 

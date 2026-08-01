@@ -141,15 +141,18 @@ pub fn remote_status(ws: &GitWorkspaceInfo) -> Result<GitRemoteStatus, String> {
 
     let (ahead, behind) = match &upstream {
         None => (0, 0),
-        Some(_) => command::run_str(&dir, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
-            .ok()
-            .and_then(|out| {
-                let mut parts = out.split_whitespace();
-                let behind = parts.next()?.parse().ok()?;
-                let ahead = parts.next()?.parse().ok()?;
-                Some((ahead, behind))
-            })
-            .unwrap_or((0, 0)),
+        Some(_) => command::run_str(
+            &dir,
+            &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+        )
+        .ok()
+        .and_then(|out| {
+            let mut parts = out.split_whitespace();
+            let behind = parts.next()?.parse().ok()?;
+            let ahead = parts.next()?.parse().ok()?;
+            Some((ahead, behind))
+        })
+        .unwrap_or((0, 0)),
     };
 
     Ok(GitRemoteStatus {
@@ -177,7 +180,10 @@ pub fn conflict_files(ws: &GitWorkspaceInfo) -> Vec<String> {
 
 pub fn pull(ws: &GitWorkspaceInfo) -> RemoteResult {
     if !ws.is_repo() {
-        return RemoteResult::plain(RemoteOutcome::NoRemote, "This vault is not a git repository.");
+        return RemoteResult::plain(
+            RemoteOutcome::NoRemote,
+            "This vault is not a git repository.",
+        );
     }
     if !has_remote(ws) {
         return RemoteResult::plain(RemoteOutcome::NoRemote, "No remote is configured.");
@@ -208,7 +214,10 @@ pub fn pull(ws: &GitWorkspaceInfo) -> RemoteResult {
             // --ff-only refuses rather than merging when histories diverged.
             // Retry as a real merge so the user reaches a resolvable conflict
             // instead of a dead end.
-            let diverged = failure.stderr.to_lowercase().contains("not possible to fast-forward")
+            let diverged = failure
+                .stderr
+                .to_lowercase()
+                .contains("not possible to fast-forward")
                 || failure.stderr.to_lowercase().contains("diverging");
             if diverged {
                 return match command::run(&dir, &["pull", "--no-rebase"]) {
@@ -246,7 +255,10 @@ pub fn pull(ws: &GitWorkspaceInfo) -> RemoteResult {
 
 pub fn push(ws: &GitWorkspaceInfo) -> RemoteResult {
     if !ws.is_repo() {
-        return RemoteResult::plain(RemoteOutcome::NoRemote, "This vault is not a git repository.");
+        return RemoteResult::plain(
+            RemoteOutcome::NoRemote,
+            "This vault is not a git repository.",
+        );
     }
     if !has_remote(ws) {
         return RemoteResult::plain(RemoteOutcome::NoRemote, "No remote is configured.");
@@ -262,9 +274,9 @@ pub fn push(ws: &GitWorkspaceInfo) -> RemoteResult {
     });
 
     // First push of a branch needs -u; after that the plain form is correct.
-    let args: Vec<&str> = if status.has_upstream {
-        vec!["push"]
-    } else if status.branch.is_empty() {
+    // An empty branch name (detached HEAD) also gets the plain form — there
+    // is no name to bind an upstream to.
+    let args: Vec<&str> = if status.has_upstream || status.branch.is_empty() {
         vec!["push"]
     } else {
         vec!["push", "-u", "origin", status.branch.as_str()]
@@ -298,10 +310,7 @@ pub fn add_remote(ws: &GitWorkspaceInfo, url: &str) -> RemoteResult {
         || url.starts_with("ssh://")
         || url.starts_with("git@");
     if !allowed {
-        return RemoteResult::plain(
-            RemoteOutcome::Error,
-            "Use an https:// or ssh remote URL.",
-        );
+        return RemoteResult::plain(RemoteOutcome::Error, "Use an https:// or ssh remote URL.");
     }
 
     let dir = ws.dir();

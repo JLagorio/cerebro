@@ -15,7 +15,7 @@ export interface VaultState {
   views: ListFile[];
   /** Every Collection: the containers Lists and Docs live in (M10). */
   collections: CollectionFile[];
-  folders: string[];   // all vault directories incl. empty ones (M2 Task 10 file trees)
+  folders: string[]; // all vault directories incl. empty ones (M2 Task 10 file trees)
   status: 'idle' | 'scanning' | 'ready' | 'error';
   error: string | null;
   openVault(path: string): Promise<void>;

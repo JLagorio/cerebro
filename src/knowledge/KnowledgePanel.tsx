@@ -2,7 +2,14 @@ import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Tag } from '@/components/ui/Tag';
-import { conceptEdges, listConcepts, nearDuplicates, type Concept, type Source, type Stamp } from '@/engine/okf';
+import {
+  conceptEdges,
+  listConcepts,
+  nearDuplicates,
+  type Concept,
+  type Source,
+  type Stamp,
+} from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { resolveTarget } from '@/engine/wikilink';
 import { FlagChip, TrustChip } from '@/knowledge/TrustChip';
@@ -41,7 +48,9 @@ function ActorLine({ stamp, today }: { stamp: Stamp; today: string }) {
   return (
     <div className="flex items-center gap-1.5 text-[12px] text-[var(--n-700)]">
       <Icon name={icon} size={12} color="var(--n-500)" />
-      <span className="truncate [font-family:var(--font-mono)] text-[11.5px]">{stamp.by.label}</span>
+      <span className="truncate [font-family:var(--font-mono)] text-[11.5px]">
+        {stamp.by.label}
+      </span>
       {when !== null && <span className="flex-none text-[11px] text-[var(--n-400)]">{when}</span>}
     </div>
   );
@@ -183,13 +192,7 @@ function RelationsBlock({
 
   if (edges.length === 0 && duplicates.length === 0) return null;
 
-  const row = (
-    key: string,
-    label: string,
-    title: string,
-    path: string,
-    tone: 'warn' | 'plain',
-  ) => (
+  const row = (key: string, label: string, title: string, path: string, tone: 'warn' | 'plain') => (
     <button
       key={key}
       type="button"
@@ -269,7 +272,9 @@ export function KnowledgePanel({
         {concept.lifecycle === 'deprecated' && (
           <FlagChip icon="archive" label="Deprecated" tone="muted" />
         )}
-        {concept.lifecycle === 'draft' && <FlagChip icon="pencil-line" label="Draft" tone="muted" />}
+        {concept.lifecycle === 'draft' && (
+          <FlagChip icon="pencil-line" label="Draft" tone="muted" />
+        )}
       </div>
 
       <AboutBlock concept={concept} onOpenEntity={onOpenEntity} />
@@ -337,12 +342,7 @@ export function KnowledgePanel({
       )}
 
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
-        <Button
-          variant="primary"
-          icon="shield-check"
-          disabled={verifying}
-          onClick={onVerify}
-        >
+        <Button variant="primary" icon="shield-check" disabled={verifying} onClick={onVerify}>
           {alreadyReviewed ? 'Verify again' : 'Verify'}
         </Button>
         <Button variant="secondary" icon="sparkles" onClick={onAskAgent}>

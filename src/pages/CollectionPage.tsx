@@ -51,7 +51,9 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
   // sidebar.
   const collection = useMemo(
     () =>
-      effectiveCollections(collections, views, entries).find((c) => c.folder === selection.folder) ?? null,
+      effectiveCollections(collections, views, entries).find(
+        (c) => c.folder === selection.folder,
+      ) ?? null,
     [collections, views, entries, selection.folder],
   );
 
@@ -59,8 +61,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
   // dossier that lived on the deleted project page follows it here — what
   // the base believes about this container's work (M8.9).
   const projectDoc = useMemo(
-    () =>
-      entries.find((e) => e.filename === 'project.md' && e.folder === selection.folder) ?? null,
+    () => entries.find((e) => e.filename === 'project.md' && e.folder === selection.folder) ?? null,
     [entries, selection.folder],
   );
 
@@ -352,9 +353,9 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmRemove(false) }}
         >
           <p className="m-0 text-[13px] text-[var(--n-600)]">
-            The folder stops being a collection. The {total}{' '}
-            {total === 1 ? 'thing' : 'things'} inside stay on disk in{' '}
-            <code>{collection.folder}/</code> — removing a container is not a way to lose work.
+            The folder stops being a collection. The {total} {total === 1 ? 'thing' : 'things'}{' '}
+            inside stay on disk in <code>{collection.folder}/</code> — removing a container is not a
+            way to lose work.
           </p>
         </Dialog>
       )}

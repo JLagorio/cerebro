@@ -42,7 +42,8 @@ export interface ContextSnapshot {
 function summarize(entry: Entry, schema: Schema, fields?: string[]): RecordSummary {
   const properties: Record<string, unknown> = {};
   const names =
-    fields ?? (entry.type === null ? [] : (schema.types.get(entry.type)?.fields ?? []).map((f) => f.name));
+    fields ??
+    (entry.type === null ? [] : (schema.types.get(entry.type)?.fields ?? []).map((f) => f.name));
   for (const name of names) {
     const resolved = schema.resolveField(entry, name);
     if (resolved.display !== '') properties[name] = resolved.display;
@@ -82,7 +83,8 @@ export interface SnapshotInput {
 }
 
 export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
-  const { selection, entries, schema, activePath, activeBody, visible, filters, references } = input;
+  const { selection, entries, schema, activePath, activeBody, visible, filters, references } =
+    input;
 
   const snapshot: ContextSnapshot = {
     selection: describeSelection(selection),
@@ -95,7 +97,7 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     },
   };
 
-  const active = activePath == null ? null : entries.find((e) => e.path === activePath) ?? null;
+  const active = activePath == null ? null : (entries.find((e) => e.path === activePath) ?? null);
   if (active !== null) {
     snapshot.activeNote = {
       ...summarize(active, schema),

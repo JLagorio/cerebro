@@ -99,9 +99,7 @@ describe('serializeFields', () => {
       { name: 'due', kind: 'date' },
       { name: 'points', kind: 'rollup', relation: 'items', property: 'estimate', calculate: 'sum' },
     ];
-    const entries = [
-      typeDoc('Ticket', { properties: { fields: serializeFields(fields) } }),
-    ];
+    const entries = [typeDoc('Ticket', { properties: { fields: serializeFields(fields) } })];
     expect(buildSchema(entries).types.get('Ticket')?.fields).toEqual(fields);
   });
 });
@@ -132,9 +130,7 @@ describe('typePresentation', () => {
   });
 
   it('falls back to a flat list for types without a status field', () => {
-    const entries = [
-      typeDoc('Person', { properties: { fields: { role: { kind: 'text' } } } }),
-    ];
+    const entries = [typeDoc('Person', { properties: { fields: { role: { kind: 'text' } } } })];
     const p = typePresentation('Person', buildSchema(entries));
     expect(p.group).toEqual([]);
     expect(p.columns).toEqual([{ field: 'role' }]);

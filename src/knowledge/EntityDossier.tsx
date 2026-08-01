@@ -70,7 +70,10 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
   return (
     <li className="flex items-start gap-2 px-2 py-1">
       <span className="mt-[3px] flex-none text-[var(--warn-600)]">
-        <Icon name={item.reason === 'contradicts' ? 'git-compare-arrows' : 'clock-alert'} size={12} />
+        <Icon
+          name={item.reason === 'contradicts' ? 'git-compare-arrows' : 'clock-alert'}
+          size={12}
+        />
       </span>
       <span className="min-w-0 flex-1 text-[12px] leading-[17px] text-[var(--n-700)]">
         {item.reason === 'contradicts' ? (

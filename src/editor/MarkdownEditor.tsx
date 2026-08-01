@@ -233,7 +233,10 @@ export function MarkdownEditor({
   // `[[` links a page (Obsidian habit); `@` links pages/people and sets due
   // dates on task lines. Insertion replaces the trigger text with a chip.
 
-  const insertChip = (content: { type: 'wikilink' | 'assignee' | 'due'; props: Record<string, string> }) => {
+  const insertChip = (content: {
+    type: 'wikilink' | 'assignee' | 'due';
+    props: Record<string, string>;
+  }) => {
     editor.insertInlineContent([content as never, ' ']);
     editor.focus();
   };
@@ -264,12 +267,12 @@ export function MarkdownEditor({
       // "Link page" would render duplicate titles (and duplicate React keys).
       .filter((e) => !(opts?.excludePeople === true && e.type === 'Person'))
       .map((e) => ({
-      title: e.title,
-      subtext: e.path,
-      group: 'Link page',
-      icon: <Icon name="file-text" size={14} />,
-      onItemClick: () => insertChip({ type: 'wikilink', props: { target: stem(e), alias: '' } }),
-    }));
+        title: e.title,
+        subtext: e.path,
+        group: 'Link page',
+        icon: <Icon name="file-text" size={14} />,
+        onItemClick: () => insertChip({ type: 'wikilink', props: { target: stem(e), alias: '' } }),
+      }));
 
   const personItems = (): DefaultReactSuggestionItem[] =>
     entries
@@ -353,9 +356,7 @@ export function MarkdownEditor({
       const docTitle =
         buildOutline(editor.document).find((i) => i.level === 1)?.text ??
         templateDisplayName(template);
-      const substituted = raw
-        .replaceAll('{{title}}', docTitle)
-        .replaceAll('{{date}}', todayIso());
+      const substituted = raw.replaceAll('{{title}}', docTitle).replaceAll('{{date}}', todayIso());
       // Drop the template's own H1 — a second H1 mid-document is noise.
       const lines = substituted.split('\n');
       const h1 = lines.findIndex((l) => l.trim().startsWith('# '));
@@ -388,8 +389,7 @@ export function MarkdownEditor({
     const { assignees } = splitTaskContent(block.content);
     const existingDue = Array.isArray(block.content)
       ? (block.content.find((c) => (c as { type?: string }).type === 'due') as
-          | { props?: { date?: string } }
-          | undefined)
+          { props?: { date?: string } } | undefined)
       : undefined;
     setAssignee(assignees[0] ?? '');
     setDueDate(existingDue?.props?.date ?? '');

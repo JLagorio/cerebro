@@ -78,8 +78,6 @@ describe('NoteBodyEditor', () => {
   it('surfaces a load failure instead of an empty editor', async () => {
     render(<NoteBodyEditor path="nope/missing.md" debounceMs={20} />);
     await waitFor(() => expect(screen.getByText("This page couldn't be loaded.")).toBeTruthy());
-    expect(useUiStore.getState().toasts.some((t) => t.message === "Couldn't load page")).toBe(
-      true,
-    );
+    expect(useUiStore.getState().toasts.some((t) => t.message === "Couldn't load page")).toBe(true);
   });
 });

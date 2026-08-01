@@ -31,7 +31,10 @@ pub struct GitProviderStatus {
 }
 
 fn which_git() -> Option<String> {
-    let out = std::process::Command::new("which").arg("git").output().ok()?;
+    let out = std::process::Command::new("which")
+        .arg("git")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

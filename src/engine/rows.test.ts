@@ -11,7 +11,10 @@ import type { GroupSpec } from './types';
  */
 
 const objectiveType = makeEntry({
-  path: 'types/objective.md', filename: 'objective.md', title: 'Objective', type: 'Type',
+  path: 'types/objective.md',
+  filename: 'objective.md',
+  title: 'Objective',
+  type: 'Type',
   properties: {
     statuses: [
       { id: 'on-track', group: 'active', color: '#34B764' },
@@ -22,38 +25,59 @@ const objectiveType = makeEntry({
 });
 
 const keyResultType = makeEntry({
-  path: 'types/key-result.md', filename: 'key-result.md', title: 'Key result', type: 'Type',
+  path: 'types/key-result.md',
+  filename: 'key-result.md',
+  title: 'Key result',
+  type: 'Type',
   properties: { fields: { objective: { kind: 'relation', target: 'Objective' } } },
 });
 
 const workItemType = makeEntry({
-  path: 'types/work-item.md', filename: 'work-item.md', title: 'Work item', type: 'Type',
+  path: 'types/work-item.md',
+  filename: 'work-item.md',
+  title: 'Work item',
+  type: 'Type',
   properties: { fields: { key_result: { kind: 'relation', target: 'Key result' } } },
 });
 
 // Two objectives, each with key results, each with work items. The links point
 // UP (child holds the relation), which is the direction the OKR data uses.
 const o1 = makeEntry({
-  path: 'records/objectives/o1.md', filename: 'o1.md', title: 'Ship the platform',
-  type: 'Objective', properties: { status: 'on-track' },
+  path: 'records/objectives/o1.md',
+  filename: 'o1.md',
+  title: 'Ship the platform',
+  type: 'Objective',
+  properties: { status: 'on-track' },
 });
 const o2 = makeEntry({
-  path: 'records/objectives/o2.md', filename: 'o2.md', title: 'Delight operators',
-  type: 'Objective', properties: { status: 'at-risk' },
+  path: 'records/objectives/o2.md',
+  filename: 'o2.md',
+  title: 'Delight operators',
+  type: 'Objective',
+  properties: { status: 'at-risk' },
 });
 
 const kr1 = makeEntry({
-  path: 'records/key-results/kr1.md', filename: 'kr1.md', title: 'p99 under 200ms',
-  type: 'Key result', relationships: { objective: ['o1'] },
+  path: 'records/key-results/kr1.md',
+  filename: 'kr1.md',
+  title: 'p99 under 200ms',
+  type: 'Key result',
+  relationships: { objective: ['o1'] },
 });
 const kr2 = makeEntry({
-  path: 'records/key-results/kr2.md', filename: 'kr2.md', title: 'NPS above 40',
-  type: 'Key result', relationships: { objective: ['o2'] },
+  path: 'records/key-results/kr2.md',
+  filename: 'kr2.md',
+  title: 'NPS above 40',
+  type: 'Key result',
+  relationships: { objective: ['o2'] },
 });
 
 const w1 = makeEntry({
-  path: 'items/w1.md', filename: 'w1.md', title: 'Add the cache',
-  type: 'Work item', relationships: { key_result: ['kr1'] },
+  path: 'items/w1.md',
+  filename: 'w1.md',
+  title: 'Add the cache',
+  type: 'Work item',
+  relationships: { key_result: ['kr1'] },
 });
 
 const ALL = [objectiveType, keyResultType, workItemType, o1, o2, kr1, kr2, w1];
@@ -123,19 +147,18 @@ describe('buildRows — nesting only', () => {
       allEntries: ALL,
       isCollapsed: (key) => key === collapsedKey,
     });
-    expect(shape(rows)).toEqual([
-      '0:Ship the platform',
-      '0:Delight operators',
-      '1:NPS above 40',
-    ]);
+    expect(shape(rows)).toEqual(['0:Ship the platform', '0:Delight operators', '1:NPS above 40']);
   });
 
   it('keys the same record differently under two parents', () => {
     // A key result linked to BOTH objectives appears twice; identical keys
     // would collide as React keys and toggle both copies together.
     const shared = makeEntry({
-      path: 'records/key-results/shared.md', filename: 'shared.md', title: 'Shared KR',
-      type: 'Key result', relationships: { objective: ['o1', 'o2'] },
+      path: 'records/key-results/shared.md',
+      filename: 'shared.md',
+      title: 'Shared KR',
+      type: 'Key result',
+      relationships: { objective: ['o1', 'o2'] },
     });
     const all = [...ALL, shared];
     const rows = entryRows(
@@ -208,7 +231,9 @@ describe('buildRows — bands and nesting in one chain', () => {
       schema,
       allEntries: ALL,
     });
-    expect(rows.filter((r) => r.kind === 'band').every((r) => r.key.startsWith('band:'))).toBe(true);
+    expect(rows.filter((r) => r.kind === 'band').every((r) => r.key.startsWith('band:'))).toBe(
+      true,
+    );
     expect(rows.filter((r) => r.kind === 'row').every((r) => r.key.startsWith('row:'))).toBe(true);
   });
 });
@@ -217,15 +242,24 @@ describe('buildRows — walk guards', () => {
   it('does not loop on a relation cycle', () => {
     // Two records that each claim the other as a child.
     const cycleType = makeEntry({
-      path: 'types/node.md', filename: 'node.md', title: 'Node', type: 'Type',
+      path: 'types/node.md',
+      filename: 'node.md',
+      title: 'Node',
+      type: 'Type',
       properties: { fields: { next: { kind: 'relation', target: 'Node' } } },
     });
     const a = makeEntry({
-      path: 'items/a.md', filename: 'a.md', title: 'A', type: 'Node',
+      path: 'items/a.md',
+      filename: 'a.md',
+      title: 'A',
+      type: 'Node',
       relationships: { next: ['b'] },
     });
     const b = makeEntry({
-      path: 'items/b.md', filename: 'b.md', title: 'B', type: 'Node',
+      path: 'items/b.md',
+      filename: 'b.md',
+      title: 'B',
+      type: 'Node',
       relationships: { next: ['a'] },
     });
     const all = [cycleType, a, b];
@@ -243,13 +277,19 @@ describe('buildRows — walk guards', () => {
     // A chain long enough to out-run the cycle guard: every level descends the
     // same forward relation on a fresh record, so `seen` never trips.
     const selfType = makeEntry({
-      path: 'types/link.md', filename: 'link.md', title: 'Link', type: 'Type',
+      path: 'types/link.md',
+      filename: 'link.md',
+      title: 'Link',
+      type: 'Type',
       properties: { fields: { next: { kind: 'relation', target: 'Link' } } },
     });
     const chainLength = MAX_ROW_DEPTH + 4;
     const links = Array.from({ length: chainLength }, (_, i) =>
       makeEntry({
-        path: `items/n${i}.md`, filename: `n${i}.md`, title: `N${i}`, type: 'Link',
+        path: `items/n${i}.md`,
+        filename: `n${i}.md`,
+        title: `N${i}`,
+        type: 'Link',
         ...(i + 1 < chainLength ? { relationships: { next: [`n${i + 1}`] } } : {}),
       }),
     );
@@ -295,7 +335,13 @@ describe('buildRows — the create-record row', () => {
   });
 
   it('is a single bandless row when the chain is flat', () => {
-    const rows = buildRows({ entries: objectives, group: [], schema, allEntries: ALL, addRows: true });
+    const rows = buildRows({
+      entries: objectives,
+      group: [],
+      schema,
+      allEntries: ALL,
+      addRows: true,
+    });
     expect(shape(rows)).toEqual(['0:Ship the platform', '0:Delight operators', '+']);
   });
 

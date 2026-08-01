@@ -116,7 +116,9 @@ pub fn vault_pulse(ws: &GitWorkspaceInfo, limit: usize) -> Result<Vec<PulseCommi
         for line in names.lines() {
             let mut parts = line.split('\t');
             let Some(code) = parts.next() else { continue };
-            let Some(path) = parts.last() else { continue };
+            let Some(path) = parts.next_back() else {
+                continue;
+            };
             if path.trim().is_empty() {
                 continue;
             }
@@ -159,8 +161,7 @@ pub fn last_commit(ws: &GitWorkspaceInfo) -> Result<Option<LastCommitInfo>, Stri
         // A repository with no commits yet is not an error.
         .unwrap_or_default();
     let mut parts = out.trim().split('\x1f');
-    let (Some(short_hash), Some(date), Some(message)) =
-        (parts.next(), parts.next(), parts.next())
+    let (Some(short_hash), Some(date), Some(message)) = (parts.next(), parts.next(), parts.next())
     else {
         return Ok(None);
     };
@@ -181,7 +182,10 @@ mod tests {
     #[test]
     fn humanizes_a_note_stem() {
         assert_eq!(title_for("projects/atlas/items/fld-1.md"), "Fld 1");
-        assert_eq!(title_for("knowledge/onboarding_drop_off.md"), "Onboarding Drop Off");
+        assert_eq!(
+            title_for("knowledge/onboarding_drop_off.md"),
+            "Onboarding Drop Off"
+        );
     }
 
     #[test]

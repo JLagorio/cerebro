@@ -2,7 +2,20 @@ import { Icon } from '@/components/ui/Icon';
 import { addDays, toIsoDate } from '@/engine/dates';
 
 const WEEKDAY_HEADER = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_SHORT = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 export interface CalendarProps {
   /** Visible month, 'YYYY-MM'. */
@@ -101,8 +114,7 @@ export function Calendar({
         ))}
         {grid.map(({ date, inMonth }) => {
           const isEndpoint = date === lo || date === hi;
-          const inRange =
-            lo !== null && hi !== null && date > lo && date < hi;
+          const inRange = lo !== null && hi !== null && date > lo && date < hi;
           const dayNum = Number(date.slice(8));
           return (
             <button

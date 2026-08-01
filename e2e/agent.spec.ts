@@ -31,7 +31,9 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
   await panel.getByRole('button', { name: 'Send' }).click();
 
   // The user's message is in the transcript immediately.
-  await expect(panel.getByTestId('chat-message').filter({ hasText: 'What is at risk' })).toBeVisible();
+  await expect(
+    panel.getByTestId('chat-message').filter({ hasText: 'What is at risk' }),
+  ).toBeVisible();
 
   // Tool use is visible, not hidden: an agent that reads your vault should
   // say so. M9.5 replaced the chip with an expandable action card, so the
@@ -121,10 +123,16 @@ test('agent: a suggested filing is shown for approval, never applied', async ({ 
 
 test('agent: organizing AI-written work records who signed off', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
 
   // The seeded capture carrying `generated: {by: claude-code}` is labelled.
-  const aiRow = page.getByTestId('inbox-row').filter({ has: page.getByTestId('from-ai') }).first();
+  const aiRow = page
+    .getByTestId('inbox-row')
+    .filter({ has: page.getByTestId('from-ai') })
+    .first();
   await expect(aiRow).toBeVisible();
   const path = await aiRow.getAttribute('data-path');
   await aiRow.click();

@@ -1,11 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  addView,
-  deleteList,
-  deleteView,
-  duplicateView,
-  updateList,
-} from '@/app/listActions';
+import { addView, deleteList, deleteView, duplicateView, updateList } from '@/app/listActions';
 import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -54,9 +48,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     // Ids are unique per FOLDER, so the collection is part of the key — two
     // Collections may each hold a "roadmap".
     () =>
-      views.find(
-        (v) => v.id === selection.id && v.collection === (selection.collection ?? null),
-      ) ?? null,
+      views.find((v) => v.id === selection.id && v.collection === (selection.collection ?? null)) ??
+      null,
     [views, selection.id, selection.collection],
   );
 
@@ -133,7 +126,12 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   }
 
   const openTab = (id: string) =>
-    navigate({ kind: 'list', id: selection.id, collection: selection.collection ?? null, view: id });
+    navigate({
+      kind: 'list',
+      id: selection.id,
+      collection: selection.collection ?? null,
+      view: id,
+    });
 
   /**
    * Persist a change to the whole List (source, name, the views array).
@@ -280,7 +278,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                       // A view still called "Table" that now draws a board is a
                       // lie in the tab row; rename only the ones that never got
                       // a name of their own.
-                      name: v.name === layoutLabel(v.presentation.type) ? layoutLabel(type) : v.name,
+                      name:
+                        v.name === layoutLabel(v.presentation.type) ? layoutLabel(type) : v.name,
                       presentation: { ...v.presentation, type },
                     }
                   : v,
@@ -409,11 +408,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
         >
           <p className="m-0 text-[13px] text-[var(--n-600)]">
             The list's configuration is removed, including its{' '}
-            {list.definition.views.length === 1
-              ? 'view'
-              : `${list.definition.views.length} views`}
-            . The records it held are untouched — a list is a saved query, not the notes
-            themselves.
+            {list.definition.views.length === 1 ? 'view' : `${list.definition.views.length} views`}.
+            The records it held are untouched — a list is a saved query, not the notes themselves.
           </p>
         </Dialog>
       )}

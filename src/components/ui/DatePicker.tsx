@@ -155,8 +155,7 @@ export function DatePicker({
       onChange({ ...value, start: date });
       return;
     }
-    const next =
-      endpoint === 'start' ? { ...value, start: date } : { ...value, end: date };
+    const next = endpoint === 'start' ? { ...value, start: date } : { ...value, end: date };
     // Keep the range ordered whichever endpoint moved.
     if (next.end !== null && next.end < next.start) {
       [next.start, next.end] = [next.end, next.start];
@@ -167,7 +166,11 @@ export function DatePicker({
   };
 
   const toggleEnd = (on: boolean) => {
-    onChange(on ? { ...value, end: value.start, endTime: value.startTime } : { ...value, end: null, endTime: null });
+    onChange(
+      on
+        ? { ...value, end: value.start, endTime: value.startTime }
+        : { ...value, end: null, endTime: null },
+    );
     setEndpoint(on ? 'end' : 'start');
   };
 
@@ -248,7 +251,9 @@ export function DatePicker({
         {showEndToggle && (
           <SettingRow
             label="End date"
-            value={<Switch checked={value.end !== null} onChange={toggleEnd} ariaLabel="End date" />}
+            value={
+              <Switch checked={value.end !== null} onChange={toggleEnd} ariaLabel="End date" />
+            }
           />
         )}
         <SettingRow
@@ -312,27 +317,30 @@ export function DatePicker({
           </>
         )}
         {showRemind && (
-        <SettingRow
-          label="Remind"
-          onClick={() => setFlyout(flyout === 'remind' ? null : 'remind')}
-          value={
-            <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
-              {REMIND_OPTIONS.find((o) => o.id === (value.remind ?? 'none'))?.label.replace(/ \(9:00 AM\)$/, '')}
-              <Icon name="chevron-right" size={13} color="var(--n-400)" />
-            </span>
-          }
-        >
-          {flyout === 'remind' && (
-            <FlyoutMenu
-              options={REMIND_OPTIONS}
-              activeId={value.remind ?? 'none'}
-              onPick={(id) => {
-                onChange({ ...value, remind: id === 'none' ? null : (id as RemindOffset) });
-                closeFlyouts();
-              }}
-            />
-          )}
-        </SettingRow>
+          <SettingRow
+            label="Remind"
+            onClick={() => setFlyout(flyout === 'remind' ? null : 'remind')}
+            value={
+              <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
+                {REMIND_OPTIONS.find((o) => o.id === (value.remind ?? 'none'))?.label.replace(
+                  / \(9:00 AM\)$/,
+                  '',
+                )}
+                <Icon name="chevron-right" size={13} color="var(--n-400)" />
+              </span>
+            }
+          >
+            {flyout === 'remind' && (
+              <FlyoutMenu
+                options={REMIND_OPTIONS}
+                activeId={value.remind ?? 'none'}
+                onPick={(id) => {
+                  onChange({ ...value, remind: id === 'none' ? null : (id as RemindOffset) });
+                  closeFlyouts();
+                }}
+              />
+            )}
+          </SettingRow>
         )}
       </div>
       <div className="border-t border-[var(--n-100)] pt-1">

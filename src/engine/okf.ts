@@ -297,19 +297,19 @@ export interface Section {
 }
 
 const humanizeFolder = (folder: string): string =>
-  folder === ''
-    ? 'Ungrouped'
-    : folder.replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+  folder === '' ? 'Ungrouped' : folder.replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
 export function listSections(concepts: Concept[]): Section[] {
   const counts = new Map<string, number>();
   for (const concept of concepts) {
     counts.set(concept.section, (counts.get(concept.section) ?? 0) + 1);
   }
-  return [...counts.entries()]
-    .map(([folder, count]) => ({ folder, label: humanizeFolder(folder), count }))
-    // Root-level concepts sort last: they are the leftovers, not a section.
-    .sort((a, b) => (a.folder === '' ? 1 : b.folder === '' ? -1 : a.label.localeCompare(b.label)));
+  return (
+    [...counts.entries()]
+      .map(([folder, count]) => ({ folder, label: humanizeFolder(folder), count }))
+      // Root-level concepts sort last: they are the leftovers, not a section.
+      .sort((a, b) => (a.folder === '' ? 1 : b.folder === '' ? -1 : a.label.localeCompare(b.label)))
+  );
 }
 
 /** One entity and everything the bundle knows about it. */
@@ -433,10 +433,7 @@ export function commitOf(entry: Entry, concepts: readonly Concept[]): Commit {
 export function relatedConcepts(entry: Entry, concepts: Concept[], entries: Entry[]): Concept[] {
   const subjects = new Set<string>([entry.path]);
   if (entry.project !== null) subjects.add(entry.project);
-  const linked = [
-    ...entry.outgoingLinks,
-    ...Object.values(entry.relationships).flat(),
-  ];
+  const linked = [...entry.outgoingLinks, ...Object.values(entry.relationships).flat()];
   for (const target of linked) {
     const resolved = resolveTarget(target, entries);
     if (resolved !== null) subjects.add(resolved.path);
@@ -680,9 +677,32 @@ export function conceptEdges(
 
 /** Words too common to make two titles about the same thing. */
 const STOPWORDS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'how', 'in',
-  'is', 'it', 'of', 'on', 'or', 'that', 'the', 'this', 'to', 'what', 'when',
-  'which', 'why', 'with',
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'for',
+  'from',
+  'how',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'that',
+  'the',
+  'this',
+  'to',
+  'what',
+  'when',
+  'which',
+  'why',
+  'with',
 ]);
 
 function titleTokens(title: string): Set<string> {
@@ -746,11 +766,12 @@ export function nearDuplicates(
  * multiple entries capture independent checks, so it never overwrites. */
 export function verifyPatch(entry: Entry, actor: string, at: string): Record<string, unknown> {
   const existing = entry.properties.verified;
-  const list = existing === undefined || existing === null
-    ? []
-    : Array.isArray(existing)
-      ? [...existing]
-      : [existing];
+  const list =
+    existing === undefined || existing === null
+      ? []
+      : Array.isArray(existing)
+        ? [...existing]
+        : [existing];
   return { verified: [...list, { by: actor, at }] };
 }
 

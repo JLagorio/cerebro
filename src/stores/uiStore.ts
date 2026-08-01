@@ -247,9 +247,7 @@ function loadExpanded(): Record<string, boolean> {
     // stub under vitest and shadows jsdom's working implementation.
     const raw = window.localStorage.getItem(EXPANDED_KEY);
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
-    return typeof parsed === 'object' && parsed !== null
-      ? (parsed as Record<string, boolean>)
-      : {};
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, boolean>) : {};
   } catch {
     return {};
   }
@@ -333,9 +331,8 @@ function loadStringListMap(key: string): Record<string, string[]> {
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).flatMap(
-        ([k, v]): [string, string[]][] =>
-          Array.isArray(v) ? [[k, v.filter((x): x is string => typeof x === 'string')]] : [],
+      Object.entries(parsed as Record<string, unknown>).flatMap(([k, v]): [string, string[]][] =>
+        Array.isArray(v) ? [[k, v.filter((x): x is string => typeof x === 'string')]] : [],
       ),
     );
   } catch {
@@ -376,14 +373,24 @@ export const useUiStore = create<UiState>((set, get) => ({
   openDetail: (path) => set({ detailPath: path }),
   closeDetail: () => set({ detailPath: null }),
 
-  detailWidth: loadNumber(DETAIL_WIDTH_KEY, DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MIN, DETAIL_WIDTH_MAX),
+  detailWidth: loadNumber(
+    DETAIL_WIDTH_KEY,
+    DETAIL_WIDTH_DEFAULT,
+    DETAIL_WIDTH_MIN,
+    DETAIL_WIDTH_MAX,
+  ),
   setDetailWidth: (px) => {
     const clamped = Math.round(Math.min(DETAIL_WIDTH_MAX, Math.max(DETAIL_WIDTH_MIN, px)));
     storeString(DETAIL_WIDTH_KEY, String(clamped));
     set({ detailWidth: clamped });
   },
 
-  sidebarWidth: loadNumber(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX),
+  sidebarWidth: loadNumber(
+    SIDEBAR_WIDTH_KEY,
+    SIDEBAR_WIDTH_DEFAULT,
+    SIDEBAR_WIDTH_MIN,
+    SIDEBAR_WIDTH_MAX,
+  ),
   setSidebarWidth: (px) => {
     const clamped = Math.round(Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, px)));
     storeString(SIDEBAR_WIDTH_KEY, String(clamped));
@@ -602,8 +609,6 @@ export const useUiStore = create<UiState>((set, get) => ({
     }),
 
   toasts: [],
-  toast: (message) =>
-    set((s) => ({ toasts: [...s.toasts, { id: nextToastId++, message }] })),
-  dismissToast: (id) =>
-    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  toast: (message) => set((s) => ({ toasts: [...s.toasts, { id: nextToastId++, message }] })),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }));

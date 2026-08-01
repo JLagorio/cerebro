@@ -52,27 +52,42 @@ const zed = makeEntry({
 });
 
 const i1 = makeEntry({
-  path: 'items/i1.md', filename: 'i1.md', title: 'One', type: 'Work item',
+  path: 'items/i1.md',
+  filename: 'i1.md',
+  title: 'One',
+  type: 'Work item',
   properties: { status: 'doing', priority: 'high' },
   relationships: { project: ['flight-deck'], assignee: ['ana-marte'] },
 });
 const i2 = makeEntry({
-  path: 'items/i2.md', filename: 'i2.md', title: 'Two', type: 'Work item',
+  path: 'items/i2.md',
+  filename: 'i2.md',
+  title: 'Two',
+  type: 'Work item',
   properties: { status: 'doing', priority: 'low' },
   relationships: { project: ['flight-deck'], assignee: ['zed-quill'] },
 });
 const i3 = makeEntry({
-  path: 'items/i3.md', filename: 'i3.md', title: 'Three', type: 'Work item',
+  path: 'items/i3.md',
+  filename: 'i3.md',
+  title: 'Three',
+  type: 'Work item',
   properties: { status: 'shipped' },
   relationships: { project: ['flight-deck'], assignee: ['ghost-user'] },
 });
 const i4 = makeEntry({
-  path: 'items/i4.md', filename: 'i4.md', title: 'Four', type: 'Work item',
+  path: 'items/i4.md',
+  filename: 'i4.md',
+  title: 'Four',
+  type: 'Work item',
   properties: { status: 'qa' }, // ghost status
   relationships: { project: ['flight-deck'] },
 });
 const i5 = makeEntry({
-  path: 'items/i5.md', filename: 'i5.md', title: 'Five', type: 'Work item',
+  path: 'items/i5.md',
+  filename: 'i5.md',
+  title: 'Five',
+  type: 'Work item',
   relationships: { project: ['flight-deck'] },
 });
 
@@ -121,7 +136,12 @@ describe('groupEntries — select', () => {
 describe('groupEntries — person', () => {
   it('orders groups alphabetically by resolved display name, unresolved targets keep raw form', () => {
     const groups = groupEntries(items, 'assignee', schema);
-    expect(groups.map((g) => g.label)).toEqual(['Ana Marte', 'ghost-user', 'Zed Quill', 'No assignee']);
+    expect(groups.map((g) => g.label)).toEqual([
+      'Ana Marte',
+      'ghost-user',
+      'Zed Quill',
+      'No assignee',
+    ]);
     expect(groups.map((g) => g.key)).toEqual(['ana-marte', 'ghost-user', 'zed-quill', '__none__']);
     expect(groups[0].entries).toEqual([i1]);
     expect(groups[3].entries).toEqual([i4, i5]);
@@ -191,7 +211,10 @@ describe('groupTree', () => {
 
   it('paths disambiguate the same key under different parents', () => {
     const nodes = groupTree(entries, [{ field: 'status' }, { field: 'priority' }], schema);
-    const urgentPaths = nodes.flatMap((n) => n.children).filter((c) => c.key === 'urgent').map((c) => c.path);
+    const urgentPaths = nodes
+      .flatMap((n) => n.children)
+      .filter((c) => c.key === 'urgent')
+      .map((c) => c.path);
     // 'urgent' appears under both statuses; collapsing one must not collapse
     // the other, which is why collapse state keys on path and not key.
     expect(new Set(urgentPaths).size).toBe(urgentPaths.length);

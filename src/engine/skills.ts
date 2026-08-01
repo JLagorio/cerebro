@@ -54,9 +54,10 @@ export function listSkills(entries: Entry[]): SkillRef[] {
       // `relationships`, so a description like "review of [[Phoenix]]" is
       // absent from `properties`. The link names are most of its meaning —
       // better in the catalog than a silent blank.
-      const description = typeof e.properties.description === 'string'
-        ? e.properties.description.replace(/\s+/g, ' ').trim()
-        : (e.relationships.description ?? []).map((t) => `[[${t}]]`).join(' ');
+      const description =
+        typeof e.properties.description === 'string'
+          ? e.properties.description.replace(/\s+/g, ' ').trim()
+          : (e.relationships.description ?? []).map((t) => `[[${t}]]`).join(' ');
       return { name, title: e.title, path: e.path, description };
     });
 }
@@ -192,7 +193,7 @@ export function skillIndex(skills: SkillRef[]): string | null {
     .join('; ');
   return (
     'This vault defines skills: records of type Skill whose body is a reusable instruction set. ' +
-    'The user runs one by typing /name in this panel. When a request matches a skill\'s purpose, ' +
+    "The user runs one by typing /name in this panel. When a request matches a skill's purpose, " +
     `read its note with get_note and follow it. Skills: ${listing}.`
   );
 }

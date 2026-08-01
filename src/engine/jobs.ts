@@ -21,14 +21,7 @@ import type { Entry } from './types';
  * rechecking stale concepts remain maintenance.
  */
 
-export type JobKind =
-  | 'filed'
-  | 'scheduled'
-  | 'agent'
-  | 'behind'
-  | 'refresh'
-  | 'stale'
-  | 'schema';
+export type JobKind = 'filed' | 'scheduled' | 'agent' | 'behind' | 'refresh' | 'stale' | 'schema';
 
 export interface AgentJob {
   kind: JobKind;
@@ -65,10 +58,7 @@ export interface JobQueueInput extends LearnQueueInput {
  * left alone they read as "filed" forever, because only a learn attempt
  * consumes a filing and these never get one (PR #5 review).
  */
-export function unlearnableFiled(
-  entries: readonly Entry[],
-  filed: readonly string[],
-): string[] {
+export function unlearnableFiled(entries: readonly Entry[], filed: readonly string[]): string[] {
   const byPath = new Map(entries.map((e) => [e.path, e]));
   return filed.filter((path) => {
     const entry = byPath.get(path);

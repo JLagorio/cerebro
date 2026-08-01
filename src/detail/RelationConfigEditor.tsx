@@ -29,9 +29,7 @@ export function RelationConfigEditor({
   /** Declares the derived reciprocal on the target type. */
   onAddReciprocal: (name: string) => void;
 }) {
-  const [reciprocalDraft, setReciprocalDraft] = useState(
-    `related ${typeName.toLowerCase()}`,
-  );
+  const [reciprocalDraft, setReciprocalDraft] = useState(`related ${typeName.toLowerCase()}`);
 
   if (def.from !== undefined) {
     return (
@@ -39,11 +37,9 @@ export function RelationConfigEditor({
         <Icon name="arrow-left-right" size={12} style={{ marginTop: 2 }} />
         <span>
           Two-way relation: this is the derived side of{' '}
-          <strong className="font-medium text-[var(--n-700)]">
-            {humanize(def.from.field)}
-          </strong>{' '}
-          on <strong className="font-medium text-[var(--n-700)]">{def.from.type}</strong>.
-          It stores nothing — the link lives there, and edits here write through.
+          <strong className="font-medium text-[var(--n-700)]">{humanize(def.from.field)}</strong> on{' '}
+          <strong className="font-medium text-[var(--n-700)]">{def.from.type}</strong>. It stores
+          nothing — the link lives there, and edits here write through.
         </span>
       </p>
     );
@@ -53,8 +49,7 @@ export function RelationConfigEditor({
   const targetDef = def.target !== undefined ? schema.types.get(def.target) : undefined;
   const reciprocal =
     targetDef?.fields.find(
-      (f) =>
-        f.kind === 'relation' && f.from?.type === typeName && f.from?.field === def.name,
+      (f) => f.kind === 'relation' && f.from?.type === typeName && f.from?.field === def.name,
     ) ?? null;
 
   return (

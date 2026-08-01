@@ -22,7 +22,9 @@ function setup(overrides: Partial<ReturnType<typeof useVaultStore.getState>> = {
   const schema = buildSchema(entries);
   const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
   const project = entries.find((e) => e.path === 'projects/onboarding/project.md')!;
-  render(<ListView entries={items} presentation={presentation} schema={schema} project={project} />);
+  render(
+    <ListView entries={items} presentation={presentation} schema={schema} project={project} />,
+  );
 }
 
 afterEach(cleanup);
@@ -162,7 +164,9 @@ describe('FieldChip', () => {
 
   it('renders ghost values with dashed muted styling', () => {
     const { container } = render(
-      <FieldChip resolved={{ def: null, raw: 'weird', display: 'weird', color: null, ghost: true }} />,
+      <FieldChip
+        resolved={{ def: null, raw: 'weird', display: 'weird', color: null, ghost: true }}
+      />,
     );
     expect((container.firstChild as HTMLElement).className).toContain('border-dashed');
   });

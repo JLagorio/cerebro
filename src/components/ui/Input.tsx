@@ -58,7 +58,12 @@ export function Input({
   className = '',
   testId,
 }: InputProps) {
-  const h = size === 'sm' ? 'var(--control-h-sm)' : size === 'lg' ? 'var(--control-h-lg)' : 'var(--control-h)';
+  const h =
+    size === 'sm'
+      ? 'var(--control-h-sm)'
+      : size === 'lg'
+        ? 'var(--control-h-lg)'
+        : 'var(--control-h)';
   return (
     <span
       className={`cb-input ${disabled ? 'cb-input-disabled' : ''} ${className}`}

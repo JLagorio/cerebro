@@ -72,18 +72,18 @@ export function QuickOpen() {
     });
 
     const viewTargets: Target[] = views.map((v) => ({
-        // Ids are unique per folder, so the collection is part of the target's
-        // identity AND of where it navigates — otherwise two collections'
-        // "roadmap" lists collapse into one entry that opens the wrong one.
-        id: `list:${v.collection ?? ''}:${v.id}`,
-        label: v.definition.name,
-        icon: v.definition.icon ?? 'layout-list',
-        color: v.definition.color,
-        hint: v.collection ?? '',
-        kindLabel: 'List',
-        alias: v.id,
-        run: () => go({ kind: 'list', id: v.id, collection: v.collection }),
-      }));
+      // Ids are unique per folder, so the collection is part of the target's
+      // identity AND of where it navigates — otherwise two collections'
+      // "roadmap" lists collapse into one entry that opens the wrong one.
+      id: `list:${v.collection ?? ''}:${v.id}`,
+      label: v.definition.name,
+      icon: v.definition.icon ?? 'layout-list',
+      color: v.definition.color,
+      hint: v.collection ?? '',
+      kindLabel: 'List',
+      alias: v.id,
+      run: () => go({ kind: 'list', id: v.id, collection: v.collection }),
+    }));
 
     const typeTargets: Target[] = listTypes(entries, schema).map((t) => ({
       id: `type:${t.name}`,
@@ -100,12 +100,48 @@ export function QuickOpen() {
     // words people actually reach for — "history" for Pulse, "git" for both.
     const places: { id: string; label: string; icon: string; alias: string; sel: Selection }[] = [
       { id: 'go:home', label: 'Home', icon: 'house', alias: 'my tasks', sel: { kind: 'home' } },
-      { id: 'go:inbox', label: 'Inbox', icon: 'inbox', alias: 'capture queue', sel: { kind: 'inbox' } },
-      { id: 'go:docs', label: 'Docs', icon: 'library', alias: 'documents pages', sel: { kind: 'docs' } },
-      { id: 'go:knowledge', label: 'Knowledge', icon: 'brain', alias: 'concepts base', sel: { kind: 'knowledge' } },
-      { id: 'go:changes', label: 'Changes', icon: 'file-diff', alias: 'git uncommitted diff', sel: { kind: 'changes' } },
-      { id: 'go:pulse', label: 'Pulse', icon: 'activity', alias: 'git history commits', sel: { kind: 'pulse' } },
-      { id: 'go:settings', label: 'Settings', icon: 'settings', alias: 'preferences', sel: { kind: 'settings' } },
+      {
+        id: 'go:inbox',
+        label: 'Inbox',
+        icon: 'inbox',
+        alias: 'capture queue',
+        sel: { kind: 'inbox' },
+      },
+      {
+        id: 'go:docs',
+        label: 'Docs',
+        icon: 'library',
+        alias: 'documents pages',
+        sel: { kind: 'docs' },
+      },
+      {
+        id: 'go:knowledge',
+        label: 'Knowledge',
+        icon: 'brain',
+        alias: 'concepts base',
+        sel: { kind: 'knowledge' },
+      },
+      {
+        id: 'go:changes',
+        label: 'Changes',
+        icon: 'file-diff',
+        alias: 'git uncommitted diff',
+        sel: { kind: 'changes' },
+      },
+      {
+        id: 'go:pulse',
+        label: 'Pulse',
+        icon: 'activity',
+        alias: 'git history commits',
+        sel: { kind: 'pulse' },
+      },
+      {
+        id: 'go:settings',
+        label: 'Settings',
+        icon: 'settings',
+        alias: 'preferences',
+        sel: { kind: 'settings' },
+      },
     ];
     const surfaces: Target[] = places.map((s) => ({
       id: s.id,
@@ -119,6 +155,8 @@ export function QuickOpen() {
     }));
 
     return [...noteTargets, ...viewTargets, ...typeTargets, ...surfaces];
+    // `go`/`openEntry` are navigation closures reborn each render; depending
+    // on them would rebuild every target per keystroke for the same behavior.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, views, schema]);
 
@@ -171,7 +209,11 @@ export function QuickOpen() {
         }}
         width="100%"
       />
-      <div role="listbox" aria-label="Quick open results" className="mt-1.5 max-h-[380px] overflow-y-auto">
+      <div
+        role="listbox"
+        aria-label="Quick open results"
+        className="mt-1.5 max-h-[380px] overflow-y-auto"
+      >
         {results.map((r, i) => (
           <button
             key={r.target.id}
@@ -184,7 +226,10 @@ export function QuickOpen() {
             className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left"
             style={{ background: i === activeIndex ? 'var(--n-50)' : 'transparent' }}
           >
-            <span className="inline-flex flex-none" style={{ color: r.target.color ?? 'var(--n-400)' }}>
+            <span
+              className="inline-flex flex-none"
+              style={{ color: r.target.color ?? 'var(--n-400)' }}
+            >
               <Icon name={r.target.icon} size={14} />
             </span>
             <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
@@ -206,7 +251,9 @@ export function QuickOpen() {
           </div>
         )}
         {query.trim() !== '' && results.length === 0 && (
-          <div className="px-3 py-4 text-[12px] text-[var(--n-500)]">No matches. Try a different term.</div>
+          <div className="px-3 py-4 text-[12px] text-[var(--n-500)]">
+            No matches. Try a different term.
+          </div>
         )}
       </div>
     </Dialog>

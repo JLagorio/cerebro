@@ -81,7 +81,9 @@ export function handleDragEnd(
 function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schema: Schema }) {
   // M9.3: one open rule across all four layouts (see useOpenPath).
   const openPath = useOpenPath('in-place');
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: entry.path });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: entry.path,
+  });
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
   const priority = schema.resolveField(entry, 'priority');
   const assignee = schema.resolveField(entry, 'assignee');
@@ -103,13 +105,25 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
       className="relative cursor-pointer rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-[11px] py-[9px] shadow-[var(--shadow-xs)] hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)]"
     >
       <div className="mb-1 flex items-center gap-1.5">
-        <span data-testid="card-key" className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">{key}</span>
+        <span
+          data-testid="card-key"
+          className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]"
+        >
+          {key}
+        </span>
       </div>
-      <div className="mb-2 text-[13px] font-medium leading-[18px] text-[var(--n-900)]">{entry.title}</div>
+      <div className="mb-2 text-[13px] font-medium leading-[18px] text-[var(--n-900)]">
+        {entry.title}
+      </div>
       <div className="flex items-center gap-[7px]">
         {priority.display !== '' && (
           <span title={`Priority: ${priority.display}`} className="inline-flex">
-            <StatusFlag bare size="sm" label={priority.display} color={priority.color ?? 'var(--n-400)'} />
+            <StatusFlag
+              bare
+              size="sm"
+              label={priority.display}
+              color={priority.color ?? 'var(--n-400)'}
+            />
           </span>
         )}
         <span className="flex-1" />
@@ -145,7 +159,9 @@ function BoardColumn({
           }
         />
         <span className="text-[12.5px] font-semibold text-[var(--n-800)]">{group.label}</span>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">{group.entries.length}</span>
+        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+          {group.entries.length}
+        </span>
       </div>
       <div
         ref={setNodeRef}
@@ -255,7 +271,9 @@ export function BoardView({
       ) : (
         <DndContext
           sensors={sensors}
-          onDragEnd={(event) => handleDragEnd(event, { groupBy, groups, schema, patchFrontmatter, toast })}
+          onDragEnd={(event) =>
+            handleDragEnd(event, { groupBy, groups, schema, patchFrontmatter, toast })
+          }
         >
           {lanes === null ? (
             <div className="flex items-start gap-3 overflow-x-auto">

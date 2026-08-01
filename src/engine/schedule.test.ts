@@ -130,7 +130,10 @@ describe('span arithmetic', () => {
 
   it('enumerates every day inclusively', () => {
     expect(eachDay({ start: '2026-07-29', end: '2026-08-01' })).toEqual([
-      '2026-07-29', '2026-07-30', '2026-07-31', '2026-08-01',
+      '2026-07-29',
+      '2026-07-30',
+      '2026-07-31',
+      '2026-08-01',
     ]);
   });
 
@@ -146,8 +149,18 @@ describe('span arithmetic', () => {
   });
 
   it('treats touching spans as overlapping (both inclusive)', () => {
-    expect(overlaps({ start: '2026-07-01', end: '2026-07-05' }, { start: '2026-07-05', end: '2026-07-09' })).toBe(true);
-    expect(overlaps({ start: '2026-07-01', end: '2026-07-04' }, { start: '2026-07-05', end: '2026-07-09' })).toBe(false);
+    expect(
+      overlaps(
+        { start: '2026-07-01', end: '2026-07-05' },
+        { start: '2026-07-05', end: '2026-07-09' },
+      ),
+    ).toBe(true);
+    expect(
+      overlaps(
+        { start: '2026-07-01', end: '2026-07-04' },
+        { start: '2026-07-05', end: '2026-07-09' },
+      ),
+    ).toBe(false);
   });
 });
 
@@ -187,7 +200,10 @@ describe('month grid', () => {
   });
 
   it('places a multi-day record on every day it covers', () => {
-    const e = makeEntry({ path: 'a.md', properties: { w: { start: '2026-07-01', end: '2026-07-03' } } });
+    const e = makeEntry({
+      path: 'a.md',
+      properties: { w: { start: '2026-07-01', end: '2026-07-03' } },
+    });
     const other = makeEntry({ path: 'b.md', properties: { w: '2026-07-03' } });
     expect(onDay([e, other], 'w', '2026-07-02').map((x) => x.path)).toEqual(['a.md']);
     expect(onDay([e, other], 'w', '2026-07-03').map((x) => x.path)).toEqual(['a.md', 'b.md']);
@@ -201,7 +217,10 @@ describe('horizontal axis', () => {
   it('pads the data range, scaled to the zoom', () => {
     expect(axisSpan(data, 'day', '2026-07-15')).toEqual({ start: '2026-07-07', end: '2026-07-23' });
     // Zoomed out it snaps outward to whole months so ticks align.
-    expect(axisSpan(data, 'month', '2026-07-15')).toEqual({ start: '2026-06-01', end: '2026-08-31' });
+    expect(axisSpan(data, 'month', '2026-07-15')).toEqual({
+      start: '2026-06-01',
+      end: '2026-08-31',
+    });
   });
 
   it('still produces an axis when nothing is dated, centred on today', () => {
@@ -266,7 +285,9 @@ describe('horizontal axis', () => {
 describe('dependencies', () => {
   const a = makeEntry({ path: 'items/a.md', filename: 'a.md', title: 'A' });
   const b = makeEntry({
-    path: 'items/b.md', filename: 'b.md', title: 'B',
+    path: 'items/b.md',
+    filename: 'b.md',
+    title: 'B',
     relationships: { blocked_by: ['a'] },
   });
   const entries = [a, b];
@@ -287,10 +308,16 @@ describe('dependencies', () => {
 
   it('flags an edge whose predecessor has not finished before its successor starts', () => {
     expect(
-      isSlipping({ start: '2026-07-01', end: '2026-07-10' }, { start: '2026-07-05', end: '2026-07-20' }),
+      isSlipping(
+        { start: '2026-07-01', end: '2026-07-10' },
+        { start: '2026-07-05', end: '2026-07-20' },
+      ),
     ).toBe(true);
     expect(
-      isSlipping({ start: '2026-07-01', end: '2026-07-04' }, { start: '2026-07-05', end: '2026-07-20' }),
+      isSlipping(
+        { start: '2026-07-01', end: '2026-07-04' },
+        { start: '2026-07-05', end: '2026-07-20' },
+      ),
     ).toBe(false);
   });
 });

@@ -3,13 +3,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
 import { listTypes } from '@/engine/typeCatalog';
-import type {
-  Entry,
-  Presentation,
-  Schema,
-  ListDefinition,
-  ViewDefinition,
-} from '@/engine/types';
+import type { Entry, Presentation, Schema, ListDefinition, ViewDefinition } from '@/engine/types';
 import { DEFAULT_PRESENTATION, layoutLabel } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import { VIEW_KINDS } from '@/views/viewKinds';
@@ -92,7 +86,8 @@ export function ViewSettingsDialog({
     .filter((e) => e.type === 'Project')
     .sort((a, b) => a.title.localeCompare(b.title));
 
-  const sourceFields = def.source.type === null ? [] : (schema.types.get(def.source.type)?.fields ?? []);
+  const sourceFields =
+    def.source.type === null ? [] : (schema.types.get(def.source.type)?.fields ?? []);
 
   return (
     <Dialog

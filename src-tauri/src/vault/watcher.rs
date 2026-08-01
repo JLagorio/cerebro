@@ -15,7 +15,12 @@ pub const OWN_WRITE_WINDOW: Duration = Duration::from_secs(4);
 
 /// Pure debounce decision: flush when there are pending changes and the vault
 /// has been quiet for at least `quiet`.
-pub fn should_flush(pending: bool, last_event: Option<Instant>, now: Instant, quiet: Duration) -> bool {
+pub fn should_flush(
+    pending: bool,
+    last_event: Option<Instant>,
+    now: Instant,
+    quiet: Duration,
+) -> bool {
     pending && last_event.is_some_and(|t| now.duration_since(t) >= quiet)
 }
 
@@ -33,7 +38,10 @@ pub fn is_relevant_path(path: &Path) -> bool {
     if hidden {
         return false;
     }
-    matches!(path.extension().and_then(|e| e.to_str()), Some("md") | Some("yml"))
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("md") | Some("yml")
+    )
 }
 
 fn own_writes() -> &'static Mutex<HashMap<PathBuf, Instant>> {
@@ -113,7 +121,10 @@ pub fn start(app: tauri::AppHandle, state: &WatcherState, vault: PathBuf) -> Res
         .map_err(|e| e.to_string())?;
     let vault_root = normalize(&vault);
     std::thread::spawn(move || debounce_loop(app, vault_root, rx));
-    let mut slot = state.0.lock().map_err(|_| "watcher state poisoned".to_string())?;
+    let mut slot = state
+        .0
+        .lock()
+        .map_err(|_| "watcher state poisoned".to_string())?;
     *slot = Some(watcher);
     Ok(())
 }
@@ -170,16 +181,39 @@ mod tests {
     #[test]
     fn pending_changes_flush_only_after_quiet_period() {
         let t0 = Instant::now();
-        assert!(!should_flush(true, Some(t0), t0 + Duration::from_millis(200), DEBOUNCE));
-        assert!(should_flush(true, Some(t0), t0 + Duration::from_millis(350), DEBOUNCE));
-        assert!(should_flush(true, Some(t0), t0 + Duration::from_millis(500), DEBOUNCE));
+        assert!(!should_flush(
+            true,
+            Some(t0),
+            t0 + Duration::from_millis(200),
+            DEBOUNCE
+        ));
+        assert!(should_flush(
+            true,
+            Some(t0),
+            t0 + Duration::from_millis(350),
+            DEBOUNCE
+        ));
+        assert!(should_flush(
+            true,
+            Some(t0),
+            t0 + Duration::from_millis(500),
+            DEBOUNCE
+        ));
     }
 
     #[test]
     fn own_write_suppression_expires_after_window() {
         let t0 = Instant::now();
-        assert!(own_write_active(t0, t0 + Duration::from_secs(3), OWN_WRITE_WINDOW));
-        assert!(!own_write_active(t0, t0 + Duration::from_secs(4), OWN_WRITE_WINDOW));
+        assert!(own_write_active(
+            t0,
+            t0 + Duration::from_secs(3),
+            OWN_WRITE_WINDOW
+        ));
+        assert!(!own_write_active(
+            t0,
+            t0 + Duration::from_secs(4),
+            OWN_WRITE_WINDOW
+        ));
     }
 
     #[test]

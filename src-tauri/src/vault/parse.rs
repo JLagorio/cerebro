@@ -45,7 +45,9 @@ fn closing_fence_body(s: &str) -> Option<&str> {
     if trimmed.is_empty() {
         Some(trimmed)
     } else {
-        trimmed.strip_prefix("\r\n").or_else(|| trimmed.strip_prefix('\n'))
+        trimmed
+            .strip_prefix("\r\n")
+            .or_else(|| trimmed.strip_prefix('\n'))
     }
 }
 
@@ -241,7 +243,9 @@ fn strip_inline_markdown(line: &str) -> String {
         }
     }
     out.push_str(rest);
-    out.chars().filter(|c| !matches!(c, '*' | '_' | '`')).collect()
+    out.chars()
+        .filter(|c| !matches!(c, '*' | '_' | '`'))
+        .collect()
 }
 
 /// Convert a YAML value to a JSON value (tagged values unwrapped,
@@ -256,7 +260,9 @@ pub fn yaml_to_json(value: &serde_yaml::Value) -> serde_json::Value {
             } else if let Some(u) = n.as_u64() {
                 serde_json::Value::from(u)
             } else {
-                n.as_f64().map(serde_json::Value::from).unwrap_or(serde_json::Value::Null)
+                n.as_f64()
+                    .map(serde_json::Value::from)
+                    .unwrap_or(serde_json::Value::Null)
             }
         }
         serde_yaml::Value::String(s) => serde_json::Value::String(s.clone()),
@@ -315,7 +321,10 @@ mod tests {
     #[test]
     fn parses_valid_mapping() {
         let mapping = parse_frontmatter("type: Work item\nestimate: 3\n").unwrap();
-        assert_eq!(mapping.get("type").and_then(|v| v.as_str()), Some("Work item"));
+        assert_eq!(
+            mapping.get("type").and_then(|v| v.as_str()),
+            Some("Work item")
+        );
         assert_eq!(mapping.get("estimate").and_then(|v| v.as_i64()), Some(3));
     }
 
@@ -345,8 +354,14 @@ mod tests {
 
     #[test]
     fn h1_title_is_first_h1_line_anywhere_in_body() {
-        assert_eq!(extract_h1_title("\n# Ship it\n\nBody.\n"), Some("Ship it".to_string()));
-        assert_eq!(extract_h1_title("intro\n\n# Later heading\n"), Some("Later heading".to_string()));
+        assert_eq!(
+            extract_h1_title("\n# Ship it\n\nBody.\n"),
+            Some("Ship it".to_string())
+        );
+        assert_eq!(
+            extract_h1_title("intro\n\n# Later heading\n"),
+            Some("Later heading".to_string())
+        );
         assert_eq!(extract_h1_title("## Only h2\n\nBody.\n"), None);
     }
 
@@ -402,7 +417,10 @@ mod tests {
     fn oversized_frontmatter_is_rejected_before_yaml_parse() {
         let block = format!("key: {}\n", "x".repeat(65 * 1024));
         let err = parse_frontmatter(&block).unwrap_err();
-        assert!(err.contains("frontmatter too large"), "unexpected error: {err}");
+        assert!(
+            err.contains("frontmatter too large"),
+            "unexpected error: {err}"
+        );
         // At the boundary (or below) parsing still proceeds normally.
         assert!(parse_frontmatter("key: value\n").is_ok());
     }

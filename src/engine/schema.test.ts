@@ -144,7 +144,14 @@ describe('buildSchema — types', () => {
     expect(def.icon).toBe('check-square');
     expect(def.color).toBe('#3D8BE8');
     expect(def.fields.map((f) => f.name)).toEqual([
-      'status', 'priority', 'estimate', 'assignee', 'due', 'blocked', 'weird', 'project',
+      'status',
+      'priority',
+      'estimate',
+      'assignee',
+      'due',
+      'blocked',
+      'weird',
+      'project',
     ]);
   });
 

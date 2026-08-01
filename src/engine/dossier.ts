@@ -1,9 +1,4 @@
-import {
-  conceptEdges,
-  conceptsAbout,
-  type Concept,
-  type Source,
-} from './okf';
+import { conceptEdges, conceptsAbout, type Concept, type Source } from './okf';
 import type { Entry } from './types';
 
 /**
@@ -104,7 +99,10 @@ export function buildDossier(
     (a, b) => b.citedBy - a.citedBy || a.resource.localeCompare(b.resource),
   );
 
-  const stamps = current.map(stampOf).filter((s) => s !== '').sort();
+  const stamps = current
+    .map(stampOf)
+    .filter((s) => s !== '')
+    .sort();
   return {
     current,
     retired,

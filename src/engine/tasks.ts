@@ -97,7 +97,20 @@ export function dueBucket(due: string | null, today: string): DueBucket {
 /** 'YYYY-MM-DD' → 'Jul 30' (UTC-safe: no Date parsing of bare dates). */
 export function formatDue(due: string): string {
   const [, m, d] = due.split('-');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
   const month = months[Number(m) - 1] ?? m;
   return `${month} ${Number(d)}`;
 }

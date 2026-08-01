@@ -118,8 +118,7 @@ export function DetailPanel() {
     entry.project === null
       ? null
       : entry.project.slice(0, Math.max(entry.project.lastIndexOf('/'), 0));
-  const onItsCollection =
-    selection.kind === 'collection' && selection.folder === containerFolder;
+  const onItsCollection = selection.kind === 'collection' && selection.folder === containerFolder;
   const container =
     containerFolder !== null && !onItsCollection
       ? (entries.find((e) => e.path === entry.project) ?? null)
@@ -182,11 +181,18 @@ export function DetailPanel() {
       <header className="flex items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
         {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
             panel, the table, QuickOpen, and the assistant's transcript. */}
-        <span className="inline-flex" style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}>
+        <span
+          className="inline-flex"
+          style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}
+        >
           <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
         <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
-        {key !== '' && <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">{key}</span>}
+        {key !== '' && (
+          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">
+            {key}
+          </span>
+        )}
         {/* M9.3/M12.5: opening a record no longer drags you to its container,
             so the container becomes something you press rather than something
             that happens to you. Hidden when you are already standing on it. */}
@@ -234,7 +240,9 @@ export function DetailPanel() {
             and related-concepts view, collapsed until asked (M8.3's rule:
             the assistant never speaks first). */}
         <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">Description</div>
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+          Description
+        </div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
             path so switching items reloads cleanly. */}
         <NoteBodyEditor

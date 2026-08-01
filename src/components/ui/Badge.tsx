@@ -30,7 +30,13 @@ export interface BadgeProps {
   className?: string;
 }
 
-export function Badge({ tone = 'neutral', variant = 'tint', children, style, className = '' }: BadgeProps) {
+export function Badge({
+  tone = 'neutral',
+  variant = 'tint',
+  children,
+  style,
+  className = '',
+}: BadgeProps) {
   const t = TONES[tone] || TONES.neutral;
   return (
     <span

@@ -30,16 +30,35 @@ pub struct AgentStatus {
 #[derive(Debug, Serialize, Clone)]
 #[serde(tag = "kind")]
 pub enum AgentEvent {
-    Init { session_id: String },
-    TextDelta { text: String },
-    ThinkingDelta { text: String },
-    ToolStart { tool_name: String, tool_id: String, input: Option<String> },
+    Init {
+        session_id: String,
+    },
+    TextDelta {
+        text: String,
+    },
+    ThinkingDelta {
+        text: String,
+    },
+    ToolStart {
+        tool_name: String,
+        tool_id: String,
+        input: Option<String>,
+    },
     // M9.5: the result travels with the completion. Action cards expand to
     // show what a tool actually returned, and without a payload here there
     // is nothing to expand to.
-    ToolDone { tool_id: String, output: Option<String>, is_error: bool },
-    Result { text: String, session_id: Option<String> },
-    Error { message: String },
+    ToolDone {
+        tool_id: String,
+        output: Option<String>,
+        is_error: bool,
+    },
+    Result {
+        text: String,
+        session_id: Option<String>,
+    },
+    Error {
+        message: String,
+    },
     Done,
 }
 
@@ -276,7 +295,11 @@ fn with_login_path(command: &mut Command) -> &mut Command {
 
 pub fn status() -> AgentStatus {
     let Some(path) = find_binary() else {
-        return AgentStatus { installed: false, version: None, path: None };
+        return AgentStatus {
+            installed: false,
+            version: None,
+            path: None,
+        };
     };
     let version = with_login_path(Command::new(&path).arg("--version"))
         .stdin(Stdio::null())
@@ -401,14 +424,17 @@ fn write_run_config(path: &Path, contents: &str) -> Result<(), String> {
             .mode(0o600)
             .open(path)
             .map_err(|e| e.to_string())?;
-        file.write_all(contents.as_bytes()).map_err(|e| e.to_string())
+        file.write_all(contents.as_bytes())
+            .map_err(|e| e.to_string())
     }
     #[cfg(not(unix))]
     std::fs::write(path, contents).map_err(|e| e.to_string())
 }
 
 pub fn sweep_run_configs(config_dir: &Path) {
-    let Ok(dir) = std::fs::read_dir(config_dir) else { return };
+    let Ok(dir) = std::fs::read_dir(config_dir) else {
+        return;
+    };
     for entry in dir.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
@@ -459,14 +485,14 @@ pub fn stream(
 
     let mut child =
         with_login_path(Command::new(&binary).args(build_args(&req, &config_path, strict_mcp)))
-        // The vault is the working directory, so shell-capable modes and the
-        // CLI's own file tools stay pointed at the user's notes.
-        .current_dir(vault)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("could not start Claude Code: {e}"))?;
+            // The vault is the working directory, so shell-capable modes and the
+            // CLI's own file tools stay pointed at the user's notes.
+            .current_dir(vault)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("could not start Claude Code: {e}"))?;
 
     let stdout = child.stdout.take().ok_or("agent produced no stdout")?;
     let stderr = child.stderr.take();
@@ -504,7 +530,9 @@ pub fn stream(
                         AGENT_EVENT,
                         TaggedEvent {
                             run,
-                            event: AgentEvent::Error { message: text.chars().take(600).collect() },
+                            event: AgentEvent::Error {
+                                message: text.chars().take(600).collect(),
+                            },
                         },
                     );
                 }
@@ -514,7 +542,13 @@ pub fn stream(
         // residency with the run — the sweep at the next spawn is only the
         // backstop for a crash between here and there.
         let _ = std::fs::remove_file(&run_config);
-        let _ = app.emit(AGENT_EVENT, TaggedEvent { run, event: AgentEvent::Done });
+        let _ = app.emit(
+            AGENT_EVENT,
+            TaggedEvent {
+                run,
+                event: AgentEvent::Done,
+            },
+        );
     });
 
     Ok(run)
@@ -562,7 +596,9 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
             if value.get("subtype").and_then(Value::as_str) == Some("init") {
                 if let Some(id) = value.get("session_id").and_then(Value::as_str) {
                     *session_id = Some(id.to_string());
-                    return vec![AgentEvent::Init { session_id: id.to_string() }];
+                    return vec![AgentEvent::Init {
+                        session_id: id.to_string(),
+                    }];
                 }
             }
             vec![]
@@ -577,12 +613,20 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
                 Some("text_delta") => delta
                     .get("text")
                     .and_then(Value::as_str)
-                    .map(|t| vec![AgentEvent::TextDelta { text: t.to_string() }])
+                    .map(|t| {
+                        vec![AgentEvent::TextDelta {
+                            text: t.to_string(),
+                        }]
+                    })
                     .unwrap_or_default(),
                 Some("thinking_delta") => delta
                     .get("thinking")
                     .and_then(Value::as_str)
-                    .map(|t| vec![AgentEvent::ThinkingDelta { text: t.to_string() }])
+                    .map(|t| {
+                        vec![AgentEvent::ThinkingDelta {
+                            text: t.to_string(),
+                        }]
+                    })
                     .unwrap_or_default(),
                 _ => vec![],
             }
@@ -596,7 +640,11 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
                     .and_then(Value::as_str)
                     .unwrap_or("tool")
                     .to_string(),
-                tool_id: b.get("id").and_then(Value::as_str).unwrap_or("").to_string(),
+                tool_id: b
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
                 input: b.get("input").map(|i| {
                     let text = i.to_string();
                     text.chars().take(200).collect()
@@ -623,7 +671,10 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
             if let Some(id) = value.get("session_id").and_then(Value::as_str) {
                 *session_id = Some(id.to_string());
             }
-            let is_error = value.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            let is_error = value
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let text = value
                 .get("result")
                 .and_then(Value::as_str)
@@ -631,10 +682,17 @@ pub fn translate(value: &Value, session_id: &mut Option<String>) -> Vec<AgentEve
                 .to_string();
             if is_error {
                 vec![AgentEvent::Error {
-                    message: if text.is_empty() { "the agent reported an error".into() } else { text },
+                    message: if text.is_empty() {
+                        "the agent reported an error".into()
+                    } else {
+                        text
+                    },
                 }]
             } else {
-                vec![AgentEvent::Result { text, session_id: session_id.clone() }]
+                vec![AgentEvent::Result {
+                    text,
+                    session_id: session_id.clone(),
+                }]
             }
         }
         _ => vec![],
@@ -711,7 +769,10 @@ mod tests {
         std::fs::write(dir.join("mcp-config-7.json"), "crashed run").unwrap();
         std::fs::write(dir.join("app-config.json"), "keep").unwrap();
         sweep_run_configs(&dir);
-        assert!(!dir.join("mcp-config.json").exists(), "legacy residency must end");
+        assert!(
+            !dir.join("mcp-config.json").exists(),
+            "legacy residency must end"
+        );
         assert!(!dir.join("mcp-config-7.json").exists());
         assert!(dir.join("app-config.json").exists());
     }
@@ -721,7 +782,11 @@ mod tests {
         // The tag is what lets a listener tell a killed run's trailing Done
         // from the live run's (PR #5 review) — flattening must keep the
         // event's own shape intact beside it.
-        let done = serde_json::to_value(TaggedEvent { run: 7, event: AgentEvent::Done }).unwrap();
+        let done = serde_json::to_value(TaggedEvent {
+            run: 7,
+            event: AgentEvent::Done,
+        })
+        .unwrap();
         assert_eq!(done["run"], 7);
         assert_eq!(done["kind"], "Done");
 
@@ -739,11 +804,19 @@ mod tests {
     #[test]
     fn stop_reports_which_run_was_killed() {
         let state = AgentState::default();
-        assert_eq!(state.stop().unwrap(), None, "nothing running: nothing to report");
+        assert_eq!(
+            state.stop().unwrap(),
+            None,
+            "nothing running: nothing to report"
+        );
         let child = Command::new("sleep").arg("5").spawn().unwrap();
         state.set(child, 42);
         assert_eq!(state.stop().unwrap(), Some(42), "the killed run is named");
-        assert_eq!(state.stop().unwrap(), None, "a second stop has nothing left to kill");
+        assert_eq!(
+            state.stop().unwrap(),
+            None,
+            "a second stop has nothing left to kill"
+        );
     }
 
     #[test]
@@ -856,7 +929,9 @@ mod tests {
             true,
         );
         assert!(full.windows(2).any(|w| w[0] == "--resume" && w[1] == "abc"));
-        assert!(full.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-5"));
+        assert!(full
+            .windows(2)
+            .any(|w| w[0] == "--model" && w[1] == "claude-opus-5"));
         // A whitespace-only system prompt is not a system prompt.
         assert!(!full.contains(&"--append-system-prompt".to_string()));
     }
@@ -865,7 +940,8 @@ mod tests {
     fn the_login_path_survives_a_chatty_shell_profile() {
         // Plenty of .zshrc files print a banner. Reading the last line, or the
         // whole of stdout, would hand the CLI a PATH of "Welcome back!".
-        let probe = format!("Welcome back!\nnvm loaded\n{PATH_SENTINEL}/opt/homebrew/bin:/usr/bin\n");
+        let probe =
+            format!("Welcome back!\nnvm loaded\n{PATH_SENTINEL}/opt/homebrew/bin:/usr/bin\n");
         assert_eq!(
             path_from_probe(&probe).as_deref(),
             Some("/opt/homebrew/bin:/usr/bin")
@@ -912,12 +988,21 @@ mod tests {
     #[test]
     fn connector_servers_merge_beside_cerebro_and_never_shadow_it() {
         let mut extra = serde_json::Map::new();
-        extra.insert("jira".into(), json!({"type": "http", "url": "https://jira/mcp"}));
-        extra.insert("cerebro".into(), json!({"type": "http", "url": "https://evil/mcp"}));
+        extra.insert(
+            "jira".into(),
+            json!({"type": "http", "url": "https://jira/mcp"}),
+        );
+        extra.insert(
+            "cerebro".into(),
+            json!({"type": "http", "url": "https://evil/mcp"}),
+        );
         let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret", &extra);
         let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
         assert_eq!(parsed["mcpServers"]["jira"]["url"], "https://jira/mcp");
-        assert_eq!(parsed["mcpServers"]["cerebro"]["url"], "http://127.0.0.1:9/mcp");
+        assert_eq!(
+            parsed["mcpServers"]["cerebro"]["url"],
+            "http://127.0.0.1:9/mcp"
+        );
     }
 
     #[test]
@@ -928,7 +1013,9 @@ mod tests {
             &json!({ "type": "system", "subtype": "init", "session_id": "s-1" }),
             &mut session,
         );
-        assert!(matches!(init.as_slice(), [AgentEvent::Init { session_id }] if session_id == "s-1"));
+        assert!(
+            matches!(init.as_slice(), [AgentEvent::Init { session_id }] if session_id == "s-1")
+        );
         assert_eq!(session.as_deref(), Some("s-1"));
 
         let delta = translate(
@@ -956,7 +1043,9 @@ mod tests {
             &json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1" }] } }),
             &mut session,
         );
-        assert!(matches!(done.as_slice(), [AgentEvent::ToolDone { tool_id, .. }] if tool_id == "t1"));
+        assert!(
+            matches!(done.as_slice(), [AgentEvent::ToolDone { tool_id, .. }] if tool_id == "t1")
+        );
 
         let result = translate(
             &json!({ "type": "result", "subtype": "success", "result": "done", "session_id": "s-1" }),
@@ -1005,7 +1094,10 @@ mod tests {
             ] } }),
             &mut sid,
         );
-        assert!(matches!(events.as_slice(), [AgentEvent::ToolDone { is_error: true, .. }]));
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ToolDone { is_error: true, .. }]
+        ));
     }
 
     #[test]
@@ -1017,7 +1109,10 @@ mod tests {
             ] } }),
             &mut sid,
         );
-        assert!(matches!(events.as_slice(), [AgentEvent::ToolDone { output: None, .. }]));
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ToolDone { output: None, .. }]
+        ));
     }
 
     #[test]
@@ -1027,7 +1122,9 @@ mod tests {
             &json!({ "type": "result", "is_error": true, "result": "rate limited" }),
             &mut session,
         );
-        assert!(matches!(events.as_slice(), [AgentEvent::Error { message }] if message == "rate limited"));
+        assert!(
+            matches!(events.as_slice(), [AgentEvent::Error { message }] if message == "rate limited")
+        );
     }
 
     #[test]

@@ -38,7 +38,9 @@ pub const DEFAULT_ACTOR: &str = "claude-code";
 /// None and blank both read as the default — a panel run AFTER an agent run
 /// must reset the attribution, never inherit it.
 fn normalize_actor(actor: Option<&str>) -> &str {
-    actor.filter(|a| !a.trim().is_empty()).unwrap_or(DEFAULT_ACTOR)
+    actor
+        .filter(|a| !a.trim().is_empty())
+        .unwrap_or(DEFAULT_ACTOR)
 }
 
 #[derive(Clone)]
@@ -72,7 +74,10 @@ fn resolve_actor(presented: &str, base: &str, runs: &[(String, String)]) -> Opti
     if presented == base {
         return Some(DEFAULT_ACTOR.to_string());
     }
-    runs.iter().rev().find(|(t, _)| t == presented).map(|(_, a)| a.clone())
+    runs.iter()
+        .rev()
+        .find(|(t, _)| t == presented)
+        .map(|(_, a)| a.clone())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -153,9 +158,8 @@ impl McpState {
                 let header = "Content-Type: application/json"
                     .parse::<tiny_http::Header>()
                     .expect("static header parses");
-                let _ = request.respond(
-                    tiny_http::Response::from_string(payload).with_header(header),
-                );
+                let _ =
+                    request.respond(tiny_http::Response::from_string(payload).with_header(header));
             }
         });
 
@@ -174,7 +178,10 @@ impl McpState {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
         let token = random_token();
-        let mut runs = running.run_actors.lock().map_err(|_| "run token lock poisoned")?;
+        let mut runs = running
+            .run_actors
+            .lock()
+            .map_err(|_| "run token lock poisoned")?;
         push_run_token(&mut runs, token.clone(), normalize_actor(actor).to_string());
         Ok(token)
     }
@@ -541,7 +548,12 @@ fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     Ok(text_result(if hits.is_empty() {
         format!("No notes matched \"{query}\".")
     } else {
-        format!("{} match(es) for \"{}\":\n{}", hits.len(), query, hits.join("\n"))
+        format!(
+            "{} match(es) for \"{}\":\n{}",
+            hits.len(),
+            query,
+            hits.join("\n")
+        )
     }))
 }
 
@@ -558,7 +570,10 @@ fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, Strin
         "Path: {}\nTitle: {}\nType: {}\n",
         entry.path,
         entry.title,
-        entry.entry_type.clone().unwrap_or_else(|| "(untyped)".into())
+        entry
+            .entry_type
+            .clone()
+            .unwrap_or_else(|| "(untyped)".into())
     );
     if crate::knowledge::is_knowledge_path(&path) {
         header.push_str(&format!("Trust: {}\n", trust_tier(entry)));
@@ -608,7 +623,11 @@ fn tool_list_inbox(vault: &Path) -> Result<Value, String> {
     Ok(text_result(if captures.is_empty() {
         "The Inbox is empty.".to_string()
     } else {
-        format!("{} capture(s) waiting:\n{}", captures.len(), captures.join("\n"))
+        format!(
+            "{} capture(s) waiting:\n{}",
+            captures.len(),
+            captures.join("\n")
+        )
     }))
 }
 
@@ -671,7 +690,11 @@ fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     Ok(text_result(format!("Appended to {path}")))
 }
 
-fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> Result<Value, String> {
+fn tool_write_concept(
+    vault: &Path,
+    args: &Map<String, Value>,
+    actor: &str,
+) -> Result<Value, String> {
     let path = arg_str(args, "path").ok_or("write_concept needs a path")?;
     if !crate::knowledge::is_knowledge_path(&path) {
         return Err(format!(
@@ -686,7 +709,10 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> R
     let body = arg_str(args, "body").ok_or("write_concept needs a body")?;
 
     let mut frontmatter = Map::new();
-    frontmatter.insert("type".into(), json!(arg_str(args, "type").unwrap_or_else(|| "Reference".into())));
+    frontmatter.insert(
+        "type".into(),
+        json!(arg_str(args, "type").unwrap_or_else(|| "Reference".into())),
+    );
     if let Some(title) = arg_str(args, "title") {
         frontmatter.insert("title".into(), json!(title));
     }
@@ -717,10 +743,7 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> R
     );
     // Provenance is stamped by US, not by the model: an agent that could
     // choose its own `generated.by` could disclaim its own output.
-    frontmatter.insert(
-        "generated".into(),
-        json!({ "by": actor, "at": now_iso() }),
-    );
+    frontmatter.insert("generated".into(), json!({ "by": actor, "at": now_iso() }));
     if let Some(sources) = args.get("sources") {
         frontmatter.insert("sources".into(), sources.clone());
     }
@@ -743,7 +766,12 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> R
         let about: Vec<String> = args
             .get("about")
             .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         crate::knowledge::near_duplicates(
             vault,
@@ -765,16 +793,17 @@ fn tool_write_concept(vault: &Path, args: &Map<String, Value>, actor: &str) -> R
         Ok(()) => String::new(),
         Err(e) => format!(" (could not update the knowledge log: {e})"),
     };
-    let warning = if duplicates.is_empty() {
-        String::new()
-    } else {
-        format!(
+    let warning =
+        if duplicates.is_empty() {
+            String::new()
+        } else {
+            format!(
             " The bundle already holds {} about the same thing: {}. Consolidate: revise one of \
              those instead, or set `supersedes` on this one if it replaces them.",
             if duplicates.len() == 1 { "a concept" } else { "concepts" },
             duplicates.join(", ")
         )
-    };
+        };
     Ok(text_result(format!(
         "Wrote {path}. It is unverified until the user reviews it in Knowledge.{note}{warning}"
     )))
@@ -799,7 +828,13 @@ fn source_slug(kind: &str, id: &str) -> String {
     // otherwise produce two different paths and the cache would never hit.
     let mut slug: String = trimmed
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     while slug.contains("--") {
         slug = slug.replace("--", "-");
@@ -815,15 +850,25 @@ fn source_slug(kind: &str, id: &str) -> String {
 /// something it cannot read, and writes the answer down here. What makes that
 /// affordable is exactly this file — one fetch, a permanent local copy, and
 /// every later turn reads markdown instead of calling an API.
-fn tool_cache_source(vault: &Path, args: &Map<String, Value>, actor: &str) -> Result<Value, String> {
+fn tool_cache_source(
+    vault: &Path,
+    args: &Map<String, Value>,
+    actor: &str,
+) -> Result<Value, String> {
     let id = arg_str(args, "id").ok_or("cache_source needs an id")?;
     let kind = arg_str(args, "kind").unwrap_or_else(|| "web".into());
     if kind != "issue" && kind != "web" {
-        return Err(format!("cache_source kind must be issue or web, not {kind}"));
+        return Err(format!(
+            "cache_source kind must be issue or web, not {kind}"
+        ));
     }
     let title = arg_str(args, "title").ok_or("cache_source needs a title")?;
     let body = arg_str(args, "body").ok_or("cache_source needs a body")?;
-    let path = format!("{}/{}.md", crate::vault::write::SOURCES_DIR, source_slug(&kind, &id));
+    let path = format!(
+        "{}/{}.md",
+        crate::vault::write::SOURCES_DIR,
+        source_slug(&kind, &id)
+    );
 
     let mut frontmatter = Map::new();
     // Typed so it is a first-class note, and `display: doc` keeps the cache
@@ -846,10 +891,7 @@ fn tool_cache_source(vault: &Path, args: &Map<String, Value>, actor: &str) -> Re
     frontmatter.insert("stale_after".into(), json!(stale));
     // Provenance is stamped by us for the same reason it is on a concept: an
     // agent that can author its own `generated` can disclaim its own work.
-    frontmatter.insert(
-        "generated".into(),
-        json!({ "by": actor, "at": now_iso() }),
-    );
+    frontmatter.insert("generated".into(), json!({ "by": actor, "at": now_iso() }));
 
     let doc = format!("# {title}\n\n{}\n", body.trim());
     crate::vault::write::write_source(vault, &path, &frontmatter, &doc)?;
@@ -905,7 +947,10 @@ mod tests {
             source_slug("web", "https://wiki.test/x/Rollback"),
             "web/wiki.test-x-rollback"
         );
-        assert_eq!(source_slug("web", "https://a.test/p?q=1&r=2"), "web/a.test-p-q-1-r-2");
+        assert_eq!(
+            source_slug("web", "https://a.test/p?q=1&r=2"),
+            "web/a.test-p-q-1-r-2"
+        );
         // Trailing separators are filing noise, not part of the name.
         assert_eq!(source_slug("web", "http://a.test/p/"), "web/a.test-p");
     }
@@ -943,7 +988,10 @@ mod tests {
     fn every_catalog_tool_has_a_name_description_and_schema() {
         for tool in tool_catalog() {
             assert!(tool.get("name").and_then(Value::as_str).is_some());
-            let description = tool.get("description").and_then(Value::as_str).unwrap_or("");
+            let description = tool
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             assert!(
                 description.len() > 20,
                 "a thin description is how an agent picks the wrong tool"
@@ -962,8 +1010,7 @@ mod tests {
         args.insert("title".into(), json!("Scouted"));
         args.insert("body".into(), json!("What the scout learned."));
         tool_write_concept(&dir, &args, "process:release-scout").unwrap();
-        let written =
-            std::fs::read_to_string(dir.join("knowledge/systems/scouted.md")).unwrap();
+        let written = std::fs::read_to_string(dir.join("knowledge/systems/scouted.md")).unwrap();
         assert!(written.contains("process:release-scout"));
         assert!(!written.contains("claude-code"));
 
@@ -974,8 +1021,7 @@ mod tests {
         cache.insert("title".into(), json!("Page"));
         cache.insert("body".into(), json!("fetched content"));
         tool_cache_source(&dir, &cache, "process:release-scout").unwrap();
-        let cached =
-            std::fs::read_to_string(dir.join("sources/web/wiki.test-x-page.md")).unwrap();
+        let cached = std::fs::read_to_string(dir.join("sources/web/wiki.test-x-page.md")).unwrap();
         assert!(cached.contains("process:release-scout"));
         assert!(!cached.contains("claude-code"));
     }
@@ -1002,13 +1048,20 @@ mod tests {
             Some("process:scout"),
             "the outgoing run's trailing write still stamps as the outgoing run"
         );
-        assert_eq!(resolve_actor("tok-chat", "base", &runs).as_deref(), Some(DEFAULT_ACTOR));
+        assert_eq!(
+            resolve_actor("tok-chat", "base", &runs).as_deref(),
+            Some(DEFAULT_ACTOR)
+        );
         assert_eq!(
             resolve_actor("base", "base", &runs).as_deref(),
             Some(DEFAULT_ACTOR),
             "the endpoint's own token is the default actor"
         );
-        assert_eq!(resolve_actor("unknown", "base", &runs), None, "unminted tokens are refused");
+        assert_eq!(
+            resolve_actor("unknown", "base", &runs),
+            None,
+            "unminted tokens are refused"
+        );
     }
 
     #[test]
@@ -1017,8 +1070,16 @@ mod tests {
         for i in 0..(RUN_TOKEN_WINDOW + 2) {
             push_run_token(&mut runs, format!("tok-{i}"), format!("actor-{i}"));
         }
-        assert_eq!(runs.len(), RUN_TOKEN_WINDOW, "the ledger never grows unboundedly");
-        assert_eq!(resolve_actor("tok-0", "base", &runs), None, "old credentials retire");
+        assert_eq!(
+            runs.len(),
+            RUN_TOKEN_WINDOW,
+            "the ledger never grows unboundedly"
+        );
+        assert_eq!(
+            resolve_actor("tok-0", "base", &runs),
+            None,
+            "old credentials retire"
+        );
         let newest = format!("tok-{}", RUN_TOKEN_WINDOW + 1);
         assert!(resolve_actor(&newest, "base", &runs).is_some());
     }
@@ -1074,7 +1135,10 @@ mod tests {
         assert!(tool_write_concept(&dir, &concept, DEFAULT_ACTOR).is_err());
 
         // The doc survived all of it, and ordinary writes still land.
-        assert_eq!(std::fs::read_to_string(dir.join("types/decision.md")).unwrap(), schema_doc);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("types/decision.md")).unwrap(),
+            schema_doc
+        );
         let mut ok = Map::new();
         ok.insert("path".into(), json!("records/decisions/d-1.md"));
         ok.insert("patch".into(), json!({ "status": "done" }));
@@ -1132,9 +1196,15 @@ mod tests {
         assert!(!is_capture(&note), "a typed note is organized");
 
         note.properties.insert("_organized".into(), json!(false));
-        assert!(is_capture(&note), "an explicit flag overrides the type default");
+        assert!(
+            is_capture(&note),
+            "an explicit flag overrides the type default"
+        );
 
         let concept = Entry::empty_for_test("knowledge/metrics/x.md");
-        assert!(!is_capture(&concept), "the bundle is reviewed, not organized");
+        assert!(
+            !is_capture(&concept),
+            "the bundle is reviewed, not organized"
+        );
     }
 }

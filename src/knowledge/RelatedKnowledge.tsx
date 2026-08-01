@@ -112,9 +112,7 @@ export function RelatedKnowledge({
                   )}
                 </span>
                 <TrustChip tier={concept.trust} size="sm" />
-                {concept.stale && (
-                  <Icon name="clock-alert" size={11} color="var(--warn-600)" />
-                )}
+                {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
               </button>
             </li>
           ))}
@@ -122,9 +120,7 @@ export function RelatedKnowledge({
       )}
 
       {rest > 0 && (
-        <p className="m-0 mt-1.5 px-2 text-[11.5px] text-[var(--n-400)]">
-          and {rest} more
-        </p>
+        <p className="m-0 mt-1.5 px-2 text-[11.5px] text-[var(--n-400)]">and {rest} more</p>
       )}
 
       {askPrompt !== undefined && (

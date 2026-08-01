@@ -42,7 +42,9 @@ async function switchLayout(page: Page, kind: string): Promise<void> {
   await page.getByTestId(`view-switch-${kind}`).click();
 }
 
-test('collections: a container holds lists and docs, and the sidebar walks it', async ({ page }) => {
+test('collections: a container holds lists and docs, and the sidebar walks it', async ({
+  page,
+}) => {
   await boot(page);
 
   // The sidebar's top-level concept is Collections, not Views. (Scoped to
@@ -60,7 +62,9 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   await expect(
     page.getByTestId('collection-node-list').filter({ hasText: 'Delivery schedule' }),
   ).toBeVisible();
-  await expect(page.getByTestId('collection-node-doc').filter({ hasText: 'How we schedule' })).toBeVisible();
+  await expect(
+    page.getByTestId('collection-node-doc').filter({ hasText: 'How we schedule' }),
+  ).toBeVisible();
 
   // The Collection has a home page of its own: what is in here, and nothing
   // else. A container carries no query, so this is contents, not a canvas.
@@ -70,7 +74,9 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   // M11: Lists are cards reporting what they hold; Docs are rows.
   await expect(page_.getByTestId('collection-card').first()).toBeVisible();
   await expect(page_.locator('[data-testid="collection-card"][data-kind="list"]')).toHaveCount(3);
-  await expect(page_.locator('[data-testid="collection-content-row"][data-kind="doc"]')).toHaveCount(1);
+  await expect(
+    page_.locator('[data-testid="collection-content-row"][data-kind="doc"]'),
+  ).toHaveCount(1);
   // No record canvas on a container.
   await expect(page.getByTestId('table-view')).toHaveCount(0);
   await expect(page.getByTestId('list-view')).toHaveCount(0);
@@ -80,7 +86,9 @@ test('collections: a container holds lists and docs, and the sidebar walks it', 
   await expect(page.getByTestId('table-view')).toBeVisible();
 });
 
-test('collections: nothing sits outside a Collection — there is no Lists bucket', async ({ page }) => {
+test('collections: nothing sits outside a Collection — there is no Lists bucket', async ({
+  page,
+}) => {
   await boot(page);
 
   // The one and only top-level grouping. A folder holding Lists IS a Collection,
@@ -96,20 +104,21 @@ test('collections: nothing sits outside a Collection — there is no Lists bucke
   await expand(page, 'Strategy');
   const listCount = await page.getByTestId('collection-node-list').count();
   expect(listCount).toBeGreaterThan(0);
-  const orphans = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-testid="collection-node-list"]')].filter((el) => {
-      // A list row is legitimate only if a collection row precedes it at a
-      // shallower indent — which is what nesting looks like in this flat DOM.
-      const indent = parseInt((el as HTMLElement).style.paddingLeft || '0', 10);
-      let prev = el.previousElementSibling;
-      while (prev !== null) {
-        if (prev.getAttribute('data-testid') === 'collection-node-collection') {
-          return parseInt((prev as HTMLElement).style.paddingLeft || '0', 10) >= indent;
+  const orphans = await page.evaluate(
+    () =>
+      [...document.querySelectorAll('[data-testid="collection-node-list"]')].filter((el) => {
+        // A list row is legitimate only if a collection row precedes it at a
+        // shallower indent — which is what nesting looks like in this flat DOM.
+        const indent = parseInt((el as HTMLElement).style.paddingLeft || '0', 10);
+        let prev = el.previousElementSibling;
+        while (prev !== null) {
+          if (prev.getAttribute('data-testid') === 'collection-node-collection') {
+            return parseInt((prev as HTMLElement).style.paddingLeft || '0', 10) >= indent;
+          }
+          prev = prev.previousElementSibling;
         }
-        prev = prev.previousElementSibling;
-      }
-      return true;
-    }).length,
+        return true;
+      }).length,
   );
   expect(orphans).toBe(0);
 });
@@ -139,7 +148,9 @@ test('collections: a nested table renders the retired hierarchy view’s job', a
     .toContain('type: list');
 });
 
-test('collections: creating one writes a folder marker and opens its empty page', async ({ page }) => {
+test('collections: creating one writes a folder marker and opens its empty page', async ({
+  page,
+}) => {
   await boot(page);
 
   await page.getByTestId('new-collection').click();
@@ -159,7 +170,9 @@ test('collections: creating one writes a folder marker and opens its empty page'
     .toContain('name: Field ops');
 });
 
-test('views: all six are reachable, and the date views place records on an axis', async ({ page }) => {
+test('views: all six are reachable, and the date views place records on an axis', async ({
+  page,
+}) => {
   await boot(page);
   await expand(page, 'Delivery');
   await page

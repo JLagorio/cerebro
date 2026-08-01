@@ -17,7 +17,11 @@ if (typeof document !== 'undefined' && !document.getElementById('cb-kcard-css'))
   document.head.appendChild(t);
 }
 
-export interface KanbanCardTag { label: string; icon?: string; color?: string }
+export interface KanbanCardTag {
+  label: string;
+  icon?: string;
+  color?: string;
+}
 
 /** Kanban column card: 3px swatch edge, entity glyph, timeframe, owner. */
 export interface KanbanCardProps {
@@ -38,7 +42,15 @@ export interface KanbanCardProps {
 }
 
 /** M1 adaptation: EntityIcon is not ported; this is its "feature" branch, inlined. */
-function EntityGlyph({ swatch, size = 16, style }: { swatch: string; size?: number; style?: React.CSSProperties }) {
+function EntityGlyph({
+  swatch,
+  size = 16,
+  style,
+}: {
+  swatch: string;
+  size?: number;
+  style?: React.CSSProperties;
+}) {
   const s = Math.round(size * 0.7);
   return (
     <span
@@ -53,7 +65,9 @@ function EntityGlyph({ swatch, size = 16, style }: { swatch: string; size?: numb
         ...style,
       }}
     >
-      <span style={{ width: s, height: s, borderRadius: Math.max(2, s * 0.28), background: swatch }} />
+      <span
+        style={{ width: s, height: s, borderRadius: Math.max(2, s * 0.28), background: swatch }}
+      />
     </span>
   );
 }

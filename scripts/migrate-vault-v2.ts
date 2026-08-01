@@ -9,7 +9,15 @@
 // this covers dev vaults created during M1 only. Files are MOVED (git-friendly
 // renames); nothing is deleted except the spaces/ notes, which are folded into
 // type/project statuses first and then removed.
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import YAML from 'yaml';
 
@@ -27,7 +35,12 @@ function walk(dir: string, root: string, out: string[] = []): string[] {
       if (item.name === 'views' || item.name === 'attachments') continue;
       walk(abs, root, out);
     } else if (item.name.endsWith('.md')) {
-      out.push(abs.slice(root.length + 1).split('\\').join('/'));
+      out.push(
+        abs
+          .slice(root.length + 1)
+          .split('\\')
+          .join('/'),
+      );
     }
   }
   return out;
@@ -151,7 +164,8 @@ function main(): void {
       target !== null && projectSlugs.has(target)
         ? `projects/${target}/items/${n.rel.split('/').pop()}`
         : `inbox/${n.rel.split('/').pop()}`;
-    if (dest.startsWith('inbox/')) warnings.push(`${n.rel}: no resolvable project — moved to inbox/`);
+    if (dest.startsWith('inbox/'))
+      warnings.push(`${n.rel}: no resolvable project — moved to inbox/`);
     mkdirSync(join(vault, dest, '..'), { recursive: true });
     writeFileSync(join(vault, dest), content, 'utf8');
     rmSync(join(vault, n.rel));

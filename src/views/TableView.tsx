@@ -18,14 +18,7 @@ import { CREATABLE_PROPERTY_KINDS, kindMeta, progressRatio } from '@/engine/prop
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
-import type {
-  ChipStyle,
-  ColumnSpec,
-  Entry,
-  GroupNode,
-  Presentation,
-  Schema,
-} from '@/engine/types';
+import type { ChipStyle, ColumnSpec, Entry, GroupNode, Presentation, Schema } from '@/engine/types';
 import {
   changeFieldKind,
   duplicateFieldOnType,
@@ -572,7 +565,11 @@ function HeaderMenu({
         section: true,
         run: () => onColumnsChange(setColumnWrap(columns, def.name)),
       },
-      { label: 'Hide column', icon: 'eye-off', run: () => onColumnsChange(toggleColumn(columns, def.name)) },
+      {
+        label: 'Hide column',
+        icon: 'eye-off',
+        run: () => onColumnsChange(toggleColumn(columns, def.name)),
+      },
       {
         label: 'Move left',
         icon: 'arrow-left',
@@ -598,7 +595,12 @@ function HeaderMenu({
         })();
       };
       items.push(
-        { label: 'Insert left', icon: 'arrow-left-to-line', section: true, run: () => insert('left') },
+        {
+          label: 'Insert left',
+          icon: 'arrow-left-to-line',
+          section: true,
+          run: () => insert('left'),
+        },
         { label: 'Insert right', icon: 'arrow-right-to-line', run: () => insert('right') },
         {
           label: 'Duplicate property',
@@ -679,96 +681,104 @@ function HeaderMenu({
                 />
               </div>
             ) : (
-            <>
-            {canEditSchema && sourceType !== null ? (
-              <div className="px-1 pb-1 pt-0.5">
-                <Input
-                  size="sm"
-                  ariaLabel={`Rename ${name}`}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={commitRename}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                    if (e.key === 'Escape') setDraft(humanize(def.name));
-                  }}
-                  width="100%"
-                />
-              </div>
-            ) : (
-              <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">{name}</div>
-            )}
-            {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
-              <button
-                type="button"
-                data-testid="edit-property"
-                onClick={() => setEditing(true)}
-                className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
-              >
-                <Icon name="settings-2" size={12} color="var(--n-500)" />
-                <span className="min-w-0 flex-1">Edit property</span>
-                <Icon name="chevron-right" size={11} color="var(--n-400)" />
-              </button>
-            )}
-            {canEditSchema && sourceType !== null && (
-              <button
-                type="button"
-                data-testid="change-type"
-                onClick={() => setChangingKind(!changingKind)}
-                className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
-              >
-                <Icon name="repeat-2" size={12} color="var(--n-500)" />
-                <span className="min-w-0 flex-1">Change type</span>
-                <span className="flex items-center gap-1 text-[11px] text-[var(--n-400)]">
-                  {kindMeta(def.kind).label}
-                  <Icon name={changingKind ? 'chevron-down' : 'chevron-right'} size={11} />
-                </span>
-              </button>
-            )}
-            {changingKind && sourceType !== null && (
-              <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-[var(--n-25)] p-0.5">
-                {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
+              <>
+                {canEditSchema && sourceType !== null ? (
+                  <div className="px-1 pb-1 pt-0.5">
+                    <Input
+                      size="sm"
+                      ariaLabel={`Rename ${name}`}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                        if (e.key === 'Escape') setDraft(humanize(def.name));
+                      }}
+                      width="100%"
+                    />
+                  </div>
+                ) : (
+                  <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">
+                    {name}
+                  </div>
+                )}
+                {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
                   <button
-                    key={k.kind}
                     type="button"
-                    data-testid={`change-type-${k.kind}`}
-                    onClick={() => {
-                      close();
-                      void changeFieldKind(sourceType, def.name, k.kind);
-                    }}
+                    data-testid="edit-property"
+                    onClick={() => setEditing(true)}
                     className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
                   >
-                    <Icon name={k.icon} size={12} color="var(--n-500)" />
-                    <span className="min-w-0 flex-1">{k.label}</span>
-                    {k.kind === def.kind && <Icon name="check" size={12} color="var(--cortex-600)" />}
+                    <Icon name="settings-2" size={12} color="var(--n-500)" />
+                    <span className="min-w-0 flex-1">Edit property</span>
+                    <Icon name="chevron-right" size={11} color="var(--n-400)" />
+                  </button>
+                )}
+                {canEditSchema && sourceType !== null && (
+                  <button
+                    type="button"
+                    data-testid="change-type"
+                    onClick={() => setChangingKind(!changingKind)}
+                    className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                  >
+                    <Icon name="repeat-2" size={12} color="var(--n-500)" />
+                    <span className="min-w-0 flex-1">Change type</span>
+                    <span className="flex items-center gap-1 text-[11px] text-[var(--n-400)]">
+                      {kindMeta(def.kind).label}
+                      <Icon name={changingKind ? 'chevron-down' : 'chevron-right'} size={11} />
+                    </span>
+                  </button>
+                )}
+                {changingKind && sourceType !== null && (
+                  <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-[var(--n-25)] p-0.5">
+                    {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
+                      <button
+                        key={k.kind}
+                        type="button"
+                        data-testid={`change-type-${k.kind}`}
+                        onClick={() => {
+                          close();
+                          void changeFieldKind(sourceType, def.name, k.kind);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                      >
+                        <Icon name={k.icon} size={12} color="var(--n-500)" />
+                        <span className="min-w-0 flex-1">{k.label}</span>
+                        {k.kind === def.kind && (
+                          <Icon name="check" size={12} color="var(--cortex-600)" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {items.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      item.run();
+                      close();
+                    }}
+                    className={[
+                      'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] hover:bg-[var(--n-50)]',
+                      item.danger === true
+                        ? 'text-[var(--danger-600,#c5372c)]'
+                        : 'text-[var(--n-700)]',
+                      item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
+                    ].join(' ')}
+                  >
+                    <Icon
+                      name={item.icon}
+                      size={12}
+                      color={item.danger === true ? 'var(--danger-600, #c5372c)' : 'var(--n-500)'}
+                    />
+                    <span className="min-w-0 flex-1">{item.label}</span>
+                    {item.active === true && (
+                      <Icon name="check" size={12} color="var(--cortex-600)" />
+                    )}
                   </button>
                 ))}
-              </div>
-            )}
-            {items.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => {
-                  item.run();
-                  close();
-                }}
-                className={[
-                  'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] hover:bg-[var(--n-50)]',
-                  item.danger === true ? 'text-[var(--danger-600,#c5372c)]' : 'text-[var(--n-700)]',
-                  item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
-                ].join(' ')}
-              >
-                <Icon
-                  name={item.icon}
-                  size={12}
-                  color={item.danger === true ? 'var(--danger-600, #c5372c)' : 'var(--n-500)'}
-                />
-                <span className="min-w-0 flex-1">{item.label}</span>
-                {item.active === true && <Icon name="check" size={12} color="var(--cortex-600)" />}
-              </button>
-            ))}
-            </>
+              </>
             )}
           </div>
         </>
@@ -832,7 +842,12 @@ function TitleHeaderMenu({
       });
     }
     if (!atStart) {
-      items.push({ label: 'Move left', icon: 'arrow-left', section: atStart || canFreeze ? undefined : true, run: () => onMove(-1) });
+      items.push({
+        label: 'Move left',
+        icon: 'arrow-left',
+        section: atStart || canFreeze ? undefined : true,
+        run: () => onMove(-1),
+      });
     }
     if (!atEnd) {
       items.push({ label: 'Move right', icon: 'arrow-right', run: () => onMove(1) });
@@ -1305,9 +1320,7 @@ export function TableView({
                 <QuickAddInline
                   compact
                   label="New"
-                  ariaLabel={
-                    row.band === null ? 'New record' : `New record in ${row.band.label}`
-                  }
+                  ariaLabel={row.band === null ? 'New record' : `New record in ${row.band.label}`}
                   onCreate={(title) =>
                     onCreate!(title, {
                       groupBy: row.band?.field ?? '',

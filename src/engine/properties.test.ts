@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { coerceValueToKind, computeRollup, formatTimestamp, validatePatch, validateValue } from './properties';
+import {
+  coerceValueToKind,
+  computeRollup,
+  formatTimestamp,
+  validatePatch,
+  validateValue,
+} from './properties';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { FieldDef } from './types';

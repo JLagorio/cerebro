@@ -30,12 +30,18 @@ export function GitSettings() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void git.gitProviderStatus().then(setProvider).catch(() => setProvider(null));
+    void git
+      .gitProviderStatus()
+      .then(setProvider)
+      .catch(() => setProvider(null));
   }, []);
 
   useEffect(() => {
     if (vaultPath === null || !isRepo) return;
-    void git.gitAuthorIdentity(vaultPath).then(setIdentity).catch(() => setIdentity(null));
+    void git
+      .gitAuthorIdentity(vaultPath)
+      .then(setIdentity)
+      .catch(() => setIdentity(null));
   }, [vaultPath, isRepo]);
 
   const guarded = (task: () => Promise<void>) => () => {
@@ -105,8 +111,8 @@ export function GitSettings() {
                 Automatic checkpoints
               </span>
               <span className="block text-[11.5px] leading-[16px] text-[var(--n-500)]">
-                Commit when you stop working, and after the assistant writes. Never while a note
-                has unsaved edits.
+                Commit when you stop working, and after the assistant writes. Never while a note has
+                unsaved edits.
               </span>
             </span>
             <Switch checked={autoCheckpoint} onChange={setAutoCheckpoint} />
@@ -190,8 +196,8 @@ function RemoteRow({
         </Button>
       </div>
       <p className="m-0 mt-1.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
-        Uses your own git credentials. Cerebro never asks for a password — if authentication
-        fails, fix it in your credential helper or SSH agent.
+        Uses your own git credentials. Cerebro never asks for a password — if authentication fails,
+        fix it in your credential helper or SSH agent.
       </p>
     </div>
   );

@@ -19,9 +19,9 @@ export type TimeDisplayFormat = '12' | '24' | 'hidden';
 export type RemindOffset = '0d' | '1d' | '2d' | '1w';
 
 export interface DateValue {
-  start: string;             // YYYY-MM-DD
-  end: string | null;        // YYYY-MM-DD — range when set
-  startTime: string | null;  // HH:MM, 24h storage
+  start: string; // YYYY-MM-DD
+  end: string | null; // YYYY-MM-DD — range when set
+  startTime: string | null; // HH:MM, 24h storage
   endTime: string | null;
   format: DateDisplayFormat;
   timeFormat: TimeDisplayFormat;
@@ -73,9 +73,18 @@ const TOKEN_RE = new RegExp(
 );
 
 const FORMAT_FLAGS: Record<string, DateDisplayFormat> = {
-  full: 'full', short: 'short', mdy: 'mdy', dmy: 'dmy', ymd: 'ymd', relative: 'relative',
+  full: 'full',
+  short: 'short',
+  mdy: 'mdy',
+  dmy: 'dmy',
+  ymd: 'ymd',
+  relative: 'relative',
 };
-const TIME_FLAGS: Record<string, TimeDisplayFormat> = { '12h': '12', '24h': '24', notime: 'hidden' };
+const TIME_FLAGS: Record<string, TimeDisplayFormat> = {
+  '12h': '12',
+  '24h': '24',
+  notime: 'hidden',
+};
 const REMIND_OFFSETS: RemindOffset[] = ['0d', '1d', '2d', '1w'];
 
 /** Parse a serialized date token (with or without the leading 📅 spacing
@@ -122,8 +131,20 @@ export function serializeDateValue(v: DateValue): string {
 
 // --- Display formatting ----------------------------------------------------
 
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
-  'August', 'September', 'October', 'November', 'December'];
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -132,11 +153,16 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 export function formatDate(iso: string, format: DateDisplayFormat, today: string): string {
   const [y, m, d] = iso.split('-').map(Number);
   switch (format) {
-    case 'mdy': return `${pad2(m)}/${pad2(d)}/${y}`;
-    case 'dmy': return `${pad2(d)}/${pad2(m)}/${y}`;
-    case 'ymd': return `${y}/${pad2(m)}/${pad2(d)}`;
-    case 'full': return `${MONTHS[m - 1]} ${d}, ${y}`;
-    case 'short': return `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`;
+    case 'mdy':
+      return `${pad2(m)}/${pad2(d)}/${y}`;
+    case 'dmy':
+      return `${pad2(d)}/${pad2(m)}/${y}`;
+    case 'ymd':
+      return `${y}/${pad2(m)}/${pad2(d)}`;
+    case 'full':
+      return `${MONTHS[m - 1]} ${d}, ${y}`;
+    case 'short':
+      return `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`;
     case 'relative': {
       const diff = Math.round(
         (fromIsoDate(iso).getTime() - fromIsoDate(today).getTime()) / 86_400_000,
@@ -239,7 +265,12 @@ export function chipPropsToDateValue(p: Partial<DateChipProps>): DateValue {
 }
 
 const FORMAT_FLAGS_BY_VALUE: Record<string, true> = {
-  full: true, short: true, mdy: true, dmy: true, ymd: true, relative: true,
+  full: true,
+  short: true,
+  mdy: true,
+  dmy: true,
+  ymd: true,
+  relative: true,
 };
 
 /** Local timezone name pair, e.g. { zone: 'America/Los_Angeles', short: 'PDT' }. */

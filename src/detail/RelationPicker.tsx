@@ -242,7 +242,9 @@ export function RelationPicker({
                         {/* A link to something that is not there any more is a
                             fact about the data, not an error to hide. */}
                         <span className="block truncate text-[11px] text-[var(--n-400)]">
-                          {entry === null ? 'Not found in this vault' : entry.folder || 'Vault root'}
+                          {entry === null
+                            ? 'Not found in this vault'
+                            : entry.folder || 'Vault root'}
                         </span>
                       </span>
                       <button
@@ -309,8 +311,7 @@ export function RelationPicker({
               >
                 <Icon name="plus" size={14} color="var(--cortex-600)" />
                 <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-700)]">
-                  Create{' '}
-                  <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
+                  Create <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
                   {targetType !== null && (
                     <span className="text-[var(--n-400)]"> as a new {targetType}</span>
                   )}

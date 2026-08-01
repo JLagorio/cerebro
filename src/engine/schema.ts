@@ -23,9 +23,21 @@ export const DEFAULT_STATUSES: StatusDef[] = [
 ];
 
 const FIELD_KINDS: FieldKind[] = [
-  'text', 'number', 'checkbox', 'date', 'daterange',
-  'select', 'multiselect', 'status', 'person', 'relation',
-  'url', 'files', 'rollup', 'created_time', 'last_edited_time',
+  'text',
+  'number',
+  'checkbox',
+  'date',
+  'daterange',
+  'select',
+  'multiselect',
+  'status',
+  'person',
+  'relation',
+  'url',
+  'files',
+  'rollup',
+  'created_time',
+  'last_edited_time',
 ];
 
 const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
@@ -70,9 +82,7 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   const s = spec as Record<string, unknown>;
   const def: FieldDef = { name, kind: asFieldKind(s.kind) };
   if (Array.isArray(s.options)) {
-    def.options = s.options
-      .map(parseOption)
-      .filter((o): o is FieldOption => o !== null);
+    def.options = s.options.map(parseOption).filter((o): o is FieldOption => o !== null);
   }
   if (typeof s.target === 'string') def.target = s.target;
   // Relation cardinality (M12.4): `limit: 1` means a single linked record.
@@ -128,10 +138,7 @@ function parseStatuses(raw: unknown): StatusDef[] {
 
 function isEmptyValue(raw: unknown): boolean {
   return (
-    raw === undefined ||
-    raw === null ||
-    raw === '' ||
-    (Array.isArray(raw) && raw.length === 0)
+    raw === undefined || raw === null || raw === '' || (Array.isArray(raw) && raw.length === 0)
   );
 }
 
@@ -198,10 +205,22 @@ export function buildSchema(entries: Entry[]): Schema {
 
     // Computed kinds ignore stored frontmatter entirely.
     if (def?.kind === 'created_time') {
-      return { def, raw: e.createdAt, display: formatTimestamp(e.createdAt), color: null, ghost: false };
+      return {
+        def,
+        raw: e.createdAt,
+        display: formatTimestamp(e.createdAt),
+        color: null,
+        ghost: false,
+      };
     }
     if (def?.kind === 'last_edited_time') {
-      return { def, raw: e.modifiedAt, display: formatTimestamp(e.modifiedAt), color: null, ghost: false };
+      return {
+        def,
+        raw: e.modifiedAt,
+        display: formatTimestamp(e.modifiedAt),
+        color: null,
+        ghost: false,
+      };
     }
     if (def?.kind === 'rollup') {
       const computed = computeRollup(e, def, entries, relations);
@@ -224,9 +243,7 @@ export function buildSchema(entries: Entry[]): Schema {
         entries,
         relations,
       );
-      const stems = sources.map(
-        (s) => (s.path.split('/').pop() ?? s.path).replace(/\.md$/, ''),
-      );
+      const stems = sources.map((s) => (s.path.split('/').pop() ?? s.path).replace(/\.md$/, ''));
       return {
         def,
         raw: stems,
@@ -244,9 +261,7 @@ export function buildSchema(entries: Entry[]): Schema {
 
     if (kind === 'person' || kind === 'relation') {
       const targets = Array.isArray(raw) ? raw.map(String) : [String(raw)];
-      const display = targets
-        .map((t) => resolveTarget(t, entries)?.title ?? t)
-        .join(', ');
+      const display = targets.map((t) => resolveTarget(t, entries)?.title ?? t).join(', ');
       return { def, raw, display, color: null, ghost: false };
     }
 
