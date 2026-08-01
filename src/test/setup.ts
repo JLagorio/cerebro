@@ -1,4 +1,13 @@
+import { configure } from '@testing-library/react';
 import { vi } from 'vitest';
+
+// waitFor's 1s default is calibrated for a developer machine; CI runs on
+// shared macos-14 runners where a BlockNote serialize that takes ~100ms
+// locally can take multiples of that under load (the NoteBodyEditor
+// persistence test flaked exactly this way). The timeout only bounds how
+// long a FAILING waitFor keeps polling — passing tests resolve the moment
+// their condition holds, so the suite runs no slower.
+configure({ asyncUtilTimeout: 5_000 });
 
 // jsdom shims for BlockNote/mantine (M2 Task 9). All are missing-API
 // no-ops; none change behavior existing tests rely on.
