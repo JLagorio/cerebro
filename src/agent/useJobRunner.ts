@@ -94,12 +94,16 @@ export function useJobRunner(): void {
     for (const path of unlearnableFiled(entries, filed)) ui.unfileForLearning(path);
   }, [entries, filed]);
 
-  // Scheduled runs whose record could not be READ this session, path →
-  // fire key. A failed read leaves the fire key unconsumed so the run is
-  // retried — but retried on the next app start or the next fire, not in a
-  // read→fail→rescan hot loop. State rather than a ref so recording a
-  // failure re-derives `next` and lets the jobs behind it proceed.
-  const [failedReads, setFailedReads] = useState<Record<string, string>>({});
+  // Scheduled runs whose record could not be READ this session, vault →
+  // path → fire key. Vault-scoped like skillRuns and for the same reason
+  // (PR #5 review): fire keys are calendar values, so a flat path map would
+  // let one vault's failed read suppress the SAME relative path in a vault
+  // opened later this session. A failed read leaves the fire key unconsumed
+  // so the run is retried — but retried on the next app start or the next
+  // fire, not in a read→fail→rescan hot loop. State rather than a ref so
+  // recording a failure re-derives `next` and lets the jobs behind it
+  // proceed.
+  const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
 
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
@@ -114,7 +118,7 @@ export function useJobRunner(): void {
         skillRuns: skillRuns[vaultPath] ?? {},
         now,
         connectors,
-      }).find((j) => failedReads[j.path] !== j.runKey) ?? null
+      }).find((j) => failedReads[vaultPath]?.[j.path] !== j.runKey) ?? null
     );
   }, [attempts, autoLearn, connectors, entries, failedReads, filed, now, skillRuns, today, vaultPath]);
 
@@ -240,10 +244,13 @@ export function useJobRunner(): void {
             // context would carry one note's framing into the next one's.
             sessionId: null,
             model: null,
-            // An agent's own `tools:` caps its run inside the Settings
-            // ceiling: a safe agent stays safe with shell globally on, and
+            // Unattended runs execute vault-authored content, so none of
+            // them inherit the Settings toggle — that grant is the
+            // assistant's, made for turns a person is watching (PR #5
+            // review). Here it is only a CEILING: the one path to shell on
+            // a schedule is an Agent record declaring `tools: shell`, and
             // no record can grant itself what Settings denies.
-            shell: job.kind === 'agent' ? shell && (agent?.shell ?? false) : shell,
+            shell: job.kind === 'agent' && shell && (agent?.shell ?? false),
             connectors,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
@@ -252,7 +259,12 @@ export function useJobRunner(): void {
           // Silent by construction. A background runner that could raise a
           // toast would be a notification, which is the one thing this whole
           // surface is not allowed to be.
-          if (!recorded) setFailedReads((m) => ({ ...m, [job.path]: job.runKey }));
+          if (!recorded) {
+            setFailedReads((m) => ({
+              ...m,
+              [vaultPath]: { ...m[vaultPath], [job.path]: job.runKey },
+            }));
+          }
           finish();
         }
       })();

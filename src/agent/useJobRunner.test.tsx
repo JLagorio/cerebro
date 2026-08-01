@@ -234,4 +234,112 @@ describe('useJobRunner scheduled runs', () => {
       .mock.calls.filter(([, path]) => path.includes('a-broken'));
     expect(brokenReads).toHaveLength(1);
   });
+
+  it('a failed read in one vault never suppresses the same path in another', async () => {
+    vi.mocked(ipc.readNote).mockImplementation(async (vault) => {
+      if (vault === '/vault') throw new Error('io');
+      return '---\ntype: Skill\n---\nplaybook';
+    });
+    renderHook(() => useJobRunner());
+
+    // /vault: the read fails; the failure is remembered for the session.
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // /other holds the same relative path with the same due fire key — fire
+    // keys are calendar values, so they collide across vaults by
+    // construction. This vault's file was never read; the failure memory
+    // must not reach across.
+    act(() => useVaultStore.setState({ vaultPath: '/other' }));
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(useUiStore.getState().skillRuns).toEqual({
+      '/other': { 'records/skills/digest.md': FIRE_KEY },
+    });
+  });
+});
+
+/**
+ * Shell for unattended runs (PR #5 security review): background jobs execute
+ * vault-authored content, so the Settings toggle — the assistant's grant,
+ * made for attended turns — is only a ceiling here. The one path to shell on
+ * a schedule is an Agent record declaring `tools: shell` inside that ceiling.
+ */
+describe('useJobRunner shell gating', () => {
+  const agentRecord = (path: string, title: string, tools?: string) =>
+    makeEntry({
+      path,
+      filename: path.split('/').pop() ?? path,
+      folder: 'records/agents',
+      title,
+      type: 'Agent',
+      properties: tools === undefined ? { schedule: 'daily 09:00' } : { schedule: 'daily 09:00', tools },
+    });
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 31, 10, 30));
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(ipc.readNote).mockImplementation(async () => '---\ntype: Skill\n---\nplaybook');
+    useVaultStore.setState({
+      vaultPath: '/vault',
+      entries: [],
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({
+      autoLearn: true,
+      filedForLearning: [],
+      learnAttempts: {},
+      skillRuns: {},
+      agentBusy: false,
+      learningPath: null,
+      agentShellAccess: true, // the ceiling is OPEN in every case below
+      agentConnectors: false,
+      stdioApprovals: {},
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('a scheduled skill never inherits the Settings shell toggle', async () => {
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'records/skills/digest.md',
+          filename: 'digest.md',
+          folder: 'records/skills',
+          title: 'Digest',
+          type: 'Skill',
+          properties: { schedule: 'daily 09:00' },
+        }),
+      ],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({ shell: false });
+  });
+
+  it('an agent gets shell only from its own tools: declaration, inside the ceiling', async () => {
+    useVaultStore.setState({
+      entries: [
+        agentRecord('records/agents/a-armed.md', 'Armed', 'shell'),
+        agentRecord('records/agents/b-plain.md', 'Plain'),
+      ],
+    });
+    renderHook(() => useJobRunner());
+
+    await startJob();
+    act(() => handlers.forEach((h) => h({ kind: 'Done' })));
+    await startJob();
+
+    const calls = vi.mocked(agentIpc.runAgent).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][1]).toMatchObject({ shell: true });
+    expect(calls[1][1]).toMatchObject({ shell: false });
+  });
 });
