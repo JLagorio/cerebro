@@ -176,12 +176,14 @@ export function DetailPanel() {
       data-testid="detail-panel"
       aria-label="Detail panel"
       className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
-      // M15: the ceiling is 50% of the CANVAS ROW, not 50vw. Measured against
-      // the viewport it ignored the rail and the sidebar, so a 1024px window
-      // with the sidebar open left the page being annotated a ~180px sliver.
-      // A percentage resolves against the flex row this panel shares with
-      // <main>, which is exactly "never more than half of what is left".
-      style={{ width, maxWidth: '50%' }}
+      // 100%, not 50%: the parent is now the right-panel SLOT, which is itself
+      // sized from this width and already capped at `100% - CANVAS_MIN_WIDTH`.
+      // A 50% cap here resolved against that slot, so the panel rendered at
+      // half the width the slot had reserved for it and the other half was
+      // blank — the canvas paid for space nothing drew in. AiPanel, added
+      // against the slot, always used 100%; this was the pre-slot value left
+      // behind. Shrinking still works: the slot's cap wins, and 100% follows.
+      style={{ width, maxWidth: '100%' }}
     >
       <ResizeHandle
         label="Resize detail panel"

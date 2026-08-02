@@ -991,19 +991,42 @@ export function TableView({
   useEffect(() => {
     const node = scrollRef.current;
     if (node === null || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
     const observer = new ResizeObserver(([entry]) => {
-      setAvailable(entry.contentRect.width);
+      // Deferred out of the callback, and rounded. Setting state synchronously
+      // inside a ResizeObserver whose own element is affected by the result is
+      // the classic "loop completed with undelivered notifications": narrower
+      // columns wrap text, taller content toggles the vertical scrollbar, the
+      // scrollbar changes this element's content width, and round it goes.
+      // Rounding also stops sub-pixel width jitter from re-laying-out columns.
+      const width = Math.round(entry.contentRect.width);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setAvailable(width));
     });
     observer.observe(node);
-    setAvailable(node.clientWidth);
-    return () => observer.disconnect();
+    setAvailable(Math.round(node.clientWidth));
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, []);
 
   const syncOverflow = useCallback(() => {
     const node = scrollRef.current;
     if (node === null) return;
-    setMoreRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
+    // A whole-pixel tolerance, not 1px: column widths are fractional, so
+    // `scrollLeft + clientWidth` lands a fraction under `scrollWidth` at the
+    // real right edge. Below that threshold the comparison flipped on rounding
+    // alone, and because this runs after EVERY render and sets state, a flip
+    // re-rendered, which re-ran it, which flipped it back — a render loop that
+    // pins the main thread and stops the table responding to scrolling at all.
+    setMoreRight(Math.ceil(node.scrollLeft + node.clientWidth) < Math.floor(node.scrollWidth) - 2);
   }, []);
+  // Deliberately every render: column widths, the row set and the panel beside
+  // the table all change the overflow answer, and none of them is a dependency
+  // this component can name. Safe only because the setter above is stable —
+  // `setMoreRight` bails out when the value is unchanged, so the common case
+  // renders once and stops.
   useEffect(syncOverflow);
 
   const resolved = useMemo(
