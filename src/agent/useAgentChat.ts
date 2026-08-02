@@ -65,6 +65,13 @@ export function useAgentChat(
   // registered as dead, since no stopAgent named it — is adopted as the
   // second turn's, freezing its bubble before its child says a word.
   const turnInFlight = useRef(false);
+  // Cancellation for send()'s async leg (PR #5 review). stop/reset/restore
+  // end the TURN synchronously, but the send that started it may still be
+  // parked on the preempt handoff (up to 5s) or a skill expansion — and on
+  // resume it would re-claim the stream and spawn a child for a turn the
+  // user already cancelled. Bumping the epoch makes that pending work quit
+  // at its next checkpoint instead.
+  const sendEpoch = useRef(0);
   const mcpRef = useRef<McpInfo | null>(null);
   // Runs this hook has killed (PR #5 review). A killed child's trailing
   // events — its terminal Done above all — must be recognizable as dead
@@ -199,7 +206,20 @@ export function useAgentChat(
       setStreaming(true);
       setAgentBusy(true);
 
+      const epoch = sendEpoch.current;
       void (async () => {
+        // stop/reset/restore bumped the epoch while this send was parked on
+        // an await: the turn is over, so quit without claiming the stream or
+        // spawning a child. The bubble was appended synchronously and the
+        // stream never claimed, so stop()'s patchActive could not reach it —
+        // un-spin it here (PR #5 review).
+        const cancelled = () => {
+          if (sendEpoch.current === epoch) return false;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+          );
+          return true;
+        };
         try {
           // A typed question outranks a background read: if the runner is
           // mid-turn, stop its child deliberately, then WAIT for its finish()
@@ -211,6 +231,11 @@ export function useAgentChat(
             const dead = await stopAgent().catch(() => null);
             if (typeof dead === 'number') deadRuns.current.add(dead);
             await streamReleased(RELEASE_TIMEOUT_MS);
+            // Checked BEFORE re-raising the busy flag: a stop() during the
+            // release wait already dropped it, and this send re-raising it
+            // on the way out would wedge the runner behind a busy agent
+            // that has no turn.
+            if (cancelled()) return;
             // The runner's finish() dropped agentBusy on its way out. Claim
             // it back before this turn's child starts, or the runner reads
             // the agent as idle and schedules a background run that would
@@ -229,6 +254,10 @@ export function useAgentChat(
               : message?.trim();
           const outgoing = expanded === undefined || expanded === '' ? trimmed : expanded;
           mcpRef.current ??= await startMcp(vaultPath);
+          // The last checkpoint before a child exists. A cancel landing
+          // after this line races the spawn on the backend, which stop()'s
+          // stopAgent already handles the moment the child registers.
+          if (cancelled()) return;
           await runAgent(vaultPath, {
             message: outgoing,
             systemPrompt,
@@ -273,6 +302,10 @@ export function useAgentChat(
 
   const stop = useCallback(() => {
     killRun();
+    // The epoch bump is what reaches a send still parked on the preempt
+    // handoff or a skill expansion — killRun can only kill a child that
+    // already exists, and that send has not spawned one yet (PR #5 review).
+    sendEpoch.current += 1;
     patchActive((m) => ({ ...m, streaming: false }));
     activeRef.current = null;
     turnInFlight.current = false;
@@ -282,6 +315,7 @@ export function useAgentChat(
 
   const reset = useCallback(() => {
     killRun();
+    sendEpoch.current += 1;
     sessionRef.current = null;
     setSessionId(null);
     activeRef.current = null;
@@ -296,6 +330,7 @@ export function useAgentChat(
   const restore = useCallback(
     (restored: ChatMessage[], restoredSession: string | null) => {
       killRun();
+      sendEpoch.current += 1;
       activeRef.current = null;
       turnInFlight.current = false;
       setStreaming(false);

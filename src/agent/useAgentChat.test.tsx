@@ -93,6 +93,59 @@ describe('useAgentChat send expansion', () => {
       ),
     );
   });
+
+  it('stop() during a pending expansion cancels the send — no child for a cancelled turn', async () => {
+    // Stop ends the turn, but the send that started it may still be parked
+    // on a skill expansion (or the preempt handoff) — and without the epoch
+    // it would resume, re-claim the stream, and spawn a child the user
+    // already cancelled (PR #5 review).
+    let release: (body: string) => void = () => undefined;
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() =>
+      result.current.send(
+        '/slow',
+        () => new Promise<string>((r) => { release = r; }),
+      ),
+    );
+    act(() => result.current.stop());
+    await act(async () => {
+      release('EXPANDED BODY');
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+      // The bubble was appended before the stream was ever claimed, so
+      // stop()'s patchActive could not reach it — the cancelled send must
+      // un-spin it on the way out.
+      expect(result.current.messages[1].streaming).toBe(false);
+      expect(result.current.streaming).toBe(false);
+    });
+  });
+
+  it('a cancelled send does not wedge the next one', async () => {
+    let release: (body: string) => void = () => undefined;
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() =>
+      result.current.send(
+        '/slow',
+        () => new Promise<string>((r) => { release = r; }),
+      ),
+    );
+    act(() => result.current.stop());
+    act(() => result.current.send('next question'));
+    await act(async () => {
+      release('LATE BODY');
+      await Promise.resolve();
+    });
+    // Only the live turn reaches the agent; the cancelled one stays dead.
+    await vi.waitFor(() => {
+      expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce();
+      expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
+        '/vault',
+        expect.objectContaining({ message: 'next question' }),
+      );
+    });
+  });
 });
 
 /**
