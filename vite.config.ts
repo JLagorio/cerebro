@@ -27,13 +27,7 @@ export default defineConfig({
     // another branch's 24 test files and running them against THIS tree —
     // hundreds of failures owned by nobody, and a pre-push hook that could
     // only be satisfied by deleting the worktree or bypassing the hook.
-    exclude: [
-      ...configDefaults.exclude,
-      'docs/**',
-      '**/tolaria-main/**',
-      'e2e/**',
-      '.claude/**',
-    ],
+    exclude: [...configDefaults.exclude, 'docs/**', '**/tolaria-main/**', 'e2e/**', '.claude/**'],
     // setup.ts grants waitFor 5s for shared CI runners, but vitest's default
     // testTimeout is ALSO 5s — so a slow-but-passing waitFor loses the race to
     // the test-level clock (MarkdownEditor's debounce test died exactly this

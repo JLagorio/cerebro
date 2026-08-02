@@ -16,7 +16,11 @@ else
   changed=$(git ls-files)
 fi
 
-echo "pre-push: lint + typecheck + unit tests"
+# format:check was missing here while CI's quality job ran it, so the one
+# lane this hook could not catch was the cheapest one to fix — a stray array
+# wrap failed CI in 34s after a full local gate had passed (M15).
+echo "pre-push: format + lint + typecheck + unit tests"
+pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test:run
