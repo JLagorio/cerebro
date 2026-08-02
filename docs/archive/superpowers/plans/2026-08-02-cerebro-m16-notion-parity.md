@@ -1,7 +1,9 @@
 # M16 — Notion-level parity and polish
 
 **Branch:** `m16-notion-parity` (worktree `.claude/worktrees/m16-notion-parity`)
-**Base:** `m15-ui-hardening` @ `afbcc47` — rebase onto `main` after M15 merges.
+**Base:** `main` @ `8d4be33` (PR #7 / M15 merged). Line citations were taken at
+`afbcc47` and re-checked against `8d4be33`; the only drift is in
+`Dialog.tsx`/`AiPanel.tsx`, corrected in place below.
 **Date:** 2026-08-02
 
 M15 fixed defects. M16 closes the **capability** gap with Notion, and adds the
@@ -50,7 +52,7 @@ panel flips when it would overflow the viewport, and submenus open on hover
 with a chevron.
 
 **Us:** 19 separate implementations
-(`Dialog.tsx:47`, `Dropdown.tsx:29`, `ContextMenu.tsx:17`,
+(`Dialog.tsx:48`, `Dropdown.tsx:29`, `ContextMenu.tsx:17`,
 `DatePicker.tsx:33`, `FieldPopover.tsx:96`, `RelationPicker.tsx:136`,
 `AddPropertyPanel.tsx:41`, `CreateMenu.tsx:101`, `ViewToolbar.tsx:362`,
 `ViewControlIcons.tsx:129` and `:158`, `ViewTabs.tsx:263` and `:323`,
@@ -83,12 +85,23 @@ sites, 14 of which are focusable and sit in the tab order.
   focus return, collision flip (today `FixedBelowAnchor` is below-only and
   measures once with `deps: []`), `role="menu"`/`menuitem`, roving arrow keys,
   typeahead, and a `submenu` mode.
+- **Focus return already has a shared hook — use it, don't re-derive it.**
+  The PR #7 review round added `src/hooks/useFocusRestore.ts`
+  (`Dialog.tsx:74`, `AiPanel.tsx:317`). Its docblock records the non-obvious
+  part: the opener must be captured in a `useState` **initializer**, during the
+  first render. Read it from an effect instead and you get a provably wrong
+  answer, because `autoFocus` fires during commit and child effects run before
+  their parent's — so any surface holding a focused field reads back **its own
+  input** as the opener, that node is gone by cleanup time, and focus lands on
+  `<body>`. Every popover M16 builds inherits this. `CreateMenu.tsx:61` is
+  still bespoke and Escape-only; fold it in.
 - Add a module-level **layer stack** and retire the two DOM probes that stand
-  in for one today: `Dialog.tsx:99-100` counting `.cb-dlg`, and
+  in for one today: `Dialog.tsx:101-102` counting `.cb-dlg`, and
   `DetailPanel.tsx:115` probing `[role="dialog"]`.
 - Migrate all 19 call sites. Delete the 17 scrims.
 - One shared test asserting the dismissal contract per surface. No such test
-  exists today, which is why a 98-file suite never noticed the add-property gap.
+  exists today, which is why a 100-file suite never noticed the add-property
+  gap.
 
 ### M16.2 — One drag-and-drop primitive
 
