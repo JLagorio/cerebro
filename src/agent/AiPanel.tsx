@@ -10,8 +10,10 @@ import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
+import { listSkills, matchSkillInvocation, skillIndex, skillPrompt, type SkillRef } from '@/engine/skills';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
+import { readNote } from '@/lib/ipc';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
@@ -125,6 +127,7 @@ export function AiPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
   const selection = useNavStore((s) => s.selection);
   const entries = useVaultStore((s) => s.entries);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
   const openPath = useOpenPath();
@@ -151,10 +154,14 @@ export function AiPanel() {
       ? views.find((v) => v.id === selection.id && v.project === null) ?? null
       : null;
 
+  // M13.1: the skill catalog — names and descriptions only; a body loads when
+  // one is invoked, so the vault can hold many skills at no per-turn cost.
+  const skills = useMemo(() => listSkills(entries), [entries]);
+
   // Context is a system-prompt suffix, not a hidden first message: it must
   // travel with every turn, because a resumed session re-reads it.
   const systemPrompt = useMemo(() => {
-    const base = buildSystemPrompt(selection, { connectors, issuePrefixes });
+    const base = buildSystemPrompt(selection, { connectors, issuePrefixes, skills });
     const snapshot = buildSnapshot({
       selection,
       entries,
@@ -175,7 +182,7 @@ export function AiPanel() {
     // `draft` is deliberately excluded: rebuilding the prompt on every
     // keystroke would thrash, and `send` reads the references it needs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectors, issuePrefixes, selection, entries, schema, detailPath, collection.entries, activeView]);
+  }, [connectors, issuePrefixes, skills, selection, entries, schema, detailPath, collection.entries, activeView]);
 
   const chat = useAgentChat(
     systemPrompt,
@@ -194,18 +201,41 @@ export function AiPanel() {
   }, [chat.messages]);
 
   // A prompt handed over from elsewhere in the app ("Ask the agent to
-  // revise" on a concept) is sent once and then cleared.
+  // revise" on a concept) is sent once and then cleared. Held while a turn
+  // is streaming — sending mid-turn would be dropped by the hook's
+  // one-turn guard — and delivered when the stream ends (PR #5 review).
   const send = chat.send;
+  const streaming = chat.streaming;
   useEffect(() => {
-    if (pendingPrompt === null) return;
+    if (pendingPrompt === null || streaming) return;
     setPendingPrompt(null);
     send(pendingPrompt);
-  }, [pendingPrompt, send, setPendingPrompt]);
+  }, [pendingPrompt, send, setPendingPrompt, streaming]);
 
   const submit = () => {
-    if (draft.trim() === '') return;
-    chat.send(draft);
+    // Mid-turn, Enter is a no-op: the Send button is already replaced by
+    // Stop, and the keyboard must match it. The draft stays in the composer
+    // rather than vanishing into a send the hook would drop (PR #5 review).
+    if (chat.streaming) return;
+    const trimmed = draft.trim();
+    if (trimmed === '') return;
+    // M13.1: `/name …` expands to the skill's body — the transcript shows what
+    // was typed, the agent gets the instructions. The expansion is handed to
+    // send() as a deferred read so the turn starts synchronously; an
+    // unreadable skill file falls back to sending the message as typed.
+    // A draft STARTING with a space is the opt-out: sent literally, never
+    // expanded — the one way to say `/weekly-review` to the agent as text.
+    const literal = draft.startsWith(' ');
+    const invocation = literal ? null : matchSkillInvocation(trimmed, skills);
     setDraft('');
+    if (invocation === null || vaultPath === null) {
+      chat.send(trimmed);
+      return;
+    }
+    const { skill, request } = invocation;
+    chat.send(trimmed, () =>
+      readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
+    );
   };
 
   // M9.7: open the note and show its diff there, rather than stacking a
@@ -305,7 +335,7 @@ export function AiPanel() {
 /** What the agent is told about where the user is standing, and what it may reach. */
 export function buildSystemPrompt(
   selection: { kind: string; path?: string; id?: string; name?: string },
-  options: { connectors?: boolean; issuePrefixes?: string } = {},
+  options: { connectors?: boolean; issuePrefixes?: string; skills?: SkillRef[] } = {},
 ): string {
   const lines = [
     'You are the assistant inside cerebro, a local markdown work-management app.',
@@ -314,6 +344,7 @@ export function buildSystemPrompt(
     'When you mention a note, write it as [[note-name]] so it is clickable.',
     'You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user\'s stamp, and claiming it would defeat the review model.',
     'To file an Inbox capture, use propose_organize so the user can accept or reject it. Do not edit captures directly.',
+    'Never create or modify `type: Type` docs on your own — schema is the user\'s to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (the Types screen and the adoption wizard are the human path).',
     'Be concise.',
   ];
 
@@ -331,6 +362,10 @@ export function buildSystemPrompt(
       );
     }
   }
+
+  // M13.1: the skill catalog — one line per skill; bodies load on invocation.
+  const skillLine = skillIndex(options.skills ?? []);
+  if (skillLine !== null) lines.push(skillLine);
 
   const where = describeSelection(selection);
   if (where !== null) lines.push(`The user is currently looking at ${where}.`);

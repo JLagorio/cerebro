@@ -10,7 +10,13 @@ const nextId = (): string => `m-${++messageCounter}`;
 export interface AgentChat {
   messages: ChatMessage[];
   streaming: boolean;
-  send(text: string): void;
+  /** `message` is what the agent runs when it differs from what the transcript
+   * shows — a skill invocation displays as `/name` but sends the body (M13.1).
+   * As a FUNCTION it is awaited inside the turn, so the transcript appends and
+   * the busy flag rises synchronously on send — an async expansion must not
+   * open a window where a second send can interleave. If it rejects, the turn
+   * falls back to sending `text` as typed. */
+  send(text: string, message?: string | (() => Promise<string>)): void;
   stop(): void;
   reset(): void;
   /** M9.5: the CLI session behind this transcript, so a conversation can be
@@ -51,7 +57,28 @@ export function useAgentChat(
   const onWrote = useRef(onWroteFiles);
   onWrote.current = onWroteFiles;
   const activeRef = useRef<string | null>(null);
+  // One turn at a time (PR #5 review). `activeRef` cannot double as this
+  // guard: it is deliberately claimed late, after the preempt handoff, and
+  // that async gap is exactly where a second send would slip in — both
+  // turns reach runAgent, the backend's replacement-kill swaps the first
+  // child for the second, and the first child's terminal Done — never
+  // registered as dead, since no stopAgent named it — is adopted as the
+  // second turn's, freezing its bubble before its child says a word.
+  const turnInFlight = useRef(false);
+  // Cancellation for send()'s async leg (PR #5 review). stop/reset/restore
+  // end the TURN synchronously, but the send that started it may still be
+  // parked on the preempt handoff (up to 5s) or a skill expansion — and on
+  // resume it would re-claim the stream and spawn a child for a turn the
+  // user already cancelled. Bumping the epoch makes that pending work quit
+  // at its next checkpoint instead.
+  const sendEpoch = useRef(0);
   const mcpRef = useRef<McpInfo | null>(null);
+  // Runs this hook has killed (PR #5 review). A killed child's trailing
+  // events — its terminal Done above all — must be recognizable as dead
+  // history, because they can land in the same dispatch that hands the
+  // stream over OR seconds after a timeout takeover, and timing alone
+  // cannot tell them from the live turn's.
+  const deadRuns = useRef<Set<number>>(new Set());
   // The agent writes straight to disk; a turn that touched files must end
   // with a rescan or the UI keeps showing the pre-agent vault.
   const touchedFiles = useRef(false);
@@ -64,12 +91,24 @@ export function useAgentChat(
 
   useEffect(() => {
     return onAgentEvent((event: AgentEvent) => {
-      // The stream is shared with the background distiller (M8.6), which runs
-      // whole turns of its own. With no active message this conversation is
-      // not the one being answered, and `Init` in particular must not land —
-      // adopting the reader's session id would make your next question resume
-      // its transcript instead of yours.
+      // A run this hook killed is dead history: drop everything it emits,
+      // and forget it once its terminal Done — the last event a run can
+      // produce — has been swallowed (PR #5 review).
+      if (deadRuns.current.has(event.run)) {
+        if (event.kind === 'Done') deadRuns.current.delete(event.run);
+        return;
+      }
+      // The stream is shared with the background runner (M8.6/M13.2), which
+      // runs whole turns of its own. With no active message this conversation
+      // is not the one being answered, and `Init` in particular must not land
+      // — adopting the runner's session id would make your next question
+      // resume its transcript instead of yours.
       if (activeRef.current === null) return;
+      // While learningPath is set, the runner OWNS the stream — including the
+      // terminal Done of a background child this send just killed. Without
+      // this, that stray Done ends the chat's turn before it begins: the
+      // bubble freezes empty and every real event is dropped (M13.2 review).
+      if (useUiStore.getState().learningPath !== null) return;
       switch (event.kind) {
         case 'Init':
           sessionRef.current = event.session_id;
@@ -132,6 +171,7 @@ export function useAgentChat(
         case 'Done':
           patchActive((m) => ({ ...m, streaming: false }));
           activeRef.current = null;
+          turnInFlight.current = false;
           setStreaming(false);
           setAgentBusy(false);
           if (touchedFiles.current) {
@@ -148,11 +188,15 @@ export function useAgentChat(
   }, [patchActive, rescan, setAgentBusy]);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, message?: string | (() => Promise<string>)) => {
       const trimmed = text.trim();
       if (trimmed === '' || vaultPath === null) return;
+      // Callers gate on `streaming`; this closes the same-tick window where
+      // that render state is still stale. Dropped, not queued — the caller
+      // that hit it kept its draft, so nothing is lost.
+      if (turnInFlight.current) return;
+      turnInFlight.current = true;
       const assistantId = nextId();
-      activeRef.current = assistantId;
       lastPrompt.current = trimmed;
       setMessages((prev) => [
         ...prev,
@@ -162,16 +206,70 @@ export function useAgentChat(
       setStreaming(true);
       setAgentBusy(true);
 
+      const epoch = sendEpoch.current;
       void (async () => {
+        // stop/reset/restore bumped the epoch while this send was parked on
+        // an await: the turn is over, so quit without claiming the stream or
+        // spawning a child. The bubble was appended synchronously and the
+        // stream never claimed, so stop()'s patchActive could not reach it —
+        // un-spin it here (PR #5 review).
+        const cancelled = () => {
+          if (sendEpoch.current === epoch) return false;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+          );
+          return true;
+        };
         try {
+          // A typed question outranks a background read: if the runner is
+          // mid-turn, stop its child deliberately, then WAIT for its finish()
+          // (on the resulting Done, which the runner still owns) to release
+          // the stream. Running before that handoff lands would put this
+          // turn's events on a stream the handler above is still ignoring —
+          // the bubble would stay empty (PR #5 review).
+          if (useUiStore.getState().learningPath !== null) {
+            const dead = await stopAgent().catch(() => null);
+            if (typeof dead === 'number') deadRuns.current.add(dead);
+            await streamReleased(RELEASE_TIMEOUT_MS);
+            // Checked BEFORE re-raising the busy flag: a stop() during the
+            // release wait already dropped it, and this send re-raising it
+            // on the way out would wedge the runner behind a busy agent
+            // that has no turn.
+            if (cancelled()) return;
+            // The runner's finish() dropped agentBusy on its way out. Claim
+            // it back before this turn's child starts, or the runner reads
+            // the agent as idle and schedules a background run that would
+            // replace the child mid-answer (PR #5 review).
+            setAgentBusy(true);
+          }
+          // The stream is claimed only NOW, after the handoff: the killed
+          // child's terminal events can be delivered in the very dispatch
+          // that released the stream — before its dead-run id is even
+          // knowable — and an earlier claim would adopt them as this turn's
+          // Done, freezing the bubble empty (PR #5 review).
+          activeRef.current = assistantId;
+          const expanded =
+            typeof message === 'function'
+              ? await message().catch(() => trimmed)
+              : message?.trim();
+          const outgoing = expanded === undefined || expanded === '' ? trimmed : expanded;
           mcpRef.current ??= await startMcp(vaultPath);
+          // The last checkpoint before a child exists. A cancel landing
+          // after this line races the spawn on the backend, which stop()'s
+          // stopAgent already handles the moment the child registers.
+          if (cancelled()) return;
           await runAgent(vaultPath, {
-            message: trimmed,
+            message: outgoing,
             systemPrompt,
             sessionId: sessionRef.current,
             model,
             shell,
             connectors,
+            // A person typed this turn and is watching it stream — the one
+            // kind of run allowed to fall back to their global MCP config
+            // when the vault has no connectors.json (PR #5 security review).
+            attended: true,
+            approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcpRef.current,
           });
         } catch (err) {
@@ -180,6 +278,7 @@ export function useAgentChat(
             prev.map((m) => (m.id === assistantId ? { ...m, error: message, streaming: false } : m)),
           );
           activeRef.current = null;
+          turnInFlight.current = false;
           setStreaming(false);
           setAgentBusy(false);
           toast(message);
@@ -189,37 +288,58 @@ export function useAgentChat(
     [connectors, model, setAgentBusy, shell, systemPrompt, toast, vaultPath],
   );
 
+  /** Kill the in-flight run and remember it as dead, so its trailing events
+   * cannot end a turn started right after (PR #5 review). Fire-and-forget:
+   * these callers null activeRef synchronously, which already ignores the
+   * strays that beat the id back. */
+  const killRun = useCallback(() => {
+    void stopAgent()
+      .then((dead) => {
+        if (typeof dead === 'number') deadRuns.current.add(dead);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const stop = useCallback(() => {
-    void stopAgent().catch(() => undefined);
+    killRun();
+    // The epoch bump is what reaches a send still parked on the preempt
+    // handoff or a skill expansion — killRun can only kill a child that
+    // already exists, and that send has not spawned one yet (PR #5 review).
+    sendEpoch.current += 1;
     patchActive((m) => ({ ...m, streaming: false }));
     activeRef.current = null;
+    turnInFlight.current = false;
     setStreaming(false);
     setAgentBusy(false);
-  }, [patchActive, setAgentBusy]);
+  }, [killRun, patchActive, setAgentBusy]);
 
   const reset = useCallback(() => {
-    void stopAgent().catch(() => undefined);
+    killRun();
+    sendEpoch.current += 1;
     sessionRef.current = null;
     setSessionId(null);
     activeRef.current = null;
+    turnInFlight.current = false;
     setStreaming(false);
     setAgentBusy(false);
     setMessages([]);
-  }, [setAgentBusy]);
+  }, [killRun, setAgentBusy]);
 
   /** Load a stored conversation. Stops any turn first: the events already in
    * flight belong to the transcript being replaced. */
   const restore = useCallback(
     (restored: ChatMessage[], restoredSession: string | null) => {
-      void stopAgent().catch(() => undefined);
+      killRun();
+      sendEpoch.current += 1;
       activeRef.current = null;
+      turnInFlight.current = false;
       setStreaming(false);
       setAgentBusy(false);
       sessionRef.current = restoredSession;
       setSessionId(restoredSession);
       setMessages(restored);
     },
-    [setAgentBusy],
+    [killRun, setAgentBusy],
   );
 
   return { messages, streaming, send, stop, reset, sessionId, restore };
@@ -228,4 +348,37 @@ export function useAgentChat(
 /** Tools that change disk — the ones that make a rescan necessary. */
 export function isWriteTool(name: string): boolean {
   return /create_note|update_frontmatter|append_to_note|write_concept|^Write$|^Edit$/.test(name);
+}
+
+/** How long send() waits for the runner to hand the stream over. A killed
+ * child's Done arrives within milliseconds; the bound exists so a lost event
+ * degrades into taking the stream rather than a send that never runs. */
+const RELEASE_TIMEOUT_MS = 5_000;
+
+/** Resolves once the job runner has released the shared event stream — its
+ * finish(), riding the killed child's terminal Done, clears learningPath.
+ * On timeout the stream is taken anyway; clearing learningPath here IS the
+ * handoff — the runner watches for that transition and drops its claim on
+ * the spot (useJobRunner), so nothing depends on the lost terminal event
+ * ever arriving, and the busy flag this send is about to raise stays the
+ * chat's (PR #5 review). */
+function streamReleased(timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (useUiStore.getState().learningPath === null) {
+      resolve();
+      return;
+    }
+    let timer = 0;
+    const unsubscribe = useUiStore.subscribe((s) => {
+      if (s.learningPath !== null) return;
+      window.clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    });
+    timer = window.setTimeout(() => {
+      unsubscribe();
+      useUiStore.getState().setLearningPath(null);
+      resolve();
+    }, timeoutMs);
+  });
 }

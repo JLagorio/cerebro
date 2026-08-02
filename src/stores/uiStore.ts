@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { OrganizeProposal } from '@/agent/types';
+import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
@@ -116,6 +117,20 @@ interface UiState {
   /** Let the agent reach the user's own MCP servers (M8.2). Persisted. */
   agentConnectors: boolean;
   setAgentConnectors(v: boolean): void;
+  /**
+   * stdio connector approval KEYS — SHA-256 digests of the approved
+   * fingerprints — keyed by vault path (PR #5 security review). Persisted
+   * HERE — outside the vault — on purpose: `.cerebro/connectors.json`
+   * travels with the vault, so an untrusted vault could otherwise name an
+   * arbitrary command and have the agent runtime spawn it. A stdio entry
+   * runs only after a person approved that exact name+command+args+env on
+   * THIS machine. Digests, never the fingerprints themselves: a spec's env
+   * carries credentials, and localStorage must not become a second
+   * plaintext home for them — see engine/connectors.stdioApprovalKey.
+   */
+  stdioApprovals: Record<string, string[]>;
+  approveStdio(vault: string, fingerprint: string): void;
+  revokeStdio(vault: string, fingerprint: string): void;
   /** Comma-separated issue-tracker project keys, e.g. "PHX, SYN". Issue
    * references cannot be recognised by shape, only declared — see
    * engine/ingest.ts. Persisted. */
@@ -137,6 +152,11 @@ interface UiState {
   /** Captures handed to the distiller when they were filed. Persisted. */
   filedForLearning: string[];
   fileForLearning(path: string): void;
+  /** Drop a filed path that can never produce a learn job — a capture that
+   * is (or became) a Skill/Agent record. Only a learn attempt consumes a
+   * filing, and these never get one, so without this the path reads as
+   * "filed" in the persisted ledger forever (PR #5 review). */
+  unfileForLearning(path: string): void;
   /**
    * path → the note version last handed to the distiller. Persisted, and the
    * only thing stopping a note nobody could learn anything from being read
@@ -144,6 +164,15 @@ interface UiState {
    */
   learnAttempts: Record<string, string>;
   recordLearnAttempt(path: string, modifiedAt: string): void;
+  /**
+   * Vault path → skill path → the schedule fire key last run (M13.2).
+   * Persisted; the same loop-stopper discipline as learnAttempts. Scoped by
+   * vault like stdioApprovals (PR #5 review): fire keys are calendar values,
+   * identical everywhere, so a flat map would let `records/skills/digest.md`
+   * in one vault mark the same path in another vault as already run.
+   */
+  skillRuns: Record<string, Record<string, string>>;
+  recordSkillRun(vault: string, path: string, fireKey: string): void;
   /** True while ANY agent turn is in flight — the chat's or the runner's. */
   agentBusy: boolean;
   setAgentBusy(v: boolean): void;
@@ -184,7 +213,9 @@ const ISSUE_PREFIXES_KEY = 'cerebro.issuePrefixes';
 const DISMISSED_INSIGHTS_KEY = 'cerebro.dismissedInsights';
 const AUTO_LEARN_KEY = 'cerebro.autoLearn';
 const FILED_LEARN_KEY = 'cerebro.filedForLearning';
+const STDIO_APPROVALS_KEY = 'cerebro.stdioApprovals';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
+const SKILL_RUNS_KEY = 'cerebro.skillRuns';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
@@ -254,6 +285,57 @@ function loadStringMap(key: string): Record<string, string> {
     return Object.fromEntries(
       Object.entries(parsed as Record<string, unknown>).filter(
         (pair): pair is [string, string] => typeof pair[1] === 'string',
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+/** vault → path → value. Entries whose value is not itself a string map are
+ * dropped — which also migrates the pre-scoping flat `skillRuns` format by
+ * discarding it (worst case each schedule fires once more, its fresh-vault
+ * behavior anyway). */
+function loadNestedStringMap(key: string): Record<string, Record<string, string>> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, Record<string, string>> = {};
+    for (const [vault, map] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof map !== 'object' || map === null || Array.isArray(map)) continue;
+      out[vault] = Object.fromEntries(
+        Object.entries(map as Record<string, unknown>).filter(
+          (pair): pair is [string, string] => typeof pair[1] === 'string',
+        ),
+      );
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** stdio approvals persisted before PR #5 round 7 were raw fingerprints —
+ * env values included, i.e. credential material in localStorage. Scrub on
+ * load: hash any pre-digest entry to its approval key and persist the
+ * cleaned map immediately, so the approval survives and the plaintext is
+ * gone after one launch. */
+function loadStdioApprovals(key: string): Record<string, string[]> {
+  const scrubbed = scrubStdioApprovals(loadStringListMap(key));
+  if (scrubbed.changed) storeString(key, JSON.stringify(scrubbed.map));
+  return scrubbed.map;
+}
+
+function loadStringListMap(key: string): Record<string, string[]> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).flatMap(
+        ([k, v]): [string, string[]][] =>
+          Array.isArray(v) ? [[k, v.filter((x): x is string => typeof x === 'string')]] : [],
       ),
     );
   } catch {
@@ -431,6 +513,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     storeString(AGENT_CONNECTORS_KEY, String(v));
     set({ agentConnectors: v });
   },
+  stdioApprovals: loadStdioApprovals(STDIO_APPROVALS_KEY),
+  approveStdio: (vault, fingerprint) =>
+    set((s) => {
+      const list = s.stdioApprovals[vault] ?? [];
+      if (list.includes(fingerprint)) return s;
+      const next = { ...s.stdioApprovals, [vault]: [...list, fingerprint] };
+      storeString(STDIO_APPROVALS_KEY, JSON.stringify(next));
+      return { stdioApprovals: next };
+    }),
+  revokeStdio: (vault, fingerprint) =>
+    set((s) => {
+      const list = s.stdioApprovals[vault] ?? [];
+      if (!list.includes(fingerprint)) return s;
+      const next = { ...s.stdioApprovals, [vault]: list.filter((f) => f !== fingerprint) };
+      storeString(STDIO_APPROVALS_KEY, JSON.stringify(next));
+      return { stdioApprovals: next };
+    }),
   issuePrefixes: loadString(ISSUE_PREFIXES_KEY, ''),
   setIssuePrefixes: (v) => {
     storeString(ISSUE_PREFIXES_KEY, v);
@@ -452,6 +551,13 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(FILED_LEARN_KEY, JSON.stringify(next));
       return { filedForLearning: next };
     }),
+  unfileForLearning: (path) =>
+    set((s) => {
+      if (!s.filedForLearning.includes(path)) return s;
+      const next = s.filedForLearning.filter((p) => p !== path);
+      storeString(FILED_LEARN_KEY, JSON.stringify(next));
+      return { filedForLearning: next };
+    }),
   learnAttempts: loadStringMap(LEARN_ATTEMPTS_KEY),
   recordLearnAttempt: (path, modifiedAt) =>
     set((s) => {
@@ -463,6 +569,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
       storeString(FILED_LEARN_KEY, JSON.stringify(filed));
       return { learnAttempts: next, filedForLearning: filed };
+    }),
+  skillRuns: loadNestedStringMap(SKILL_RUNS_KEY),
+  recordSkillRun: (vault, path, fireKey) =>
+    set((s) => {
+      const scoped = { ...(s.skillRuns[vault] ?? {}), [path]: fireKey };
+      const next = { ...s.skillRuns, [vault]: scoped };
+      storeString(SKILL_RUNS_KEY, JSON.stringify(next));
+      return { skillRuns: next };
     }),
   agentBusy: false,
   setAgentBusy: (v) => set({ agentBusy: v }),

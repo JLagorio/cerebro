@@ -39,21 +39,42 @@ export interface RunOptions {
   shell: boolean;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
+  /** Whether a person is watching this run. Only an attended run may fall
+   * back to the user's global MCP config when the vault has no
+   * connectors.json (PR #5 security review) — a background job executing
+   * vault-authored content unattended never inherits it; for that job the
+   * absent file is the absence of a vault-scoped opt-in, not a grant. */
+  attended: boolean;
+  /** Attribute this run's writes to a process identity (M13.4) —
+   * `process:<slug>` for an agent record's run; omitted = the default. */
+  actor?: string | null;
+  /** Fingerprints of the vault's stdio connectors approved to run on this
+   * machine (PR #5 security review) — engine/connectors.stdioFingerprint.
+   * Absent reads as none approved: a missing field must never widen access. */
+  approvedStdio?: string[];
   mcp: McpInfo | null;
 }
 
 let mockRun: MockRun | null = null;
+let mockRunSeq = 0;
+let mockRunId: number | null = null;
 
-export async function runAgent(vault: string, options: RunOptions): Promise<void> {
+/** Start a run. Resolves to the RUN ID whose tag every event of this run
+ * carries — the same id stopAgent reports back when the run is killed. */
+export async function runAgent(vault: string, options: RunOptions): Promise<number> {
   if (!inTauri()) {
+    const run = ++mockRunSeq;
+    mockRunId = run;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.
-    mockRun = runMockAgent(options.message, (event) => emitLocal(event), {
+    // Tagging happens here for the same reason it happens in agent.rs: the
+    // script only knows its own stream, the runtime knows which run it is.
+    mockRun = runMockAgent(options.message, (event) => emitLocal({ ...event, run }), {
       onUiAction: emitUiAction,
     });
-    return;
+    return run;
   }
-  await invokeTauri('run_agent', {
+  return invokeTauri<number>('run_agent', {
     vault,
     request: {
       message: options.message,
@@ -62,19 +83,27 @@ export async function runAgent(vault: string, options: RunOptions): Promise<void
       model: options.model ?? null,
       shell: options.shell,
       connectors: options.connectors,
+      attended: options.attended,
+      actor: options.actor ?? null,
+      approved_stdio: options.approvedStdio ?? [],
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },
   });
 }
 
-export async function stopAgent(): Promise<void> {
+/** Kill the current run. Resolves to the killed run's id (null when nothing
+ * was running) so the caller can drop that run's trailing events — its
+ * terminal Done arrives AFTER the kill (PR #5 review). */
+export async function stopAgent(): Promise<number | null> {
   if (!inTauri()) {
     mockRun?.cancel();
     mockRun = null;
-    return;
+    const dead = mockRunId;
+    mockRunId = null;
+    return dead;
   }
-  await invokeTauri('stop_agent');
+  return invokeTauri<number | null>('stop_agent');
 }
 
 // --- Event fan-out ---------------------------------------------------------

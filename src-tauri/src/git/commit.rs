@@ -6,26 +6,46 @@ use super::author;
 use super::command;
 use super::workspace::GitWorkspaceInfo;
 
-/// What cerebro adds to a fresh vault's .gitignore.
+/// What cerebro keeps out of a vault's git history.
 ///
 /// Deliberately short. `views/*.yml`, `types/*.md`, and — above all —
 /// `knowledge/` are content the user wants versioned. Ignoring the knowledge
 /// bundle would defeat the whole reason git is here: the assistant writes
 /// there unattended, and untracked writes cannot be reviewed or reverted.
-const IGNORE_BLOCK: &str = "# Cerebro\n.DS_Store\n";
+///
+/// `.cerebro/` is the opposite case and the reason this is per-entry rather
+/// than one write-once block: connectors.json documents Authorization
+/// headers and env API keys as ITS contents, and the Settings page promises
+/// "your credentials never leave this vault". An automatic checkpoint that
+/// commits it — and a sync that pushes it — would make that promise a lie.
+const IGNORE_ENTRIES: &[&str] = &[".DS_Store", ".cerebro/"];
 
 pub fn ensure_gitignore(dir: &Path) -> Result<(), String> {
     let path = dir.join(".gitignore");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    if existing.contains(".DS_Store") {
+    let missing: Vec<&str> = IGNORE_ENTRIES
+        .iter()
+        .copied()
+        .filter(|entry| !existing.lines().any(|line| line.trim() == *entry))
+        .collect();
+    if missing.is_empty() {
         return Ok(());
     }
-    let next = if existing.trim().is_empty() {
-        IGNORE_BLOCK.to_string()
+    let mut next = if existing.trim().is_empty() {
+        "# Cerebro\n".to_string()
     } else {
-        format!("{}\n{IGNORE_BLOCK}", existing.trim_end())
+        format!("{}\n", existing.trim_end())
     };
-    std::fs::write(&path, next).map_err(|e| e.to_string())
+    for entry in missing {
+        next.push_str(entry);
+        next.push('\n');
+    }
+    std::fs::write(&path, next).map_err(|e| e.to_string())?;
+    // A config already swept into the index keeps getting committed no
+    // matter what .gitignore says — untrack it so the NEXT checkpoint stops
+    // carrying it. Best-effort: not a repo yet, or nothing tracked, is fine.
+    let _ = command::run_str(dir, &["rm", "-r", "--cached", "--ignore-unmatch", "-q", ".cerebro"]);
+    Ok(())
 }
 
 /// Turn a vault into a repository, with an identity and a first commit.
@@ -74,6 +94,10 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
     }
     let dir = ws.dir();
     author::ensure_identity(&dir)?;
+    // Self-healing for vaults whose repo predates an entry (M13.3: the
+    // .cerebro/ credential exclusion must reach EXISTING repos, and init is
+    // the one moment this otherwise ran).
+    ensure_gitignore(Path::new(&ws.vault_root))?;
 
     let mut add: Vec<String> = vec!["add".into(), "-A".into()];
     // Scope the stage to the vault. In a nested vault, `git add -A` from the
@@ -112,6 +136,29 @@ mod tests {
         assert!(first.contains(".DS_Store"));
         // The knowledge bundle must stay tracked — reviewability depends on it.
         assert!(!first.contains("knowledge"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cerebro_config_is_ignored_and_untracked_even_in_existing_repos() {
+        let dir = std::env::temp_dir().join(format!("cerebro-ignore3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".cerebro")).unwrap();
+        std::fs::write(dir.join(".cerebro/connectors.json"), "{\"servers\":{}}").unwrap();
+        // A pre-M13.3 vault: repo exists, .gitignore already has .DS_Store
+        // (the old early-return), and the config is already TRACKED.
+        command::run_str(&dir, &["init"]).unwrap();
+        author::ensure_identity(&dir).unwrap();
+        std::fs::write(dir.join(".gitignore"), "# Cerebro\n.DS_Store\n").unwrap();
+        command::run_str(&dir, &["add", "-A"]).unwrap();
+        command::run_str(&dir, &["commit", "-m", "old state"]).unwrap();
+
+        ensure_gitignore(&dir).unwrap();
+        let content = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+        assert!(content.contains(".cerebro/"));
+        // Untracked from the index: the next commit no longer carries it.
+        let tracked = command::run_str(&dir, &["ls-files", "--cached", ".cerebro"]).unwrap();
+        assert!(tracked.trim().is_empty(), "credentials must leave the index: {tracked}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

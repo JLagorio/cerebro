@@ -26,3 +26,6 @@ trash = "5"
 # an async web framework and its ~100 transitive crates.
 tiny_http = "0.12"
 rand = "0.8"
+# stdio connector approval keys (PR #5 security review): the ledger stores
+# SHA-256 digests of the env-bearing fingerprints, never the strings.
+sha2 = "0.10"

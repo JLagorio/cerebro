@@ -148,6 +148,22 @@ export function startWatcher(vault: string): Promise<void> {
   return inTauri() ? invokeTauri('start_watcher', { vault }) : mock.startWatcher(vault);
 }
 
+// --- Connectors (M13.3) ----------------------------------------------------
+
+/** Raw `.cerebro/connectors.json`, '' when the vault has none. Rejects when
+ * the file exists but cannot be read — permissions, or a symlinked path the
+ * backend refuses to follow (PR #5 review). Runs fail closed on that config,
+ * so Settings must render it as blocked, never as "no list". */
+export function readConnectors(vault: string): Promise<string> {
+  return inTauri() ? invokeTauri('read_connectors', { vault }) : mock.readConnectors(vault);
+}
+
+export function saveConnectors(vault: string, json: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('save_connectors', { vault, json })
+    : mock.saveConnectors(vault, json);
+}
+
 // --- Vault format v2 file operations (M2 Task 3) ---
 
 export function createFolder(vault: string, path: string): Promise<void> {

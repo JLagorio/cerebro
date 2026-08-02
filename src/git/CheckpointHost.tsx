@@ -5,7 +5,7 @@ import { useUiStore } from '@/stores/uiStore';
 /**
  * Runs the automatic-checkpoint loop (M9.4).
  *
- * Mounted at the app root for the same reason `useLearnRunner` is: the panel
+ * Mounted at the app root for the same reason `useJobRunner` is: the panel
  * or page that happened to trigger the work may already be unmounted by the
  * time the vault settles, and a history that only accrues while a particular
  * screen is open is not one.

@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod app_config;
+pub mod connectors;
 pub mod demo;
 pub mod git;
 pub mod git_commands;
@@ -181,19 +182,46 @@ fn start_mcp(
     state.ensure(&app, Path::new(&vault))
 }
 
+/// Returns the run's id — the tag on every event this run emits.
 #[tauri::command(async)]
 fn run_agent(
     app: tauri::AppHandle,
     state: tauri::State<'_, agent::AgentState>,
+    mcp_state: tauri::State<'_, mcp::McpState>,
     vault: String,
     request: agent::AgentRequest,
-) -> Result<(), String> {
+) -> Result<u64, String> {
+    // Attribution rides the run's own bearer token (M13.4): the MCP server
+    // stamps `generated.by` from the token each request presents, so a
+    // child killed while a write is in flight still stamps as itself.
+    // Shared "current actor" state had a window — set here, before the old
+    // child was gone — where the outgoing run's trailing writes stamped as
+    // the incoming run (PR #5 security review).
+    let mut request = request;
+    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref())?);
     let dir = config_dir(&app)?;
     agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
 }
 
+/// Empty string = the vault has no connectors.json (a real state Settings
+/// names). A file that EXISTS but cannot be read — permissions, a blocked
+/// symlink — is an Err, never an empty Ok (PR #5 review): runs fail closed
+/// on that config, and Settings rendering it as "no explicit list" would
+/// claim legacy open mode while runs are pinned to zero servers.
 #[tauri::command(async)]
-fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<(), String> {
+fn read_connectors(vault: String) -> Result<String, String> {
+    connectors::read_raw_checked(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn save_connectors(vault: String, json: String) -> Result<(), String> {
+    connectors::save_raw(Path::new(&vault), &json)
+}
+
+/// Returns the killed run's id (if anything was running) so the frontend can
+/// recognize and drop that run's trailing events (PR #5 review).
+#[tauri::command(async)]
+fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<Option<u64>, String> {
     state.stop()
 }
 
@@ -234,6 +262,8 @@ pub fn run() {
             delete_note,
             list_folders,
             start_watcher,
+            read_connectors,
+            save_connectors,
             check_agent,
             start_mcp,
             run_agent,

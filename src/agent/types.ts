@@ -4,7 +4,9 @@
  * between versions, so the panel only ever sees this shape.
  */
 
-export type AgentEvent =
+/** One run's stream payload, before the run tag is attached (mockAgent
+ * scripts emit this shape; the IPC layer tags it). */
+export type AgentStreamEvent =
   | { kind: 'Init'; session_id: string }
   | { kind: 'TextDelta'; text: string }
   | { kind: 'ThinkingDelta'; text: string }
@@ -15,6 +17,12 @@ export type AgentEvent =
   | { kind: 'Result'; text: string; session_id?: string | null }
   | { kind: 'Error'; message: string }
   | { kind: 'Done' };
+
+/** Every event names the run (child process) it came from (PR #5 review):
+ * a killed child's terminal Done arrives after the kill — sometimes in the
+ * very dispatch that hands the stream to the next turn — and only the tag
+ * lets a listener refuse it instead of ending whichever turn is active. */
+export type AgentEvent = AgentStreamEvent & { run: number };
 
 export interface AgentStatus {
   installed: boolean;

@@ -9,6 +9,7 @@
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,18 @@ pub enum AgentEvent {
     Done,
 }
 
+/// What actually crosses the event channel: every event tagged with the run
+/// (child process) it came from. A killed child's terminal `Done` arrives
+/// AFTER the kill — sometimes in the very dispatch that hands the stream to
+/// the next turn — and only the tag lets a listener refuse it instead of
+/// ending whichever turn happens to be active (PR #5 review).
+#[derive(Debug, Serialize, Clone)]
+struct TaggedEvent {
+    run: u64,
+    #[serde(flatten)]
+    event: AgentEvent,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AgentRequest {
     pub message: String,
@@ -55,33 +68,53 @@ pub struct AgentRequest {
     /// friends — so the connector inlet has something to connect with.
     /// Absent reads as false, for the same reason.
     pub connectors: Option<bool>,
+    /// Whether a person is watching this run (the panel's turns) or it is a
+    /// background job executing vault-authored content unattended. Only an
+    /// attended run may fall back to legacy open mode — the user's own MCP
+    /// config — when the vault has no connectors.json (PR #5 security
+    /// review). Absent reads as unattended: a missing field must never
+    /// widen access.
+    pub attended: Option<bool>,
     pub mcp_url: Option<String>,
     pub mcp_token: Option<String>,
+    /// Who this run's MCP writes are attributed to (M13.4) — `process:<slug>`
+    /// for an agent record's run. Absent reads as the default actor.
+    pub actor: Option<String>,
+    /// Fingerprints of the vault's stdio connectors the user approved on
+    /// this machine (PR #5 security review) — connectors::stdio_fingerprint.
+    /// Absent reads as none approved: a missing field must never widen
+    /// access, least of all to executing commands a vault file names.
+    pub approved_stdio: Option<Vec<String>>,
 }
 
 #[derive(Default)]
 pub struct AgentState {
-    child: Mutex<Option<Child>>,
+    /// The one live child, paired with the run id its events are tagged with.
+    child: Mutex<Option<(Child, u64)>>,
 }
 
 impl AgentState {
-    fn set(&self, child: Child) {
+    fn set(&self, child: Child, run: u64) {
         if let Ok(mut guard) = self.child.lock() {
             // Replacing a live child without killing it would leave an
             // orphaned CLI streaming into a conversation nobody is reading.
-            if let Some(mut previous) = guard.take() {
+            if let Some((mut previous, _)) = guard.take() {
                 let _ = previous.kill();
             }
-            *guard = Some(child);
+            *guard = Some((child, run));
         }
     }
 
-    pub fn stop(&self) -> Result<(), String> {
+    /// Kill the current child and report WHICH run died. The killed child's
+    /// terminal events arrive after this returns, so the caller needs the id
+    /// to recognize and drop them (PR #5 review).
+    pub fn stop(&self) -> Result<Option<u64>, String> {
         let mut guard = self.child.lock().map_err(|_| "agent state poisoned")?;
-        if let Some(mut child) = guard.take() {
+        if let Some((mut child, run)) = guard.take() {
             child.kill().map_err(|e| e.to_string())?;
+            return Ok(Some(run));
         }
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -292,7 +325,7 @@ fn tool_policy(shell: bool) -> Vec<&'static str> {
     tools
 }
 
-pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
+pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Vec<String> {
     let tools = tool_policy(req.shell.unwrap_or(false));
     let mut args: Vec<String> = vec![
         "-p".into(),
@@ -310,12 +343,12 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
         "--allowedTools".into(),
         tools.join(","),
     ];
-    // Without connectors, --strict-mcp-config keeps the agent from loading the
-    // user's other MCP servers into a session they opened inside a notes app.
-    // WITH connectors, those servers are the whole point: they are how a Jira
-    // key in a note becomes a cached source doc. Off by default — reaching
-    // other systems is a choice, never one inherited from opening the panel.
-    if !req.connectors.unwrap_or(false) {
+    // Strictness is decided by connectors::connector_context (M13.3): a vault
+    // with an explicit connector list is pinned to it (strict, the enabled
+    // servers merged into our config); a vault without one keeps the legacy
+    // open mode when connectors are on. Off stays strict — reaching other
+    // systems is a choice, never one inherited from opening the panel.
+    if strict_mcp {
         args.push("--strict-mcp-config".into());
     }
     if let Some(prompt) = req.system_prompt.as_ref().filter(|p| !p.trim().is_empty()) {
@@ -333,30 +366,71 @@ pub fn build_args(req: &AgentRequest, mcp_config: &Path) -> Vec<String> {
     args
 }
 
-pub fn mcp_config_json(url: &str, token: &str) -> String {
-    serde_json::json!({
-        "mcpServers": {
-            "cerebro": {
-                "type": "http",
-                "url": url,
-                "headers": { "Authorization": format!("Bearer {token}") }
-            }
+pub fn mcp_config_json(
+    url: &str,
+    token: &str,
+    extra: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    // Connector entries first, cerebro last: on a name collision the loopback
+    // wins, because a config that shadows our own tools is a broken run.
+    let mut servers = extra.clone();
+    servers.insert(
+        "cerebro".into(),
+        serde_json::json!({
+            "type": "http",
+            "url": url,
+            "headers": { "Authorization": format!("Bearer {token}") }
+        }),
+    );
+    serde_json::json!({ "mcpServers": servers }).to_string()
+}
+
+/// The merged MCP config carries secrets — the vault's connector headers/env
+/// and this run's loopback token — so it must not take up residence in the
+/// app config dir (PR #5 security review). Owner-readable only, and swept:
+/// every run removes whatever configs earlier runs (or crashes) left behind.
+fn write_run_config(path: &Path, contents: &str) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        file.write_all(contents.as_bytes()).map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, contents).map_err(|e| e.to_string())
+}
+
+pub fn sweep_run_configs(config_dir: &Path) {
+    let Ok(dir) = std::fs::read_dir(config_dir) else { return };
+    for entry in dir.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("mcp-config") && name.ends_with(".json") {
+            let _ = std::fs::remove_file(entry.path());
         }
-    })
-    .to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Streaming
 // ---------------------------------------------------------------------------
 
+/// Spawn a run and return its RUN ID — the tag every event it emits carries,
+/// and the id `AgentState::stop` reports back when this child is killed.
 pub fn stream(
     app: AppHandle,
     state: &AgentState,
     vault: &Path,
     req: AgentRequest,
     config_dir: &Path,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     let binary = find_binary().ok_or(
         "Claude Code was not found on this machine. Install it from https://claude.com/claude-code, then reopen cerebro.",
     )?;
@@ -366,10 +440,25 @@ pub fn stream(
         _ => return Err("the MCP endpoint is not running".into()),
     };
     std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
-    let config_path = config_dir.join("mcp-config.json");
-    std::fs::write(&config_path, mcp_config_json(&url, &token)).map_err(|e| e.to_string())?;
+    // One sequence names both the run and its config file. A UNIQUE config
+    // path per run: the sweep below or a killed run's late cleanup must
+    // never delete the config a just-spawned CLI has not read yet. This
+    // also retires the old persistent `mcp-config.json`, which sat in the
+    // app config dir holding connector credentials between runs.
+    static RUN_SEQ: AtomicU64 = AtomicU64::new(0);
+    sweep_run_configs(config_dir);
+    let run = RUN_SEQ.fetch_add(1, Ordering::Relaxed);
+    let config_path = config_dir.join(format!("mcp-config-{run}.json"));
+    let (extra_servers, strict_mcp) = crate::connectors::connector_context(
+        vault,
+        req.connectors.unwrap_or(false),
+        req.attended.unwrap_or(false),
+        req.approved_stdio.as_deref().unwrap_or(&[]),
+    );
+    write_run_config(&config_path, &mcp_config_json(&url, &token, &extra_servers))?;
 
-    let mut child = with_login_path(Command::new(&binary).args(build_args(&req, &config_path)))
+    let mut child =
+        with_login_path(Command::new(&binary).args(build_args(&req, &config_path, strict_mcp)))
         // The vault is the working directory, so shell-capable modes and the
         // CLI's own file tools stay pointed at the user's notes.
         .current_dir(vault)
@@ -381,8 +470,9 @@ pub fn stream(
 
     let stdout = child.stdout.take().ok_or("agent produced no stdout")?;
     let stderr = child.stderr.take();
-    state.set(child);
+    state.set(child, run);
 
+    let run_config = config_path.clone();
     std::thread::spawn(move || {
         let mut session_id: Option<String> = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -396,7 +486,7 @@ pub fn stream(
                 continue;
             };
             for event in translate(&value, &mut session_id) {
-                let _ = app.emit(AGENT_EVENT, event);
+                let _ = app.emit(AGENT_EVENT, TaggedEvent { run, event });
             }
         }
 
@@ -412,15 +502,22 @@ pub fn stream(
                 if !text.trim().is_empty() {
                     let _ = app.emit(
                         AGENT_EVENT,
-                        AgentEvent::Error { message: text.chars().take(600).collect() },
+                        TaggedEvent {
+                            run,
+                            event: AgentEvent::Error { message: text.chars().take(600).collect() },
+                        },
                     );
                 }
             }
         }
-        let _ = app.emit(AGENT_EVENT, AgentEvent::Done);
+        // The child has exited; its config's job is done. Secrets end their
+        // residency with the run — the sweep at the next spawn is only the
+        // backstop for a crash between here and there.
+        let _ = std::fs::remove_file(&run_config);
+        let _ = app.emit(AGENT_EVENT, TaggedEvent { run, event: AgentEvent::Done });
     });
 
-    Ok(())
+    Ok(run)
 }
 
 /// Map one CLI stream-json object onto zero or more normalized events.
@@ -567,10 +664,14 @@ mod tests {
                 model: None,
                 shell: Some(shell),
                 connectors: None,
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
+            true,
         )
     }
 
@@ -579,6 +680,70 @@ mod tests {
             .position(|a| a == "--allowedTools")
             .map(|i| args[i + 1].clone())
             .expect("--allowedTools is always passed")
+    }
+
+    #[test]
+    fn a_run_config_is_owner_readable_only() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-perms");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("mcp-config-0.json");
+        write_run_config(&path, "{\"secret\":true}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"secret\":true}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "the merged config carries bearer tokens");
+        }
+        // Re-writing an existing path must truncate, not append.
+        write_run_config(&path, "{}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+    }
+
+    #[test]
+    fn the_sweep_removes_every_leftover_run_config_and_nothing_else() {
+        let dir = std::env::temp_dir().join("cerebro-agent-test-sweep");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // The legacy persistent name, a per-run name, and a bystander.
+        std::fs::write(dir.join("mcp-config.json"), "old").unwrap();
+        std::fs::write(dir.join("mcp-config-7.json"), "crashed run").unwrap();
+        std::fs::write(dir.join("app-config.json"), "keep").unwrap();
+        sweep_run_configs(&dir);
+        assert!(!dir.join("mcp-config.json").exists(), "legacy residency must end");
+        assert!(!dir.join("mcp-config-7.json").exists());
+        assert!(dir.join("app-config.json").exists());
+    }
+
+    #[test]
+    fn every_event_crosses_the_channel_tagged_with_its_run() {
+        // The tag is what lets a listener tell a killed run's trailing Done
+        // from the live run's (PR #5 review) — flattening must keep the
+        // event's own shape intact beside it.
+        let done = serde_json::to_value(TaggedEvent { run: 7, event: AgentEvent::Done }).unwrap();
+        assert_eq!(done["run"], 7);
+        assert_eq!(done["kind"], "Done");
+
+        let delta = serde_json::to_value(TaggedEvent {
+            run: 3,
+            event: AgentEvent::TextDelta { text: "hi".into() },
+        })
+        .unwrap();
+        assert_eq!(delta["run"], 3);
+        assert_eq!(delta["kind"], "TextDelta");
+        assert_eq!(delta["text"], "hi");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_reports_which_run_was_killed() {
+        let state = AgentState::default();
+        assert_eq!(state.stop().unwrap(), None, "nothing running: nothing to report");
+        let child = Command::new("sleep").arg("5").spawn().unwrap();
+        state.set(child, 42);
+        assert_eq!(state.stop().unwrap(), Some(42), "the killed run is named");
+        assert_eq!(state.stop().unwrap(), None, "a second stop has nothing left to kill");
     }
 
     #[test]
@@ -613,10 +778,14 @@ mod tests {
                 model: None,
                 shell: None,
                 connectors: None,
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
+            true,
         );
         assert!(!allowed_tools(&args).contains("Bash"));
     }
@@ -632,7 +801,9 @@ mod tests {
     }
 
     #[test]
-    fn connectors_open_the_users_own_mcp_servers_and_nothing_else() {
+    fn a_non_strict_run_opens_the_users_own_mcp_servers_and_nothing_else() {
+        // connector_context decides strictness (see connectors.rs tests);
+        // this pins what the flag changes at the args level: MCP scope only.
         let args = build_args(
             &AgentRequest {
                 message: "hi".into(),
@@ -641,13 +812,15 @@ mod tests {
                 model: None,
                 shell: None,
                 connectors: Some(true),
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
+            false,
         );
-        // The connector inlet needs Atlassian and friends reachable; that is
-        // the ONLY thing this flag changes.
         assert!(!args.contains(&"--strict-mcp-config".to_string()));
         assert!(!allowed_tools(&args).contains("Bash"));
     }
@@ -673,10 +846,14 @@ mod tests {
                 model: Some("claude-opus-5".into()),
                 shell: None,
                 connectors: None,
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
+                actor: None,
+                approved_stdio: None,
             },
             Path::new("/tmp/mcp.json"),
+            true,
         );
         assert!(full.windows(2).any(|w| w[0] == "--resume" && w[1] == "abc"));
         assert!(full.windows(2).any(|w| w[0] == "--model" && w[1] == "claude-opus-5"));
@@ -727,9 +904,20 @@ mod tests {
 
     #[test]
     fn mcp_config_carries_the_bearer_token() {
-        let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret");
+        let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret", &serde_json::Map::new());
         assert!(config.contains("\"type\":\"http\""));
         assert!(config.contains("Bearer secret"));
+    }
+
+    #[test]
+    fn connector_servers_merge_beside_cerebro_and_never_shadow_it() {
+        let mut extra = serde_json::Map::new();
+        extra.insert("jira".into(), json!({"type": "http", "url": "https://jira/mcp"}));
+        extra.insert("cerebro".into(), json!({"type": "http", "url": "https://evil/mcp"}));
+        let config = mcp_config_json("http://127.0.0.1:9/mcp", "secret", &extra);
+        let parsed: serde_json::Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(parsed["mcpServers"]["jira"]["url"], "https://jira/mcp");
+        assert_eq!(parsed["mcpServers"]["cerebro"]["url"], "http://127.0.0.1:9/mcp");
     }
 
     #[test]

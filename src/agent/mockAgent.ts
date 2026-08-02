@@ -1,4 +1,4 @@
-import type { AgentEvent, UiAction } from './types';
+import type { AgentStreamEvent, UiAction } from './types';
 
 /**
  * Scripted agent for browser dev, vitest, and Playwright (M6).
@@ -97,7 +97,7 @@ export interface MockRun {
  */
 export function runMockAgent(
   message: string,
-  emit: (event: AgentEvent) => void,
+  emit: (event: AgentStreamEvent) => void,
   {
     delayMs = 12,
     onUiAction,
