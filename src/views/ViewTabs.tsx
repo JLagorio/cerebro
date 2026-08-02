@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
+import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
@@ -54,6 +55,11 @@ export function ViewTabs({
   const [layoutFor, setLayoutFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // A ViewDefinition carries the tab's filters, its column set with widths and
+  // order, its sort chain, its grouping chain and its chip style. Deleting it
+  // was two clicks from an ordinary tab click, directly under "Duplicate", and
+  // unrecoverable — the app has no undo.
+  const [deleting, setDeleting] = useState<ViewDefinition | null>(null);
 
   const menuItems = (view: ViewDefinition): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
@@ -75,7 +81,7 @@ export function ViewTabs({
         icon: 'trash-2',
         label: 'Delete view',
         danger: true,
-        onSelect: () => onDelete(view.id),
+        onSelect: () => setDeleting(view),
       });
     }
     return items;
@@ -83,6 +89,29 @@ export function ViewTabs({
 
   return (
     <div className="flex min-w-0 flex-none items-end border-b border-[var(--n-200)] px-5">
+      {deleting !== null && (
+        <Dialog
+          open
+          onClose={() => setDeleting(null)}
+          title={`Delete "${deleting.name}"?`}
+          width={420}
+          primaryAction={{
+            label: 'Delete view',
+            onClick: () => {
+              const id = deleting.id;
+              setDeleting(null);
+              onDelete(id);
+            },
+          }}
+          secondaryAction={{ label: 'Cancel', onClick: () => setDeleting(null) }}
+        >
+          <p className="m-0 text-[13px] text-[var(--n-600)]">
+            This removes the tab and everything it holds — its{' '}
+            {layoutLabel(deleting.presentation.type).toLowerCase()} layout, filters, sort, grouping
+            and column arrangement. The records stay where they are.
+          </p>
+        </Dialog>
+      )}
       <div
         role="tablist"
         aria-label="Views"

@@ -194,8 +194,20 @@ function GroupEditor({
           ),
         )}
         {children.length === 0 && (
-          <span className="px-1 text-[11.5px] text-[var(--n-400)]">
-            No conditions — this view shows everything in its source.
+          // The hint has to name what THIS group does. It used to promise
+          // "shows everything" for an empty Match-any group, which hides every
+          // record — so the one line on screen contradicted the empty canvas.
+          <span
+            className={[
+              'px-1 text-[11.5px]',
+              conjunction === 'any' ? 'text-[var(--warn-600)]' : 'text-[var(--n-400)]',
+            ].join(' ')}
+          >
+            {conjunction === 'any'
+              ? 'No conditions — Match any with nothing to match hides every record. Add a condition, or switch to Match all.'
+              : depth === 0
+                ? 'No conditions — this view shows everything in its source.'
+                : 'No conditions — this group narrows nothing.'}
           </span>
         )}
       </div>
@@ -206,7 +218,12 @@ function GroupEditor({
             onChange(
               withChildren(group, [
                 ...children,
-                { field: fields[0]?.name ?? 'type', op: 'equals', value: '' },
+                // Seeded NON-exclusionary. `equals ''` matched essentially no
+                // record, so pressing "Add filter" blanked the view before the
+                // user had chosen a field or a value — and the only text on
+                // screen still said the filter showed everything. `is_not_empty`
+                // is the same rule the column-header path seeds.
+                { field: fields[0]?.name ?? 'type', op: 'is_not_empty' },
               ]),
             )
           }
@@ -218,7 +235,12 @@ function GroupEditor({
         {depth < 2 && (
           <button
             type="button"
-            onClick={() => onChange(withChildren(group, [...children, { any: [] }]))}
+            // Seeded as `all`, not `any`: `[].some()` is false, so an empty
+            // `any` group nested in the default top-level `all` matched
+            // NOTHING and emptied the view the instant it appeared — while the
+            // group's own hint said it showed everything. `[].every()` is true,
+            // so an empty `all` group really is the no-op the hint promises.
+            onClick={() => onChange(withChildren(group, [...children, { all: [] }]))}
             className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
           >
             <Icon name="plus" size={12} />

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -124,6 +124,22 @@ export function ViewSettingsPanel({
   const view = list.views.find((v) => v.id === viewId) ?? list.views[0];
   const p = view.presentation;
 
+  /**
+   * Name fields are BUFFERED, not controlled off the store (M15).
+   *
+   * They used to persist on every keystroke: onChange → updateList → writeList
+   * → saveList + a full vault rescan, with no optimistic local value. The
+   * rescan's stale result then reset the input, so typing "Roadmap" quickly
+   * produced "R" or "Rp" and the app stuttered through a rename. Commit on
+   * blur and Enter — the pattern RenameTab already uses.
+   */
+  const [viewName, setViewName] = useState(view.name);
+  const [listName, setListName] = useState(list.name);
+  // Re-seed when the panel switches to another tab or another List; a rename
+  // made elsewhere should still show up here.
+  useEffect(() => setViewName(view.name), [view.id, view.name]);
+  useEffect(() => setListName(list.name), [list.name]);
+
   /** Write back one field of the open VIEW, leaving its siblings alone. */
   const setView = (next: Partial<ViewDefinition>) =>
     onChange({
@@ -170,8 +186,17 @@ export function ViewSettingsPanel({
               <Input
                 ariaLabel="View name"
                 placeholder="View name"
-                value={view.name}
-                onChange={(e) => setView({ name: e.target.value })}
+                value={viewName}
+                onChange={(e) => setViewName(e.target.value)}
+                onBlur={() => {
+                  const next = viewName.trim();
+                  if (next === '' || next === view.name) setViewName(view.name);
+                  else setView({ name: next });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  if (e.key === 'Escape') setViewName(view.name);
+                }}
                 width="100%"
               />
             </div>
@@ -295,7 +320,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteList}
-                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--danger-600,#B3261E)] hover:bg-[var(--danger-50)]"
+                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
                 >
                   <Icon name="trash-2" size={13} />
                   {surface === 'type' ? 'Delete type' : 'Delete list'}
@@ -314,8 +339,17 @@ export function ViewSettingsPanel({
               <Input
                 ariaLabel="List name"
                 placeholder="List name"
-                value={list.name}
-                onChange={(e) => onChange({ ...list, name: e.target.value })}
+                value={listName}
+                onChange={(e) => setListName(e.target.value)}
+                onBlur={() => {
+                  const next = listName.trim();
+                  if (next === '' || next === list.name) setListName(list.name);
+                  else onChange({ ...list, name: next });
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  if (e.key === 'Escape') setListName(list.name);
+                }}
                 width="100%"
               />
             </div>

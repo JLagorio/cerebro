@@ -250,6 +250,7 @@ export function ViewToolbar({
       {showLayout && (
         <SegmentedControl
           size="sm"
+          ariaLabel="View mode"
           options={VIEW_SEGMENTS}
           value={presentation.type}
           onChange={(value) => onChange({ ...presentation, type: value as ViewType })}

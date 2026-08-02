@@ -18,7 +18,15 @@ import { CREATABLE_PROPERTY_KINDS, kindMeta, progressRatio } from '@/engine/prop
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
-import type { ChipStyle, ColumnSpec, Entry, GroupNode, Presentation, Schema } from '@/engine/types';
+import type {
+  ChipStyle,
+  ColumnSpec,
+  Entry,
+  FieldDef,
+  GroupNode,
+  Presentation,
+  Schema,
+} from '@/engine/types';
 import {
   changeFieldKind,
   duplicateFieldOnType,
@@ -28,10 +36,11 @@ import {
   renameFieldOnType,
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
-import { PropertyEditor } from '@/views/PropertyEditor';
+import { ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
 import { QuickAddInline } from '@/views/QuickAdd';
-import { useRowKeyboard } from '@/views/useRowKeyboard';
+import { useRowKeyboard, type RowKeyboardRowProps } from '@/views/useRowKeyboard';
 import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
 
 const TITLE_W = 280;
 const MIN_TITLE_W = 140;
@@ -60,7 +69,7 @@ function ProgressCell({ display }: { display: string }) {
           className="block h-full rounded-full"
           style={{
             width: `${ratio}%`,
-            background: ratio >= 100 ? 'var(--success-500, #1F9D61)' : 'var(--cortex-500)',
+            background: ratio >= 100 ? 'var(--success-500)' : 'var(--cortex-500)',
           }}
         />
       </span>
@@ -156,6 +165,7 @@ const TableRow = memo(function TableRow({
   onToggle,
   selected,
   onSelect,
+  rowProps,
 }: {
   entry: Entry;
   cells: { def: ColumnDef; wrap: boolean }[];
@@ -174,6 +184,9 @@ const TableRow = memo(function TableRow({
   onToggle: () => void;
   selected: boolean;
   onSelect: () => void;
+  /** Roving-tabindex bookkeeping from useRowKeyboard — id, aria-selected and
+   * the ref the cursor scrolls into view. */
+  rowProps: RowKeyboardRowProps;
 }) {
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
@@ -185,6 +198,7 @@ const TableRow = memo(function TableRow({
   return (
     <div
       role="row"
+      {...rowProps}
       data-testid="table-row"
       data-path={entry.path}
       data-depth={depth}
@@ -194,7 +208,11 @@ const TableRow = memo(function TableRow({
       className={[
         'group flex border-b border-[var(--n-100)]',
         autoHeight ? 'min-h-9' : 'h-9',
-        selected ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-25)]',
+        // The cursor row needs to survive a bright screen: the --cortex-50
+        // fill alone was 1.13:1 against white, so a left rule carries it.
+        selected
+          ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]'
+          : 'hover:bg-[var(--n-25)]',
       ].join(' ')}
     >
       {cells.slice(0, titlePos).map(({ def, wrap }, i) => (
@@ -237,14 +255,10 @@ const TableRow = memo(function TableRow({
           <span className="h-4 w-4 flex-none" />
         )}
         <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-400)'} />
-        <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
-          {entry.title}
-        </span>
-        {childCount > 0 && (
-          <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
-            {childCount}
-          </span>
-        )}
+        {/* The title IS the opener. It used to be an inert <span> beside a
+            chip that was `display:none` until hover — so the only way into a
+            record was a control absent from the DOM and from the tab order,
+            and hovering it stole ~62px from the title you were reading. */}
         <button
           type="button"
           aria-label={`Open ${entry.title}`}
@@ -252,11 +266,24 @@ const TableRow = memo(function TableRow({
             e.stopPropagation();
             openPath(entry.path);
           }}
-          className="hidden flex-none items-center gap-1 rounded-md border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 py-px text-[11px] text-[var(--n-600)] hover:border-[var(--n-400)] group-hover:inline-flex"
+          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] text-[var(--n-900)] hover:underline focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
         >
-          <Icon name="maximize-2" size={10} />
-          Open
+          {entry.title}
         </button>
+        {childCount > 0 && (
+          <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
+            {childCount}
+          </span>
+        )}
+        {/* Reserved space, not inserted space: the glyph is always laid out
+            and only its opacity changes, so the title never reflows under the
+            pointer. */}
+        <span
+          aria-hidden
+          className="flex-none text-[var(--n-400)] opacity-0 group-hover:opacity-100"
+        >
+          <Icon name="maximize-2" size={11} />
+        </span>
       </div>
       {cells.slice(titlePos).map(({ def, wrap }, i) => (
         <TableCell
@@ -499,10 +526,12 @@ function HeaderMenu({
 }) {
   const [open, setOpen] = useState(false);
   const [changingKind, setChangingKind] = useState(false);
+  const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
   // M12.8: the full property editor, flown out IN this popover next to the
   // column it configures — config never docks a side panel.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(humanize(def.name));
+  const allEntriesForCount = useVaultStore((s) => s.entries);
   const name = humanize(def.name);
   // Schema operations need one agreed-on declaration to edit.
   const canEditSchema = sourceType !== null && def.heterogeneous !== true;
@@ -736,10 +765,7 @@ function HeaderMenu({
                         key={k.kind}
                         type="button"
                         data-testid={`change-type-${k.kind}`}
-                        onClick={() => {
-                          close();
-                          void changeFieldKind(sourceType, def.name, k.kind);
-                        }}
+                        onClick={() => setPendingKind(k.kind)}
                         className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
                       >
                         <Icon name={k.icon} size={12} color="var(--n-500)" />
@@ -761,16 +787,14 @@ function HeaderMenu({
                     }}
                     className={[
                       'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] hover:bg-[var(--n-50)]',
-                      item.danger === true
-                        ? 'text-[var(--danger-600,#c5372c)]'
-                        : 'text-[var(--n-700)]',
+                      item.danger === true ? 'text-[var(--danger-600)]' : 'text-[var(--n-700)]',
                       item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
                     ].join(' ')}
                   >
                     <Icon
                       name={item.icon}
                       size={12}
-                      color={item.danger === true ? 'var(--danger-600, #c5372c)' : 'var(--n-500)'}
+                      color={item.danger === true ? 'var(--danger-600)' : 'var(--n-500)'}
                     />
                     <span className="min-w-0 flex-1">{item.label}</span>
                     {item.active === true && (
@@ -782,6 +806,20 @@ function HeaderMenu({
             )}
           </div>
         </>
+      )}
+      {pendingKind !== null && sourceType !== null && (
+        <ConfirmKindChange
+          name={name}
+          from={def.kind}
+          to={pendingKind}
+          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          onCancel={() => setPendingKind(null)}
+          onConfirm={() => {
+            setPendingKind(null);
+            close();
+            void changeFieldKind(sourceType, def.name, pendingKind);
+          }}
+        />
       )}
     </span>
   );
@@ -942,6 +980,11 @@ export function TableView({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [available, setAvailable] = useState(0);
+  // True while columns remain to the right of the fold. The horizontal
+  // scrollbar sits at the bottom of the viewport, which on a four-row table is
+  // hundreds of pixels below the last row — so nothing at the edge said the
+  // half-clipped date column continued.
+  const [moreRight, setMoreRight] = useState(false);
 
   // The width the grid has to fill. Observed rather than read once, because
   // the detail panel opening beside the table changes it (M11 item 2).
@@ -955,6 +998,13 @@ export function TableView({
     setAvailable(node.clientWidth);
     return () => observer.disconnect();
   }, []);
+
+  const syncOverflow = useCallback(() => {
+    const node = scrollRef.current;
+    if (node === null) return;
+    setMoreRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 1);
+  }, []);
+  useEffect(syncOverflow);
 
   const resolved = useMemo(
     () => resolveColumns(presentation.columns, fields),
@@ -1179,195 +1229,222 @@ export function TableView({
   }, [layout]);
 
   return (
-    <div
-      ref={scrollRef}
-      data-testid="table-view"
-      role="grid"
-      className="min-h-0 min-w-0 flex-1 overflow-auto outline-none"
-      {...keyboard.containerProps}
-    >
+    // The wrapper exists only to hang the right-edge overflow fade off the
+    // scroller; the scroller itself keeps every class it had.
+    <div className="relative flex min-h-0 min-w-0 flex-1">
       <div
-        ref={gridRef}
-        style={{ width: layout.total, minWidth: '100%', ...widthVars } as React.CSSProperties}
+        ref={scrollRef}
+        onScroll={syncOverflow}
+        data-testid="table-view"
+        role="grid"
+        // The grid is the sole tab stop, so it has to say what it is and how
+        // big it is; `outline-none` with nothing replacing it meant Tabbing in
+        // changed nothing on screen at all.
+        aria-label={sourceType === null ? 'Records' : `${sourceType} records`}
+        aria-rowcount={flatRows.length}
+        className="min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
+        {...keyboard.containerProps}
       >
         <div
-          ref={headerRowRef}
-          role="row"
-          className="sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
+          ref={gridRef}
+          style={{ width: layout.total, minWidth: '100%', ...widthVars } as React.CSSProperties}
         >
-          {/* M12.8: headers render in DISPLAY order — the name column is one
+          <div
+            ref={headerRowRef}
+            role="row"
+            className="sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
+          >
+            {/* M12.8: headers render in DISPLAY order — the name column is one
               of them now, not a fixture bolted to the front. */}
-          {displayKeys.map((key, d) => {
-            if (key === 'title') {
+            {displayKeys.map((key, d) => {
+              if (key === 'title') {
+                return (
+                  <div
+                    key="title"
+                    role="columnheader"
+                    onPointerDown={startHeaderDrag('title')}
+                    onClickCapture={swallowDraggedClick}
+                    className={[
+                      titleFrozen ? 'sticky left-0 z-30' : 'relative',
+                      'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
+                      drag?.key === 'title' ? 'opacity-60' : '',
+                    ].join(' ')}
+                    style={{ width: `var(${TITLE_VAR})`, ...dropStyle(d) }}
+                  >
+                    <Icon name="type" size={12} color="var(--n-400)" />
+                    <TitleHeaderMenu
+                      presentation={presentation}
+                      frozen={titleFrozen}
+                      canFreeze={titlePos === 0}
+                      atStart={titlePos === 0}
+                      atEnd={titlePos === resolved.length}
+                      onPresentationChange={onPresentationChange}
+                      onFilterField={onFilterField}
+                      onMove={(delta) => moveDisplay('title', delta)}
+                    />
+                    {primarySort?.field === 'title' && (
+                      <Icon
+                        name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
+                        size={11}
+                        color="var(--cortex-600)"
+                      />
+                    )}
+                    {/* M11: the name column resizes too. It is the widest thing
+                      on the row and was the one width nobody could change. */}
+                    {onPresentationChange !== undefined && (
+                      <ColumnResizer
+                        label="Name"
+                        width={layout.title}
+                        min={MIN_TITLE_W}
+                        onDrag={(w) => paint(TITLE_VAR, w, w - layout.title)}
+                        onCommit={commitTitle}
+                      />
+                    )}
+                  </div>
+                );
+              }
+              const i = d < titlePos ? d : d - 1;
+              const { def, spec } = resolved[i];
               return (
                 <div
-                  key="title"
+                  key={def.name}
                   role="columnheader"
-                  onPointerDown={startHeaderDrag('title')}
+                  onPointerDown={startHeaderDrag(def.name)}
                   onClickCapture={swallowDraggedClick}
                   className={[
-                    titleFrozen ? 'sticky left-0 z-30' : 'relative',
-                    'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
-                    drag?.key === 'title' ? 'opacity-60' : '',
+                    'group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]',
+                    drag?.key === def.name ? 'opacity-60' : '',
                   ].join(' ')}
-                  style={{ width: `var(${TITLE_VAR})`, ...dropStyle(d) }}
+                  style={{ width: `var(${widthVar(i)})`, ...dropStyle(d) }}
                 >
-                  <Icon name="type" size={12} color="var(--n-400)" />
-                  <TitleHeaderMenu
+                  <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
+                  {/* M12.4b: the label opens the column menu (Notion's header).
+                    Sorting lives inside it now, with an explicit direction. */}
+                  <HeaderMenu
+                    def={def}
+                    wrap={spec.wrap === true}
+                    columns={presentation.columns}
                     presentation={presentation}
-                    frozen={titleFrozen}
-                    canFreeze={titlePos === 0}
-                    atStart={titlePos === 0}
-                    atEnd={titlePos === resolved.length}
+                    schema={schema}
+                    sourceType={sourceType ?? null}
+                    onColumnsChange={onColumnsChange}
                     onPresentationChange={onPresentationChange}
                     onFilterField={onFilterField}
-                    onMove={(delta) => moveDisplay('title', delta)}
+                    onMove={onPresentationChange !== undefined ? moveDisplay : undefined}
                   />
-                  {primarySort?.field === 'title' && (
+                  {def.heterogeneous === true && (
+                    <span
+                      title="Declared with different kinds across the types in this view"
+                      className="flex-none text-[var(--warn-500)]"
+                    >
+                      <Icon name="triangle-alert" size={10} />
+                    </span>
+                  )}
+                  {primarySort?.field === def.name && (
                     <Icon
                       name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
                       size={11}
                       color="var(--cortex-600)"
                     />
                   )}
-                  {/* M11: the name column resizes too. It is the widest thing
-                      on the row and was the one width nobody could change. */}
-                  {onPresentationChange !== undefined && (
+                  {onColumnsChange !== undefined && (
                     <ColumnResizer
-                      label="Name"
-                      width={layout.title}
-                      min={MIN_TITLE_W}
-                      onDrag={(w) => paint(TITLE_VAR, w, w - layout.title)}
-                      onCommit={commitTitle}
+                      label={humanize(def.name)}
+                      width={layout.columns[i]}
+                      min={MIN_COL_W}
+                      onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
+                      onCommit={(w) => commitColumn(def.name, w)}
                     />
                   )}
                 </div>
               );
-            }
-            const i = d < titlePos ? d : d - 1;
-            const { def, spec } = resolved[i];
-            return (
-              <div
-                key={def.name}
-                role="columnheader"
-                onPointerDown={startHeaderDrag(def.name)}
-                onClickCapture={swallowDraggedClick}
-                className={[
-                  'group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]',
-                  drag?.key === def.name ? 'opacity-60' : '',
-                ].join(' ')}
-                style={{ width: `var(${widthVar(i)})`, ...dropStyle(d) }}
-              >
-                <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
-                {/* M12.4b: the label opens the column menu (Notion's header).
-                    Sorting lives inside it now, with an explicit direction. */}
-                <HeaderMenu
-                  def={def}
-                  wrap={spec.wrap === true}
-                  columns={presentation.columns}
-                  presentation={presentation}
-                  schema={schema}
-                  sourceType={sourceType ?? null}
-                  onColumnsChange={onColumnsChange}
-                  onPresentationChange={onPresentationChange}
-                  onFilterField={onFilterField}
-                  onMove={onPresentationChange !== undefined ? moveDisplay : undefined}
-                />
-                {def.heterogeneous === true && (
-                  <span
-                    title="Declared with different kinds across the types in this view"
-                    className="flex-none text-[var(--warn-500)]"
-                  >
-                    <Icon name="triangle-alert" size={10} />
-                  </span>
-                )}
-                {primarySort?.field === def.name && (
-                  <Icon
-                    name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
-                    size={11}
-                    color="var(--cortex-600)"
-                  />
-                )}
-                {onColumnsChange !== undefined && (
-                  <ColumnResizer
-                    label={humanize(def.name)}
-                    width={layout.columns[i]}
-                    min={MIN_COL_W}
-                    onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
-                    onCommit={(w) => commitColumn(def.name, w)}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+            })}
+          </div>
 
-        {rows.map((row) => {
-          if (row.kind === 'band') {
+          {rows.map((row) => {
+            if (row.kind === 'band') {
+              return (
+                <BandHeader
+                  key={row.key}
+                  node={row.node}
+                  collapsed={collapsedMap?.[row.key] === true}
+                  onToggle={() => toggleCollapsed(scope, row.key)}
+                />
+              );
+            }
+            if (row.kind === 'add') {
+              // M9.6: a listing surface can create, inheriting its band.
+              return (
+                <div
+                  key={row.key}
+                  role="row"
+                  className="sticky left-0"
+                  style={{ width: `var(${TITLE_VAR})` }}
+                >
+                  <QuickAddInline
+                    compact
+                    label="New"
+                    ariaLabel={row.band === null ? 'New record' : `New record in ${row.band.label}`}
+                    onCreate={(title) =>
+                      onCreate!(title, {
+                        groupBy: row.band?.field ?? '',
+                        groupValue: row.band?.key ?? '',
+                      })
+                    }
+                  />
+                </div>
+              );
+            }
+            const index = flatRows.indexOf(row);
             return (
-              <BandHeader
+              <TableRow
                 key={row.key}
-                node={row.node}
+                entry={row.entry}
+                cells={cells}
+                titlePos={titlePos}
+                titleFrozen={titleFrozen}
+                autoHeight={anyWrap}
+                schema={schema}
+                depth={row.depth}
+                childCount={row.childCount}
                 collapsed={collapsedMap?.[row.key] === true}
+                chips={chips}
                 onToggle={() => toggleCollapsed(scope, row.key)}
+                selected={index === keyboard.index}
+                onSelect={() => keyboard.setIndex(index)}
+                // Without this the hook's `rows` ref stayed empty, so arrowing
+                // past the fold moved an invisible cursor off-screen and the
+                // scroller never followed it.
+                rowProps={keyboard.rowProps(index)}
               />
             );
-          }
-          if (row.kind === 'add') {
-            // M9.6: a listing surface can create, inheriting its band.
-            return (
-              <div key={row.key} className="sticky left-0" style={{ width: `var(${TITLE_VAR})` }}>
-                <QuickAddInline
-                  compact
-                  label="New"
-                  ariaLabel={row.band === null ? 'New record' : `New record in ${row.band.label}`}
-                  onCreate={(title) =>
-                    onCreate!(title, {
-                      groupBy: row.band?.field ?? '',
-                      groupValue: row.band?.key ?? '',
-                    })
-                  }
-                />
-              </div>
-            );
-          }
-          const index = flatRows.indexOf(row);
-          return (
-            <TableRow
-              key={row.key}
-              entry={row.entry}
-              cells={cells}
-              titlePos={titlePos}
-              titleFrozen={titleFrozen}
-              autoHeight={anyWrap}
-              schema={schema}
-              depth={row.depth}
-              childCount={row.childCount}
-              collapsed={collapsedMap?.[row.key] === true}
-              chips={chips}
-              onToggle={() => toggleCollapsed(scope, row.key)}
-              selected={index === keyboard.index}
-              onSelect={() => keyboard.setIndex(index)}
-            />
-          );
-        })}
+          })}
 
-        {entries.length === 0 && (
-          <div className="sticky left-0 px-3 py-8">
-            {/* An empty that only reports emptiness occupies the space where
+          {entries.length === 0 && (
+            <div role="row" className="sticky left-0 px-3 py-8">
+              {/* An empty that only reports emptiness occupies the space where
                 the next action belongs (M9.6). */}
-            <EmptyState
-              icon="table-2"
-              title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
-              description={
-                filtered === true
-                  ? 'Adjust the filters in view settings to widen the query.'
-                  : 'Create the first one below.'
-              }
-            />
-          </div>
-        )}
+              <EmptyState
+                icon="table-2"
+                title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
+                description={
+                  filtered === true
+                    ? 'Adjust the filters in view settings to widen the query.'
+                    : 'Create the first one below.'
+                }
+              />
+            </div>
+          )}
+        </div>
       </div>
+      {moreRight && (
+        <div
+          aria-hidden
+          data-testid="table-overflow-right"
+          className="pointer-events-none absolute inset-y-0 right-0 w-6"
+          style={{ background: 'linear-gradient(to left, var(--n-200), transparent)' }}
+        />
+      )}
     </div>
   );
 }

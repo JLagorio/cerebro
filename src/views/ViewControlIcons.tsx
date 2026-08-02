@@ -8,6 +8,7 @@ import { humanize } from '@/engine/schema';
 import type { FilterGroup, Presentation } from '@/engine/types';
 import { groupByField, sortBy } from '@/engine/views';
 import { countRules, GROUPABLE_KINDS, META_SORTS, ORDERABLE_KINDS } from '@/views/ViewToolbar';
+import { axesFor } from '@/views/viewKinds';
 
 /**
  * The view-control icon cluster (M12.8): Notion's toolbar-in-the-tab-row.
@@ -50,6 +51,7 @@ export function ViewControlIcons({
   onNew?: () => void;
 }) {
   const filterCount = countRules(filters);
+  const axes = axesFor(presentation.type);
 
   const option = (f: ColumnDef) => ({
     value: f.name,
@@ -68,6 +70,7 @@ export function ViewControlIcons({
           active={filterCount > 0}
           placeholder="Filter by…"
           options={[{ value: 'title', label: 'Name', icon: 'type' }, ...fields.map(option)]}
+          barOpen={barOpen}
           onToggleBar={toggleBar}
           onPick={(field) => {
             onFiltersChange({ all: [{ field, op: 'is_not_empty', value: '' }] });
@@ -84,24 +87,28 @@ export function ViewControlIcons({
           ...META_SORTS.map((m) => ({ value: m.value, label: m.label, icon: 'type' })),
           ...fields.filter((f) => ORDERABLE_KINDS.has(f.kind)).map(option),
         ]}
+        barOpen={barOpen}
         onToggleBar={toggleBar}
         onPick={(field) => {
           onChange(sortBy(presentation, field, 'asc'));
           onBarOpenChange(true);
         }}
       />
-      <QuickAxisIcon
-        icon="rows-3"
-        label="Group"
-        active={presentation.group.length > 0}
-        placeholder="Group by…"
-        options={fields.filter((f) => GROUPABLE_KINDS.has(f.kind)).map(option)}
-        onToggleBar={toggleBar}
-        onPick={(field) => {
-          onChange(groupByField(presentation, field));
-          onBarOpenChange(true);
-        }}
-      />
+      {axes.group && (
+        <QuickAxisIcon
+          icon="rows-3"
+          label="Group"
+          active={presentation.group.length > 0}
+          placeholder="Group by…"
+          options={fields.filter((f) => GROUPABLE_KINDS.has(f.kind)).map(option)}
+          barOpen={barOpen}
+          onToggleBar={toggleBar}
+          onPick={(field) => {
+            onChange(groupByField(presentation, field));
+            onBarOpenChange(true);
+          }}
+        />
+      )}
       {onSettingsOpenChange !== undefined && (
         <span className="relative inline-flex">
           <button
@@ -154,6 +161,7 @@ function QuickAxisIcon({
   active,
   placeholder,
   options,
+  barOpen,
   onToggleBar,
   onPick,
 }: {
@@ -162,6 +170,8 @@ function QuickAxisIcon({
   active: boolean;
   placeholder: string;
   options: { value: string; label: string; icon: string }[];
+  /** Whether the chip bar below the tabs is showing. */
+  barOpen: boolean;
   onToggleBar: () => void;
   onPick: (field: string) => void;
 }) {
@@ -183,7 +193,10 @@ function QuickAxisIcon({
         data-testid={`view-control-${label.toLowerCase()}`}
         aria-label={label}
         aria-expanded={open}
-        onClick={() => (active ? onToggleBar() : open ? close() : openMenu())}
+        // An OPEN bar always closes from these icons. It used to toggle only
+        // while its axis was ACTIVE, so clearing the last rule stranded the bar
+        // permanently open with nothing left that could close it.
+        onClick={() => (open ? close() : barOpen || active ? onToggleBar() : openMenu())}
         className={[
           'flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent',
           active

@@ -17,10 +17,72 @@ import {
 } from '@/engine/schedule';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { ColumnDef } from '@/engine/columns';
+import type { Span } from '@/engine/schedule';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 
-/** Chips beyond this in one day cell collapse into a "+N more" row. */
+/** Single-day chips beyond this in one cell collapse into a "+N more" row. */
 const MAX_CHIPS = 3;
+/** Height of one continuous-bar lane, in px. */
+const LANE_H = 18;
+/** Bar lanes a week will draw before the rest fall into the day overflow. */
+const MAX_LANES = 3;
+
+/** One multi-day span, clipped to the week that draws it. */
+interface Segment {
+  entry: Entry;
+  span: Span;
+  /** Weekday column (0-6) the bar starts and ends in, inclusive. */
+  startCol: number;
+  endCol: number;
+  lane: number;
+  continuesLeft: boolean;
+  continuesRight: boolean;
+}
+
+/**
+ * Lay a week's multi-day spans out as continuous bars.
+ *
+ * Every entry used to be re-rendered as its own chip in EVERY day it covered,
+ * so a two-week item was drawn fourteen times and all 42 cells showed the same
+ * three truncated titles plus a "+N more". Nothing said how long anything ran,
+ * when it started, or which day was busier — the one question a month grid
+ * exists to answer. Greedy lane packing: earliest start first, longest first
+ * on a tie, each bar taking the first lane that is free at its start column.
+ */
+function layoutWeek(spans: { entry: Entry; span: Span }[], days: string[]): Segment[] {
+  const weekStart = days[0];
+  const weekEnd = days[days.length - 1];
+  const inWeek = spans
+    .filter(({ span }) => span.end > span.start && span.start <= weekEnd && span.end >= weekStart)
+    .sort((a, b) =>
+      a.span.start === b.span.start
+        ? b.span.end.localeCompare(a.span.end)
+        : a.span.start.localeCompare(b.span.start),
+    );
+  const laneEnd: number[] = [];
+  return inWeek.map(({ entry, span }) => {
+    const from = days.indexOf(span.start);
+    const to = days.indexOf(span.end);
+    const startCol = span.start < weekStart || from === -1 ? 0 : from;
+    const endCol = span.end > weekEnd || to === -1 ? days.length - 1 : to;
+    let lane = laneEnd.findIndex((end) => end < startCol);
+    if (lane === -1) {
+      lane = laneEnd.length;
+      laneEnd.push(endCol);
+    } else {
+      laneEnd[lane] = endCol;
+    }
+    return {
+      entry,
+      span,
+      startCol,
+      endCol,
+      lane,
+      continuesLeft: span.start < weekStart,
+      continuesRight: span.end > weekEnd,
+    };
+  });
+}
 
 export interface CalendarViewProps {
   entries: Entry[];
@@ -59,7 +121,20 @@ export function CalendarView({
     () => entries.filter((e) => spanOf(e, dateField) !== null),
     [entries, dateField],
   );
-  const undatedCount = useMemo(() => unscheduled(entries, dateField).length, [entries, dateField]);
+  const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
+  const [showUndated, setShowUndated] = useState(false);
+  /** Each dated entry with its span resolved once — the layout needs both. */
+  const spans = useMemo(
+    () =>
+      dated
+        .map((entry) => ({ entry, span: spanOf(entry, dateField) as Span }))
+        .filter((s) => s.span !== null),
+    [dated, dateField],
+  );
+  const weeks = useMemo(
+    () => Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7)),
+    [days],
+  );
 
   // No date property anywhere on this collection's type — the view cannot be
   // made to work by paging months, so say what would fix it.
@@ -113,8 +188,24 @@ export function CalendarView({
         <span className="flex-1" />
         {/* Honest about coverage: a calendar that silently omits a third of
             the collection looks complete and is not. */}
-        {undatedCount > 0 && (
-          <span className="text-[11.5px] text-[var(--n-500)]">{undatedCount} without a date</span>
+        {undated.length > 0 && (
+          // A count that resists clicking is worse than no indicator: the app
+          // names exactly what is missing from the grid and then offers no way
+          // to reach it.
+          <button
+            type="button"
+            data-testid="calendar-undated-toggle"
+            aria-expanded={showUndated}
+            onClick={() => setShowUndated(!showUndated)}
+            className={[
+              'rounded-md border px-2 py-0.5 text-[11.5px]',
+              showUndated
+                ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-600)]'
+                : 'border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]',
+            ].join(' ')}
+          >
+            {undated.length} without a date
+          </button>
         )}
       </div>
 
@@ -129,69 +220,174 @@ export function CalendarView({
         ))}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 overflow-auto">
-        {days.map((day) => {
-          const inMonth = isSameMonth(day, anchor);
-          const records = onDay(dated, dateField, day);
-          const showAll = expanded === day;
-          const visible = showAll ? records : records.slice(0, MAX_CHIPS);
+      <div className="min-h-0 flex-1 overflow-auto">
+        {weeks.map((days) => {
+          const segments = layoutWeek(spans, days);
+          const drawn = segments.filter((s) => s.lane < MAX_LANES);
+          const spilled = segments.filter((s) => s.lane >= MAX_LANES);
+          const lanes = Math.min(
+            segments.reduce((max, s) => Math.max(max, s.lane + 1), 0),
+            MAX_LANES,
+          );
           return (
-            <div
-              key={day}
-              data-testid="calendar-day"
-              data-day={day}
-              data-count={records.length}
-              className={[
-                'group/day flex min-h-[92px] min-w-0 flex-col gap-0.5 border-b border-r border-[var(--n-100)] p-1',
-                inMonth ? '' : 'bg-[var(--n-25)]',
-              ].join(' ')}
-            >
-              <div className="flex flex-none items-center gap-1">
-                <span
-                  className={[
-                    'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[11px]',
-                    day === today
-                      ? 'bg-[var(--cortex-500)] font-semibold text-white'
-                      : inMonth
-                        ? 'text-[var(--n-700)]'
-                        : 'text-[var(--n-400)]',
-                  ].join(' ')}
-                >
-                  {Number(day.slice(8, 10))}
-                </span>
-                <span className="flex-1" />
-                {onCreateOn !== undefined && <DayAdd day={day} onCreate={onCreateOn} />}
-              </div>
-              {visible.map((entry) => {
-                const style = typeStyle(entry.type, schema);
+            <div key={days[0]} className="relative grid grid-cols-7">
+              {days.map((day, col) => {
+                const inMonth = isSameMonth(day, anchor);
+                // The cell stack is single-day items ONLY, plus whatever
+                // spilled past the lane cap — a bar is not repeated as a chip.
+                const singles = spans
+                  .filter(({ span }) => span.start === span.end && span.start === day)
+                  .map(({ entry }) => entry);
+                const overflowed = spilled
+                  .filter((s) => s.startCol <= col && s.endCol >= col)
+                  .map((s) => s.entry);
+                const stack = [...singles, ...overflowed];
+                const showAll = expanded === day;
+                const visible = showAll ? stack : stack.slice(0, MAX_CHIPS);
                 return (
-                  <button
-                    key={entry.path}
-                    type="button"
-                    data-testid="calendar-chip"
-                    data-path={entry.path}
-                    onClick={() => openPath(entry.path)}
-                    title={entry.title}
-                    className="flex min-w-0 items-center gap-1 rounded border-0 bg-[var(--n-50)] px-1 py-px text-left text-[11.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+                  <div
+                    key={day}
+                    data-testid="calendar-day"
+                    data-day={day}
+                    data-count={onDay(dated, dateField, day).length}
+                    className={[
+                      'group/day flex min-h-[92px] min-w-0 flex-col gap-0.5 border-b border-r border-[var(--n-100)] p-1',
+                      inMonth ? '' : 'bg-[var(--n-25)]',
+                    ].join(' ')}
                   >
-                    <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
-                    <span className="min-w-0 flex-1 truncate">{entry.title}</span>
-                  </button>
+                    <div className="flex flex-none items-center gap-1">
+                      <span
+                        className={[
+                          'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[11px]',
+                          day === today
+                            ? 'bg-[var(--cortex-500)] font-semibold text-[var(--n-0)]'
+                            : inMonth
+                              ? 'text-[var(--n-700)]'
+                              : 'text-[var(--n-400)]',
+                        ].join(' ')}
+                      >
+                        {Number(day.slice(8, 10))}
+                      </span>
+                      <span className="flex-1" />
+                      {onCreateOn !== undefined && <DayAdd day={day} onCreate={onCreateOn} />}
+                    </div>
+                    {/* Reserved lane space. Every cell in the week reserves the
+                        same height, so the bars painted over the row land in
+                        the gap rather than on top of a chip. */}
+                    <div aria-hidden className="flex-none" style={{ height: lanes * LANE_H }} />
+                    {visible.map((entry) => {
+                      const style = typeStyle(entry.type, schema);
+                      return (
+                        <button
+                          key={entry.path}
+                          type="button"
+                          data-testid="calendar-chip"
+                          data-path={entry.path}
+                          onClick={() => openPath(entry.path)}
+                          title={entry.title}
+                          className="flex min-w-0 items-center gap-1 rounded border-0 bg-[var(--n-50)] px-1 py-px text-left text-[11.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+                        >
+                          <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                          <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+                        </button>
+                      );
+                    })}
+                    {stack.length > visible.length && (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(day)}
+                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+                      >
+                        {`+${stack.length - visible.length} more`}
+                      </button>
+                    )}
+                    {showAll && stack.length > MAX_CHIPS && (
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(null)}
+                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+                      >
+                        Show less
+                      </button>
+                    )}
+                  </div>
                 );
               })}
-              {records.length > MAX_CHIPS && (
-                <button
-                  type="button"
-                  onClick={() => setExpanded(showAll ? null : day)}
-                  className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-[var(--n-500)] hover:text-[var(--n-800)]"
-                >
-                  {showAll ? 'Show less' : `+${records.length - MAX_CHIPS} more`}
-                </button>
-              )}
+              {/* One bar per span per week row, drawn over the reserved lanes.
+                  Square ends mean "this continues" — rounded ends are the real
+                  start and the real finish. */}
+              <div
+                className="pointer-events-none absolute inset-x-0"
+                // 4px cell padding + the 18px day-number row + the 2px gap.
+                style={{ top: 24 }}
+                data-testid="calendar-lanes"
+              >
+                {drawn.map((seg) => {
+                  const style = typeStyle(seg.entry.type, schema);
+                  return (
+                    <button
+                      key={`${seg.entry.path}:${days[0]}`}
+                      type="button"
+                      data-testid="calendar-bar"
+                      data-path={seg.entry.path}
+                      onClick={() => openPath(seg.entry.path)}
+                      title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
+                      className={[
+                        'pointer-events-auto absolute flex items-center gap-1 overflow-hidden border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]',
+                        seg.continuesLeft ? 'border-l-0' : 'rounded-l-[5px]',
+                        seg.continuesRight ? 'border-r-0' : 'rounded-r-[5px]',
+                      ].join(' ')}
+                      style={{
+                        left: `calc(${(seg.startCol / 7) * 100}% + 3px)`,
+                        width: `calc(${((seg.endCol - seg.startCol + 1) / 7) * 100}% - 6px)`,
+                        top: seg.lane * LANE_H,
+                        height: LANE_H - 3,
+                      }}
+                    >
+                      {seg.continuesLeft && (
+                        <Icon name="chevron-left" size={10} color="var(--cortex-600)" />
+                      )}
+                      {!seg.continuesLeft && (
+                        <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">{seg.entry.title}</span>
+                      {seg.continuesRight && (
+                        <Icon name="chevron-right" size={10} color="var(--cortex-600)" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
       </div>
+      {showUndated && undated.length > 0 && (
+        <div
+          data-testid="calendar-undated"
+          className="max-h-[180px] flex-none overflow-y-auto border-t border-[var(--n-200)] bg-[var(--n-25)] px-5 py-2"
+        >
+          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            Without a date
+          </div>
+          {undated.map((entry) => (
+            <button
+              key={entry.path}
+              type="button"
+              data-path={entry.path}
+              onClick={() => openPath(entry.path)}
+              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+            >
+              <Icon
+                name={typeStyle(entry.type, schema).icon}
+                size={11}
+                color={typeStyle(entry.type, schema).color ?? 'var(--n-400)'}
+              />
+              <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

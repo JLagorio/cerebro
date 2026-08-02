@@ -359,6 +359,36 @@ describe('buildRows — the create-record row', () => {
     expect(addDepths.every((d) => d === 2)).toBe(true);
   });
 
+  it('is absent under an EMPTY band', () => {
+    // A type with six declared statuses renders six bands whether or not
+    // anything is in them, and a create row under each turned a four-record
+    // table into seven ways to create — one of which silently filed the new
+    // record as "Void".
+    const rows = buildRows({
+      entries: [objectives[0]],
+      group: [{ field: 'status' }],
+      schema,
+      allEntries: ALL,
+      addRows: true,
+    });
+    // The fixture's status list declares more bands than this one record can
+    // fill, which is the whole point.
+    const bands = rows.filter((r) => r.kind === 'band');
+    expect(bands.length).toBeGreaterThan(1);
+    const empties = rows.filter((r) => r.kind === 'band' && r.node.entries.length === 0);
+    expect(empties.length).toBeGreaterThan(0);
+    for (const band of empties) {
+      expect(
+        rows.some(
+          (r) =>
+            r.kind === 'add' && r.key === `add:${(band as { node: { path: string } }).node.path}`,
+        ),
+      ).toBe(false);
+    }
+    // The band that DOES hold something keeps its create row.
+    expect(rows.filter((r) => r.kind === 'add')).toHaveLength(1);
+  });
+
   it('is suppressed inside a collapsed band', () => {
     const rows = buildRows({
       entries: objectives,

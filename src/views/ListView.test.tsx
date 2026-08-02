@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ListView } from '@/views/ListView';
 import { FieldChip } from '@/views/FieldChip';
@@ -156,6 +156,69 @@ describe('ListView', () => {
       frontmatter: { type: 'Work item', key: 'FLD-3' },
       body: '# First item\n',
     });
+  });
+});
+
+/**
+ * Keyboard access and the empty state (M15).
+ *
+ * ListRow was a `<div role="row">` with an onClick, no tabIndex and no roving
+ * container — the hook was imported by TableView alone, so this layout had no
+ * keyboard path to a record at all. A zero-row view also rendered nothing but
+ * the grey "All items 0" strip, which reads as a load failure.
+ */
+describe('ListView keyboard and empty state (M15)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    useUiStore.setState({ detailPath: null });
+  });
+
+  it('lands a visible cursor on the first row when the list takes focus', () => {
+    setup();
+    const list = screen.getByTestId('list-view');
+    expect(list.getAttribute('role')).toBe('grid');
+    fireEvent.focus(list, { target: list });
+    const rows = screen.getAllByTestId('list-row');
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    expect(list.getAttribute('aria-activedescendant')).toBe(rows[0].id);
+  });
+
+  it('opens a record with Enter after arrowing to it', () => {
+    setup();
+    const list = screen.getByTestId('list-view');
+    fireEvent.focus(list, { target: list });
+    fireEvent.keyDown(list, { key: 'Enter' });
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+  });
+
+  it('creates from the canvas when only onCreate is passed — no project needed', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(true);
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
+    render(
+      <ListView
+        entries={items}
+        presentation={presentation}
+        schema={schema}
+        project={null}
+        onCreate={onCreate}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'New item in Doing' }));
+    await user.type(screen.getByRole('textbox', { name: 'New item in Doing' }), 'Ship it{Enter}');
+    expect(onCreate).toHaveBeenCalledWith('Ship it', { groupBy: 'status', groupValue: 'doing' });
+  });
+
+  it('says why a filtered view is empty instead of showing a bare count strip', () => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(
+      <ListView entries={[]} presentation={presentation} schema={schema} project={null} filtered />,
+    );
+    expect(screen.getByText('Nothing matches these filters')).toBeTruthy();
   });
 });
 

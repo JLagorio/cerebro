@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 /**
  * Arrow-key navigation for row-based layouts (M9.6).
@@ -17,11 +17,23 @@ export interface RowKeyboard {
     tabIndex: number;
     onKeyDown: (e: React.KeyboardEvent) => void;
     onBlur: (e: React.FocusEvent) => void;
+    onFocus: (e: React.FocusEvent) => void;
+    /** Points assistive tech at the cursor row — focus never leaves the
+     * container, so without this an arrow press is silent. */
+    'aria-activedescendant'?: string;
   };
   /** Props for row `index`. */
-  rowProps: (i: number) => { 'data-focused'?: 'true'; ref?: (el: HTMLElement | null) => void };
+  rowProps: (i: number) => {
+    id: string;
+    'aria-selected': boolean;
+    'data-focused'?: 'true';
+    ref: (el: HTMLElement | null) => void;
+  };
   setIndex: (i: number) => void;
 }
+
+/** What a row must spread to take part in the roving cursor. */
+export type RowKeyboardRowProps = ReturnType<RowKeyboard['rowProps']>;
 
 export function useRowKeyboard(options: {
   count: number;
@@ -33,6 +45,10 @@ export function useRowKeyboard(options: {
   const { count, onOpen, onToggle, onEscape } = options;
   const [index, setIndex] = useState(-1);
   const rows = useRef<(HTMLElement | null)[]>([]);
+  // Stable per instance, so two grids on one screen cannot mint the same
+  // descendant id.
+  const idBase = useId();
+  const rowId = useCallback((i: number) => `${idBase}row-${i}`, [idBase]);
 
   // A list that shrinks under the cursor must not leave it pointing past the
   // end — filtering or a delete would otherwise strand focus nowhere.
@@ -106,11 +122,23 @@ export function useRowKeyboard(options: {
       onBlur: (e: React.FocusEvent) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIndex(-1);
       },
+      // Tabbing in used to change nothing on screen and announce nothing, so
+      // the whole keyboard path through the grid was invisible: the user had
+      // to guess that ArrowDown was what woke it up. Landing the cursor on the
+      // first row makes arrival visible and gives aria-activedescendant
+      // something to point at.
+      onFocus: (e: React.FocusEvent) => {
+        if (e.target !== e.currentTarget) return;
+        setIndex((i) => (i === -1 && count > 0 ? 0 : i));
+      },
+      ...(index >= 0 ? { 'aria-activedescendant': rowId(index) } : {}),
     },
-    rowProps: (i: number) =>
-      i === index
-        ? { 'data-focused': 'true', ref: (el: HTMLElement | null) => (rows.current[i] = el) }
-        : { ref: (el: HTMLElement | null) => (rows.current[i] = el) },
+    rowProps: (i: number) => ({
+      id: rowId(i),
+      'aria-selected': i === index,
+      ...(i === index ? ({ 'data-focused': 'true' } as const) : {}),
+      ref: (el: HTMLElement | null) => (rows.current[i] = el),
+    }),
     setIndex,
   };
 }

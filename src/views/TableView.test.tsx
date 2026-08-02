@@ -77,6 +77,68 @@ describe('TableView row opening (M9.3)', () => {
 });
 
 /**
+ * Keyboard reachability of the grid (M15).
+ *
+ * The record name was a bare <span> and the only opener was a chip that was
+ * `display:none` until hover — absent from the DOM and from the tab order, so
+ * there was no keyboard path into a record from the app's primary data
+ * surface. The grid was also `outline-none` with no substitute, and the hook's
+ * rowProps were never spread, so the cursor moved invisibly and never scrolled.
+ */
+describe('TableView keyboard access (M15)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    useUiStore.setState({ detailPath: null });
+    useNavStore.setState({
+      selection: { kind: 'list', id: 'at-risk-work' },
+      history: [{ kind: 'list', id: 'at-risk-work' }],
+      historyIndex: 0,
+    });
+  });
+
+  it('exposes the record name as a real focusable control', async () => {
+    const user = userEvent.setup();
+    const { items } = setup();
+    const opener = screen.getByRole('button', { name: `Open ${items[0].title}` });
+    // Not a hover-only chip: it is in the tab order and reachable by focus.
+    opener.focus();
+    expect(document.activeElement).toBe(opener);
+    await user.keyboard('{Enter}');
+    expect(useUiStore.getState().detailPath).toBe(items[0].path);
+  });
+
+  it('announces itself as a grid with a row count', () => {
+    const { items } = setup();
+    const grid = screen.getByTestId('table-view');
+    expect(grid.getAttribute('aria-label')).toBeTruthy();
+    expect(grid.getAttribute('aria-rowcount')).toBe(String(items.length));
+    // The native ring is no longer suppressed with nothing in its place.
+    expect(grid.className).not.toContain('outline-none ');
+  });
+
+  it('lands the cursor on the first row when the grid takes focus', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    const rows = screen.getAllByTestId('table-row');
+    expect(rows[0].getAttribute('aria-selected')).toBe('true');
+    // …and points assistive tech at it, since focus never leaves the container.
+    expect(grid.getAttribute('aria-activedescendant')).toBe(rows[0].id);
+  });
+
+  it('moves the cursor with the arrows and opens with Enter', () => {
+    const { items } = setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    fireEvent.keyDown(grid, { key: 'ArrowDown' });
+    const rows = screen.getAllByTestId('table-row');
+    expect(rows[1].getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(useUiStore.getState().detailPath).toBe(items[1].path);
+  });
+});
+
+/**
  * Column resizing (M11).
  *
  * The old resizer called `onColumnsChange` on every mousemove, which meant a
