@@ -49,19 +49,33 @@ export function PulsePage() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="pulse-page">
+      {/* The header shares the content column's left edge (M15). In `px-5`
+          against a centred 720px list it floated ~220px to the left of every
+          card it labels, reading as two unrelated fragments.
+          It is also titled "History", because that is what the rail and the
+          status bar call this destination — a button labelled History that
+          opens a page called Pulse is two names for one place. */}
       <div className="flex-none px-5 pb-2 pt-3.5">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="mx-auto flex w-full min-w-0 max-w-[720px] items-center gap-2">
           <Icon name="activity" size={16} color="var(--n-600)" />
-          <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">Pulse</h1>
+          <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">History</h1>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pt-1">
           {commits.map((c) => (
+            // The card LOOKS clickable across ~970px and was inert everywhere
+            // except the message string. The message button stays the
+            // accessible name and the keyboard target; this only extends the
+            // hit area the card's own affordances already promised. Clicks that
+            // land on a real control (a file chip) are left to it.
             <div
               key={c.hash}
               data-testid="pulse-commit"
-              className="rounded-[10px] border border-[var(--n-200)] p-3"
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button') === null) show(c.hash, c.message);
+              }}
+              className="cursor-pointer rounded-[10px] border border-[var(--n-200)] p-3 hover:border-[var(--n-300)] hover:bg-[var(--n-25)]"
             >
               <div className="flex min-w-0 items-baseline gap-2">
                 <button
@@ -79,13 +93,36 @@ export function PulsePage() {
                 <span>{c.author}</span>
                 <span>·</span>
                 <span>{relativeDate(c.date)}</span>
+                {/* `+1` and `~1` are undecodable without knowing the
+                    convention, and colour is the only other cue — so each
+                    carries its own words for hover and for a screen reader. */}
                 {c.added > 0 && (
-                  <span className="text-[var(--success-600,#1F9D61)]">+{c.added}</span>
+                  <span
+                    className="text-[var(--success-600)]"
+                    title={`${c.added} file${c.added === 1 ? '' : 's'} added`}
+                    aria-label={`${c.added} file${c.added === 1 ? '' : 's'} added`}
+                  >
+                    +{c.added}
+                  </span>
                 )}
                 {c.modified > 0 && (
-                  <span className="text-[var(--warn-600,#B87503)]">~{c.modified}</span>
+                  <span
+                    className="text-[var(--warn-600)]"
+                    title={`${c.modified} file${c.modified === 1 ? '' : 's'} changed`}
+                    aria-label={`${c.modified} file${c.modified === 1 ? '' : 's'} changed`}
+                  >
+                    ~{c.modified}
+                  </span>
                 )}
-                {c.deleted > 0 && <span className="text-[var(--danger-500)]">−{c.deleted}</span>}
+                {c.deleted > 0 && (
+                  <span
+                    className="text-[var(--danger-500)]"
+                    title={`${c.deleted} file${c.deleted === 1 ? '' : 's'} deleted`}
+                    aria-label={`${c.deleted} file${c.deleted === 1 ? '' : 's'} deleted`}
+                  >
+                    −{c.deleted}
+                  </span>
+                )}
               </div>
               {c.files.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">

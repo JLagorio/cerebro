@@ -145,6 +145,11 @@ export function ViewCanvas({
           project={project}
           scope={scope}
           createType={createType}
+          // M15: the list layout gets the same create + empty-state contract
+          // the table has. It was gated on `project`, which no ViewCanvas call
+          // site passes, so a List-layout tab could not create at all.
+          onCreate={onCreate}
+          filtered={filtered}
         />
       );
   }

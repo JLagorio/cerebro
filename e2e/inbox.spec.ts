@@ -83,7 +83,10 @@ test('inbox: quick capture writes an untyped note into the queue', async ({ page
   const rows = page.getByTestId('inbox-row');
   const before = await rows.count();
 
-  await page.getByRole('button', { name: 'Capture' }).click();
+  // exact: `name` is a case-insensitive SUBSTRING by default, so 'Capture'
+  // also matched the reading pane's "Previous capture" / "Next capture" that
+  // M15 added — three matches, strict-mode violation.
+  await page.getByRole('button', { name: 'Capture', exact: true }).click();
   await expect(rows).toHaveCount(before + 1);
 
   // A capture is untyped on purpose — that is what keeps it in the queue.

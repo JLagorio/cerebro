@@ -1,5 +1,9 @@
 :root {
-  /* 4px spacing grid */
+  /* 4px spacing grid. These mirror Tailwind's own `--spacing` step exactly, so
+     the utilities you already write (`p-2` = 8px = --sp-2) ARE this scale —
+     which is why nothing references the custom properties directly. Keep them
+     as the documented grid for hand-written CSS (the `cb-*` blocks injected by
+     the DS primitives); do not re-type their values as literals. */
   --sp-05: 2px;
   --sp-1: 4px;
   --sp-2: 8px;

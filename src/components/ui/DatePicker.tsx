@@ -53,7 +53,7 @@ function FlyoutMenu<T extends string>({
       ref={ref}
       role="menu"
       style={{ transform: shiftX === 0 ? undefined : `translateX(${shiftX}px)` }}
-      className="absolute left-full top-[-6px] z-50 ml-1.5 w-56 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+      className="absolute left-full top-[-6px] z-50 ml-1.5 w-56 rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
     >
       {options.map((o) => (
         <button
@@ -62,7 +62,7 @@ function FlyoutMenu<T extends string>({
           role="menuitemradio"
           aria-checked={o.id === activeId}
           onClick={() => onPick(o.id)}
-          className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+          className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
         >
           <span className="min-w-0 flex-1 truncate">{o.label}</span>
           {o.id === activeId && <Icon name="check" size={14} color="var(--n-700)" />}
@@ -347,8 +347,8 @@ export function DatePicker({
         <SettingRow label="Clear" onClick={onClear} />
       </div>
       {showRemind && (
-        <div className="flex items-center gap-1.5 border-t border-[var(--n-100)] px-2 pb-0.5 pt-2 text-[12px] text-[var(--n-400)]">
-          <Icon name="circle-help" size={13} />
+        <div className="flex items-center gap-1.5 border-t border-[var(--n-100)] px-2 pb-0.5 pt-2 text-[12px] text-[var(--text-meta)]">
+          <Icon name="circle-question-mark" size={13} />
           Reminders fire as desktop notifications
         </div>
       )}

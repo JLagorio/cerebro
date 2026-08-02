@@ -79,6 +79,11 @@ export function TimelineView({
 
   const ticks = useMemo(() => axisTicks(axis, zoom), [axis, zoom]);
   const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
+  // Undated records used to render as full-height rows containing nothing —
+  // this view has no name gutter, so they were literally invisible dead space
+  // and the only signal was a count that did not explain the gaps. They are
+  // skipped from the chart and listed under it instead.
+  const [showUndated, setShowUndated] = useState(false);
 
   const setZoom = (next: Zoom) => {
     setLocalZoom(next);
@@ -92,7 +97,7 @@ export function TimelineView({
         data-testid="timeline-view"
       >
         <EmptyState
-          icon="gantt-chart"
+          icon="chart-gantt"
           title="Nothing here carries a date"
           description="A timeline places records by a date or date-range property. Add one to this type, or pick a different view."
         />
@@ -111,13 +116,21 @@ export function TimelineView({
         <ZoomControl zoom={zoom} onChange={setZoom} />
         <span className="flex-1" />
         {undated.length > 0 && (
-          <span className="text-[11.5px] text-[var(--n-500)]">{undated.length} without a date</span>
+          <button
+            type="button"
+            data-testid="timeline-undated-toggle"
+            aria-expanded={showUndated}
+            onClick={() => setShowUndated(!showUndated)}
+            className="rounded-md border border-[var(--n-200)] bg-transparent px-2 py-0.5 text-[11.5px] text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]"
+          >
+            {undated.length} without a date
+          </button>
         )}
       </div>
 
       <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         <div className="relative" style={{ width: axisWidth(axis, zoom), minWidth: '100%' }}>
-          <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} />
+          <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} today={today} />
           <div className="relative">
             <TimeGridLines ticks={ticks} zoom={zoom} />
             <TodayLine axis={axis} zoom={zoom} today={today} />
@@ -158,6 +171,7 @@ export function TimelineView({
               }
 
               const span = spanOf(row.entry, dateField);
+              if (span === null) return null;
               const style = typeStyle(row.entry.type, schema);
               return (
                 <div
@@ -167,23 +181,21 @@ export function TimelineView({
                   className="relative border-b border-[var(--n-100)] hover:bg-[var(--n-25)]"
                   style={{ height: ROW_H }}
                 >
-                  {span !== null && (
-                    <button
-                      type="button"
-                      data-testid="timeline-bar"
-                      data-path={row.entry.path}
-                      onClick={() => openPath(row.entry.path)}
-                      title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
-                      className="absolute top-1 flex items-center gap-1 overflow-hidden rounded-[5px] border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1.5 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]"
-                      style={{
-                        ...barGeometry(span, axis, zoom),
-                        height: ROW_H - 9,
-                      }}
-                    >
-                      <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
-                      <span className="truncate">{row.entry.title}</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    data-testid="timeline-bar"
+                    data-path={row.entry.path}
+                    onClick={() => openPath(row.entry.path)}
+                    title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
+                    className="absolute top-1 flex items-center gap-1 overflow-hidden rounded-[5px] border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1.5 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]"
+                    style={{
+                      ...barGeometry(span, axis, zoom),
+                      height: ROW_H - 9,
+                    }}
+                  >
+                    <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
+                    <span className="truncate">{row.entry.title}</span>
+                  </button>
                 </div>
               );
             })}
@@ -191,10 +203,37 @@ export function TimelineView({
         </div>
       </div>
 
+      {showUndated && undated.length > 0 && (
+        <div
+          data-testid="timeline-undated"
+          className="max-h-[180px] flex-none overflow-y-auto border-t border-[var(--n-200)] bg-[var(--n-25)] px-5 py-2"
+        >
+          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            Without a date
+          </div>
+          {undated.map((entry) => (
+            <button
+              key={entry.path}
+              type="button"
+              data-path={entry.path}
+              onClick={() => openPath(entry.path)}
+              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+            >
+              <Icon
+                name={typeStyle(entry.type, schema).icon}
+                size={11}
+                color={typeStyle(entry.type, schema).color ?? 'var(--n-400)'}
+              />
+              <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">
           <EmptyState
-            icon="gantt-chart"
+            icon="chart-gantt"
             title="No records yet"
             description="Dated records appear here as bars."
           />

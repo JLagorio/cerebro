@@ -1,34 +1,62 @@
 import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { inboxCount } from '@/engine/inbox';
+import { inboxCounts } from '@/engine/inbox';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+
+/**
+ * The surfaces Home is the front door to (M15).
+ *
+ * A Collection, a List and a Type screen are the item world, and HomePage is
+ * where you enter it — so the rail marks Home on all four. Spelled out rather
+ * than derived by negating every other slot, which is how `changes` and
+ * `settings` had to be remembered in a boolean expression to keep Home dark.
+ */
+const HOME_KINDS = new Set(['home', 'collection', 'list', 'type']);
 
 function RailButton({
   icon,
   label,
   active = false,
+  toggle = false,
   count,
   onClick,
 }: {
   icon: string;
   label: string;
   active?: boolean;
+  /**
+   * This entry opens and closes a panel rather than going somewhere. Toggles
+   * announce `aria-pressed`; destinations announce `aria-current="page"`.
+   * Before this, a screen reader heard seven identical "…, button" and nothing
+   * said which surface was current or whether the assistant was already open.
+   */
+  toggle?: boolean;
   /** Queue size shown as a corner badge; omitted or 0 renders nothing. */
   count?: number;
   onClick?: () => void;
 }) {
   const tone = active
-    ? 'bg-[var(--cortex-50)] text-[var(--cortex-600)]'
+    ? 'bg-[var(--cortex-50)] font-semibold text-[var(--cortex-600)]'
     : 'text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]';
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
+      aria-current={!toggle && active ? 'page' : undefined}
+      aria-pressed={toggle ? active : undefined}
       className={`relative flex w-11 flex-col items-center gap-[3px] rounded-lg border-0 bg-transparent pb-[5px] pt-1.5 text-[10px] font-medium ${tone}`}
     >
+      {/* A 1.13:1 tint was the entire active affordance. The bar is the part
+          that survives a glance, a low-contrast display, and colour blindness. */}
+      {active && (
+        <span
+          aria-hidden
+          className="absolute -left-1.5 top-1.5 h-[calc(100%-12px)] w-[3px] rounded-full bg-[var(--cortex-500)]"
+        />
+      )}
       <Icon name={icon} size={18} />
       {count !== undefined && count > 0 && (
         <span
@@ -48,6 +76,7 @@ export function Rail() {
   const navigate = useNavStore((s) => s.navigate);
   const entries = useVaultStore((s) => s.entries);
   const inboxEnabled = useUiStore((s) => s.inboxEnabled);
+  const inboxPeriod = useUiStore((s) => s.inboxPeriod);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   // Task 11: Docs owns the document surfaces; Home keeps the item world.
@@ -57,22 +86,34 @@ export function Rail() {
   const knowledgeActive = selection.kind === 'knowledge';
   // M9.4: the two git surfaces share a rail slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
-  const queued = useMemo(() => (inboxEnabled ? inboxCount(entries) : 0), [entries, inboxEnabled]);
+  const homeActive = HOME_KINDS.has(selection.kind);
+  // M15: the badge counts what the page will SHOW. It used to be the unfiltered
+  // total while the page opened on a persisted period, so a rail reading
+  // "Inbox 9" could land you on "Nothing captured in this period".
+  const queued = useMemo(
+    () => (inboxEnabled ? inboxCounts(entries)[inboxPeriod] : 0),
+    [entries, inboxEnabled, inboxPeriod],
+  );
 
   return (
-    <div
+    <nav
+      aria-label="Primary"
       data-testid="rail"
-      className="flex w-14 flex-none flex-col items-center gap-1 border-r border-[var(--n-100)] bg-[var(--n-0)] py-3"
+      // --n-200 like every other structural divider in the shell; at --n-100
+      // the rail read as floating inside the sidebar rather than as its peer.
+      className="flex w-14 flex-none flex-col items-center gap-1 border-r border-[var(--n-200)] bg-[var(--n-0)] py-3"
     >
       <div className="mb-3 flex h-8 w-8 select-none items-center justify-center rounded-lg bg-[var(--cortex-500)] text-[17px] font-bold tracking-[-0.02em] text-[var(--n-0)]">
         c.
       </div>
+      {/* M15: an explicit list, not a derivation by elimination. Home owns the
+          ITEM world — Collections, Lists and Type screens are the surfaces its
+          page is the front door to — and says so here. Computed by negation it
+          also lit up for any kind nobody remembered to add to the list. */}
       <RailButton
         icon="house"
         label="Home"
-        active={
-          !settingsActive && !docsActive && !inboxActive && !knowledgeActive && !historyActive
-        }
+        active={homeActive}
         onClick={() => navigate({ kind: 'home' })}
       />
       {inboxEnabled && (
@@ -116,6 +157,7 @@ export function Rail() {
       <RailButton
         icon="sparkles"
         label="Assistant"
+        toggle
         active={aiPanelOpen}
         onClick={() => setAiPanelOpen(!aiPanelOpen)}
       />
@@ -125,6 +167,6 @@ export function Rail() {
         active={settingsActive}
         onClick={() => navigate({ kind: 'settings' })}
       />
-    </div>
+    </nav>
   );
 }

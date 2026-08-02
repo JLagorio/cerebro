@@ -35,7 +35,9 @@ export function Toast({
   return (
     <div
       className={className}
-      role="status"
+      // No role="status" here: ToastHost owns one live region that pre-exists
+      // the toast. A second live region on the node being inserted double-
+      // announces at best, and on its own is usually missed entirely.
       style={{
         display: 'flex',
         alignItems: 'flex-start',

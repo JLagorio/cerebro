@@ -22,8 +22,14 @@ interface Target {
   label: string;
   icon: string;
   color: string | null;
-  /** Right-aligned qualifier — the record's key, or what kind of thing this is. */
+  /**
+   * The record's own identifier, rendered as a mono chip. Only records have
+   * one — it used to double as "a count" and "a folder name", which put three
+   * unrelated things in one slot styled identically to the kind label.
+   */
   hint: string;
+  /** Plain-language qualifier: where it lives, or how big it is. */
+  meta: string;
   kindLabel: string;
   /** Text the query is matched against, beyond the label. */
   alias: string;
@@ -65,6 +71,7 @@ export function QuickOpen() {
         icon: style.icon,
         color: style.color,
         hint: key,
+        meta: '',
         kindLabel: e.type ?? 'Note',
         alias: key,
         run: () => openEntry(e),
@@ -79,7 +86,8 @@ export function QuickOpen() {
       label: v.definition.name,
       icon: v.definition.icon ?? 'layout-list',
       color: v.definition.color,
-      hint: v.collection ?? '',
+      hint: '',
+      meta: v.collection ?? '',
       kindLabel: 'List',
       alias: v.id,
       run: () => go({ kind: 'list', id: v.id, collection: v.collection }),
@@ -90,7 +98,8 @@ export function QuickOpen() {
       label: t.name,
       icon: t.icon,
       color: t.color,
-      hint: String(t.count),
+      hint: '',
+      meta: `${t.count} ${t.count === 1 ? 'record' : 'records'}`,
       kindLabel: 'Type',
       alias: '',
       run: () => go({ kind: 'type', name: t.name }),
@@ -149,6 +158,7 @@ export function QuickOpen() {
       icon: s.icon,
       color: null,
       hint: '',
+      meta: '',
       kindLabel: 'Go to',
       alias: s.alias,
       run: () => go(s.sel),
@@ -160,9 +170,14 @@ export function QuickOpen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, views, schema]);
 
+  // On an empty query the panel used to restate the placeholder verbatim and
+  // offer nothing to press. The places — Home, Inbox, Docs… — are already
+  // targets, so showing them costs nothing and makes ↑↓/↵ work on open.
+  const places = useMemo(() => targets.filter((t) => t.kindLabel === 'Go to'), [targets]);
+
   const results = useMemo(() => {
     const q = query.trim();
-    if (q === '') return [];
+    if (q === '') return places.map((target) => ({ target, score: 0 }));
     return targets
       .map((t) => ({
         target: t,
@@ -171,7 +186,7 @@ export function QuickOpen() {
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 12);
-  }, [targets, query]);
+  }, [targets, places, query]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -187,7 +202,13 @@ export function QuickOpen() {
   if (!visible) return null;
 
   return (
-    <Dialog open onClose={close} title="Quick open" width={580}>
+    <Dialog
+      open
+      onClose={close}
+      title="Quick open"
+      width={580}
+      footerNote="↑↓ navigate · ↵ open · esc close"
+    >
       <Input
         autoFocus
         testId="quick-open-input"
@@ -209,6 +230,11 @@ export function QuickOpen() {
         }}
         width="100%"
       />
+      {query.trim() === '' && results.length > 0 && (
+        <div className="mt-2.5 px-2.5 text-[11px] font-semibold uppercase tracking-[var(--track-caps)] text-[var(--text-meta)]">
+          Go to
+        </div>
+      )}
       <div
         role="listbox"
         aria-label="Quick open results"
@@ -228,30 +254,34 @@ export function QuickOpen() {
           >
             <span
               className="inline-flex flex-none"
-              style={{ color: r.target.color ?? 'var(--n-400)' }}
+              style={{ color: r.target.color ?? 'var(--n-500)' }}
             >
               <Icon name={r.target.icon} size={14} />
             </span>
             <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
               {r.target.label}
             </span>
+            {/* The record's key: a mono chip, because it is an identifier you
+                might have typed. Distinct from the kind label, which used to
+                sit beside it in the identical style and read as one phrase. */}
             {r.target.hint !== '' && (
-              <span className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">
+              <span className="flex-none rounded-[4px] bg-[var(--n-100)] px-1 py-px [font-family:var(--font-mono)] text-[11px] text-[var(--text-meta)]">
                 {r.target.hint}
               </span>
             )}
-            <span className="flex-none [font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">
+            {r.target.meta !== '' && (
+              <span className="max-w-[40%] flex-none truncate text-[11px] text-[var(--text-meta)]">
+                {r.target.meta}
+              </span>
+            )}
+            {/* Fixed column so the category aligns down the whole list. */}
+            <span className="w-[84px] flex-none truncate text-right text-[11px] text-[var(--text-meta)]">
               {r.target.kindLabel}
             </span>
           </button>
         ))}
-        {query.trim() === '' && (
-          <div className="px-3 py-4 text-[12px] text-[var(--n-500)]">
-            Type to search notes, lists, types, and places to go.
-          </div>
-        )}
         {query.trim() !== '' && results.length === 0 && (
-          <div className="px-3 py-4 text-[12px] text-[var(--n-500)]">
+          <div className="px-3 py-4 text-[12px] text-[var(--text-meta)]">
             No matches. Try a different term.
           </div>
         )}

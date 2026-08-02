@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -9,12 +9,14 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  dayOffset,
   dependenciesOf,
   isSlipping,
   resolveDateField,
   spanBounds,
   spanOf,
   unscheduled,
+  PX_PER_DAY,
   type Span,
   type Zoom,
 } from '@/engine/schedule';
@@ -111,7 +113,23 @@ export function GanttView({
   );
 
   const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
-  const slipping = edges.filter((e) => e.slipping).length;
+  const slips = useMemo(() => edges.filter((e) => e.slipping), [edges]);
+  // The counts used to be spans styled like links that did nothing — red
+  // medium-weight text that resists clicking is worse than no indicator. Both
+  // are controls now: the conflict count walks the slipping edges, the undated
+  // count reveals the rows that have no bar to point at.
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [focusedSlip, setFocusedSlip] = useState(-1);
+  const [showUndated, setShowUndated] = useState(false);
+
+  const stepSlip = () => {
+    if (slips.length === 0) return;
+    const next = (focusedSlip + 1) % slips.length;
+    setFocusedSlip(next);
+    scrollerRef.current
+      ?.querySelector(`[data-row-index="${slips[next].toRow}"]`)
+      ?.scrollIntoView({ block: 'center', inline: 'center' });
+  };
 
   const setZoom = (next: Zoom) => {
     setLocalZoom(next);
@@ -147,25 +165,42 @@ export function GanttView({
         <span className="flex-1" />
         {/* The one number a schedule owes you. Absent when the view has no
             dependency field — zero slips and no edges are different facts. */}
-        {presentation.dependencyField !== undefined && (
-          <span
-            data-testid="gantt-slips"
+        {presentation.dependencyField !== undefined &&
+          (slips.length > 0 ? (
+            <button
+              type="button"
+              data-testid="gantt-slips"
+              title="Go to the next slipping dependency"
+              onClick={stepSlip}
+              className="rounded-md border border-[var(--danger-500)] bg-transparent px-2 py-0.5 text-[11.5px] font-medium text-[var(--danger-500)] hover:bg-[var(--danger-50)]"
+            >
+              {slips.length} dependency {slips.length === 1 ? 'conflict' : 'conflicts'}
+              {focusedSlip >= 0 && ` · ${focusedSlip + 1}/${slips.length}`}
+            </button>
+          ) : (
+            <span data-testid="gantt-slips" className="text-[11.5px] text-[var(--n-500)]">
+              No dependency conflicts
+            </span>
+          ))}
+        {undated.length > 0 && (
+          <button
+            type="button"
+            data-testid="gantt-undated-toggle"
+            aria-expanded={showUndated}
+            onClick={() => setShowUndated(!showUndated)}
             className={[
-              'text-[11.5px]',
-              slipping > 0 ? 'font-medium text-[var(--danger-500)]' : 'text-[var(--n-500)]',
+              'rounded-md border px-2 py-0.5 text-[11.5px]',
+              showUndated
+                ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-600)]'
+                : 'border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]',
             ].join(' ')}
           >
-            {slipping > 0
-              ? `${slipping} dependency ${slipping === 1 ? 'conflict' : 'conflicts'}`
-              : 'No dependency conflicts'}
-          </span>
-        )}
-        {undated.length > 0 && (
-          <span className="text-[11.5px] text-[var(--n-500)]">{undated.length} without a date</span>
+            {undated.length} without a date
+          </button>
         )}
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+      <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
         <div className="flex" style={{ width: NAME_W + width, minWidth: '100%' }}>
           {/* Work breakdown gutter */}
           <div className="sticky left-0 z-30 flex-none bg-[var(--n-0)]" style={{ width: NAME_W }}>
@@ -233,12 +268,18 @@ export function GanttView({
 
           {/* Schedule */}
           <div className="relative flex-none" style={{ width }}>
-            <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} />
+            <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} today={today} />
             <div className="relative">
               <TimeGridLines ticks={ticks} zoom={zoom} />
               <TodayLine axis={axis} zoom={zoom} today={today} />
-              <DependencyArrows edges={edges} rows={rows} axis={axis} zoom={zoom} />
-              {rows.map((row) => {
+              <DependencyArrows
+                edges={edges}
+                rows={rows}
+                axis={axis}
+                zoom={zoom}
+                focusedKey={focusedSlip >= 0 ? (slips[focusedSlip]?.key ?? null) : null}
+              />
+              {rows.map((row, rowIndex) => {
                 if (row.kind === 'band') {
                   return (
                     <div
@@ -255,9 +296,30 @@ export function GanttView({
                     key={row.key}
                     data-testid="gantt-row"
                     data-path={row.entry.path}
+                    data-row-index={rowIndex}
                     className="relative border-b border-[var(--n-100)]"
                     style={{ height: ROW_H }}
                   >
+                    {span === null && showUndated && (
+                      // A row with no dates is not a blank lane: it is a row
+                      // that cannot be scheduled from the surface built for
+                      // scheduling. Give it a target at today's position.
+                      <button
+                        type="button"
+                        data-testid="gantt-ghost"
+                        data-path={row.entry.path}
+                        onClick={() => openPath(row.entry.path)}
+                        title={`${row.entry.title} · no ${dateField} — open to set one`}
+                        className="absolute top-1.5 rounded-[4px] border border-dashed border-[var(--n-400)] bg-transparent text-[10.5px] text-[var(--n-500)] hover:border-[var(--cortex-500)] hover:text-[var(--cortex-600)]"
+                        style={{
+                          left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
+                          width: 96,
+                          height: ROW_H - 12,
+                        }}
+                      >
+                        Set dates
+                      </button>
+                    )}
                     {span !== null && (
                       <button
                         type="button"
@@ -356,11 +418,14 @@ function DependencyArrows({
   rows,
   axis,
   zoom,
+  focusedKey = null,
 }: {
   edges: Edge[];
   rows: RenderRow[];
   axis: Span;
   zoom: Zoom;
+  /** The edge the conflict counter is currently pointing at. */
+  focusedKey?: string | null;
 }) {
   if (edges.length === 0) return null;
 
@@ -386,16 +451,39 @@ function DependencyArrows({
         const x2 = toGeo.left;
         const y2 = tops[edge.toRow] + ROW_H / 2;
         const color = edge.slipping ? 'var(--danger-500)' : 'var(--n-400)';
+        const focused = focusedKey !== null && focusedKey === edge.key;
         // Elbow out, down, then in — with a minimum stub so a back-to-back
         // pair still shows a visible connector rather than a dot.
         const mid = Math.max(x1 + 8, x2 - 8);
+        const weight = edge.slipping ? 1.5 : 1;
         return (
-          <g key={edge.key} data-slipping={edge.slipping}>
+          <g
+            key={edge.key}
+            data-slipping={edge.slipping}
+            data-focused={focused ? 'true' : undefined}
+          >
+            {/* The endpoints are solid; the long middle riser is faded and
+                dashed. A full-height solid vertical read as a chart-wide rule
+                — indistinguishable from the today marker at a glance. */}
             <path
-              d={`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`}
+              d={`M ${x1} ${y1} H ${mid}`}
               fill="none"
               stroke={color}
-              strokeWidth={edge.slipping ? 1.5 : 1}
+              strokeWidth={focused ? weight + 1 : weight}
+            />
+            <path
+              d={`M ${mid} ${y1} V ${y2}`}
+              fill="none"
+              stroke={color}
+              strokeWidth={focused ? weight + 1 : weight}
+              strokeDasharray="3 3"
+              opacity={focused ? 0.9 : 0.4}
+            />
+            <path
+              d={`M ${mid} ${y2} H ${x2}`}
+              fill="none"
+              stroke={color}
+              strokeWidth={focused ? weight + 1 : weight}
             />
             <path d={`M ${x2} ${y2} l -4 -3 v 6 z`} fill={color} />
           </g>

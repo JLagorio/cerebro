@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CollectionDialog } from '@/app/CollectionDialog';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Button } from '@/components/ui/Button';
@@ -18,8 +18,9 @@ function MenuEntry({ label, icon, onClick }: { label: string; icon: string; onCl
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+      className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)] focus-visible:bg-[var(--n-50)]"
     >
       <Icon name={icon} size={14} color="var(--n-500)" />
       {label}
@@ -35,13 +36,55 @@ function MenuEntry({ label, icon, onClick }: { label: string; icon: string; onCl
 export function CreateMenu() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<CreateDialog>(null);
+  const popup = useRef<HTMLDivElement | null>(null);
+  const trigger = useRef<HTMLDivElement | null>(null);
   const openDialog = (d: CreateDialog) => {
     setMenuOpen(false);
     setDialog(d);
   };
 
+  const entries = (): HTMLButtonElement[] =>
+    popup.current === null ? [] : [...popup.current.querySelectorAll('button')];
+
+  // M15: the popup was a plain div — nothing announced a menu, focus stayed on
+  // the trigger, arrow keys did nothing, and Escape did not close it, so the
+  // only way out was the mouse.
+  useEffect(() => {
+    if (!menuOpen) return;
+    entries()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMenuOpen(false);
+        // Focus goes back where it came from, or it lands on <body> and the
+        // next Tab restarts from the top of the page.
+        trigger.current?.querySelector('button')?.focus();
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      const items = entries();
+      if (items.length === 0) return;
+      const at = items.indexOf(document.activeElement as HTMLButtonElement);
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      items[(at + step + items.length) % items.length].focus();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
+  // Set on the DOM node rather than passed as props: `Button` takes no ARIA
+  // props, and it is another package's file this milestone. Two attributes on
+  // one known element is a smaller, more reversible thing than widening a
+  // shared component's API from here.
+  useEffect(() => {
+    const button = trigger.current?.querySelector('button');
+    button?.setAttribute('aria-haspopup', 'menu');
+    button?.setAttribute('aria-expanded', String(menuOpen));
+  }, [menuOpen]);
+
   return (
-    <div className="relative">
+    <div className="relative" ref={trigger}>
       <Button variant="primary" size="sm" icon="plus" onClick={() => setMenuOpen((v) => !v)}>
         New
       </Button>
@@ -50,16 +93,21 @@ export function CreateMenu() {
           <button
             type="button"
             aria-label="Close menu"
+            tabIndex={-1}
             onClick={() => setMenuOpen(false)}
             onWheel={() => setMenuOpen(false)}
             className="fixed inset-0 z-40 cursor-default bg-transparent"
           />
-          <div className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-md)]">
-            <MenuEntry
-              label="New record"
-              icon="circle-check"
-              onClick={() => openDialog('record')}
-            />
+          <div
+            ref={popup}
+            role="menu"
+            aria-label="New"
+            className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-md)]"
+          >
+            {/* `circle-check` is the app's completion glyph — it marks notes
+                organized and rows ready — so the primary create action read as
+                a completion action. A neutral create glyph instead. */}
+            <MenuEntry label="New record" icon="square-plus" onClick={() => openDialog('record')} />
             <MenuEntry label="New doc" icon="file-text" onClick={() => openDialog('doc')} />
             <MenuEntry
               label="New collection"

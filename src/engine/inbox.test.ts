@@ -105,6 +105,33 @@ describe('hasRealTitle', () => {
       true,
     );
   });
+
+  it('accepts a title the filename was generated FROM', () => {
+    // Every capture and every ingested doc is named by slugifying its own
+    // title, so the stem round-trips exactly — this used to read as untitled
+    // forever, and no amount of retyping the H1 could satisfy the check.
+    expect(
+      hasRealTitle(
+        makeEntry({
+          filename: 'standup-notes-for-tuesday.md',
+          title: 'Standup notes for tuesday',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('still flags a machine-minted stem', () => {
+    expect(
+      hasRealTitle(
+        makeEntry({
+          filename: 'capture-2026-07-28-1432.md',
+          title: 'Capture 2026 07 28 1432',
+        }),
+      ),
+    ).toBe(false);
+    expect(hasRealTitle(makeEntry({ filename: 'x.md', title: 'X' }))).toBe(false);
+    expect(hasRealTitle(makeEntry({ filename: 'notes.md', title: '' }))).toBe(false);
+  });
 });
 
 describe('organizeChecklist', () => {

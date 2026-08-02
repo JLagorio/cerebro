@@ -7,7 +7,7 @@ import { TRUST_LABELS, type TrustTier } from '@/engine/okf';
  * is a state to act on, not an error to hide.
  */
 const TONE: Record<TrustTier, { icon: string; fg: string; bg: string }> = {
-  unverified: { icon: 'circle-help', fg: 'var(--n-600)', bg: 'var(--n-100)' },
+  unverified: { icon: 'circle-question-mark', fg: 'var(--n-600)', bg: 'var(--n-100)' },
   'machine-confirmed': { icon: 'bot', fg: 'var(--cortex-600)', bg: 'var(--cortex-50)' },
   'human-reviewed': { icon: 'shield-check', fg: 'var(--success-700)', bg: 'var(--success-50)' },
 };

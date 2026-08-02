@@ -15,11 +15,72 @@ export interface IconProps {
   className?: string;
 }
 
+/**
+ * Lucide renamed its shape-qualified icons in 0.4xx (`check-square` ->
+ * `square-check`) and dropped the old exports entirely. Vault type files and
+ * user-authored `icon:` frontmatter still carry the old names — and used to
+ * render as an empty svg. Aliasing keeps those vaults working.
+ */
+export const ICON_ALIASES: Record<string, string> = {
+  'alert-circle': 'circle-alert',
+  'alert-octagon': 'octagon-alert',
+  'alert-triangle': 'triangle-alert',
+  'arrow-down-circle': 'circle-arrow-down',
+  'arrow-left-circle': 'circle-arrow-left',
+  'arrow-right-circle': 'circle-arrow-right',
+  'arrow-up-circle': 'circle-arrow-up',
+  'check-circle': 'circle-check',
+  'check-circle-2': 'circle-check-big',
+  'check-square': 'square-check',
+  'check-square-2': 'square-check-big',
+  'chevron-down-circle': 'circle-chevron-down',
+  'chevron-left-circle': 'circle-chevron-left',
+  'chevron-right-circle': 'circle-chevron-right',
+  'chevron-up-circle': 'circle-chevron-up',
+  // Renamed twice: help-circle -> circle-help -> circle-question-mark. The
+  // middle hop is dead too, so both old spellings map straight to the survivor.
+  'circle-help': 'circle-question-mark',
+  'edit-2': 'pencil',
+  'edit-3': 'pen-line',
+  'external-link': 'square-arrow-out-up-right',
+  'gantt-chart': 'chart-gantt',
+  'help-circle': 'circle-question-mark',
+  'minus-circle': 'circle-minus',
+  'more-horizontal': 'ellipsis',
+  'more-vertical': 'ellipsis-vertical',
+  'pause-circle': 'circle-pause',
+  'play-circle': 'circle-play',
+  'plus-circle': 'circle-plus',
+  'stop-circle': 'circle-stop',
+  'user-circle': 'circle-user',
+  'wand-2': 'wand-sparkles',
+  'x-circle': 'circle-x',
+  'x-octagon': 'octagon-x',
+  'x-square': 'square-x',
+};
+
+/** Drawn when a name resolves to nothing, so a bad icon is visible, not blank. */
+const FALLBACK_ICON = 'square-dashed';
+
 const pascal = (n: string) =>
   n
     .split('-')
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join('');
+
+const warned = new Set<string>();
+
+/** Resolve a kebab-case lucide name through the alias table. Exported for tests. */
+export function resolveIcon(name: string): { Comp: (typeof icons)[keyof typeof icons] | null } {
+  const direct = icons[pascal(name) as keyof typeof icons];
+  if (direct) return { Comp: direct };
+  const aliased = ICON_ALIASES[name];
+  if (aliased) {
+    const viaAlias = icons[pascal(aliased) as keyof typeof icons];
+    if (viaAlias) return { Comp: viaAlias };
+  }
+  return { Comp: null };
+}
 
 export function Icon({ name, size = 16, strokeWidth = 1.75, color, style, className }: IconProps) {
   const baseStyle: React.CSSProperties = {
@@ -29,26 +90,31 @@ export function Icon({ name, size = 16, strokeWidth = 1.75, color, style, classN
     color,
     ...style,
   };
-  const Lucide = icons[pascal(name) as keyof typeof icons];
-  if (!Lucide) {
+  const { Comp } = resolveIcon(name);
+  if (!Comp) {
+    // Silence used to mean a user typo produced an invisible hole with no clue
+    // anywhere — in the UI, the console, or the type editor. Warn once per bad
+    // name and draw a visible placeholder instead.
+    if (import.meta.env.DEV && !warned.has(name)) {
+      warned.add(name);
+      console.warn(
+        `[Icon] unknown icon name "${name}" — no such lucide icon. Rendering "${FALLBACK_ICON}".`,
+      );
+    }
+    const Fallback = icons[pascal(FALLBACK_ICON) as keyof typeof icons];
     return (
-      <svg
-        width={size}
-        height={size}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
+      <Fallback
+        size={size}
         strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
         className={className}
         style={baseStyle}
         aria-hidden="true"
+        data-unknown-icon={name}
       />
     );
   }
   return (
-    <Lucide
+    <Comp
       size={size}
       strokeWidth={strokeWidth}
       className={className}

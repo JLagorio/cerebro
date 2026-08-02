@@ -58,4 +58,17 @@ describe('SettingsPage', () => {
       );
     });
   });
+
+  // M15 [CRITICAL]: Settings had no scroll container at all — its root was a
+  // plain `mx-auto max-w-[640px]` div inside a flex row that neither scrolls
+  // nor clips. Everything below the fold was unreachable, and the overflow
+  // painted on top of the status bar and swallowed its clicks.
+  it('is its own scroll host so nothing below the fold is unreachable', () => {
+    render(<SettingsPage />);
+    const page = screen.getByTestId('settings-page');
+    expect(page.className).toContain('overflow-y-auto');
+    // `flex-1` without `min-h-0` still overflows a flex parent.
+    expect(page.className).toContain('min-h-0');
+    expect(page.className).toContain('flex-1');
+  });
 });

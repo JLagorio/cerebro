@@ -22,7 +22,7 @@ export const VIEW_KINDS: ViewKind[] = [
   { value: 'board', label: 'Board', icon: 'columns-3' },
   { value: 'calendar', label: 'Calendar', icon: 'calendar-days', requires: 'date' },
   { value: 'gantt', label: 'Gantt', icon: 'chart-gantt', requires: 'date' },
-  { value: 'timeline', label: 'Timeline', icon: 'gantt-chart', requires: 'date' },
+  { value: 'timeline', label: 'Timeline', icon: 'chart-gantt', requires: 'date' },
 ];
 
 /** Segmented-control options, with the test ids the e2e suite navigates by. */
@@ -40,4 +40,18 @@ export function viewKind(type: ViewType): ViewKind {
 /** True for the views that place records on a date axis. */
 export function needsDate(type: ViewType): boolean {
   return viewKind(type).requires === 'date';
+}
+
+/**
+ * Which view-control axes a layout actually consumes.
+ *
+ * The tab row offered Group on every layout, including the calendar — which
+ * never reads `presentation.group`. Picking a field there tinted the icon,
+ * wrote the view file, and left the month grid byte-identical: a control that
+ * lies about having done something. ViewSettingsPanel already hid its own
+ * Group row for calendars; this is the one place both surfaces can agree.
+ */
+export function axesFor(type: ViewType): { sort: boolean; group: boolean } {
+  // Days ARE the calendar's grouping. Sort still orders the chips inside a day.
+  return { sort: true, group: type !== 'calendar' };
 }

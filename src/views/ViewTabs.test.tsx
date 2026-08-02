@@ -113,10 +113,23 @@ describe('ViewTabs (M11)', () => {
     expect(screen.getByRole('menuitem', { name: 'Duplicate' })).toBeTruthy();
   });
 
-  it('deletes a tab once there is more than one', () => {
+  it('confirms before deleting a tab, naming what goes with it', () => {
     const props = setup();
     fireEvent.click(screen.getByTestId('view-tab-grid'));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Delete view' }));
+    // A view carries filters, columns, sort and grouping, and there is no undo
+    // in the app — the menu item alone used to destroy all of it.
+    expect(props.onDelete).not.toHaveBeenCalled();
+    expect(screen.getByText('Delete "All work"?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete view' }));
     expect(props.onDelete).toHaveBeenCalledWith('grid');
+  });
+
+  it('cancelling the delete confirmation keeps the view', () => {
+    const props = setup();
+    fireEvent.click(screen.getByTestId('view-tab-grid'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(props.onDelete).not.toHaveBeenCalled();
   });
 });

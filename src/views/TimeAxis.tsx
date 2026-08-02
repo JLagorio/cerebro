@@ -23,11 +23,15 @@ export function TimeAxisHeader({
   ticks,
   axis,
   zoom,
+  today,
 }: {
   ticks: AxisTick[];
   axis: Span;
   zoom: Zoom;
+  /** Draws the labelled Today marker when the date is on the axis. */
+  today?: string;
 }) {
+  const onAxis = today !== undefined && today >= axis.start && today <= axis.end;
   return (
     <div
       role="row"
@@ -51,6 +55,19 @@ export function TimeAxisHeader({
           {tick.label}
         </div>
       ))}
+      {/* The now marker used to be an unlabelled red vertical, identical to a
+          slipped-dependency riser — so the one line you must not misread was
+          the one you could not identify. Labelled here, and drawn in cortex so
+          red stays exclusively for violations. */}
+      {onAxis && (
+        <span
+          data-testid="today-label"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-[var(--cortex-500)] px-1.5 py-px text-[10px] font-semibold text-[var(--n-0)]"
+          style={{ left: dayOffset(axis, today) * PX_PER_DAY[zoom], top: 4 }}
+        >
+          Today
+        </span>
+      )}
     </div>
   );
 }
@@ -83,7 +100,7 @@ export function TodayLine({ axis, zoom, today }: { axis: Span; zoom: Zoom; today
     <div
       aria-hidden
       data-testid="today-line"
-      className="pointer-events-none absolute bottom-0 top-0 z-10 w-px bg-[var(--danger-500)] opacity-70"
+      className="pointer-events-none absolute bottom-0 top-0 z-10 w-px bg-[var(--cortex-500)] opacity-70"
       style={{ left: dayOffset(axis, today) * PX_PER_DAY[zoom] }}
     />
   );
@@ -93,6 +110,7 @@ export function ZoomControl({ zoom, onChange }: { zoom: Zoom; onChange: (zoom: Z
   return (
     <SegmentedControl
       size="sm"
+      ariaLabel="Time scale"
       options={ZOOM_LABELS.map((z) => ({
         value: z.value,
         label: z.label,

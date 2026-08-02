@@ -124,14 +124,36 @@ export function humanizeStem(filename: string): string {
 }
 
 /**
+ * Whether a filename stem reads as machine-minted rather than written:
+ * `capture-2026-07-28-1432`, `fld-7`, `img_0042`, `x`. Two tells — a token
+ * that is nothing but digits (dates, stamps, counters), and a stem of a
+ * single word (an id, never a sentence).
+ */
+export function looksAutoNamed(filename: string): boolean {
+  const words = filename
+    .replace(/\.md$/, '')
+    .split(/[-_\s]+/)
+    .filter((w) => w !== '');
+  return words.length < 2 || words.some((w) => /^\d+$/.test(w));
+}
+
+/**
  * Whether the note carries a real H1 rather than the humanized-filename
- * fallback. Entry has no "had an H1" flag, so this compares against what
- * the fallback would have produced — advisory only, and a note whose H1
- * happens to match its filename reads as untitled. The checklist never
- * blocks organizing, so a false negative costs nothing but a nudge.
+ * fallback. Entry has no "had an H1" flag, so this compares against what the
+ * fallback would have produced — but the comparison alone is wrong in the
+ * common direction: captures and ingested docs get their FILENAME from their
+ * title (`captureSlug` slugifies it), so a pasted "Standup notes for tuesday"
+ * lands as `standup-notes-for-tuesday.md` and round-trips exactly, and the
+ * check could never be satisfied no matter what the user typed. When the
+ * title is the humanized stem, the name itself decides: a stem that reads as
+ * machine-minted means no H1, a stem that reads as a phrase means the file
+ * was named after one. Advisory either way — the checklist never blocks
+ * organizing, so a wrong guess costs a nudge.
  */
 export function hasRealTitle(entry: Entry): boolean {
-  return entry.title.trim() !== '' && entry.title !== humanizeStem(entry.filename);
+  if (entry.title.trim() === '') return false;
+  if (entry.title !== humanizeStem(entry.filename)) return true;
+  return !looksAutoNamed(entry.filename);
 }
 
 /**

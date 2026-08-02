@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { isFailure } from '@/engine/git';
 import { useGit } from '@/git/useGit';
@@ -15,8 +15,12 @@ import { useVaultStore } from '@/stores/vaultStore';
  * when it last synced, and whether the agent's MCP endpoint is up.
  *
  * Held to the no-idle-chrome rule by making every segment a control. The
- * changes count navigates to the diff, Commit commits, Sync pulls-then-
- * pushes, History opens Pulse — none of it is a readout you can only look at.
+ * changes count navigates to the diff and Sync pulls-then-pushes — none of it
+ * is a readout you can only look at.
+ *
+ * M15: every segment is now also the ONLY door to where it goes. Duplicates of
+ * destinations the rail already owns (History, Settings) were removed, and so
+ * was "Commit", which navigated instead of committing.
  */
 
 const APP_VERSION = '2026.7.29';
@@ -40,7 +44,7 @@ function Segment({
     tone === 'accent'
       ? 'var(--cortex-600)'
       : tone === 'warn'
-        ? 'var(--warn-600, #B87503)'
+        ? 'var(--warn-600)'
         : tone === 'danger'
           ? 'var(--danger-500)'
           : 'var(--n-500)';
@@ -85,29 +89,17 @@ export function StatusBar() {
   const navigate = useNavStore((s) => s.navigate);
   const agentBusy = useUiStore((s) => s.agentBusy);
   const { isRepo, ready, modified, conflicts, remote, refresh } = useGit();
+  // M15: `lastSync` is set ONLY by a completed sync (see `sync` below). An
+  // effect that stamped it the moment a repo was detected made the strip read
+  // "Synced" on every launch, before anything had been pulled or pushed — a
+  // false safety signal on the one control that exists to report sync state.
   const [lastSync, setLastSync] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (isRepo) setLastSync(Date.now());
-  }, [isRepo]);
 
   if (vaultPath === null || !ready) return null;
 
   const vaultName = vaultPath.split('/').filter(Boolean).pop() ?? vaultPath;
   const pending = modified.length + conflicts.length;
-
-  const commit = async () => {
-    if (vaultPath === null || pending === 0) return;
-    setBusy(true);
-    try {
-      // The message lives on the Changes surface; from here, committing means
-      // "checkpoint what I have", so send you there to say why.
-      navigate({ kind: 'changes' });
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const sync = async () => {
     if (vaultPath === null || remote === null) return;
@@ -193,14 +185,11 @@ export function StatusBar() {
               onClick={() => navigate({ kind: 'changes' })}
             />
           )}
-          {pending > 0 && (
-            <Segment
-              icon="check"
-              label="Commit"
-              testId="status-commit"
-              onClick={() => void commit()}
-            />
-          )}
+          {/* M15: the "Commit" segment is gone. It committed nothing — it
+              navigated to Changes, which the changes-count segment beside it
+              already does — so it was a button that lied about its own verb AND
+              the second of three doors to the same page. The commit itself
+              belongs where its message is typed. */}
           {remote !== null && (
             <Segment
               icon="refresh-cw"
@@ -209,12 +198,9 @@ export function StatusBar() {
               onClick={() => void sync()}
             />
           )}
-          <Segment
-            icon="activity"
-            label="History"
-            testId="status-history"
-            onClick={() => navigate({ kind: 'pulse' })}
-          />
+          {/* M15: the duplicate "History" segment is gone — the rail owns that
+              destination, and two chromes offering the same door under
+              different chrome means neither reads as authoritative. */}
         </>
       )}
 
@@ -224,7 +210,8 @@ export function StatusBar() {
           <Segment
             icon="git-branch"
             label="Not tracked"
-            title="Turn on history in Settings"
+            // The tooltip said Settings while the click opened Changes.
+            title="Start tracking this vault's history"
             testId="status-changes"
             onClick={() => navigate({ kind: 'changes' })}
           />
@@ -238,12 +225,9 @@ export function StatusBar() {
       {agentBusy && (
         <Segment icon="sparkles" label="Assistant working" tone="accent" testId="status-agent" />
       )}
-      <Segment
-        icon="settings"
-        label="Settings"
-        testId="status-settings"
-        onClick={() => navigate({ kind: 'settings' })}
-      />
+      {/* M15: no "Settings" segment either. The rail owns it, and the vault
+          name and "No remote" segments here are already settings shortcuts
+          that say what they will configure. */}
     </footer>
   );
 }

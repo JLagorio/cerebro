@@ -4,8 +4,42 @@ import type { AgentEvent, ChatMessage, McpInfo } from './types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
-let messageCounter = 0;
-const nextId = (): string => `m-${++messageCounter}`;
+/**
+ * Message ids are unique per HOOK INSTANCE, not per sequence (M15).
+ *
+ * A module counter reset to 0 on every page load, while `conversations.ts`
+ * persists every message WITH its id: after a reload the first send minted
+ * `m-1`/`m-2`, ids the restored transcript already used, so `patchActive`
+ * wrote one reply into two bubbles and React saw duplicate keys. The prefix
+ * is drawn once per hook instance, so no id this instance mints can collide
+ * with one from a previous load — or with one it minted before a reset.
+ */
+let hookInstances = 0;
+function newIdPrefix(): string {
+  hookInstances += 1;
+  return `m${Date.now().toString(36)}${hookInstances.toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+}
+
+/**
+ * Runs this hook has killed — across ALL of its instances (PR #5/#7 review).
+ *
+ * A killed child's trailing events, its terminal Done above all, have to stay
+ * recognizable as dead history: they can land in the same dispatch that hands
+ * the stream over, OR seconds after a timeout takeover, and timing alone
+ * cannot tell them apart from the live turn's.
+ *
+ * MODULE scope, not a per-instance ref, because the kill and the event it
+ * predicts can happen in two different instances. Closing the assistant
+ * mid-turn kills the run from an unmount — and that hook is gone before the
+ * dead Done ever arrives. Reopening the panel builds a fresh hook, which with
+ * a per-instance set would start empty, see the stray Done as its own, and
+ * freeze a brand-new bubble the moment the next question was asked. Run ids
+ * are process-global on both backends (Rust's RUN_SEQ, the mock's counter),
+ * so a single shared set can never confuse two runs for each other.
+ */
+const deadRuns = new Set<number>();
 
 export interface AgentChat {
   messages: ChatMessage[];
@@ -49,6 +83,13 @@ export function useAgentChat(
   const setAgentBusy = useUiStore((s) => s.setAgentBusy);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const idPrefix = useRef<string>('');
+  if (idPrefix.current === '') idPrefix.current = newIdPrefix();
+  const idSeq = useRef(0);
+  const nextId = useCallback(() => {
+    idSeq.current += 1;
+    return `${idPrefix.current}-${idSeq.current}`;
+  }, []);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   // The prompt that started the in-flight turn, so a write checkpoint can say
@@ -73,12 +114,6 @@ export function useAgentChat(
   // at its next checkpoint instead.
   const sendEpoch = useRef(0);
   const mcpRef = useRef<McpInfo | null>(null);
-  // Runs this hook has killed (PR #5 review). A killed child's trailing
-  // events — its terminal Done above all — must be recognizable as dead
-  // history, because they can land in the same dispatch that hands the
-  // stream over OR seconds after a timeout takeover, and timing alone
-  // cannot tell them from the live turn's.
-  const deadRuns = useRef<Set<number>>(new Set());
   // The agent writes straight to disk; a turn that touched files must end
   // with a rescan or the UI keeps showing the pre-agent vault.
   const touchedFiles = useRef(false);
@@ -94,8 +129,8 @@ export function useAgentChat(
       // A run this hook killed is dead history: drop everything it emits,
       // and forget it once its terminal Done — the last event a run can
       // produce — has been swallowed (PR #5 review).
-      if (deadRuns.current.has(event.run)) {
-        if (event.kind === 'Done') deadRuns.current.delete(event.run);
+      if (deadRuns.has(event.run)) {
+        if (event.kind === 'Done') deadRuns.delete(event.run);
         return;
       }
       // The stream is shared with the background runner (M8.6/M13.2), which
@@ -123,20 +158,37 @@ export function useAgentChat(
           break;
         case 'ToolStart':
           if (isWriteTool(event.tool_name)) touchedFiles.current = true;
-          patchActive((m) => ({
-            ...m,
-            tools: [
-              ...m.tools,
-              {
+          patchActive((m) => {
+            // A tool_id is unique within a turn by definition, so a repeat is a
+            // redelivery of the same call — never a second call. Appending it
+            // blindly is what put `["t-1","t-1","t-2","t-2"]` in shipped
+            // transcripts: duplicate React keys (AiPanel keys rows by tool.id),
+            // and every tool row drawn twice (M15).
+            const at = m.tools.findIndex((t) => t.id === event.tool_id);
+            if (at === -1) {
+              const started = {
                 id: event.tool_id,
                 name: event.tool_name,
                 input: event.input ?? null,
                 output: null,
                 done: false,
                 failed: false,
-              },
-            ],
-          }));
+              };
+              return { ...m, tools: [...m.tools, started] };
+            }
+            // A redelivery must not un-finish a tool (PR #7 review). ToolDone
+            // may already have landed for this id, and rebuilding the row from
+            // the start event alone would blank the result and set the row
+            // spinning again — so only what the start event actually knows is
+            // refreshed, and the completion the row already has is kept.
+            const tools = m.tools.slice();
+            tools[at] = {
+              ...tools[at],
+              name: event.tool_name,
+              input: event.input ?? tools[at].input,
+            };
+            return { ...m, tools };
+          });
           break;
         case 'ToolDone':
           patchActive((m) => ({
@@ -229,7 +281,7 @@ export function useAgentChat(
           // the bubble would stay empty (PR #5 review).
           if (useUiStore.getState().learningPath !== null) {
             const dead = await stopAgent().catch(() => null);
-            if (typeof dead === 'number') deadRuns.current.add(dead);
+            if (typeof dead === 'number') deadRuns.add(dead);
             await streamReleased(RELEASE_TIMEOUT_MS);
             // Checked BEFORE re-raising the busy flag: a stop() during the
             // release wait already dropped it, and this send re-raising it
@@ -285,7 +337,7 @@ export function useAgentChat(
         }
       })();
     },
-    [connectors, model, setAgentBusy, shell, systemPrompt, toast, vaultPath],
+    [connectors, model, nextId, setAgentBusy, shell, systemPrompt, toast, vaultPath],
   );
 
   /** Kill the in-flight run and remember it as dead, so its trailing events
@@ -295,10 +347,37 @@ export function useAgentChat(
   const killRun = useCallback(() => {
     void stopAgent()
       .then((dead) => {
-        if (typeof dead === 'number') deadRuns.current.add(dead);
+        if (typeof dead === 'number') deadRuns.add(dead);
       })
       .catch(() => undefined);
   }, []);
+
+  /**
+   * Unmounting mid-turn must end the turn (M15).
+   *
+   * The panel is rendered conditionally, so ⌘J while an answer streams tears
+   * this hook down instantly. Nothing here used to run on the way out: the
+   * child kept going, and `agentBusy` stayed true for the rest of the
+   * session — which made the background distiller's own guard bail forever.
+   * Written against the store directly rather than the bound action, because
+   * this runs while React is unmounting the tree that owns the binding.
+   */
+  useEffect(() => {
+    return () => {
+      // Reaches a send still parked on the preempt handoff or a skill
+      // expansion, which killRun cannot: it has no child to kill yet.
+      sendEpoch.current += 1;
+      if (!turnInFlight.current) return;
+      turnInFlight.current = false;
+      activeRef.current = null;
+      // killRun, not a bare stopAgent: this kill's trailing Done arrives
+      // after the hook is gone, so it has to be recorded as dead for the
+      // NEXT instance — the one the user gets by reopening the panel — or
+      // that Done ends the first turn they type into it (PR #7 review).
+      killRun();
+      useUiStore.getState().setAgentBusy(false);
+    };
+  }, [killRun]);
 
   const stop = useCallback(() => {
     killRun();

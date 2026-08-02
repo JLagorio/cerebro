@@ -11,6 +11,9 @@ import type { ChatMessage, Conversation } from '@/agent/types';
  */
 
 const KEY = 'cerebro.conversations';
+/** Which conversation the panel was last showing (M15). Without it, closing
+ * and reopening the panel silently swapped you into the newest thread. */
+const ACTIVE_KEY = 'cerebro.activeConversation';
 /** Enough to find last week's thread; not enough to bloat localStorage. */
 const MAX_KEPT = 30;
 export const DEFAULT_TITLE = 'New conversation';
@@ -64,6 +67,36 @@ function isConversation(raw: unknown): raw is Conversation {
   return typeof c.id === 'string' && typeof c.title === 'string' && Array.isArray(c.messages);
 }
 
+/**
+ * Transcripts written before M15 recorded every tool twice — `["t-1","t-1"]` —
+ * because `ToolStart` appended without checking the id. Those rows are already
+ * on disk, so fixing the writer is not enough: React still logs a duplicate-key
+ * error and paints every tool row twice for anyone with existing history. First
+ * write of an id wins; a later one only fills in a field the first one lacked.
+ */
+function healToolIds(conversation: Conversation): Conversation {
+  let changed = false;
+  const messages = conversation.messages.map((m) => {
+    if (m.tools.length < 2) return m;
+    const byId = new Map<string, (typeof m.tools)[number]>();
+    for (const tool of m.tools) {
+      const seen = byId.get(tool.id);
+      if (seen === undefined) byId.set(tool.id, tool);
+      else
+        byId.set(tool.id, {
+          ...seen,
+          done: seen.done || tool.done,
+          failed: seen.failed || tool.failed,
+          output: seen.output ?? tool.output,
+        });
+    }
+    if (byId.size === m.tools.length) return m;
+    changed = true;
+    return { ...m, tools: [...byId.values()] };
+  });
+  return changed ? { ...conversation, messages } : conversation;
+}
+
 export function loadConversations(): Conversation[] {
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -71,7 +104,7 @@ export function loadConversations(): Conversation[] {
     if (!Array.isArray(parsed)) return [];
     // Tolerant like every other load path: one malformed record must not
     // take the whole history with it.
-    return parsed.filter(isConversation);
+    return parsed.filter(isConversation).map(healToolIds);
   } catch {
     return [];
   }
@@ -88,6 +121,23 @@ export function saveConversations(conversations: Conversation[]): void {
     window.localStorage.setItem(KEY, JSON.stringify(clean));
   } catch {
     // Storage unavailable (private mode): conversations stay session-only.
+  }
+}
+
+/** The id of the conversation that was last open, if one was recorded. */
+export function loadActiveId(): string | null {
+  try {
+    return window.localStorage.getItem(ACTIVE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveId(id: string): void {
+  try {
+    window.localStorage.setItem(ACTIVE_KEY, id);
+  } catch {
+    // Storage unavailable (private mode): the choice stays session-only.
   }
 }
 

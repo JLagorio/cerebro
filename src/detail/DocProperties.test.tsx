@@ -57,7 +57,61 @@ describe('DocProperties', () => {
     const { patchFrontmatter } = setup();
     await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
     await user.click(screen.getByRole('option', { name: 'Work item' }));
+    await user.click(screen.getByRole('button', { name: 'Convert to Work item' }));
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { type: 'Work item' });
+  });
+
+  // M15: conversion has no inverse in the app, so picking a type in the list
+  // must select, not commit — a stray click used to convert immediately.
+  it('selects a type without converting until the footer action is pressed', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    const row = screen.getByRole('option', { name: 'Work item' });
+    expect(row.getAttribute('aria-selected')).toBe('false');
+    await user.click(row);
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(screen.getByRole('option', { name: 'Work item' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+  });
+
+  it('closes the convert dialog on Escape', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Convert to record…' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  // A text input round-tripped `tags: [work, urgent]` to disk as the single
+  // string "work,urgent", silently destroying the YAML list.
+  it('shows a list-valued loose key read-only instead of collapsing it', () => {
+    setup({ properties: { tags: ['work', 'urgent'] } });
+    expect(screen.queryByLabelText('Tags')).toBeNull();
+    expect(screen.getByText('work, urgent')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Remove Tags' })).toBeTruthy();
+  });
+
+  // The remove affordance must exist in the tree (and so in the tab order)
+  // rather than appearing only under a pointer.
+  it('keeps the remove button mounted without hover', () => {
+    setup({ properties: { source: 'imported' } });
+    const remove = screen.getByRole('button', { name: 'Remove Source' });
+    expect(remove.closest('span')?.className).toContain('opacity-0');
+    expect(remove.closest('span')?.className).not.toContain('hidden');
+  });
+
+  // An untyped doc has no schema: every kind but the plain ones produced a
+  // text box (a Checkbox opened as a text input containing "false").
+  it('offers only plain kinds on an untyped doc', () => {
+    setup();
+    fireEvent.click(screen.getByText('+ Add property'));
+    expect((screen.getByTestId('property-kind-text') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('property-kind-number') as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId('property-kind-checkbox') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('property-kind-date') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('never offers Convert on an already-typed entry', () => {

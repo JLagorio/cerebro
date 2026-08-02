@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { listSkills, type SkillRef } from '@/engine/skills';
@@ -21,17 +21,29 @@ export function ChatInput({
   onSubmit,
   disabled = false,
   placeholder = 'Ask about this vault…',
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSubmit: () => void;
   disabled?: boolean;
   placeholder?: string;
+  /** Take focus on mount — ⌘J opens a chat you can type into (M15). */
+  autoFocus?: boolean;
 }) {
   const entries = useVaultStore((s) => s.entries);
   const schema = useSchema();
   const ref = useRef<HTMLTextAreaElement>(null);
   const [active, setActive] = useState(0);
+  // Escape dismisses the MENU, not the draft (M15). Keyed on what is being
+  // completed so the next `[[` or `/` reopens it; the draft is never touched,
+  // which is the whole point — Escape used to append `]]` at the END of the
+  // message, wherever the caret happened to be.
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (autoFocus) ref.current?.focus();
+  }, [autoFocus]);
 
   // The open `[[` immediately before the caret, if any. Anchored to the end
   // so a completed link earlier in the message does not reopen the menu.
@@ -56,7 +68,7 @@ export function ChatInput({
       .map((m) => m.entry);
   }, [query, entries]);
 
-  const open = query !== null && matches.length > 0;
+  const hasMatches = query !== null && matches.length > 0;
 
   // M13.1: `/` at the start of the message completes against the vault's
   // skills, the way `[[` completes against its notes. The menu lives only
@@ -73,7 +85,7 @@ export function ChatInput({
     if (slashFragment === null) return [];
     return skills.filter((s) => s.name.startsWith(slashFragment)).slice(0, 6);
   }, [slashFragment, skills]);
-  const slashOpen = slashFragment !== null && skillMatches.length > 0;
+  const hasSkillMatches = slashFragment !== null && skillMatches.length > 0;
 
   const completeSkill = (skill: SkillRef) => {
     // The whole draft IS the token while the menu is open, so completion
@@ -92,6 +104,15 @@ export function ChatInput({
     lastMenuKey.current = menuKey;
     if (active !== 0) setActive(0);
   }
+
+  // What an Escape dismisses: the slash token, or the specific `[[` being
+  // completed. Keyed on the ANCHOR rather than the fragment so typing another
+  // character does not resurrect a menu you just dismissed.
+  const menuAnchor =
+    slashFragment !== null ? 'slash' : query !== null ? `wiki:${query.start}` : null;
+  if (dismissed !== null && menuAnchor === null) setDismissed(null);
+  const open = hasMatches && dismissed !== menuAnchor;
+  const slashOpen = hasSkillMatches && dismissed !== menuAnchor;
 
   const complete = (entry: Entry) => {
     if (query === null) return;
@@ -186,9 +207,10 @@ export function ChatInput({
             }
             if (e.key === 'Escape') {
               e.preventDefault();
-              // Close by completing the brackets, so the next keystroke is
-              // ordinary text rather than reopening the menu.
-              onChange(`${value}]]`);
+              // Dismiss the menu and nothing else. This used to append `]]`
+              // to the END of the draft — committing a link you were
+              // abandoning, at the wrong place if the caret was mid-message.
+              setDismissed(menuAnchor);
               return;
             }
           }
@@ -210,11 +232,11 @@ export function ChatInput({
             }
             if (e.key === 'Escape') {
               e.preventDefault();
-              // A trailing space turns the token into prose, closing the
-              // menu. Dismissal is about the MENU: a draft that still reads
+              // Dismissal is about the MENU: a draft that still reads
               // `/name` still invokes on send. To send it as literal text,
-              // start the message with a space (see AiPanel.submit).
-              onChange(`${value} `);
+              // start the message with a space (see AiPanel.submit). What it
+              // must not do is edit the draft — it used to append a space.
+              setDismissed(menuAnchor);
               return;
             }
           }

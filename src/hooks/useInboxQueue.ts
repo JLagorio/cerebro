@@ -40,6 +40,16 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
 
   const queued = useMemo(() => inboxEntries(allEntries, period), [allEntries, period]);
 
+  // Pins are scoped to the period they were made in. Without this, every note
+  // opened under "All" was held in the list when you switched to "Week" — the
+  // pill read 0 while the rows it had just filtered out were still on screen,
+  // and the "Nothing captured in this period" empty state could never appear
+  // once you had clicked anything. A period change is a new question, so the
+  // held set starts empty and re-pins whatever the new period opens.
+  useEffect(() => {
+    setPinned([]);
+  }, [period]);
+
   // Pinned notes that no longer match the filter, restored to their place in
   // the queue so the list does not reshuffle around the note being edited.
   const entries = useMemo(() => {
@@ -84,7 +94,16 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
         index < 0 ? null : (current.entries[index + 1] ?? current.entries[index - 1] ?? null);
       const wasOnScreen = current.selectedPath === path;
 
-      setPinned((prev) => prev.filter((p) => p !== path));
+      // Unpinning is what makes the filed note leave the list — so it is also
+      // what auto-advance OFF must not do to the note you are reading. Left
+      // unpinned, the filed note stopped matching, the resolver below fell
+      // through to entries[0], and switching auto-advance off threw you to
+      // the TOP of the queue on every file: a bigger jump than the one you
+      // turned off. Held, the row stays where it is, marked ready, and the
+      // undo affordance beside it still points at something visible.
+      if (current.autoAdvance || !wasOnScreen) {
+        setPinned((prev) => prev.filter((p) => p !== path));
+      }
 
       // M7: organizing an AI-written note is a REVIEW, so it records who
       // signed off. That is the whole loop — the agent writes, the note

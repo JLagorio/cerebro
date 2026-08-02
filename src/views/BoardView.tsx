@@ -1,5 +1,6 @@
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   useDraggable,
   useDroppable,
@@ -84,6 +85,7 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: entry.path,
   });
+  const dragKeyDown = listeners?.onKeyDown as ((e: React.KeyboardEvent) => void) | undefined;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
   const priority = schema.resolveField(entry, 'priority');
   const assignee = schema.resolveField(entry, 'assignee');
@@ -96,6 +98,21 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
       {...listeners}
       {...attributes}
       onClick={() => openPath(entry.path)}
+      // dnd-kit's `attributes` stamp role="button" and tabIndex=0 on this div,
+      // so the card advertises itself as a button and takes focus — but a
+      // <div role="button"> gets no native Enter/Space activation, and onClick
+      // was the only handler. The card was a dead focus stop. Space is left to
+      // the drag sensor.
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          openPath(entry.path);
+          return;
+        }
+        // Everything else (Space to pick up, arrows to move, Escape) belongs
+        // to the keyboard drag sensor, whose own handler this prop shadows.
+        dragKeyDown?.(e);
+      }}
       style={{
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
         borderLeft: `3px solid ${group.ghost || !group.color ? 'var(--n-300)' : group.color}`,
@@ -137,11 +154,15 @@ function BoardColumn({
   group,
   schema,
   groupBy,
+  groupKind,
   onCreate,
 }: {
   group: Group;
   schema: Schema;
   groupBy: string;
+  /** Kind of the field the columns band by — decides how the column's value is
+   * written when a card is created in it. */
+  groupKind?: string;
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }) {
   const droppableId = group.key === '__none__' ? NO_VALUE_COLUMN_ID : group.key;
@@ -178,7 +199,22 @@ function BoardColumn({
             compact
             label="New"
             ariaLabel={`New record in ${group.label}`}
-            onCreate={(title) => onCreate(title, { groupBy, groupValue: group.key })}
+            // Person and relation groups key by the wikilink STEM, and the
+            // create path writes the band value verbatim — so a card made in
+            // the "Ada Lovelace" column got `assignee: Ada Lovelace` and
+            // stopped being a link at the next rescan. The drag path already
+            // wraps these (handleDragEnd); this is the same rule.
+            onCreate={(title) =>
+              onCreate(title, {
+                groupBy,
+                groupValue:
+                  group.key === '__none__'
+                    ? ''
+                    : groupKind === 'person' || groupKind === 'relation'
+                      ? formatWikilink(group.key)
+                      : group.key,
+              })
+            }
           />
         )}
       </div>
@@ -232,13 +268,25 @@ export function BoardView({
 }: BoardViewProps) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const toast = useUiStore((s) => s.toast);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    // Moving a card between columns is the board's entire purpose and was
+    // pointer-only. Space picks up and drops (Enter stays the card's open
+    // gesture), arrows move, Escape cancels.
+    useSensor(KeyboardSensor, {
+      keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space'] },
+    }),
+  );
   // A board's columns ARE its first grouping level, so it always has one.
   const groupBy = presentation.group[0]?.field ?? 'status';
   const swimlaneBy = presentation.group[1]?.field ?? null;
   const parseable = entries.filter((e) => e.parseError === null);
   const hiddenCount = entries.length - parseable.length;
   const groups = groupEntries(parseable, groupBy, schema);
+  // One resolution for the whole board: every column bands by the same field,
+  // and an empty column has no entry of its own to resolve it from.
+  const groupKind =
+    parseable.length > 0 ? schema.resolveField(parseable[0], groupBy).def?.kind : undefined;
 
   // M9.1: sub-grouping partitions the ROWS first, then columns within each
   // band — the reverse would produce columns that don't line up across lanes.
@@ -283,6 +331,7 @@ export function BoardView({
                   group={g}
                   schema={schema}
                   groupBy={groupBy}
+                  groupKind={groupKind}
                   onCreate={onCreate}
                 />
               ))}
@@ -303,6 +352,7 @@ export function BoardView({
                       group={g}
                       schema={schema}
                       groupBy={groupBy}
+                      groupKind={groupKind}
                       onCreate={onCreate}
                     />
                   ))}

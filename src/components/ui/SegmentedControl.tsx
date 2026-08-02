@@ -29,6 +29,8 @@ export interface SegmentedControlProps {
   onChange?: (value: string) => void;
   /** "sm" 28 total (default) | "md" 32 total */
   size?: 'sm' | 'md';
+  /** names the tablist for screen readers, e.g. "View mode" */
+  ariaLabel?: string;
   style?: React.CSSProperties;
   className?: string;
 }
@@ -38,18 +40,51 @@ export function SegmentedControl({
   value,
   onChange,
   size = 'sm',
+  ariaLabel,
   style,
   className = '',
 }: SegmentedControlProps) {
+  const ref = React.useRef<HTMLSpanElement>(null);
+  const selectedIndex = options.findIndex((o) => o.value === value);
+  // Roving tabindex: the strip is ONE tab stop and arrows move within it. Fall
+  // back to the first option so the control stays reachable when `value`
+  // matches nothing.
+  const focusIndex = selectedIndex >= 0 ? selectedIndex : 0;
+
+  const move = (next: number) => {
+    if (options.length === 0) return;
+    const i = ((next % options.length) + options.length) % options.length;
+    if (onChange) onChange(options[i].value);
+    // Selection follows focus, so the newly selected button is the tab stop.
+    ref.current?.querySelectorAll('button')[i]?.focus();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    if (e.key === 'Home') return move(0);
+    if (e.key === 'End') return move(options.length - 1);
+    const delta = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
+    move(focusIndex + delta);
+  };
+
   return (
     <span
+      ref={ref}
       className={`cb-seg ${size === 'md' ? 'cb-seg-md' : ''} ${className}`}
       style={style}
       role="tablist"
+      aria-label={ariaLabel}
+      onKeyDown={onKeyDown}
     >
-      {options.map((o) => (
+      {options.map((o, i) => (
         <button
           key={o.value}
+          type="button"
+          role="tab"
+          aria-selected={o.value === value}
+          tabIndex={i === focusIndex ? 0 : -1}
           data-testid={o.testId}
           className={o.value === value ? 'cb-seg-on' : ''}
           onClick={() => onChange && onChange(o.value)}

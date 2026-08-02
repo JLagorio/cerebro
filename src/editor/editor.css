@@ -1,3 +1,14 @@
+/* Callout 'tip' ramp. The global palette has a single teal stop
+   (--swatch-teal) and no 50/700 ends, so the two missing stops are declared
+   here ONCE and referenced as tokens from blocks.tsx — never inlined at the
+   use site, which is how the old callout map desynchronised its fill from its
+   own border. Teal, not violet: violet is reserved for AI surfaces. */
+:root {
+  --callout-tip-50: #e6f8f6;
+  --callout-tip-500: var(--swatch-teal);
+  --callout-tip-700: #0b7268;
+}
+
 /* DS theme for BlockNote (M2 Task 9): map the mantine flavor's CSS
    variables onto Cerebro tokens, scoped under our wrapper. */
 .cerebro-editor .bn-container {

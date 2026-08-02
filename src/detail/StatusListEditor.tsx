@@ -5,6 +5,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { ColorPicker, optionId } from '@/detail/OptionListEditor';
 import type { StatusDef } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 
 /** The three lifecycle buckets every status belongs to (engine contract). */
 const GROUPS: { group: StatusDef['group']; label: string; hint: string }[] = [
@@ -80,7 +81,9 @@ function StatusRow({
         <span className="[font-family:var(--font-mono)] text-[10.5px] text-[var(--n-300)]">
           {status.id}
         </span>
-        <span className="hidden group-hover:inline-flex">
+        {/* Revealed on hover OR focus — see OptionListEditor: `hidden` took
+            the remove button out of the tab order entirely. */}
+        <span className="inline-flex flex-none opacity-0 focus-within:opacity-100 group-hover:opacity-100">
           <IconButton icon="x" label={`Remove ${status.label}`} size="sm" onClick={onRemove} />
         </span>
       </div>
@@ -115,11 +118,17 @@ export function StatusListEditor({
 
   const append = (group: StatusDef['group']) => {
     const text = draft.trim();
+    const id = optionId(text);
+    // A collision used to clear the input and return silently. The colliding
+    // status is often in a different lifecycle group and off-screen, so the
+    // only signal the user got was their text vanishing. Keep it, and say so.
+    if (text !== '' && statuses.some((s) => s.id === id)) {
+      useUiStore.getState().toast(`"${text}" already exists`);
+      return;
+    }
     setDraft('');
     setAddingIn(null);
     if (text === '') return;
-    const id = optionId(text);
-    if (statuses.some((s) => s.id === id)) return;
     onChange([
       ...statuses,
       { id, label: text, color: TYPE_COLORS[statuses.length % TYPE_COLORS.length], group },

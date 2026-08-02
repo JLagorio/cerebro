@@ -1,11 +1,14 @@
+import { useMemo } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { FieldChip } from '@/views/FieldChip';
 import { QuickAddInline, useQuickAdd } from '@/views/QuickAdd';
-import { buildRows } from '@/engine/rows';
+import { buildRows, entryRows } from '@/engine/rows';
 import { typeStyle } from '@/engine/typeCatalog';
 import { visibleColumns } from '@/engine/views';
+import { useRowKeyboard, type RowKeyboardRowProps } from '@/views/useRowKeyboard';
 import { useUiStore } from '@/stores/uiStore';
 import type { Entry, GroupNode, Presentation, Schema } from '@/engine/types';
 
@@ -25,6 +28,15 @@ export interface ListViewProps {
   scope?: string;
   /** Type new records get (M9.6); defaults to the project canvas's type. */
   createType?: string;
+  /**
+   * M15: the same create contract the other layouts get. `project` alone gated
+   * this, and nothing outside the project canvas passed one — so switching a
+   * view tab from Table to List silently removed the only way to add a record
+   * from the canvas.
+   */
+  onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
+  /** True when the view has filters, so the empty state can say why. */
+  filtered?: boolean;
 }
 
 /** Indent per nesting level, matching the band header's step. */
@@ -38,6 +50,9 @@ function ListRow({
   childCount,
   collapsed,
   onToggle,
+  selected,
+  onSelect,
+  rowProps,
 }: {
   entry: Entry;
   presentation: Presentation;
@@ -47,6 +62,10 @@ function ListRow({
   childCount: number;
   collapsed: boolean;
   onToggle: () => void;
+  /** True when the roving cursor is on this row. */
+  selected: boolean;
+  onSelect: () => void;
+  rowProps: RowKeyboardRowProps;
 }) {
   // M9.3: the same in-place rule the table and hierarchy use. This row
   // already called openDetail directly, which was the correct BEHAVIOUR but
@@ -79,9 +98,17 @@ function ListRow({
     return (
       <div
         role="row"
+        {...rowProps}
+        data-testid="list-row"
         data-depth={depth}
-        onClick={() => openPath(entry.path)}
-        className="flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]"
+        onClick={() => {
+          onSelect();
+          openPath(entry.path);
+        }}
+        className={[
+          'flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]',
+          selected ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
+        ].join(' ')}
         style={{ paddingLeft: 20 + depth * INDENT }}
       >
         <span className="w-[52px] flex-none" />
@@ -99,9 +126,17 @@ function ListRow({
   return (
     <div
       role="row"
+      {...rowProps}
+      data-testid="list-row"
       data-depth={depth}
-      onClick={() => openPath(entry.path)}
-      className="flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]"
+      onClick={() => {
+        onSelect();
+        openPath(entry.path);
+      }}
+      className={[
+        'flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]',
+        selected ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
+      ].join(' ')}
       style={{ paddingLeft: 20 + depth * INDENT }}
     >
       <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
@@ -176,8 +211,11 @@ function BandHeader({
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
       </button>
+      {/* flex-none: without it a long band label squeezed the swatch from a
+          circle into a thin ellipse, and the colour coding the grouping
+          depends on quietly vanished. 10px matches the table's. */}
       <span
-        className="box-border h-[11px] w-[11px] rounded-full"
+        className="box-border h-2.5 w-2.5 flex-none rounded-full"
         style={
           node.ghost || !node.color
             ? { border: '1.5px solid var(--n-400)' }
@@ -187,7 +225,7 @@ function BandHeader({
       <span
         className={[
           node.depth === 0 ? 'text-[12.5px] font-semibold' : 'text-[12px] font-medium',
-          'text-[var(--n-800)]',
+          'min-w-0 truncate text-[var(--n-800)]',
         ].join(' ')}
       >
         {node.label}
@@ -208,10 +246,17 @@ export function ListView({
   allEntries = entries,
   scope = 'list',
   createType = 'Work item',
+  onCreate,
+  filtered,
 }: ListViewProps) {
   const quickAdd = useQuickAdd(createType, project);
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggle = useUiStore((s) => s.toggleCollapsed);
+  const openPath = useOpenPath('in-place');
+
+  // M15: create where a create contract exists — `project !== null` alone meant
+  // no caller outside the project canvas could ever create from this layout.
+  const canCreate = onCreate !== undefined || project !== null;
 
   // M10: one row list — bands, nesting, and the create row. The list no longer
   // needs a separate flat-fallback branch either: buildRows already emits a
@@ -222,10 +267,22 @@ export function ListView({
     group: presentation.group,
     schema,
     allEntries,
-    addRows: project !== null,
+    addRows: canCreate,
     isCollapsed: (key) => collapsedMap?.[key] === true,
   });
   const bandless = rows.every((r) => r.kind !== 'band');
+
+  // M15: the same roving cursor the table has. Rows were `<div role="row">`
+  // with an onClick and no tabIndex, and the hook was imported by TableView
+  // alone — so on this layout there was no keyboard path to a record at all.
+  const flatRows = useMemo(() => entryRows(rows), [rows]);
+  const keyboard = useRowKeyboard({
+    count: flatRows.length,
+    onOpen: (i) => openPath(flatRows[i].entry.path),
+    onToggle: (i) => {
+      if (flatRows[i].childCount > 0) toggle(scope, flatRows[i].key);
+    },
+  });
 
   return (
     // Deviation from the plan's verbatim root (reported): the shared contract
@@ -233,7 +290,14 @@ export function ListView({
     // provide no scrolling ancestor (App is overflow-hidden) — so the root
     // keeps the placeholder's scroll-container classes; the plan's
     // min-w-[720px] block sits inside it.
-    <div data-testid="list-view" className="min-h-0 min-w-0 flex-1 overflow-auto">
+    <div
+      data-testid="list-view"
+      role="grid"
+      aria-label="Records"
+      aria-rowcount={flatRows.length}
+      className="min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
+      {...keyboard.containerProps}
+    >
       <div className="min-w-[720px]">
         {/* An ungrouped run still gets a header: it carries the count, and a
             canvas that opens with rows and no header reads as half-loaded. */}
@@ -244,7 +308,7 @@ export function ListView({
             className="sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] px-5"
           >
             <span
-              className="box-border h-[11px] w-[11px] rounded-full"
+              className="box-border h-2.5 w-2.5 flex-none rounded-full"
               style={{ border: '1.5px solid var(--n-400)' }}
             />
             <span className="text-[12.5px] font-semibold text-[var(--n-800)]">All items</span>
@@ -271,13 +335,19 @@ export function ListView({
                 ariaLabel={row.band === null ? 'New item' : `New item in ${row.band.label}`}
                 label="Add item"
                 onCreate={(title) =>
-                  row.band === null
-                    ? quickAdd(title)
-                    : quickAdd(title, { groupBy: row.band.field, groupValue: row.band.key })
+                  onCreate !== undefined
+                    ? onCreate(title, {
+                        groupBy: row.band?.field ?? '',
+                        groupValue: row.band?.key ?? '',
+                      })
+                    : row.band === null
+                      ? quickAdd(title)
+                      : quickAdd(title, { groupBy: row.band.field, groupValue: row.band.key })
                 }
               />
             );
           }
+          const index = flatRows.indexOf(row);
           return (
             <ListRow
               key={row.key}
@@ -288,9 +358,30 @@ export function ListView({
               childCount={row.childCount}
               collapsed={collapsedMap?.[row.key] === true}
               onToggle={() => toggle(scope, row.key)}
+              selected={index === keyboard.index}
+              onSelect={() => keyboard.setIndex(index)}
+              rowProps={keyboard.rowProps(index)}
             />
           );
         })}
+        {entries.length === 0 && (
+          // A bare "All items 0" strip over an empty canvas reads as a load
+          // failure, not as an empty result — and said nothing about the
+          // filter that caused it.
+          <div role="row" className="px-3 py-8">
+            <EmptyState
+              icon="list"
+              title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
+              description={
+                filtered === true
+                  ? 'Adjust the filters in view settings to widen the query.'
+                  : canCreate
+                    ? 'Create the first one below.'
+                    : 'Records that land in this view appear here.'
+              }
+            />
+          </div>
+        )}
       </div>
     </div>
   );

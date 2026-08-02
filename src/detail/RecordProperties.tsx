@@ -1,9 +1,24 @@
 import { useState } from 'react';
 import { addPropertyToEntry } from '@/app/typeActions';
+import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { visibleProperties } from '@/engine/properties';
 import type { Entry, Schema } from '@/engine/types';
+import { useVaultStore } from '@/stores/vaultStore';
+
+/** Readable text for a key the type does not declare. `properties` holds
+ * `Scalar | Scalar[]` and, after a field is dropped from a type, can hold
+ * object-shaped leftovers (a daterange's {start, end}) — `String(value)`
+ * turned those into "[object Object]". */
+function undeclaredDisplay(entry: Entry, name: string): string {
+  if (name in entry.relationships) return entry.relationships[name].join(', ');
+  const value = entry.properties[name];
+  if (value === null || value === undefined) return '—';
+  if (Array.isArray(value)) return value.map(String).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
 
 /**
  * The property stack for one record: declared fields as editors, undeclared
@@ -13,6 +28,7 @@ import type { Entry, Schema } from '@/engine/types';
  */
 export function RecordProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const [addingProp, setAddingProp] = useState(false);
+  const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
 
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const declared = typeDef?.fields ?? [];
@@ -38,12 +54,26 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
         </div>
       ))}
       {undeclared.map((name) => (
-        <div key={name} className="flex items-center gap-2">
-          <span className="w-24 flex-none text-[12px] text-[var(--n-500)]">{humanize(name)}</span>
-          <span className="text-[12.5px] text-[var(--n-700)]">
-            {name in entry.relationships
-              ? entry.relationships[name].join(', ')
-              : String(entry.properties[name])}
+        // A key the type no longer declares is still the user's data. It used
+        // to render `String(value)` — "[object Object]" for a leftover
+        // daterange — inside a fixed-width row, with no way to remove it from
+        // the panel at all. Now it reads, wraps, and can be dropped.
+        <div key={name} className="group flex min-w-0 items-start gap-2">
+          <span className="w-24 flex-none truncate pt-[3px] text-[12px] text-[var(--n-500)]">
+            {humanize(name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <span className="block text-[12.5px] text-[var(--n-700)] [overflow-wrap:anywhere]">
+              {undeclaredDisplay(entry, name)}
+            </span>
+          </div>
+          <span className="inline-flex flex-none opacity-0 focus-within:opacity-100 group-hover:opacity-100">
+            <IconButton
+              icon="x"
+              label={`Remove ${humanize(name)}`}
+              size="sm"
+              onClick={() => void patchFrontmatter(entry.path, { [name]: null })}
+            />
           </span>
         </div>
       ))}

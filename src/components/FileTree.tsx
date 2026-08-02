@@ -7,7 +7,7 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import type { Entry } from '@/engine/types';
-import { createFolder, deleteNote, readNote, renameNote } from '@/lib/ipc';
+import { createFolder, deleteNote, readNote, renameNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
@@ -18,6 +18,7 @@ import {
   todayIso,
 } from '@/lib/templates';
 import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
+import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -46,6 +47,10 @@ function buildTree(
   hide: (path: string) => boolean,
   order: Record<string, string[]> = {},
   pruneEmptied = false,
+  /** Non-note files that make a folder non-empty on disk without ever
+   * appearing in the tree: record `.md` are covered by `hide`, but Lists
+   * (`*.list.yml`) and `collection.yml` are not entries at all. */
+  extraHidden: string[] = [],
 ): TreeNode[] {
   const prefix = root === '' ? '' : `${root}/`;
   const byPath = new Map<string, TreeNode>();
@@ -85,9 +90,28 @@ function buildTree(
   // would linger as empty rows; drop them, but keep genuinely empty folders
   // the user made themselves.
   if (pruneEmptied) {
+    // Hidden-derived is TRANSITIVE: mark every ancestor, not just the direct
+    // parent. Keying on parentDir alone left `records/`, `sources/` and any
+    // folder whose files sit one level deeper surviving as "Empty folder"
+    // rows — the tree claiming a vault folder full of files was empty.
     const hadHiddenFile = new Set<string>();
+    const markAncestors = (path: string) => {
+      for (
+        let dir = parentDir(path);
+        dir !== '' && dir !== root && dir.startsWith(prefix);
+        dir = parentDir(dir)
+      ) {
+        hadHiddenFile.add(dir);
+      }
+    };
     for (const e of entries) {
-      if (e.path.startsWith(prefix) && hide(e.path)) hadHiddenFile.add(parentDir(e.path));
+      if (e.path.startsWith(prefix) && hide(e.path)) markAncestors(e.path);
+    }
+    // Lists and collection.yml keep a folder legitimately non-empty even
+    // though Docs never shows them — a Collection folder is not an "Empty
+    // folder", it just has nothing that belongs in Docs.
+    for (const path of extraHidden) {
+      if (path.startsWith(prefix)) markAncestors(path);
     }
     const prune = (nodes: TreeNode[]): TreeNode[] =>
       nodes.filter((node) => {
@@ -170,9 +194,12 @@ export function FileTree({
 }: FileTreeProps) {
   const entries = useVaultStore((s) => s.entries);
   const folders = useVaultStore((s) => s.folders);
+  const views = useVaultStore((s) => s.views);
+  const collections = useVaultStore((s) => s.collections);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const createItem = useVaultStore((s) => s.createItem);
+  const replacePath = useNavStore((s) => s.replacePath);
   const expanded = useUiStore((s) => s.expandedFolders);
   const toggleFolder = useUiStore((s) => s.toggleFolder);
   const treeOrder = useUiStore((s) => s.treeOrder);
@@ -194,9 +221,16 @@ export function FileTree({
     };
   }, [docsOnly, hide, entryByPath]);
 
+  // Lists and Collections are files on disk that Docs never shows; without
+  // them a Collection folder (strategy/, delivery/) prunes to "Empty folder".
+  const nonDocFiles = useMemo(
+    () => [...views.map((v) => v.path), ...collections.map((c) => `${c.folder}/collection.yml`)],
+    [views, collections],
+  );
+
   const tree = useMemo(
-    () => buildTree(root, entries, folders, hidePath, treeOrder, docsOnly),
-    [root, entries, folders, hidePath, treeOrder, docsOnly],
+    () => buildTree(root, entries, folders, hidePath, treeOrder, docsOnly, nonDocFiles),
+    [root, entries, folders, hidePath, treeOrder, docsOnly, nonDocFiles],
   );
 
   const [dialog, setDialog] = useState<TreeDialog | null>(null);
@@ -231,6 +265,31 @@ export function FileTree({
 
   const stemOf = (path: string) => (path.split('/').pop() ?? path).replace(/\.md$/, '');
 
+  const join = (dir: string, base: string) => (dir === '' ? base : `${dir}/${base}`);
+
+  /**
+   * Where the OPEN page ends up when `src` becomes `dest`, or null when the
+   * open page wasn't the subject (or inside it). Renaming or drag-moving the
+   * page you are reading used to strand the canvas on "This page no longer
+   * exists" — the file was fine, only navigation was left behind.
+   */
+  const remapActive = (src: string, dest: string): string | null => {
+    if (activePath === null) return null;
+    if (activePath === src) return dest;
+    if (activePath.startsWith(`${src}/`)) return `${dest}${activePath.slice(src.length)}`;
+    return null;
+  };
+
+  /** Expand every collapsed ancestor of `path` so a fresh page/folder is
+   * actually visible instead of silently landing inside a closed folder. */
+  const revealAncestors = (path: string) => {
+    for (let dir = parentDir(path); dir !== '' && dir !== root; dir = parentDir(dir)) {
+      // Live state, not the render snapshot: toggleFolder flips, so acting on
+      // a stale value would COLLAPSE a folder that is already open.
+      if (useUiStore.getState().expandedFolders[dir] !== true) toggleFolder(dir);
+    }
+  };
+
   const invalidDrop = (src: string, destDir: string) =>
     destDir === src || destDir.startsWith(`${src}/`);
 
@@ -238,10 +297,14 @@ export function FileTree({
     if (vaultPath === null || invalidDrop(src, destDir)) return;
     if (parentDir(src) === destDir) return; // already there
     const base = src.split('/').pop() ?? src;
+    const dest = join(destDir, base);
     try {
-      await renameNote(vaultPath, src, destDir === '' ? base : `${destDir}/${base}`);
+      await renameNote(vaultPath, src, dest);
       await rescan();
+      replacePath(src, dest);
       if (!expanded[destDir]) toggleFolder(destDir);
+      const next = remapActive(src, dest);
+      if (next !== null) onOpen(next);
     } catch {
       toast("Couldn't move here");
     }
@@ -255,8 +318,12 @@ export function FileTree({
     try {
       if (parentDir(src) !== destDir) {
         const base = src.split('/').pop() ?? src;
-        await renameNote(vaultPath, src, destDir === '' ? base : `${destDir}/${base}`);
+        const dest = join(destDir, base);
+        await renameNote(vaultPath, src, dest);
         await rescan();
+        replacePath(src, dest);
+        const next = remapActive(src, dest);
+        if (next !== null) onOpen(next);
       }
       const siblings = siblingsOf(destDir);
       const names = (siblings ?? []).map((s) => s.name).filter((n) => n !== srcStem);
@@ -304,7 +371,9 @@ export function FileTree({
 
   const openDialog = (d: TreeDialog) => {
     setDialog(d);
-    setName(d.mode === 'rename' ? d.node.name : '');
+    // Rename prefills the VISIBLE name (a note's H1, a folder's humanized
+    // slug), not the on-disk slug the user never sees.
+    setName(d.mode === 'rename' ? d.node.label : '');
     setTemplatePath('none');
   };
   const closeDialog = () => {
@@ -329,32 +398,54 @@ export function FileTree({
           frontmatter = applyTemplateFrontmatter(template, vars);
         }
         const path = await createItem({ folder: dialog.dir, slug, frontmatter, body });
+        // The new page can land inside a collapsed folder — open the chain
+        // so the tree shows where it went.
+        revealAncestors(path);
         closeDialog();
         onOpen(path);
         return;
       }
       if (dialog.mode === 'new-folder') {
         const slug = slugify(trimmed) || 'folder';
-        const path = `${dialog.dir}/${slug}`;
+        const path = join(dialog.dir, slug);
         await createFolder(vaultPath, path);
         await rescan();
-        // Reveal the new folder (and keep its parent open).
-        if (!expanded[path]) toggleFolder(path);
+        // Reveal the new folder AND the (possibly collapsed) chain it was
+        // created in — expanding only the new folder left it invisible.
+        revealAncestors(path);
+        if (useUiStore.getState().expandedFolders[path] !== true) toggleFolder(path);
         closeDialog();
         return;
       }
       const { node } = dialog;
       const slug = slugify(trimmed) || node.name;
-      const to = `${parentDir(node.path)}/${slug}${node.kind === 'file' ? '.md' : ''}`;
+      const to = join(parentDir(node.path), `${slug}${node.kind === 'file' ? '.md' : ''}`);
       if (to !== node.path) {
         await renameNote(vaultPath, node.path, to);
+        // Repair history as well as the canvas: the old path is still in the
+        // back stack, and a folder rename takes every page under it along.
+        replacePath(node.path, to);
         // Folder-note pattern: the doc's main file must keep the folder's
         // name or the folder stops being a doc.
         if (node.kind === 'doc' && node.mainPath !== undefined) {
           await renameNote(vaultPath, `${to}/${node.name}.md`, `${to}/${slug}.md`);
+          replacePath(`${to}/${node.name}.md`, `${to}/${slug}.md`);
         }
-        await rescan();
       }
+      // A row's label is the note's H1, never its filename — renaming only
+      // the file left the visible name unchanged in the tree, breadcrumb,
+      // recents and Quick Open ("the rename did nothing").
+      const titleTarget =
+        node.kind === 'file' ? to : node.kind === 'doc' ? `${to}/${slug}.md` : null;
+      if (titleTarget !== null) await setNoteTitle(vaultPath, titleTarget, trimmed);
+      await rescan();
+      // Follow the file: renaming the page you are reading must not strand
+      // the canvas on "This page no longer exists".
+      let next = remapActive(node.path, to);
+      if (next !== null && node.kind === 'doc' && next === `${to}/${node.name}.md`) {
+        next = `${to}/${slug}.md`;
+      }
+      if (next !== null) onOpen(next);
       closeDialog();
     } catch {
       const verb =
@@ -419,7 +510,11 @@ export function FileTree({
   };
 
   const rowActions = (node: TreeNode) => (
-    <span className="ml-auto hidden items-center gap-0.5 group-hover:inline-flex">
+    // `hidden` (display:none) took these out of the tab order entirely, so a
+    // keyboard user could never create a page in a folder, rename, move or
+    // trash anything. Kept in flow and merely transparent, they stay
+    // focusable and reveal themselves on focus.
+    <span className="ml-auto inline-flex flex-none items-center gap-0.5 opacity-0 focus-within:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100">
       {node.kind !== 'file' && (
         <IconButton
           icon="file-plus"
@@ -681,8 +776,11 @@ export function FileTree({
           label={`"${moveNode.label}"`}
           onClose={() => setMoveNode(null)}
           onMoved={(dest) => {
+            const next = moveNode.kind === 'file' ? dest : remapActive(moveNode.path, dest);
             setMoveNode(null);
-            if (moveNode.kind === 'file') onOpen(dest);
+            // Follow the file: a moved page opens at its new path, and a
+            // moved folder carries the open page inside it along.
+            if (next !== null) onOpen(next);
           }}
         />
       )}

@@ -184,10 +184,14 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   await page.getByRole('button', { name: 'New folder' }).click();
   await page.getByPlaceholder('Folder name').fill('Notes');
   await page.getByRole('button', { name: 'Create' }).click();
-  const notesFolder = page.getByRole('button', { name: 'notes' });
+  // exact: Playwright's `name` is a case-insensitive SUBSTRING by default, so
+  // 'notes' also matched this row's "New page in Notes" and "Options for
+  // Notes" once M15 stopped gating those on hover — three matches, strict-mode
+  // violation. The row actions are in the DOM now whether or not you hover.
+  const notesFolder = page.getByRole('button', { name: 'Notes', exact: true });
   await expect(notesFolder).toBeVisible();
   await notesFolder.hover();
-  await page.getByRole('button', { name: 'New page in notes' }).click();
+  await page.getByRole('button', { name: 'New page in Notes', exact: true }).click();
   await page.getByPlaceholder('Page name').fill('Smoke Notes');
   await page.getByRole('button', { name: 'Create' }).click();
 

@@ -56,7 +56,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
     return (
       <Dialog open onClose={onClose} title="Adopt vault schema" width={480}>
         <div className="flex items-start gap-2.5 py-2">
-          <Icon name="badge-check" size={18} color="var(--success-500, #1F9D61)" />
+          <Icon name="badge-check" size={18} color="var(--success-500)" />
           <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
             Nothing to adopt. Every type in this vault is declared, and every stored value fits its
             declared kind.
@@ -116,7 +116,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                   className={[
                     'flex-none rounded-full px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-[0.05em]',
                     p.docPath === null
-                      ? 'bg-[var(--cortex-50)] text-[var(--cortex-700, #3b5bd6)]'
+                      ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
                       : 'bg-[var(--n-50)] text-[var(--n-500)]',
                   ].join(' ')}
                 >
@@ -145,7 +145,9 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                   className={[
                     'mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border',
                     on
-                      ? 'border-[var(--cortex-500)] bg-[var(--cortex-500)] text-white'
+                      ? // text-inverse, never text-white: index.css resets the stock palette, so
+                        // `text-white` emits no CSS and the check inherited near-black on blue (M15).
+                        'border-[var(--cortex-500)] bg-[var(--cortex-500)] text-inverse'
                       : 'border-[var(--n-300)] bg-[var(--n-0)]',
                   ].join(' ')}
                 >
@@ -178,8 +180,8 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
                   {note !== null && (
-                    <div className="mt-0.5 inline-flex items-center gap-1 rounded-[5px] bg-[var(--warn-50,#fdf3e2)] px-1.5 py-px text-[10.5px] text-[var(--warn-700,#8a5a13)]">
-                      <Icon name="wand-2" size={10} />
+                    <div className="mt-0.5 inline-flex items-center gap-1 rounded-[5px] bg-[var(--warn-50)] px-1.5 py-px text-[10.5px] text-[var(--warn-700)]">
+                      <Icon name="wand-sparkles" size={10} />
                       {note}
                     </div>
                   )}

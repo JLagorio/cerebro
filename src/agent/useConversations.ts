@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  loadActiveId,
   loadConversations,
   newConversation,
   ordered,
   retitle,
+  saveActiveId,
   saveConversations,
 } from '@/agent/conversations';
 import type { AgentChat } from '@/agent/useAgentChat';
@@ -32,10 +34,22 @@ export function useConversations(chat: AgentChat): ConversationState {
     const stored = loadConversations();
     return stored.length > 0 ? stored : [newConversation()];
   });
+  // Seeded from the remembered choice, and from `conversations` — NOT from a
+  // second loadConversations() call, which on a first run minted a whole
+  // second conversation whose id matched nothing in the list, so the mirror
+  // effect below had no record to write the transcript into (M15).
   const [activeId, setActiveId] = useState<string>(() => {
-    const stored = loadConversations();
-    return (stored[0] ?? newConversation()).id;
+    const remembered = loadActiveId();
+    return remembered !== null && conversations.some((c) => c.id === remembered)
+      ? remembered
+      : conversations[0].id;
   });
+
+  // One writer for every path that changes the active conversation — start,
+  // select, remove and the initial seed all end up here.
+  useEffect(() => {
+    saveActiveId(activeId);
+  }, [activeId]);
 
   // First render restores the stored transcript into the chat hook once.
   const hydrated = useRef(false);
@@ -65,6 +79,25 @@ export function useConversations(chat: AgentChat): ConversationState {
       return next;
     });
   }, [messages, sessionId, streaming, activeId]);
+
+  // …but the panel can be closed MID-TURN, and the effect above deliberately
+  // skips streaming, so the question and everything already written were
+  // thrown away on the way out (M15). Persist once more as this unmounts,
+  // streaming or not — saveConversations strips the streaming flags, so what
+  // comes back reads as a finished turn rather than one frozen mid-sentence.
+  const snapshot = useRef({ conversations, activeId, messages, sessionId });
+  snapshot.current = { conversations, activeId, messages, sessionId };
+  useEffect(() => {
+    return () => {
+      const s = snapshot.current;
+      if (!hydrated.current || s.messages.length === 0) return;
+      saveConversations(
+        s.conversations.map((c) =>
+          c.id === s.activeId ? retitle({ ...c, messages: s.messages, sessionId: s.sessionId }) : c,
+        ),
+      );
+    };
+  }, []);
 
   const start = useCallback(() => {
     const created = newConversation();

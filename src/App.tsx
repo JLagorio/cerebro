@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { AgentActions } from '@/agent/AgentActions';
 import { AiPanel } from '@/agent/AiPanel';
 import { JobRunnerHost } from '@/agent/useJobRunner';
@@ -28,8 +28,40 @@ import { RemindersHost } from '@/hooks/useReminders';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { CANVAS_MIN_WIDTH, RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
+
+/**
+ * A media query as React state (M15) — the shell had not one `@media` or
+ * `matchMedia` in it before this.
+ *
+ * `useSyncExternalStore` rather than an effect + useState so the first paint
+ * already knows how wide the window is: a layout that flips one frame after
+ * mount is a visible jump on every launch.
+ */
+function useMediaQuery(query: string): boolean {
+  const ref = useRef<MediaQueryList | null>(null);
+  // jsdom (and any host without matchMedia) reports "not narrow", which is the
+  // pre-M15 behaviour — never a crash.
+  ref.current ??= typeof window.matchMedia === 'function' ? window.matchMedia(query) : null;
+  const mql = ref.current;
+  return useSyncExternalStore(
+    (onChange) => {
+      if (mql === null) return () => {};
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    },
+    () => mql?.matches ?? false,
+    () => false,
+  );
+}
+
+/**
+ * Below this the rail, a full-width sidebar, a right-hand panel and a readable
+ * canvas cannot all fit: 56 (rail) + 264 (sidebar) + 400 (canvas floor) + 320
+ * (panel floor) = 1040, with slack for the window chrome.
+ */
+const SHELL_NARROW_MAX = 1120;
 
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
@@ -123,6 +155,15 @@ function App() {
   const navigate = useNavStore((s) => s.navigate);
   const [booted, setBooted] = useState(false);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
+  const detailPath = useUiStore((s) => s.detailPath);
+  const narrow = useMediaQuery(`(max-width: ${SHELL_NARROW_MAX}px)`);
+  // ONE right-hand slot (M15). The store keeps these two mutually exclusive;
+  // this is only which of them is drawn.
+  const rightPanel: 'assistant' | 'detail' | null = aiPanelOpen
+    ? 'assistant'
+    : detailPath !== null
+      ? 'detail'
+      : null;
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
   // M10: null = the dialog is shut. Otherwise it holds the Collection folder the
@@ -143,17 +184,37 @@ function App() {
         const ui = useUiStore.getState();
         ui.setAiPanelOpen(!ui.aiPanelOpen);
       }
-      // Quick capture (M4): writes an untyped note and opens the Inbox on
-      // it, so capture never costs more than the keystroke.
+      // Quick capture (M4): writes an untyped note and opens the Inbox ON IT.
+      // M15: the resolved path is now SELECTED — throwing it away landed you
+      // on whichever capture the persisted `inboxSelectedPath` still pointed
+      // at, so the first thing you typed went into someone else's note.
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         void captureNote()
-          .then(() => useNavStore.getState().navigate({ kind: 'inbox' }))
+          .then((path) => {
+            useUiStore.getState().setInboxSelectedPath(path);
+            useNavStore.getState().navigate({ kind: 'inbox' });
+          })
           .catch((err: unknown) => {
             useUiStore
               .getState()
               .toast(`Couldn't capture: ${err instanceof Error ? err.message : String(err)}`);
           });
+      }
+      // M15: nav history existed in the store with no way to reach it. Not
+      // bound while typing — ⌘[ / ⌘] are outdent/indent inside an editor, and
+      // losing the page you are writing on is worse than having no shortcut.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === '[' || e.key === ']')) {
+        const target = e.target;
+        const editing =
+          target instanceof HTMLElement &&
+          (target.isContentEditable ||
+            target instanceof HTMLInputElement ||
+            target instanceof HTMLTextAreaElement);
+        if (editing) return;
+        e.preventDefault();
+        if (e.key === '[') useNavStore.getState().back();
+        else useNavStore.getState().forward();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -186,22 +247,66 @@ function App() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
+      {/* The rail and the whole sidebar tree sit between the top of the tab
+          order and the content, which in a real vault is dozens of stops. */}
+      <button
+        type="button"
+        onClick={() => document.getElementById('main')?.focus()}
+        className="sr-only rounded-md bg-[var(--cortex-500)] px-3 py-1.5 text-[12px] font-medium text-[var(--n-0)] focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+      >
+        Skip to content
+      </button>
       <Rail />
-      <Sidebar onNewView={(collection) => setNewList({ collection })} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <Sidebar narrow={narrow} onNewView={(collection) => setNewList({ collection })} />
+      {/* M15: the floor that makes the sidebar yield first. Without a minimum
+          here the main column shrinks to nothing and the canvas absorbs every
+          pixel of a narrow window; with it, flex has to take the shortfall out
+          of the sidebar (which is shrinkable down to SIDEBAR_WIDTH_MIN). */}
+      <div
+        className="flex min-w-0 flex-1 flex-col"
+        style={{
+          minWidth: CANVAS_MIN_WIDTH + (rightPanel !== null ? RIGHT_PANEL_MIN_WIDTH : 0),
+        }}
+      >
         <Topbar />
         {/* M11: the record panel is a COLUMN here, beside the canvas, rather
             than a fixed overlay on top of it. That is what lets a table keep
-            its full horizontal scroll while a record is open. */}
-        <div className="flex min-h-0 min-w-0 flex-1 bg-[var(--n-0)]">
-          <CanvasOutlet />
-          <DetailPanel />
+            its full horizontal scroll while a record is open.
+            M15: the assistant moved in here too. As a sibling of the whole main
+            column it stole width from the Topbar and the StatusBar as well as
+            the canvas. `overflow-hidden` is the box nothing may paint outside,
+            and `@container/canvas` lets a page respond to the width it actually
+            has rather than the viewport's. */}
+        <div className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--n-0)]">
+          <main
+            id="main"
+            // -1 so the skip link can put focus here; no ring, because a ring
+            // around the entire canvas reads as an error state.
+            tabIndex={-1}
+            className="flex flex-1 outline-none"
+            // The floor itself. NOT `min-w-0` — that is exactly what made
+            // content absorb 100% of any shortfall.
+            style={{ minWidth: CANVAS_MIN_WIDTH }}
+          >
+            <CanvasOutlet />
+          </main>
+          {/* ONE slot, and it is capped against the CANVAS ROW rather than the
+              viewport — a vw cap resolves against a box the panel does not live
+              in, so it never engaged. */}
+          {rightPanel !== null && (
+            <div
+              data-testid="right-panel-slot"
+              className="flex min-w-0 flex-none overflow-hidden"
+              style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
+            >
+              {rightPanel === 'assistant' ? <AiPanel /> : <DetailPanel />}
+            </div>
+          )}
         </div>
         {/* M9.7 — everything ambient about the vault in one strip, and every
             segment of it is a control rather than a readout. */}
         <StatusBar />
       </div>
-      {aiPanelOpen && <AiPanel />}
       {newList !== null && (
         <ViewSettingsDialog
           initial={newViewDefinition(null, schema)}

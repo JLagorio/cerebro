@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import {
@@ -19,7 +20,7 @@ import type { ColumnDef } from '@/engine/columns';
 import { CREATABLE_PROPERTY_KINDS, kindMeta } from '@/engine/properties';
 import { DEFAULT_STATUSES, humanize } from '@/engine/schema';
 import { isLockedField } from '@/engine/typeCatalog';
-import type { ColumnSpec, Schema } from '@/engine/types';
+import type { ColumnSpec, FieldDef, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -30,6 +31,50 @@ import { useVaultStore } from '@/stores/vaultStore';
  * configure (the column header, the settings menu) instead of docking a
  * panel on the far side of the window.
  */
+/**
+ * The confirmation a kind change owes the user (M15).
+ *
+ * `changeFieldKind` rewrites EVERY record of the type on disk and drops the
+ * property's option list on the way. It used to fire from a single click in a
+ * submenu, with no count, no preview and no undo — a mis-aimed click on a
+ * 400-record select column wrote 400 files and destroyed the options, and the
+ * only recovery in the app is git.
+ */
+export function ConfirmKindChange({
+  name,
+  from,
+  to,
+  count,
+  onConfirm,
+  onCancel,
+}: {
+  name: string;
+  from: FieldDef['kind'];
+  to: FieldDef['kind'];
+  /** Records of this type that will be rewritten. */
+  count: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const losesOptions = from === 'select' || from === 'multiselect' || from === 'status';
+  return (
+    <Dialog
+      open
+      onClose={onCancel}
+      title={`Change "${name}" to ${kindMeta(to).label}?`}
+      width={420}
+      primaryAction={{ label: 'Change type', onClick: onConfirm }}
+      secondaryAction={{ label: 'Cancel', onClick: onCancel }}
+    >
+      <p className="m-0 text-[13px] text-[var(--n-600)]">
+        This rewrites {count === 1 ? '1 record' : `${count} records`} on disk
+        {losesOptions ? " and discards this property's option list" : ''}. Values that cannot be
+        read as {kindMeta(to).label.toLowerCase()} are dropped. This cannot be undone from the app.
+      </p>
+    </Dialog>
+  );
+}
+
 export function PropertyEditor({
   def,
   sourceType,
@@ -53,6 +98,7 @@ export function PropertyEditor({
   const entries = useVaultStore((s) => s.entries);
   const [draft, setDraft] = useState(humanize(def.name));
   const [changingKind, setChangingKind] = useState(false);
+  const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
 
   const locked = isLockedField(sourceType, def.name);
   const typeDef = schema.types.get(sourceType);
@@ -127,10 +173,7 @@ export function PropertyEditor({
                   key={k.kind}
                   type="button"
                   data-testid={`change-type-${k.kind}`}
-                  onClick={() => {
-                    setChangingKind(false);
-                    void changeFieldKind(sourceType, def.name, k.kind);
-                  }}
+                  onClick={() => setPendingKind(k.kind)}
                   className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
                 >
                   <Icon name={k.icon} size={12} color="var(--n-500)" />
@@ -198,11 +241,25 @@ export function PropertyEditor({
               }
             })();
           }}
-          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-1 py-1.5 text-left text-[12.5px] text-[var(--danger-600,#B3261E)] hover:bg-[var(--danger-50)]"
+          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-1 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
         >
           <Icon name="trash-2" size={13} />
           Delete property
         </button>
+      )}
+      {pendingKind !== null && (
+        <ConfirmKindChange
+          name={humanize(def.name)}
+          from={def.kind}
+          to={pendingKind}
+          count={entries.filter((e) => e.type === sourceType).length}
+          onCancel={() => setPendingKind(null)}
+          onConfirm={() => {
+            setPendingKind(null);
+            setChangingKind(false);
+            void changeFieldKind(sourceType, def.name, pendingKind);
+          }}
+        />
       )}
     </div>
   );

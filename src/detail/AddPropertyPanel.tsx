@@ -63,7 +63,15 @@ export function AddPropertyPanel({
 
   const targets = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
 
+  /** An untyped doc has no schema to declare a kind on: addPropertyToEntry
+   * writes plain frontmatter and the Info panel renders every loose key
+   * through a text input. Picking "Checkbox" there produced a text box
+   * containing "false", so the catalog offers only what actually survives. */
+  const supportedOnOwner = (kind: FieldKind) =>
+    ownerType !== null || kind === 'text' || kind === 'number' || kind === 'url';
+
   const pick = (kind: FieldKind, label: string) => {
+    if (!supportedOnOwner(kind)) return;
     // A relation on a TYPE gets the enforced-config step. On an untyped doc
     // there is no schema to write, so it stays a plain frontmatter key.
     if (kind === 'relation' && ownerType !== null) {
@@ -103,7 +111,13 @@ export function AddPropertyPanel({
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') setStep('catalog');
+            if (e.key === 'Escape') {
+              // stopPropagation: stepping back to the catalog must not also
+              // reach the record panel's global Escape and tear the whole
+              // panel down, losing the target/limit/two-way choices made here.
+              e.stopPropagation();
+              setStep('catalog');
+            }
           }}
           className="min-w-0"
           width="100%"
@@ -169,7 +183,11 @@ export function AddPropertyPanel({
           data-testid="add-relation"
           disabled={target === null}
           onClick={addRelation}
-          className="mt-0.5 rounded-md border-0 bg-[var(--cortex-600)] px-2 py-1.5 text-[12.5px] font-medium text-white hover:bg-[var(--cortex-700)] disabled:cursor-default disabled:opacity-40"
+          // text-[var(--n-0)], never text-white: index.css resets the stock
+          // palette with `--color-*: initial` inside @theme inline, so
+          // `text-white` emits no CSS at all and the label inherited --n-900
+          // on the blue fill (2.34:1 — the button read as disabled).
+          className="mt-0.5 rounded-md border-0 bg-[var(--cortex-600)] px-2 py-1.5 text-[12.5px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-700)] disabled:cursor-default disabled:opacity-40"
         >
           Add relation
         </button>
@@ -197,7 +215,12 @@ export function AddPropertyPanel({
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && name.trim() !== '') onAdd(name, 'text');
-          if (e.key === 'Escape') onCancel();
+          if (e.key === 'Escape') {
+            // stopPropagation: closing the flyout must not also reach the
+            // record panel's global Escape and tear the whole panel down.
+            e.stopPropagation();
+            onCancel();
+          }
         }}
         className="min-w-0"
         width="100%"
@@ -208,24 +231,37 @@ export function AddPropertyPanel({
       <div className="max-h-[220px] overflow-y-auto">
         {/* Picking a kind with the name still blank names the property after
             the kind (Notion's flow) — the catalog is never disabled. */}
-        {CREATABLE_PROPERTY_KINDS.map((k) => (
-          <button
-            key={k.kind}
-            type="button"
-            data-testid={`property-kind-${k.kind}`}
-            onClick={() => pick(k.kind, k.label)}
-            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
-          >
-            <Icon name={k.icon} size={13} color="var(--n-500)" />
-            {k.label}
-            {k.kind === 'relation' && ownerType !== null && (
-              <span className="ml-auto inline-flex">
-                <Icon name="chevron-right" size={12} color="var(--n-400)" />
-              </span>
-            )}
-          </button>
-        ))}
+        {CREATABLE_PROPERTY_KINDS.map((k) => {
+          const unsupported = !supportedOnOwner(k.kind);
+          return (
+            <button
+              key={k.kind}
+              type="button"
+              data-testid={`property-kind-${k.kind}`}
+              disabled={unsupported}
+              title={
+                unsupported ? 'Convert this doc to a record to use typed properties' : undefined
+              }
+              onClick={() => pick(k.kind, k.label)}
+              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)] disabled:cursor-default disabled:text-[var(--n-400)] disabled:hover:bg-transparent"
+            >
+              <Icon name={k.icon} size={13} color="var(--n-500)" />
+              {k.label}
+              {k.kind === 'relation' && ownerType !== null && (
+                <span className="ml-auto inline-flex">
+                  <Icon name="chevron-right" size={12} color="var(--n-400)" />
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
+      {ownerType === null && (
+        <p className="m-0 px-1.5 pb-0.5 pt-1 text-[11px] leading-relaxed text-[var(--n-500)]">
+          A doc has no schema, so it can only hold plain values. Convert it to a record to use
+          Select, Status, Date, Person, Checkbox, Files or Relation.
+        </p>
+      )}
       <button
         type="button"
         onClick={onCancel}

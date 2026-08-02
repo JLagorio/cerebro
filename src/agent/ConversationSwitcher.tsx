@@ -13,6 +13,10 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // M15: deleting was one hover-revealed click, 4px from the rename pencil,
+  // against the only copy of a transcript (localStorage — deliberately not the
+  // vault). The row asks first now; there is nothing to undo it with.
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const commit = (id: string) => {
     state.rename(id, draft);
@@ -62,7 +66,33 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                     c.id === state.activeId ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-50)]',
                   ].join(' ')}
                 >
-                  {renaming === c.id ? (
+                  {confirming === c.id ? (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--n-600)]">
+                        Delete “{c.title}”?
+                      </span>
+                      <button
+                        type="button"
+                        data-testid="confirm-delete"
+                        aria-label={`Confirm delete ${c.title}`}
+                        onClick={() => {
+                          setConfirming(null);
+                          state.remove(c.id);
+                        }}
+                        className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-[11.5px] font-medium text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Keep conversation"
+                        onClick={() => setConfirming(null)}
+                        className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-[11.5px] text-[var(--n-500)] hover:bg-[var(--n-100)]"
+                      >
+                        Keep
+                      </button>
+                    </>
+                  ) : renaming === c.id ? (
                     <input
                       autoFocus
                       value={draft}
@@ -107,7 +137,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                         <button
                           type="button"
                           aria-label={`Delete ${c.title}`}
-                          onClick={() => state.remove(c.id)}
+                          onClick={() => setConfirming(c.id)}
                           className="rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] hover:text-[var(--danger-500)]"
                         >
                           <Icon name="trash-2" size={11} />

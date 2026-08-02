@@ -1,14 +1,19 @@
 import React from 'react';
 
+/**
+ * Eight DS tokens rather than eight raw hexes (M15). The old palette was a
+ * private set of pastels that duplicated the role of --swatch-* while sharing
+ * none of their values, and every one of them left white initials below 2.5:1.
+ */
 const PALETTE = [
-  '#7BA8E0',
-  '#7CC5A8',
-  '#D9A46B',
-  '#C08FD6',
-  '#E08F9F',
-  '#77BFCF',
-  '#A3B06F',
-  '#9099D9',
+  'var(--avatar-1)',
+  'var(--avatar-2)',
+  'var(--avatar-3)',
+  'var(--avatar-4)',
+  'var(--avatar-5)',
+  'var(--avatar-6)',
+  'var(--avatar-7)',
+  'var(--avatar-8)',
 ];
 const hash = (s: string): number => {
   let h = 0;
@@ -74,10 +79,12 @@ export function Avatar({ name = '?', size = 24, src, style, className = '' }: Av
       style={{
         ...base,
         background: bg,
-        color: '#fff',
+        color: 'var(--text-inverse)',
         fontFamily: 'var(--font-ui)',
-        fontWeight: 600,
-        fontSize: Math.round(size * 0.4),
+        fontWeight: 700,
+        // Floor of 10px: at size 20 (table rows) the old 0.4 ratio produced 8px
+        // initials, which is below the point where two letters are legible.
+        fontSize: Math.max(10, Math.round(size * 0.42)),
         letterSpacing: '0.02em',
         userSelect: 'none',
       }}
@@ -114,12 +121,12 @@ export function AvatarGroup({
             height: size,
             borderRadius: '50%',
             background: 'var(--n-100)',
-            color: 'var(--n-600)',
+            color: 'var(--n-700)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: Math.round(size * 0.38),
-            fontWeight: 600,
+            fontSize: Math.max(10, Math.round(size * 0.4)),
+            fontWeight: 700,
             boxShadow: '0 0 0 2px var(--n-0)',
           }}
         >

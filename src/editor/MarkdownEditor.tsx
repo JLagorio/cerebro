@@ -143,10 +143,30 @@ export interface MarkdownEditorProps {
    * Fires once the document is loaded. `lossyImport` is true when the parse
    * round trip lost textual content (e.g. raw HTML blocks) — consumers
    * should warn before edits overwrite the file.
+   *
+   * `flushPendingSave` / `cancelPendingSave` let the owner take control of the
+   * debounce: flush before a deliberate save (⌘S), cancel before writing the
+   * file out of band (template apply) so the stale in-editor body can't be
+   * written back over it.
    */
-  onReady?: (info: { editor: CerebroEditor; lossyImport: boolean }) => void;
+  onReady?: (info: EditorReadyInfo) => void;
   debounceMs?: number;
   autoFocus?: boolean;
+  /**
+   * Mount the document as a read-only view: no typing, and no save can be
+   * scheduled. Used for lossy imports, where a single keystroke would strip
+   * content the editor cannot represent.
+   */
+  readOnly?: boolean;
+  /** A user edit was made and a save is now pending (fires per keystroke). */
+  onDirty?: () => void;
+}
+
+export interface EditorReadyInfo {
+  editor: CerebroEditor;
+  lossyImport: boolean;
+  flushPendingSave: () => void;
+  cancelPendingSave: () => void;
 }
 
 export function MarkdownEditor({
@@ -155,6 +175,8 @@ export function MarkdownEditor({
   onReady,
   debounceMs = 500,
   autoFocus = false,
+  readOnly = false,
+  onDirty,
 }: MarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: cerebroSchema });
   const entries = useVaultStore((s) => s.entries);
@@ -173,6 +195,34 @@ export function MarkdownEditor({
   onChangeRef.current = onChange;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const onDirtyRef = useRef(onDirty);
+  onDirtyRef.current = onDirty;
+  // Read-only is checked through a ref so unlocking a lossy import takes
+  // effect without rebuilding the debounce plumbing.
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
+  const emitRef = useRef(() => {});
+  emitRef.current = () => {
+    void blocksToMarkdown(editor).then((md) => {
+      if (md === lastSaved.current) return;
+      lastSaved.current = md;
+      onChangeRef.current(md);
+    });
+  };
+
+  // Handed to the owner via onReady and kept for the editor's lifetime, so
+  // they must be identity-stable — they close over refs only, never props.
+  const cancelPendingSave = useRef(() => {
+    if (timer.current === null) return;
+    window.clearTimeout(timer.current);
+    timer.current = null;
+  }).current;
+  const flushPendingSave = useRef(() => {
+    const wasPending = timer.current !== null;
+    cancelPendingSave();
+    if (wasPending && !readOnlyRef.current) emitRef.current();
+  }).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +236,12 @@ export function MarkdownEditor({
       if (cancelled) return;
       lastSaved.current = roundTripped;
       setLoaded(true);
-      onReadyRef.current?.({ editor, lossyImport: isLossyImport(markdown, roundTripped) });
+      onReadyRef.current?.({
+        editor,
+        lossyImport: isLossyImport(markdown, roundTripped),
+        flushPendingSave,
+        cancelPendingSave,
+      });
     })();
     return () => {
       cancelled = true;
@@ -196,16 +251,11 @@ export function MarkdownEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor]);
 
-  const emitRef = useRef(() => {});
-  emitRef.current = () => {
-    void blocksToMarkdown(editor).then((md) => {
-      if (md === lastSaved.current) return;
-      lastSaved.current = md;
-      onChangeRef.current(md);
-    });
-  };
-
   const scheduleEmit = () => {
+    // A read-only document must not be able to schedule a write at all — the
+    // editable flag alone would still let a programmatic change through.
+    if (readOnlyRef.current) return;
+    onDirtyRef.current?.();
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
@@ -219,7 +269,7 @@ export function MarkdownEditor({
       if (timer.current !== null) {
         window.clearTimeout(timer.current);
         timer.current = null;
-        emitRef.current();
+        if (!readOnlyRef.current) emitRef.current();
       }
     },
     [],
@@ -439,6 +489,7 @@ export function MarkdownEditor({
         <BlockNoteView
           editor={editor}
           theme="light"
+          editable={!readOnly}
           onChange={scheduleEmit}
           sideMenu={false}
           slashMenu={false}

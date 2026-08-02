@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { BoardView, handleDragEnd, NO_VALUE_COLUMN_ID } from '@/views/BoardView';
 import { buildSchema } from '@/engine/schema';
 import { groupEntries } from '@/engine/grouping';
+import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
 import type { Group, Presentation, Schema } from '@/engine/types';
 
@@ -38,6 +41,57 @@ describe('BoardView', () => {
     render(<BoardView entries={[]} presentation={presentation} schema={schema} />);
     expect(screen.getByTestId('board-view')).toBeTruthy();
     expect(screen.getByText('No items yet')).toBeTruthy();
+  });
+});
+
+/**
+ * Keyboard and create semantics (M15).
+ *
+ * dnd-kit's `attributes` stamp role="button" and tabIndex=0 on each card, so
+ * the board advertised every card as a button and then did nothing on Enter —
+ * a dead focus stop. And quick-add passed the raw group key, so a card made in
+ * a person column wrote a bare string where a wikilink belongs.
+ */
+describe('BoardView keyboard and create (M15)', () => {
+  const byPerson: Presentation = { ...presentation, group: [{ field: 'assignee' }] };
+
+  it('opens a card on Enter', async () => {
+    const user = userEvent.setup();
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries });
+    useUiStore.setState({ detailPath: null });
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.path === 'projects/onboarding/items/fld-1.md');
+    render(<BoardView entries={items} presentation={presentation} schema={schema} />);
+    const card = screen.getByTestId('board-card');
+    card.focus();
+    await user.keyboard('{Enter}');
+    expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
+  });
+
+  it('wraps a person column value as a wikilink when creating in it', async () => {
+    const user = userEvent.setup();
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const items = entries.filter(
+      (e) => e.path.startsWith('projects/onboarding/items/') && e.parseError === null,
+    );
+    const onCreate = vi.fn().mockResolvedValue(true);
+    render(
+      <BoardView entries={items} presentation={byPerson} schema={schema} onCreate={onCreate} />,
+    );
+    await user.click(screen.getByRole('button', { name: 'New record in Ana Rios' }));
+    await user.type(
+      screen.getByRole('textbox', { name: 'New record in Ana Rios' }),
+      'Draft{Enter}',
+    );
+    // A bare "ana-rios" stops being a relationship after rescan. The stem is
+    // what the group is keyed by, and what handleDragEnd already writes.
+    expect(onCreate).toHaveBeenCalledWith('Draft', {
+      groupBy: 'assignee',
+      groupValue: '[[ana-rios]]',
+    });
   });
 });
 

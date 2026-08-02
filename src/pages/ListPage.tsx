@@ -4,7 +4,6 @@ import { ViewSettingsPanel } from '@/views/ViewSettingsPanel';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import { IconButton } from '@/components/ui/IconButton';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
 import type {
@@ -249,9 +248,13 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               {filtered && ' · filtered'}
             </span>
             <span className="flex-1" />
-            {/* M12.8: view settings opens from the title or the tab row's
-                sliders icon — a third door in the corner was clutter. */}
-            <IconButton icon="trash-2" label="Delete list" onClick={() => setConfirmDelete(true)} />
+            {/* M15: Delete list no longer sits here. It was the ONLY control in
+                this gutter — a 24px unlabelled glyph roughly 55px above the
+                toolbar's "+ New" and directly below the topbar's, so the corner
+                read New / Delete-list / New with the destructive one in the
+                middle and no visual distinction. It lives where the rest of the
+                list's configuration lives: view settings, which this title
+                button opens, alongside "This list". */}
           </div>
         </div>
         {/* M11: the tab row IS the layout control. There is no pill strip in

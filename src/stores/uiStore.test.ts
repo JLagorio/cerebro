@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { useUiStore } from './uiStore';
 
 function reset() {
-  useUiStore.setState({ detailPath: null, quickOpenVisible: false, toasts: [] });
+  useUiStore.setState({
+    detailPath: null,
+    aiPanelOpen: false,
+    quickOpenVisible: false,
+    toasts: [],
+  });
 }
 
 describe('uiStore', () => {
@@ -13,6 +18,32 @@ describe('uiStore', () => {
     expect(useUiStore.getState().detailPath).toBe('items/fld-7.md');
     useUiStore.getState().closeDetail();
     expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  // M15: one right-hand slot. As independent flags they stacked, and two
+  // panels beside the sidebar left a ~20px canvas on a 1280px window.
+  describe('the right-hand slot holds one occupant', () => {
+    it('opening a record closes the assistant', () => {
+      useUiStore.getState().setAiPanelOpen(true);
+      useUiStore.getState().openDetail('records/bets/office-hours.md');
+      expect(useUiStore.getState().aiPanelOpen).toBe(false);
+      expect(useUiStore.getState().detailPath).toBe('records/bets/office-hours.md');
+    });
+
+    it('opening the assistant closes the record panel', () => {
+      useUiStore.getState().openDetail('records/bets/office-hours.md');
+      useUiStore.getState().setAiPanelOpen(true);
+      expect(useUiStore.getState().detailPath).toBeNull();
+      expect(useUiStore.getState().aiPanelOpen).toBe(true);
+    });
+
+    it('closing the assistant leaves the slot empty rather than reviving a record', () => {
+      useUiStore.getState().openDetail('records/bets/office-hours.md');
+      useUiStore.getState().setAiPanelOpen(true);
+      useUiStore.getState().setAiPanelOpen(false);
+      expect(useUiStore.getState().detailPath).toBeNull();
+      expect(useUiStore.getState().aiPanelOpen).toBe(false);
+    });
   });
 
   it('setQuickOpen toggles quickOpenVisible', () => {

@@ -107,7 +107,7 @@ export function Calendar({
         {WEEKDAY_HEADER.map((wd) => (
           <span
             key={wd}
-            className="flex h-7 items-center justify-center text-[11.5px] text-[var(--n-400)]"
+            className="flex h-7 items-center justify-center text-[11.5px] text-[var(--text-meta)]"
           >
             {wd}
           </span>

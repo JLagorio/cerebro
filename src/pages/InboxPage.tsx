@@ -6,17 +6,19 @@ import { Select } from '@/components/ui/Select';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import {
+  hasRealTitle,
   inboxCounts,
   inInbox,
   INBOX_PERIODS,
   organizeChecklist,
   type InboxPeriod,
+  type OrganizeCheck,
 } from '@/engine/inbox';
 import { conceptsFrom, isAgentWritten, listConcepts } from '@/engine/okf';
 import { typeStyle } from '@/engine/typeCatalog';
 import { ProposalCard } from '@/agent/ProposalCard';
 import type { Entry, Schema } from '@/engine/types';
-import { useInboxQueue, type InboxQueue } from '@/hooks/useInboxQueue';
+import { useInboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
 import { describeIngest, ingestFiles, ingestOne, INGESTIBLE_EXTENSIONS } from '@/lib/ingest';
 import { fetchRefsPrompt, organizePrompt } from '@/lib/prompts';
@@ -41,22 +43,33 @@ function PeriodPills({
     <div className="flex items-center gap-1" role="tablist" aria-label="Capture period">
       {INBOX_PERIODS.map(({ value, label }) => {
         const on = value === active;
+        // A period holding nothing is not a filter, it is a teardown: the old
+        // row let you pay a full-screen wipe to learn the answer was 0, with
+        // the 0 itself drawn at the lowest contrast on the row. Dim it, say
+        // so, and refuse the click.
+        const empty = counts[value] === 0 && !on;
         return (
           <button
             key={value}
             type="button"
             role="tab"
             aria-selected={on}
-            onClick={() => onChange(value)}
+            aria-disabled={empty || undefined}
+            title={empty ? `No captures in the last ${label.toLowerCase()}` : undefined}
+            onClick={() => {
+              if (!empty) onChange(value);
+            }}
             className={[
               'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium',
               on
                 ? 'border-[var(--n-300)] bg-[var(--n-100)] text-[var(--n-900)]'
-                : 'border-transparent bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+                : empty
+                  ? 'cursor-default border-transparent bg-transparent text-[var(--n-400)] opacity-60'
+                  : 'border-transparent bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
             ].join(' ')}
           >
             {label}
-            <span className="text-[10px] tabular-nums text-[var(--n-400)]">{counts[value]}</span>
+            <span className="text-[10.5px] tabular-nums text-[var(--n-500)]">{counts[value]}</span>
           </button>
         );
       })}
@@ -69,20 +82,36 @@ function PeriodPills({
  * here blocks "Mark organized" — over-structuring a note you will never
  * revisit is its own failure mode.
  */
-function OrganizeChecklist({ entry, schema }: { entry: Entry; schema: Schema }) {
+function OrganizeChecklist({
+  entry,
+  schema,
+  onFix,
+}: {
+  entry: Entry;
+  schema: Schema;
+  /** Reveal and focus the control that settles `id`, when this panel owns one. */
+  onFix: (id: OrganizeCheck['id']) => void;
+}) {
   const checks = useMemo(() => organizeChecklist(entry, schema), [entry, schema]);
   const outstanding = checks.filter((c) => !c.done);
 
   return (
-    <ul className="m-0 flex list-none flex-col gap-1.5 p-0" data-testid="organize-checklist">
-      {checks.map((c) => (
-        <li key={c.id} className="flex gap-2">
+    <ul className="m-0 flex list-none flex-col gap-1 p-0" data-testid="organize-checklist">
+      {checks.map((c) => {
+        // Only a check this panel actually holds a control for can be acted
+        // on. The rest stay text — and NOTHING outstanding is drawn as a
+        // hollow ring any more: a ring is the shape of an unchecked box, so
+        // every item read as a form field that ignored clicks.
+        const fixable = !c.done && (c.id === 'type' || c.id === 'status');
+        const glyph = (
           <span
-            className={`flex-none pt-[1px] ${c.done ? 'text-[var(--success-600)]' : 'text-[var(--n-300)]'}`}
+            className={`flex-none pt-[1px] ${c.done ? 'text-[var(--success-600)]' : 'text-[var(--n-400)]'}`}
           >
-            <Icon name={c.done ? 'circle-check' : 'circle'} size={13} />
+            <Icon name={c.done ? 'circle-check' : 'minus'} size={13} />
           </span>
-          <span className="min-w-0">
+        );
+        const text = (
+          <span className="min-w-0 text-left">
             <span
               className={`block text-[12.5px] ${c.done ? 'text-[var(--n-500)]' : 'font-medium text-[var(--n-800)]'}`}
             >
@@ -94,8 +123,31 @@ function OrganizeChecklist({ entry, schema }: { entry: Entry; schema: Schema }) 
               </span>
             )}
           </span>
-        </li>
-      ))}
+        );
+        return (
+          <li key={c.id} className="flex">
+            {fixable ? (
+              <button
+                type="button"
+                data-testid={`checklist-fix-${c.id}`}
+                onClick={() => onFix(c.id)}
+                className="-mx-1 flex w-full gap-2 rounded-[6px] border-0 bg-transparent px-1 py-0.5 text-left hover:bg-[var(--n-50)]"
+              >
+                {glyph}
+                {text}
+                <span className="ml-auto flex-none pt-[1px] text-[var(--cortex-600)]">
+                  <Icon name="chevron-right" size={13} />
+                </span>
+              </button>
+            ) : (
+              <span className="flex w-full gap-2 px-0 py-0.5">
+                {glyph}
+                {text}
+              </span>
+            )}
+          </li>
+        );
+      })}
       {outstanding.length === 0 && (
         <li className="pt-1 text-[11.5px] text-[var(--success-600)]">
           Ready — this note will be findable later.
@@ -109,11 +161,12 @@ function OrganizeChecklist({ entry, schema }: { entry: Entry; schema: Schema }) 
 function OrganizePanel({
   entry,
   schema,
-  queue,
+  onFile,
 }: {
   entry: Entry;
   schema: Schema;
-  queue: InboxQueue;
+  /** Files the capture through the page, which owns the undo affordance. */
+  onFile: (path: string) => void;
 }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const proposal = useUiStore((s) => s.proposals[entry.path]);
@@ -146,17 +199,34 @@ function OrganizePanel({
       .map((t) => ({ value: t, label: t })),
   ];
 
+  // The checklist sits at the far end of the panel from the controls it talks
+  // about — "Has a type" was ~800px from the TYPE select. These let an
+  // outstanding item carry you to its own control instead of describing it.
+  const typeField = useRef<HTMLLabelElement>(null);
+  const typeFields = useRef<HTMLDivElement>(null);
+  const fixCheck = (id: OrganizeCheck['id']) => {
+    const root = id === 'type' ? typeField.current : typeFields.current;
+    if (root === null) return;
+    root.scrollIntoView({ block: 'nearest' });
+    root.querySelector<HTMLElement>('select, input, textarea, button')?.focus();
+  };
+
   return (
     <aside
       aria-label="Organize"
-      className="flex w-[320px] flex-none flex-col overflow-y-auto border-l border-[var(--n-200)] px-4 pb-5 pt-3.5"
+      className="flex w-[272px] flex-none flex-col overflow-y-auto border-l border-[var(--n-200)] px-4 pb-5 pt-3.5 @[1100px]/canvas:w-[300px] @[1360px]/canvas:w-[320px]"
     >
       {/* Type leads, and the type's own fields follow it, because assigning a
           type is the whole job here — everything else on this panel is either
           advice about that decision or something to do once it is made. The
           checklist used to sit above it, which put a list of instructions
           between you and the one control you came for. */}
-      <div className="flex items-center gap-2">
+      {/* A real <label> wrapping the control, not a caption beside it: Select
+          forwards no id or aria-label, so the only way to name the Inbox's
+          most important control without touching the shared component is the
+          implicit association a wrapping label gives. Clicking "Type" now
+          focuses the dropdown too. */}
+      <label ref={typeField} className="flex items-center gap-2">
         <span className="flex-none text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
           Type
         </span>
@@ -171,12 +241,12 @@ function OrganizePanel({
           }
           className="min-w-0 flex-1"
         />
-      </div>
+      </label>
 
       {/* Once typed, the type's declared fields are the rest of the form —
           the same property stack the record surfaces use, not a second one. */}
       {entry.type !== null && (
-        <div className="mt-3 border-t border-[var(--n-100)] pt-3">
+        <div ref={typeFields} className="mt-3 border-t border-[var(--n-100)] pt-3">
           <RecordProperties key={entry.path} entry={entry} schema={schema} />
         </div>
       )}
@@ -197,10 +267,15 @@ function OrganizePanel({
         </div>
 
         <div className="border-t border-[var(--n-100)] pt-3">
-          <div className="pb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
             Before you file
           </div>
-          <OrganizeChecklist entry={entry} schema={schema} />
+          {/* Said out loud, because a list of unmet items reads as a blocker
+              until something tells you it is not one. */}
+          <div className="pb-1.5 text-[10.5px] text-[var(--n-400)]">
+            Advisory — you can file with items outstanding.
+          </div>
+          <OrganizeChecklist entry={entry} schema={schema} onFix={fixCheck} />
         </div>
 
         <div className="flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
@@ -233,11 +308,7 @@ function OrganizePanel({
               {`Fetch ${unresolved.length} reference${unresolved.length === 1 ? '' : 's'}`}
             </Button>
           )}
-          <Button
-            variant="primary"
-            icon="circle-check"
-            onClick={() => void queue.organize(entry.path)}
-          >
+          <Button variant="primary" icon="circle-check" onClick={() => onFile(entry.path)}>
             Mark organized
           </Button>
           <span className="text-center text-[10.5px] text-[var(--n-400)]">
@@ -272,24 +343,91 @@ export function InboxPage() {
   // Hoisted to a const so the narrowing survives into the row callbacks.
   const selected = queue.selected;
   const selectedPath = selected?.path ?? null;
+  const index = queue.entries.findIndex((e) => e.path === selectedPath);
+
+  // Filing is the one action here that removes something from the queue, and
+  // the queue is the only place it was visible — so it gets an undo, not a
+  // toast that disappears. `toast()` takes a message and nothing else, so the
+  // affordance lives on the page where it can hold a button.
+  const [lastFiled, setLastFiled] = useState<{ path: string; title: string } | null>(null);
+  // Focus follows the file: after ⌘E the row that opened next should be where
+  // the keyboard is, or the next Tab restarts at the Rail.
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
+  const refocusRow = useRef(false);
+
+  const fileNote = (path: string) => {
+    const title = queue.entries.find((e) => e.path === path)?.title ?? 'capture';
+    refocusRow.current = true;
+    void (async () => {
+      await queue.organize(path);
+      setLastFiled({ path, title });
+    })();
+  };
+  // Read through a ref by the keydown effect below, which must not re-bind on
+  // every render: fileNote closes over the entry list and so is new each time.
+  const fileRef = useRef(fileNote);
+  fileRef.current = fileNote;
+
+  useEffect(() => {
+    if (!refocusRow.current) return;
+    refocusRow.current = false;
+    if (selectedPath === null) return;
+    rowRefs.current.get(selectedPath)?.focus();
+  }, [selectedPath]);
 
   // Cmd/Ctrl+E organizes the open capture — the whole loop is meant to run
   // from the keyboard, so this is the one binding that matters here.
-  // Depends on queue.organize, not `queue`: the queue object is a fresh
-  // literal every render, and re-binding the listener that often is how a
-  // single keystroke ends up firing twice.
-  const organize = queue.organize;
+  // Bound once per selection: fileRef keeps the handler out of the deps, and
+  // re-binding a window listener on every render is how a single keystroke
+  // ends up firing twice.
   useEffect(() => {
     if (selectedPath === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'e') {
-        e.preventDefault();
-        void organize(selectedPath);
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'e') return;
+      // The same guard the paste handler uses. ⌘E/Ctrl+E is end-of-line in
+      // every text field on this screen — including the capture body right
+      // beside the list — and filing what you are typing into is not
+      // recoverable from the keyboard.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]') != null) return;
+      e.preventDefault();
+      fileRef.current(selectedPath);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [organize, selectedPath]);
+  }, [selectedPath]);
+
+  // Arrow keys walk the queue. The rows are a roving tabindex — only the open
+  // one is a tab stop, so Tab crosses the list instead of stepping through
+  // every capture in it.
+  const moveSelection = (to: number) => {
+    const list = queue.entries;
+    if (list.length === 0) return;
+    const path = list[Math.min(Math.max(to, 0), list.length - 1)].path;
+    queue.select(path);
+    const el = rowRefs.current.get(path);
+    el?.focus();
+    el?.scrollIntoView({ block: 'nearest' });
+  };
+  const onListKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        moveSelection(index < 0 ? 0 : index + 1);
+        break;
+      case 'ArrowUp':
+        moveSelection(index < 0 ? 0 : index - 1);
+        break;
+      case 'Home':
+        moveSelection(0);
+        break;
+      case 'End':
+        moveSelection(queue.entries.length - 1);
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+  };
 
   const capture = () => {
     void (async () => {
@@ -380,7 +518,10 @@ export function InboxPage() {
       }}
     >
       <header className="flex flex-none items-center gap-3 border-b border-[var(--n-200)] px-5 py-2.5">
-        <h2 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">Inbox</h2>
+        {/* h1, like every other page's chrome title — the Inbox used to be
+            the one screen whose highest-ranked heading was an h2, so "jump to
+            main heading" found nothing here. */}
+        <h1 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">Inbox</h1>
         <PeriodPills active={period} counts={counts} onChange={setPeriod} />
         <span className="flex-1" />
         <input
@@ -408,6 +549,42 @@ export function InboxPage() {
           Capture
         </Button>
       </header>
+
+      {/* Filing removes the note from the only list that showed it, so the
+          way back stays on screen until it is used or dismissed rather than
+          riding a toast that times out. */}
+      {lastFiled !== null && (
+        <div
+          data-testid="inbox-undo"
+          className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] bg-[var(--n-25)] px-5 py-1.5"
+        >
+          <span className="inline-flex flex-none text-[var(--success-600)]">
+            <Icon name="circle-check" size={13} />
+          </span>
+          <span className="min-w-0 truncate text-[12px] text-[var(--n-600)]">
+            Filed “{lastFiled.title}”
+          </span>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="undo-2"
+            onClick={() => {
+              void queue.unorganize(lastFiled.path);
+              setLastFiled(null);
+            }}
+          >
+            Undo
+          </Button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setLastFiled(null)}
+            className="ml-auto inline-flex flex-none border-0 bg-transparent p-1 text-[var(--n-400)] hover:text-[var(--n-700)]"
+          >
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+      )}
 
       {dragDepth > 0 && (
         <div
@@ -448,8 +625,20 @@ export function InboxPage() {
           />
         </div>
       ) : (
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="flex w-[280px] flex-none flex-col overflow-y-auto border-r border-[var(--n-200)]">
+        // Three fixed columns inside a container that could not scroll meant
+        // the surplus was simply clipped: at 1024px the reading pane fell to
+        // ~100px and the Organize panel — the Type select and "Mark
+        // organized" — sat off the right edge with no way to reach it. Now
+        // the flanks give width back as the canvas narrows, the reading pane
+        // keeps a legible floor, and past the point where they cannot yield
+        // any further the row scrolls instead of hiding a control.
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden">
+          <div
+            role="listbox"
+            aria-label="Captures"
+            onKeyDown={onListKeyDown}
+            className="flex w-[220px] flex-none flex-col overflow-y-auto border-r border-[var(--n-200)] @[1100px]/canvas:w-[260px] @[1360px]/canvas:w-[300px]"
+          >
             {queue.entries.map((e) => {
               const active = e.path === selectedPath;
               // Held in place by the queue while you work on it, but it
@@ -461,8 +650,16 @@ export function InboxPage() {
                 <button
                   key={e.path}
                   type="button"
-                  role="row"
+                  // option inside the listbox above, not `row`: role="row"
+                  // overrode the button role in a document with no table
+                  // anywhere, so the queue announced as rows of nothing.
+                  role="option"
                   aria-selected={active}
+                  tabIndex={active ? 0 : -1}
+                  ref={(el) => {
+                    if (el === null) rowRefs.current.delete(e.path);
+                    else rowRefs.current.set(e.path, el);
+                  }}
                   data-testid="inbox-row"
                   data-path={e.path}
                   onClick={() => queue.select(e.path)}
@@ -479,13 +676,23 @@ export function InboxPage() {
                     )}
                     {ready && (
                       <span
-                        title="Organized — press ⌘E to file it"
+                        // ⌘E files whatever is OPEN, never the row under the
+                        // cursor — the old wording read as an instruction
+                        // about this row and filed a different note.
+                        title={
+                          active
+                            ? 'Organized — press ⌘E to file it'
+                            : 'Organized — open it to file it'
+                        }
                         className="inline-flex flex-none text-[var(--success-600)]"
                       >
                         <Icon name="circle-check" size={12} />
                       </span>
                     )}
                     <span
+                      // Titles are how you pick the next capture, and at this
+                      // width most of them clip mid-word.
+                      title={e.title}
                       className={[
                         'truncate text-[13px]',
                         ready
@@ -543,8 +750,53 @@ export function InboxPage() {
             })}
           </div>
 
-          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6">
+          <div className="min-h-0 min-w-[360px] flex-1 overflow-y-auto pb-10 pt-6">
             <div className="mx-auto w-full max-w-[760px] px-6">
+              {/* Which capture this is, and where it sits in the queue. The
+                  pane used to name it nowhere — the only clue was the
+                  highlighted row off to the left, and "Mark organized" takes
+                  it out of the list you would check against. */}
+              <div
+                data-testid="inbox-pane-header"
+                className="mb-4 flex items-baseline gap-3 border-b border-[var(--n-100)] pb-2"
+              >
+                <span className="min-w-0 flex-1">
+                  <span
+                    title={selected.title}
+                    className={`block truncate text-[13.5px] font-semibold ${
+                      hasRealTitle(selected) ? 'text-[var(--n-900)]' : 'text-[var(--n-500)] italic'
+                    }`}
+                  >
+                    {hasRealTitle(selected) ? selected.title : '(untitled capture)'}
+                  </span>
+                  <span className="block text-[11px] text-[var(--n-500)]">
+                    Captured {selected.createdAt.slice(0, 10)}
+                  </span>
+                </span>
+                <span className="flex-none text-[11px] tabular-nums text-[var(--n-500)]">
+                  {index + 1} of {queue.entries.length}
+                </span>
+                <span className="flex flex-none items-center gap-0.5">
+                  <button
+                    type="button"
+                    aria-label="Previous capture"
+                    disabled={index <= 0}
+                    onClick={() => moveSelection(index - 1)}
+                    className="inline-flex border-0 bg-transparent p-1 text-[var(--n-500)] hover:text-[var(--n-800)] disabled:opacity-40"
+                  >
+                    <Icon name="chevron-up" size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Next capture"
+                    disabled={index < 0 || index >= queue.entries.length - 1}
+                    onClick={() => moveSelection(index + 1)}
+                    className="inline-flex border-0 bg-transparent p-1 text-[var(--n-500)] hover:text-[var(--n-800)] disabled:opacity-40"
+                  >
+                    <Icon name="chevron-down" size={14} />
+                  </button>
+                </span>
+              </div>
               <NoteBodyEditor key={selected.path} path={selected.path} />
               <button
                 type="button"
@@ -557,7 +809,7 @@ export function InboxPage() {
             </div>
           </div>
 
-          <OrganizePanel entry={selected} schema={schema} queue={queue} />
+          <OrganizePanel entry={selected} schema={schema} onFile={fileNote} />
         </div>
       )}
     </div>

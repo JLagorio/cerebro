@@ -4,6 +4,7 @@ import { IconButton } from '@/components/ui/IconButton';
 import { listConcepts, recentlyLearned } from '@/engine/okf';
 import { TrustChip } from '@/knowledge/TrustChip';
 import { todayIso } from '@/lib/templates';
+import { SECTION_HEADING } from '@/pages/HomePage';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -38,7 +39,7 @@ export function LearnedCard() {
     >
       <div className="mb-2 flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h2 className="m-0 text-[13px] font-semibold text-[var(--n-800)]">Recently learned</h2>
+        <h2 className={`${SECTION_HEADING} text-[var(--n-800)]`}>Recently learned</h2>
         <span className="text-[11.5px] text-[var(--n-500)]">nobody has confirmed these yet</span>
       </div>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
@@ -66,7 +67,11 @@ export function LearnedCard() {
                   </span>
                 )}
               </span>
-              <TrustChip tier={concept.trust} size="sm" />
+              {/* M15: the header already says nobody has confirmed these, so
+                  an "Unverified" chip on every row is three restatements of
+                  the premise. Only the EXCEPTION — a machine-confirmed
+                  concept, which the header does not describe — earns a chip. */}
+              {concept.trust !== 'unverified' && <TrustChip tier={concept.trust} size="sm" />}
             </button>
             <IconButton
               icon="x"

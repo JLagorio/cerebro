@@ -7,16 +7,27 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { EscapeToClose } from '@/detail/FieldPopover';
 import { visibleProperties } from '@/engine/properties';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
-const LABEL = 'w-24 flex-none text-[12px] text-[var(--n-500)]';
+const LABEL = 'w-24 flex-none truncate text-[12px] text-[var(--n-500)]';
+
+/** Revealed on hover OR keyboard focus. `hidden group-hover:` took the button
+ * out of the accessibility tree and the tab order entirely, so a keyboard user
+ * could not remove anything at all. */
+const REVEAL = 'inline-flex flex-none opacity-0 group-hover:opacity-100 focus-within:opacity-100';
 
 /** Undeclared scalar frontmatter: plain text editing. Numeric values stay
- * numeric when the draft still parses as a number. */
+ * numeric when the draft still parses as a number.
+ *
+ * Lists and maps are shown, not edited: `entry.properties` legitimately holds
+ * `Scalar | Scalar[]`, and a text input round-tripped `tags: [work, urgent]`
+ * back to disk as the single string "work,urgent", destroying the YAML list.
+ * A loose key with structure is edited in the file until it is declared. */
 function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const value = entry.properties[name];
@@ -34,6 +45,35 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
     void patchFrontmatter(entry.path, { [name]: next });
   };
 
+  const structured = Array.isArray(value) || (typeof value === 'object' && value !== null);
+  const remove = (
+    <span className={REVEAL}>
+      <IconButton
+        icon="x"
+        label={`Remove ${humanize(name)}`}
+        size="sm"
+        onClick={() => void patchFrontmatter(entry.path, { [name]: null })}
+      />
+    </span>
+  );
+
+  if (structured) {
+    return (
+      <div className="group flex min-w-0 items-start gap-2">
+        <span className={`${LABEL} pt-[3px]`}>{humanize(name)}</span>
+        <div className="min-w-0 flex-1">
+          <span
+            title="A list or map — edit it in the file, or declare it on a type"
+            className="block text-[12.5px] text-[var(--n-700)] [overflow-wrap:anywhere]"
+          >
+            {Array.isArray(value) ? value.map(String).join(', ') : JSON.stringify(value)}
+          </span>
+        </div>
+        {remove}
+      </div>
+    );
+  }
+
   return (
     <div className="group flex min-w-0 items-center gap-2">
       <span className={LABEL}>{humanize(name)}</span>
@@ -47,14 +87,7 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
         }}
         className="min-w-0 flex-1"
       />
-      <span className="hidden group-hover:inline-flex">
-        <IconButton
-          icon="x"
-          label={`Remove ${humanize(name)}`}
-          size="sm"
-          onClick={() => void patchFrontmatter(entry.path, { [name]: null })}
-        />
-      </span>
+      {remove}
     </div>
   );
 }
@@ -82,17 +115,27 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   );
 
   const [converting, setConverting] = useState(false);
+  const [pendingType, setPendingType] = useState<string | null>(null);
   const openPath = useOpenPath();
 
   // M12.1: a doc's type is not a dropdown. Docs are docs — the only way out
   // is the explicit Convert action, which says what it does to the note.
+  //
+  // M15: the type rows SELECT; the footer button commits. Conversion has no
+  // inverse anywhere in the app — the note leaves Docs and only hand-editing
+  // frontmatter brings it back — so a single stray click must not perform it.
   const convertTo = (typeName: string) => {
     setConverting(false);
+    setPendingType(null);
     void (async () => {
       await patchFrontmatter(entry.path, { type: typeName });
       toast(`Now a ${typeName} record — this note left Docs`);
       openPath(entry.path);
     })();
+  };
+  const closeConvert = () => {
+    setConverting(false);
+    setPendingType(null);
   };
   const convertTargets = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
 
@@ -122,9 +165,9 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   return (
     <div data-testid="doc-properties" aria-label="Document properties" className="pt-1">
       <div className="flex flex-col gap-[7px]">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <span className={LABEL}>Type</span>
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--n-700)]">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] text-[var(--n-700)]">
             <Icon
               name={entry.type === null ? 'file-text' : typeStyle(entry.type, schema).icon}
               size={13}
@@ -134,33 +177,46 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                   : (typeStyle(entry.type, schema).color ?? 'var(--n-400)')
               }
             />
-            {entry.type ?? 'Doc'}
+            <span className="truncate">{entry.type ?? 'Doc'}</span>
           </span>
-          {entry.type === null && (
-            <button
-              type="button"
-              onClick={() => setConverting(true)}
-              className="rounded-md border-0 bg-transparent px-1 py-0.5 text-[11px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-            >
-              Convert to record…
-            </button>
-          )}
         </div>
+        {entry.type === null && (
+          // Its own row: 96px label + icon + "Doc" + this button never fitted
+          // the 272px panel, so it wrapped to two lines and collided with the
+          // Type value. And it was painted in --n-400, the token the design
+          // system aliases as --text-disabled (2.19:1) — the most consequential
+          // control on a doc read as switched off. It is a real secondary
+          // button now: bordered, --n-600, one line.
+          <button
+            type="button"
+            onClick={() => setConverting(true)}
+            className="self-start whitespace-nowrap rounded-md border border-[var(--n-200)] bg-transparent px-2 py-1 text-[12px] text-[var(--n-600)] hover:bg-[var(--n-50)] hover:text-[var(--n-900)]"
+          >
+            Convert to record…
+          </button>
+        )}
         {declared.map((f) => (
-          <div key={f.name} className="flex items-center gap-2">
-            <span className={LABEL}>{humanize(f.name)}</span>
-            <FieldEditor entry={entry} def={f} schema={schema} />
+          // min-w-0 + a flexible value column, the shape RecordProperties uses:
+          // without it a multi-value field lays out at content width and runs
+          // off the right edge of a 272px panel with nothing to scroll.
+          <div key={f.name} className="flex min-w-0 items-start gap-2">
+            <span className={`${LABEL} pt-[3px]`}>{humanize(f.name)}</span>
+            <div className="min-w-0 flex-1">
+              <FieldEditor entry={entry} def={f} schema={schema} />
+            </div>
           </div>
         ))}
         {undeclaredScalars.map((name) => (
           <UndeclaredRow key={name} entry={entry} name={name} />
         ))}
         {undeclaredRelations.map((name) => (
-          <div key={name} className="flex items-center gap-2">
-            <span className={LABEL}>{humanize(name)}</span>
-            <span className="text-[12.5px] text-[var(--n-700)]">
-              {entry.relationships[name].join(', ')}
-            </span>
+          <div key={name} className="flex min-w-0 items-start gap-2">
+            <span className={`${LABEL} pt-[3px]`}>{humanize(name)}</span>
+            <div className="min-w-0 flex-1">
+              <span className="block text-[12.5px] text-[var(--n-700)] [overflow-wrap:anywhere]">
+                {entry.relationships[name].join(', ')}
+              </span>
+            </div>
           </div>
         ))}
         {adding ? (
@@ -189,46 +245,71 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         <div>Modified {entry.modifiedAt.slice(0, 10)}</div>
       </div>
       {converting && (
-        <Dialog open onClose={() => setConverting(false)} title="Convert to record" width={420}>
-          <p className="mb-2 text-[12px] leading-relaxed text-[var(--n-500)]">
-            A record belongs to a type: it opens in the record panel, appears in that type&apos;s
-            views and Lists, and leaves the Docs tree. Its text and properties come along unchanged.
-          </p>
-          <div
-            role="listbox"
-            aria-label="Convert to type"
-            className="flex max-h-[300px] flex-col overflow-y-auto"
+        <>
+          {/* Dialog has no keydown handling of its own; Escape is where every
+              hand goes first, and it was the one exit this modal lacked. */}
+          <EscapeToClose onClose={closeConvert} />
+          <Dialog
+            open
+            onClose={closeConvert}
+            title="Convert to record"
+            width={420}
+            footerNote="This cannot be undone from the app."
+            secondaryAction={{ label: 'Cancel', onClick: closeConvert }}
+            primaryAction={{
+              label: pendingType === null ? 'Convert' : `Convert to ${pendingType}`,
+              disabled: pendingType === null,
+              onClick: () => {
+                if (pendingType !== null) convertTo(pendingType);
+              },
+            }}
           >
-            {convertTargets.map((t) => {
-              const style = typeStyle(t, schema);
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  role="option"
-                  aria-selected={false}
-                  onClick={() => convertTo(t)}
-                  className="flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left hover:bg-[var(--n-50)]"
-                >
-                  <span
-                    className="inline-flex flex-none"
-                    style={{ color: style.color ?? 'var(--n-400)' }}
+            <p className="mb-2 text-[12px] leading-relaxed text-[var(--n-500)]">
+              A record belongs to a type: it opens in the record panel, appears in that type&apos;s
+              views and Lists, and leaves the Docs tree. Its text and properties come along
+              unchanged.
+            </p>
+            <div
+              role="listbox"
+              aria-label="Convert to type"
+              className="flex max-h-[300px] flex-col overflow-y-auto"
+            >
+              {convertTargets.map((t) => {
+                const style = typeStyle(t, schema);
+                const picked = pendingType === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="option"
+                    aria-selected={picked}
+                    onClick={() => setPendingType(t)}
+                    className={[
+                      'flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left',
+                      picked ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-50)]',
+                    ].join(' ')}
                   >
-                    <Icon name={style.icon} size={14} />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
-                    {t}
-                  </span>
-                </button>
-              );
-            })}
-            {convertTargets.length === 0 && (
-              <div className="px-2.5 py-4 text-[12px] text-[var(--n-500)]">
-                No types yet — create one from the Types section of the sidebar first.
-              </div>
-            )}
-          </div>
-        </Dialog>
+                    <span
+                      className="inline-flex flex-none"
+                      style={{ color: style.color ?? 'var(--n-400)' }}
+                    >
+                      <Icon name={style.icon} size={14} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
+                      {t}
+                    </span>
+                    {picked && <Icon name="check" size={14} color="var(--cortex-600)" />}
+                  </button>
+                );
+              })}
+              {convertTargets.length === 0 && (
+                <div className="px-2.5 py-4 text-[12px] text-[var(--n-500)]">
+                  No types yet — create one from the Types section of the sidebar first.
+                </div>
+              )}
+            </div>
+          </Dialog>
+        </>
       )}
     </div>
   );
