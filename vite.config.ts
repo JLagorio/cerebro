@@ -22,6 +22,12 @@ export default defineConfig({
     // lived at the repo root too. e2e/ holds Playwright specs
     // (@playwright/test crashes under vitest).
     exclude: [...configDefaults.exclude, 'docs/**', '**/tolaria-main/**', 'e2e/**'],
+    // setup.ts grants waitFor 5s for shared CI runners, but vitest's default
+    // testTimeout is ALSO 5s — so a slow-but-passing waitFor loses the race to
+    // the test-level clock (MarkdownEditor's debounce test died exactly this
+    // way on a cold ubuntu runner). Like asyncUtilTimeout, this only bounds
+    // hung tests; passing tests still finish the moment their condition holds.
+    testTimeout: 15_000,
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'lcov'],
