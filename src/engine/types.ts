@@ -217,8 +217,16 @@ export interface ColumnSpec {
  *   panel does from any view.
  *
  * Saved files naming either one migrate to `table` on read (engine/views.ts).
+ *
+ * The array is the source and the union is derived from it (M16.3), so adding
+ * a kind is one edit. It used to be the other way round — a hand-written union
+ * beside a hand-written `LAYOUTS` set in views.ts, and forgetting the set made
+ * `parseViewType` silently downgrade every saved file of the new kind to
+ * `list`, losing the layout with no error anywhere.
  */
-export type ViewType = 'table' | 'list' | 'board' | 'calendar' | 'gantt' | 'timeline';
+export const VIEW_TYPES = ['table', 'list', 'board', 'calendar', 'gantt', 'timeline'] as const;
+
+export type ViewType = (typeof VIEW_TYPES)[number];
 
 /**
  * How a relation value draws in this view (M11).

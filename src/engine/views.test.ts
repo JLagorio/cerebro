@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { VIEW_TYPES } from '@/engine/types';
 import {
   layoutLabel,
   newView,
@@ -530,8 +531,11 @@ describe('serializeList', () => {
       expect(parse('presentation: {}\n').type).toBe('list');
     });
 
+    // M16.3: driven by VIEW_TYPES, so a kind added to the union is parsed
+    // here automatically. Omitting one from the LAYOUTS allowlist used to
+    // downgrade every saved file of that kind to `list`, silently.
     it('accepts every live kind verbatim', () => {
-      for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
+      for (const kind of VIEW_TYPES) {
         expect(parse(`presentation:\n  type: ${kind}\n`).type).toBe(kind);
       }
     });

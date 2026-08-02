@@ -1,3 +1,4 @@
+import type React from 'react';
 import type { ColumnDef } from '@/engine/columns';
 import type { Zoom } from '@/engine/schedule';
 import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
@@ -66,7 +67,10 @@ export function ViewCanvas({
   onZoomChange,
   onFilterField,
   today,
-}: ViewCanvasProps) {
+}: ViewCanvasProps): React.ReactElement {
+  // The return type is the exhaustiveness check (M16.3). Without it, and with
+  // no `default` below and no `noImplicitReturns` in tsconfig, adding a
+  // ViewType member compiled clean and rendered `undefined` at runtime.
   switch (presentation.type) {
     case 'table':
       return (

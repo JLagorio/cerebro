@@ -16,6 +16,7 @@ import type {
   ViewDefinition,
   ViewType,
 } from './types';
+import { VIEW_TYPES } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
 export const DEFAULT_PRESENTATION: Presentation = {
@@ -95,7 +96,12 @@ function asRecord(raw: unknown): Record<string, unknown> {
     : {};
 }
 
-const LAYOUTS = new Set<ViewType>(['table', 'list', 'board', 'calendar', 'gantt', 'timeline']);
+/**
+ * Derived, never hand-written (M16.3). This used to be a literal set, and
+ * omitting a kind from it made `parseViewType` silently downgrade every saved
+ * file of that kind to `list` — a data-losing failure with no error anywhere.
+ */
+const LAYOUTS = new Set<ViewType>(VIEW_TYPES);
 
 /**
  * The two view kinds M10 retired, and what they become (see types.ts for why).

@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TypePage } from '@/pages/TypePage';
+import { VIEW_KINDS } from '@/views/viewKinds';
 import { fixtureVault, makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -52,13 +53,13 @@ describe('TypePage — Records tab', () => {
     fireEvent.click(screen.getByTestId(`view-switch-${kind}`));
   };
 
-  it('offers the six view kinds from the tab menu and switches between them', () => {
+  it('offers every declared view kind from the tab menu and switches between them', () => {
     render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
     expect(screen.getByTestId('view-tabs')).toBeTruthy();
     fireEvent.click(screen.getByTestId('view-tab-all'));
     fireEvent.click(screen.getByText('Change layout…'));
-    for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
-      expect(screen.getByTestId(`view-switch-${kind}`)).toBeTruthy();
+    for (const { value } of VIEW_KINDS) {
+      expect(screen.getByTestId(`view-switch-${value}`)).toBeTruthy();
     }
     fireEvent.click(screen.getByTestId('view-switch-board'));
     expect(screen.getByTestId('board-view')).toBeTruthy();

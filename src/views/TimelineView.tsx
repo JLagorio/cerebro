@@ -21,6 +21,7 @@ import type { ColumnDef } from '@/engine/columns';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { ROW_H, TimeAxisHeader, TimeGridLines, TodayLine, ZoomControl } from '@/views/TimeAxis';
+import { viewKind } from '@/views/viewKinds';
 
 export interface TimelineViewProps {
   entries: Entry[];
@@ -97,7 +98,7 @@ export function TimelineView({
         data-testid="timeline-view"
       >
         <EmptyState
-          icon="chart-gantt"
+          icon={viewKind('timeline').icon}
           title="Nothing here carries a date"
           description="A timeline places records by a date or date-range property. Add one to this type, or pick a different view."
         />
@@ -233,7 +234,7 @@ export function TimelineView({
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">
           <EmptyState
-            icon="chart-gantt"
+            icon={viewKind('timeline').icon}
             title="No records yet"
             description="Dated records appear here as bars."
           />

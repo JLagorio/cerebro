@@ -30,7 +30,14 @@ import type {
 } from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
-import { VIEW_KINDS } from '@/views/viewKinds';
+import {
+  VIEW_KINDS,
+  axesFor,
+  hasDependencies,
+  isZoomable,
+  needsDate,
+  showsChips,
+} from '@/views/viewKinds';
 
 /**
  * The view's whole configuration in one place (M9.7).
@@ -53,10 +60,9 @@ type Page =
   | 'newProperty'
   | 'field';
 
-/** Layouts that draw records on a date axis — they get the Axis page. */
-const DATED_LAYOUTS = new Set(['calendar', 'timeline', 'gantt']);
-/** Layouts that render relation chips — they get the chip-style section. */
-const CHIP_LAYOUTS = new Set(['table', 'list', 'board']);
+// Layout capabilities are declared on the kind now (M16.3). These were two
+// plain Set<string> plus two hardcoded p.type comparisons, so a new kind
+// compiled clean and then silently had no Axis page and no chip section.
 
 const GROUPABLE_KINDS = new Set([
   'status',
@@ -227,8 +233,11 @@ export function ViewSettingsPanel({
             />
             {/* M9.7: one row. Grouping by a property bands; grouping by a
                 relation nests. They were two rows answering one question.
-                M12.8: absent on the calendar — days are its grouping. */}
-            {p.type !== 'calendar' && (
+                M12.8: absent on the calendar — days are its grouping.
+                M16.3: which is now `groupable` on the kind, so this row and
+                the tab row's Group icon read the same declaration instead of
+                each hardcoding the calendar. */}
+            {axesFor(p.type).group && (
               <Row
                 icon="rows-3"
                 label="Group"
@@ -244,7 +253,7 @@ export function ViewSettingsPanel({
             )}
             {/* M12.8: tailoring per layout — the dated views expose the axis
                 they draw on, which the table has no use for. */}
-            {DATED_LAYOUTS.has(p.type) && (
+            {needsDate(p.type) && (
               <Row
                 icon="calendar"
                 label="Date axis"
@@ -255,7 +264,7 @@ export function ViewSettingsPanel({
 
             {/* M11: how related records draw, per view. A dense table wants
                 bare chips; a mixed one wants to see which type each points at. */}
-            {CHIP_LAYOUTS.has(p.type) && (
+            {showsChips(p.type) && (
               <div className="mt-2 border-t border-[var(--n-100)] pt-2">
                 <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
                   Related records
@@ -777,7 +786,7 @@ function AxisPage({
           width="100%"
         />
       </div>
-      {(presentation.type === 'timeline' || presentation.type === 'gantt') && (
+      {isZoomable(presentation.type) && (
         <div>
           <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Zoom</span>
           <Select
@@ -799,7 +808,7 @@ function AxisPage({
           />
         </div>
       )}
-      {presentation.type === 'gantt' && (
+      {hasDependencies(presentation.type) && (
         <div>
           <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
             Dependencies

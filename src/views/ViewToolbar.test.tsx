@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
 import type { Presentation } from '@/engine/types';
 import { orderToValue, slugifyListId, valueToOrder, ViewToolbar } from './ViewToolbar';
+import { VIEW_KINDS } from './viewKinds';
 
 const emptySchema = () => buildSchema([]);
 
@@ -72,11 +73,12 @@ describe('ViewToolbar', () => {
     });
   });
 
-  // M10: the six views, and only those six. "Hierarchy" is gone because
-  // nesting is a grouping level, so every one of these can nest.
-  it('offers exactly the six view kinds', () => {
+  // M10: nesting is a grouping level, so "Hierarchy" is gone and every one of
+  // these can nest. M16.3: derived from VIEW_KINDS rather than a literal list,
+  // so adding a kind extends the assertion instead of quietly escaping it.
+  it('offers every declared view kind and nothing retired', () => {
     render(<ViewToolbar presentation={presentation} onChange={vi.fn()} />);
-    for (const label of ['Table', 'List', 'Board', 'Calendar', 'Gantt', 'Timeline']) {
+    for (const { label } of VIEW_KINDS) {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(screen.queryByText('Hierarchy')).toBeNull();
