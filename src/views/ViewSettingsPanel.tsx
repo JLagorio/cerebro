@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/Select';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
 import { moveColumnTo, toggleColumn } from '@/engine/columns';
+import { useSortableList } from '@/hooks/useSortableList';
 import {
   chainTypes,
   descentOptions,
@@ -591,9 +592,6 @@ function PropertiesPage({
   onNewProperty?: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const [dropSlot, setDropSlot] = useState<number | null>(null);
-  const [dragging, setDragging] = useState<string | null>(null);
 
   const shown = new Set(columns.filter((c) => c.hidden !== true).map((c) => c.field));
   const visible: ColumnDef[] = columns
@@ -605,56 +603,29 @@ function PropertiesPage({
     humanize(f.name).toLowerCase().includes(query.trim().toLowerCase());
   const searching = query.trim() !== '';
 
-  /** Drag a shown row by its grip to a new slot. Same shape as the table's
-   * header drag: measure once, pick the slot by midpoint, commit on release. */
-  const startDrag = (field: string) => (e: React.PointerEvent) => {
-    if (searching || e.button !== 0) return;
-    e.preventDefault();
-    const rows = Array.from(listRef.current?.children ?? []) as HTMLElement[];
-    const mids = rows.map((r) => {
-      const box = r.getBoundingClientRect();
-      return box.top + box.height / 2;
-    });
-    const move = (ev: PointerEvent) => {
-      setDragging(field);
-      setDropSlot(Math.min(mids.filter((m) => ev.clientY > m).length, rows.length));
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-      setDragging(null);
-      setDropSlot(null);
-      const slot = mids.filter((m) => ev.clientY > m).length;
-      const from = visible.findIndex((f) => f.name === field);
-      if (from === -1) return;
-      onChange(moveColumnTo(columns, field, slot > from ? slot - 1 : slot));
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  };
+  // One reorder implementation, keyboard-operable (M16.2). This used to be a
+  // hand-rolled pointer drag whose own comment said it was a copy of the
+  // table's — and, like the table's, it could not be driven without a mouse.
+  const sortable = useSortableList({
+    ids: visible.map((f) => f.name),
+    onReorder: (field, to) => onChange(moveColumnTo(columns, field, to)),
+    disabled: searching,
+    labelFor: (field) => humanize(field),
+  });
 
   const row = (f: ColumnDef, on: boolean, index?: number) => (
     <div
       key={f.name}
       className={[
         'group flex items-center gap-1.5 rounded-[7px] px-1 py-1 hover:bg-[var(--n-50)]',
-        dragging === f.name ? 'opacity-60' : '',
+        sortable.dragging === f.name ? 'opacity-60' : '',
       ].join(' ')}
-      style={
-        index !== undefined && dropSlot === index
-          ? { boxShadow: 'inset 0 2px 0 var(--cortex-500)' }
-          : index !== undefined && dropSlot === visible.length && index === visible.length - 1
-            ? { boxShadow: 'inset 0 -2px 0 var(--cortex-500)' }
-            : undefined
-      }
+      style={index !== undefined ? sortable.dropIndicator(index) : undefined}
     >
-      {on && !searching ? (
+      {on && !searching && index !== undefined ? (
         <span
-          onPointerDown={startDrag(f.name)}
-          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)]"
-          aria-hidden
+          {...sortable.gripProps(f.name, index)}
+          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)] focus-visible:text-[var(--cortex-600)] focus-visible:outline-none"
         >
           <Icon name="grip-vertical" size={12} />
         </span>
@@ -715,7 +686,10 @@ function PropertiesPage({
           </button>
         </div>
       )}
-      <div ref={listRef} className="flex flex-col gap-0.5">
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col gap-0.5"
+      >
         {visible.map((f, i) => (matches(f) ? row(f, true, i) : null))}
       </div>
 
