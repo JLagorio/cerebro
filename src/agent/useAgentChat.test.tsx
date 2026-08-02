@@ -328,3 +328,78 @@ describe('useAgentChat one turn at a time', () => {
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
   });
 });
+
+/**
+ * Closing the panel mid-answer (M15).
+ *
+ * `App` renders the assistant conditionally, so ⌘J tears this hook down
+ * instantly. Nothing used to run on the way out: the child kept going and
+ * `agentBusy` stayed true forever, which made useJobRunner's own guard bail
+ * for the rest of the session — the background distiller silently stopped.
+ */
+describe('useAgentChat unmounted mid-turn', () => {
+  const opts = { shell: false, connectors: false };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ learningPath: null, agentBusy: false });
+  });
+
+  it('stops the run and releases the shared busy flag', async () => {
+    const { result, unmount } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(useUiStore.getState().agentBusy).toBe(true);
+
+    unmount();
+    expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled();
+    expect(useUiStore.getState().agentBusy).toBe(false);
+  });
+
+  it('leaves an idle agent alone', () => {
+    const { unmount } = renderHook(() => useAgentChat('sys', opts, null));
+    unmount();
+    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Restored ids and fresh ids never collide (M15). The counter used to reset
+ * to 0 per page load while conversations.ts persisted `m-1`/`m-2`, so the
+ * first send after a reload minted ids the restored transcript already used
+ * and one reply was written into two bubbles.
+ */
+describe('useAgentChat message ids', () => {
+  const opts = { shell: false, connectors: false };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ learningPath: null, agentBusy: false });
+  });
+
+  it('mints ids that a restored transcript cannot already hold', () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() =>
+      result.current.restore(
+        [
+          { id: 'm-1', role: 'user', text: 'old question', tools: [] },
+          { id: 'm-2', role: 'assistant', text: 'old answer', tools: [] },
+        ],
+        'sess-old',
+      ),
+    );
+    act(() => result.current.send('new question'));
+    const ids = result.current.messages.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // And a reset does not rewind the sequence either.
+    act(() => result.current.reset());
+    act(() => result.current.send('after reset'));
+    expect(result.current.messages.every((m) => !ids.slice(0, 2).includes(m.id))).toBe(true);
+  });
+});

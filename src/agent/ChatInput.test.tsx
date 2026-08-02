@@ -49,13 +49,34 @@ describe('ChatInput slash completion (M13.1)', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('one space makes it prose: no menu, and Escape closes via the same rule', () => {
+  // M15: Escape dismisses the MENU and leaves the draft byte-for-byte alone.
+  // It used to append a space (slash) or `]]` (wikilink) — rewriting what you
+  // typed, in the wikilink case at the end of the message rather than at the
+  // caret.
+  it('Escape closes the skill menu without touching the draft', () => {
     render(<Harness />);
     fireEvent.change(box(), { target: { value: '/we' } });
     expect(screen.getByTestId('skill-menu')).toBeTruthy();
     fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(box().value).toBe('/we ');
+    expect(box().value).toBe('/we');
     expect(screen.queryByTestId('skill-menu')).toBeNull();
+    // Still dismissed as the token grows — a dismissal that reopened on the
+    // next keystroke would not be one.
+    fireEvent.change(box(), { target: { value: '/wee' } });
+    expect(screen.queryByTestId('skill-menu')).toBeNull();
+  });
+
+  it('Escape closes the wikilink menu without completing the link', () => {
+    render(<Harness />);
+    fireEvent.change(box(), { target: { value: 'compare [[risk' } });
+    expect(screen.getByTestId('wikilink-menu')).toBeTruthy();
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(box().value).toBe('compare [[risk');
+    expect(screen.queryByTestId('wikilink-menu')).toBeNull();
+    // A LATER `[[` is a different anchor, so completion still works after a
+    // dismissal.
+    fireEvent.change(box(), { target: { value: 'compare [[risk and [[weekly' } });
+    expect(screen.getByTestId('wikilink-menu')).toBeTruthy();
   });
 
   it('a highlight arrowed in the slash menu cannot leak into the wikilink menu', () => {

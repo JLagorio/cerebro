@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -51,6 +51,7 @@ function ConceptRow({
       aria-selected={active}
       data-testid="concept-row"
       data-path={concept.entry.path}
+      title={concept.supersededBy !== null ? 'Replaced by a newer concept' : undefined}
       onClick={onClick}
       className={[
         'flex flex-col gap-1 border-0 border-b border-solid border-[var(--n-100)] px-4 py-2.5 text-left',
@@ -81,6 +82,16 @@ function ConceptRow({
       )}
       <span className="flex flex-wrap items-center gap-1.5">
         <span className="text-[10.5px] text-[var(--n-400)]">{concept.conceptType}</span>
+        {/* M15: a strikethrough alone is a legend nobody has — deleted,
+            deprecated, done and filtered-out all look like this. */}
+        {concept.supersededBy !== null && (
+          <span
+            data-testid="replaced-tag"
+            className="rounded-[5px] bg-[var(--n-100)] px-1 text-[10px] text-[var(--n-500)]"
+          >
+            Replaced
+          </span>
+        )}
         <TrustChip tier={concept.trust} size="sm" />
         {concept.stale && (
           <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--warn-600)]">
@@ -111,6 +122,34 @@ export function KnowledgePage({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [body, setBody] = useState<string>('');
   const [verifying, setVerifying] = useState(false);
+
+  /**
+   * How much room the three columns actually have (M15).
+   *
+   * They used to be `flex-none` at 280 + 320 with a shrinkable middle, i.e. a
+   * 600px hard floor inside a canvas whose own floor is 400 — so with the
+   * assistant open the concept body vanished and the provenance column, which
+   * holds the only two actions on this surface, was clipped away entirely.
+   * Measured rather than assumed because what matters is the CANVAS's width,
+   * not the viewport's.
+   */
+  const [rowWidth, setRowWidth] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const rowRef = useCallback((node: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (node === null || typeof ResizeObserver === 'undefined') return;
+    const next = new ResizeObserver((entries) => {
+      setRowWidth(entries[0]?.contentRect.width ?? 0);
+    });
+    next.observe(node);
+    observer.current = next;
+  }, []);
+  useEffect(() => () => observer.current?.disconnect(), []);
+  // 280 list + a readable concept body + 320 provenance. Below it the third
+  // column becomes a drawer instead of eating the other two.
+  const narrow = rowWidth > 0 && rowWidth < 900;
+  const [provenanceOpen, setProvenanceOpen] = useState(false);
 
   // A deep link from elsewhere in the app (M8.3) wins over whatever was last
   // open here — arriving from "what the assistant knows" has to land on the
@@ -144,6 +183,13 @@ export function KnowledgePage({
   const selected = concepts.find((c) => c.entry.path === selectedPath) ?? concepts[0] ?? null;
   const selectedConceptPath = selected?.entry.path ?? null;
 
+  // A replaced concept carries no back-pointer of its own (M8.7: the
+  // replacement is what holds `supersedes`), so the title of what replaced it
+  // is looked up in the bundle.
+  const replacedBy = selected?.supersededBy ?? '';
+  const replacement =
+    replacedBy === '' ? null : (all.find((c) => c.entry.path === replacedBy) ?? null);
+
   // Concept bodies are read on demand rather than held in the store: the
   // bundle can be large and only one concept is on screen at a time.
   useEffect(() => {
@@ -164,15 +210,35 @@ export function KnowledgePage({
     };
   }, [selectedConceptPath, vaultPath]);
 
+  // M15: one sign-off per actor per day. "Verify again" used to append an
+  // identical `{by, at}` row on every click, which is how the ledger filled
+  // with four copies of the same stamp.
+  const verifiedToday =
+    selected !== null &&
+    selected.verified.some(
+      (stamp) =>
+        stamp.by.kind === 'human' &&
+        stamp.by.label === actorId &&
+        (stamp.at ?? '').slice(0, 10) === today,
+    );
+
   const verify = () => {
-    if (vaultPath === null || selected === null) return;
+    if (vaultPath === null || selected === null || verifiedToday) return;
     setVerifying(true);
     void (async () => {
       try {
         const patch = verifyPatch(selected.entry, `human:${actorId}`, new Date().toISOString());
         await verifyConcept(vaultPath, selected.entry.path, patch);
         await rescan();
-        toast(`Verified "${selected.title}"`);
+        // Said plainly, because verifying does NOT clear staleness: the
+        // recheck date is the agent's to move (verify_concept may write
+        // `verified` and nothing else), so a stale concept stays in the
+        // review queue and the toast must not imply otherwise.
+        toast(
+          selected.stale
+            ? `Verified "${selected.title}" — still due a recheck, so it stays in Needs review`
+            : `Verified "${selected.title}"`,
+        );
       } catch (err) {
         toast(`Couldn't verify: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
@@ -252,10 +318,24 @@ export function KnowledgePage({
           </Button>
         )}
         <span className="flex-1" />
-        <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--n-500)]">
-          <Icon name="lock" size={12} />
-          Maintained by the agent
-        </span>
+        {/* The only way to Verify or ask for a recheck once the provenance
+            column has stepped out of the row. */}
+        {narrow && selected !== null && (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="shield-check"
+            onClick={() => setProvenanceOpen(!provenanceOpen)}
+          >
+            {provenanceOpen ? 'Hide provenance' : 'Provenance'}
+          </Button>
+        )}
+        {!narrow && (
+          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--n-500)]">
+            <Icon name="lock" size={12} />
+            Maintained by the agent
+          </span>
+        )}
       </header>
 
       {selected === null ? (
@@ -279,8 +359,18 @@ export function KnowledgePage({
           />
         </div>
       ) : (
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="flex w-[280px] flex-none flex-col overflow-y-auto border-r border-[var(--n-200)]">
+        <div
+          ref={rowRef}
+          // `overflow-hidden` + a relative box: nothing in here may paint
+          // outside the canvas, and the provenance drawer anchors to it.
+          className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+        >
+          <div
+            className={[
+              'flex flex-none flex-col overflow-y-auto border-r border-[var(--n-200)]',
+              narrow ? 'w-[220px]' : 'w-[280px]',
+            ].join(' ')}
+          >
             {concepts.map((c) => (
               <ConceptRow
                 key={c.entry.path}
@@ -293,6 +383,25 @@ export function KnowledgePage({
 
           <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6">
             <div className="mx-auto w-full max-w-[760px] px-6">
+              {/* M15: the reading pane gave no sign at all that the bundle no
+                  longer believes this — a retired claim read as current. */}
+              {selected.supersededBy !== null && (
+                <div
+                  data-testid="superseded-banner"
+                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[10px] border border-[var(--n-200)] bg-[var(--warn-50)] px-3 py-2 text-[12px] text-[var(--warn-700)]"
+                >
+                  <Icon name="archive" size={12} />
+                  <span>No longer believed. Replaced by</span>
+                  <button
+                    type="button"
+                    data-path={selected.supersededBy}
+                    onClick={() => openConcept(replacedBy)}
+                    className="border-0 bg-transparent p-0 text-[12px] font-medium text-[var(--warn-700)] underline underline-offset-2"
+                  >
+                    {replacement?.title ?? 'a newer concept'}
+                  </button>
+                </div>
+              )}
               <div className="mb-1 flex items-center gap-2 text-[11px] text-[var(--n-400)]">
                 <span className="[font-family:var(--font-mono)]">{selected.id}</span>
               </div>
@@ -314,18 +423,37 @@ export function KnowledgePage({
             </div>
           </div>
 
-          <KnowledgePanel
-            concept={selected}
-            today={today}
-            verifying={verifying}
-            onVerify={verify}
-            onOpenEntity={openPath}
-            onOpenConcept={openConcept}
-            onAskAgent={() => {
-              setAiPanelOpen(true);
-              setPendingPrompt(reviewConceptPrompt(selected.entry.path, selected.title));
-            }}
-          />
+          {/* Beside the concept when there is room for it; a drawer over the
+              reading pane when there is not — never a third fixed column
+              squeezing the other two off the canvas. */}
+          {narrow && provenanceOpen && (
+            <button
+              type="button"
+              aria-label="Close provenance"
+              onClick={() => setProvenanceOpen(false)}
+              className="absolute inset-0 z-10 cursor-default border-0 bg-transparent"
+            />
+          )}
+          {(!narrow || provenanceOpen) && (
+            <KnowledgePanel
+              concept={selected}
+              today={today}
+              verifying={verifying}
+              verifiedToday={verifiedToday}
+              className={
+                narrow
+                  ? 'absolute inset-y-0 right-0 z-20 w-[300px] max-w-full shadow-[var(--shadow-lg)]'
+                  : 'w-[320px] flex-none'
+              }
+              onVerify={verify}
+              onOpenEntity={openPath}
+              onOpenConcept={openConcept}
+              onAskAgent={() => {
+                setAiPanelOpen(true);
+                setPendingPrompt(reviewConceptPrompt(selected.entry.path, selected.title));
+              }}
+            />
+          )}
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
+import { ResizeHandle } from '@/components/ui/ResizeHandle';
 import { checkAgent } from '@/agent/agentIpc';
 import { AiActionCard } from '@/agent/AiActionCard';
 import { ChatInput } from '@/agent/ChatInput';
@@ -26,7 +27,7 @@ import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
 import { resolveTarget } from '@/engine/wikilink';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
+import { RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -67,26 +68,54 @@ export function MessageText({ text, onOpen }: { text: string; onOpen: (target: s
   );
 }
 
+/** Past this, a prompt is a wall rather than a question, so it is collapsed
+ * to a predictable slice of the transcript with a way to see the rest. */
+const LONG_PROMPT = 400;
+
+function UserMessage({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const long = text.length > LONG_PROMPT;
+  return (
+    <div className="flex flex-col items-end gap-0.5" data-testid="chat-message" data-role="user">
+      <div
+        // `whitespace-pre-wrap` (M15): a Shift+Enter multi-line question used
+        // to come back as one run-on line in your own bubble.
+        className={[
+          'max-w-[85%] whitespace-pre-wrap break-words rounded-[12px] rounded-br-[4px] bg-[var(--cortex-500)] px-3 py-2 text-[12.5px] leading-[18px] text-[var(--n-0)]',
+          long && !expanded ? 'max-h-[112px] overflow-hidden' : '',
+        ].join(' ')}
+      >
+        {text}
+      </div>
+      {long && (
+        <button
+          type="button"
+          data-testid="prompt-toggle"
+          onClick={() => setExpanded(!expanded)}
+          className="border-0 bg-transparent p-0 text-[10.5px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Message({
   message,
   onOpen,
   onOpenPath,
   onViewDiff,
+  onRetry,
 }: {
   message: ChatMessage;
   onOpen: (t: string) => void;
   onOpenPath: (p: string) => void;
   onViewDiff?: (p: string) => void;
+  /** Re-send the question this answer belongs to (M15). */
+  onRetry?: () => void;
 }) {
-  if (message.role === 'user') {
-    return (
-      <div className="flex justify-end" data-testid="chat-message" data-role="user">
-        <div className="max-w-[85%] rounded-[12px] rounded-br-[4px] bg-[var(--cortex-500)] px-3 py-2 text-[12.5px] leading-[18px] text-[var(--n-0)]">
-          {message.text}
-        </div>
-      </div>
-    );
-  }
+  if (message.role === 'user') return <UserMessage text={message.text} />;
   return (
     <div className="flex flex-col gap-1.5" data-testid="chat-message" data-role="assistant">
       {message.tools.length > 0 && (
@@ -101,20 +130,74 @@ function Message({
           ))}
         </div>
       )}
-      {message.error !== undefined ? (
-        <div className="rounded-[10px] border border-[var(--danger-200)] bg-[var(--danger-50)] px-3 py-2 text-[12px] leading-[17px] text-[var(--danger-700)]">
-          {message.error}
-        </div>
-      ) : (
-        <div className="text-[12.5px] leading-[19px] text-[var(--n-800)]">
+      {/* M15: the text and the error are no longer mutually exclusive. A turn
+          that wrote three paragraphs and then failed used to show only the red
+          box, throwing away work that was still sitting in state. */}
+      {message.text !== '' && (
+        <div className="whitespace-pre-wrap break-words text-[12.5px] leading-[19px] text-[var(--n-800)]">
           <MessageText text={message.text} onOpen={onOpen} />
-          {message.streaming === true && message.text === '' && (
-            <span className="text-[var(--n-400)]">Thinking…</span>
+        </div>
+      )}
+      {message.error !== undefined && (
+        <div className="flex flex-col items-start gap-1.5 rounded-[10px] border border-[var(--danger-200)] bg-[var(--danger-50)] px-3 py-2 text-[12px] leading-[17px] text-[var(--danger-700)]">
+          <span>{message.error}</span>
+          {onRetry !== undefined && (
+            <button
+              type="button"
+              data-testid="retry-turn"
+              onClick={onRetry}
+              className="rounded-md border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 py-0.5 text-[11px] text-[var(--danger-700)] hover:border-[var(--danger-500)]"
+            >
+              Retry
+            </button>
           )}
         </div>
       )}
+      {message.streaming === true && message.text === '' && message.error === undefined && (
+        <span className="text-[12.5px] text-[var(--n-400)]">Thinking…</span>
+      )}
     </div>
   );
+}
+
+/**
+ * The panel's own width (M15).
+ *
+ * Every other panel in the shell drags; this one was a fixed 380px you could
+ * only toggle, which made tool-call JSON unreadable on a wide screen and made
+ * the assistant impossible to give ground on a narrow one. Kept local and in
+ * localStorage rather than in uiStore: nothing else in the app reads it, and
+ * the floor is the store's own RIGHT_PANEL_MIN_WIDTH.
+ */
+const AI_WIDTH_KEY = 'cerebro.aiPanelWidth';
+export const AI_WIDTH_DEFAULT = 380;
+export const AI_WIDTH_MIN = RIGHT_PANEL_MIN_WIDTH;
+export const AI_WIDTH_MAX = 720;
+
+function loadAiWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(AI_WIDTH_KEY);
+    const parsed = raw === null ? NaN : Number(raw);
+    if (!Number.isFinite(parsed)) return AI_WIDTH_DEFAULT;
+    return Math.min(AI_WIDTH_MAX, Math.max(AI_WIDTH_MIN, Math.round(parsed)));
+  } catch {
+    return AI_WIDTH_DEFAULT;
+  }
+}
+
+function saveAiWidth(width: number): void {
+  try {
+    window.localStorage.setItem(AI_WIDTH_KEY, String(width));
+  } catch {
+    // Storage unavailable (private mode): the width stays session-only.
+  }
+}
+
+/** jsdom has no element scrolling, and a missing method must not take the
+ * transcript down with it. */
+function scrollToLatest(el: HTMLDivElement | null): void {
+  if (el === null || typeof el.scrollTo !== 'function') return;
+  el.scrollTo({ top: el.scrollHeight });
 }
 
 const SUGGESTIONS = [
@@ -142,6 +225,15 @@ export function AiPanel() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
+  // M15: the panel is resizable like every other panel in the shell. The
+  // width lives here rather than in uiStore because it is nobody else's
+  // business, and it persists the same way the store's widths do.
+  const [width, setWidth] = useState(loadAiWidth);
+  // Auto-scroll is STICKY, not unconditional: `patchActive` mints a new
+  // message array per streamed token, so the old effect yanked you back to
+  // the bottom mid-token every time you tried to read anything above.
+  const sticky = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
 
   // M9.4: an agent turn that wrote files becomes its own commit, so its work
   // is revertible independently of the user's.
@@ -213,8 +305,21 @@ export function AiPanel() {
   }, []);
 
   useEffect(() => {
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+    if (!sticky.current) return;
+    scrollToLatest(listRef.current);
   }, [chat.messages]);
+
+  // ⌘J is "talk to the assistant", so it has to open something you can type
+  // into; and closing it must not drop focus to <body> (M15).
+  const openerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    openerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      const opener = openerRef.current;
+      if (opener !== null && opener.isConnected) opener.focus();
+    };
+  }, []);
 
   // A prompt handed over from elsewhere in the app ("Ask the agent to
   // revise" on a concept) is sent once and then cleared. Held while a turn
@@ -266,12 +371,52 @@ export function AiPanel() {
     if (entry !== null) openPath(entry.path);
   };
 
+  // M15: the failed turn's question is still in the transcript — retrying is
+  // one click rather than retyping it from memory. The failed exchange stays
+  // visible: it is what the error refers to.
+  const retry = (assistantId: string) => {
+    if (chat.streaming) return;
+    const index = chat.messages.findIndex((m) => m.id === assistantId);
+    const question = index > 0 ? chat.messages[index - 1] : undefined;
+    if (question === undefined || question.role !== 'user') return;
+    chat.send(question.text);
+  };
+
+  const onListScroll = () => {
+    const el = listRef.current;
+    if (el === null) return;
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    sticky.current = bottom;
+    if (bottom !== atBottom) setAtBottom(bottom);
+  };
+
+  const jumpToLatest = () => {
+    sticky.current = true;
+    setAtBottom(true);
+    scrollToLatest(listRef.current);
+  };
+
   return (
     <aside
       aria-label="AI panel"
       data-testid="ai-panel"
-      className="flex w-[380px] flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      // `relative` hosts the drag handle; `min-w-0` + a 100% ceiling let the
+      // panel SHRINK inside the shell's right-hand slot instead of having its
+      // close button clipped off the edge (M15 layout contract).
+      className="relative flex min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      style={{ width, maxWidth: '100%' }}
     >
+      <ResizeHandle
+        label="Resize AI panel"
+        side="left"
+        width={width}
+        min={AI_WIDTH_MIN}
+        max={AI_WIDTH_MAX}
+        onResize={(next) => {
+          setWidth(next);
+          saveAiWidth(next);
+        }}
+      />
       <header className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-3 py-2">
         <Icon name="sparkles" size={14} color="var(--synapse-500)" />
         {/* M9.5: conversations are kept and named, so this is a switcher
@@ -295,7 +440,11 @@ export function AiPanel() {
         />
       </header>
 
-      <div ref={listRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+      <div
+        ref={listRef}
+        onScroll={onListScroll}
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3"
+      >
         {chat.messages.length === 0 ? (
           <div className="flex flex-col gap-2 pt-2">
             <p className="m-0 text-[12.5px] leading-[18px] text-[var(--n-500)]">
@@ -323,16 +472,29 @@ export function AiPanel() {
               onOpen={openTarget}
               onOpenPath={openPath}
               onViewDiff={isRepo ? viewDiff : undefined}
+              onRetry={message.error !== undefined ? () => retry(message.id) : undefined}
             />
           ))
         )}
       </div>
 
-      <div className="flex-none border-t border-[var(--n-200)] p-2.5">
+      <div className="relative flex-none border-t border-[var(--n-200)] p-2.5">
+        {/* Only offered when you have actually scrolled away — the transcript
+            is sticky to the bottom the rest of the time. */}
+        {!atBottom && chat.messages.length > 0 && (
+          <button
+            type="button"
+            data-testid="jump-to-latest"
+            onClick={jumpToLatest}
+            className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--n-200)] bg-[var(--n-0)] px-2.5 py-1 text-[11px] text-[var(--n-600)] shadow-[var(--shadow-lg)] hover:border-[var(--n-400)]"
+          >
+            Jump to latest
+          </button>
+        )}
         {/* M9.5: `[[` completes against the vault, and the note you name
             travels into the snapshot with its content rather than as a word
             the agent has to go searching for. */}
-        <ChatInput value={draft} onChange={setDraft} onSubmit={submit} />
+        <ChatInput autoFocus value={draft} onChange={setDraft} onSubmit={submit} />
         <div className="mt-1.5 flex items-center gap-2">
           <span className="flex-1 text-[10.5px] text-[var(--n-400)]">
             {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}

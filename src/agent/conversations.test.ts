@@ -117,3 +117,77 @@ describe('newConversation', () => {
     expect(c.sessionId).toBeNull();
   });
 });
+
+describe('loading a transcript written before the ToolStart dedupe (M15)', () => {
+  const tool = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    name: 'get note',
+    input: null,
+    output: null,
+    done: false,
+    failed: false,
+    ...over,
+  });
+
+  it('collapses the doubled tool rows shipped transcripts already carry', () => {
+    // Exactly what was found in localStorage: every tool recorded twice.
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        {
+          id: 'c-1',
+          title: 'Learn from the note at…',
+          usesDefaultTitle: true,
+          sessionId: 'mock-session',
+          messages: [
+            {
+              id: 'm-2',
+              role: 'assistant',
+              text: 'Kept one thing.',
+              tools: [tool('t-1'), tool('t-1'), tool('t-2'), tool('t-2')],
+            },
+          ],
+        },
+      ]),
+    );
+
+    const [conversation] = loadConversations();
+    expect(conversation.messages[0].tools.map((t) => t.id)).toEqual(['t-1', 't-2']);
+  });
+
+  it('keeps the completed result when only the later copy finished', () => {
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        {
+          id: 'c-1',
+          title: 'x',
+          usesDefaultTitle: true,
+          sessionId: null,
+          messages: [
+            {
+              id: 'm-1',
+              role: 'assistant',
+              text: '',
+              tools: [tool('t-1'), tool('t-1', { done: true, output: 'the note' })],
+            },
+          ],
+        },
+      ]),
+    );
+
+    const [{ messages }] = loadConversations();
+    expect(messages[0].tools).toHaveLength(1);
+    expect(messages[0].tools[0].done).toBe(true);
+    expect(messages[0].tools[0].output).toBe('the note');
+  });
+
+  it('leaves a clean transcript untouched', () => {
+    const clean = newConversation();
+    clean.messages = [
+      { id: 'm-1', role: 'assistant', text: 'hi', tools: [tool('t-1'), tool('t-2')] },
+    ];
+    saveConversations([clean]);
+    expect(loadConversations()[0].messages[0].tools.map((t) => t.id)).toEqual(['t-1', 't-2']);
+  });
+});

@@ -4,8 +4,23 @@ import type { AgentEvent, ChatMessage, McpInfo } from './types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
-let messageCounter = 0;
-const nextId = (): string => `m-${++messageCounter}`;
+/**
+ * Message ids are unique per HOOK INSTANCE, not per sequence (M15).
+ *
+ * A module counter reset to 0 on every page load, while `conversations.ts`
+ * persists every message WITH its id: after a reload the first send minted
+ * `m-1`/`m-2`, ids the restored transcript already used, so `patchActive`
+ * wrote one reply into two bubbles and React saw duplicate keys. The prefix
+ * is drawn once per hook instance, so no id this instance mints can collide
+ * with one from a previous load — or with one it minted before a reset.
+ */
+let hookInstances = 0;
+function newIdPrefix(): string {
+  hookInstances += 1;
+  return `m${Date.now().toString(36)}${hookInstances.toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 6)}`;
+}
 
 export interface AgentChat {
   messages: ChatMessage[];
@@ -49,6 +64,13 @@ export function useAgentChat(
   const setAgentBusy = useUiStore((s) => s.setAgentBusy);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const idPrefix = useRef<string>('');
+  if (idPrefix.current === '') idPrefix.current = newIdPrefix();
+  const idSeq = useRef(0);
+  const nextId = useCallback(() => {
+    idSeq.current += 1;
+    return `${idPrefix.current}-${idSeq.current}`;
+  }, []);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   // The prompt that started the in-flight turn, so a write checkpoint can say
@@ -123,20 +145,26 @@ export function useAgentChat(
           break;
         case 'ToolStart':
           if (isWriteTool(event.tool_name)) touchedFiles.current = true;
-          patchActive((m) => ({
-            ...m,
-            tools: [
-              ...m.tools,
-              {
-                id: event.tool_id,
-                name: event.tool_name,
-                input: event.input ?? null,
-                output: null,
-                done: false,
-                failed: false,
-              },
-            ],
-          }));
+          patchActive((m) => {
+            // A tool_id is unique within a turn by definition, so a repeat is a
+            // redelivery of the same call — never a second call. Appending it
+            // blindly is what put `["t-1","t-1","t-2","t-2"]` in shipped
+            // transcripts: duplicate React keys (AiPanel keys rows by tool.id),
+            // and every tool row drawn twice (M15).
+            const started = {
+              id: event.tool_id,
+              name: event.tool_name,
+              input: event.input ?? null,
+              output: null,
+              done: false,
+              failed: false,
+            };
+            const at = m.tools.findIndex((t) => t.id === event.tool_id);
+            if (at === -1) return { ...m, tools: [...m.tools, started] };
+            const tools = m.tools.slice();
+            tools[at] = started;
+            return { ...m, tools };
+          });
           break;
         case 'ToolDone':
           patchActive((m) => ({
@@ -285,8 +313,31 @@ export function useAgentChat(
         }
       })();
     },
-    [connectors, model, setAgentBusy, shell, systemPrompt, toast, vaultPath],
+    [connectors, model, nextId, setAgentBusy, shell, systemPrompt, toast, vaultPath],
   );
+
+  /**
+   * Unmounting mid-turn must end the turn (M15).
+   *
+   * The panel is rendered conditionally, so ⌘J while an answer streams tears
+   * this hook down instantly. Nothing here used to run on the way out: the
+   * child kept going, and `agentBusy` stayed true for the rest of the
+   * session — which made the background distiller's own guard bail forever.
+   * Written against the store directly rather than the bound action, because
+   * this runs while React is unmounting the tree that owns the binding.
+   */
+  useEffect(() => {
+    return () => {
+      // Reaches a send still parked on the preempt handoff or a skill
+      // expansion, which killRun cannot: it has no child to kill yet.
+      sendEpoch.current += 1;
+      if (!turnInFlight.current) return;
+      turnInFlight.current = false;
+      activeRef.current = null;
+      void stopAgent().catch(() => undefined);
+      useUiStore.getState().setAgentBusy(false);
+    };
+  }, []);
 
   /** Kill the in-flight run and remember it as dead, so its trailing events
    * cannot end a turn started right after (PR #5 review). Fire-and-forget:

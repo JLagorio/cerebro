@@ -246,6 +246,8 @@ export function KnowledgePanel({
   onOpenEntity,
   onOpenConcept,
   verifying = false,
+  verifiedToday = false,
+  className = 'w-[320px] flex-none',
 }: {
   concept: Concept;
   today: string;
@@ -254,6 +256,12 @@ export function KnowledgePanel({
   onOpenEntity: (path: string) => void;
   onOpenConcept: (path: string) => void;
   verifying?: boolean;
+  /** This actor already stamped this concept today (M15) — a second identical
+   * row in the ledger is noise, so the button says so instead of adding one. */
+  verifiedToday?: boolean;
+  /** How the page places this column — beside the concept, or as an overlay
+   * when the canvas is too narrow for three columns. */
+  className?: string;
 }) {
   const lastVerified = relativeDay(concept.lastVerified, today);
   const alreadyReviewed = concept.trust === 'human-reviewed';
@@ -262,12 +270,26 @@ export function KnowledgePanel({
     <aside
       aria-label="Provenance"
       data-testid="knowledge-panel"
-      className="flex w-[320px] flex-none flex-col overflow-y-auto border-l border-[var(--n-200)] px-4 pb-5 pt-3.5"
+      className={`flex flex-col overflow-y-auto border-l border-[var(--n-200)] bg-[var(--n-0)] px-4 pb-5 pt-3.5 ${className}`}
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <TrustChip tier={concept.trust} detail={lastVerified} />
         {concept.stale && (
-          <FlagChip icon="clock-alert" label={`Stale since ${concept.staleAfter}`} tone="warn" />
+          <>
+            <FlagChip icon="clock-alert" label={`Stale since ${concept.staleAfter}`} tone="warn" />
+            {/* M15: verifying does NOT clear staleness — `stale_after` is the
+                agent's to move, and verify_concept may write `verified` and
+                nothing else. So the remedy for the amber chip sits next to
+                it, rather than leaving Verify looking like it. */}
+            <button
+              type="button"
+              data-testid="recheck-concept"
+              onClick={onAskAgent}
+              className="rounded-md border border-[var(--n-200)] bg-transparent px-1.5 py-0.5 text-[10.5px] text-[var(--warn-600)] hover:bg-[var(--warn-50)]"
+            >
+              Recheck
+            </button>
+          </>
         )}
         {concept.lifecycle === 'deprecated' && (
           <FlagChip icon="archive" label="Deprecated" tone="muted" />
@@ -342,8 +364,16 @@ export function KnowledgePanel({
       )}
 
       <div className="mt-auto flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
-        <Button variant="primary" icon="shield-check" disabled={verifying} onClick={onVerify}>
-          {alreadyReviewed ? 'Verify again' : 'Verify'}
+        {/* M15: "Verify again" invited a second identical stamp, which is
+            what filled the ledger above with duplicate rows. Once you have
+            signed off today there is nothing left for you to add. */}
+        <Button
+          variant="primary"
+          icon="shield-check"
+          disabled={verifying || verifiedToday}
+          onClick={onVerify}
+        >
+          {verifiedToday ? 'Verified by you today' : alreadyReviewed ? 'Verify again' : 'Verify'}
         </Button>
         <Button variant="secondary" icon="sparkles" onClick={onAskAgent}>
           Ask the agent to revise

@@ -139,7 +139,10 @@ export function KnowledgeCommit({
           data-testid="learn-queued"
           className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-[11.5px] text-[var(--cortex-600)]"
         >
-          <Icon name="loader" size={11} />
+          {/* M15: it turns while a read is actually in flight. */}
+          <span className={reading ? 'inline-flex animate-spin' : 'inline-flex'}>
+            <Icon name="loader" size={11} />
+          </span>
           {reading ? 'Reading this now' : 'Queued to be read'}
         </p>
       )}

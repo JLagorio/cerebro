@@ -117,7 +117,7 @@ export function AiActionCard({
     ? 'var(--n-400)'
     : tool.failed
       ? 'var(--danger-500)'
-      : 'var(--success-600, #1F9D61)';
+      : 'var(--success-600)';
 
   return (
     <div
@@ -139,7 +139,11 @@ export function AiActionCard({
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center gap-1.5 border-0 bg-transparent px-2 py-1.5 text-left disabled:cursor-default"
       >
-        <Icon name={statusIcon} size={11} color={statusColor} />
+        {/* M15: the loader actually turns. A static partial circle made a
+            running tool indistinguishable from a hung one. */}
+        <span className={tool.done ? 'inline-flex' : 'inline-flex animate-spin'}>
+          <Icon name={statusIcon} size={11} color={statusColor} />
+        </span>
         <Icon name={toolIcon(tool.name)} size={11} color="var(--n-500)" />
         <span className="flex-none font-medium text-[var(--n-700)]">{toolLabel(tool.name)}</span>
         {/* A write keeps its path visible collapsed — it is the thing you
