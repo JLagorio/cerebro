@@ -1,0 +1,102 @@
+:root {
+  /* neutrals — cool graphite */
+  --n-0: #ffffff;
+  --n-25: #fbfbfd;
+  --n-50: #f6f7fa;
+  --n-100: #eef0f5;
+  --n-200: #e3e6ee;
+  --n-300: #cdd2df;
+  --n-400: #a8afc2;
+  --n-500: #7e8699;
+  --n-600: #5a6274;
+  --n-700: #3f4657;
+  --n-800: #272d3b;
+  --n-900: #161a24;
+  /* primary — cortex ultramarine */
+  --cortex-50: #eef1fe;
+  --cortex-100: #dde4fd;
+  --cortex-200: #bcc9fb;
+  --cortex-300: #93a7f5;
+  --cortex-400: #6580ec;
+  --cortex-500: #3d5bde;
+  --cortex-600: #2e48c2;
+  --cortex-700: #2439a0;
+  --cortex-800: #1e2f7d;
+  --cortex-900: #1a2760;
+  /* AI — synapse violet (AI surfaces ONLY) */
+  --synapse-50: #f5f0fe;
+  --synapse-100: #ebe2fd;
+  --synapse-200: #d5c4fa;
+  --synapse-300: #b79cf3;
+  --synapse-400: #9c77e9;
+  --synapse-500: #8250dc;
+  --synapse-600: #6c3bc2;
+  --synapse-700: #5730a0;
+  /* semantic */
+  --success-50: #e9f7f0;
+  --success-500: #1f9d61;
+  --success-600: #17814f;
+  --success-700: #126740;
+  --warn-50: #fcf3e1;
+  --warn-500: #de8f0a;
+  --warn-600: #b87404;
+  --warn-700: #925e04;
+  --danger-50: #fdedef;
+  --danger-500: #de3b4e;
+  --danger-600: #bc2438;
+  --danger-700: #9a1d2e;
+  /* entity colors */
+  --ent-objective: #d97706;
+  --ent-keyresult: #1f9d61;
+  --ent-initiative: #3d5bde;
+  --ent-feature: #0e9bb5;
+  --ent-subfeature: #4fb3d9;
+  --ent-product: #5b6478;
+  --ent-component: #0e8585;
+  --ent-release: #e0562e;
+  --ent-releasegroup: #b4451f;
+  --ent-company: #11766b;
+  --ent-user: #64748b;
+  /* user-assignable swatches (features, kanban cards, timeline bars) */
+  --swatch-amber: #efb428;
+  --swatch-blue: #3d8be8;
+  --swatch-teal: #14b8a6;
+  --swatch-green: #34b764;
+  --swatch-violet: #8250dc;
+  --swatch-magenta: #d8569e;
+  --swatch-vermilion: #e0562e;
+  --swatch-sky: #38bdf8;
+  /* workflow status defaults */
+  --status-idea: #14b8a6;
+  --status-planned: #3d8be8;
+  --status-progress: #efb428;
+  --status-validation: #8250dc;
+  --status-released: #34b764;
+  --status-wontdo: #a8afc2;
+  /* health */
+  --health-on: #1f9d61;
+  --health-risk: #de8f0a;
+  --health-off: #de3b4e;
+  --health-none: #a8afc2;
+  /* semantic aliases */
+  --surface-app: var(--n-0);
+  --surface-board: var(--n-25);
+  --surface-sunken: var(--n-50);
+  --surface-raised: var(--n-0);
+  --surface-selected: var(--cortex-50);
+  --surface-ai: var(--synapse-50);
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-500);
+  --text-disabled: var(--n-400);
+  --text-inverse: #ffffff;
+  --text-link: var(--cortex-500);
+  --text-ai: var(--synapse-600);
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-focus: var(--cortex-500);
+  --accent: var(--cortex-500);
+  --accent-hover: var(--cortex-600);
+  --accent-press: var(--cortex-700);
+  --scrim: rgba(22, 26, 36, 0.4);
+}
