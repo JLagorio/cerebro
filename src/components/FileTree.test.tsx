@@ -88,11 +88,93 @@ describe('FileTree', () => {
     fireEvent.click(screen.getByRole('button', { name: `Options for ${KICKOFF_TITLE}` }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const input = screen.getByPlaceholderText('Page name');
-    expect((input as HTMLInputElement).value).toBe('kickoff');
-    fireEvent.change(input, { target: { value: 'kickoff-notes' } });
+    // Prefilled with the VISIBLE name (the note's H1), not the slug on disk.
+    expect((input as HTMLInputElement).value).toBe(KICKOFF_TITLE);
+    fireEvent.change(input, { target: { value: 'Kickoff notes' } });
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff-notes.md`)).toBe(true));
     expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false);
+  });
+
+  // A row's label comes from the note's H1, so renaming only the filename
+  // left every visible surface showing the old name.
+  it('rename rewrites the H1 so the row label actually changes', async () => {
+    renderTree();
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('button', { name: `Options for ${KICKOFF_TITLE}` }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), { target: { value: 'Team Sync' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(screen.getByText('Team Sync')).toBeTruthy());
+    expect(fs().get(`${ROOT}/meetings/team-sync.md`)).toContain('# Team Sync');
+    expect(screen.queryByText(KICKOFF_TITLE)).toBeNull();
+  });
+
+  // Renaming or moving the page you are READING must not strand the canvas
+  // on "This page no longer exists" — follow the file.
+  it('reopens the active page at its new path after a rename', async () => {
+    const onOpen = vi.fn();
+    render(
+      <FileTree
+        root={ROOT}
+        hide={(p) => p === PROJECT}
+        activePath={`${ROOT}/meetings/kickoff.md`}
+        onOpen={onOpen}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('button', { name: `Options for ${KICKOFF_TITLE}` }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), { target: { value: 'Team Sync' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/meetings/team-sync.md`));
+  });
+
+  it('creates a folder inside a collapsed parent and reveals the chain', async () => {
+    renderTree();
+    // `meetings` starts collapsed — the new folder used to land invisibly.
+    expect(useUiStore.getState().expandedFolders[`${ROOT}/meetings`]).toBeUndefined();
+    fireEvent.contextMenu(screen.getByRole('button', { name: /^Meetings/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New folder' }));
+    fireEvent.change(screen.getByPlaceholderText('Folder name'), { target: { value: 'Sub' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() =>
+      expect(screen.getAllByTestId('tree-folder').map((el) => el.textContent)).toContain('Sub'),
+    );
+    expect(useUiStore.getState().expandedFolders[`${ROOT}/meetings`]).toBe(true);
+  });
+
+  // The per-row actions must stay in the tab order: `hidden` (display:none)
+  // removed them entirely, so keyboard users had no path to them at all.
+  it('keeps the per-row actions focusable while they are visually hidden', () => {
+    renderTree();
+    const actions = screen
+      .getByRole('button', { name: /^Options for Meetings/ })
+      .closest('span')?.parentElement;
+    expect(actions?.className).toContain('opacity-0');
+    expect(actions?.className).not.toContain('hidden');
+    expect(actions?.className).toContain('group-focus-within:opacity-100');
+  });
+
+  // Docs-only mode prunes folders the record filter emptied. The prune used
+  // to test only a folder's DIRECT children, so `records/` (whose files sit
+  // one level deeper) survived and told the user it was an "Empty folder".
+  it('prunes record-only folders transitively in docs-only mode', () => {
+    render(<FileTree root="" docsOnly onOpen={vi.fn()} />);
+    const folders = screen.getAllByTestId('tree-folder').map((el) => el.textContent);
+    expect(folders).not.toContain('Records');
+    expect(folders).not.toContain('Types');
+    // strategy/ holds only collection.yml and Lists — a Collection, not an
+    // "Empty folder".
+    expect(folders).not.toContain('Strategy');
+  });
+
+  it('never claims a surviving docs-only folder is empty when it is not', () => {
+    useUiStore.setState({
+      expandedFolders: Object.fromEntries(useVaultStore.getState().folders.map((f) => [f, true])),
+    });
+    render(<FileTree root="" docsOnly onOpen={vi.fn()} />);
+    expect(screen.queryByText('Empty folder')).toBeNull();
   });
 
   // Task 14: right-click context menus.
@@ -103,7 +185,7 @@ describe('FileTree', () => {
     expect(screen.getByRole('menu')).toBeTruthy();
     fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
     const input = screen.getByPlaceholderText('Page name') as HTMLInputElement;
-    expect(input.value).toBe('kickoff');
+    expect(input.value).toBe(KICKOFF_TITLE);
     fireEvent.change(input, { target: { value: 'standup' } });
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/standup.md`)).toBe(true));
