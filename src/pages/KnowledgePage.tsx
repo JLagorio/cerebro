@@ -296,12 +296,15 @@ export function KnowledgePage({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
       <header className="flex flex-none items-center gap-2.5 border-b border-[var(--n-200)] px-5 py-2.5">
-        <h2
+        {/* h1, like the other five page-chrome titles (Docs, Changes, Pulse,
+            List, Type). Knowledge was the last page with no h1 at all, so a
+            screen reader's heading list started at the selected concept. */}
+        <h1
           className="m-0 text-[15px] font-semibold text-[var(--n-900)]"
           data-testid="knowledge-heading"
         >
           {heading}
-        </h2>
+        </h1>
         <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
           {concepts.length}
         </span>
@@ -405,9 +408,11 @@ export function KnowledgePage({
               <div className="mb-1 flex items-center gap-2 text-[11px] text-[var(--n-400)]">
                 <span className="[font-family:var(--font-mono)]">{selected.id}</span>
               </div>
-              <h1 className="m-0 text-[26px] font-semibold tracking-[-0.02em] text-[var(--n-900)]">
+              {/* h2: the concept is a section of the Knowledge page, not the
+                  page itself. Size is unchanged — the level is the fix. */}
+              <h2 className="m-0 text-[26px] font-semibold tracking-[-0.02em] text-[var(--n-900)]">
                 {selected.title}
-              </h1>
+              </h2>
               {selected.description !== null && (
                 <p className="mb-1 mt-1.5 text-[13.5px] leading-[20px] text-[var(--n-600)]">
                   {selected.description}

@@ -95,6 +95,73 @@ describe('navStore', () => {
     });
   });
 
+  describe('replacePath — following a file that moved (M15)', () => {
+    it('rewrites the open selection and the history entry behind it', () => {
+      const { navigate, replacePath, back } = useNavStore.getState();
+      navigate({ kind: 'doc', path: 'notes/capture.md' });
+      navigate({ kind: 'docs' });
+      // "Add page" grows the single file into a folder-note doc.
+      replacePath('notes/capture.md', 'notes/capture/capture.md');
+      back();
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'notes/capture/capture.md',
+      });
+    });
+
+    it('carries descendants when a folder moves', () => {
+      const { navigate, replacePath } = useNavStore.getState();
+      navigate({ kind: 'doc', path: 'notes/trip/day-one.md' });
+      replacePath('notes/trip', 'archive/trip');
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'archive/trip/day-one.md',
+      });
+    });
+
+    it('rewrites collection folders and knowledge deep-links too', () => {
+      const { navigate, replacePath } = useNavStore.getState();
+      navigate({ kind: 'collection', folder: 'work/delivery' });
+      navigate({ kind: 'knowledge', path: 'knowledge/work/delivery/c-1.md' });
+      replacePath('work/delivery', 'work/shipping');
+      const s = useNavStore.getState();
+      expect(s.history[1]).toEqual({ kind: 'collection', folder: 'work/shipping' });
+      // The knowledge path is not under the moved folder — untouched.
+      expect(s.selection).toEqual({ kind: 'knowledge', path: 'knowledge/work/delivery/c-1.md' });
+    });
+
+    it('leaves an unrelated path alone, including a same-prefix sibling', () => {
+      const { navigate, replacePath } = useNavStore.getState();
+      navigate({ kind: 'doc', path: 'notes/trip-report.md' });
+      replacePath('notes/trip', 'archive/trip');
+      expect(useNavStore.getState().selection).toEqual({
+        kind: 'doc',
+        path: 'notes/trip-report.md',
+      });
+    });
+  });
+
+  // Renames repair history and then re-open the moved page, which would
+  // otherwise leave two identical adjacent entries and a Back that does nothing.
+  it('navigating to the current selection is not a history step', () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'notes/a.md' });
+    navigate({ kind: 'doc', path: 'notes/a.md' });
+    const s = useNavStore.getState();
+    expect(s.history).toHaveLength(2);
+    expect(s.historyIndex).toBe(1);
+    s.back();
+    expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
+  });
+
+  it('still drops surface state when navigating to where you already are', () => {
+    const { navigate } = useNavStore.getState();
+    navigate({ kind: 'doc', path: 'notes/a.md' });
+    useUiStore.setState({ detailPath: 'records/bets/office-hours.md' });
+    navigate({ kind: 'doc', path: 'notes/a.md' });
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
   it('back and forward walk the history', () => {
     const { navigate, back, forward } = useNavStore.getState();
     navigate({ kind: 'list', id: 'all-items' });

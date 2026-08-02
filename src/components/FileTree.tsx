@@ -18,6 +18,7 @@ import {
   todayIso,
 } from '@/lib/templates';
 import { isDocEntry, typeStyle } from '@/engine/typeCatalog';
+import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
@@ -198,6 +199,7 @@ export function FileTree({
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const createItem = useVaultStore((s) => s.createItem);
+  const replacePath = useNavStore((s) => s.replacePath);
   const expanded = useUiStore((s) => s.expandedFolders);
   const toggleFolder = useUiStore((s) => s.toggleFolder);
   const treeOrder = useUiStore((s) => s.treeOrder);
@@ -299,6 +301,7 @@ export function FileTree({
     try {
       await renameNote(vaultPath, src, dest);
       await rescan();
+      replacePath(src, dest);
       if (!expanded[destDir]) toggleFolder(destDir);
       const next = remapActive(src, dest);
       if (next !== null) onOpen(next);
@@ -318,6 +321,7 @@ export function FileTree({
         const dest = join(destDir, base);
         await renameNote(vaultPath, src, dest);
         await rescan();
+        replacePath(src, dest);
         const next = remapActive(src, dest);
         if (next !== null) onOpen(next);
       }
@@ -418,10 +422,14 @@ export function FileTree({
       const to = join(parentDir(node.path), `${slug}${node.kind === 'file' ? '.md' : ''}`);
       if (to !== node.path) {
         await renameNote(vaultPath, node.path, to);
+        // Repair history as well as the canvas: the old path is still in the
+        // back stack, and a folder rename takes every page under it along.
+        replacePath(node.path, to);
         // Folder-note pattern: the doc's main file must keep the folder's
         // name or the folder stops being a doc.
         if (node.kind === 'doc' && node.mainPath !== undefined) {
           await renameNote(vaultPath, `${to}/${node.name}.md`, `${to}/${slug}.md`);
+          replacePath(`${to}/${node.name}.md`, `${to}/${slug}.md`);
         }
       }
       // A row's label is the note's H1, never its filename — renaming only

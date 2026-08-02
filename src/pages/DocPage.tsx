@@ -112,6 +112,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const createItem = useVaultStore((s) => s.createItem);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const navigate = useNavStore((s) => s.navigate);
+  const replacePath = useNavStore((s) => s.replacePath);
   const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
   const panelOpen = useUiStore((s) => s.docPanelOpen);
@@ -196,7 +197,12 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         // First extra page: grow the file into a doc folder (folder-note).
         folder = docFolderPathFor(entry);
         await createFolder(vaultPath, folder);
-        await renameNote(vaultPath, entry.path, `${folder}/${entry.filename}`);
+        const moved = `${folder}/${entry.filename}`;
+        await renameNote(vaultPath, entry.path, moved);
+        // The page you were just reading now lives inside the new folder, and
+        // its old path is still sitting in history — Back would land on the
+        // "This page no longer exists" empty state for a file nobody deleted.
+        replacePath(entry.path, moved);
       }
       const slug = slugify(trimmed) || 'page';
       const path = await createItem({

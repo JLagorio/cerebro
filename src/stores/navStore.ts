@@ -22,6 +22,34 @@ interface NavState {
   navigate(sel: Selection, options?: NavigateOptions): void;
   back(): void;
   forward(): void;
+  replacePath(from: string, to: string): void;
+}
+
+/**
+ * Rewrite one path inside a selection, including anything beneath it.
+ *
+ * A folder rename moves every descendant, so an exact-match-only rewrite would
+ * leave `docs/old/page.md` in the history after `docs/old` became `docs/new`.
+ */
+function remapSelection(sel: Selection, from: string, to: string): Selection {
+  const swap = (p: string): string | null => {
+    if (p === from) return to;
+    if (p.startsWith(`${from}/`)) return `${to}${p.slice(from.length)}`;
+    return null;
+  };
+  if (sel.kind === 'doc') {
+    const next = swap(sel.path);
+    return next === null ? sel : { ...sel, path: next };
+  }
+  if (sel.kind === 'knowledge' && sel.path !== undefined) {
+    const next = swap(sel.path);
+    return next === null ? sel : { ...sel, path: next };
+  }
+  if (sel.kind === 'collection') {
+    const next = swap(sel.folder);
+    return next === null ? sel : { ...sel, folder: next };
+  }
+  return sel;
 }
 
 /**
@@ -42,6 +70,24 @@ function leaveSurface(keepDetail: boolean): void {
   if (!keepDetail) ui.closeDetail();
 }
 
+/**
+ * Structural equality. A Selection is a flat bag of primitives except for
+ * `knowledge.nav`, which is one level deeper — hence the recursion rather than
+ * a stringify compare, which would also make the answer depend on key order.
+ */
+function sameSelection(a: Selection | undefined, b: Selection): boolean {
+  if (a === undefined) return false;
+  const equal = (x: unknown, y: unknown): boolean => {
+    if (x === y) return true;
+    if (typeof x !== 'object' || typeof y !== 'object' || x === null || y === null) return false;
+    const xr = x as Record<string, unknown>;
+    const yr = y as Record<string, unknown>;
+    const keys = new Set([...Object.keys(xr), ...Object.keys(yr)]);
+    return [...keys].every((k) => equal(xr[k], yr[k]));
+  };
+  return equal(a, b);
+}
+
 export const useNavStore = create<NavState>((set, get) => ({
   selection: { kind: 'home' },
   history: [{ kind: 'home' }],
@@ -49,8 +95,16 @@ export const useNavStore = create<NavState>((set, get) => ({
 
   navigate(sel, options) {
     const { history, historyIndex } = get();
-    const next = [...history.slice(0, historyIndex + 1), sel];
     leaveSurface(options?.keepDetail === true);
+    // Navigating to where you already are is not a history step. Without this,
+    // a rename that repairs history and then re-opens the moved page leaves two
+    // identical adjacent entries, and the first Back press appears to do
+    // nothing. Surface state is still dropped above — that part did happen.
+    if (sameSelection(history[historyIndex], sel)) {
+      set({ selection: sel });
+      return;
+    }
+    const next = [...history.slice(0, historyIndex + 1), sel];
     set({ selection: sel, history: next, historyIndex: next.length - 1 });
   },
 
@@ -68,5 +122,25 @@ export const useNavStore = create<NavState>((set, get) => ({
     const index = historyIndex + 1;
     leaveSurface(false);
     set({ selection: history[index], historyIndex: index });
+  },
+
+  /**
+   * Follow a file that moved (M15).
+   *
+   * Renaming leaves the old path in `history`, and Back then lands on a path
+   * that no longer exists — the "This page no longer exists" empty state, from
+   * a file the user never deleted. "Add page" hit this every time: growing a
+   * single file into a doc folder renames it, so the entry you were reading
+   * one step ago was already dead by the time you pressed Back.
+   *
+   * The history entry is rewritten in place rather than dropped: the user did
+   * navigate there, and the note is still that note at a new address.
+   */
+  replacePath(from, to) {
+    if (from === to) return;
+    set((s) => ({
+      selection: remapSelection(s.selection, from, to),
+      history: s.history.map((sel) => remapSelection(sel, from, to)),
+    }));
   },
 }));
