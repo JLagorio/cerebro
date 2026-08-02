@@ -140,6 +140,36 @@ describe('useJobRunner stream ownership', () => {
     await startJob();
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
   });
+
+  it('a takeover while start-up is parked on an await never spawns the stale job', async () => {
+    // Between claiming the stream and runAgent, start-up awaits readNote and
+    // startMcp. A chat takeover in that window drops the claim — and the
+    // resumed start-up must quit, because a spawn now would replace the
+    // chat's child mid-answer through the single shared AgentState (PR #5
+    // review).
+    let releaseMcp: (value: Awaited<ReturnType<typeof agentIpc.startMcp>>) => void = () =>
+      undefined;
+    vi.mocked(agentIpc.startMcp).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseMcp = resolve;
+        }),
+    );
+    renderHook(() => useJobRunner());
+    await startJob();
+    // The claim is up but no child exists yet — start-up is parked.
+    expect(useUiStore.getState().learningPath).toBe('items/note.md');
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+
+    // The chat takes the stream by timeout; the subscriber drops the claim.
+    act(() => useUiStore.getState().setLearningPath(null));
+
+    await act(async () => {
+      releaseMcp({ url: 'mock://cerebro', token: 't' });
+      await Promise.resolve();
+    });
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -233,6 +263,33 @@ describe('useJobRunner scheduled runs', () => {
       .mocked(ipc.readNote)
       .mock.calls.filter(([, path]) => path.includes('a-broken'));
     expect(brokenReads).toHaveLength(1);
+  });
+
+  it('a preempted scheduled job keeps its fire key — a takeover is not a run', async () => {
+    // The key is consumed after the read AND only while the runner still
+    // owns the stream (PR #5 review): a job whose start-up was preempted
+    // mid-read never ran, so it must retry when the agent is next idle
+    // rather than silently skipping the whole period.
+    let releaseRead: (body: string) => void = () => undefined;
+    vi.mocked(ipc.readNote).mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseRead = resolve;
+        }),
+    );
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(useUiStore.getState().learningPath).toBe('records/skills/digest.md');
+
+    // Chat takeover lands while the record's body is still being read.
+    act(() => useUiStore.getState().setLearningPath(null));
+    await act(async () => {
+      releaseRead('---\ntype: Skill\n---\nplaybook');
+      await Promise.resolve();
+    });
+
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(useUiStore.getState().skillRuns).toEqual({});
   });
 
   it('a failed read in one vault never suppresses the same path in another', async () => {

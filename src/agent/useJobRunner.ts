@@ -222,6 +222,15 @@ export function useJobRunner(): void {
                     : job.kind === 'stale'
                       ? reviewConceptPrompt(job.path, job.title)
                       : distillPrompt(job.path, job.title);
+          mcp.current ??= await startMcp(vaultPath);
+          // Ownership re-check (PR #5 review): while this start-up was
+          // parked on readNote or startMcp, a chat preemption may have taken
+          // the stream — the takeover subscriber dropped this claim — and a
+          // spawn now would replace the chat's child mid-answer through the
+          // single shared AgentState. Checked before the ledger records
+          // anything, so a preempted job keeps its fire key and simply runs
+          // when the agent is next idle.
+          if (!running.current) return;
           // The body is in hand: NOW the fire key is consumed — still before
           // the run itself, so a run that dies waits for the next fire, but
           // after the read, so a read that dies surrenders the key instead
@@ -230,7 +239,6 @@ export function useJobRunner(): void {
             useUiStore.getState().recordSkillRun(vaultPath, job.path, job.runKey);
             recorded = true;
           }
-          mcp.current ??= await startMcp(vaultPath);
           await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
