@@ -16,5 +16,7 @@ src-tauri/gen/schemas/
 test-results/
 playwright-report/
 
-docs/# vitest coverage output (M14.4)
+docs/
+
+# vitest coverage output (M14.4)
 coverage/
