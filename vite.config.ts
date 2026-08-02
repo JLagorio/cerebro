@@ -1,4 +1,4 @@
-import { configDefaults, defineConfig } from 'vitest/config';
+import { configDefaults, coverageConfigDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
@@ -37,6 +37,21 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'lcov'],
+      // Coverage does NOT inherit the exclusions above: those decide only
+      // which files are COLLECTED AS TESTS, while coverage measures every
+      // source file it can reach. So the vendored reference repos in docs/
+      // and the full branch checkouts under .claude/worktrees were being
+      // scored as untested project code — 207k statements of somebody
+      // else's, which read as 9% against a 48% floor and made pre-push
+      // unsatisfiable for as long as a worktree existed. The same blind spot
+      // as M15.13, one config block further down.
+      exclude: [
+        ...coverageConfigDefaults.exclude,
+        'docs/**',
+        '**/tolaria-main/**',
+        'e2e/**',
+        '.claude/**',
+      ],
       // RATCHET floors (M14.4): set a hair under measured reality
       // (49.45 / 59.15 / 81.8 on 2026-08-01) so they can only move UP.
       // Never edit downward — raise them as coverage grows.
