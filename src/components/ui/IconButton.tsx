@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { Tooltip } from '@/components/ui/Tooltip';
 
 const css = `
 .cb-ibtn{display:inline-flex;align-items:center;justify-content:center;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--n-600);cursor:pointer;transition:background var(--dur-fast) var(--ease-out);outline:none;padding:0}
@@ -49,17 +50,21 @@ export function IconButton({
 }: IconButtonProps) {
   const px = size === 'sm' ? 24 : size === 'lg' ? 32 : 28;
   const ic = size === 'sm' ? 14 : 16;
+  // `title` on a disabled <button> never renders, so every icon button that
+  // explained why it was unavailable explained it to nobody (M16.5). Tooltip
+  // clones its handlers onto this button and adds no wrapper node.
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={`cb-ibtn ${variant === 'outline' ? 'cb-ibtn-outline' : ''} ${active ? 'cb-ibtn-active' : ''} ${className}`}
-      style={{ width: px, height: px, ...style }}
-    >
-      <Icon name={icon} size={ic} />
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className={`cb-ibtn ${variant === 'outline' ? 'cb-ibtn-outline' : ''} ${active ? 'cb-ibtn-active' : ''} ${className}`}
+        style={{ width: px, height: px, ...style }}
+      >
+        <Icon name={icon} size={ic} />
+      </button>
+    </Tooltip>
   );
 }

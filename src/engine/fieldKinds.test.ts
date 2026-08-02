@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIELD_KINDS } from '@/engine/types';
+import { FIELD_KINDS, type Entry } from '@/engine/types';
 import { CREATABLE_PROPERTY_KINDS, PROPERTY_KINDS, kindMeta } from '@/engine/properties';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
@@ -45,7 +45,9 @@ describe('field kind registration', () => {
           filename: 'thing.md',
           title: 'Thing',
           type: 'Type',
-          properties: { fields: { probe: { kind } } },
+          // `properties` is typed for scalars, but a Type doc's `fields:` is
+          // genuinely a nested mapping — the scanner hands it through as-is.
+          properties: { fields: { probe: { kind } } } as unknown as Entry['properties'],
         }),
       ]);
       expect(schema.types.get('Thing')?.fields.find((f) => f.name === 'probe')?.kind).toBe(kind);
