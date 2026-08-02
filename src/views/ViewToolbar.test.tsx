@@ -11,7 +11,14 @@ const presentation: Presentation = {
   type: 'list',
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
-  columns: [{ field: 'key' }, { field: 'status' }, { field: 'priority' }, { field: 'assignee' }, { field: 'due' }, { field: 'estimate' }],
+  columns: [
+    { field: 'key' },
+    { field: 'status' },
+    { field: 'priority' },
+    { field: 'assignee' },
+    { field: 'due' },
+    { field: 'estimate' },
+  ],
 };
 
 describe('slugifyListId', () => {
@@ -39,9 +46,7 @@ describe('ViewToolbar', () => {
 
   it('switching the segmented control reports a board presentation', () => {
     const onChange = vi.fn();
-    render(
-      <ViewToolbar presentation={presentation} onChange={onChange} />,
-    );
+    render(<ViewToolbar presentation={presentation} onChange={onChange} />);
     fireEvent.click(screen.getByText('Board'));
     expect(onChange).toHaveBeenCalledWith({ ...presentation, type: 'board' });
   });

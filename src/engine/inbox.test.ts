@@ -101,7 +101,9 @@ describe('hasRealTitle', () => {
   it('recognises the humanized-filename fallback as untitled', () => {
     expect(humanizeStem('capture-2026-07-28.md')).toBe('Capture 2026 07 28');
     expect(hasRealTitle(makeEntry({ filename: 'fld-7.md', title: 'Fld 7' }))).toBe(false);
-    expect(hasRealTitle(makeEntry({ filename: 'fld-7.md', title: 'Warehouse cutover' }))).toBe(true);
+    expect(hasRealTitle(makeEntry({ filename: 'fld-7.md', title: 'Warehouse cutover' }))).toBe(
+      true,
+    );
   });
 });
 
@@ -129,9 +131,9 @@ describe('organizeChecklist', () => {
 
   it('asks for a status only once the type declares one', () => {
     const untyped = makeEntry({ path: 'inbox/x.md' });
-    expect(organizeChecklist(untyped, buildSchema([untyped, typeDoc])).some((c) => c.id === 'status')).toBe(
-      false,
-    );
+    expect(
+      organizeChecklist(untyped, buildSchema([untyped, typeDoc])).some((c) => c.id === 'status'),
+    ).toBe(false);
 
     const item = makeEntry({ path: 'items/1.md', type: 'Work item' });
     const checks = organizeChecklist(item, buildSchema([item, typeDoc]));

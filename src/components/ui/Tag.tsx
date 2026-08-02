@@ -29,7 +29,11 @@ export interface TagProps {
 export function Tag({ children, color, icon, onRemove, style, className = '' }: TagProps) {
   return (
     <span className={`cb-tag ${className}`} style={style}>
-      {color ? <i className="cb-tag-dot" style={{ background: color }}></i> : icon ? <Icon name={icon} size={12} /> : null}
+      {color ? (
+        <i className="cb-tag-dot" style={{ background: color }}></i>
+      ) : icon ? (
+        <Icon name={icon} size={12} />
+      ) : null}
       <span>{children}</span>
       {onRemove ? (
         <button className="cb-tag-x" onClick={onRemove} aria-label="Remove">

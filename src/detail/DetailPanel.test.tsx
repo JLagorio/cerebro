@@ -7,7 +7,7 @@ import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
 import { useUiStore } from '@/stores/uiStore';
-import { fixtureVault } from '@/test/factories';
+import { fixtureVault, makeEntry } from '@/test/factories';
 
 vi.mock('@/lib/ipc', () => ({
   readNote: vi.fn().mockResolvedValue('Existing body'),
@@ -42,7 +42,9 @@ describe('DetailPanel', () => {
     render(<DetailPanel />);
     await user.click(screen.getByRole('button', { name: 'Todo' }));
     await user.click(screen.getByRole('option', { name: 'Doing' }));
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: 'doing' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      status: 'doing',
+    });
   });
 
   it('shows undeclared frontmatter keys as advisory text', () => {
@@ -85,9 +87,7 @@ describe('DetailPanel', () => {
     fireEvent.change(input, { target: { value: 'Renamed flow' } });
     fireEvent.blur(input);
     await waitFor(() => {
-      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-        "Couldn't rename item",
-      );
+      expect(useUiStore.getState().toasts.map((t) => t.message)).toContain("Couldn't rename item");
     });
     expect(input.value).toBe('Design first-run flow');
   });
@@ -126,6 +126,38 @@ describe('DetailPanel', () => {
       { timeout: 3_000 },
     );
   });
+
+  // M14.2: which knowledge surface answers is capability-gated — a record the
+  // base holds concepts ABOUT gets its dossier (projects became ordinary
+  // records in the M12.5 aftermath, so the dossier rides the panel now); any
+  // other record keeps the wide-net related list.
+  it('shows the entity dossier when the base holds concepts about the record', async () => {
+    const user = userEvent.setup();
+    useVaultStore.setState({
+      entries: [
+        ...fixtureVault(),
+        makeEntry({
+          path: 'knowledge/systems/first-run.md',
+          title: 'First-run flow',
+          // The scanner hands wikilink fields over bracket-stripped, in
+          // relationships — not properties (M12.4a).
+          relationships: { about: ['fld-1'] },
+        }),
+      ],
+    });
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('entity-dossier')).toBeTruthy();
+    expect(screen.queryByTestId('related-knowledge')).toBeNull();
+  });
+
+  it('keeps the related list when the base only knows around the record', async () => {
+    const user = userEvent.setup();
+    render(<DetailPanel />);
+    await user.click(screen.getByTestId('detail-knowledge-toggle'));
+    expect(screen.getByTestId('related-knowledge')).toBeTruthy();
+    expect(screen.queryByTestId('entity-dossier')).toBeNull();
+  });
 });
 
 // spliceTitle (string splice) was replaced by spliceTitleIntoBlocks in Task
@@ -143,9 +175,7 @@ describe('FieldEditor number guard', () => {
     const entry = entries.find((e) => e.path === 'projects/onboarding/items/fld-1.md')!;
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     useVaultStore.setState({ entries, patchFrontmatter });
-    render(
-      <FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />,
-    );
+    render(<FieldEditor entry={entry} def={{ name: 'effort', kind: 'number' }} schema={schema} />);
     return patchFrontmatter;
   }
 
@@ -165,6 +195,8 @@ describe('FieldEditor number guard', () => {
     await user.click(screen.getByRole('button'));
     await user.type(screen.getByLabelText('Effort'), '5');
     fireEvent.blur(screen.getByLabelText('Effort'));
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { effort: 5 });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      effort: 5,
+    });
   });
 });

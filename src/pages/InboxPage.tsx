@@ -18,12 +18,7 @@ import { ProposalCard } from '@/agent/ProposalCard';
 import type { Entry, Schema } from '@/engine/types';
 import { useInboxQueue, type InboxQueue } from '@/hooks/useInboxQueue';
 import { captureNote } from '@/lib/capture';
-import {
-  describeIngest,
-  ingestFiles,
-  ingestOne,
-  INGESTIBLE_EXTENSIONS,
-} from '@/lib/ingest';
+import { describeIngest, ingestFiles, ingestOne, INGESTIBLE_EXTENSIONS } from '@/lib/ingest';
 import { fetchRefsPrompt, organizePrompt } from '@/lib/prompts';
 import { parseIssuePrefixes, uncachedRefs } from '@/engine/ingest';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
@@ -82,7 +77,9 @@ function OrganizeChecklist({ entry, schema }: { entry: Entry; schema: Schema }) 
     <ul className="m-0 flex list-none flex-col gap-1.5 p-0" data-testid="organize-checklist">
       {checks.map((c) => (
         <li key={c.id} className="flex gap-2">
-          <span className={`flex-none pt-[1px] ${c.done ? 'text-[var(--success-600)]' : 'text-[var(--n-300)]'}`}>
+          <span
+            className={`flex-none pt-[1px] ${c.done ? 'text-[var(--success-600)]' : 'text-[var(--n-300)]'}`}
+          >
             <Icon name={c.done ? 'circle-check' : 'circle'} size={13} />
           </span>
           <span className="min-w-0">
@@ -132,9 +129,13 @@ function OrganizePanel({
   const unresolved = useMemo(() => {
     if (!connectors) return [];
     const text = `${entry.title}\n${entry.snippet}`;
-    return uncachedRefs(text, allEntries.map((e) => e.path), {
-      issuePrefixes: parseIssuePrefixes(issuePrefixes),
-    });
+    return uncachedRefs(
+      text,
+      allEntries.map((e) => e.path),
+      {
+        issuePrefixes: parseIssuePrefixes(issuePrefixes),
+      },
+    );
   }, [allEntries, connectors, entry.snippet, entry.title, issuePrefixes]);
 
   const typeOptions = [
@@ -221,7 +222,12 @@ function OrganizePanel({
               icon="download"
               onClick={() => {
                 setAiPanelOpen(true);
-                setPendingPrompt(fetchRefsPrompt(entry.path, unresolved.map((r) => r.id)));
+                setPendingPrompt(
+                  fetchRefsPrompt(
+                    entry.path,
+                    unresolved.map((r) => r.id),
+                  ),
+                );
               }}
             >
               {`Fetch ${unresolved.length} reference${unresolved.length === 1 ? '' : 's'}`}

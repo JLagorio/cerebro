@@ -59,7 +59,7 @@ function asRecord(raw: unknown): Record<string, unknown> {
  * after its folder — the alternative is a folder that vanishes from the
  * sidebar because someone fat-fingered its icon. */
 export function parseCollectionYaml(folder: string, yamlText: string): CollectionFile {
-  let raw: unknown = null;
+  let raw: unknown;
   try {
     raw = parse(yamlText);
   } catch {
@@ -150,9 +150,7 @@ export function collectionTree(
   // matching on it would leave an implicit container's own Lists out of it.
   // M12.5: project-scoped Lists belong to their folder like any other.
   const own = lists.filter((l) => isUnder(collection.folder, dirOf(l.path)));
-  const docs = entries.filter(
-    (e) => isBrowsableDoc(e) && isUnder(collection.folder, e.folder),
-  );
+  const docs = entries.filter((e) => isBrowsableDoc(e) && isUnder(collection.folder, e.folder));
   // A nested Collection owns its own subtree, so this one must not also claim
   // the descendants inside it.
   const claimed = nested
@@ -252,11 +250,8 @@ function folderChildren(
 
   // Folders, then Lists, then Docs — containers above contents, and the
   // databases above the prose, which is the order people scan for.
-  const rank = (n: CollectionNode) =>
-    n.kind === 'folder' ? 0 : n.kind === 'list' ? 1 : 2;
-  return [...folders, ...here].sort(
-    (a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label),
-  );
+  const rank = (n: CollectionNode) => (n.kind === 'folder' ? 0 : n.kind === 'list' ? 1 : 2);
+  return [...folders, ...here].sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
 }
 
 /**

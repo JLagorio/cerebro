@@ -44,6 +44,9 @@ export function ChangesPage() {
   // click when you have nothing to add.
   useEffect(() => {
     if (message === '' && modified.length > 0) setMessage(checkpointMessage(modified));
+    // `message` is read only to avoid clobbering a hand-typed draft; keyed on
+    // it, this would re-fire per keystroke and re-prefill the moment the
+    // field is cleared. Prefill belongs to the change set, so it keys on that.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modified.length]);
 
@@ -178,7 +181,9 @@ export function ChangesPage() {
           </div>
           {conflicts.map((path) => (
             <div key={path} className="flex items-center gap-2 py-0.5">
-              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--n-800)]">{path}</span>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--n-800)]">
+                {path}
+              </span>
               <Button size="sm" variant="secondary" onClick={() => void resolve(path, 'ours')}>
                 Keep mine
               </Button>

@@ -1,0 +1,31 @@
+# Full gate (M14.5): what CI enforces, caught before the push instead of ten
+# minutes after. Frontend-only pushes skip the Rust lane via change detection.
+#
+# Policy: never bypass with --no-verify. If the hook is wrong, fix the hook.
+
+set -e
+
+# Everything about to leave this machine. @{push} is unset for a new branch;
+# fall back to origin's default branch, and to everything as a last resort.
+range=$(git rev-parse --abbrev-ref '@{push}' 2>/dev/null || true)
+if [ -n "$range" ]; then
+  changed=$(git diff --name-only "@{push}"...HEAD)
+elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+  changed=$(git diff --name-only origin/main...HEAD)
+else
+  changed=$(git ls-files)
+fi
+
+echo "pre-push: lint + typecheck + unit tests"
+pnpm lint
+pnpm typecheck
+pnpm test:run
+
+if echo "$changed" | grep -q '^src-tauri/'; then
+  echo "pre-push: src-tauri changed — fmt, clippy, cargo test"
+  cargo fmt --check --manifest-path src-tauri/Cargo.toml
+  cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+  cargo test --manifest-path src-tauri/Cargo.toml
+else
+  echo "pre-push: no src-tauri changes — Rust lane skipped"
+fi

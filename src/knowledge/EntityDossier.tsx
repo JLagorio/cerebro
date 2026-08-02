@@ -70,7 +70,10 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
   return (
     <li className="flex items-start gap-2 px-2 py-1">
       <span className="mt-[3px] flex-none text-[var(--warn-600)]">
-        <Icon name={item.reason === 'contradicts' ? 'git-compare-arrows' : 'clock-alert'} size={12} />
+        <Icon
+          name={item.reason === 'contradicts' ? 'git-compare-arrows' : 'clock-alert'}
+          size={12}
+        />
       </span>
       <span className="min-w-0 flex-1 text-[12px] leading-[17px] text-[var(--n-700)]">
         {item.reason === 'contradicts' ? (
@@ -112,7 +115,14 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
   );
 }
 
-export function EntityDossier({ entry }: { entry: Entry }) {
+export function EntityDossier({
+  entry,
+  variant = 'section',
+}: {
+  entry: Entry;
+  /** 'section' sits in a page; 'panel' is the narrower side-panel variant. */
+  variant?: 'section' | 'panel';
+}) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
   const openPath = useOpenPath();
@@ -125,8 +135,14 @@ export function EntityDossier({ entry }: { entry: Entry }) {
     [entries, entry.path, today],
   );
 
-  const openConcept = (path: string) =>
+  const closeDetail = useUiStore((s) => s.closeDetail);
+  // Following a concept leaves the record for the knowledge page; a panel left
+  // open would sit beside it showing the record you just left — and squeeze
+  // the concept body to nothing at laptop widths (M14.2).
+  const openConcept = (path: string) => {
+    closeDetail();
     navigate({ kind: 'knowledge', nav: { tab: 'all' }, path });
+  };
 
   const ask = () => {
     setAiPanelOpen(true);
@@ -140,7 +156,7 @@ export function EntityDossier({ entry }: { entry: Entry }) {
     <section
       data-testid="entity-dossier"
       data-count={dossier.current.length}
-      className="mt-8 border-t border-[var(--n-100)] pt-5"
+      className={variant === 'panel' ? '' : 'mt-8 border-t border-[var(--n-100)] pt-5'}
     >
       <div className="flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />

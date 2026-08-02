@@ -129,7 +129,11 @@ pub fn resolve(vault_root: impl AsRef<Path>) -> GitWorkspaceInfo {
             GitWorkspaceInfo {
                 vault_root: vault_str,
                 git_root: Some(canonical_root.to_string_lossy().to_string()),
-                vault_pathspec: if prefix.is_empty() { None } else { Some(prefix) },
+                vault_pathspec: if prefix.is_empty() {
+                    None
+                } else {
+                    Some(prefix)
+                },
                 git_root_relation: GitRootRelation::Parent,
                 resolution_failure: None,
             }

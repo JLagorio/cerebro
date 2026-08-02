@@ -119,9 +119,7 @@ export function saveView(
 // --- Collections (M10) -----------------------------------------------------
 
 /** Every Collection: each folder holding a `collection.yml`. */
-export function listCollections(
-  vault: string,
-): Promise<{ folder: string; yaml: string }[]> {
+export function listCollections(vault: string): Promise<{ folder: string; yaml: string }[]> {
   return inTauri() ? invokeTauri('list_collections', { vault }) : mock.listCollections(vault);
 }
 
@@ -133,12 +131,7 @@ export function saveCollection(vault: string, folder: string, yaml: string): Pro
 }
 
 /** Write `<folder>/<id>.list.yml`; folder '' means the vault root. */
-export function saveList(
-  vault: string,
-  folder: string,
-  id: string,
-  yaml: string,
-): Promise<void> {
+export function saveList(vault: string, folder: string, id: string, yaml: string): Promise<void> {
   return inTauri()
     ? invokeTauri('save_list', { vault, folder, id, yaml })
     : mock.saveList(vault, folder, id, yaml);
@@ -167,9 +160,7 @@ export function saveConnectors(vault: string, json: string): Promise<void> {
 // --- Vault format v2 file operations (M2 Task 3) ---
 
 export function createFolder(vault: string, path: string): Promise<void> {
-  return inTauri()
-    ? invokeTauri('create_folder', { vault, path })
-    : mock.createFolder(vault, path);
+  return inTauri() ? invokeTauri('create_folder', { vault, path }) : mock.createFolder(vault, path);
 }
 
 /** Move a note or folder within the vault. Fails if the target exists. */

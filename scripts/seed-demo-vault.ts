@@ -104,7 +104,7 @@ write(
   'types/epic.md',
   fm([
     'type: Type',
-    "icon: layers",
+    'icon: layers',
     "color: '#8B5CF6'",
     'statuses:',
     "  - { id: shaping, group: active, color: '#A8AFC2', hollow: true }",
@@ -527,7 +527,8 @@ for (const d of DECISIONS) {
         `status: ${d.status}`,
         `decided: ${d.decided}`,
         'deciders:' + links(d.deciders),
-        'affects:' + links(d.affects.map((p) => p.replace(/^projects\//, '').replace(/\/project\.md$/, ''))),
+        'affects:' +
+          links(d.affects.map((p) => p.replace(/^projects\//, '').replace(/\/project\.md$/, ''))),
       ].concat(d.supersedes !== undefined ? [`supersedes: ${link(d.supersedes)}`] : []),
     ) +
       `# ${d.title}\n\n## Context\n\n${d.context}\n\n## Decision\n\n${d.choice}\n\n## Consequences\n\n${d.consequences}\n`,
@@ -652,7 +653,8 @@ const RISKS = [
     severity: 'critical',
     owner: 'marcus-webb',
     affects: 'obj-field-app-readiness',
-    mitigation: 'Run the full rollback against the staging warehouse before the go-live date locks.',
+    mitigation:
+      'Run the full rollback against the staging warehouse before the go-live date locks.',
     body: `We have a cutover plan and a written rollback. Nobody has executed the
 rollback end to end.
 
@@ -721,50 +723,241 @@ interface ItemSpec {
 
 const ITEMS: ItemSpec[] = [
   // Offline sync hardening — the conflict epic
-  { project: 'offline-sync-hardening', key: 'SYN-6', slug: 'syn-6', title: 'Detect write conflicts on job close', status: 'done', priority: 'high', assignee: 'tom-keller', due: '2026-07-18', estimate: 'L', epic: 'epic-offline-conflict-model' },
-  { project: 'offline-sync-hardening', key: 'SYN-7', slug: 'syn-7', title: 'Hold both versions instead of discarding', status: 'progress', priority: 'urgent', assignee: 'sam-ito', due: '2026-08-04', estimate: 'L', epic: 'epic-offline-conflict-model', blockedBy: ['syn-6'],
+  {
+    project: 'offline-sync-hardening',
+    key: 'SYN-6',
+    slug: 'syn-6',
+    title: 'Detect write conflicts on job close',
+    status: 'done',
+    priority: 'high',
+    assignee: 'tom-keller',
+    due: '2026-07-18',
+    estimate: 'L',
+    epic: 'epic-offline-conflict-model',
+  },
+  {
+    project: 'offline-sync-hardening',
+    key: 'SYN-7',
+    slug: 'syn-7',
+    title: 'Hold both versions instead of discarding',
+    status: 'progress',
+    priority: 'urgent',
+    assignee: 'sam-ito',
+    due: '2026-08-04',
+    estimate: 'L',
+    epic: 'epic-offline-conflict-model',
+    blockedBy: ['syn-6'],
     body: `Storage side of [[dec-conflict-resolution-is-manual]]. Both versions live until
 someone picks; neither is authoritative in the meantime.
 
 The migration is the awkward part — existing rows have no concept of a losing
-version, so the schema change has to tolerate a null second side forever.` },
-  { project: 'offline-sync-hardening', key: 'SYN-8', slug: 'syn-8', title: 'Side-by-side resolution screen', status: 'todo', priority: 'urgent', assignee: 'mo-byrd', due: '2026-08-22', estimate: 'XL', epic: 'epic-offline-conflict-model', blockedBy: ['syn-7'],
+version, so the schema change has to tolerate a null second side forever.`,
+  },
+  {
+    project: 'offline-sync-hardening',
+    key: 'SYN-8',
+    slug: 'syn-8',
+    title: 'Side-by-side resolution screen',
+    status: 'todo',
+    priority: 'urgent',
+    assignee: 'mo-byrd',
+    due: '2026-08-22',
+    estimate: 'XL',
+    epic: 'epic-offline-conflict-model',
+    blockedBy: ['syn-7'],
     body: `The half of the epic that makes the other half worth shipping. Detection
-without this just tells crews something went wrong and offers them nothing.` },
-  { project: 'offline-sync-hardening', key: 'SYN-9', slug: 'syn-9', title: 'Warn past the 72-hour offline window', status: 'todo', priority: 'medium', assignee: 'sam-ito', due: '2026-08-29', estimate: 'S', epic: 'epic-offline-conflict-model',
+without this just tells crews something went wrong and offers them nothing.`,
+  },
+  {
+    project: 'offline-sync-hardening',
+    key: 'SYN-9',
+    slug: 'syn-9',
+    title: 'Warn past the 72-hour offline window',
+    status: 'todo',
+    priority: 'medium',
+    assignee: 'sam-ito',
+    due: '2026-08-29',
+    estimate: 'S',
+    epic: 'epic-offline-conflict-model',
     body: `Implements the boundary from [[dec-offline-window-72h]]. The warning has to be
-honest without being alarming — crews work long weekends routinely.` },
-  { project: 'offline-sync-hardening', key: 'SYN-10', slug: 'syn-10', title: 'Instrument conflict rate separately from sync errors', status: 'backlog', priority: 'high', assignee: 'tom-keller', estimate: 'M', epic: 'epic-offline-conflict-model', blockedBy: ['syn-6'],
+honest without being alarming — crews work long weekends routinely.`,
+  },
+  {
+    project: 'offline-sync-hardening',
+    key: 'SYN-10',
+    slug: 'syn-10',
+    title: 'Instrument conflict rate separately from sync errors',
+    status: 'backlog',
+    priority: 'high',
+    assignee: 'tom-keller',
+    estimate: 'M',
+    epic: 'epic-offline-conflict-model',
+    blockedBy: ['syn-6'],
     body: `Without this the KR reads as a regression the day the epic ships. See the
-consequences section of [[dec-conflict-resolution-is-manual]].` },
+consequences section of [[dec-conflict-resolution-is-manual]].`,
+  },
 
   // Phoenix warehouse rollout — cutover epic
-  { project: 'phoenix-warehouse-rollout', key: 'OPS-9', slug: 'ops-9', title: 'Rehearse the rollback in staging', status: 'todo', priority: 'urgent', assignee: 'marcus-webb', due: '2026-08-08', estimate: 'M', epic: 'epic-warehouse-cutover',
+  {
+    project: 'phoenix-warehouse-rollout',
+    key: 'OPS-9',
+    slug: 'ops-9',
+    title: 'Rehearse the rollback in staging',
+    status: 'todo',
+    priority: 'urgent',
+    assignee: 'marcus-webb',
+    due: '2026-08-08',
+    estimate: 'M',
+    epic: 'epic-warehouse-cutover',
     body: `Mitigation for [[risk-rollback-unrehearsed]]. Full sequence, including the
-pick-queue drain, with the clock running.` },
-  { project: 'phoenix-warehouse-rollout', key: 'OPS-10', slug: 'ops-10', title: 'Camera-based scanning fallback', status: 'progress', priority: 'high', assignee: 'mo-byrd', due: '2026-08-14', estimate: 'L', epic: 'epic-warehouse-cutover',
-    body: `Takes hardware off the critical path per [[dec-no-custom-scanner-hardware]].` },
-  { project: 'phoenix-warehouse-rollout', key: 'OPS-11', slug: 'ops-11', title: 'Go-live runbook sign-off', status: 'todo', priority: 'high', assignee: 'marcus-webb', due: '2026-08-18', estimate: 'S', epic: 'epic-warehouse-cutover', blockedBy: ['ops-9', 'ops-10'] },
-  { project: 'phoenix-warehouse-rollout', key: 'OPS-12', slug: 'ops-12', title: 'Train the night shift on the fallback path', status: 'backlog', priority: 'medium', assignee: 'rosa-alvine', due: '2026-08-19', estimate: 'M', epic: 'epic-warehouse-cutover', blockedBy: ['ops-10'] },
+pick-queue drain, with the clock running.`,
+  },
+  {
+    project: 'phoenix-warehouse-rollout',
+    key: 'OPS-10',
+    slug: 'ops-10',
+    title: 'Camera-based scanning fallback',
+    status: 'progress',
+    priority: 'high',
+    assignee: 'mo-byrd',
+    due: '2026-08-14',
+    estimate: 'L',
+    epic: 'epic-warehouse-cutover',
+    body: `Takes hardware off the critical path per [[dec-no-custom-scanner-hardware]].`,
+  },
+  {
+    project: 'phoenix-warehouse-rollout',
+    key: 'OPS-11',
+    slug: 'ops-11',
+    title: 'Go-live runbook sign-off',
+    status: 'todo',
+    priority: 'high',
+    assignee: 'marcus-webb',
+    due: '2026-08-18',
+    estimate: 'S',
+    epic: 'epic-warehouse-cutover',
+    blockedBy: ['ops-9', 'ops-10'],
+  },
+  {
+    project: 'phoenix-warehouse-rollout',
+    key: 'OPS-12',
+    slug: 'ops-12',
+    title: 'Train the night shift on the fallback path',
+    status: 'backlog',
+    priority: 'medium',
+    assignee: 'rosa-alvine',
+    due: '2026-08-19',
+    estimate: 'M',
+    epic: 'epic-warehouse-cutover',
+    blockedBy: ['ops-10'],
+  },
 
   // Guided onboarding — first-week activation
-  { project: 'guided-onboarding-ga', key: 'FLD-8', slug: 'fld-8', title: 'First-job checklist inside the app', status: 'progress', priority: 'high', assignee: 'maya-chen', due: '2026-08-12', estimate: 'L', epic: 'epic-first-week-activation' },
-  { project: 'guided-onboarding-ga', key: 'FLD-9', slug: 'fld-9', title: 'Recover gracefully from the first failed sync', status: 'todo', priority: 'high', assignee: 'maya-chen', due: '2026-08-25', estimate: 'M', epic: 'epic-first-week-activation', blockedBy: ['syn-8'],
+  {
+    project: 'guided-onboarding-ga',
+    key: 'FLD-8',
+    slug: 'fld-8',
+    title: 'First-job checklist inside the app',
+    status: 'progress',
+    priority: 'high',
+    assignee: 'maya-chen',
+    due: '2026-08-12',
+    estimate: 'L',
+    epic: 'epic-first-week-activation',
+  },
+  {
+    project: 'guided-onboarding-ga',
+    key: 'FLD-9',
+    slug: 'fld-9',
+    title: 'Recover gracefully from the first failed sync',
+    status: 'todo',
+    priority: 'high',
+    assignee: 'maya-chen',
+    due: '2026-08-25',
+    estimate: 'M',
+    epic: 'epic-first-week-activation',
+    blockedBy: ['syn-8'],
     body: `Depends on the resolution screen: there is no graceful recovery to show until
-there is somewhere to send them.` },
-  { project: 'guided-onboarding-ga', key: 'FLD-10', slug: 'fld-10', title: 'Day-3 nudge for crews with no completed job', status: 'todo', priority: 'medium', assignee: 'priya-nair', due: '2026-08-28', estimate: 'S', epic: 'epic-first-week-activation' },
-  { project: 'guided-onboarding-ga', key: 'FLD-11', slug: 'fld-11', title: 'Instrument the first seven days', status: 'done', priority: 'high', assignee: 'priya-nair', due: '2026-07-22', estimate: 'M', epic: 'epic-first-week-activation' },
+there is somewhere to send them.`,
+  },
+  {
+    project: 'guided-onboarding-ga',
+    key: 'FLD-10',
+    slug: 'fld-10',
+    title: 'Day-3 nudge for crews with no completed job',
+    status: 'todo',
+    priority: 'medium',
+    assignee: 'priya-nair',
+    due: '2026-08-28',
+    estimate: 'S',
+    epic: 'epic-first-week-activation',
+  },
+  {
+    project: 'guided-onboarding-ga',
+    key: 'FLD-11',
+    slug: 'fld-11',
+    title: 'Instrument the first seven days',
+    status: 'done',
+    priority: 'high',
+    assignee: 'priya-nair',
+    due: '2026-07-22',
+    estimate: 'M',
+    epic: 'epic-first-week-activation',
+  },
 
   // Field app launch campaign — narrative
-  { project: 'field-app-launch-campaign', key: 'LNC-8', slug: 'lnc-8', title: 'Rewrite messaging for the console split', status: 'progress', priority: 'urgent', assignee: 'dana-fox', due: '2026-08-06', estimate: 'M', epic: 'epic-launch-narrative',
+  {
+    project: 'field-app-launch-campaign',
+    key: 'LNC-8',
+    slug: 'lnc-8',
+    title: 'Rewrite messaging for the console split',
+    status: 'progress',
+    priority: 'urgent',
+    assignee: 'dana-fox',
+    due: '2026-08-06',
+    estimate: 'M',
+    epic: 'epic-launch-narrative',
     body: `Every asset currently describes one app for both audiences, which
-[[dec-supervisor-web-console]] made untrue.` },
-  { project: 'field-app-launch-campaign', key: 'LNC-9', slug: 'lnc-9', title: 'Secure a named reference customer', status: 'todo', priority: 'high', assignee: 'ana-rios', due: '2026-09-05', estimate: 'L', epic: 'epic-launch-narrative',
-    body: `The settling condition for [[bet-named-customer-unlocks-pipeline]].` },
-  { project: 'field-app-launch-campaign', key: 'LNC-10', slug: 'lnc-10', title: 'Time-on-job proof from the Phoenix pilot', status: 'backlog', priority: 'medium', assignee: 'dana-fox', estimate: 'M', epic: 'epic-launch-narrative', blockedBy: ['lnc-9'] },
-  { project: 'field-app-launch-campaign', key: 'LNC-11', slug: 'lnc-11', title: 'Convert the webinar slot to office hours', status: 'todo', priority: 'medium', assignee: 'dana-fox', due: '2026-08-20', estimate: 'S',
+[[dec-supervisor-web-console]] made untrue.`,
+  },
+  {
+    project: 'field-app-launch-campaign',
+    key: 'LNC-9',
+    slug: 'lnc-9',
+    title: 'Secure a named reference customer',
+    status: 'todo',
+    priority: 'high',
+    assignee: 'ana-rios',
+    due: '2026-09-05',
+    estimate: 'L',
+    epic: 'epic-launch-narrative',
+    body: `The settling condition for [[bet-named-customer-unlocks-pipeline]].`,
+  },
+  {
+    project: 'field-app-launch-campaign',
+    key: 'LNC-10',
+    slug: 'lnc-10',
+    title: 'Time-on-job proof from the Phoenix pilot',
+    status: 'backlog',
+    priority: 'medium',
+    assignee: 'dana-fox',
+    estimate: 'M',
+    epic: 'epic-launch-narrative',
+    blockedBy: ['lnc-9'],
+  },
+  {
+    project: 'field-app-launch-campaign',
+    key: 'LNC-11',
+    slug: 'lnc-11',
+    title: 'Convert the webinar slot to office hours',
+    status: 'todo',
+    priority: 'medium',
+    assignee: 'dana-fox',
+    due: '2026-08-20',
+    estimate: 'S',
     body: `Runs [[bet-office-hours-beat-webinars]]. Keep the webinar landing page alive
-so the comparison is like for like.` },
+so the comparison is like for like.`,
+  },
 ];
 
 for (const item of ITEMS) {
@@ -811,9 +1004,7 @@ Best one-line statement of the offline problem anyone has given us.
 
 write(
   'inbox/capture-2026-07-28-1642.md',
-  fm([
-    'generated: { by: claude-code, at: 2026-07-28T16:42:00Z }',
-  ]) +
+  fm(['generated: { by: claude-code, at: 2026-07-28T16:42:00Z }']) +
     `# Three work items reference a 72-hour window that is only written down in one decision
 
 While reading the sync project I noticed SYN-9, the crew FAQ draft, and the
@@ -1358,5 +1549,4 @@ write(
 `,
 );
 
-// eslint-disable-next-line no-console
 console.log('Seeded demo vault.');

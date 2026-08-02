@@ -158,7 +158,13 @@ describe('Sidebar', () => {
     };
     useVaultStore.setState({
       views: [roadmap],
-      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null, description: null } }],
+      collections: [
+        {
+          folder: 'product',
+          declared: true,
+          definition: { name: 'Product', icon: null, color: null, order: null, description: null },
+        },
+      ],
     });
     useUiStore.setState({ expandedFolders: {} });
     render(<Sidebar onNewView={vi.fn()} />);
@@ -173,7 +179,13 @@ describe('Sidebar', () => {
     const onNewView = vi.fn();
     useVaultStore.setState({
       views: [],
-      collections: [{ folder: 'product', declared: true, definition: { name: 'Product', icon: null, color: null, order: null, description: null } }],
+      collections: [
+        {
+          folder: 'product',
+          declared: true,
+          definition: { name: 'Product', icon: null, color: null, order: null, description: null },
+        },
+      ],
     });
     render(<Sidebar onNewView={onNewView} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add to Product' }));

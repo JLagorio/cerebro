@@ -33,7 +33,7 @@ export function AgentActions() {
           navigate(toSelection(action.to, action.id));
           break;
         case 'vault_changed':
-          void rescan().catch(() => undefined);
+          void rescan();
           break;
         case 'propose_organize':
           addProposal({

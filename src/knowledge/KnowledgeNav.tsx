@@ -95,12 +95,7 @@ export function KnowledgeNav({ nav }: { nav: Nav }) {
         nav={{ tab: 'review' }}
         active={is({ tab: 'review' })}
       />
-      <NavRow
-        icon="history"
-        label="Update log"
-        nav={{ tab: 'log' }}
-        active={is({ tab: 'log' })}
-      />
+      <NavRow icon="history" label="Update log" nav={{ tab: 'log' }} active={is({ tab: 'log' })} />
 
       {sections.length > 0 && (
         <>

@@ -15,7 +15,15 @@ export interface EmptyStateProps {
   className?: string;
 }
 
-export function EmptyState({ icon = 'inbox', title, description, action, compact, style, className = '' }: EmptyStateProps) {
+export function EmptyState({
+  icon = 'inbox',
+  title,
+  description,
+  action,
+  compact,
+  style,
+  className = '',
+}: EmptyStateProps) {
   return (
     <div
       className={className}
@@ -56,7 +64,14 @@ export function EmptyState({ icon = 'inbox', title, description, action, compact
         {title}
       </div>
       {description ? (
-        <div style={{ fontSize: compact ? 'var(--text-xs)' : 'var(--text-sm)', color: 'var(--text-muted)', maxWidth: 340, lineHeight: 1.5 }}>
+        <div
+          style={{
+            fontSize: compact ? 'var(--text-xs)' : 'var(--text-sm)',
+            color: 'var(--text-muted)',
+            maxWidth: 340,
+            lineHeight: 1.5,
+          }}
+        >
           {description}
         </div>
       ) : null}

@@ -72,8 +72,7 @@ function isAdoptable(e: Entry): boolean {
 export function inferKind(keyName: string, values: unknown[]): FieldKind {
   const flat = values.filter((v) => v !== null && v !== undefined && v !== '');
   if (flat.length === 0) return 'text';
-  const share = (pred: (v: unknown) => boolean) =>
-    flat.filter(pred).length / flat.length;
+  const share = (pred: (v: unknown) => boolean) => flat.filter(pred).length / flat.length;
   if (flat.some((v) => Array.isArray(v))) return 'multiselect';
   if (share((v) => typeof v === 'boolean') >= 2 / 3) return 'checkbox';
   if (share((v) => typeof v === 'number') >= 2 / 3) return 'number';
@@ -220,10 +219,7 @@ export function analyzeVault(entries: Entry[], schema: Schema): TypeProposal[] {
         options: options !== null && options.length > 0 ? options : null,
         target:
           kind === 'relation' && existing?.target === undefined
-            ? inferTarget(
-                slot.rel.flat(),
-                entries,
-              )
+            ? inferTarget(slot.rel.flat(), entries)
             : (existing?.target ?? null),
         convert,
       });
@@ -233,7 +229,12 @@ export function analyzeVault(entries: Entry[], schema: Schema): TypeProposal[] {
     // all, or at least one undeclared key or ill-fitting value.
     if (doc === null || fields.length > 0) {
       fields.sort((a, b) => b.coverage - a.coverage || a.name.localeCompare(b.name));
-      proposals.push({ name: typeName, docPath: doc?.path ?? null, records: records.length, fields });
+      proposals.push({
+        name: typeName,
+        docPath: doc?.path ?? null,
+        records: records.length,
+        fields,
+      });
     }
   }
 

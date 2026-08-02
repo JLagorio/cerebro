@@ -17,7 +17,8 @@ beforeAll(() => {
   editor = BlockNoteEditor.create({ schema: cerebroSchema }) as CerebroEditor;
 });
 
-const roundTrip = async (md: string) => blocksToMarkdown(editor, await markdownToBlocks(editor, md));
+const roundTrip = async (md: string) =>
+  blocksToMarkdown(editor, await markdownToBlocks(editor, md));
 
 /**
  * The M2 fixture corpus. `out` pins the normalized serialization; every

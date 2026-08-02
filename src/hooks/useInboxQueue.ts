@@ -61,7 +61,9 @@ export function useInboxQueue(period: InboxPeriod): InboxQueue {
   const selectedResolvedPath = selected?.path ?? null;
   useEffect(() => {
     if (selectedResolvedPath === null) return;
-    setPinned((prev) => (prev.includes(selectedResolvedPath) ? prev : [...prev, selectedResolvedPath]));
+    setPinned((prev) =>
+      prev.includes(selectedResolvedPath) ? prev : [...prev, selectedResolvedPath],
+    );
   }, [selectedResolvedPath]);
 
   // organize() reads these through a ref so the callback identity stays

@@ -101,7 +101,13 @@ describe('chip props mapping', () => {
   it('defaults collapse to empty strings and back', () => {
     const props = dateValueToChipProps(makeDateValue('2026-07-26'));
     expect(props).toEqual({
-      date: '2026-07-26', end: '', time: '', endTime: '', format: '', timeFormat: '', remind: '',
+      date: '2026-07-26',
+      end: '',
+      time: '',
+      endTime: '',
+      format: '',
+      timeFormat: '',
+      remind: '',
     });
     expect(chipPropsToDateValue(props)).toEqual(makeDateValue('2026-07-26'));
   });

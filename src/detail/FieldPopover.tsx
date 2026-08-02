@@ -26,7 +26,9 @@ export function FixedBelowAnchor({ children }: { children: React.ReactNode }) {
     <div
       ref={ref}
       className="fixed z-50"
-      style={pos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: pos.left, top: pos.top }}
+      style={
+        pos === null ? { left: 0, top: 0, visibility: 'hidden' } : { left: pos.left, top: pos.top }
+      }
     >
       {/* Animated on an inner wrapper so the entrance transform never skews
           the measurement above (M12.8). */}
@@ -90,66 +92,73 @@ export function FieldPopover({
         className="fixed inset-0 z-40 cursor-default bg-transparent"
       />
       <FixedBelowAnchor>
-      <div
-        role="listbox"
-        className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
-      >
-        {searchable && (
-          <div className="pb-1.5">
-            <Input autoFocus size="sm" placeholder="Search…" value={query} onChange={(e) => setQuery(e.target.value)} width="100%" />
-          </div>
-        )}
-        <div className="max-h-[264px] overflow-y-auto">
-          {visible.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              role="option"
-              aria-selected={selected.has(o.id)}
-              onClick={() => {
-                onPick(o.id);
-                if (!multi) onClose();
-              }}
-              className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
-            >
-              <span
-                className="box-border h-2 w-2 flex-none rounded-full"
-                style={
-                  o.hollow || !o.color
-                    ? { border: `1.5px solid ${o.color ?? 'var(--n-400)'}` }
-                    : { background: o.color }
-                }
+        <div
+          role="listbox"
+          className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+        >
+          {searchable && (
+            <div className="pb-1.5">
+              <Input
+                autoFocus
+                size="sm"
+                placeholder="Search…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                width="100%"
               />
-              <span className="min-w-0 flex-1 truncate">{o.label}</span>
-              {selected.has(o.id) && <Icon name="check" size={14} color="var(--cortex-600)" />}
-            </button>
-          ))}
-          {visible.length === 0 && !canCreate && (
-            <div className="p-2 text-[12px] text-[var(--n-400)]">No matches</div>
+            </div>
           )}
-          {canCreate && (
-            <button
-              type="button"
-              onClick={() => {
-                onCreate?.(trimmed);
-                setQuery('');
-                if (!multi) onClose();
-              }}
-              className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
-            >
-              <Icon name="plus" size={13} color="var(--n-400)" />
-              <span className="min-w-0 flex-1 truncate">
-                Create <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
-              </span>
-            </button>
+          <div className="max-h-[264px] overflow-y-auto">
+            {visible.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                role="option"
+                aria-selected={selected.has(o.id)}
+                onClick={() => {
+                  onPick(o.id);
+                  if (!multi) onClose();
+                }}
+                className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+              >
+                <span
+                  className="box-border h-2 w-2 flex-none rounded-full"
+                  style={
+                    o.hollow || !o.color
+                      ? { border: `1.5px solid ${o.color ?? 'var(--n-400)'}` }
+                      : { background: o.color }
+                  }
+                />
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {selected.has(o.id) && <Icon name="check" size={14} color="var(--cortex-600)" />}
+              </button>
+            ))}
+            {visible.length === 0 && !canCreate && (
+              <div className="p-2 text-[12px] text-[var(--n-400)]">No matches</div>
+            )}
+            {canCreate && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreate?.(trimmed);
+                  setQuery('');
+                  if (!multi) onClose();
+                }}
+                className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+              >
+                <Icon name="plus" size={13} color="var(--n-400)" />
+                <span className="min-w-0 flex-1 truncate">
+                  Create <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
+                </span>
+              </button>
+            )}
+          </div>
+          {multi && (
+            <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[11px] text-[var(--n-400)]">
+              Pick as many as you need — Esc or click away to close.
+            </div>
           )}
         </div>
-        {multi && (
-          <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[11px] text-[var(--n-400)]">
-            Pick as many as you need — Esc or click away to close.
-          </div>
-        )}
-      </div>
       </FixedBelowAnchor>
     </>
   );

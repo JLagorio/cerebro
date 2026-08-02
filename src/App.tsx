@@ -34,20 +34,31 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
   switch (selection.kind) {
-    case 'home': return <HomePage />;
-    case 'inbox': return <InboxPage />;
-    case 'knowledge': return <KnowledgePage selection={selection} />;
+    case 'home':
+      return <HomePage />;
+    case 'inbox':
+      return <InboxPage />;
+    case 'knowledge':
+      return <KnowledgePage selection={selection} />;
     // M12.5: `project` retired — a project is a folder, and a folder on
     // screen is a Collection.
-    case 'doc': return <DocPage selection={selection} />;
-    case 'docs': return <DocsPage />;
+    case 'doc':
+      return <DocPage selection={selection} />;
+    case 'docs':
+      return <DocsPage />;
     // M10: a Collection is the container's page; a List is the record canvas.
-    case 'collection': return <CollectionPage selection={selection} />;
-    case 'list': return <ListPage selection={selection} />;
-    case 'type': return <TypePage selection={selection} />;
-    case 'changes': return <ChangesPage />;
-    case 'pulse': return <PulsePage />;
-    case 'settings': return <SettingsPage />;
+    case 'collection':
+      return <CollectionPage selection={selection} />;
+    case 'list':
+      return <ListPage selection={selection} />;
+    case 'type':
+      return <TypePage selection={selection} />;
+    case 'changes':
+      return <ChangesPage />;
+    case 'pulse':
+      return <PulsePage />;
+    case 'settings':
+      return <SettingsPage />;
   }
 }
 
@@ -85,15 +96,19 @@ function VaultChooser() {
         </span>
         <h1 className="m-0 text-[16px] font-semibold text-[var(--n-900)]">Open a vault</h1>
         <p className="m-0 text-[13px] leading-[19px] text-[var(--n-600)]">
-          A vault is a folder of markdown files — projects, docs, and work items live there as
-          plain text.
+          A vault is a folder of markdown files — projects, docs, and work items live there as plain
+          text.
         </p>
         {(error ?? pickError) ? (
           <p className="m-0 text-[12px] text-[var(--danger-500)]">{error ?? pickError}</p>
         ) : null}
         <div className="mt-1 flex gap-2">
-          <Button variant="primary" onClick={guarded(openDemo)}>Open demo vault</Button>
-          <Button variant="secondary" onClick={guarded(chooseFolder)}>Choose folder…</Button>
+          <Button variant="primary" onClick={guarded(openDemo)}>
+            Open demo vault
+          </Button>
+          <Button variant="secondary" onClick={guarded(chooseFolder)}>
+            Choose folder…
+          </Button>
         </div>
       </div>
     </div>
@@ -194,15 +209,17 @@ function App() {
           schema={schema}
           title="New list"
           onCancel={() => setNewList(null)}
-          onSubmit={(definition) => {
+          onSubmit={async (definition) => {
             const collection = newList.collection;
+            const id = await createList(definition, collection);
+            // Close only on success (M14.8) — a failed write already toasted,
+            // and the dialog keeps the view the user configured.
+            if (id === null) return false;
             setNewList(null);
-            void (async () => {
-              const id = await createList(definition, collection);
-              // Navigate WITH the collection: ids are unique per folder, so
-              // "roadmap" alone could resolve to another collection's list.
-              if (id !== null) navigate({ kind: 'list', id, collection });
-            })();
+            // Navigate WITH the collection: ids are unique per folder, so
+            // "roadmap" alone could resolve to another collection's list.
+            navigate({ kind: 'list', id, collection });
+            return true;
           }}
         />
       )}

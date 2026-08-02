@@ -28,7 +28,10 @@ test('ingest: a dropped transcript becomes an untyped working doc in the Inbox',
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
 
   // Drop a .vtt the way a user would. DataTransfer has to be built in the
   // page: Playwright cannot hand a File across the boundary.
@@ -76,7 +79,10 @@ test('distil: the ingested transcript and its cached ticket are cited by a conce
   page,
 }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
 
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Phoenix warehouse' }).click();
   await page.locator(`[data-testid="concept-row"][data-path="${CONCEPT}"]`).click();
@@ -118,7 +124,10 @@ test('commit: any note says what the base took from it, not just Inbox captures'
 
   // The same fact, visible without opening anything: the transcript row in
   // the queue carries what was distilled from it.
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
   const row = page.locator(`[data-testid="inbox-row"][data-path="${TRANSCRIPT}"]`);
   await expect(row.getByTestId('row-committed')).toHaveText('1');
 
@@ -199,7 +208,10 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   if (await demoButton.isVisible()) await demoButton.click();
   await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
 
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
   await page.locator('[data-testid="inbox-row"]').filter({ hasText: 'Warehouse cutover' }).click();
 
   const organize = page.getByLabel('Organize').getByTestId('knowledge-commit');
@@ -215,14 +227,17 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   await page.getByTestId('quick-open-input').fill('warehouse cutover');
   await page.getByTestId('quick-open-result').first().click();
   await page.getByTestId('doc-side-panel').getByTestId('doc-panel-tab-knowledge').click();
-  await expect(
-    page.getByTestId('doc-side-panel').getByTestId('learn-queued'),
-  ).toContainText(/Queued to be read|Reading this now/);
+  await expect(page.getByTestId('doc-side-panel').getByTestId('learn-queued')).toContainText(
+    /Queued to be read|Reading this now/,
+  );
 });
 
 test('retire: a replaced concept says so, and stops asking to be verified', async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
 
   // The pilot's week-long offline window was replaced by the 72-hour decision.
   const replaced = page.locator(
@@ -248,11 +263,13 @@ test('retire: a replaced concept says so, and stops asking to be verified', asyn
   // something newer already overrode is busywork.
   await page.getByTestId('knowledge-nav-row').filter({ hasText: 'Needs review' }).click();
   await expect(
-    page.locator('[data-testid="concept-row"][data-path="knowledge/systems/offline-window-pilot.md"]'),
+    page.locator(
+      '[data-testid="concept-row"][data-path="knowledge/systems/offline-window-pilot.md"]',
+    ),
   ).toHaveCount(0);
 });
 
-test('dossier: a project page says what the base believes, doubts, and no longer believes', async ({
+test('dossier: a project record says what the base believes, doubts, and no longer believes', async ({
   page,
 }) => {
   await boot(page);
@@ -260,10 +277,12 @@ test('dossier: a project page says what the base believes, doubts, and no longer
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByTestId('quick-open-input').fill('offline sync hardening');
   await page.getByTestId('quick-open-result').first().click();
-  // M12.5: the project page is gone — the folder reads as a Collection whose
-  // page hosts the dossier, behind the record panel project.md opened in.
-  await page.keyboard.press('Escape');
-  await expect(page.getByTestId('collection-page')).toBeVisible();
+  // M12.5 aftermath: a project is an ordinary record under records/projects/,
+  // so its dossier rides the record panel (M14.2). The base holds concepts
+  // ABOUT this record, which is what swaps the panel's related list for the
+  // full dossier — capability, not type, decides.
+  await expect(page.getByTestId('detail-panel')).toBeVisible();
+  await page.getByTestId('detail-knowledge-toggle').click();
 
   const dossier = page.getByTestId('entity-dossier');
   await expect(dossier).toBeVisible();

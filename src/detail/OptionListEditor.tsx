@@ -6,17 +6,10 @@ import { Input } from '@/components/ui/Input';
 import type { FieldOption } from '@/engine/types';
 
 /** Stable id for a freshly typed label; ids are what records store. */
-export const optionId = (label: string) =>
-  label.trim().replace(/\s+/g, '-').toLowerCase();
+export const optionId = (label: string) => label.trim().replace(/\s+/g, '-').toLowerCase();
 
 /** Swatch grid used by both the option editor and the status editor. */
-function ColorPicker({
-  value,
-  onPick,
-}: {
-  value: string | null;
-  onPick: (color: string) => void;
-}) {
+function ColorPicker({ value, onPick }: { value: string | null; onPick: (color: string) => void }) {
   return (
     <div className="flex flex-wrap gap-1 pt-1.5">
       {TYPE_COLORS.map((c) => (

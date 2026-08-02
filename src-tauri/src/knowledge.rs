@@ -51,21 +51,32 @@ pub fn near_duplicates(
     let root = vault.join(KNOWLEDGE_DIR);
     let mut hits = Vec::new();
 
-    for item in walkdir::WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+    for item in walkdir::WalkDir::new(&root)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         if !item.file_type().is_file() {
             continue;
         }
         if item.path().extension().and_then(|e| e.to_str()) != Some("md") {
             continue;
         }
-        let Ok(rel) = item.path().strip_prefix(vault) else { continue };
+        let Ok(rel) = item.path().strip_prefix(vault) else {
+            continue;
+        };
         let rel = rel.to_string_lossy().replace('\\', "/");
         if rel == skip_rel || rel.ends_with("/index.md") || rel.ends_with("/log.md") {
             continue;
         }
-        let Ok(content) = std::fs::read_to_string(item.path()) else { continue };
-        let (Some(block), _) = crate::vault::parse::split_frontmatter(&content) else { continue };
-        let Ok(map) = crate::vault::parse::parse_frontmatter(block) else { continue };
+        let Ok(content) = std::fs::read_to_string(item.path()) else {
+            continue;
+        };
+        let (Some(block), _) = crate::vault::parse::split_frontmatter(&content) else {
+            continue;
+        };
+        let Ok(map) = crate::vault::parse::parse_frontmatter(block) else {
+            continue;
+        };
 
         let other_title = map
             .get(serde_yaml::Value::from("title"))
@@ -118,7 +129,11 @@ fn title_overlap(a: &str, b: &str) -> f64 {
     }
     let shared = left.intersection(&right).count() as f64;
     let union = (left.len() + right.len()) as f64 - shared;
-    if union <= 0.0 { 0.0 } else { shared / union }
+    if union <= 0.0 {
+        0.0
+    } else {
+        shared / union
+    }
 }
 
 const STOPWORDS: &[&str] = &[
@@ -159,7 +174,9 @@ pub fn guard_verify(path: &str, patch: &Map<String, Value>) -> Result<(), String
     }
     for key in patch.keys() {
         if key != "verified" {
-            return Err(format!("verify_concept may only write `verified`, not `{key}`"));
+            return Err(format!(
+                "verify_concept may only write `verified`, not `{key}`"
+            ));
         }
     }
     if patch.is_empty() {
@@ -251,7 +268,10 @@ mod tests {
     use super::*;
 
     fn patch(pairs: &[(&str, Value)]) -> Map<String, Value> {
-        pairs.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect()
     }
 
     const REL: &str = "knowledge/playbooks/cutover.md";
@@ -270,7 +290,10 @@ mod tests {
         let existing = "# Knowledge Update Log\n\n## 2026-07-28\n* **Creation**: [A](/a.md).\n";
         let out = insert_log_entry(existing, "2026-07-28", "Update", "Cutover", REL);
         let bullets: Vec<&str> = out.lines().filter(|l| l.starts_with("* ")).collect();
-        assert_eq!(bullets[0], "* **Update**: [Cutover](/playbooks/cutover.md).");
+        assert_eq!(
+            bullets[0],
+            "* **Update**: [Cutover](/playbooks/cutover.md)."
+        );
         assert_eq!(bullets[1], "* **Creation**: [A](/a.md).");
         // One section for the day, not two.
         assert_eq!(out.matches("## 2026-07-28").count(), 1);
@@ -286,7 +309,13 @@ mod tests {
 
     #[test]
     fn a_log_with_only_a_heading_gains_its_first_section() {
-        let out = insert_log_entry("# Knowledge Update Log\n", "2026-07-28", "Creation", "C", REL);
+        let out = insert_log_entry(
+            "# Knowledge Update Log\n",
+            "2026-07-28",
+            "Creation",
+            "C",
+            REL,
+        );
         assert!(out.starts_with("# Knowledge Update Log\n"));
         assert!(out.contains("## 2026-07-28"));
         assert_eq!(out.matches("# Knowledge Update Log").count(), 1);

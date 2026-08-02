@@ -6,7 +6,6 @@ import { DATE_TOKEN_SOURCE, dateValueToChipProps, parseDateToken } from '@/engin
  * markdown conversion surface. Blocks flow back into the same editor's
  * replaceBlocks, so the erased typing is safe by construction. */
 type AnyEditor = BlockNoteEditor<any, any, any>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyBlocks = any[];
 
 /**
@@ -172,7 +171,9 @@ const CALLOUT_MARK = /^\[!([a-z]+)\]\s?/;
 const blockText = (content: unknown): string =>
   Array.isArray(content)
     ? content
-        .map((n) => (typeof (n as { text?: string }).text === 'string' ? (n as { text: string }).text : ''))
+        .map((n) =>
+          typeof (n as { text?: string }).text === 'string' ? (n as { text: string }).text : '',
+        )
         .join('')
     : '';
 
@@ -236,10 +237,7 @@ export function demoteRichBlocks<T extends PartialBlock>(blocks: T[]): T[] {
   });
 }
 
-export async function markdownToBlocks(
-  editor: AnyEditor,
-  markdown: string,
-): Promise<AnyBlocks> {
+export async function markdownToBlocks(editor: AnyEditor, markdown: string): Promise<AnyBlocks> {
   return promoteRichBlocks(
     enrichChips(
       normalizeParsedBlocks((await editor.tryParseMarkdownToBlocks(markdown)) as PartialBlock[]),
@@ -275,11 +273,7 @@ export function spliceTitleIntoBlocks(editor: AnyEditor, title: string): void {
   }
   const first = editor.document[0];
   if (first === undefined) return; // live editors always hold >= 1 block
-  editor.insertBlocks(
-    [{ type: 'heading', props: { level: 1 }, content: title }],
-    first,
-    'before',
-  );
+  editor.insertBlocks([{ type: 'heading', props: { level: 1 }, content: title }], first, 'before');
 }
 
 const significantChars = (s: string): string => s.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '');

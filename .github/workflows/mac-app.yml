@@ -1,7 +1,10 @@
-name: Mac app
+name: CI & Mac app
 
-# Builds a runnable Cerebro.app and a drag-to-install DMG on GitHub's macOS
-# runners, so getting the app onto a Mac never requires a local toolchain.
+# Two gates and a build (M14.4). `quality` and `e2e` run on Linux on every
+# push; the macOS build only starts once both pass, so a broken lint,
+# typecheck, test, or Playwright flow can no longer ship a DMG — which it
+# could until M14 (CI ran vitest + cargo test and nothing else; tsc breakage
+# reached main in 80ca071).
 #
 # Every push produces a downloadable artifact (Actions → this run → Artifacts).
 # Pushing a `v*` tag additionally publishes a release.
@@ -25,8 +28,96 @@ env:
   TARGET: universal-apple-darwin
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint (zero warnings)
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Typecheck (app + tools)
+        run: pnpm typecheck
+
+      # Thresholds live in vite.config.ts and only ratchet up (M14.4).
+      - name: Unit tests with coverage floor
+        run: pnpm test:coverage
+
+      # Tauri needs the webkit stack even to typecheck the crate on Linux.
+      - name: Rust system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl \
+            wget file libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Rust format check
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # CI=true makes playwright start its own dev server (reuse is off) and
+      # enables the 2-retry policy the config has carried since M4.
+      - name: Playwright e2e
+        run: pnpm e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-failures
+          path: test-results/
+          if-no-files-found: ignore
+
   build:
     runs-on: macos-14
+    needs: [quality, e2e]
     # The whole job is minutes. Past this something is wedged, and failing says
     # so instead of holding a runner for hours.
     timeout-minutes: 45
@@ -54,11 +145,6 @@ jobs:
           workspaces: src-tauri -> target
 
       - run: pnpm install --frozen-lockfile
-
-      - name: Test
-        run: |
-          pnpm vitest run
-          cargo test --manifest-path src-tauri/Cargo.toml
 
       # Only the .app here — the disk image is assembled in the next step,
       # after the bundle is signed, so what ships inside it is the signed copy.

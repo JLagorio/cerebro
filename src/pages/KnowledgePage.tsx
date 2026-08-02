@@ -2,13 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import {
-  listConcepts,
-  listSubjects,
-  needsReview,
-  verifyPatch,
-  type Concept,
-} from '@/engine/okf';
+import { listConcepts, listSubjects, needsReview, verifyPatch, type Concept } from '@/engine/okf';
 import type { KnowledgeNav, Selection } from '@/engine/types';
 import { useOpenPath } from '@/app/useOpenPath';
 import { reviewConceptPrompt } from '@/lib/prompts';
@@ -99,7 +93,11 @@ function ConceptRow({
   );
 }
 
-export function KnowledgePage({ selection }: { selection: Extract<Selection, { kind: 'knowledge' }> }) {
+export function KnowledgePage({
+  selection,
+}: {
+  selection: Extract<Selection, { kind: 'knowledge' }>;
+}) {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
@@ -122,12 +120,14 @@ export function KnowledgePage({ selection }: { selection: Extract<Selection, { k
     if (linkedPath !== null) setSelectedPath(linkedPath);
   }, [linkedPath]);
 
-  const nav: KnowledgeNav = selection.nav ?? { tab: 'all' };
+  // Memoized so downstream useMemos key on the nav VALUE — `?? {tab:'all'}`
+  // inline would mint a fresh object every render and defeat them.
+  const nav: KnowledgeNav = useMemo(() => selection.nav ?? { tab: 'all' }, [selection.nav]);
   const today = todayIso();
   const all = useMemo(() => listConcepts(entries, today), [entries, today]);
   const subjects = useMemo(() => listSubjects(all, entries), [all, entries]);
 
-  const subject = nav.tab === 'entity' ? subjects.find((s) => s.key === nav.key) ?? null : null;
+  const subject = nav.tab === 'entity' ? (subjects.find((s) => s.key === nav.key) ?? null) : null;
   const concepts = useMemo(() => {
     switch (nav.tab) {
       case 'review':
@@ -220,7 +220,9 @@ export function KnowledgePage({ selection }: { selection: Extract<Selection, { k
     nav.tab === 'review'
       ? 'Needs review'
       : nav.tab === 'section'
-        ? (nav.folder === '' ? 'Ungrouped' : nav.folder.replace(/^\w/, (c) => c.toUpperCase()))
+        ? nav.folder === ''
+          ? 'Ungrouped'
+          : nav.folder.replace(/^\w/, (c) => c.toUpperCase())
         : nav.tab === 'entity'
           ? (subject?.label ?? 'Unknown entity')
           : 'All concepts';
@@ -228,7 +230,10 @@ export function KnowledgePage({ selection }: { selection: Extract<Selection, { k
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
       <header className="flex flex-none items-center gap-2.5 border-b border-[var(--n-200)] px-5 py-2.5">
-        <h2 className="m-0 text-[15px] font-semibold text-[var(--n-900)]" data-testid="knowledge-heading">
+        <h2
+          className="m-0 text-[15px] font-semibold text-[var(--n-900)]"
+          data-testid="knowledge-heading"
+        >
           {heading}
         </h2>
         <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">

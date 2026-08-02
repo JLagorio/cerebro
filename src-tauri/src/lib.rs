@@ -14,8 +14,8 @@ use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 use vault::entry::Entry;
-use vault::write::{CollectionYaml, ViewYaml};
 use vault::watcher::WatcherState;
+use vault::write::{CollectionYaml, ViewYaml};
 
 fn config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
@@ -120,7 +120,12 @@ fn list_views(vault: String) -> Result<Vec<ViewYaml>, String> {
 }
 
 #[tauri::command(async)]
-fn save_view(vault: String, id: String, yaml: String, folder: Option<String>) -> Result<(), String> {
+fn save_view(
+    vault: String,
+    id: String,
+    yaml: String,
+    folder: Option<String>,
+) -> Result<(), String> {
     vault::write::save_view(Path::new(&vault), &id, &yaml, folder.as_deref())
 }
 

@@ -28,11 +28,7 @@ export interface ColumnDef extends FieldDef {
  *   present, then undeclared frontmatter keys observed on those records. A
  *   mixed view gets the columns its records really have rather than none.
  */
-export function columnUniverse(
-  source: ListSource,
-  entries: Entry[],
-  schema: Schema,
-): ColumnDef[] {
+export function columnUniverse(source: ListSource, entries: Entry[], schema: Schema): ColumnDef[] {
   if (source.type !== null) {
     return schema.types.get(source.type)?.fields ?? [];
   }
@@ -77,7 +73,10 @@ export function columnUniverse(
  * column naming a field nothing declares still renders — as text — so a
  * hand-written view file never silently loses a column.
  */
-export function resolveColumns(columns: ColumnSpec[], fields: ColumnDef[]): {
+export function resolveColumns(
+  columns: ColumnSpec[],
+  fields: ColumnDef[],
+): {
   spec: ColumnSpec;
   def: ColumnDef;
   width: number;

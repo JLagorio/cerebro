@@ -21,7 +21,9 @@ export const MAX_INGEST_BYTES = 4 * 1024 * 1024;
 export function isIngestible(filename: string): boolean {
   const dot = filename.lastIndexOf('.');
   if (dot === -1) return false;
-  return (INGESTIBLE_EXTENSIONS as readonly string[]).includes(filename.slice(dot + 1).toLowerCase());
+  return (INGESTIBLE_EXTENSIONS as readonly string[]).includes(
+    filename.slice(dot + 1).toLowerCase(),
+  );
 }
 
 export interface IngestResult {

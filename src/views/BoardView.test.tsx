@@ -44,22 +44,34 @@ describe('BoardView', () => {
 describe('handleDragEnd', () => {
   const entries = fixtureVault();
   const schema = buildSchema(entries);
-  const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/') && e.path !== 'projects/onboarding/items/broken.md');
+  const items = entries.filter(
+    (e) =>
+      e.path.startsWith('projects/onboarding/items/') &&
+      e.path !== 'projects/onboarding/items/broken.md',
+  );
   const groups = groupEntries(items, 'status', schema);
 
   it('patches the dragged entry frontmatter and toasts the target label', () => {
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     const toast = vi.fn();
-    const event = { active: { id: 'projects/onboarding/items/fld-1.md' }, over: { id: 'doing' } } as unknown as DragEndEvent;
+    const event = {
+      active: { id: 'projects/onboarding/items/fld-1.md' },
+      over: { id: 'doing' },
+    } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast });
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: 'doing' });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      status: 'doing',
+    });
     expect(toast).toHaveBeenCalledWith('Moved to Doing');
   });
 
   it('is a no-op when dropped on the source column', () => {
     const patchFrontmatter = vi.fn();
     const toast = vi.fn();
-    const event = { active: { id: 'projects/onboarding/items/fld-1.md' }, over: { id: 'todo' } } as unknown as DragEndEvent;
+    const event = {
+      active: { id: 'projects/onboarding/items/fld-1.md' },
+      over: { id: 'todo' },
+    } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast });
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
@@ -69,20 +81,37 @@ describe('handleDragEnd', () => {
     // The fixture items all carry a status, so groupEntries emits no
     // '__none__' group here; append a hand-built one per the plan's note so
     // the no-value drop target exists (boards render it whenever present).
-    const noneGroup: Group = { key: '__none__', label: 'No status', color: null, ghost: true, entries: [] };
+    const noneGroup: Group = {
+      key: '__none__',
+      label: 'No status',
+      color: null,
+      ghost: true,
+      entries: [],
+    };
     const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
     const toast = vi.fn();
     const event = {
       active: { id: 'projects/onboarding/items/fld-1.md' },
       over: { id: NO_VALUE_COLUMN_ID },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'status', groups: [...groups, noneGroup], schema, patchFrontmatter, toast });
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', { status: null });
+    handleDragEnd(event, {
+      groupBy: 'status',
+      groups: [...groups, noneGroup],
+      schema,
+      patchFrontmatter,
+      toast,
+    });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      status: null,
+    });
   });
 
   it('is a no-op when dropped outside any column', () => {
     const patchFrontmatter = vi.fn();
-    const event = { active: { id: 'projects/onboarding/items/fld-1.md' }, over: null } as unknown as DragEndEvent;
+    const event = {
+      active: { id: 'projects/onboarding/items/fld-1.md' },
+      over: null,
+    } as unknown as DragEndEvent;
     handleDragEnd(event, { groupBy: 'status', groups, schema, patchFrontmatter, toast: vi.fn() });
     expect(patchFrontmatter).not.toHaveBeenCalled();
   });
@@ -107,7 +136,13 @@ describe('handleDragEnd', () => {
       { key: 'b', label: 'B', color: null, ghost: false, entries: [] },
     ];
     const event = { active: { id: dragged.path }, over: { id: 'b' } } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'tags', groups: msGroups, schema: multiSchema, patchFrontmatter, toast });
+    handleDragEnd(event, {
+      groupBy: 'tags',
+      groups: msGroups,
+      schema: multiSchema,
+      patchFrontmatter,
+      toast,
+    });
     expect(patchFrontmatter).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith("Can't move cards grouped by a multi-select field");
   });
@@ -122,8 +157,16 @@ describe('handleDragEnd', () => {
       active: { id: 'projects/onboarding/items/fld-2.md' },
       over: { id: 'ana-rios' },
     } as unknown as DragEndEvent;
-    handleDragEnd(event, { groupBy: 'assignee', groups: personGroups, schema, patchFrontmatter, toast });
-    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-2.md', { assignee: '[[ana-rios]]' });
+    handleDragEnd(event, {
+      groupBy: 'assignee',
+      groups: personGroups,
+      schema,
+      patchFrontmatter,
+      toast,
+    });
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-2.md', {
+      assignee: '[[ana-rios]]',
+    });
     expect(toast).toHaveBeenCalledWith('Moved to Ana Rios');
   });
 });

@@ -57,10 +57,7 @@ export function Rail() {
   const knowledgeActive = selection.kind === 'knowledge';
   // M9.4: the two git surfaces share a rail slot's worth of "history".
   const historyActive = selection.kind === 'changes' || selection.kind === 'pulse';
-  const queued = useMemo(
-    () => (inboxEnabled ? inboxCount(entries) : 0),
-    [entries, inboxEnabled],
-  );
+  const queued = useMemo(() => (inboxEnabled ? inboxCount(entries) : 0), [entries, inboxEnabled]);
 
   return (
     <div

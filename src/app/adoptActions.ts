@@ -13,7 +13,14 @@ export interface AdoptionResult {
 
 /** Status ids that read as finished/abandoned, for the seeded group. */
 const DONE_WORDS = new Set(['done', 'complete', 'completed', 'shipped', 'closed', 'resolved']);
-const CLOSED_WORDS = new Set(['cancelled', 'canceled', 'archived', 'wont-do', 'wontfix', 'dropped']);
+const CLOSED_WORDS = new Set([
+  'cancelled',
+  'canceled',
+  'archived',
+  'wont-do',
+  'wontfix',
+  'dropped',
+]);
 
 function fieldSpec(f: FieldProposal): unknown {
   const spec: Record<string, unknown> = { kind: f.kind };

@@ -19,7 +19,11 @@ if (typeof document !== 'undefined' && !document.getElementById('cb-dlg-css')) {
   document.head.appendChild(t);
 }
 
-export interface DialogAction { label: string; onClick?: () => void; disabled?: boolean }
+export interface DialogAction {
+  label: string;
+  onClick?: () => void;
+  disabled?: boolean;
+}
 
 /** Modal dialog: flat scrim, radius-14 card, footer actions right-aligned. */
 export interface DialogProps {
@@ -63,10 +67,20 @@ export function Dialog({
         <div className="cb-dlg-bd">{children}</div>
         {primaryAction || secondaryAction || footerNote ? (
           <div className="cb-dlg-ft">
-            {footerNote ? <span className="cb-dlg-note">{footerNote}</span> : <span className="cb-dlg-note"></span>}
-            {secondaryAction ? <Button onClick={secondaryAction.onClick}>{secondaryAction.label}</Button> : null}
+            {footerNote ? (
+              <span className="cb-dlg-note">{footerNote}</span>
+            ) : (
+              <span className="cb-dlg-note"></span>
+            )}
+            {secondaryAction ? (
+              <Button onClick={secondaryAction.onClick}>{secondaryAction.label}</Button>
+            ) : null}
             {primaryAction ? (
-              <Button variant="primary" disabled={primaryAction.disabled} onClick={primaryAction.onClick}>
+              <Button
+                variant="primary"
+                disabled={primaryAction.disabled}
+                onClick={primaryAction.onClick}
+              >
                 {primaryAction.label}
               </Button>
             ) : null}

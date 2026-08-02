@@ -16,14 +16,30 @@ import { Icon } from '@/components/ui/Icon';
 export const CALLOUT_KINDS = ['info', 'note', 'tip', 'success', 'warning', 'danger'] as const;
 export type CalloutKind = (typeof CALLOUT_KINDS)[number];
 
-const CALLOUT_STYLE: Record<CalloutKind, { icon: string; bg: string; border: string; fg: string }> = {
-  info:    { icon: 'info',           bg: 'var(--cortex-50)',           border: 'var(--cortex-500)', fg: 'var(--cortex-600)' },
-  note:    { icon: 'pencil',         bg: 'var(--n-50)',                border: 'var(--n-400)',      fg: 'var(--n-700)' },
-  tip:     { icon: 'lightbulb',      bg: '#f3ecfd',                    border: '#8b5cf6',           fg: '#6d33d6' },
-  success: { icon: 'circle-check',   bg: '#e8f7ee',                    border: '#1F9D61',           fg: '#187a4b' },
-  warning: { icon: 'triangle-alert', bg: 'var(--warn-50,#fdf3e2)',     border: '#DE8F0A',           fg: 'var(--warn-700,#8a5a13)' },
-  danger:  { icon: 'octagon-alert',  bg: 'var(--danger-50,#fdecec)',   border: '#DE3B4E',           fg: 'var(--danger-600,#c5372c)' },
-};
+const CALLOUT_STYLE: Record<CalloutKind, { icon: string; bg: string; border: string; fg: string }> =
+  {
+    info: {
+      icon: 'info',
+      bg: 'var(--cortex-50)',
+      border: 'var(--cortex-500)',
+      fg: 'var(--cortex-600)',
+    },
+    note: { icon: 'pencil', bg: 'var(--n-50)', border: 'var(--n-400)', fg: 'var(--n-700)' },
+    tip: { icon: 'lightbulb', bg: '#f3ecfd', border: '#8b5cf6', fg: '#6d33d6' },
+    success: { icon: 'circle-check', bg: '#e8f7ee', border: '#1F9D61', fg: '#187a4b' },
+    warning: {
+      icon: 'triangle-alert',
+      bg: 'var(--warn-50,#fdf3e2)',
+      border: '#DE8F0A',
+      fg: 'var(--warn-700,#8a5a13)',
+    },
+    danger: {
+      icon: 'octagon-alert',
+      bg: 'var(--danger-50,#fdecec)',
+      border: '#DE3B4E',
+      fg: 'var(--danger-600,#c5372c)',
+    },
+  };
 
 function CalloutView({
   kind,
@@ -69,8 +85,7 @@ export const CalloutBlock = createReactBlockSpec(
         kind={(props.block.props.kind as CalloutKind) ?? 'info'}
         onCycleKind={() => {
           const current = props.block.props.kind as CalloutKind;
-          const next =
-            CALLOUT_KINDS[(CALLOUT_KINDS.indexOf(current) + 1) % CALLOUT_KINDS.length];
+          const next = CALLOUT_KINDS[(CALLOUT_KINDS.indexOf(current) + 1) % CALLOUT_KINDS.length];
           props.editor.updateBlock(props.block, { props: { kind: next } } as never);
         }}
         contentRef={props.contentRef}
@@ -175,7 +190,7 @@ function MermaidView({
       {!editing && svg !== null && (
         <div
           className="overflow-x-auto px-3 py-2 [&_svg]:max-w-full"
-          // eslint-disable-next-line react/no-danger -- mermaid's own sanitized SVG output
+          // dangerouslySetInnerHTML is safe here: mermaid sanitizes its own SVG output.
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       )}
@@ -188,7 +203,9 @@ function MermaidView({
           }}
           className="w-full border-0 bg-transparent px-3 py-3 text-left text-[12.5px] text-[var(--n-400)]"
         >
-          {error !== null ? 'Fix the diagram source…' : 'Empty diagram — click to add mermaid source'}
+          {error !== null
+            ? 'Fix the diagram source…'
+            : 'Empty diagram — click to add mermaid source'}
         </button>
       )}
     </div>
@@ -205,9 +222,7 @@ export const MermaidBlock = createReactBlockSpec(
     render: (props) => (
       <MermaidView
         code={props.block.props.code as string}
-        onChangeCode={(code) =>
-          props.editor.updateBlock(props.block, { props: { code } } as never)
-        }
+        onChangeCode={(code) => props.editor.updateBlock(props.block, { props: { code } } as never)}
       />
     ),
   },

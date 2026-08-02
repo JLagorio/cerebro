@@ -39,10 +39,10 @@ export function detectFormat(filename: string, content: string): IngestFormat {
   const ext = extensionOf(filename);
   if (ext === 'vtt') return 'vtt';
   if (ext === 'srt') return 'srt';
-  if (/^﻿?WEBVTT/.test(content)) return 'vtt';
+  if (/^\uFEFF?WEBVTT/.test(content)) return 'vtt';
   // SRT has no header, so it is recognised by its first cue: an index line
   // followed by a comma-decimal timing line.
-  if (/^﻿?\s*\d+\s*\r?\n\d{2}:\d{2}:\d{2},\d{3}\s*-->/.test(content)) return 'srt';
+  if (/^\uFEFF?\s*\d+\s*\r?\n\d{2}:\d{2}:\d{2},\d{3}\s*-->/.test(content)) return 'srt';
   if (ext === 'md' || ext === 'markdown') return 'markdown';
   return 'text';
 }
@@ -60,7 +60,22 @@ function normalizeTimestamp(raw: string): string | null {
 const TIMING = /^\s*(\S+)\s*-->\s*(\S+)/;
 
 /** Lowercase name particles, so `Tom van der Berg` still reads as a name. */
-const PARTICLES = new Set(['van', 'von', 'der', 'den', 'de', 'del', 'di', 'da', 'du', 'la', 'le', 'bin', 'ibn', 'al']);
+const PARTICLES = new Set([
+  'van',
+  'von',
+  'der',
+  'den',
+  'de',
+  'del',
+  'di',
+  'da',
+  'du',
+  'la',
+  'le',
+  'bin',
+  'ibn',
+  'al',
+]);
 
 /**
  * Is this the name of a person, or the first clause of a sentence?
@@ -75,8 +90,7 @@ function looksLikeName(candidate: string): boolean {
   const words = candidate.split(/\s+/);
   if (words.length > 4) return false;
   return words.every(
-    (word, i) =>
-      /^[\p{Lu}\p{N}]/u.test(word) || (i > 0 && PARTICLES.has(word.toLowerCase())),
+    (word, i) => /^[\p{Lu}\p{N}]/u.test(word) || (i > 0 && PARTICLES.has(word.toLowerCase())),
   );
 }
 
@@ -102,7 +116,7 @@ const startsSkippedBlock = (line: string): boolean => /^(NOTE|STYLE|REGION)\b/.t
 
 const isNoise = (line: string): boolean =>
   line.trim() === '' ||
-  /^﻿?WEBVTT/.test(line) ||
+  /^\uFEFF?WEBVTT/.test(line) ||
   startsSkippedBlock(line) ||
   // A bare cue index (`1`, `42`) between blocks.
   /^\d+$/.test(line.trim());
@@ -350,7 +364,11 @@ export function findExternalRefs(text: string, options: RefOptions = {}): Extern
   if (issues !== null) {
     for (const match of text.matchAll(issues)) {
       const id = match[0];
-      refs.set(id, { kind: 'issue', id, cachePath: `${SOURCES_DIR}/issues/${id.toLowerCase()}.md` });
+      refs.set(id, {
+        kind: 'issue',
+        id,
+        cachePath: `${SOURCES_DIR}/issues/${id.toLowerCase()}.md`,
+      });
     }
   }
   for (const match of text.matchAll(URL_PATTERN)) {

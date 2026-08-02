@@ -3,34 +3,52 @@ import type { RelationIndex } from './relations';
 export type Scalar = string | number | boolean | null;
 
 export interface Entry {
-  path: string;                 // vault-relative, e.g. "items/fld-7.md"
-  filename: string;             // "fld-7.md"
-  folder: string;               // vault-relative parent dir ('' at the root) — vault format v2
-  project: string | null;       // owning project.md path via containment (nearest ancestor
-                                // directory holding a project.md), null outside any project
-  title: string;                // first H1, else humanized filename stem
-  type: string | null;          // frontmatter `type`
-  properties: Record<string, Scalar | Scalar[]>;   // scalar frontmatter (non-wikilink); nested YAML
-                                                   // (type-note `fields:`, space `statuses:`) passes
-                                                   // through as raw nested values — consumers cast
-  relationships: Record<string, string[]>;         // wikilink-valued fields → raw targets
-  outgoingLinks: string[];      // wikilink targets found in the body
-  snippet: string;              // first ~160 chars of body text, markdown-stripped
-  createdAt: string;            // ISO 8601
-  modifiedAt: string;           // ISO 8601
-  parseError: string | null;    // YAML error message, or null
+  path: string; // vault-relative, e.g. "items/fld-7.md"
+  filename: string; // "fld-7.md"
+  folder: string; // vault-relative parent dir ('' at the root) — vault format v2
+  project: string | null; // owning project.md path via containment (nearest ancestor
+  // directory holding a project.md), null outside any project
+  title: string; // first H1, else humanized filename stem
+  type: string | null; // frontmatter `type`
+  properties: Record<string, Scalar | Scalar[]>; // scalar frontmatter (non-wikilink); nested YAML
+  // (type-note `fields:`, space `statuses:`) passes
+  // through as raw nested values — consumers cast
+  relationships: Record<string, string[]>; // wikilink-valued fields → raw targets
+  outgoingLinks: string[]; // wikilink targets found in the body
+  snippet: string; // first ~160 chars of body text, markdown-stripped
+  createdAt: string; // ISO 8601
+  modifiedAt: string; // ISO 8601
+  parseError: string | null; // YAML error message, or null
 }
 
 export type FieldKind =
-  | 'text' | 'number' | 'checkbox' | 'date' | 'daterange'
-  | 'select' | 'multiselect' | 'status' | 'person' | 'relation'
-  | 'url' | 'files' | 'rollup' | 'created_time' | 'last_edited_time';
+  | 'text'
+  | 'number'
+  | 'checkbox'
+  | 'date'
+  | 'daterange'
+  | 'select'
+  | 'multiselect'
+  | 'status'
+  | 'person'
+  | 'relation'
+  | 'url'
+  | 'files'
+  | 'rollup'
+  | 'created_time'
+  | 'last_edited_time';
 
-export type RollupCalc =
-  | 'count' | 'sum' | 'avg' | 'min' | 'max' | 'earliest' | 'latest' | 'show';
+export type RollupCalc = 'count' | 'sum' | 'avg' | 'min' | 'max' | 'earliest' | 'latest' | 'show';
 
-export interface FieldOption { id: string; label: string; color: string | null; hollow?: boolean }
-export interface StatusDef extends FieldOption { group: 'active' | 'done' | 'closed' }
+export interface FieldOption {
+  id: string;
+  label: string;
+  color: string | null;
+  hollow?: boolean;
+}
+export interface StatusDef extends FieldOption {
+  group: 'active' | 'done' | 'closed';
+}
 /** How a numeric value is displayed. Stored value never changes — a percent
  * is still `76` on disk (M3.4: the Notion "Progress · 0% Complete" bar). */
 export type FieldFormat = 'plain' | 'percent' | 'progress' | 'currency';
@@ -76,11 +94,11 @@ export interface TypeDef {
 }
 
 export interface ResolvedField {
-  def: FieldDef | null;         // null → undeclared field (advisory: still shown as text)
+  def: FieldDef | null; // null → undeclared field (advisory: still shown as text)
   raw: unknown;
-  display: string;              // '' when empty
+  display: string; // '' when empty
   color: string | null;
-  ghost: boolean;               // value not in the declared option set
+  ghost: boolean; // value not in the declared option set
 }
 
 /**
@@ -98,15 +116,15 @@ export type KnowledgeNav =
 
 export type Selection =
   | { kind: 'home' }
-  | { kind: 'inbox' }                  // capture queue: unorganized notes (M4)
+  | { kind: 'inbox' } // capture queue: unorganized notes (M4)
   // AI knowledge base: OKF bundle, read-only (M5); `nav` defaults to all (M8.1).
   // `path` deep-links one concept, so knowledge surfaced beside your work
   // (M8.3) can actually be opened rather than only named.
   | { kind: 'knowledge'; nav?: KnowledgeNav; path?: string }
   // M12.5: `project` retired — a project is a folder, and a folder with
   // things in it is a Collection. Legacy project.md files open as records.
-  | { kind: 'doc'; path: string }      // full-page markdown document (M2 Task 10)
-  | { kind: 'docs' }                   // all-docs rail surface (M2 Task 11)
+  | { kind: 'doc'; path: string } // full-page markdown document (M2 Task 10)
+  | { kind: 'docs' } // all-docs rail surface (M2 Task 11)
   // M10 — a Collection is a container (a folder holding collection.yml); a List
   // is a database inside one. These were a single `view` kind that was both.
   | { kind: 'collection'; folder: string }
@@ -254,14 +272,25 @@ export interface Presentation {
  * works whichever side of the link the data lives on.
  */
 export type ChildrenSpec =
-  | { direction: 'forward'; field: string }
-  | { direction: 'reverse'; type: string; field: string };
+  { direction: 'forward'; field: string } | { direction: 'reverse'; type: string; field: string };
 
 export type FilterOp =
-  | 'equals' | 'not_equals' | 'contains' | 'any_of' | 'none_of'
-  | 'is_empty' | 'is_not_empty' | 'before' | 'after';
-export interface FilterRule { field: string; op: FilterOp; value?: Scalar | Scalar[] }
-export type FilterGroup = { all: (FilterRule | FilterGroup)[] } | { any: (FilterRule | FilterGroup)[] };
+  | 'equals'
+  | 'not_equals'
+  | 'contains'
+  | 'any_of'
+  | 'none_of'
+  | 'is_empty'
+  | 'is_not_empty'
+  | 'before'
+  | 'after';
+export interface FilterRule {
+  field: string;
+  op: FilterOp;
+  value?: Scalar | Scalar[];
+}
+export type FilterGroup =
+  { all: (FilterRule | FilterGroup)[] } | { any: (FilterRule | FilterGroup)[] };
 
 /**
  * What a List looks at (M3.5). A List is rooted in a type — the Notion model:
@@ -299,7 +328,10 @@ export interface ViewDefinition {
 }
 
 export interface ListDefinition {
-  name: string; icon: string | null; color: string | null; order: number | null;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  order: number | null;
   source: ListSource;
   /**
    * The List's views, in tab order. NEVER empty — the parser synthesizes one
@@ -388,7 +420,13 @@ export interface CollectionNode {
   path?: string;
 }
 
-export interface Group { key: string; label: string; color: string | null; ghost: boolean; entries: Entry[] }
+export interface Group {
+  key: string;
+  label: string;
+  color: string | null;
+  ghost: boolean;
+  entries: Entry[];
+}
 // groupEntries emits empty declared option/status groups (boards need the columns) and a trailing
 // no-value group with key '__none__' (label 'No <field>') — pinned; BoardView/ListView rely on it.
 
@@ -412,7 +450,7 @@ export interface Schema {
   types: Map<string, TypeDef>;
   /** Reverse link index (M3.5) — see engine/relations.ts. */
   relations: RelationIndex;
-  projectForEntry(e: Entry): Entry | null;                      // containment: Entry.project → project.md entry
+  projectForEntry(e: Entry): Entry | null; // containment: Entry.project → project.md entry
   // Status resolution chain (v2, locked decision 4): project.md `statuses:`
   // override → Work item Type doc `statuses:` → DEFAULT_STATUSES.
   statusSetForProject(projectPath: string | null): StatusDef[];

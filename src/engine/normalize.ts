@@ -20,10 +20,7 @@ export function normalizeValue(value: unknown): Scalar | Scalar[] {
 
 function isPlainObject(value: unknown): boolean {
   return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    !(value instanceof Date)
+    value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)
   );
 }
 

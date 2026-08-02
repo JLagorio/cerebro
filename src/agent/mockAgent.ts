@@ -98,10 +98,7 @@ export interface MockRun {
 export function runMockAgent(
   message: string,
   emit: (event: AgentStreamEvent) => void,
-  {
-    delayMs = 12,
-    onUiAction,
-  }: { delayMs?: number; onUiAction?: (action: UiAction) => void } = {},
+  { delayMs = 12, onUiAction }: { delayMs?: number; onUiAction?: (action: UiAction) => void } = {},
 ): MockRun {
   const script = scriptFor(message);
   let cancelled = false;

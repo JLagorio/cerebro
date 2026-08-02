@@ -65,7 +65,9 @@ export function DocsPage() {
                   >
                     {(() => {
                       const style = typeStyle(e.type, schema);
-                      return <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />;
+                      return (
+                        <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
+                      );
                     })()}
                     <span className="truncate text-[13px] text-[var(--n-800)]">{e.title}</span>
                     {projectTitle(e) !== null && (

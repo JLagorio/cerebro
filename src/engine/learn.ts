@@ -112,6 +112,7 @@ export function learnQueue(
   const RANK: Record<LearnReason, number> = { filed: 0, behind: 1, stale: 2 };
   const rank = (j: LearnJob) => RANK[j.reason];
   return jobs.sort(
-    (a, b) => rank(a) - rank(b) || b.modifiedAt.localeCompare(a.modifiedAt) || a.path.localeCompare(b.path),
+    (a, b) =>
+      rank(a) - rank(b) || b.modifiedAt.localeCompare(a.modifiedAt) || a.path.localeCompare(b.path),
   );
 }

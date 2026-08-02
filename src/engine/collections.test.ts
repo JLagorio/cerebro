@@ -67,8 +67,12 @@ describe('parseCollectionYaml', () => {
   // nothing where a paragraph is meant to be.
   it('treats a missing or blank description as none', () => {
     expect(parseCollectionYaml('p', 'name: P\n').definition.description).toBeNull();
-    expect(parseCollectionYaml('p', 'name: P\ndescription: "  "\n').definition.description).toBeNull();
-    expect(parseCollectionYaml('p', 'name: P\ndescription: 12\n').definition.description).toBeNull();
+    expect(
+      parseCollectionYaml('p', 'name: P\ndescription: "  "\n').definition.description,
+    ).toBeNull();
+    expect(
+      parseCollectionYaml('p', 'name: P\ndescription: 12\n').definition.description,
+    ).toBeNull();
   });
 
   // Tolerant like every other vault file: a fat-fingered collection.yml must
@@ -307,10 +311,31 @@ describe('collectionsTree', () => {
       [],
       [
         doc('real.md', 'Real doc'),
-        makeEntry({ path: 'types/risk.md', filename: 'risk.md', folder: 'types', title: 'Risk', type: 'Type' }),
-        makeEntry({ path: 'templates/t.md', filename: 't.md', folder: 'templates', title: 'Template' }),
-        makeEntry({ path: 'knowledge/c.md', filename: 'c.md', folder: 'knowledge', title: 'Concept' }),
-        makeEntry({ path: 'proj/project.md', filename: 'project.md', folder: 'proj', title: 'A project' }),
+        makeEntry({
+          path: 'types/risk.md',
+          filename: 'risk.md',
+          folder: 'types',
+          title: 'Risk',
+          type: 'Type',
+        }),
+        makeEntry({
+          path: 'templates/t.md',
+          filename: 't.md',
+          folder: 'templates',
+          title: 'Template',
+        }),
+        makeEntry({
+          path: 'knowledge/c.md',
+          filename: 'c.md',
+          folder: 'knowledge',
+          title: 'Concept',
+        }),
+        makeEntry({
+          path: 'proj/project.md',
+          filename: 'project.md',
+          folder: 'proj',
+          title: 'A project',
+        }),
       ],
       schema,
     );

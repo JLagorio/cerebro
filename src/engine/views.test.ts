@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { layoutLabel, newView, nextViewId, parseListYaml, replaceView, resolveView, serializeList } from './views';
+import {
+  layoutLabel,
+  newView,
+  nextViewId,
+  parseListYaml,
+  replaceView,
+  resolveView,
+  serializeList,
+} from './views';
 import type { FilterGroup, ListDefinition, ListFile, Presentation } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
@@ -7,8 +15,12 @@ const DEFAULT_LIST_PRESENTATION = {
   group: [{ field: 'status' }],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
   columns: [
-    { field: 'key' }, { field: 'status' }, { field: 'priority' },
-    { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
+    { field: 'key' },
+    { field: 'status' },
+    { field: 'priority' },
+    { field: 'assignee' },
+    { field: 'due' },
+    { field: 'estimate' },
   ],
   rowHeight: undefined,
 };
@@ -100,7 +112,9 @@ describe('parseListYaml', () => {
   });
 
   it('carries the project scope through (Task 6)', () => {
-    const scoped = parseListYaml('delivery', 'name: Delivery\n', { project: 'projects/atlas/project.md' });
+    const scoped = parseListYaml('delivery', 'name: Delivery\n', {
+      project: 'projects/atlas/project.md',
+    });
     expect(scoped.project).toBe('projects/atlas/project.md');
     expect(parseListYaml('global', 'name: G\n').project).toBeNull();
   });
@@ -114,7 +128,13 @@ describe('parseListYaml', () => {
       order: null,
       source: NO_SOURCE,
       views: [
-        { id: 'view', name: 'List', icon: null, filters: null, presentation: DEFAULT_LIST_PRESENTATION },
+        {
+          id: 'view',
+          name: 'List',
+          icon: null,
+          filters: null,
+          presentation: DEFAULT_LIST_PRESENTATION,
+        },
       ],
     });
   });
@@ -136,8 +156,12 @@ describe('parseListYaml', () => {
       group: [{ field: 'status' }],
       sort: [{ field: 'modifiedAt', dir: 'desc' }],
       columns: [
-        { field: 'key' }, { field: 'status' }, { field: 'priority' },
-        { field: 'assignee' }, { field: 'due' }, { field: 'estimate' },
+        { field: 'key' },
+        { field: 'status' },
+        { field: 'priority' },
+        { field: 'assignee' },
+        { field: 'due' },
+        { field: 'estimate' },
       ],
       rowHeight: undefined,
     });
@@ -338,8 +362,10 @@ describe('views', () => {
   });
 
   it('drops a chip style it does not recognize rather than trusting it', () => {
-    const def = parseListYaml('bad', 'views:\n  - { id: v, presentation: { chips: rainbow } }\n')
-      .definition;
+    const def = parseListYaml(
+      'bad',
+      'views:\n  - { id: v, presentation: { chips: rainbow } }\n',
+    ).definition;
     expect(def.views[0].presentation.chips).toBeUndefined();
   });
 
@@ -439,7 +465,10 @@ describe('serializeList', () => {
         sort: [{ field: 'title', dir: 'asc' }],
         // M9.7: nesting is a level of the ONE grouping chain.
         group: [
-          { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+          {
+            field: 'objective',
+            descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+          },
         ],
         columns: [{ field: 'status' }, { field: 'progress' }],
       },
@@ -474,7 +503,10 @@ describe('serializeList', () => {
       );
       expect(p.type).toBe('table');
       expect(p.group).toEqual([
-        { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+        {
+          field: 'objective',
+          descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+        },
       ]);
     });
 
@@ -535,7 +567,13 @@ describe('serializeList', () => {
     it('omits them entirely when unset', () => {
       const yaml = serializeList(
         oneView(
-          { name: 'Grid', icon: null, color: null, order: null, source: { type: null, project: null } },
+          {
+            name: 'Grid',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: null, project: null },
+          },
           { type: 'table', group: [], sort: [], columns: [] },
         ),
       );
@@ -576,7 +614,10 @@ describe('serializeList', () => {
       // The legacy hierarchy becomes a relation LEVEL of the group chain.
       expect(p.group).toEqual([
         { field: 'priority' },
-        { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+        {
+          field: 'objective',
+          descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+        },
       ]);
     });
 
@@ -610,19 +651,36 @@ describe('serializeList', () => {
           group: [
             { field: 'status' },
             { field: 'owner', dir: 'desc' },
-            { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
-            { field: 'key_result', descend: { direction: 'reverse', type: 'Work item', field: 'key_result' } },
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+            {
+              field: 'key_result',
+              descend: { direction: 'reverse', type: 'Work item', field: 'key_result' },
+            },
           ],
-          sort: [{ field: 'priority', dir: 'asc' }, { field: 'due', dir: 'desc' }],
-          columns: [{ field: 'status', width: 180 }, { field: 'owner', hidden: true }],
+          sort: [
+            { field: 'priority', dir: 'asc' },
+            { field: 'due', dir: 'desc' },
+          ],
+          columns: [
+            { field: 'status', width: 180 },
+            { field: 'owner', hidden: true },
+          ],
         },
       );
       expect(parseListYaml('deep', serializeList(def)).definition).toEqual(def);
     });
 
     it('caps nesting and banding separately', () => {
-      const levels = Array.from({ length: 9 }, (_, i) => `  - { type: T${i}, field: y }`).join('\n');
-      const view = parseListYaml('deep', `presentation:\n  groupBy: null\n  hierarchy:\n${levels}\n`);
+      const levels = Array.from({ length: 9 }, (_, i) => `  - { type: T${i}, field: y }`).join(
+        '\n',
+      );
+      const view = parseListYaml(
+        'deep',
+        `presentation:\n  groupBy: null\n  hierarchy:\n${levels}\n`,
+      );
       const p = presentationOf(view);
       // A chain that mixes both must not have its nesting truncated by the
       // band cap, nor the other way round.

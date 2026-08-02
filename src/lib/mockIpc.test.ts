@@ -40,7 +40,10 @@ describe('mockIpc', () => {
   });
 
   it('updateFrontmatter patches values, deletes nulls, preserves order and unknown keys', async () => {
-    await mock.updateFrontmatter('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', { status: 'done', due: null });
+    await mock.updateFrontmatter('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', {
+      status: 'done',
+      due: null,
+    });
     const entries = await mock.scanVault('/demo-vault');
     const item = entries.find((e) => e.path === 'projects/guided-onboarding-ga/items/fld-1.md');
     expect(item?.properties.status).toBe('done');
@@ -70,9 +73,15 @@ describe('mockIpc', () => {
   });
 
   it('setNoteTitle rewrites the first H1', async () => {
-    await mock.setNoteTitle('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', 'Renamed walkthrough');
+    await mock.setNoteTitle(
+      '/demo-vault',
+      'projects/guided-onboarding-ga/items/fld-1.md',
+      'Renamed walkthrough',
+    );
     const entries = await mock.scanVault('/demo-vault');
-    expect(entries.find((e) => e.path === 'projects/guided-onboarding-ga/items/fld-1.md')?.title).toBe('Renamed walkthrough');
+    expect(
+      entries.find((e) => e.path === 'projects/guided-onboarding-ga/items/fld-1.md')?.title,
+    ).toBe('Renamed walkthrough');
   });
 
   // Parity with write.rs create_note: default H1 for empty bodies, no fence
@@ -246,12 +255,20 @@ describe('mockIpc', () => {
 
   it('renameNote moves a note, refuses to clobber, and moves folders', async () => {
     await mock.createFolder('/demo-vault', 'projects/atlas/items');
-    await mock.renameNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-1.md', 'projects/atlas/items/fld-1.md');
+    await mock.renameNote(
+      '/demo-vault',
+      'projects/guided-onboarding-ga/items/fld-1.md',
+      'projects/atlas/items/fld-1.md',
+    );
     const fs = (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
     expect(fs.has('projects/guided-onboarding-ga/items/fld-1.md')).toBe(false);
     expect(fs.has('projects/atlas/items/fld-1.md')).toBe(true);
     await expect(
-      mock.renameNote('/demo-vault', 'projects/guided-onboarding-ga/items/fld-2.md', 'projects/atlas/items/fld-1.md'),
+      mock.renameNote(
+        '/demo-vault',
+        'projects/guided-onboarding-ga/items/fld-2.md',
+        'projects/atlas/items/fld-1.md',
+      ),
     ).rejects.toThrow('already exists');
     // Folder move: every key under the prefix relocates.
     await mock.renameNote('/demo-vault', 'projects/guided-onboarding-ga/items', 'archive');

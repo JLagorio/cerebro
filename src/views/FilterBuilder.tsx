@@ -29,7 +29,11 @@ const withChildren = (group: FilterGroup, next: (FilterRule | FilterGroup)[]): F
 
 /** Comma-separated text ⇄ the list value the any_of/none_of ops expect. */
 const valueToText = (value: FilterRule['value']): string =>
-  Array.isArray(value) ? value.join(', ') : value === undefined || value === null ? '' : String(value);
+  Array.isArray(value)
+    ? value.join(', ')
+    : value === undefined || value === null
+      ? ''
+      : String(value);
 
 function textToValue(text: string, op: FilterOp): FilterRule['value'] {
   if (op === 'any_of' || op === 'none_of') {
@@ -116,7 +120,12 @@ function GroupEditor({
   const conjunction = 'all' in group ? 'all' : 'any';
 
   const replaceChild = (i: number, next: FilterRule | FilterGroup) =>
-    onChange(withChildren(group, children.map((c, ci) => (ci === i ? next : c))));
+    onChange(
+      withChildren(
+        group,
+        children.map((c, ci) => (ci === i ? next : c)),
+      ),
+    );
 
   return (
     <div
@@ -159,7 +168,12 @@ function GroupEditor({
               depth={depth + 1}
               onChange={(next) => replaceChild(i, next)}
               onRemove={() =>
-                onChange(withChildren(group, children.filter((_, ci) => ci !== i)))
+                onChange(
+                  withChildren(
+                    group,
+                    children.filter((_, ci) => ci !== i),
+                  ),
+                )
               }
             />
           ) : (
@@ -169,7 +183,12 @@ function GroupEditor({
               fields={fields}
               onChange={(next) => replaceChild(i, next)}
               onRemove={() =>
-                onChange(withChildren(group, children.filter((_, ci) => ci !== i)))
+                onChange(
+                  withChildren(
+                    group,
+                    children.filter((_, ci) => ci !== i),
+                  ),
+                )
               }
             />
           ),

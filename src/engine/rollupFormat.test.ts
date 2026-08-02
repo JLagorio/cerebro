@@ -73,8 +73,18 @@ describe('rollup configuration', () => {
         type: 'Type',
         properties: { fields: { attainment: { kind: 'number' } } } as never,
       }),
-      makeEntry({ path: 'krs/a.md', title: 'A', type: 'Key result', properties: { attainment: 80 } }),
-      makeEntry({ path: 'krs/b.md', title: 'B', type: 'Key result', properties: { attainment: 40 } }),
+      makeEntry({
+        path: 'krs/a.md',
+        title: 'A',
+        type: 'Key result',
+        properties: { attainment: 80 },
+      }),
+      makeEntry({
+        path: 'krs/b.md',
+        title: 'B',
+        type: 'Key result',
+        properties: { attainment: 40 },
+      }),
       makeEntry({
         path: 'objs/o.md',
         title: 'O',

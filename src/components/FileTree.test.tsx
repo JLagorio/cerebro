@@ -62,9 +62,9 @@ describe('FileTree', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(`${ROOT}/design-notes.md`));
     expect(fs().get(`${ROOT}/design-notes.md`)).toBe('# Design Notes\n');
-    expect(
-      useVaultStore.getState().entries.some((e) => e.path === `${ROOT}/design-notes.md`),
-    ).toBe(true);
+    expect(useVaultStore.getState().entries.some((e) => e.path === `${ROOT}/design-notes.md`)).toBe(
+      true,
+    );
   });
 
   it('creates a folder and shows it expanded even while empty', async () => {
@@ -221,9 +221,7 @@ describe('FileTree', () => {
     renderTree();
     drag(`${ROOT}/meetings`, `${ROOT}/items`, 0);
     await waitFor(() => {
-      const order = screen
-        .getAllByTestId('tree-row')
-        .map((el) => el.getAttribute('data-path'));
+      const order = screen.getAllByTestId('tree-row').map((el) => el.getAttribute('data-path'));
       expect(order.indexOf(`${ROOT}/meetings`)).toBeLessThan(order.indexOf(`${ROOT}/items`));
     });
     expect(useUiStore.getState().treeOrder[ROOT]).toEqual(['meetings', 'items']);

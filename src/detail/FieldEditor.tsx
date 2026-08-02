@@ -81,7 +81,12 @@ export function FieldEditor({
     const options: FieldPopoverOption[] =
       def.kind === 'status'
         ? statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, hollow: s.hollow }))
-        : (def.options ?? []).map((o) => ({ id: o.id, label: o.label, color: o.color, hollow: o.hollow }));
+        : (def.options ?? []).map((o) => ({
+            id: o.id,
+            label: o.label,
+            color: o.color,
+            hollow: o.hollow,
+          }));
     const multi = def.kind === 'multiselect';
     const values = asList(resolved.raw);
     const chips = values.map((v) => {
@@ -170,8 +175,7 @@ export function FieldEditor({
     const derived = def.from !== undefined ? def.from : null;
     const targetType = derived !== null ? derived.type : (def.target ?? null);
     const values = asList(resolved.raw).map(stripWikilink);
-    const targetOf = (id: string) =>
-      entries.find((e) => pathStem(e.path) === id) ?? null;
+    const targetOf = (id: string) => entries.find((e) => pathStem(e.path) === id) ?? null;
 
     // Entry.relationships holds bracket-stripped targets; frontmatter wants
     // them back as wikilinks, so every write re-wraps the whole list.
@@ -198,9 +202,7 @@ export function FieldEditor({
         if (wanted.has(id)) continue;
         const other = targetOf(id);
         if (other === null) continue;
-        const links = (other.relationships[derived.field] ?? []).filter(
-          (raw) => !pointsHere(raw),
-        );
+        const links = (other.relationships[derived.field] ?? []).filter((raw) => !pointsHere(raw));
         jobs.push(
           patchFrontmatter(other.path, {
             [derived.field]: links.length === 0 ? null : links.map(formatWikilink),
@@ -308,11 +310,7 @@ export function FieldEditor({
               <DatePicker
                 value={value}
                 onChange={(v) =>
-                  patch(
-                    def.kind === 'date'
-                      ? v.start
-                      : { start: v.start, end: v.end },
-                  )
+                  patch(def.kind === 'date' ? v.start : { start: v.start, end: v.end })
                 }
                 onClear={() => {
                   patch(null);
@@ -358,12 +356,11 @@ export function FieldEditor({
   }
 
   if (def.kind === 'files') {
-    const files =
-      Array.isArray(resolved.raw)
-        ? resolved.raw.map(String)
-        : typeof resolved.raw === 'string' && resolved.raw !== ''
-          ? [resolved.raw]
-          : [];
+    const files = Array.isArray(resolved.raw)
+      ? resolved.raw.map(String)
+      : typeof resolved.raw === 'string' && resolved.raw !== ''
+        ? [resolved.raw]
+        : [];
     return (
       <span className="flex min-w-0 flex-wrap items-center gap-1">
         {files.map((f) => (
@@ -420,7 +417,11 @@ export function FieldEditor({
         title="Computed from the vault — read only"
         className="inline-flex items-center gap-1.5 px-2 py-[3px] text-[12.5px] text-[var(--n-600)]"
       >
-        {resolved.display === '' ? <span className="text-[var(--n-400)]">—</span> : resolved.display}
+        {resolved.display === '' ? (
+          <span className="text-[var(--n-400)]">—</span>
+        ) : (
+          resolved.display
+        )}
         <Icon name="lock" size={10} color="var(--n-300)" />
       </span>
     );
@@ -471,7 +472,11 @@ export function FieldEditor({
       onClick={() => setDraft(resolved.display)}
       className="inline-flex max-w-full truncate rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
     >
-      {resolved.display === '' ? <span className="text-[var(--n-400)]">Empty</span> : resolved.display}
+      {resolved.display === '' ? (
+        <span className="text-[var(--n-400)]">Empty</span>
+      ) : (
+        resolved.display
+      )}
     </button>
   );
 }

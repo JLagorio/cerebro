@@ -49,14 +49,14 @@ export interface RollupCalcMeta {
 
 /** Every aggregation the engine can compute, with what it needs configured. */
 export const ROLLUP_CALCS: RollupCalcMeta[] = [
-  { calc: 'count',    label: 'Count',          needsProperty: false, numeric: false },
-  { calc: 'sum',      label: 'Sum',            needsProperty: true,  numeric: true },
-  { calc: 'avg',      label: 'Average',        needsProperty: true,  numeric: true },
-  { calc: 'min',      label: 'Min',            needsProperty: true,  numeric: true },
-  { calc: 'max',      label: 'Max',            needsProperty: true,  numeric: true },
-  { calc: 'earliest', label: 'Earliest',       needsProperty: true,  numeric: false },
-  { calc: 'latest',   label: 'Latest',         needsProperty: true,  numeric: false },
-  { calc: 'show',     label: 'Show values',    needsProperty: true,  numeric: false },
+  { calc: 'count', label: 'Count', needsProperty: false, numeric: false },
+  { calc: 'sum', label: 'Sum', needsProperty: true, numeric: true },
+  { calc: 'avg', label: 'Average', needsProperty: true, numeric: true },
+  { calc: 'min', label: 'Min', needsProperty: true, numeric: true },
+  { calc: 'max', label: 'Max', needsProperty: true, numeric: true },
+  { calc: 'earliest', label: 'Earliest', needsProperty: true, numeric: false },
+  { calc: 'latest', label: 'Latest', needsProperty: true, numeric: false },
+  { calc: 'show', label: 'Show values', needsProperty: true, numeric: false },
 ];
 
 export const rollupCalcMeta = (calc: RollupCalc | undefined): RollupCalcMeta =>
@@ -126,21 +126,55 @@ export interface PropertyKindMeta {
 }
 
 export const PROPERTY_KINDS: PropertyKindMeta[] = [
-  { kind: 'text',             label: 'Text',             icon: 'type',           computed: false, seed: '' },
-  { kind: 'number',           label: 'Number',           icon: 'hash',           computed: false, seed: '' },
-  { kind: 'select',           label: 'Select',           icon: 'circle-chevron-down', computed: false, seed: '' },
-  { kind: 'multiselect',      label: 'Multi-select',     icon: 'list-checks',    computed: false, seed: '', multi: true },
-  { kind: 'status',           label: 'Status',           icon: 'loader',         computed: false, seed: '' },
-  { kind: 'date',             label: 'Date',             icon: 'calendar',       computed: false, seed: '' },
-  { kind: 'daterange',        label: 'Date range',       icon: 'calendar-range', computed: false, seed: '', legacy: true },
-  { kind: 'person',           label: 'Person',           icon: 'circle-user',    computed: false, seed: '', multi: true },
-  { kind: 'files',            label: 'Files & media',    icon: 'paperclip',      computed: false, seed: '', multi: true },
-  { kind: 'checkbox',         label: 'Checkbox',         icon: 'square-check',   computed: false, seed: false },
-  { kind: 'url',              label: 'URL',              icon: 'link',           computed: false, seed: '' },
-  { kind: 'relation',         label: 'Relation',         icon: 'arrow-up-right', computed: false, seed: '', multi: true },
-  { kind: 'rollup',           label: 'Rollup',           icon: 'sigma',          computed: true,  seed: null },
-  { kind: 'created_time',     label: 'Created time',     icon: 'clock',          computed: true,  seed: null },
-  { kind: 'last_edited_time', label: 'Last edited time', icon: 'history',        computed: true,  seed: null },
+  { kind: 'text', label: 'Text', icon: 'type', computed: false, seed: '' },
+  { kind: 'number', label: 'Number', icon: 'hash', computed: false, seed: '' },
+  { kind: 'select', label: 'Select', icon: 'circle-chevron-down', computed: false, seed: '' },
+  {
+    kind: 'multiselect',
+    label: 'Multi-select',
+    icon: 'list-checks',
+    computed: false,
+    seed: '',
+    multi: true,
+  },
+  { kind: 'status', label: 'Status', icon: 'loader', computed: false, seed: '' },
+  { kind: 'date', label: 'Date', icon: 'calendar', computed: false, seed: '' },
+  {
+    kind: 'daterange',
+    label: 'Date range',
+    icon: 'calendar-range',
+    computed: false,
+    seed: '',
+    legacy: true,
+  },
+  { kind: 'person', label: 'Person', icon: 'circle-user', computed: false, seed: '', multi: true },
+  {
+    kind: 'files',
+    label: 'Files & media',
+    icon: 'paperclip',
+    computed: false,
+    seed: '',
+    multi: true,
+  },
+  { kind: 'checkbox', label: 'Checkbox', icon: 'square-check', computed: false, seed: false },
+  { kind: 'url', label: 'URL', icon: 'link', computed: false, seed: '' },
+  {
+    kind: 'relation',
+    label: 'Relation',
+    icon: 'arrow-up-right',
+    computed: false,
+    seed: '',
+    multi: true,
+  },
+  { kind: 'rollup', label: 'Rollup', icon: 'sigma', computed: true, seed: null },
+  { kind: 'created_time', label: 'Created time', icon: 'clock', computed: true, seed: null },
+  {
+    kind: 'last_edited_time',
+    label: 'Last edited time',
+    icon: 'history',
+    computed: true,
+    seed: null,
+  },
 ];
 
 /** The kinds offered in "+ Add property" — legacy kinds stay resolvable but
@@ -166,9 +200,7 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
   const label = def.name;
   switch (def.kind) {
     case 'text':
-      return isScalarString(value) || typeof value === 'number'
-        ? null
-        : `${label} must be text`;
+      return isScalarString(value) || typeof value === 'number' ? null : `${label} must be text`;
     case 'number':
       return typeof value === 'number' && Number.isFinite(value)
         ? null
@@ -320,9 +352,7 @@ export function validatePatch(
 // --- Rollups ---------------------------------------------------------------
 
 const asNumbers = (values: unknown[]): number[] =>
-  values
-    .map((v) => (typeof v === 'number' ? v : Number(v)))
-    .filter((n) => Number.isFinite(n));
+  values.map((v) => (typeof v === 'number' ? v : Number(v))).filter((n) => Number.isFinite(n));
 
 /**
  * Aggregate `def.property` across the entries referenced by this entry's

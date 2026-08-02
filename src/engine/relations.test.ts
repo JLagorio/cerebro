@@ -14,7 +14,11 @@ function fixture(): Entry[] {
       properties: {
         fields: {
           key_results: { kind: 'relation', target: 'Key result' },
-          kr_count: { kind: 'rollup', from: { type: 'Key result', field: 'objective' }, calculate: 'count' },
+          kr_count: {
+            kind: 'rollup',
+            from: { type: 'Key result', field: 'objective' },
+            calculate: 'count',
+          },
           avg_attainment: {
             kind: 'rollup',
             from: { type: 'Key result', field: 'objective' },

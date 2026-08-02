@@ -60,8 +60,7 @@ export function PropertyEditor({
     typeDef !== undefined && typeDef.statuses.length > 0 ? typeDef.statuses : DEFAULT_STATUSES;
   // setTypeStatuses wants the Type doc's path — resolve it the way the type
   // catalog does: the Type-typed entry whose title is the type's name.
-  const docPath =
-    entries.find((e) => e.type === 'Type' && e.title === sourceType)?.path ?? null;
+  const docPath = entries.find((e) => e.type === 'Type' && e.title === sourceType)?.path ?? null;
 
   const hasValues = def.kind === 'select' || def.kind === 'multiselect' || def.kind === 'status';
   const hasConfig = def.kind === 'rollup' || def.kind === 'number' || def.kind === 'relation';

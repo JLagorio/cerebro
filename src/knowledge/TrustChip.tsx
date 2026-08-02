@@ -40,7 +40,15 @@ export function TrustChip({
 }
 
 /** Lifecycle and staleness read as warnings, so they get their own chip. */
-export function FlagChip({ icon, label, tone }: { icon: string; label: string; tone: 'warn' | 'muted' }) {
+export function FlagChip({
+  icon,
+  label,
+  tone,
+}: {
+  icon: string;
+  label: string;
+  tone: 'warn' | 'muted';
+}) {
   const fg = tone === 'warn' ? 'var(--warn-700)' : 'var(--n-600)';
   const bg = tone === 'warn' ? 'var(--warn-50)' : 'var(--n-100)';
   return (

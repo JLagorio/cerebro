@@ -36,7 +36,8 @@ export { resolveBundleLink as resolveLink } from '@/engine/okf';
 // Order matters: code spans win over emphasis so `**` inside a fence-span
 // stays literal, and footnotes are matched before links so `[^id]` is never
 // read as a link with an empty target.
-const INLINE = /(`[^`]+`)|(\[\^([^\]\s]+)\](?!:))|(\[([^\]]+)\]\(([^)]+)\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
+const INLINE =
+  /(`[^`]+`)|(\[\^([^\]\s]+)\](?!:))|(\[([^\]]+)\]\(([^)]+)\))|(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
 
 interface InlineContext {
   fromPath: string;
@@ -54,7 +55,9 @@ function Citation({ id, ctx }: { id: string; ctx: InlineContext }) {
   return (
     <button
       type="button"
-      title={known ? (ctx.sources[index].title ?? ctx.sources[index].resource) : `No source "${id}"`}
+      title={
+        known ? (ctx.sources[index].title ?? ctx.sources[index].resource) : `No source "${id}"`
+      }
       onClick={known ? () => ctx.onCite?.(id) : undefined}
       className={[
         'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-[9.5px] font-semibold [font-family:var(--font-mono)]',
@@ -126,7 +129,11 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
 // --- Blocks ---------------------------------------------------------------
 
 const splitRow = (line: string): string[] =>
-  line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim());
+  line
+    .replace(/^\s*\|/, '')
+    .replace(/\|\s*$/, '')
+    .split('|')
+    .map((c) => c.trim());
 
 const isDivider = (line: string): boolean => /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(line);
 

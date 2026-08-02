@@ -82,9 +82,7 @@ export function NoteBodyEditor({
 
   if (failed) {
     return (
-      <p className="m-0 px-1 py-2 text-[13px] text-[var(--n-500)]">
-        This page couldn't be loaded.
-      </p>
+      <p className="m-0 px-1 py-2 text-[13px] text-[var(--n-500)]">This page couldn't be loaded.</p>
     );
   }
   if (loaded === null || loaded.path !== path) {
@@ -98,8 +96,8 @@ export function NoteBodyEditor({
           role="alert"
           className="mx-1 mb-2 rounded-lg border border-[var(--warn-500)] bg-[var(--warn-50)] px-3 py-2 text-[12.5px] text-[var(--warn-700)]"
         >
-          Parts of this file (raw HTML) can't be shown in the rich editor and will be lost if
-          you edit here.
+          Parts of this file (raw HTML) can't be shown in the rich editor and will be lost if you
+          edit here.
         </div>
       )}
       <LazyMarkdownEditor

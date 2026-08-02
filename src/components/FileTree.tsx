@@ -104,9 +104,7 @@ function buildTree(
   const promoteDocs = (nodes: TreeNode[]) => {
     for (const node of nodes) {
       if (node.kind === 'folder') {
-        const main = node.children.find(
-          (c) => c.kind === 'file' && c.name === node.name,
-        );
+        const main = node.children.find((c) => c.kind === 'file' && c.name === node.name);
         if (main !== undefined) {
           node.kind = 'doc';
           node.mainPath = main.path;
@@ -132,8 +130,7 @@ function buildTree(
         if (bi !== -1) return 1;
       }
       return (
-        Number(a.kind !== 'folder') - Number(b.kind !== 'folder') ||
-        a.label.localeCompare(b.label)
+        Number(a.kind !== 'folder') - Number(b.kind !== 'folder') || a.label.localeCompare(b.label)
       );
     });
     for (const n of nodes) sortNodes(n.children, n.path);
@@ -213,7 +210,10 @@ export function FileTree({
   // Drag & drop (M2.x): drag any row; drop INTO folders/docs (moves the item
   // and everything inside it) or BETWEEN siblings (manual reorder).
   const [dragPath, setDragPath] = useState<string | null>(null);
-  const [dropHint, setDropHint] = useState<{ path: string; mode: 'into' | 'before' | 'after' } | null>(null);
+  const [dropHint, setDropHint] = useState<{
+    path: string;
+    mode: 'into' | 'before' | 'after';
+  } | null>(null);
 
   /** Sibling list holding `dir`'s children in current display order. */
   const siblingsOf = (dir: string): TreeNode[] | null => {
@@ -277,8 +277,14 @@ export function FileTree({
     const y = (e.clientY - rect.top) / Math.max(rect.height, 1);
     const mode: 'into' | 'before' | 'after' =
       node.kind === 'file'
-        ? y < 0.5 ? 'before' : 'after'
-        : y < 0.25 ? 'before' : y > 0.75 ? 'after' : 'into';
+        ? y < 0.5
+          ? 'before'
+          : 'after'
+        : y < 0.25
+          ? 'before'
+          : y > 0.75
+            ? 'after'
+            : 'into';
     setDropHint((prev) =>
       prev?.path === node.path && prev.mode === mode ? prev : { path: node.path, mode },
     );
@@ -352,7 +358,11 @@ export function FileTree({
       closeDialog();
     } catch {
       const verb =
-        dialog.mode === 'rename' ? 'rename' : dialog.mode === 'new-page' ? 'create page' : 'create folder';
+        dialog.mode === 'rename'
+          ? 'rename'
+          : dialog.mode === 'new-page'
+            ? 'create page'
+            : 'create folder';
       toast(`Couldn't ${verb}`);
     } finally {
       setSubmitting(false);
@@ -374,10 +384,13 @@ export function FileTree({
   };
 
   const menuItems = (node: TreeNode | null): ContextMenuItem[] => {
-    const dir =
-      node === null ? root : node.kind === 'file' ? parentDir(node.path) : node.path;
+    const dir = node === null ? root : node.kind === 'file' ? parentDir(node.path) : node.path;
     const items: ContextMenuItem[] = [
-      { icon: 'file-plus', label: 'New page', onSelect: () => openDialog({ mode: 'new-page', dir }) },
+      {
+        icon: 'file-plus',
+        label: 'New page',
+        onSelect: () => openDialog({ mode: 'new-page', dir }),
+      },
       {
         icon: 'folder-plus',
         label: 'New folder',
@@ -449,7 +462,9 @@ export function FileTree({
         className={[
           'group flex min-w-0 items-center gap-1 rounded-md pr-1',
           active ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-100)]',
-          hint === 'into' ? 'bg-[var(--cortex-50)] shadow-[inset_0_0_0_1.5px_var(--cortex-500)]' : '',
+          hint === 'into'
+            ? 'bg-[var(--cortex-50)] shadow-[inset_0_0_0_1.5px_var(--cortex-500)]'
+            : '',
           hint === 'before' ? 'shadow-[inset_0_2px_0_var(--cortex-500)]' : '',
           hint === 'after' ? 'shadow-[inset_0_-2px_0_var(--cortex-500)]' : '',
           dragPath === node.path ? 'opacity-50' : '',
@@ -469,10 +484,9 @@ export function FileTree({
       const active =
         (node.kind === 'file' && node.path === activePath) ||
         (node.kind === 'doc' && node.mainPath === activePath);
-      const labelClass = [
-        'truncate',
-        active ? 'font-medium text-[var(--cortex-600)]' : '',
-      ].join(' ');
+      const labelClass = ['truncate', active ? 'font-medium text-[var(--cortex-600)]' : ''].join(
+        ' ',
+      );
 
       return (
         <li key={node.path} className="list-none">
@@ -488,7 +502,11 @@ export function FileTree({
                 onClick={() => toggleFolder(node.path)}
                 className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-[13px] text-[var(--n-800)]"
               >
-                <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} color="var(--n-400)" />
+                <Icon
+                  name={isOpen ? 'chevron-down' : 'chevron-right'}
+                  size={13}
+                  color="var(--n-400)"
+                />
                 <Icon name={isOpen ? 'folder-open' : 'folder'} size={14} color="var(--n-500)" />
                 <span className="truncate">{node.label}</span>
               </button>,
@@ -514,7 +532,11 @@ export function FileTree({
                   onClick={() => node.mainPath !== undefined && onOpen(node.mainPath)}
                   className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent py-[5px] pr-1 text-left text-[13px] text-[var(--n-700)]"
                 >
-                  <Icon name="file-stack" size={14} color={active ? 'var(--cortex-500)' : 'var(--n-500)'} />
+                  <Icon
+                    name="file-stack"
+                    size={14}
+                    color={active ? 'var(--cortex-500)' : 'var(--n-500)'}
+                  />
                   <span className={labelClass}>{node.label}</span>
                 </button>
               </span>,

@@ -12,7 +12,10 @@ const parse = (yaml: string) => parseListYaml('v', yaml).definition.views[0].pre
 describe('band vs nest levels', () => {
   const chain: GroupSpec[] = [
     { field: 'status' },
-    { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+    {
+      field: 'objective',
+      descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+    },
     { field: 'owner' },
   ];
 
@@ -31,14 +34,21 @@ describe('band vs nest levels', () => {
 
 describe('grouping chain parse', () => {
   it('reads a relation level from `relation:`', () => {
-    const p = parse('presentation:\n  group:\n    - relation: { type: Key result, field: objective }\n');
+    const p = parse(
+      'presentation:\n  group:\n    - relation: { type: Key result, field: objective }\n',
+    );
     expect(p.group).toEqual([
-      { field: 'objective', descend: { direction: 'reverse', type: 'Key result', field: 'objective' } },
+      {
+        field: 'objective',
+        descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+      },
     ]);
   });
 
   it('reads a relation level from `descend:` too', () => {
-    const p = parse('presentation:\n  group:\n    - descend: { direction: forward, field: deliverables }\n');
+    const p = parse(
+      'presentation:\n  group:\n    - descend: { direction: forward, field: deliverables }\n',
+    );
     expect(nestLevels(p.group)).toEqual([{ direction: 'forward', field: 'deliverables' }]);
   });
 
@@ -116,7 +126,10 @@ describe('grouping chain round trip', () => {
       ].join('\n'),
     );
     const yaml = serializeList({
-      name: 'n', icon: null, color: null, order: null,
+      name: 'n',
+      icon: null,
+      color: null,
+      order: null,
       source: { type: 'Objective', project: null },
       views: [{ id: 'v', name: 'View', icon: null, filters: null, presentation: original }],
     });

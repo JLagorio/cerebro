@@ -12,7 +12,10 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry } from '@/engine/types';
 import { KnowledgeCommit } from '@/knowledge/KnowledgeCommit';
 import { RelatedKnowledge } from '@/knowledge/RelatedKnowledge';
+import { EntityDossier } from '@/knowledge/EntityDossier';
+import { conceptsAbout, listConcepts } from '@/engine/okf';
 import { setNoteTitle } from '@/lib/ipc';
+import { todayIso } from '@/lib/templates';
 import { augmentDocPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
@@ -23,9 +26,20 @@ import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore
  * the base can give it back. The doc side panel carried this as a tab;
  * records open here instead now, so the loop follows them. Collapsed until
  * asked — opening it IS the ask (M8.3: nothing speaks first).
+ *
+ * Which surface answers is capability-gated, not type-gated (M14.2): when the
+ * base holds concepts ABOUT this entry itself, the entry is a subject and gets
+ * its full dossier — believed, unsettled, read-from, retired. Otherwise the
+ * wide-net related list, which is the right shape for a record the base only
+ * knows *around* (via its project or links). Projects became ordinary records
+ * (M12.5 aftermath), so the dossier that lived on the project page rides the
+ * record panel now — no type name routes specially.
  */
 function KnowledgeSection({ entry }: { entry: Entry }) {
   const [open, setOpen] = useState(false);
+  const entries = useVaultStore((s) => s.entries);
+  const isSubject =
+    open && conceptsAbout(entry.path, listConcepts(entries, todayIso()), entries).length > 0;
   return (
     <section data-testid="detail-knowledge" className="mb-3.5 border-t border-[var(--n-100)] pt-2">
       <button
@@ -42,12 +56,16 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
         <div className="flex flex-col gap-4 pb-1 pt-2">
           <KnowledgeCommit entry={entry} variant="panel" />
           <div className="border-t border-[var(--n-100)] pt-3.5">
-            <RelatedKnowledge
-              entry={entry}
-              variant="panel"
-              askPrompt={augmentDocPrompt(entry.path, entry.title)}
-              askLabel="What am I missing?"
-            />
+            {isSubject ? (
+              <EntityDossier entry={entry} variant="panel" />
+            ) : (
+              <RelatedKnowledge
+                entry={entry}
+                variant="panel"
+                askPrompt={augmentDocPrompt(entry.path, entry.title)}
+                askLabel="What am I missing?"
+              />
+            )}
           </div>
         </div>
       )}
@@ -100,8 +118,7 @@ export function DetailPanel() {
     entry.project === null
       ? null
       : entry.project.slice(0, Math.max(entry.project.lastIndexOf('/'), 0));
-  const onItsCollection =
-    selection.kind === 'collection' && selection.folder === containerFolder;
+  const onItsCollection = selection.kind === 'collection' && selection.folder === containerFolder;
   const container =
     containerFolder !== null && !onItsCollection
       ? (entries.find((e) => e.path === entry.project) ?? null)
@@ -164,11 +181,18 @@ export function DetailPanel() {
       <header className="flex items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
         {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
             panel, the table, QuickOpen, and the assistant's transcript. */}
-        <span className="inline-flex" style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}>
+        <span
+          className="inline-flex"
+          style={{ color: typeStyle(entry.type, schema).color ?? 'var(--n-500)' }}
+        >
           <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
         <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
-        {key !== '' && <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">{key}</span>}
+        {key !== '' && (
+          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">
+            {key}
+          </span>
+        )}
         {/* M9.3/M12.5: opening a record no longer drags you to its container,
             so the container becomes something you press rather than something
             that happens to you. Hidden when you are already standing on it. */}
@@ -216,7 +240,9 @@ export function DetailPanel() {
             and related-concepts view, collapsed until asked (M8.3's rule:
             the assistant never speaks first). */}
         <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">Description</div>
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+          Description
+        </div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
             path so switching items reloads cleanly. */}
         <NoteBodyEditor

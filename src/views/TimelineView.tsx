@@ -73,9 +73,7 @@ export function TimelineView({
   );
 
   const axis: Span = useMemo(() => {
-    const spans = entries
-      .map((e) => spanOf(e, dateField))
-      .filter((s): s is Span => s !== null);
+    const spans = entries.map((e) => spanOf(e, dateField)).filter((s): s is Span => s !== null);
     return axisSpan(spanBounds(spans), zoom, today);
   }, [entries, dateField, zoom, today]);
 
@@ -89,7 +87,10 @@ export function TimelineView({
 
   if (dateField === null) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center" data-testid="timeline-view">
+      <div
+        className="flex min-h-0 min-w-0 flex-1 items-center justify-center"
+        data-testid="timeline-view"
+      >
         <EmptyState
           icon="gantt-chart"
           title="Nothing here carries a date"
@@ -110,9 +111,7 @@ export function TimelineView({
         <ZoomControl zoom={zoom} onChange={setZoom} />
         <span className="flex-1" />
         {undated.length > 0 && (
-          <span className="text-[11.5px] text-[var(--n-500)]">
-            {undated.length} without a date
-          </span>
+          <span className="text-[11.5px] text-[var(--n-500)]">{undated.length} without a date</span>
         )}
       </div>
 
@@ -194,7 +193,11 @@ export function TimelineView({
 
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">
-          <EmptyState icon="gantt-chart" title="No records yet" description="Dated records appear here as bars." />
+          <EmptyState
+            icon="gantt-chart"
+            title="No records yet"
+            description="Dated records appear here as bars."
+          />
         </div>
       )}
     </div>

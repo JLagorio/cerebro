@@ -91,7 +91,7 @@ describe('useJobRunner stream ownership', () => {
     expect(useUiStore.getState().agentBusy).toBe(false);
   });
 
-  it('a late Done after a timeout takeover drops the claim without touching the chat\'s busy flag', async () => {
+  it("a late Done after a timeout takeover drops the claim without touching the chat's busy flag", async () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(useUiStore.getState().learningPath).toBe('items/note.md');
@@ -330,7 +330,8 @@ describe('useJobRunner shell gating', () => {
       folder: 'records/agents',
       title,
       type: 'Agent',
-      properties: tools === undefined ? { schedule: 'daily 09:00' } : { schedule: 'daily 09:00', tools },
+      properties:
+        tools === undefined ? { schedule: 'daily 09:00' } : { schedule: 'daily 09:00', tools },
     });
 
   beforeEach(() => {

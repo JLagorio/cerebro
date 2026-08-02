@@ -97,7 +97,9 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto w-full max-w-[640px] px-8 py-8">
-      <h1 className="mb-6 text-[18px] font-semibold tracking-[-0.01em] text-[var(--n-900)]">Settings</h1>
+      <h1 className="mb-6 text-[18px] font-semibold tracking-[-0.01em] text-[var(--n-900)]">
+        Settings
+      </h1>
       <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
         <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Vault</h2>
         <p className="mb-3 text-[12.5px] text-[var(--n-500)]">
@@ -138,11 +140,10 @@ export function SettingsPage() {
       <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
         <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Assistant</h2>
         <p className="mb-4 text-[12.5px] leading-[18px] text-[var(--n-500)]">
-          What the assistant may change follows from where it is writing, not from a mode you
-          pick each time: it owns{' '}
-          <span className="[font-family:var(--font-mono)]">knowledge/</span> and writes there
-          directly, and it reaches everything else through cerebro's own tools. Shell access is
-          the one thing a folder boundary cannot express.
+          What the assistant may change follows from where it is writing, not from a mode you pick
+          each time: it owns <span className="[font-family:var(--font-mono)]">knowledge/</span> and
+          writes there directly, and it reaches everything else through cerebro's own tools. Shell
+          access is the one thing a folder boundary cannot express.
         </p>
         <SettingRow
           label="Shell access"
@@ -181,8 +182,9 @@ export function SettingsPage() {
       <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
         <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Knowledge</h2>
         <p className="mb-4 text-[12.5px] text-[var(--n-500)]">
-          The AI knowledge base in <span className="[font-family:var(--font-mono)]">knowledge/</span> is
-          written by the agent and read-only here. Verifying a concept records who confirmed it.
+          The AI knowledge base in{' '}
+          <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the agent
+          and read-only here. Verifying a concept records who confirmed it.
         </p>
         <SettingRow
           label="Learn on its own"
@@ -202,9 +204,9 @@ export function SettingsPage() {
             <div className="text-[13px] font-medium text-[var(--n-800)]">Your identity</div>
             <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
               Stamped as{' '}
-              <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when you
-              verify. The <span className="[font-family:var(--font-mono)]">human:</span> prefix is what
-              separates your review from a machine's.
+              <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when
+              you verify. The <span className="[font-family:var(--font-mono)]">human:</span> prefix
+              is what separates your review from a machine's.
             </div>
           </div>
           <Input

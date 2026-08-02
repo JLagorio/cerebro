@@ -1,6 +1,15 @@
 import React from 'react';
 
-const PALETTE = ['#7BA8E0', '#7CC5A8', '#D9A46B', '#C08FD6', '#E08F9F', '#77BFCF', '#A3B06F', '#9099D9'];
+const PALETTE = [
+  '#7BA8E0',
+  '#7CC5A8',
+  '#D9A46B',
+  '#C08FD6',
+  '#E08F9F',
+  '#77BFCF',
+  '#A3B06F',
+  '#9099D9',
+];
 const hash = (s: string): number => {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
@@ -48,7 +57,16 @@ export function Avatar({ name = '?', size = 24, src, style, className = '' }: Av
     verticalAlign: 'middle',
     ...style,
   };
-  if (src) return <img src={src} alt={name} title={name} className={className} style={{ ...base, objectFit: 'cover' }} />;
+  if (src)
+    return (
+      <img
+        src={src}
+        alt={name}
+        title={name}
+        className={className}
+        style={{ ...base, objectFit: 'cover' }}
+      />
+    );
   return (
     <span
       title={name}
@@ -69,13 +87,24 @@ export function Avatar({ name = '?', size = 24, src, style, className = '' }: Av
   );
 }
 
-export function AvatarGroup({ names = [], size = 24, max = 3, style, className = '' }: AvatarGroupProps) {
+export function AvatarGroup({
+  names = [],
+  size = 24,
+  max = 3,
+  style,
+  className = '',
+}: AvatarGroupProps) {
   const shown = names.slice(0, max);
   const rest = names.length - shown.length;
   return (
     <span className={className} style={{ display: 'inline-flex', alignItems: 'center', ...style }}>
       {shown.map((n, i) => (
-        <Avatar key={n + i} name={n} size={size} style={{ marginLeft: i ? -size * 0.3 : 0, boxShadow: '0 0 0 2px var(--n-0)' }} />
+        <Avatar
+          key={n + i}
+          name={n}
+          size={size}
+          style={{ marginLeft: i ? -size * 0.3 : 0, boxShadow: '0 0 0 2px var(--n-0)' }}
+        />
       ))}
       {rest > 0 ? (
         <span

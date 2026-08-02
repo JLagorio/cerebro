@@ -17,3 +17,6 @@ test-results/
 playwright-report/
 
 docs/
+
+# vitest coverage output (M14.4)
+coverage/

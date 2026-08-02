@@ -79,20 +79,17 @@ pub fn file_diff(ws: &GitWorkspaceInfo, vault_relative: &str) -> Result<String, 
     if !command::succeeds(&dir, &["ls-files", "--error-unmatch", &git_path]) {
         // /dev/null against the file gives a real unified diff for something
         // git does not track yet.
-        return command::run(
-            &dir,
-            &["diff", "--no-index", "--", "/dev/null", &git_path],
-        )
-        .or_else(|f| {
-            // --no-index exits 1 when there ARE differences, which is the
-            // normal case here — the stdout it produced is the diff.
-            if f.code == Some(1) {
-                Ok(String::new())
-            } else {
-                Err(f.message())
-            }
-        })
-        .or_else(|_: String| Ok(String::new()));
+        return command::run(&dir, &["diff", "--no-index", "--", "/dev/null", &git_path])
+            .or_else(|f| {
+                // --no-index exits 1 when there ARE differences, which is the
+                // normal case here — the stdout it produced is the diff.
+                if f.code == Some(1) {
+                    Ok(String::new())
+                } else {
+                    Err(f.message())
+                }
+            })
+            .or_else(|_: String| Ok(String::new()));
     }
 
     command::run_str(&dir, &["diff", "HEAD", "--", &git_path])
@@ -114,9 +111,7 @@ pub fn file_diff_at_commit(
     command::run_str(&ws.dir(), &["diff", &range, "--", &git_path])
         // A root commit has no parent, so `^!` fails; show it against the
         // empty tree instead of reporting an error.
-        .or_else(|_| {
-            command::run_str(&ws.dir(), &["show", "--format=", &commit, "--", &git_path])
-        })
+        .or_else(|_| command::run_str(&ws.dir(), &["show", "--format=", &commit, "--", &git_path]))
 }
 
 /// Everything one commit changed.

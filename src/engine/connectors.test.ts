@@ -67,9 +67,9 @@ describe('stdio approval fingerprints (PR #5 security review)', () => {
     // the SAME strings — if either side drifts, its own suite fails before
     // the two can disagree at runtime.
     expect(stdioFingerprint(spec())).toBe('["linear","npx",["-y","@linear/mcp"],[["KEY","v"]]]');
-    expect(
-      stdioFingerprint(spec({ name: 'a', command: 'b', args: [], extra: {} })),
-    ).toBe('["a","b",[],[]]');
+    expect(stdioFingerprint(spec({ name: 'a', command: 'b', args: [], extra: {} }))).toBe(
+      '["a","b",[],[]]',
+    );
   });
 
   it('is env-order independent, and null for http or an env it cannot cover', () => {

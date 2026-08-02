@@ -105,7 +105,11 @@ export function childLink(
 }
 
 /** The type a hierarchy level produces, for labelling "Add <type>". */
-export function childTypeOf(spec: ChildrenSpec, parentType: string | null, schema: Schema): string | null {
+export function childTypeOf(
+  spec: ChildrenSpec,
+  parentType: string | null,
+  schema: Schema,
+): string | null {
   if (spec.direction === 'reverse') return spec.type;
   const def = parentType === null ? undefined : schema.types.get(parentType);
   return def?.fields.find((f) => f.name === spec.field)?.target ?? null;

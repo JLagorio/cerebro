@@ -22,17 +22,49 @@ describe('parseSchedule', () => {
     expect(parseSchedule('hourly')).toEqual({ kind: 'hourly' });
     expect(parseSchedule('daily 09:00')).toEqual({ kind: 'daily', hour: 9, minute: 0 });
     expect(parseSchedule('Weekdays 8:30')).toEqual({ kind: 'weekdays', hour: 8, minute: 30 });
-    expect(parseSchedule('weekly fri 17:00')).toEqual({ kind: 'weekly', day: 5, hour: 17, minute: 0 });
-    expect(parseSchedule('weekly monday 09:15')).toEqual({ kind: 'weekly', day: 1, hour: 9, minute: 15 });
+    expect(parseSchedule('weekly fri 17:00')).toEqual({
+      kind: 'weekly',
+      day: 5,
+      hour: 17,
+      minute: 0,
+    });
+    expect(parseSchedule('weekly monday 09:15')).toEqual({
+      kind: 'weekly',
+      day: 1,
+      hour: 9,
+      minute: 15,
+    });
   });
 
   it('resolves full day names to their own day — saturday is not sunday (PR #5 review)', () => {
-    expect(parseSchedule('weekly saturday 10:00')).toEqual({ kind: 'weekly', day: 6, hour: 10, minute: 0 });
-    expect(parseSchedule('weekly sunday 08:00')).toEqual({ kind: 'weekly', day: 0, hour: 8, minute: 0 });
+    expect(parseSchedule('weekly saturday 10:00')).toEqual({
+      kind: 'weekly',
+      day: 6,
+      hour: 10,
+      minute: 0,
+    });
+    expect(parseSchedule('weekly sunday 08:00')).toEqual({
+      kind: 'weekly',
+      day: 0,
+      hour: 8,
+      minute: 0,
+    });
   });
 
   it('rejects everything malformed rather than guessing', () => {
-    for (const bad of [undefined, null, 42, '', 'sometimes', 'daily', 'daily 25:00', 'daily 9:60', 'weekly 09:00', 'weekly noday 09:00', 'monthly 1 09:00']) {
+    for (const bad of [
+      undefined,
+      null,
+      42,
+      '',
+      'sometimes',
+      'daily',
+      'daily 25:00',
+      'daily 9:60',
+      'weekly 09:00',
+      'weekly noday 09:00',
+      'monthly 1 09:00',
+    ]) {
       expect(parseSchedule(bad)).toBeNull();
     }
   });
@@ -49,27 +81,39 @@ describe('lastFireKey', () => {
 
   it('daily fires today once the time has passed, else yesterday', () => {
     expect(lastFireKey({ kind: 'daily', hour: 9, minute: 0 }, friday1030)).toBe('2026-07-31 09:00');
-    expect(lastFireKey({ kind: 'daily', hour: 17, minute: 0 }, friday1030)).toBe('2026-07-30 17:00');
+    expect(lastFireKey({ kind: 'daily', hour: 17, minute: 0 }, friday1030)).toBe(
+      '2026-07-30 17:00',
+    );
   });
 
   it('weekdays skips back over the weekend', () => {
     const monday0800 = new Date(2026, 7, 3, 8, 0); // Mon Aug 3, before 09:00
-    expect(lastFireKey({ kind: 'weekdays', hour: 9, minute: 0 }, monday0800)).toBe('2026-07-31 09:00');
+    expect(lastFireKey({ kind: 'weekdays', hour: 9, minute: 0 }, monday0800)).toBe(
+      '2026-07-31 09:00',
+    );
   });
 
   it('weekly walks back to the scheduled day', () => {
-    expect(lastFireKey({ kind: 'weekly', day: 5, hour: 17, minute: 0 }, friday1030)).toBe('2026-07-24 17:00');
-    expect(lastFireKey({ kind: 'weekly', day: 1, hour: 9, minute: 0 }, friday1030)).toBe('2026-07-27 09:00');
+    expect(lastFireKey({ kind: 'weekly', day: 5, hour: 17, minute: 0 }, friday1030)).toBe(
+      '2026-07-24 17:00',
+    );
+    expect(lastFireKey({ kind: 'weekly', day: 1, hour: 9, minute: 0 }, friday1030)).toBe(
+      '2026-07-27 09:00',
+    );
   });
 
   it('weekly on the scheduled day AFTER the time fires today, not last week', () => {
     const friday1800 = new Date(2026, 6, 31, 18, 0);
-    expect(lastFireKey({ kind: 'weekly', day: 5, hour: 17, minute: 0 }, friday1800)).toBe('2026-07-31 17:00');
+    expect(lastFireKey({ kind: 'weekly', day: 5, hour: 17, minute: 0 }, friday1800)).toBe(
+      '2026-07-31 17:00',
+    );
   });
 
   it('weekdays observed FROM a weekend walks back to Friday', () => {
     const saturday1000 = new Date(2026, 7, 1, 10, 0); // Sat Aug 1
-    expect(lastFireKey({ kind: 'weekdays', hour: 9, minute: 0 }, saturday1000)).toBe('2026-07-31 09:00');
+    expect(lastFireKey({ kind: 'weekdays', hour: 9, minute: 0 }, saturday1000)).toBe(
+      '2026-07-31 09:00',
+    );
   });
 
   it("a dated key's HH:MM always equals the schedule's — DST normalization must never leak in", () => {
@@ -82,7 +126,9 @@ describe('lastFireKey', () => {
         const now = new Date(2026, 2, day, hour, 45);
         expect(lastFireKey({ kind: 'daily', hour: 2, minute: 30 }, now)).toMatch(/ 02:30$/);
         expect(lastFireKey({ kind: 'weekdays', hour: 2, minute: 30 }, now)).toMatch(/ 02:30$/);
-        expect(lastFireKey({ kind: 'weekly', day: 0, hour: 2, minute: 30 }, now)).toMatch(/ 02:30$/);
+        expect(lastFireKey({ kind: 'weekly', day: 0, hour: 2, minute: 30 }, now)).toMatch(
+          / 02:30$/,
+        );
       }
     }
   });
@@ -124,7 +170,12 @@ describe('jobQueue', () => {
   it('ranks a filed capture first, then scheduled, then maintenance', () => {
     const entries = [
       skill('Digest', 'daily 09:00'),
-      makeEntry({ path: 'inbox/capture.md', title: 'Capture', snippet: 'notes', modifiedAt: '2026-07-31T08:00:00Z' }),
+      makeEntry({
+        path: 'inbox/capture.md',
+        title: 'Capture',
+        snippet: 'notes',
+        modifiedAt: '2026-07-31T08:00:00Z',
+      }),
     ];
     const jobs = jobQueue(entries, listConcepts(entries, TODAY), {
       ...EMPTY,
@@ -138,9 +189,19 @@ describe('jobQueue', () => {
     // The full RANK, pinned: mutating any tier's number fails here. The
     // runner takes jobQueue(...)[0], so a wrong order is a wrong next run.
     const entries = [
-      makeEntry({ path: 'inbox/new.md', title: 'New', snippet: 'x', modifiedAt: '2026-07-31T08:00:00Z' }),
+      makeEntry({
+        path: 'inbox/new.md',
+        title: 'New',
+        snippet: 'x',
+        modifiedAt: '2026-07-31T08:00:00Z',
+      }),
       skill('Digest', 'daily 09:00'),
-      makeEntry({ path: 'docs/edited.md', title: 'Edited', snippet: 'x', modifiedAt: '2026-07-31T09:00:00Z' }),
+      makeEntry({
+        path: 'docs/edited.md',
+        title: 'Edited',
+        snippet: 'x',
+        modifiedAt: '2026-07-31T09:00:00Z',
+      }),
       makeEntry({
         path: 'knowledge/systems/cites-edited.md',
         title: 'Cites edited',
@@ -201,7 +262,12 @@ describe('jobQueue', () => {
         properties: { schedule: 'daily 09:00' },
       }),
       skill('Digest', 'daily 09:00'),
-      makeEntry({ path: 'docs/edited.md', title: 'Edited', snippet: 'x', modifiedAt: '2026-07-31T09:00:00Z' }),
+      makeEntry({
+        path: 'docs/edited.md',
+        title: 'Edited',
+        snippet: 'x',
+        modifiedAt: '2026-07-31T09:00:00Z',
+      }),
       makeEntry({
         path: 'knowledge/systems/cites-edited.md',
         title: 'Cites edited',

@@ -30,17 +30,23 @@ export function CollectionDialog({
     if (trimmed === '' || busy) return;
     setBusy(true);
     void (async () => {
+      // The actions toast their own failures and return falsy (store-layer
+      // invariant). The dialog closes only on success — closing on failure
+      // would discard the name the user just typed along with the reason it
+      // never saved (M14.8).
+      let ok: boolean;
       if (state.mode === 'new') {
         const folder = await createCollection(trimmed);
+        ok = folder !== null;
         if (folder !== null) onCreated?.(folder);
       } else {
-        await updateCollection(state.collection, {
+        ok = await updateCollection(state.collection, {
           ...state.collection.definition,
           name: trimmed,
         });
       }
       setBusy(false);
-      onClose();
+      if (ok) onClose();
     })();
   };
 

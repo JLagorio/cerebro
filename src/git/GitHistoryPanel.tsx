@@ -56,7 +56,6 @@ export function GitHistoryPanel({ path }: { path: string }) {
           </div>
         ))}
       </div>
-
     </div>
   );
 }

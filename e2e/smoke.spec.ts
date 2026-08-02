@@ -13,7 +13,9 @@ async function readMockFile(page: Page, path: string): Promise<string> {
   return text;
 }
 
-test('smoke: boot demo vault, list, board drag writes disk, rename, quick open', async ({ page }) => {
+test('smoke: boot demo vault, list, board drag writes disk, rename, quick open', async ({
+  page,
+}) => {
   // -- Boot -----------------------------------------------------------
   // The background distiller (M8.6) is off for tests that are not about it:
   // a reader that fires four seconds in would rescan the vault mid-assertion.
@@ -84,11 +86,9 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
   await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
   await page.mouse.down();
   // Small first move clears dnd-kit's activation distance constraint.
-  await page.mouse.move(
-    cardBox.x + cardBox.width / 2 + 12,
-    cardBox.y + cardBox.height / 2 + 12,
-    { steps: 4 },
-  );
+  await page.mouse.move(cardBox.x + cardBox.width / 2 + 12, cardBox.y + cardBox.height / 2 + 12, {
+    steps: 4,
+  });
   await page.mouse.move(
     targetBox.x + targetBox.width / 2,
     targetBox.y + Math.min(targetBox.height - 8, 160),
@@ -97,9 +97,7 @@ test('smoke: boot demo vault, list, board drag writes disk, rename, quick open',
   await page.mouse.up();
 
   // -- Card renders in the target column -------------------------------
-  const movedCard = targetColumn.locator(
-    `[data-testid="board-card"][data-path="${cardPath}"]`,
-  );
+  const movedCard = targetColumn.locator(`[data-testid="board-card"][data-path="${cardPath}"]`);
   await expect(movedCard).toBeVisible();
 
   // -- The mock filesystem was written (disk-first write) --------------
@@ -217,10 +215,7 @@ test('smoke v2: view tabs persist edits, page created in folder, BlockNote round
   // -- Navigate away and back through the Docs rail (disk round trip) -----
   await page.getByRole('button', { name: 'Home' }).click();
   await page.getByRole('button', { name: 'Docs' }).click();
-  const recent = page
-    .getByTestId('recent-doc')
-    .filter({ hasText: 'Smoke Notes' })
-    .first();
+  const recent = page.getByTestId('recent-doc').filter({ hasText: 'Smoke Notes' }).first();
   await expect(recent).toBeVisible();
   await recent.click();
   await expect(page.getByTestId('doc-title')).toHaveText('Smoke Notes');

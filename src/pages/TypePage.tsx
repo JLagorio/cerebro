@@ -9,21 +9,9 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
-import {
-  clonePresentation,
-  layoutLabel,
-  newView,
-  nextViewId,
-  toggleSort,
-} from '@/engine/views';
+import { clonePresentation, layoutLabel, newView, nextViewId, toggleSort } from '@/engine/views';
 import { listTypes, typeViews, type TypeListing } from '@/engine/typeCatalog';
-import type {
-  FieldDef,
-  Presentation,
-  Selection,
-  ViewDefinition,
-  ViewType,
-} from '@/engine/types';
+import type { FieldDef, Presentation, Selection, ViewDefinition, ViewType } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
@@ -145,7 +133,12 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const createView = (name: string, type: ViewType) => {
     // Seeded from the tab you are on, and written together with the current
     // tabs — which also materializes the default view the first time.
-    const seeded = newView(name, type, savedViews.map((v) => v.id), presentation);
+    const seeded = newView(
+      name,
+      type,
+      savedViews.map((v) => v.id),
+      presentation,
+    );
     void (async () => {
       if (await setTypeViews(listing, [...savedViews, seeded])) openTab(seeded.id);
     })();
@@ -166,7 +159,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     const name = `${source.name} copy`;
     const copy: ViewDefinition = {
       ...source,
-      id: nextViewId(name, savedViews.map((v) => v.id)),
+      id: nextViewId(
+        name,
+        savedViews.map((v) => v.id),
+      ),
       name,
       filters:
         source.filters === null
@@ -283,9 +279,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                     color: listing.color,
                     order: null,
                     source: { type: listing.name, project: null },
-                    views: savedViews.map((v) =>
-                      v.id === activeId ? { ...v, presentation } : v,
-                    ),
+                    views: savedViews.map((v) => (v.id === activeId ? { ...v, presentation } : v)),
                   }}
                   viewId={activeId}
                   fields={typeFields}
@@ -354,9 +348,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           }
         />
       </div>
-      {dialog === 'style' && (
-        <TypeStyleDialog listing={listing} onClose={() => setDialog(null)} />
-      )}
+      {dialog === 'style' && <TypeStyleDialog listing={listing} onClose={() => setDialog(null)} />}
       {dialog === 'rename' && (
         <RenameTypeDialog listing={listing} onClose={() => setDialog(null)} />
       )}

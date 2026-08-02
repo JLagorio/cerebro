@@ -44,7 +44,10 @@ pub fn ensure_gitignore(dir: &Path) -> Result<(), String> {
     // A config already swept into the index keeps getting committed no
     // matter what .gitignore says — untrack it so the NEXT checkpoint stops
     // carrying it. Best-effort: not a repo yet, or nothing tracked, is fine.
-    let _ = command::run_str(dir, &["rm", "-r", "--cached", "--ignore-unmatch", "-q", ".cerebro"]);
+    let _ = command::run_str(
+        dir,
+        &["rm", "-r", "--cached", "--ignore-unmatch", "-q", ".cerebro"],
+    );
     Ok(())
 }
 
@@ -158,7 +161,10 @@ mod tests {
         assert!(content.contains(".cerebro/"));
         // Untracked from the index: the next commit no longer carries it.
         let tracked = command::run_str(&dir, &["ls-files", "--cached", ".cerebro"]).unwrap();
-        assert!(tracked.trim().is_empty(), "credentials must leave the index: {tracked}");
+        assert!(
+            tracked.trim().is_empty(),
+            "credentials must leave the index: {tracked}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

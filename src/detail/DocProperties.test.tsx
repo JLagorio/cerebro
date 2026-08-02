@@ -111,9 +111,6 @@ describe('DocProperties', () => {
     fireEvent.change(screen.getByLabelText('Property name'), { target: { value: 'source' } });
     fireEvent.keyDown(screen.getByLabelText('Property name'), { key: 'Enter' });
     expect(patchFrontmatter).not.toHaveBeenCalled();
-    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain(
-      'Property already exists',
-    );
+    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Property already exists');
   });
-
 });

@@ -90,9 +90,13 @@ describe('childTypeOf', () => {
   ]);
 
   it('reads a reverse descent straight off the spec', () => {
-    expect(childTypeOf({ direction: 'reverse', type: 'Key result', field: 'objective' }, 'Objective', schema)).toBe(
-      'Key result',
-    );
+    expect(
+      childTypeOf(
+        { direction: 'reverse', type: 'Key result', field: 'objective' },
+        'Objective',
+        schema,
+      ),
+    ).toBe('Key result');
   });
 
   it('resolves a forward descent through the relation target', () => {
@@ -102,6 +106,8 @@ describe('childTypeOf', () => {
   });
 
   it('is null when the relation declares no target', () => {
-    expect(childTypeOf({ direction: 'forward', field: 'mystery' }, 'Key result', schema)).toBeNull();
+    expect(
+      childTypeOf({ direction: 'forward', field: 'mystery' }, 'Key result', schema),
+    ).toBeNull();
   });
 });

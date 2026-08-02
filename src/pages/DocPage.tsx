@@ -276,8 +276,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     {
       icon: fullWidth ? 'minimize-2' : 'maximize-2',
       label: fullWidth ? 'Center content' : 'Full width',
-      onSelect: () =>
-        void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
+      onSelect: () => void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
     },
     { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
     {
@@ -348,7 +347,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         {(docPages === null || entry.path !== docPages.main.path) && (
           <span className="flex min-w-0 items-center gap-0.5" data-testid="doc-title">
             {separator}
-            {crumb(entry.title, { icon: docPages === null ? 'file-text' : undefined, strong: true })}
+            {crumb(entry.title, {
+              icon: docPages === null ? 'file-text' : undefined,
+              strong: true,
+            })}
           </span>
         )}
         <span className="flex-1" />
@@ -373,7 +375,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             size="sm"
             onClick={() => {
               const rect = menuButtonRef.current?.getBoundingClientRect();
-              setMenu(rect === undefined ? { x: 0, y: 0 } : { x: rect.right - 180, y: rect.bottom + 4 });
+              setMenu(
+                rect === undefined ? { x: 0, y: 0 } : { x: rect.right - 180, y: rect.bottom + 4 },
+              );
             }}
           />
         </div>
@@ -416,7 +420,9 @@ export function DocPage({ selection }: { selection: DocSelection }) {
               )}
             </div>
           </div>
-          {blank && !busy && <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />}
+          {blank && !busy && (
+            <BlankPageBar templates={templates} onPick={(t) => void applyTemplate(t)} />
+          )}
         </div>
         {panelOpen && (
           <DocSidePanel entry={entry} schema={schema} editor={editor} scrollRef={scrollRef} />
@@ -433,9 +439,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           onClose={() => setMoving(false)}
           onMoved={(dest) => {
             const newPath =
-              docPages !== null
-                ? `${dest}/${entry.path.slice(docPages.folder.length + 1)}`
-                : dest;
+              docPages !== null ? `${dest}/${entry.path.slice(docPages.folder.length + 1)}` : dest;
             setMoving(false);
             navigate({ kind: 'doc', path: newPath });
           }}

@@ -29,7 +29,10 @@ const CONCEPT = 'knowledge/metrics/sync-error-rate.md';
 test('knowledge: browse the bundle, read provenance, and verify a concept', async ({ page }) => {
   await boot(page);
 
-  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
   await expect(page.getByTestId('knowledge-page')).toBeVisible();
   // Counts come from the seed and change whenever it does. Assert the
   // relationships instead: the review queue is a proper subset of the bundle.
@@ -55,9 +58,7 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
 
   // -- Verify writes an OKF stamp and lifts the trust tier ---------------
   await page.getByRole('button', { name: /^Verify$/ }).click();
-  await expect
-    .poll(async () => readMockFile(page, CONCEPT))
-    .toContain('human:me');
+  await expect.poll(async () => readMockFile(page, CONCEPT)).toContain('human:me');
   await expect(panel.getByTestId('trust-chip')).toHaveAttribute('data-tier', 'human-reviewed');
 
   // Still queued — and that is the point. Verification and freshness are
@@ -72,9 +73,12 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount - 1);
 });
 
-test('knowledge: the bundle navigates by its own axes, not by Home\'s', async ({ page }) => {
+test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
   await boot(page);
-  await page.getByTestId('rail').getByRole('button', { name: /^Knowledge/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
 
   // The sidebar stops being Home's. Collections and Types describe a corpus
   // with a different author; standing on Knowledge they have no business here.
@@ -159,7 +163,10 @@ test('knowledge: the bundle stays out of the surfaces you author', async ({ page
   expect(docPaths.some((p) => p.startsWith('knowledge/'))).toBe(false);
 
   // Not in the Inbox either, despite carrying no `_organized` flag.
-  await page.getByTestId('rail').getByRole('button', { name: /^Inbox/ }).click();
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
   // Asserted on PATHS, not row text: a capture in the demo vault is itself
   // about the sync error rate, so matching on title text would pass or fail
   // for reasons that have nothing to do with the bundle.

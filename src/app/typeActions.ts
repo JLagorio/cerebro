@@ -35,9 +35,7 @@ export function normalizeFieldName(raw: string): string {
 export function findTypeDoc(entries: Entry[], typeName: string): Entry | null {
   return (
     entries.find((e) => e.type === 'Type' && e.title === typeName) ??
-    entries.find(
-      (e) => e.type === 'Type' && e.title.toLowerCase() === typeName.toLowerCase(),
-    ) ??
+    entries.find((e) => e.type === 'Type' && e.title.toLowerCase() === typeName.toLowerCase()) ??
     null
   );
 }
@@ -103,8 +101,7 @@ export async function addFieldToType(
   const extras = Object.fromEntries(
     Object.entries(config).filter(([, v]) => v !== undefined && v !== null && v !== ''),
   );
-  fields[name] =
-    kind === 'text' && Object.keys(extras).length === 0 ? 'text' : { kind, ...extras };
+  fields[name] = kind === 'text' && Object.keys(extras).length === 0 ? 'text' : { kind, ...extras };
   try {
     if (doc === null) {
       await ensureTypeDoc({ name: typeName, docPath: null }, { fields });
@@ -179,7 +176,8 @@ export async function changeFieldKind(
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
       ? { ...(raw as Record<string, unknown>) }
       : {};
-  const oldKind = typeof oldSpec.kind === 'string' ? oldSpec.kind : typeof raw === 'string' ? raw : 'text';
+  const oldKind =
+    typeof oldSpec.kind === 'string' ? oldSpec.kind : typeof raw === 'string' ? raw : 'text';
   if (oldKind === kind) return true;
 
   // Coerce first, so the option seed below sees the final values.
@@ -200,10 +198,7 @@ export async function changeFieldKind(
   const keep = new Set(KIND_KEYS[kind] ?? []);
   const spec: Record<string, unknown> = { kind };
   if (keep.has('options') && Array.isArray(oldSpec.options)) spec.options = oldSpec.options;
-  if (
-    (kind === 'select' || kind === 'multiselect') &&
-    !Array.isArray(spec.options)
-  ) {
+  if ((kind === 'select' || kind === 'multiselect') && !Array.isArray(spec.options)) {
     const distinct = [
       ...new Set(
         conversions
@@ -234,7 +229,10 @@ export async function changeFieldKind(
  * Duplicate a declared field: same spec under a fresh name, values copied on
  * every record (M12.4b — the header menu's Duplicate property).
  */
-export async function duplicateFieldOnType(typeName: string, fieldName: string): Promise<string | null> {
+export async function duplicateFieldOnType(
+  typeName: string,
+  fieldName: string,
+): Promise<string | null> {
   const { entries, patchFrontmatter } = useVaultStore.getState();
   const toast = useUiStore.getState().toast;
   const doc = findTypeDoc(entries, typeName);
@@ -290,7 +288,11 @@ export async function insertFieldOnType(
   if (!guardEditable(doc, typeName)) return null;
   const fields = rawFieldsOf(doc);
   let name = 'property';
-  for (let n = 2; Object.keys(fields).some((k) => k.toLowerCase() === name) || RESERVED.has(name); n += 1) {
+  for (
+    let n = 2;
+    Object.keys(fields).some((k) => k.toLowerCase() === name) || RESERVED.has(name);
+    n += 1
+  ) {
     name = `property_${n}`;
   }
   const rebuilt: Record<string, unknown> = {};

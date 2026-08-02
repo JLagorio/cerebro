@@ -39,10 +39,7 @@ fn classify(code: &str) -> (FileStatus, bool) {
     if code == "??" {
         return (FileStatus::Untracked, false);
     }
-    if index == 'U'
-        || tree == 'U'
-        || (index == 'A' && tree == 'A')
-        || (index == 'D' && tree == 'D')
+    if index == 'U' || tree == 'U' || (index == 'A' && tree == 'A') || (index == 'D' && tree == 'D')
     {
         return (FileStatus::Conflicted, false);
     }

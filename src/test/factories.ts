@@ -40,15 +40,28 @@ export function fixtureVault(): Entry[] {
           status: { kind: 'status' },
           priority: {
             kind: 'select',
-            options: [{ id: 'high', color: '#DE8F0A' }, { id: 'low', color: '#A8AFC2' }],
+            options: [
+              { id: 'high', color: '#DE8F0A' },
+              { id: 'low', color: '#A8AFC2' },
+            ],
           },
           assignee: { kind: 'person' },
           due: { kind: 'date' },
         },
       } as unknown as Entry['properties'],
     }),
-    makeEntry({ path: 'types/project.md', title: 'Project', type: 'Type', properties: { icon: 'folder', color: 'var(--n-600)' } }),
-    makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type', properties: { icon: 'user', color: 'var(--n-600)' } }),
+    makeEntry({
+      path: 'types/project.md',
+      title: 'Project',
+      type: 'Type',
+      properties: { icon: 'folder', color: 'var(--n-600)' },
+    }),
+    makeEntry({
+      path: 'types/person.md',
+      title: 'Person',
+      type: 'Type',
+      properties: { icon: 'user', color: 'var(--n-600)' },
+    }),
     makeEntry({
       path: PROJECT,
       project: PROJECT,

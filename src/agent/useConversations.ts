@@ -6,7 +6,7 @@ import {
   retitle,
   saveConversations,
 } from '@/agent/conversations';
-import type { AgentChat, } from '@/agent/useAgentChat';
+import type { AgentChat } from '@/agent/useAgentChat';
 import type { Conversation } from '@/agent/types';
 
 export interface ConversationState {

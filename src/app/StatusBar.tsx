@@ -64,7 +64,13 @@ function Segment({
     );
   }
   return (
-    <button type="button" data-testid={testId} title={title} onClick={onClick} className={className}>
+    <button
+      type="button"
+      data-testid={testId}
+      title={title}
+      onClick={onClick}
+      className={className}
+    >
       {body}
     </button>
   );

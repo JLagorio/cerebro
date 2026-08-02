@@ -141,9 +141,7 @@ describe('provenance', () => {
   it('lets an entry override the shared usage window', () => {
     const e = concept({
       usage_window: { from: '2026-06-01', to: '2026-06-30' },
-      sources: [
-        { resource: 'x', usage_window: { from: '2026-01-01', to: '2026-01-31' } },
-      ],
+      sources: [{ resource: 'x', usage_window: { from: '2026-01-01', to: '2026-01-31' } }],
     });
     expect(parseSources(e)[0].usageWindow).toEqual({ from: '2026-01-01', to: '2026-01-31' });
   });
@@ -213,7 +211,10 @@ describe('review queue', () => {
     );
     expect(reviewReasons(machine)).toEqual(['unverified', 'stale']);
 
-    const reviewed = toConcept(concept({ verified: [{ by: 'human:josef', at: '2026-07-01' }] }), TODAY);
+    const reviewed = toConcept(
+      concept({ verified: [{ by: 'human:josef', at: '2026-07-01' }] }),
+      TODAY,
+    );
     expect(needsReview(reviewed)).toBe(false);
   });
 
@@ -318,7 +319,11 @@ describe('subjects', () => {
     });
 
   it('groups concepts by the entity they resolve to', () => {
-    const entries = [project, about('knowledge/a.md', ['phoenix']), about('knowledge/b.md', ['phoenix'])];
+    const entries = [
+      project,
+      about('knowledge/a.md', ['phoenix']),
+      about('knowledge/b.md', ['phoenix']),
+    ];
     const subjects = listSubjects(listConcepts(entries, TODAY), entries);
     expect(subjects).toHaveLength(1);
     expect(subjects[0].label).toBe('Phoenix warehouse rollout');
@@ -339,8 +344,16 @@ describe('subjects', () => {
   });
 
   it('answers what a project page asks: concepts anchored to this path', () => {
-    const entries = [project, about('knowledge/a.md', ['phoenix']), about('knowledge/b.md', ['other'])];
-    const found = conceptsAbout('projects/phoenix/project.md', listConcepts(entries, TODAY), entries);
+    const entries = [
+      project,
+      about('knowledge/a.md', ['phoenix']),
+      about('knowledge/b.md', ['other']),
+    ];
+    const found = conceptsAbout(
+      'projects/phoenix/project.md',
+      listConcepts(entries, TODAY),
+      entries,
+    );
     expect(found.map((c) => c.entry.path)).toEqual(['knowledge/a.md']);
   });
 });
@@ -533,7 +546,9 @@ describe('commitOf — has this note been committed to the knowledge base?', () 
     const edited = note({ modifiedAt: '2026-07-29T12:00:00Z' });
     expect(commitOf(edited, concepts).state).toBe('behind');
     // Editing it BEFORE the distillation is the ordinary case, not a warning.
-    expect(commitOf(note({ modifiedAt: '2026-07-27T12:00:00Z' }), concepts).state).toBe('committed');
+    expect(commitOf(note({ modifiedAt: '2026-07-27T12:00:00Z' }), concepts).state).toBe(
+      'committed',
+    );
   });
 
   it('does not manufacture work from an unstamped concept', () => {
@@ -544,7 +559,10 @@ describe('commitOf — has this note been committed to the knowledge base?', () 
       filename: 'a.md',
       properties: { sources: [{ id: 's', resource: 'inbox/standup.md' }] },
     });
-    const commit = commitOf(note({ modifiedAt: '2027-01-01T00:00:00Z' }), listConcepts([unstamped], TODAY));
+    const commit = commitOf(
+      note({ modifiedAt: '2027-01-01T00:00:00Z' }),
+      listConcepts([unstamped], TODAY),
+    );
     expect(commit.state).toBe('committed');
     expect(commit.at).toBeNull();
   });
@@ -603,7 +621,7 @@ describe('relatedConcepts', () => {
     );
   });
 
-  it('follows the note\'s own links and frontmatter relations', () => {
+  it("follows the note's own links and frontmatter relations", () => {
     const note = makeEntry({
       path: 'docs/note.md',
       filename: 'note.md',

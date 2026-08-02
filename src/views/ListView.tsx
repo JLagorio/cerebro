@@ -27,7 +27,6 @@ export interface ListViewProps {
   createType?: string;
 }
 
-
 /** Indent per nesting level, matching the band header's step. */
 const INDENT = 16;
 
@@ -105,7 +104,9 @@ function ListRow({
       className="flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]"
       style={{ paddingLeft: 20 + depth * INDENT }}
     >
-      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">{key}</span>
+      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
+        {key}
+      </span>
       {expander}
       <span
         title={entry.type ?? undefined}

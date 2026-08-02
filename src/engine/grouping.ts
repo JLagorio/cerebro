@@ -45,8 +45,7 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   const buckets = new Map<string, Entry[]>();
   const ungrouped: Entry[] = [];
   for (const e of entries) {
-    const raw =
-      e.relationships[field] !== undefined ? e.relationships[field] : e.properties[field];
+    const raw = e.relationships[field] !== undefined ? e.relationships[field] : e.properties[field];
     const key = firstValue(raw);
     if (key === null) {
       ungrouped.push(e);

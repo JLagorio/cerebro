@@ -120,7 +120,18 @@ export function useJobRunner(): void {
         connectors,
       }).find((j) => failedReads[vaultPath]?.[j.path] !== j.runKey) ?? null
     );
-  }, [attempts, autoLearn, connectors, entries, failedReads, filed, now, skillRuns, today, vaultPath]);
+  }, [
+    attempts,
+    autoLearn,
+    connectors,
+    entries,
+    failedReads,
+    filed,
+    now,
+    skillRuns,
+    today,
+    vaultPath,
+  ]);
 
   // Owns the run: the event stream is shared with the chat, so both sides need
   // to know whose turn the events belong to.
@@ -134,7 +145,7 @@ export function useJobRunner(): void {
     ui.setLearningPath(null);
     ui.setAgentBusy(false);
     // Whatever it just wrote is on disk and nowhere else until this runs.
-    void rescan().catch(() => undefined);
+    void rescan();
   }, [rescan]);
 
   // The chat's release wait can take the stream by TIMEOUT: streamReleased

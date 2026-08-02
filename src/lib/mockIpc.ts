@@ -100,9 +100,7 @@ export async function scanVault(_vault: string): Promise<Entry[]> {
   // Parity with scan.rs: views/ and attachments/ and dot-dirs are skipped at
   // any depth (v2 project folders carry their own views/).
   const skipped = /(^|\/)(views|attachments|\.[^/]*)\//;
-  const paths = [...files.keys()]
-    .filter((p) => p.endsWith('.md') && !skipped.test(p))
-    .sort();
+  const paths = [...files.keys()].filter((p) => p.endsWith('.md') && !skipped.test(p)).sort();
   const entries = paths.map((p) => {
     const t = times.get(p) ?? { createdAt: SEED_TIME, modifiedAt: SEED_TIME };
     return parseNote(p, files.get(p) ?? '', t.createdAt, t.modifiedAt);
@@ -290,7 +288,9 @@ export async function listViews(_vault: string): Promise<RawList[]> {
       });
       continue;
     }
-    const dir = projectDirs.find((d) => p.startsWith(`${d}/views/`) && !p.slice(`${d}/views/`.length).includes('/'));
+    const dir = projectDirs.find(
+      (d) => p.startsWith(`${d}/views/`) && !p.slice(`${d}/views/`.length).includes('/'),
+    );
     if (dir !== undefined) {
       views.push({
         id: p.slice(`${dir}/views/`.length, -'.yml'.length),
@@ -321,20 +321,14 @@ export async function saveView(
   touch(path);
 }
 
-export async function listCollections(
-  _vault: string,
-): Promise<{ folder: string; yaml: string }[]> {
+export async function listCollections(_vault: string): Promise<{ folder: string; yaml: string }[]> {
   return [...files.keys()]
     .filter((p) => p === COLLECTION_MARKER || p.endsWith(`/${COLLECTION_MARKER}`))
     .map((p) => ({ folder: dirOf(p), yaml: files.get(p) ?? '' }))
     .sort((a, b) => a.folder.localeCompare(b.folder));
 }
 
-export async function saveCollection(
-  _vault: string,
-  folder: string,
-  yaml: string,
-): Promise<void> {
+export async function saveCollection(_vault: string, folder: string, yaml: string): Promise<void> {
   if (folder === '') throw new Error('the vault root is not a collection');
   const path = `${folder}/${COLLECTION_MARKER}`;
   files.set(path, yaml);
@@ -376,7 +370,7 @@ export async function saveConnectors(_vault: string, json: string): Promise<void
   try {
     parsed = JSON.parse(json);
   } catch (e) {
-    throw new Error(`connectors.json is not valid JSON: ${String(e)}`);
+    throw new Error(`connectors.json is not valid JSON: ${String(e)}`, { cause: e });
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('connectors.json must be a JSON object');

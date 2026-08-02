@@ -93,7 +93,7 @@ fn assign_projects(entries: &mut [Entry]) {
         let mut best: Option<&String> = None;
         for dir in &project_dirs {
             if entry.path.starts_with(&format!("{dir}/"))
-                && best.map_or(true, |b| dir.len() > b.len())
+                && best.is_none_or(|b| dir.len() > b.len())
             {
                 best = Some(dir);
             }
@@ -135,11 +135,27 @@ mod tests {
     fn fixture_vault(label: &str) -> PathBuf {
         let vault = testutil::temp_vault(label);
         testutil::write(&vault, "type/work-item.md", "---\ntype: Type\nicon: check-square\nfields:\n  status: { kind: status }\n  priority: { kind: select }\n---\n\n# Work item\n");
-        testutil::write(&vault, "people/maya-chen.md", "---\ntype: Person\n---\n\n# Maya Chen\n");
+        testutil::write(
+            &vault,
+            "people/maya-chen.md",
+            "---\ntype: Person\n---\n\n# Maya Chen\n",
+        );
         testutil::write(&vault, "projects/atlas.md", "---\ntype: Project\nkey: ATL\nlead: \"[[maya-chen]]\"\nstatuses:\n  - { id: todo, group: active, color: '#3D8BE8' }\n  - { id: done, group: done, color: '#34B764' }\n---\n\n# Atlas\n");
-        testutil::write(&vault, "items/atl-1.md", "---\ntype: Work item\nkey: ATL-1\nstatus: todo\n---\n\n# Ship the scanner\n");
-        testutil::write(&vault, "items/atl-2.md", "---\ntype: Work item\nkey: ATL-2\nstatus: done\n---\n\n# Parse frontmatter\n");
-        testutil::write(&vault, "items/broken.md", "---\nstatus: [unclosed\n---\n\n# Broken item\n");
+        testutil::write(
+            &vault,
+            "items/atl-1.md",
+            "---\ntype: Work item\nkey: ATL-1\nstatus: todo\n---\n\n# Ship the scanner\n",
+        );
+        testutil::write(
+            &vault,
+            "items/atl-2.md",
+            "---\ntype: Work item\nkey: ATL-2\nstatus: done\n---\n\n# Parse frontmatter\n",
+        );
+        testutil::write(
+            &vault,
+            "items/broken.md",
+            "---\nstatus: [unclosed\n---\n\n# Broken item\n",
+        );
         testutil::write(&vault, "views/all-items.yml", "name: All items\n");
         testutil::write(&vault, "attachments/readme.md", "# Not scanned\n");
         testutil::write(&vault, ".obsidian/workspace.md", "# Hidden\n");
@@ -184,7 +200,10 @@ mod tests {
     fn malformed_file_yields_parse_error_entry_and_scan_succeeds() {
         let vault = fixture_vault("scan-broken");
         let entries = scan_vault(&vault).unwrap();
-        let broken = entries.iter().find(|e| e.path == "items/broken.md").unwrap();
+        let broken = entries
+            .iter()
+            .find(|e| e.path == "items/broken.md")
+            .unwrap();
         assert!(broken.parse_error.is_some());
         assert_eq!(broken.title, "Broken item");
         assert!(entries.iter().filter(|e| e.parse_error.is_some()).count() == 1);
@@ -195,11 +214,17 @@ mod tests {
     fn extracts_relationships_and_complex_properties() {
         let vault = fixture_vault("scan-props");
         let entries = scan_vault(&vault).unwrap();
-        let project = entries.iter().find(|e| e.path == "projects/atlas.md").unwrap();
+        let project = entries
+            .iter()
+            .find(|e| e.path == "projects/atlas.md")
+            .unwrap();
         assert_eq!(project.relationships["lead"], vec!["maya-chen"]);
         // v2: the statuses override is nested YAML on the project itself.
         assert_eq!(project.properties["statuses"].as_array().unwrap().len(), 2);
-        let type_note = entries.iter().find(|e| e.path == "type/work-item.md").unwrap();
+        let type_note = entries
+            .iter()
+            .find(|e| e.path == "type/work-item.md")
+            .unwrap();
         assert_eq!(type_note.properties["fields"]["status"]["kind"], "status");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -209,8 +234,16 @@ mod tests {
         let vault = fixture_vault("scan-times");
         let entries = scan_vault(&vault).unwrap();
         for e in &entries {
-            assert!(chrono::DateTime::parse_from_rfc3339(&e.created_at).is_ok(), "{}", e.created_at);
-            assert!(chrono::DateTime::parse_from_rfc3339(&e.modified_at).is_ok(), "{}", e.modified_at);
+            assert!(
+                chrono::DateTime::parse_from_rfc3339(&e.created_at).is_ok(),
+                "{}",
+                e.created_at
+            );
+            assert!(
+                chrono::DateTime::parse_from_rfc3339(&e.modified_at).is_ok(),
+                "{}",
+                e.modified_at
+            );
         }
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -223,10 +256,22 @@ mod tests {
     #[test]
     fn v2_containment_resolves_nearest_project_and_folder() {
         let vault = testutil::temp_vault("scan-v2");
-        testutil::write(&vault, "projects/atlas/project.md", "---\ntype: Project\nkey: ATL\n---\n\n# Atlas\n");
-        testutil::write(&vault, "projects/atlas/items/atl-1.md", "---\ntype: Work item\n---\n\n# One\n");
+        testutil::write(
+            &vault,
+            "projects/atlas/project.md",
+            "---\ntype: Project\nkey: ATL\n---\n\n# Atlas\n",
+        );
+        testutil::write(
+            &vault,
+            "projects/atlas/items/atl-1.md",
+            "---\ntype: Work item\n---\n\n# One\n",
+        );
         testutil::write(&vault, "projects/atlas/meetings/kickoff.md", "# Kickoff\n");
-        testutil::write(&vault, "projects/atlas/sub/project.md", "---\ntype: Project\n---\n\n# Sub\n");
+        testutil::write(
+            &vault,
+            "projects/atlas/sub/project.md",
+            "---\ntype: Project\n---\n\n# Sub\n",
+        );
         testutil::write(&vault, "projects/atlas/sub/notes.md", "# Notes\n");
         testutil::write(&vault, "inbox/loose.md", "# Loose\n");
         let entries = scan_vault(&vault).unwrap();
@@ -235,7 +280,10 @@ mod tests {
             get("projects/atlas/items/atl-1.md").project.as_deref(),
             Some("projects/atlas/project.md")
         );
-        assert_eq!(get("projects/atlas/items/atl-1.md").folder, "projects/atlas/items");
+        assert_eq!(
+            get("projects/atlas/items/atl-1.md").folder,
+            "projects/atlas/items"
+        );
         assert_eq!(
             get("projects/atlas/meetings/kickoff.md").project.as_deref(),
             Some("projects/atlas/project.md")
@@ -263,9 +311,9 @@ mod tests {
         assert!(dirs.contains(&"items".to_string()));
         assert!(dirs.contains(&"projects".to_string()));
         assert!(dirs.contains(&"projects/empty-folder".to_string()));
-        assert!(!dirs
-            .iter()
-            .any(|d| d.starts_with("views") || d.starts_with(".obsidian") || d.starts_with("attachments")));
+        assert!(!dirs.iter().any(|d| d.starts_with("views")
+            || d.starts_with(".obsidian")
+            || d.starts_with("attachments")));
         let mut sorted = dirs.clone();
         sorted.sort();
         assert_eq!(dirs, sorted);
@@ -278,10 +326,16 @@ mod tests {
         std::fs::write(vault.join("items/bad.md"), [0xFF, 0xFE, 0x00, 0x80]).unwrap();
         let entries = scan_vault(&vault).unwrap();
         let bad = entries.iter().find(|e| e.path == "items/bad.md").unwrap();
-        assert!(bad.parse_error.as_deref().unwrap().starts_with("unreadable:"));
+        assert!(bad
+            .parse_error
+            .as_deref()
+            .unwrap()
+            .starts_with("unreadable:"));
         assert_eq!(bad.title, "Bad");
         // The rest of the vault still scanned normally.
-        assert!(entries.iter().any(|e| e.path == "items/atl-1.md" && e.parse_error.is_none()));
+        assert!(entries
+            .iter()
+            .any(|e| e.path == "items/atl-1.md" && e.parse_error.is_none()));
         let _ = std::fs::remove_dir_all(&vault);
     }
 }

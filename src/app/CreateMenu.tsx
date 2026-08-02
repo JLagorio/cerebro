@@ -55,7 +55,11 @@ export function CreateMenu() {
             className="fixed inset-0 z-40 cursor-default bg-transparent"
           />
           <div className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-md)]">
-            <MenuEntry label="New record" icon="circle-check" onClick={() => openDialog('record')} />
+            <MenuEntry
+              label="New record"
+              icon="circle-check"
+              onClick={() => openDialog('record')}
+            />
             <MenuEntry label="New doc" icon="file-text" onClick={() => openDialog('doc')} />
             <MenuEntry
               label="New collection"

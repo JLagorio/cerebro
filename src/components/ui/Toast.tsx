@@ -22,7 +22,15 @@ export interface ToastProps {
   className?: string;
 }
 
-export function Toast({ tone = 'neutral', title, description, action, onDismiss, style, className = '' }: ToastProps) {
+export function Toast({
+  tone = 'neutral',
+  title,
+  description,
+  action,
+  onDismiss,
+  style,
+  className = '',
+}: ToastProps) {
   const c = CFG[tone] || CFG.neutral;
   return (
     <div
@@ -43,9 +51,13 @@ export function Toast({ tone = 'neutral', title, description, action, onDismiss,
     >
       <Icon name={c.icon} size={16} color={c.color} style={{ marginTop: 2 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--n-900)' }}>{title}</div>
+        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--n-900)' }}>
+          {title}
+        </div>
         {description ? (
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>{description}</div>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
+            {description}
+          </div>
         ) : null}
         {action ? (
           <button

@@ -55,11 +55,7 @@ export function useRowKeyboard(options: {
     (e: React.KeyboardEvent) => {
       // Never steal keys from an editor inside a cell.
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
-      ) {
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return;
       }
       switch (e.key) {

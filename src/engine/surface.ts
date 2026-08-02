@@ -1,7 +1,15 @@
 import { isTemplate } from '@/lib/templates';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
-import type { Entry, Presentation, Schema, Selection, SortSpec, ListFile, ListSource } from './types';
+import type {
+  Entry,
+  Presentation,
+  Schema,
+  Selection,
+  SortSpec,
+  ListFile,
+  ListSource,
+} from './types';
 import { typeViews } from './typeCatalog';
 import { evaluateFilters } from './viewFilters';
 import { clonePresentation, DEFAULT_PRESENTATION, resolveView } from './views';
@@ -210,7 +218,11 @@ export function resolveSurface(
       // InboxPage draws its own queue/reading/organize layout, but the
       // collection still reports the real contents so the topbar and any
       // other consumer see the truth rather than an empty stand-in.
-      return { title: 'Inbox', entries: inboxEntries(entries), presentation: defaultPresentation() };
+      return {
+        title: 'Inbox',
+        entries: inboxEntries(entries),
+        presentation: defaultPresentation(),
+      };
     case 'doc':
       // Docs render in the editor surface (DocPage); they have no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };

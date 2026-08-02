@@ -84,11 +84,15 @@
 .cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox']:hover {
   border-color: var(--cortex-500);
 }
-.cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox']:checked {
+.cerebro-editor
+  .bn-block-content[data-content-type='checkListItem']
+  input[type='checkbox']:checked {
   border-color: var(--cortex-500);
   background: var(--cortex-500);
 }
-.cerebro-editor .bn-block-content[data-content-type='checkListItem'] input[type='checkbox']:checked::after {
+.cerebro-editor
+  .bn-block-content[data-content-type='checkListItem']
+  input[type='checkbox']:checked::after {
   content: '';
   position: absolute;
   left: 4px;
@@ -136,7 +140,9 @@
 
 /* Checklist items read as tasks: dim + strike when done. */
 .cerebro-editor .bn-block-content[data-content-type='checkListItem'][data-checked='true'] p,
-.cerebro-editor .bn-block-content[data-content-type='checkListItem'][data-checked='true'] .bn-inline-content {
+.cerebro-editor
+  .bn-block-content[data-content-type='checkListItem'][data-checked='true']
+  .bn-inline-content {
   color: var(--n-400);
   text-decoration: line-through;
 }

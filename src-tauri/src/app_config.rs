@@ -46,7 +46,9 @@ mod tests {
     #[test]
     fn save_then_load_round_trips() {
         let dir = testutil::temp_vault("config-roundtrip");
-        let config = AppConfig { last_vault: Some("/Users/me/vault".to_string()) };
+        let config = AppConfig {
+            last_vault: Some("/Users/me/vault".to_string()),
+        };
         save(&dir, &config).unwrap();
         assert_eq!(load(&dir), config);
         let _ = std::fs::remove_dir_all(&dir);
@@ -62,7 +64,10 @@ mod tests {
 
     #[test]
     fn config_serializes_last_vault_as_camel_case() {
-        let raw = serde_json::to_string(&AppConfig { last_vault: Some("/v".into()) }).unwrap();
+        let raw = serde_json::to_string(&AppConfig {
+            last_vault: Some("/v".into()),
+        })
+        .unwrap();
         assert!(raw.contains("\"lastVault\""));
     }
 }

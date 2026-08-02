@@ -45,7 +45,14 @@ export const ORDER_OPTIONS = [
 /** Kinds whose values bucket meaningfully (M3 fix: the dropdowns used to be
  * hardcoded to Work-item fields, so grouping on any other type was a no-op).
  * Exported for the tab-row icon cluster's quick pickers (M12.8). */
-export const GROUPABLE_KINDS = new Set(['status', 'select', 'multiselect', 'person', 'checkbox', 'relation']);
+export const GROUPABLE_KINDS = new Set([
+  'status',
+  'select',
+  'multiselect',
+  'person',
+  'checkbox',
+  'relation',
+]);
 export const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
 
 /** Group options for a collection whose type declares `fields`. */
@@ -170,9 +177,14 @@ export function ViewToolbar({
     const nestedBefore = nestLevels(before).length;
     // A relation level changes the TYPE of everything below it, so the
     // properties on offer are that type's, not the view source's.
-    const typeHere = schema === undefined ? sourceType : (chainTypes(sourceType, nestLevels(before), schema).pop() ?? null);
+    const typeHere =
+      schema === undefined
+        ? sourceType
+        : (chainTypes(sourceType, nestLevels(before), schema).pop() ?? null);
     const fieldsHere =
-      typeHere === null || schema === undefined ? declared : (schema.types.get(typeHere)?.fields ?? declared);
+      typeHere === null || schema === undefined
+        ? declared
+        : (schema.types.get(typeHere)?.fields ?? declared);
     const own = presentation.group[index];
     const propertyOptions = fieldsHere
       .filter((f) => GROUPABLE_KINDS.has(f.kind))
@@ -254,42 +266,42 @@ export function ViewToolbar({
           so "band by status" and "nest under the objective" are the same
           gesture — which is what they always were. */}
       <ChainBuilder
-          testId="group-chain"
-          label="Group"
-          icon="rows-3"
-          summary={groupSummary}
-          rows={groupRows}
-          addOptions={optionsForLevel(presentation.group.length)}
-          addLabel="Add a level…"
-          max={MAX_GROUP_DEPTH + MAX_NEST_DEPTH}
-          emptyHint="Records are listed flat. Group by a property to band them, or by a relation to nest them."
-          blockedHint="Nothing left to group or nest by at this level."
-          onChange={(i, v) => {
-            const level = decodeLevel(v);
-            if (level === null) return;
-            // Changing a relation level invalidates everything below it —
-            // those options were resolved against the old type.
-            const tail =
-              presentation.group[i]?.descend !== undefined || level.descend !== undefined
-                ? []
-                : presentation.group.slice(i + 1);
-            setGroup([...presentation.group.slice(0, i), level, ...tail]);
-          }}
-          onToggleDir={(i) =>
-            setGroup(
-              presentation.group.map((g, j) =>
-                j === i && g.descend === undefined
-                  ? { ...g, dir: (g.dir ?? 'asc') === 'asc' ? 'desc' : 'asc' }
-                  : g,
-              ),
-            )
-          }
-          onRemove={(i) => setGroup(presentation.group.filter((_, j) => j !== i))}
-          onAdd={(v) => {
-            const level = decodeLevel(v);
-            if (level !== null) setGroup([...presentation.group, level]);
-          }}
-        />
+        testId="group-chain"
+        label="Group"
+        icon="rows-3"
+        summary={groupSummary}
+        rows={groupRows}
+        addOptions={optionsForLevel(presentation.group.length)}
+        addLabel="Add a level…"
+        max={MAX_GROUP_DEPTH + MAX_NEST_DEPTH}
+        emptyHint="Records are listed flat. Group by a property to band them, or by a relation to nest them."
+        blockedHint="Nothing left to group or nest by at this level."
+        onChange={(i, v) => {
+          const level = decodeLevel(v);
+          if (level === null) return;
+          // Changing a relation level invalidates everything below it —
+          // those options were resolved against the old type.
+          const tail =
+            presentation.group[i]?.descend !== undefined || level.descend !== undefined
+              ? []
+              : presentation.group.slice(i + 1);
+          setGroup([...presentation.group.slice(0, i), level, ...tail]);
+        }}
+        onToggleDir={(i) =>
+          setGroup(
+            presentation.group.map((g, j) =>
+              j === i && g.descend === undefined
+                ? { ...g, dir: (g.dir ?? 'asc') === 'asc' ? 'desc' : 'asc' }
+                : g,
+            ),
+          )
+        }
+        onRemove={(i) => setGroup(presentation.group.filter((_, j) => j !== i))}
+        onAdd={(v) => {
+          const level = decodeLevel(v);
+          if (level !== null) setGroup([...presentation.group, level]);
+        }}
+      />
 
       <ChainBuilder
         testId="sort-chain"
@@ -306,9 +318,15 @@ export function ViewToolbar({
         max={4}
         emptyHint="Records appear in vault order."
         blockedHint="Every sortable property is already in the chain."
-        onChange={(i, v) => setSort(presentation.sort.map((s, j) => (j === i ? { ...s, field: v } : s)))}
+        onChange={(i, v) =>
+          setSort(presentation.sort.map((s, j) => (j === i ? { ...s, field: v } : s)))
+        }
         onToggleDir={(i) =>
-          setSort(presentation.sort.map((s, j) => (j === i ? { ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' } : s)))
+          setSort(
+            presentation.sort.map((s, j) =>
+              j === i ? { ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' } : s,
+            ),
+          )
         }
         onRemove={(i) => setSort(presentation.sort.filter((_, j) => j !== i))}
         onAdd={(v) => setSort([...presentation.sort, { field: v, dir: 'asc' }])}
