@@ -16,6 +16,14 @@ import { Icon } from '@/components/ui/Icon';
 export const CALLOUT_KINDS = ['info', 'note', 'tip', 'success', 'warning', 'danger'] as const;
 export type CalloutKind = (typeof CALLOUT_KINDS)[number];
 
+/**
+ * Every callout colour is a token reference — no literals, so a palette tweak
+ * can never desynchronise a callout's fill from its own left border. `tip`
+ * uses the teal callout tokens rather than violet: violet is reserved for AI
+ * surfaces, and a user-inserted block must not read as the assistant talking.
+ * The `--callout-tip-*` trio is defined in editor.css (the teal ramp has no
+ * global 50/700 stops).
+ */
 const CALLOUT_STYLE: Record<CalloutKind, { icon: string; bg: string; border: string; fg: string }> =
   {
     info: {
@@ -25,19 +33,29 @@ const CALLOUT_STYLE: Record<CalloutKind, { icon: string; bg: string; border: str
       fg: 'var(--cortex-600)',
     },
     note: { icon: 'pencil', bg: 'var(--n-50)', border: 'var(--n-400)', fg: 'var(--n-700)' },
-    tip: { icon: 'lightbulb', bg: '#f3ecfd', border: '#8b5cf6', fg: '#6d33d6' },
-    success: { icon: 'circle-check', bg: '#e8f7ee', border: '#1F9D61', fg: '#187a4b' },
+    tip: {
+      icon: 'lightbulb',
+      bg: 'var(--callout-tip-50)',
+      border: 'var(--callout-tip-500)',
+      fg: 'var(--callout-tip-700)',
+    },
+    success: {
+      icon: 'circle-check',
+      bg: 'var(--success-50)',
+      border: 'var(--success-500)',
+      fg: 'var(--success-700)',
+    },
     warning: {
       icon: 'triangle-alert',
-      bg: 'var(--warn-50,#fdf3e2)',
-      border: '#DE8F0A',
-      fg: 'var(--warn-700,#8a5a13)',
+      bg: 'var(--warn-50)',
+      border: 'var(--warn-500)',
+      fg: 'var(--warn-700)',
     },
     danger: {
       icon: 'octagon-alert',
-      bg: 'var(--danger-50,#fdecec)',
-      border: '#DE3B4E',
-      fg: 'var(--danger-600,#c5372c)',
+      bg: 'var(--danger-50)',
+      border: 'var(--danger-500)',
+      fg: 'var(--danger-700)',
     },
   };
 
@@ -155,13 +173,17 @@ function MermaidView({
           Mermaid
         </span>
         {error !== null && (
-          <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--danger-600,#c5372c)]">
+          <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--danger-600)]">
             {error}
           </span>
         )}
         <span className="flex-1" />
         <button
           type="button"
+          // Without this the textarea blurs FIRST, commit() flips `editing`
+          // false, and the click then lands on the (now) "Edit" branch —
+          // reopening the source box the button just closed.
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             if (editing) commit();
             else {
@@ -184,7 +206,7 @@ function MermaidView({
           onBlur={commit}
           onKeyDown={(e) => e.stopPropagation()}
           rows={Math.max(4, draft.split('\n').length + 1)}
-          className="w-full resize-y border-0 bg-[var(--n-25,var(--n-50))] px-3 py-2 [font-family:var(--font-mono)] text-[12.5px] leading-[1.5] text-[var(--n-800)] outline-none"
+          className="w-full resize-y border-0 bg-[var(--n-25)] px-3 py-2 [font-family:var(--font-mono)] text-[12.5px] leading-[1.5] text-[var(--n-800)] outline-none"
         />
       )}
       {!editing && svg !== null && (

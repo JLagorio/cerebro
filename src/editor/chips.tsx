@@ -169,9 +169,9 @@ function DueRender({
   const bucket = dueBucket(value.end ?? value.start, today);
   const tone =
     bucket === 'overdue'
-      ? 'bg-[var(--danger-50,#fdecec)] text-[var(--danger-600,#c5372c)]'
+      ? 'bg-[var(--danger-50)] text-[var(--danger-600)]'
       : bucket === 'today'
-        ? 'bg-[var(--warn-50,#fdf3e2)] text-[var(--warn-700,#8a5a13)]'
+        ? 'bg-[var(--warn-50)] text-[var(--warn-700)]'
         : 'bg-[var(--n-50)] text-[var(--n-600)]';
 
   return (

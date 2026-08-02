@@ -1,23 +1,34 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
-import type { CerebroEditor } from './MarkdownEditor';
-import { NoteBodyEditor } from './NoteBodyEditor';
+import type { EditorReadyInfo } from './MarkdownEditor';
+import { NoteBodyEditor, type SaveState } from './NoteBodyEditor';
 
 const PAGE = 'inbox/test-page.md';
+const LOSSY_BODY = '# Page\n\n<div align="center">raw html island</div>\n';
 const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
 
-type ReadyInfo = { editor: CerebroEditor; lossyImport: boolean };
+type ReadyInfo = EditorReadyInfo;
 
-async function renderReady(path: string): Promise<ReadyInfo> {
+async function renderReady(
+  path: string,
+  props: { onSaveState?: (s: SaveState) => void } = {},
+): Promise<ReadyInfo> {
   const onReady = vi.fn<(info: ReadyInfo) => void>();
-  render(<NoteBodyEditor path={path} debounceMs={20} onReady={onReady} />);
+  render(<NoteBodyEditor path={path} debounceMs={20} onReady={onReady} {...props} />);
   await waitFor(() => expect(onReady).toHaveBeenCalled(), { timeout: 5_000 });
   return onReady.mock.calls[0][0];
 }
+
+const appendParagraph = (editor: ReadyInfo['editor'], text: string) => {
+  const last = editor.document[editor.document.length - 1];
+  editor.insertBlocks([{ type: 'paragraph', content: text }], last, 'after');
+};
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 120));
 
 describe('NoteBodyEditor', () => {
   beforeEach(() => {
@@ -58,9 +69,39 @@ describe('NoteBodyEditor', () => {
   });
 
   it('warns when the file holds content the editor would drop', async () => {
-    fs().set(PAGE, '# Page\n\n<div align="center">raw html island</div>\n');
+    fs().set(PAGE, LOSSY_BODY);
     await renderReady(PAGE);
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('raw HTML'));
+  });
+
+  // The banner used to be the ENTIRE mitigation: the editor stayed live and
+  // the first keystroke autosaved the raw HTML out of the file 500 ms later.
+  it('mounts a lossy import read-only so an edit cannot reach disk', async () => {
+    fs().set(PAGE, LOSSY_BODY);
+    const { editor } = await renderReady(PAGE);
+    await waitFor(() => expect(screen.getByTestId('lossy-import-banner')).toBeTruthy());
+    appendParagraph(editor, 'stray keystroke');
+    await settle();
+    expect(fs().get(PAGE)).toBe(LOSSY_BODY);
+  });
+
+  it('"Edit anyway" unlocks the editor and only then does a save land', async () => {
+    fs().set(PAGE, LOSSY_BODY);
+    const { editor } = await renderReady(PAGE);
+    await waitFor(() => expect(screen.getByTestId('lossy-import-banner')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Edit anyway/ }));
+    appendParagraph(editor, 'deliberate edit');
+    await waitFor(() => expect(fs().get(PAGE)).toContain('deliberate edit'), { timeout: 5_000 });
+  });
+
+  // Autosave used to be entirely invisible — no dirty marker, no saved state.
+  it('reports the save lifecycle so the host can show it', async () => {
+    const states: SaveState[] = [];
+    const { editor } = await renderReady(PAGE, { onSaveState: (s) => states.push(s) });
+    appendParagraph(editor, 'Fresh words');
+    await waitFor(() => expect(states).toContain('saved'), { timeout: 5_000 });
+    expect(states).toContain('dirty');
+    expect(states.indexOf('dirty')).toBeLessThan(states.indexOf('saved'));
   });
 
   it('toasts when a save fails instead of rejecting silently', async () => {

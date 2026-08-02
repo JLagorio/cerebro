@@ -9,13 +9,14 @@ import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
 import { DocSidePanel } from '@/detail/DocSidePanel';
-import type { CerebroEditor } from '@/editor/MarkdownEditor';
-import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
+import type { CerebroEditor, EditorReadyInfo } from '@/editor/MarkdownEditor';
+import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
 import { docFolderPathFor, docPagesFor } from '@/engine/docPages';
 import type { Entry, Selection } from '@/engine/types';
-import { createFolder, deleteNote, readNote, renameNote, saveNote } from '@/lib/ipc';
+import { createFolder, deleteNote, readNote, renameNote, saveNote, setNoteTitle } from '@/lib/ipc';
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
@@ -88,6 +89,16 @@ function BlankPageBar({
   );
 }
 
+/** What the header says about the body's relationship to disk. `idle` is the
+ * quiet default — nothing typed yet, so there is nothing to reassure about. */
+const SAVE_LABEL: Record<SaveState, string | null> = {
+  idle: null,
+  dirty: 'Unsaved',
+  saving: 'Saving…',
+  saved: 'Saved',
+  failed: "Couldn't save",
+};
+
 /**
  * Full-page markdown document (M2 Task 10; M2.x docs polish). The title is
  * the doc's H1, edited inside the editor — each save rescans, so the header
@@ -109,6 +120,10 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   // The outline needs the live editor and the scroll container (Task 15).
   const [editor, setEditor] = useState<CerebroEditor | null>(null);
+  // Debounce controls, so out-of-editor writes can stop a stale in-editor
+  // body from being flushed back over them.
+  const editorControls = useRef<EditorReadyInfo | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   // M9.7: reading a diff swaps the editor out for it, in place.
   const diffOpen = useUiStore((s) => s.diffView?.path === selection.path);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -134,6 +149,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   const [moving, setMoving] = useState(false);
   const [addingPage, setAddingPage] = useState(false);
   const [pageName, setPageName] = useState('');
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const menuButtonRef = useRef<HTMLDivElement | null>(null);
@@ -199,16 +215,48 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     }
   };
 
+  // Trash operates on the same subject as Move: trashing a doc's MAIN page
+  // used to delete only that file, which removed the folder note and
+  // dissolved the doc — its other pages stranded in a plain folder with no
+  // header, no Pages panel, and no dialog copy warning about any of it.
+  const isDocMain = docPages !== null && entry.path === docPages.main.path;
+  const deleteSubject: { path: string; title: string; extraPages: number } = isDocMain
+    ? {
+        path: docPages.folder,
+        title: docPages.main.title,
+        extraPages: docPages.pages.length - 1,
+      }
+    : { path: entry.path, title: entry.title, extraPages: 0 };
+
   const submitDelete = async () => {
     if (vaultPath === null || busy) return;
     setBusy(true);
     try {
-      await deleteNote(vaultPath, entry.path);
+      await deleteNote(vaultPath, deleteSubject.path);
       await rescan();
       setConfirmDelete(false);
       navigate({ kind: 'docs' });
     } catch {
       toast("Couldn't move to Trash");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Rename the doc the way the user means it: the visible title (its H1),
+  // not the slug on disk. The live editor is spliced too, or its next
+  // autosave would write the old title straight back.
+  const submitRename = async () => {
+    const trimmed = renaming?.trim() ?? '';
+    if (vaultPath === null || trimmed === '' || busy) return;
+    setBusy(true);
+    try {
+      await setNoteTitle(vaultPath, entry.path, trimmed);
+      if (editor !== null) spliceTitleIntoBlocks(editor, trimmed);
+      await rescan();
+      setRenaming(null);
+    } catch {
+      toast("Couldn't rename page");
     } finally {
       setBusy(false);
     }
@@ -220,6 +268,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
   // then force the editor to reload from disk.
   const applyTemplate = async (template: Entry) => {
     if (vaultPath === null || busy) return;
+    // Drop any pending debounce FIRST. Otherwise the reload below remounts
+    // the editor, its unmount flush serializes the pre-template body, and the
+    // template the user just picked is overwritten half a second later
+    // ("I clicked the template and nothing happened").
+    editorControls.current?.cancelPendingSave();
     setBusy(true);
     try {
       const vars = { title: entry.title, date: todayIso() };
@@ -230,7 +283,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
         await patchFrontmatter(entry.path, frontmatter);
       }
       await rescan();
+      // Cancel again: the awaits above gave the editor time to reschedule.
+      editorControls.current?.cancelPendingSave();
+      editorControls.current = null;
       setEditor(null);
+      setSaveState('idle');
       setReloadGen((g) => g + 1);
     } catch {
       toast("Couldn't apply template");
@@ -278,6 +335,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       label: fullWidth ? 'Center content' : 'Full width',
       onSelect: () => void patchFrontmatter(entry.path, { full_width: fullWidth ? null : true }),
     },
+    { icon: 'pencil', label: 'Rename…', onSelect: () => setRenaming(entry.title) },
     { icon: 'file-plus', label: 'Add page', onSelect: () => setAddingPage(true) },
     {
       icon: 'layout-template',
@@ -291,7 +349,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     },
     {
       icon: 'trash-2',
-      label: 'Move to Trash',
+      label: isDocMain && deleteSubject.extraPages > 0 ? 'Move doc to Trash' : 'Move to Trash',
       danger: true,
       onSelect: () => setConfirmDelete(true),
     },
@@ -354,20 +412,26 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           </span>
         )}
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => setAddingPage(true)}
-          className="mr-0.5 inline-flex flex-none items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
-        >
-          <Icon name="file-plus" size={13} />
-          Add page
-        </button>
-        <IconButton
-          icon="folder-input"
-          label="Move to folder"
-          size="sm"
-          onClick={() => setMoving(true)}
-        />
+        {/* Autosave used to be entirely invisible: no dirty marker, no saved
+            state, and ⌘S did nothing. This is the trust signal — ⌘S now
+            force-flushes the debounce (handled in NoteBodyEditor). */}
+        {SAVE_LABEL[saveState] !== null && (
+          <span
+            data-testid="doc-save-state"
+            title={saveState === 'failed' ? undefined : 'Saves automatically — ⌘S to save now'}
+            className={[
+              'mr-1 flex-none whitespace-nowrap text-[11.5px]',
+              saveState === 'failed'
+                ? 'font-medium text-[var(--danger-600)]'
+                : 'text-[var(--text-meta)]',
+            ].join(' ')}
+          >
+            {SAVE_LABEL[saveState]}
+          </span>
+        )}
+        {/* 'Add page' and 'Move to folder' are BOTH in the overflow menu
+            below — the toolbar's only labelled control was a duplicate of the
+            action users need least. The toolbar is now menu + panel toggle. */}
         <div ref={menuButtonRef} className="inline-flex">
           <IconButton
             icon="ellipsis"
@@ -412,7 +476,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                   <NoteBodyEditor
                     key={`${entry.path}#${reloadGen}`}
                     path={entry.path}
-                    onReady={({ editor: e }) => setEditor(e)}
+                    onSaveState={setSaveState}
+                    onReady={(info) => {
+                      editorControls.current = info;
+                      setEditor(info.editor);
+                    }}
                   />
                   {/* M9.4 — this document's history, silent when it has none. */}
                   <GitHistoryPanel path={entry.path} />
@@ -475,11 +543,45 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           />
         </Dialog>
       )}
+      {renaming !== null && (
+        <Dialog
+          open
+          onClose={() => setRenaming(null)}
+          title="Rename page"
+          width={420}
+          primaryAction={{
+            label: 'Rename',
+            onClick: () => void submitRename(),
+            disabled: renaming.trim() === '' || busy,
+          }}
+          secondaryAction={{ label: 'Cancel', onClick: () => setRenaming(null) }}
+        >
+          <p className="m-0 mb-2 text-[12.5px] text-[var(--n-500)]">
+            This rewrites the page's heading — the filename on disk stays as it is.
+          </p>
+          <Input
+            autoFocus
+            placeholder="Page name"
+            value={renaming}
+            onChange={(e) => setRenaming(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submitRename();
+            }}
+            width="100%"
+          />
+        </Dialog>
+      )}
       {confirmDelete && (
         <Dialog
           open
           onClose={() => setConfirmDelete(false)}
-          title={`Move "${entry.title}" to Trash?`}
+          title={
+            deleteSubject.extraPages > 0
+              ? `Move "${deleteSubject.title}" and its ${deleteSubject.extraPages} other ${
+                  deleteSubject.extraPages === 1 ? 'page' : 'pages'
+                } to Trash?`
+              : `Move "${deleteSubject.title}" to Trash?`
+          }
           width={420}
           primaryAction={{
             label: 'Move to Trash',
@@ -488,7 +590,11 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">The page moves to the system Trash.</p>
+          <p className="m-0 text-[13px] text-[var(--n-600)]">
+            {isDocMain
+              ? 'The whole doc — every page in it — moves to the system Trash.'
+              : 'The page moves to the system Trash.'}
+          </p>
         </Dialog>
       )}
     </div>

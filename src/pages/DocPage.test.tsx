@@ -8,6 +8,9 @@ import { useVaultStore } from '@/stores/vaultStore';
 import { DocPage } from './DocPage';
 
 const DOC = 'projects/guided-onboarding-ga/meetings/kickoff.md';
+const DOC_FOLDER = 'projects/guided-onboarding-ga/spec';
+const DOC_MAIN = `${DOC_FOLDER}/spec.md`;
+const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
 
 describe('DocPage', () => {
   beforeEach(async () => {
@@ -62,5 +65,58 @@ describe('DocPage', () => {
     expect(screen.getByText('This page no longer exists')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Go home' }));
     expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
+  });
+
+  // 'Add page' and 'Move to folder' both live in the overflow menu; the
+  // toolbar's only LABELLED control used to be a duplicate of the action
+  // users need least.
+  it('does not duplicate overflow-menu actions in the toolbar', () => {
+    render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    expect(screen.queryByRole('button', { name: 'Add page' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Move to folder' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    const labels = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(labels).toContain('Add page');
+    expect(labels).toContain('Move to folder…');
+    // Rename is reachable without going back to the file tree.
+    expect(labels).toContain('Rename…');
+  });
+
+  it('renames the doc by rewriting its H1, not its filename', async () => {
+    render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), { target: { value: 'Team Sync' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(fs().get(DOC)).toContain('# Team Sync'), { timeout: 5_000 });
+    // The file itself never moves — the path the user navigated to still works.
+    expect(fs().has(DOC)).toBe(true);
+  });
+
+  // Move already operated on the whole doc folder; Trash deleted one file,
+  // removing the folder note and dissolving the doc without warning.
+  it('trashing a multi-page doc from its main page takes the whole doc', async () => {
+    fs().set(DOC_MAIN, '# Spec\n');
+    fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path: DOC_MAIN }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move doc to Trash' }));
+    expect(screen.getByText(/and its 1 other page to Trash\?/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(fs().has(`${DOC_FOLDER}/two.md`)).toBe(false), { timeout: 5_000 });
+    expect(fs().has(DOC_MAIN)).toBe(false);
+  });
+
+  it('trashing a non-main page of a doc still takes only that page', async () => {
+    fs().set(DOC_MAIN, '# Spec\n');
+    fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');
+    await useVaultStore.getState().rescan();
+    render(<DocPage selection={{ kind: 'doc', path: `${DOC_FOLDER}/two.md` }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Page options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move to Trash' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(fs().has(`${DOC_FOLDER}/two.md`)).toBe(false), { timeout: 5_000 });
+    expect(fs().has(DOC_MAIN)).toBe(true);
   });
 });

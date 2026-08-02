@@ -69,13 +69,19 @@ export function DocsPage() {
                         <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
                       );
                     })()}
-                    <span className="truncate text-[13px] text-[var(--n-800)]">{e.title}</span>
+                    {/* The document name is the LAST thing to give up space,
+                        never the first: it has a readable floor, the project
+                        chip shrinks before it, and the date drops out of the
+                        row entirely on a narrow canvas. */}
+                    <span className="min-w-[12ch] flex-1 truncate text-[13px] text-[var(--n-800)]">
+                      {e.title}
+                    </span>
                     {projectTitle(e) !== null && (
-                      <span className="flex-none rounded-[5px] bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--n-600)]">
+                      <span className="hidden min-w-0 shrink truncate rounded-[5px] bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--n-600)] @[380px]/canvas:inline-block">
                         {projectTitle(e)}
                       </span>
                     )}
-                    <span className="ml-auto flex-none text-[11px] text-[var(--n-400)] [font-family:var(--font-mono)]">
+                    <span className="hidden flex-none text-[11px] text-[var(--text-meta)] [font-family:var(--font-mono)] @[520px]/canvas:inline">
                       {formatDay(e.modifiedAt)}
                     </span>
                   </button>
