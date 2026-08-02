@@ -4,6 +4,7 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import type { FieldOption } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 
 /** Stable id for a freshly typed label; ids are what records store. */
 export const optionId = (label: string) => label.trim().replace(/\s+/g, '-').toLowerCase();
@@ -96,7 +97,10 @@ function OptionRow({
             {option.label}
           </button>
         )}
-        <span className="hidden group-hover:inline-flex">
+        {/* Revealed on hover OR focus. `hidden group-hover:` kept the button
+            out of the tab order entirely, so an option could not be removed
+            from the keyboard at all. */}
+        <span className="inline-flex flex-none opacity-0 focus-within:opacity-100 group-hover:opacity-100">
           <IconButton icon="x" label={`Remove ${option.label}`} size="sm" onClick={onRemove} />
         </span>
       </div>
@@ -134,8 +138,14 @@ export function OptionListEditor({
     const text = adding.trim();
     if (text === '') return;
     const id = optionId(text);
+    // A collision used to clear the input and return silently, which read as
+    // the app dropping input at random. Keep the draft and say what happened
+    // — ids are slugged, so "In Progress" and "in-progress" collide.
+    if (options.some((o) => o.id === id)) {
+      useUiStore.getState().toast(`"${text}" already exists`);
+      return;
+    }
     setAdding('');
-    if (options.some((o) => o.id === id)) return;
     onChange([
       ...options,
       { id, label: text, color: TYPE_COLORS[options.length % TYPE_COLORS.length] },

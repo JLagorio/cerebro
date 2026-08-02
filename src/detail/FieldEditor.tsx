@@ -1,10 +1,13 @@
 import { useState } from 'react';
+import { TYPE_COLORS } from '@/app/TypeDialogs';
+import { setFieldOptions } from '@/app/typeActions';
 import { Avatar } from '@/components/ui/Avatar';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
-import { FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
+import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
+import { optionId } from '@/detail/OptionListEditor';
 import { RelationPicker } from '@/detail/RelationPicker';
 import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -89,6 +92,30 @@ export function FieldEditor({
           }));
     const multi = def.kind === 'multiselect';
     const values = asList(resolved.raw);
+    // A freshly declared Select has no options, and the popover was a dead
+    // end: "No matches", nothing to type into, no way out. Typing a label now
+    // declares it on the type (the same write the type screen makes) and picks
+    // it. Statuses are a different store (the type's status set) and untyped
+    // docs have no schema to write to, so both keep the read-only hint below.
+    const ownerType = entry.type;
+    const declaredOptions = def.options ?? [];
+    const createOption =
+      def.kind !== 'status' && ownerType !== null
+        ? (label: string) => {
+            const id = optionId(label);
+            void (async () => {
+              const ok = await setFieldOptions(ownerType, def.name, [
+                ...declaredOptions,
+                {
+                  id,
+                  label,
+                  color: TYPE_COLORS[declaredOptions.length % TYPE_COLORS.length],
+                },
+              ]);
+              if (ok) patch(multi ? toggle(values, id) : id);
+            })();
+          }
+        : undefined;
     const chips = values.map((v) => {
       const match = options.find((o) => o.id === v);
       return { id: v, label: match?.label ?? v, color: match?.color ?? null };
@@ -121,7 +148,13 @@ export function FieldEditor({
         {open && (
           <FieldPopover
             options={options}
-            searchable={options.length > 6 || multi}
+            searchable={options.length > 6 || multi || createOption !== undefined}
+            {...(createOption !== undefined ? { onCreate: createOption } : {})}
+            emptyHint={
+              def.kind === 'status'
+                ? 'No statuses yet — add them on the type screen.'
+                : 'No options yet — add them on the type screen.'
+            }
             {...(multi ? { activeIds: values } : { activeId: values[0] ?? null })}
             onPick={(id) => patch(multi ? toggle(values, id) : id)}
             onClose={() => setOpen(false)}
@@ -299,8 +332,11 @@ export function FieldEditor({
         </button>
         {open && (
           <>
+            {/* Escape closes the date popover, not the record panel behind it. */}
+            <EscapeToClose onClose={() => setOpen(false)} />
             <button
               type="button"
+              tabIndex={-1}
               aria-label="Close popover"
               onClick={() => setOpen(false)}
               onWheel={() => setOpen(false)}
@@ -374,7 +410,7 @@ export function FieldEditor({
               type="button"
               aria-label={`Remove ${f}`}
               onClick={() => patch(files.filter((x) => x !== f))}
-              className="border-0 bg-transparent p-0 text-[var(--n-400)] hover:text-[var(--danger-600,#c5372c)]"
+              className="border-0 bg-transparent p-0 text-[var(--n-400)] hover:text-[var(--danger-600)]"
             >
               <Icon name="x" size={11} />
             </button>
@@ -435,14 +471,24 @@ export function FieldEditor({
   if (draft !== null) {
     const commit = () => {
       const trimmed = draft.trim();
+      // A number field's display carries its format ("$1,840", "76%"). The
+      // draft is seeded raw (see the read view below), but a user may well
+      // retype the decoration they can see, so strip it before parsing —
+      // the same tolerance progressRatio applies in engine/properties.
+      const numeric = def.kind === 'number' ? trimmed.replace(/[%$,]/g, '').trim() : trimmed;
       // Number('junk') is NaN, which serde_yaml serializes as `.nan` on disk
       // (M1.x): refuse the commit instead of poisoning the frontmatter.
-      if (def.kind === 'number' && trimmed !== '' && Number.isNaN(Number(trimmed))) {
+      if (def.kind === 'number' && numeric !== '' && Number.isNaN(Number(numeric))) {
         useUiStore.getState().toast('Enter a number');
         setDraft(null);
         return;
       }
-      patch(trimmed === '' ? null : def.kind === 'number' ? Number(trimmed) : trimmed);
+      if (def.kind === 'number') {
+        patch(numeric === '' ? null : Number(numeric));
+        setDraft(null);
+        return;
+      }
+      patch(trimmed === '' ? null : trimmed);
       setDraft(null);
     };
     return (
@@ -459,23 +505,35 @@ export function FieldEditor({
             setDraft(null);
           }
         }}
-        className="h-[26px] w-40 rounded-md border border-[var(--cortex-500)] px-1.5 text-[13px] text-[var(--n-900)] shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
+        className="h-[26px] w-40 rounded-md border border-[var(--cortex-500)] px-1.5 text-[13px] text-[var(--n-900)] shadow-[var(--ring)] outline-none"
       />
     );
   }
   return (
     // max-w-full + truncate keep long text on one line inside a table cell;
     // the full value stays readable in the title and the detail panel.
+    // The ellipsis lives on the inner span: `truncate` on a flex CONTAINER
+    // clips without one, which is why these cells cut off mid-word.
     <button
       type="button"
       title={resolved.display === '' ? undefined : resolved.display}
-      onClick={() => setDraft(resolved.display)}
-      className="inline-flex max-w-full truncate rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+      // Seed the draft from the RAW value, never the formatted display: a
+      // percent field opened holding "76%" and a currency field "$1,840",
+      // and commit then rejected the app's own display string as not a
+      // number. Formats are presentation only (engine/properties).
+      onClick={() =>
+        setDraft(
+          def.kind === 'number' && typeof resolved.raw === 'number'
+            ? String(resolved.raw)
+            : resolved.display,
+        )
+      }
+      className="inline-flex min-w-0 max-w-full rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
     >
       {resolved.display === '' ? (
         <span className="text-[var(--n-400)]">Empty</span>
       ) : (
-        resolved.display
+        <span className="min-w-0 truncate">{resolved.display}</span>
       )}
     </button>
   );

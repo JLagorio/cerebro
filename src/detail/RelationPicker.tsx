@@ -137,6 +137,10 @@ export function RelationPicker({
     <>
       <button
         type="button"
+        // tabIndex -1: a click-away scrim is not a stop on the tab route.
+        // Focus landing on an invisible full-screen button reads as focus
+        // being lost, and Escape does nothing while parked there.
+        tabIndex={-1}
         aria-label="Close relation picker"
         onClick={onClose}
         className="fixed inset-0 z-[1000] cursor-default border-0 bg-[var(--scrim)]"
@@ -214,13 +218,17 @@ export function RelationPicker({
                       data-testid="relation-linked-row"
                       className="group flex items-center gap-2 rounded-[8px] px-2 py-1.5 hover:bg-[var(--n-25)]"
                     >
-                      <span className="flex flex-none flex-col">
+                      {/* 12x16px stacked with no gap was well under WCAG
+                          2.5.8's 24x24 floor, on a control that decides which
+                          link a narrow table cell shows. The glyph stays 11px;
+                          the target grows to 24x24. */}
+                      <span className="flex flex-none flex-col gap-0.5">
                         <button
                           type="button"
                           aria-label={`Move ${entry?.title ?? id} up`}
                           disabled={i === 0}
                           onClick={() => move(i, -1)}
-                          className="flex h-3 w-4 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-300)] hover:text-[var(--n-700)] disabled:opacity-30"
+                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-300)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)] disabled:opacity-30"
                         >
                           <Icon name="chevron-up" size={11} />
                         </button>
@@ -229,7 +237,7 @@ export function RelationPicker({
                           aria-label={`Move ${entry?.title ?? id} down`}
                           disabled={i === value.length - 1}
                           onClick={() => move(i, 1)}
-                          className="flex h-3 w-4 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-300)] hover:text-[var(--n-700)] disabled:opacity-30"
+                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-300)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)] disabled:opacity-30"
                         >
                           <Icon name="chevron-down" size={11} />
                         </button>

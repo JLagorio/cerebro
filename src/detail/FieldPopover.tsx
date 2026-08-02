@@ -1,6 +1,30 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+
+/**
+ * Escape dismisses THIS overlay and nothing behind it.
+ *
+ * Registered on `window` in the CAPTURE phase so it runs before the
+ * bubble-phase listener the record panel binds, and stops propagation so a
+ * single keystroke dismisses exactly one surface — the rule Dropdown already
+ * states ("an open dropdown must swallow Escape before global listeners").
+ * Without this, Escape inside a field popover tore down the whole record
+ * panel, which is the opposite of what the popover's own footer promises.
+ */
+export function useEscapeToClose(onClose: () => void): void {
+  const latest = useRef(onClose);
+  latest.current = onClose;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      latest.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+}
 
 /**
  * Fixed-position wrapper that pins its children just below the nearest
@@ -37,6 +61,13 @@ export function FixedBelowAnchor({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Mount inside a conditionally-rendered overlay to give it Escape without
+ * hoisting a conditional hook into the parent. */
+export function EscapeToClose({ onClose }: { onClose: () => void }) {
+  useEscapeToClose(onClose);
+  return null;
+}
+
 export interface FieldPopoverOption {
   id: string;
   label: string;
@@ -54,6 +85,9 @@ export interface FieldPopoverProps {
   searchable?: boolean;
   /** Offer "Create <query>" when the typed text matches no option. */
   onCreate?: (label: string) => void;
+  /** Shown instead of "No matches" when the field has no options at all, so a
+   * freshly declared Select says where its options come from. */
+  emptyHint?: string;
   onPick: (id: string) => void;
   onClose: () => void;
 }
@@ -65,9 +99,11 @@ export function FieldPopover({
   activeIds,
   searchable,
   onCreate,
+  emptyHint,
   onPick,
   onClose,
 }: FieldPopoverProps) {
+  useEscapeToClose(onClose);
   const [query, setQuery] = useState('');
   const trimmed = query.trim();
   const visible =
@@ -86,6 +122,10 @@ export function FieldPopover({
     <>
       <button
         type="button"
+        // tabIndex -1: the scrim is a click target, not a stop on the tab
+        // route — focus landing on an invisible full-screen button reads as
+        // focus being lost. Matches Dropdown's scrim.
+        tabIndex={-1}
         aria-label="Close popover"
         onClick={onClose}
         onWheel={onClose}
@@ -134,7 +174,9 @@ export function FieldPopover({
               </button>
             ))}
             {visible.length === 0 && !canCreate && (
-              <div className="p-2 text-[12px] text-[var(--n-400)]">No matches</div>
+              <div className="p-2 text-[12px] leading-relaxed text-[var(--n-500)]">
+                {options.length === 0 && emptyHint !== undefined ? emptyHint : 'No matches'}
+              </div>
             )}
             {canCreate && (
               <button

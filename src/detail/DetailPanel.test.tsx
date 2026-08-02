@@ -59,6 +59,34 @@ describe('DetailPanel', () => {
     expect(useUiStore.getState().detailPath).toBeNull();
   });
 
+  // M15: one Escape must dismiss ONE surface. The window listener sits above
+  // the null-guard (hooks are unconditional), so the guard is in the handler.
+  it('leaves the record panel open when QuickOpen owns the Escape', () => {
+    render(<DetailPanel />);
+    useUiStore.setState({ quickOpenVisible: true });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+    useUiStore.setState({ quickOpenVisible: false });
+  });
+
+  it('leaves the record panel open when the inline diff owns the Escape', () => {
+    render(<DetailPanel />);
+    useUiStore.setState({ diffView: { path: 'projects/onboarding/items/fld-1.md', commit: null } });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+    useUiStore.setState({ diffView: null });
+  });
+
+  it('leaves the record panel open when a modal is on top', () => {
+    render(<DetailPanel />);
+    const modal = document.createElement('div');
+    modal.setAttribute('role', 'dialog');
+    document.body.appendChild(modal);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+    modal.remove();
+  });
+
   it('renders nothing when no detail path is open', () => {
     useUiStore.setState({ detailPath: null });
     const { container } = render(<DetailPanel />);
@@ -198,5 +226,50 @@ describe('FieldEditor number guard', () => {
     expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
       effort: 5,
     });
+  });
+
+  // M15: the read view seeded the draft from the FORMATTED display, so a
+  // percent field opened holding "76%" and commit rejected the app's own
+  // display string with "Enter a number" — the field was unusable.
+  function setupFormattedEditor(format: 'percent' | 'currency') {
+    const entries = fixtureVault();
+    // The format lives on the TYPE — resolveField reads the declared def, not
+    // the one handed to FieldEditor — so declare it there.
+    const typeDoc = entries.find((e) => e.path === 'types/work-item.md')!;
+    (typeDoc.properties as unknown as { fields: Record<string, unknown> }).fields.effort = {
+      kind: 'number',
+      format,
+      precision: 0,
+    };
+    const entry = entries.find((e) => e.path === 'projects/onboarding/items/fld-1.md')!;
+    entry.properties.effort = 1840;
+    const schema = buildSchema(entries);
+    const def = schema.types.get('Work item')!.fields.find((f) => f.name === 'effort')!;
+    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    useVaultStore.setState({ entries, patchFrontmatter });
+    render(<FieldEditor entry={entry} def={def} schema={schema} />);
+    return patchFrontmatter;
+  }
+
+  it('opens a currency field on the raw number, not "$1,840"', async () => {
+    const user = userEvent.setup();
+    setupFormattedEditor('currency');
+    expect(screen.getByRole('button').textContent).toBe('$1,840');
+    await user.click(screen.getByRole('button'));
+    expect((screen.getByLabelText('Effort') as HTMLInputElement).value).toBe('1840');
+  });
+
+  it('accepts a retyped formatted value instead of toasting at it', async () => {
+    const user = userEvent.setup();
+    const patchFrontmatter = setupFormattedEditor('percent');
+    await user.click(screen.getByRole('button'));
+    const input = screen.getByLabelText('Effort');
+    await user.clear(input);
+    await user.type(input, '76%');
+    fireEvent.blur(input);
+    expect(patchFrontmatter).toHaveBeenCalledWith('projects/onboarding/items/fld-1.md', {
+      effort: 76,
+    });
+    expect(useUiStore.getState().toasts.map((t) => t.message)).not.toContain('Enter a number');
   });
 });

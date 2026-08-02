@@ -99,9 +99,21 @@ export function DetailPanel() {
     editorRef.current = null;
   }, [entry?.path, entry?.title]);
 
+  // Escape closes the record panel only when the record panel is the
+  // innermost dismissable thing on screen. The effect cannot move below the
+  // null-guard (hooks are unconditional), so the guard lives in the handler:
+  // with nothing open it did close the panel out from under QuickOpen, the
+  // inline diff, and any modal — one keystroke dismissing two surfaces, and
+  // in the modal case dismissing the one the user could not see.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeDetail();
+      if (e.key !== 'Escape') return;
+      const ui = useUiStore.getState();
+      if (ui.detailPath === null || ui.quickOpenVisible || ui.diffView !== null) return;
+      // Any open modal owns Escape first. Overlays that stop propagation
+      // (Dropdown, FieldPopover, RelationPicker) never reach us at all.
+      if (document.querySelector('[role="dialog"]') !== null) return;
+      closeDetail();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -164,11 +176,12 @@ export function DetailPanel() {
       data-testid="detail-panel"
       aria-label="Detail panel"
       className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
-      // The 50vw ceiling is what keeps the canvas usable in a narrow window:
-      // the stored width is a preference for a big screen, and honouring it at
-      // 1024px would leave the table a sliver. The record never takes more of
-      // the window than what it is annotating.
-      style={{ width, maxWidth: '50vw' }}
+      // M15: the ceiling is 50% of the CANVAS ROW, not 50vw. Measured against
+      // the viewport it ignored the rail and the sidebar, so a 1024px window
+      // with the sidebar open left the page being annotated a ~180px sliver.
+      // A percentage resolves against the flex row this panel shares with
+      // <main>, which is exactly "never more than half of what is left".
+      style={{ width, maxWidth: '50%' }}
     >
       <ResizeHandle
         label="Resize detail panel"
@@ -229,7 +242,9 @@ export function DetailPanel() {
               setTitle(entry.title);
             }
           }}
-          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-[16px] font-semibold leading-[22px] tracking-[-0.01em] text-[var(--n-900)] outline-none hover:border-[var(--n-200)] focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]"
+          // focus-visible + the shared --ring token: every other control in
+          // the app uses that halo and suppresses it on plain mouse clicks.
+          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-[16px] font-semibold leading-[22px] tracking-[-0.01em] text-[var(--n-900)] outline-none hover:border-[var(--n-200)] focus-visible:border-[var(--cortex-500)] focus-visible:shadow-[var(--ring)]"
         />
         {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
