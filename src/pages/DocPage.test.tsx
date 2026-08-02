@@ -108,6 +108,47 @@ describe('DocPage', () => {
     expect(fs().has(DOC_MAIN)).toBe(false);
   });
 
+  // M15: a doc whose body has no H1 had its title in the breadcrumb and
+  // nowhere else — the document itself was untitled.
+  describe('the title of an untitled doc', () => {
+    const UNTITLED = 'inbox/capture-untitled.md';
+
+    it('renders in the document, and only when the body has none', async () => {
+      fs().set(UNTITLED, 'Sync error rate looked spiky again overnight.\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: UNTITLED }} />);
+      await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+        timeout: 5_000,
+      });
+      const heading = await screen.findByTestId('doc-title-heading');
+      const entry = useVaultStore.getState().entries.find((e) => e.path === UNTITLED);
+      expect((heading as HTMLTextAreaElement).value).toBe(entry?.title);
+
+      // The doc that DOES carry an H1 must not grow a second title.
+      cleanup();
+      render(<DocPage selection={{ kind: 'doc', path: DOC }} />);
+      await waitFor(() => expect(screen.getByTestId('markdown-editor')).toBeTruthy(), {
+        timeout: 5_000,
+      });
+      expect(screen.queryByTestId('doc-title-heading')).toBeNull();
+    });
+
+    it('committing it writes a real H1 into the body', async () => {
+      fs().set(UNTITLED, 'Sync error rate looked spiky again overnight.\n');
+      await useVaultStore.getState().rescan();
+      render(<DocPage selection={{ kind: 'doc', path: UNTITLED }} />);
+      const heading = await screen.findByTestId('doc-title-heading');
+      fireEvent.change(heading, { target: { value: 'Sync error spike' } });
+      fireEvent.blur(heading);
+      await waitFor(() => expect(fs().get(UNTITLED)?.includes('# Sync error spike')).toBe(true), {
+        timeout: 5_000,
+      });
+      // The body it was written above is still there — this adds a title, it
+      // does not replace the document.
+      expect(fs().get(UNTITLED)).toContain('Sync error rate looked spiky');
+    });
+  });
+
   it('trashing a non-main page of a doc still takes only that page', async () => {
     fs().set(DOC_MAIN, '# Spec\n');
     fs().set(`${DOC_FOLDER}/two.md`, '# Two\n');

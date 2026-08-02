@@ -263,6 +263,17 @@ export async function blocksToMarkdown(
  * policy). Fence-awareness is inherent — code fences are codeBlock blocks,
  * never headings.
  */
+/**
+ * Does the live document carry its own title? A note's title IS its first H1
+ * — that is what the scanner reads. When there is none the scanner falls back
+ * to the filename, and the document itself shows the title nowhere (M15).
+ */
+export function hasTitleBlock(editor: AnyEditor): boolean {
+  return editor.document.some(
+    (b) => b.type === 'heading' && (b.props as { level?: number }).level === 1,
+  );
+}
+
 export function spliceTitleIntoBlocks(editor: AnyEditor, title: string): void {
   const h1 = editor.document.find(
     (b) => b.type === 'heading' && (b.props as { level?: number }).level === 1,

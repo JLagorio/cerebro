@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/Input';
 import { DocPagesFloatingButton, DocPagesPanel } from '@/detail/DocPagesPanel';
 import { DocSidePanel } from '@/detail/DocSidePanel';
 import type { CerebroEditor, EditorReadyInfo } from '@/editor/MarkdownEditor';
-import { spliceTitleIntoBlocks } from '@/editor/markdown';
+import { hasTitleBlock, spliceTitleIntoBlocks } from '@/editor/markdown';
 import { NoteBodyEditor, type SaveState } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
 import { InlineDiff } from '@/git/InlineDiff';
@@ -47,6 +47,65 @@ export function isBlankBody(editor: CerebroEditor): boolean {
     if (Array.isArray(content) && content.length > 0) return false;
   }
   return true;
+}
+
+/**
+ * The title of a doc whose body carries no H1 (M15).
+ *
+ * A note's title IS its first H1; with none, the scanner falls back to the
+ * filename. So the app knew this doc's title — it showed it in the sidebar,
+ * in Quick Open, in recents and in the breadcrumb — and the document was the
+ * single place it never appeared. This renders it where a title belongs, in
+ * the editor's own H1 metrics so it reads as the document's first line rather
+ * than as page chrome, and committing it writes a real H1 into the body.
+ *
+ * A textarea, not an input: at 42px in an 820px column real titles wrap, and
+ * an input would clip its own text with no way to read the rest.
+ */
+function UntitledDocHeading({
+  title,
+  onCommit,
+}: {
+  title: string;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(title);
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => setDraft(title), [title]);
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    el.style.height = 'auto';
+    // scrollHeight excludes the border, but the box is border-box, so setting
+    // height to scrollHeight alone clips the last two pixels of a descender.
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [draft]);
+  return (
+    <textarea
+      ref={ref}
+      data-testid="doc-title-heading"
+      aria-label="Document title"
+      rows={1}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(draft)}
+      onKeyDown={(e) => {
+        // Enter commits rather than opening a second line: this is one title,
+        // and the body below is where prose goes.
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          setDraft(title);
+        }
+      }}
+      // 45 + 1px border + 8px padding = the editor's 54px block gutter, so the
+      // heading and the first paragraph share one left edge.
+      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-[42px] font-bold leading-[63px] text-[var(--n-900)] outline-none hover:border-[var(--n-200)] focus-visible:border-[var(--cortex-500)] focus-visible:shadow-[var(--ring)]"
+    />
+  );
 }
 
 /** Floating action bar on blank pages: start from a template (M2.x feedback:
@@ -134,15 +193,23 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     setEditor(null); // the keyed editor remounts per doc; wait for onReady
   }, [selection.path, reloadGen]);
 
-  // Blank-page detection drives the floating template bar.
+  // Blank-page detection drives the floating template bar. Title detection
+  // drives the heading below: a doc whose body has no H1 has its title only in
+  // the breadcrumb, so the document itself is untitled (M15).
   const [blank, setBlank] = useState(false);
+  const [titled, setTitled] = useState(true);
   useEffect(() => {
     if (editor === null) {
       setBlank(false);
+      setTitled(true);
       return;
     }
-    setBlank(isBlankBody(editor));
-    const unsubscribe = editor.onChange?.(() => setBlank(isBlankBody(editor)));
+    const sync = () => {
+      setBlank(isBlankBody(editor));
+      setTitled(hasTitleBlock(editor));
+    };
+    sync();
+    const unsubscribe = editor.onChange?.(sync);
     return () => unsubscribe?.();
   }, [editor]);
 
@@ -244,6 +311,31 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       navigate({ kind: 'docs' });
     } catch {
       toast("Couldn't move to Trash");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Give an untitled doc a real title (M15).
+   *
+   * The scanner derives a title from the filename when the body has no H1, so
+   * the app knew the title all along and the document was the one place it did
+   * not appear. Committing the heading writes it as an actual H1 — through the
+   * same path as Rename, so from then on this doc is an ordinary titled doc
+   * and the heading below unmounts because the editor now shows the real one.
+   */
+  const adoptTitle = async (next: string) => {
+    const trimmed = next.trim();
+    if (vaultPath === null || trimmed === '' || busy) return;
+    if (trimmed === entry.title && editor !== null && hasTitleBlock(editor)) return;
+    setBusy(true);
+    try {
+      await setNoteTitle(vaultPath, entry.path, trimmed);
+      if (editor !== null) spliceTitleIntoBlocks(editor, trimmed);
+      await rescan();
+    } catch {
+      toast("Couldn't set the title");
     } finally {
       setBusy(false);
     }
@@ -479,6 +571,17 @@ export function DocPage({ selection }: { selection: DocSelection }) {
                 <InlineDiff path={entry.path} />
               ) : (
                 <>
+                  {/* Only when the body has no H1 of its own. A doc whose body
+                      starts with one already shows its title as the first line
+                      of the editor — rendering a second heading above it would
+                      show the same string twice, which is the bug this fixes,
+                      not a second copy of it. */}
+                  {!titled && (
+                    <UntitledDocHeading
+                      title={entry.title}
+                      onCommit={(next) => void adoptTitle(next)}
+                    />
+                  )}
                   <NoteBodyEditor
                     key={`${entry.path}#${reloadGen}`}
                     path={entry.path}
