@@ -25,7 +25,7 @@ export function DiffView({
   return (
     <div data-testid="diff-view" className="flex min-h-0 flex-col">
       <div className="flex flex-none items-center gap-3 pb-1.5 text-[11px]">
-        <span className="[font-family:var(--font-mono)] text-[var(--success-600,#1F9D61)]">
+        <span className="[font-family:var(--font-mono)] text-[var(--success-600)]">
           +{stats.added}
         </span>
         <span className="[font-family:var(--font-mono)] text-[var(--danger-500)]">
@@ -43,7 +43,7 @@ export function DiffView({
               className={[
                 'whitespace-pre px-2',
                 line.kind === 'add'
-                  ? 'bg-[var(--success-50,#EAF7F0)] text-[var(--success-700,#166B44)]'
+                  ? 'bg-[var(--success-50)] text-[var(--success-700)]'
                   : line.kind === 'del'
                     ? 'bg-[var(--danger-50)] text-[var(--danger-700)]'
                     : line.kind === 'hunk'

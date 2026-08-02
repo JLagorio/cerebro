@@ -80,7 +80,7 @@ export function GitSettings() {
       <h2 className="m-0 text-[13px] font-semibold text-[var(--n-900)]">History</h2>
 
       {provider !== null && !provider.native.available && (
-        <div className="flex items-start gap-2 rounded-[10px] border border-[var(--warn-300,#F0C36D)] bg-[var(--warn-50,#FDF6E7)] px-3 py-2.5 text-[12.5px] leading-[18px] text-[var(--n-700)]">
+        <div className="flex items-start gap-2 rounded-[10px] border border-[var(--warn-300)] bg-[var(--warn-50)] px-3 py-2.5 text-[12.5px] leading-[18px] text-[var(--n-700)]">
           <Icon name="triangle-alert" size={13} style={{ marginTop: 2 }} />
           <span>{provider.native.message}</span>
         </div>
@@ -126,9 +126,7 @@ export function GitSettings() {
                 <span className="text-[var(--n-400)]">({identity.source})</span>
               </div>
               {identity.warning !== null && (
-                <div className="mt-1 text-[11.5px] text-[var(--warn-600,#B87503)]">
-                  {identity.warning}
-                </div>
+                <div className="mt-1 text-[11.5px] text-[var(--warn-600)]">{identity.warning}</div>
               )}
             </div>
           )}

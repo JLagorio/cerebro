@@ -143,6 +143,10 @@ function CollectionRow({
           <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
           <span className="overflow-hidden text-ellipsis whitespace-nowrap">{node.label}</span>
         </button>
+        {/* M15: revealed by OPACITY, not `display:none`. Hidden it was out of
+            the tab order and out of the accessibility tree entirely, so a
+            keyboard user could not add a List to a specific Collection at all.
+            `group-focus-within/row` is the counterpart hover never had. */}
         {onAdd !== undefined && node.kind === 'collection' && (
           <button
             type="button"
@@ -151,13 +155,13 @@ function CollectionRow({
               e.stopPropagation();
               onAdd(node);
             }}
-            className="hidden h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)] group-hover/row:flex"
+            className="flex h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] opacity-0 hover:bg-[var(--n-100)] hover:text-[var(--n-700)] focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
           >
             <Icon name="plus" size={13} />
           </button>
         )}
         {container && count > 0 && (
-          <span className="ml-auto flex-none [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)] group-hover/row:hidden">
+          <span className="ml-auto flex-none [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)] group-hover/row:hidden group-focus-within/row:hidden">
             {count}
           </span>
         )}

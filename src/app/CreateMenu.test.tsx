@@ -24,7 +24,7 @@ describe('CreateMenu', () => {
     useVaultStore.setState({ createItem });
     render(<CreateMenu />);
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New record' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Ship the fix');
     await user.selectOptions(screen.getByRole('combobox'), 'Work item');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
@@ -44,7 +44,7 @@ describe('CreateMenu', () => {
     useVaultStore.setState({ createItem });
     render(<CreateMenu />);
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New doc' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New doc' }));
     await user.type(screen.getByPlaceholderText('Doc title'), 'Meeting notes');
     await user.click(screen.getByRole('button', { name: 'Create doc' }));
     expect(createItem).toHaveBeenCalledWith({
@@ -59,7 +59,7 @@ describe('CreateMenu', () => {
     const user = userEvent.setup();
     render(<CreateMenu />);
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New collection' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New collection' }));
     // The shared CollectionDialog opens; its behavior is covered by its own
     // tests — here it only matters that the menu reaches it.
     expect(screen.getByText(/collection/i)).toBeTruthy();
@@ -73,7 +73,7 @@ describe('CreateMenu', () => {
     useVaultStore.setState({ createItem });
     render(<CreateMenu />);
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New record' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Doomed');
     await user.click(screen.getByRole('button', { name: 'Create record' }));
     await vi.waitFor(() => {
@@ -84,6 +84,36 @@ describe('CreateMenu', () => {
     expect(screen.getByPlaceholderText('What is it called?')).toBeTruthy();
   });
 
+  // M15: the popup was a plain div — nothing announced a menu, focus stayed on
+  // the trigger, arrow keys did nothing, and Escape did not close it.
+  describe('keyboard', () => {
+    it('announces a menu, focuses the first entry, and closes on Escape', async () => {
+      const user = userEvent.setup();
+      render(<CreateMenu />);
+      const trigger = screen.getByRole('button', { name: 'New' });
+      expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+      expect(trigger.getAttribute('aria-expanded')).toBe('false');
+      await user.click(trigger);
+      expect(trigger.getAttribute('aria-expanded')).toBe('true');
+      expect(screen.getByRole('menu')).toBeTruthy();
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'New record' }));
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('menu')).toBeNull();
+      // Focus goes back to the trigger, not to <body>.
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'New' }));
+    });
+
+    it('walks the entries with the arrow keys and wraps', async () => {
+      const user = userEvent.setup();
+      render(<CreateMenu />);
+      await user.click(screen.getByRole('button', { name: 'New' }));
+      await user.keyboard('{ArrowDown}');
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'New doc' }));
+      await user.keyboard('{ArrowUp}{ArrowUp}');
+      expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'New collection' }));
+    });
+  });
+
   // Fix (fix round M1): double-clicking Create while the write was pending
   // created twice.
   it('a second click while the record create is pending does not create twice', async () => {
@@ -92,7 +122,7 @@ describe('CreateMenu', () => {
     useVaultStore.setState({ createItem });
     render(<CreateMenu />);
     await user.click(screen.getByRole('button', { name: 'New' }));
-    await user.click(screen.getByRole('button', { name: 'New record' }));
+    await user.click(screen.getByRole('menuitem', { name: 'New record' }));
     await user.type(screen.getByPlaceholderText('What is it called?'), 'Once only');
     const create = screen.getByRole('button', { name: 'Create record' });
     await user.click(create);

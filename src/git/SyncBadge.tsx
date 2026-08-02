@@ -21,12 +21,12 @@ const TONE: Record<SyncState, { icon: string; color: string; label: (n: number) 
   clean: { icon: 'check', color: 'var(--n-400)', label: () => 'Up to date' },
   'local-changes': {
     icon: 'file-diff',
-    color: 'var(--warn-600, #B87503)',
+    color: 'var(--warn-600)',
     label: (n) => `${n} uncommitted`,
   },
   ahead: { icon: 'arrow-up', color: 'var(--cortex-600)', label: (n) => `${n} to push` },
   behind: { icon: 'arrow-down', color: 'var(--cortex-600)', label: (n) => `${n} to pull` },
-  diverged: { icon: 'git-branch', color: 'var(--warn-600, #B87503)', label: () => 'Diverged' },
+  diverged: { icon: 'git-branch', color: 'var(--warn-600)', label: () => 'Diverged' },
   conflict: { icon: 'triangle-alert', color: 'var(--danger-500)', label: (n) => `${n} conflicted` },
 };
 

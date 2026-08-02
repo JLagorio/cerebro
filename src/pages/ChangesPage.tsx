@@ -12,9 +12,9 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const STATUS_STYLE: Record<FileStatus, { icon: string; color: string; label: string }> = {
-  added: { icon: 'file-plus', color: 'var(--success-600, #1F9D61)', label: 'Added' },
-  untracked: { icon: 'file-plus', color: 'var(--success-600, #1F9D61)', label: 'New' },
-  modified: { icon: 'file-pen', color: 'var(--warn-600, #B87503)', label: 'Modified' },
+  added: { icon: 'file-plus', color: 'var(--success-600)', label: 'Added' },
+  untracked: { icon: 'file-plus', color: 'var(--success-600)', label: 'New' },
+  modified: { icon: 'file-pen', color: 'var(--warn-600)', label: 'Modified' },
   deleted: { icon: 'file-minus', color: 'var(--danger-500)', label: 'Deleted' },
   renamed: { icon: 'file-symlink', color: 'var(--n-500)', label: 'Renamed' },
   conflicted: { icon: 'triangle-alert', color: 'var(--danger-500)', label: 'Conflict' },
@@ -225,6 +225,11 @@ export function ChangesPage() {
                 const style = STATUS_STYLE[file.status];
                 const active = selected === file.path;
                 return (
+                  // M15: the row's two actions are revealed by opacity rather
+                  // than `display:none`. Hidden they were out of the tab order
+                  // entirely — discarding an unwanted change had no keyboard
+                  // path at all, which is the most destructive thing in the app
+                  // to make mouse-only.
                   <div
                     key={file.path}
                     data-testid="changed-file"
@@ -246,7 +251,7 @@ export function ChangesPage() {
                       type="button"
                       aria-label={`Open ${file.path}`}
                       onClick={() => openPath(file.path)}
-                      className="hidden flex-none rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] hover:text-[var(--n-800)] group-hover:inline-flex"
+                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] opacity-0 hover:text-[var(--n-800)] focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="maximize-2" size={11} />
                     </button>
@@ -254,7 +259,7 @@ export function ChangesPage() {
                       type="button"
                       aria-label={`Discard changes to ${file.path}`}
                       onClick={() => void discard(file)}
-                      className="hidden flex-none rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] hover:text-[var(--danger-500)] group-hover:inline-flex"
+                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] opacity-0 hover:text-[var(--danger-500)] focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="undo-2" size={11} />
                     </button>

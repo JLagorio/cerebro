@@ -192,6 +192,47 @@ describe('Sidebar', () => {
     expect(onNewView).toHaveBeenCalledWith('product');
   });
 
+  // M15: sidebar content is a function of the destination. Collections + 15
+  // Types beside a settings form is ~25% of the window under navigation that
+  // has no relationship to what is in view.
+  it('does not render at all on Settings, Pulse or the Inbox', () => {
+    for (const kind of ['settings', 'pulse', 'inbox'] as const) {
+      useNavStore.setState({ selection: { kind } });
+      const { container } = render(<Sidebar onNewView={vi.fn()} />);
+      expect(container.firstChild).toBeNull();
+      cleanup();
+    }
+  });
+
+  // M15: the sidebar names the NAVIGATOR, not the page. As an h1 it gave Docs
+  // two level-1 headings and left Inbox/Knowledge with none of their own.
+  it('titles itself with an h2 so the page keeps the only h1', () => {
+    render(<Sidebar onNewView={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: 'Workspace', level: 2 })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Workspace', level: 1 })).toBeNull();
+  });
+
+  // M15: `flex-none` here was what made the canvas absorb every pixel of a
+  // narrow window. The sidebar has to be the column that yields.
+  it('is shrinkable down to its minimum rather than fixed', () => {
+    const { container } = render(<Sidebar onNewView={vi.fn()} />);
+    const nav = container.querySelector('nav');
+    expect(nav?.className).not.toContain('flex-none');
+    expect(nav?.style.minWidth).toBe('180px');
+  });
+
+  it('draws at its minimum and withdraws the resize handle while narrow', () => {
+    useUiStore.setState({ sidebarWidth: 420 });
+    const { container } = render(<Sidebar narrow onNewView={vi.fn()} />);
+    expect(container.querySelector('nav')?.style.width).toBe('180px');
+    expect(screen.queryByRole('separator', { name: 'Resize sidebar' })).toBeNull();
+    cleanup();
+    // The STORED preference is untouched — widening the window restores it.
+    expect(useUiStore.getState().sidebarWidth).toBe(420);
+    const wide = render(<Sidebar onNewView={vi.fn()} />);
+    expect(wide.container.querySelector('nav')?.style.width).toBe('420px');
+  });
+
   // Task 14: on the Docs surfaces the sidebar is a Drive-style file tree.
   it('shows the file tree instead of projects on the Docs surface', () => {
     const doc = mkEntry({

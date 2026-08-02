@@ -24,6 +24,10 @@ import { fixtureVault } from '@/test/factories';
 
 describe('App boot flow', () => {
   beforeEach(() => {
+    // jsdom implements no scrolling at all; the assistant's transcript pins
+    // itself to the bottom on mount. Not a stub for app behaviour — a stub for
+    // a DOM method the environment simply does not have.
+    Element.prototype.scrollTo ??= () => {};
     useVaultStore.setState({
       vaultPath: null,
       entries: [],
@@ -36,7 +40,13 @@ describe('App boot flow', () => {
       history: [{ kind: 'home' }],
       historyIndex: 0,
     });
-    useUiStore.setState({ quickOpenVisible: false, toasts: [], detailPath: null });
+    useUiStore.setState({
+      quickOpenVisible: false,
+      toasts: [],
+      detailPath: null,
+      aiPanelOpen: false,
+      inboxSelectedPath: null,
+    });
   });
 
   afterEach(cleanup);
@@ -81,6 +91,94 @@ describe('App boot flow', () => {
     await screen.findByRole('navigation', { name: 'Sidebar' });
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     expect(useUiStore.getState().quickOpenVisible).toBe(true);
+  });
+
+  // M15 — the layout contract every surface is built on.
+  describe('shell layout', () => {
+    it('gives the canvas a <main> landmark, a skip link, and a real floor', async () => {
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      const main = screen.getByRole('main');
+      expect(main.id).toBe('main');
+      // The canvas never shrinks below its floor, whatever else is open.
+      expect(main.style.minWidth).toBe('400px');
+      expect(screen.getByRole('button', { name: 'Skip to content' })).toBeTruthy();
+      // The row nothing may paint outside of, and the container pages size to.
+      const row = main.parentElement;
+      expect(row?.className).toContain('overflow-hidden');
+      expect(row?.className).toContain('@container/canvas');
+    });
+
+    it('holds the right-hand panel in ONE slot, inside the canvas row', async () => {
+      render(<App />);
+      const main = await screen.findByRole('main');
+      expect(screen.queryByTestId('right-panel-slot')).toBeNull();
+
+      act(() => useUiStore.getState().openDetail('records/bets/office-hours.md'));
+      const slot = await screen.findByTestId('right-panel-slot');
+      // Beside the canvas — NOT beside the whole main column, which is what
+      // let the assistant steal width from the Topbar and StatusBar as well.
+      expect(slot.parentElement).toBe(main.parentElement);
+      // Capped against the canvas ROW, so the cap actually engages — `50vw`
+      // resolved against the viewport, a box the panel does not live in.
+      expect(slot.style.maxWidth).toBe('calc(100% - 400px)');
+
+      // Never two: the store displaces rather than stacks, so at most one
+      // occupant is ever drawn. (The exclusion rule itself is covered in
+      // uiStore.test.ts, where the assistant need not be mounted.)
+      act(() => useUiStore.getState().setAiPanelOpen(true));
+      expect(useUiStore.getState().detailPath).toBeNull();
+      act(() => useUiStore.getState().setAiPanelOpen(false));
+      expect(screen.queryByTestId('right-panel-slot')).toBeNull();
+    });
+
+    it('drops the record panel when the surface changes', async () => {
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      act(() => useUiStore.getState().openDetail('records/bets/office-hours.md'));
+      act(() => useNavStore.getState().navigate({ kind: 'docs' }));
+      expect(useUiStore.getState().detailPath).toBeNull();
+      expect(screen.queryByTestId('right-panel-slot')).toBeNull();
+    });
+  });
+
+  // M15: the handler threw away the path it had just created, so you landed on
+  // whichever capture `inboxSelectedPath` still pointed at and typed into it.
+  it('quick capture selects the note it just created', async () => {
+    const createItem = vi.fn().mockResolvedValue('inbox/2026-08-02-1200.md');
+    useVaultStore.setState({ createItem });
+    useUiStore.setState({ inboxSelectedPath: 'inbox/capture-b.md' });
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'n', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    expect(useUiStore.getState().inboxSelectedPath).toBe('inbox/2026-08-02-1200.md');
+    expect(useNavStore.getState().selection).toEqual({ kind: 'inbox' });
+  });
+
+  // M15: `back()`/`forward()` existed in the store with no way to reach them.
+  it('walks nav history with cmd+[ and cmd+]', async () => {
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    act(() => useNavStore.getState().navigate({ kind: 'docs' }));
+    fireEvent.keyDown(window, { key: '[', metaKey: true });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
+    fireEvent.keyDown(window, { key: ']', metaKey: true });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'docs' });
+  });
+
+  it('leaves cmd+[ to the editor while text is being edited', async () => {
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    act(() => useNavStore.getState().navigate({ kind: 'docs' }));
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+    field.focus();
+    fireEvent.keyDown(field, { key: '[', metaKey: true, bubbles: true });
+    expect(useNavStore.getState().selection).toEqual({ kind: 'docs' });
+    field.remove();
   });
 
   it('routes the settings selection to the settings page', async () => {

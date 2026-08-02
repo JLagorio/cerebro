@@ -6,6 +6,15 @@ import type { InboxPeriod } from '@/engine/inbox';
 export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
 
 interface UiState {
+  /**
+   * The record showing in the RIGHT-HAND SLOT, or null.
+   *
+   * M15: `detailPath` and `aiPanelOpen` are the two occupants of ONE slot, and
+   * the store — not the call sites — is what makes them mutually exclusive.
+   * As independent booleans they stacked: a record panel plus the assistant
+   * beside a 264px sidebar left a ~20px canvas on a 1280px window, with three
+   * separate close buttons in three chromes as the only way out.
+   */
   detailPath: string | null;
   openDetail(path: string): void;
   closeDetail(): void;
@@ -235,6 +244,21 @@ export const SIDEBAR_WIDTH_DEFAULT = 264;
 export const SIDEBAR_WIDTH_MIN = 180;
 export const SIDEBAR_WIDTH_MAX = 460;
 
+/**
+ * Layout floors (M15).
+ *
+ * The canvas is the thing every other column annotates, so it is the one
+ * column that never yields: the sidebar shrinks to SIDEBAR_WIDTH_MIN and the
+ * right-hand panel is capped at `100% - CANVAS_MIN_WIDTH` before the canvas
+ * gives up a pixel. Before this, every flanking column was `flex-none` and the
+ * canvas carried `min-w-0`, so content absorbed 100% of any shortfall — at
+ * 1024px with a record open the reading pane measured 108px and wrapped body
+ * text one character per line.
+ */
+export const CANVAS_MIN_WIDTH = 400;
+/** How narrow the right-hand slot may get before the sidebar has to yield. */
+export const RIGHT_PANEL_MIN_WIDTH = 320;
+
 function loadNumber(key: string, fallback: number, min: number, max: number): number {
   const raw = Number(loadString(key, String(fallback)));
   if (!Number.isFinite(raw)) return fallback;
@@ -370,7 +394,13 @@ let nextToastId = 1;
 
 export const useUiStore = create<UiState>((set, get) => ({
   detailPath: null,
-  openDetail: (path) => set({ detailPath: path }),
+  // One slot (M15): a record takes it from the assistant rather than stacking
+  // beside it. The persisted flag follows, or the assistant would come back on
+  // the next launch having been closed here.
+  openDetail: (path) => {
+    if (get().aiPanelOpen) storeString(AI_PANEL_KEY, 'false');
+    set({ detailPath: path, aiPanelOpen: false });
+  },
   closeDetail: () => set({ detailPath: null }),
 
   detailWidth: loadNumber(
@@ -504,7 +534,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
   setAiPanelOpen: (v) => {
     storeString(AI_PANEL_KEY, String(v));
-    set({ aiPanelOpen: v });
+    // The other half of the one-slot rule: opening the assistant vacates the
+    // slot rather than stacking on top of the record panel. Closing it leaves
+    // `detailPath` alone — there is nothing to displace.
+    set(v ? { aiPanelOpen: true, detailPath: null } : { aiPanelOpen: false });
   },
   // Defaults off: shell access is a choice the user makes, never one they
   // inherit. Everything else the agent can do follows from the folder model.

@@ -30,13 +30,30 @@ export interface SidebarProps {
    * offer and no null to handle downstream.
    */
   onNewView: (collection: string) => void;
+  /**
+   * The window is too narrow to honour a stored width (M15). The sidebar draws
+   * at its minimum instead — the STORED preference is untouched, so widening
+   * the window restores it — and the resize handle is withdrawn rather than
+   * left to fight a ceiling it cannot pass.
+   */
+  narrow?: boolean;
 }
+
+/**
+ * Surfaces the Workspace sidebar has nothing to say about (M15).
+ *
+ * Settings and Pulse are full-width single-column surfaces, and the Inbox is a
+ * queue with its own two-pane layout. Rendering Collections + 15 Types beside
+ * them put ~25% of the window under navigation unrelated to what is in view,
+ * and left a Collection highlighted as though it scoped the page.
+ */
+const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox']);
 
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
 type CollectionDialogState = { mode: 'new' } | { mode: 'rename'; collection: CollectionFile };
 
-export function Sidebar({ onNewView }: SidebarProps) {
+export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   const entries = useVaultStore((s) => s.entries);
   const views = useVaultStore((s) => s.views);
   const schema = useSchema();
@@ -157,6 +174,11 @@ export function Sidebar({ onNewView }: SidebarProps) {
     return items;
   };
 
+  // M15: sidebar content is a function of the destination, not a default.
+  // Checked BEFORE `collapsed` so these surfaces do not even get the hairline —
+  // there is nothing behind it to reopen.
+  if (SIDEBARLESS.has(selection.kind)) return null;
+
   // M11: collapsed to a hairline rather than unmounted, so the reopen control
   // stays where the sidebar was instead of moving to a different chrome.
   if (collapsed) {
@@ -181,21 +203,32 @@ export function Sidebar({ onNewView }: SidebarProps) {
       // `relative` hosts the drag handle; the width is a stored preference
       // rather than a constant, because 264px is only right for some vaults
       // and some window sizes (M11 responsiveness).
-      className="relative flex flex-none flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
-      style={{ width, maxWidth: '60vw' }}
+      // M15: SHRINKABLE — `flex-none` here is what made the canvas absorb every
+      // pixel of a narrow window. It gives ground down to SIDEBAR_WIDTH_MIN
+      // before the canvas gives up anything, which is the whole layout contract.
+      className="relative flex flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      style={{ width: narrow ? SIDEBAR_WIDTH_MIN : width, minWidth: SIDEBAR_WIDTH_MIN }}
     >
-      <ResizeHandle
-        label="Resize sidebar"
-        side="right"
-        width={width}
-        min={SIDEBAR_WIDTH_MIN}
-        max={SIDEBAR_WIDTH_MAX}
-        onResize={setWidth}
-      />
+      {/* Withdrawn while narrow: the sidebar is already pinned at its minimum,
+          so a handle there could only fight a ceiling — and dragging it would
+          overwrite the width the user chose for a wide window. */}
+      {!narrow && (
+        <ResizeHandle
+          label="Resize sidebar"
+          side="right"
+          width={width}
+          min={SIDEBAR_WIDTH_MIN}
+          max={SIDEBAR_WIDTH_MAX}
+          onResize={setWidth}
+        />
+      )}
       <div className="flex items-center justify-between pb-2 pl-4 pr-3 pt-3.5">
-        <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold text-[var(--n-900)]">
+        {/* An h2, not an h1 (M15): this names the navigator, not the page. As an
+            h1 it gave Docs two level-1 headings and made Inbox/Knowledge read as
+            subsections of the file tree. */}
+        <h2 className="m-0 min-w-0 truncate text-[15px] font-semibold text-[var(--n-900)]">
           {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
-        </h1>
+        </h2>
         <button
           type="button"
           aria-label="Hide sidebar"
