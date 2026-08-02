@@ -125,57 +125,48 @@ export interface PropertyKindMeta {
   multi?: boolean;
 }
 
-export const PROPERTY_KINDS: PropertyKindMeta[] = [
-  { kind: 'text', label: 'Text', icon: 'type', computed: false, seed: '' },
-  { kind: 'number', label: 'Number', icon: 'hash', computed: false, seed: '' },
-  { kind: 'select', label: 'Select', icon: 'circle-chevron-down', computed: false, seed: '' },
-  {
-    kind: 'multiselect',
+/**
+ * Every kind's metadata, in "+ Add property" catalog order (M16.4).
+ *
+ * `satisfies Record<FieldKind, ...>` is the enforcement: this was a bare
+ * array, so a kind added to the union but forgotten here fell through
+ * `kindMeta`'s `?? PROPERTY_KINDS[0]` and silently rendered as Text — with a
+ * Text icon, in every surface, forever. Declaration order is catalog order,
+ * because object key order is insertion order for string keys.
+ */
+const KIND_META = {
+  text: { label: 'Text', icon: 'type', computed: false, seed: '' },
+  number: { label: 'Number', icon: 'hash', computed: false, seed: '' },
+  select: { label: 'Select', icon: 'circle-chevron-down', computed: false, seed: '' },
+  multiselect: {
     label: 'Multi-select',
     icon: 'list-checks',
     computed: false,
     seed: '',
     multi: true,
   },
-  { kind: 'status', label: 'Status', icon: 'loader', computed: false, seed: '' },
-  { kind: 'date', label: 'Date', icon: 'calendar', computed: false, seed: '' },
-  {
-    kind: 'daterange',
+  status: { label: 'Status', icon: 'loader', computed: false, seed: '' },
+  date: { label: 'Date', icon: 'calendar', computed: false, seed: '' },
+  daterange: {
     label: 'Date range',
     icon: 'calendar-range',
     computed: false,
     seed: '',
     legacy: true,
   },
-  { kind: 'person', label: 'Person', icon: 'circle-user', computed: false, seed: '', multi: true },
-  {
-    kind: 'files',
-    label: 'Files & media',
-    icon: 'paperclip',
-    computed: false,
-    seed: '',
-    multi: true,
-  },
-  { kind: 'checkbox', label: 'Checkbox', icon: 'square-check', computed: false, seed: false },
-  { kind: 'url', label: 'URL', icon: 'link', computed: false, seed: '' },
-  {
-    kind: 'relation',
-    label: 'Relation',
-    icon: 'arrow-up-right',
-    computed: false,
-    seed: '',
-    multi: true,
-  },
-  { kind: 'rollup', label: 'Rollup', icon: 'sigma', computed: true, seed: null },
-  { kind: 'created_time', label: 'Created time', icon: 'clock', computed: true, seed: null },
-  {
-    kind: 'last_edited_time',
-    label: 'Last edited time',
-    icon: 'history',
-    computed: true,
-    seed: null,
-  },
-];
+  person: { label: 'Person', icon: 'circle-user', computed: false, seed: '', multi: true },
+  files: { label: 'Files & media', icon: 'paperclip', computed: false, seed: '', multi: true },
+  checkbox: { label: 'Checkbox', icon: 'square-check', computed: false, seed: false },
+  url: { label: 'URL', icon: 'link', computed: false, seed: '' },
+  relation: { label: 'Relation', icon: 'arrow-up-right', computed: false, seed: '', multi: true },
+  rollup: { label: 'Rollup', icon: 'sigma', computed: true, seed: null },
+  created_time: { label: 'Created time', icon: 'clock', computed: true, seed: null },
+  last_edited_time: { label: 'Last edited time', icon: 'history', computed: true, seed: null },
+} satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
+
+export const PROPERTY_KINDS: PropertyKindMeta[] = (Object.keys(KIND_META) as FieldKind[]).map(
+  (kind) => ({ kind, ...KIND_META[kind] }),
+);
 
 /** The kinds offered in "+ Add property" — legacy kinds stay resolvable but
  * are no longer creatable. */

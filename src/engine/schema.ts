@@ -8,6 +8,7 @@ import type {
   StatusDef,
   TypeDef,
 } from './types';
+import { FIELD_KINDS } from './types';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
 import { parseViewList } from './views';
@@ -20,24 +21,6 @@ export const DEFAULT_STATUSES: StatusDef[] = [
   { id: 'in-progress', label: 'In progress', color: '#EFB428', group: 'active' },
   { id: 'done', label: 'Done', color: '#34B764', group: 'done' },
   { id: 'cancelled', label: 'Cancelled', color: '#A8AFC2', hollow: true, group: 'closed' },
-];
-
-const FIELD_KINDS: FieldKind[] = [
-  'text',
-  'number',
-  'checkbox',
-  'date',
-  'daterange',
-  'select',
-  'multiselect',
-  'status',
-  'person',
-  'relation',
-  'url',
-  'files',
-  'rollup',
-  'created_time',
-  'last_edited_time',
 ];
 
 const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
@@ -53,8 +36,15 @@ export function humanize(id: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/**
+ * M16.4: the allowlist is FIELD_KINDS from types.ts now. It used to be a
+ * second hand-written copy here, and a kind missing from it fell through to
+ * `text` — silently, so a declared Select rendered as a text box.
+ */
 function asFieldKind(value: unknown): FieldKind {
-  return FIELD_KINDS.includes(value as FieldKind) ? (value as FieldKind) : 'text';
+  return (FIELD_KINDS as readonly string[]).includes(value as string)
+    ? (value as FieldKind)
+    : 'text';
 }
 
 function parseOption(raw: unknown): FieldOption | null {

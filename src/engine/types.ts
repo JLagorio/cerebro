@@ -21,22 +21,37 @@ export interface Entry {
   parseError: string | null; // YAML error message, or null
 }
 
-export type FieldKind =
-  | 'text'
-  | 'number'
-  | 'checkbox'
-  | 'date'
-  | 'daterange'
-  | 'select'
-  | 'multiselect'
-  | 'status'
-  | 'person'
-  | 'relation'
-  | 'url'
-  | 'files'
-  | 'rollup'
-  | 'created_time'
-  | 'last_edited_time';
+/**
+ * Every property kind, as an array with the union derived from it (M16.4).
+ *
+ * There were three hand-maintained copies of this list — here, `FIELD_KINDS`
+ * in schema.ts, and `PROPERTY_KINDS` in properties.ts — and only the union was
+ * compiler-enforced. Omitting the schema.ts entry made `asFieldKind` silently
+ * resolve the kind to `text`, so a declared Select rendered as a text box and
+ * the YAML that said otherwise was ignored.
+ *
+ * Order here is irrelevant; the "+ Add property" catalog order is declaration
+ * order in properties.ts.
+ */
+export const FIELD_KINDS = [
+  'text',
+  'number',
+  'checkbox',
+  'date',
+  'daterange',
+  'select',
+  'multiselect',
+  'status',
+  'person',
+  'relation',
+  'url',
+  'files',
+  'rollup',
+  'created_time',
+  'last_edited_time',
+] as const;
+
+export type FieldKind = (typeof FIELD_KINDS)[number];
 
 export type RollupCalc = 'count' | 'sum' | 'avg' | 'min' | 'max' | 'earliest' | 'latest' | 'show';
 
