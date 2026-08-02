@@ -69,21 +69,36 @@ pub fn read_raw(vault: &Path) -> Option<String> {
 /// means "no explicit list" (legacy open mode), but an unreadable one —
 /// permissions, IO error, non-UTF-8 from a hand-edit, a symlink where a file
 /// should be — is a list we cannot see (or cannot trust), and must fail
-/// closed exactly like an unparseable one.
+/// closed exactly like an unparseable one. Unreadable carries WHY, because
+/// Settings has to say so — see read_raw_checked.
 enum ConfigRead {
     Absent,
-    Unreadable,
+    Unreadable(String),
     Content(String),
 }
 
 fn read_config(vault: &Path) -> ConfigRead {
-    let Ok(path) = checked_config_path(vault) else {
-        return ConfigRead::Unreadable;
+    let path = match checked_config_path(vault) {
+        Ok(path) => path,
+        Err(reason) => return ConfigRead::Unreadable(reason),
     };
-    match std::fs::read_to_string(path) {
+    match std::fs::read_to_string(&path) {
         Ok(raw) => ConfigRead::Content(raw),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ConfigRead::Absent,
-        Err(_) => ConfigRead::Unreadable,
+        Err(e) => ConfigRead::Unreadable(format!("{} could not be read: {e}", path.display())),
+    }
+}
+
+/// The read Settings uses: absent and unreadable are DIFFERENT answers there
+/// (PR #5 review). Runs already fail closed on an unreadable config — strict,
+/// zero servers — so a UI that renders that state as "no explicit list"
+/// (which reads as legacy open mode) describes the opposite of what the run
+/// will do. Absent stays an empty Ok: that state really is "no list yet".
+pub fn read_raw_checked(vault: &Path) -> Result<String, String> {
+    match read_config(vault) {
+        ConfigRead::Absent => Ok(String::new()),
+        ConfigRead::Content(raw) => Ok(raw),
+        ConfigRead::Unreadable(reason) => Err(reason),
     }
 }
 
@@ -114,21 +129,29 @@ pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
 ///
 /// Three cases, fail-closed in the odd one:
 /// - no config file + connectors on → legacy: nothing merged, strict OFF
-///   (the CLI loads the user's own servers, pre-M13.3 behavior);
+///   (the CLI loads the user's own servers, pre-M13.3 behavior) — but only
+///   for an ATTENDED run. Legacy mode is the user's own working setup, and
+///   the person who flipped connectors on is watching the turn that uses
+///   it. A background job runs vault-authored content unattended, so for it
+///   the absent file is not an inheritance — it is the absence of a
+///   vault-scoped opt-in, and the run stays strict with zero extra servers
+///   (PR #5 security review). The one path to connectors on a schedule is
+///   an explicit connectors.json, whose stdio entries are machine-approved.
 /// - config file + connectors on → the enabled entries, strict ON;
 /// - unparseable config + connectors on → nothing merged, strict ON — a
 ///   broken explicit list must not silently widen into "everything".
 pub fn connector_context(
     vault: &Path,
     connectors: bool,
+    attended: bool,
     approved_stdio: &[String],
 ) -> (Map<String, Value>, bool) {
     if !connectors {
         return (Map::new(), true);
     }
     match read_config(vault) {
-        ConfigRead::Absent => (Map::new(), false),
-        ConfigRead::Unreadable => (Map::new(), true),
+        ConfigRead::Absent => (Map::new(), !attended),
+        ConfigRead::Unreadable(_) => (Map::new(), true),
         ConfigRead::Content(raw) => match serde_json::from_str::<Value>(&raw) {
             Err(_) => (Map::new(), true),
             Ok(parsed) => (enabled_servers(&parsed, approved_stdio), true),
@@ -288,11 +311,55 @@ mod tests {
     }
 
     #[test]
-    fn no_config_keeps_the_legacy_open_mode() {
+    fn no_config_keeps_the_legacy_open_mode_for_attended_runs() {
         let vault = temp_vault("legacy");
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
         assert!(!strict, "no explicit list yet: the user's own config still works");
+    }
+
+    #[test]
+    fn an_unattended_run_with_no_config_never_widens_to_the_global_config() {
+        // The fail-open branch (PR #5 security review): a scheduled job runs
+        // vault-authored content with nobody watching, so an ABSENT list must
+        // read as "no vault-scoped opt-in" — strict, zero extra servers —
+        // never as an inheritance of the user's own MCP setup.
+        let vault = temp_vault("unattended-legacy");
+        let (servers, strict) = connector_context(&vault, true, false, &[]);
+        assert!(servers.is_empty());
+        assert!(strict, "unattended + no explicit list must stay pinned");
+    }
+
+    #[test]
+    fn an_unattended_run_still_gets_the_explicit_allowlist() {
+        // The one path to connectors on a schedule: a config the vault's
+        // owner wrote, whose stdio entries were approved on this machine.
+        let vault = temp_vault("unattended-explicit");
+        save_raw(
+            &vault,
+            &json!({"servers": {
+                "jira": {"transport": "http", "url": "https://jira/mcp", "enabled": true}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        let (servers, strict) = connector_context(&vault, true, false, &[]);
+        assert!(strict);
+        assert_eq!(servers.len(), 1, "the vault-scoped opt-in works unattended");
+        assert_eq!(servers["jira"]["type"], "http");
+    }
+
+    #[test]
+    fn read_raw_checked_tells_absent_and_content_apart_from_unreadable() {
+        let vault = temp_vault("checked-read");
+        assert_eq!(read_raw_checked(&vault).unwrap(), "", "absent is an empty Ok");
+        save_raw(&vault, "{\"servers\":{}}").unwrap();
+        assert_eq!(read_raw_checked(&vault).unwrap(), "{\"servers\":{}}");
+        // Invalid UTF-8 is a file that EXISTS but cannot be read — Settings
+        // must hear that as an error, not as "no explicit list" (PR #5
+        // review): runs fail closed on it, and the UI must not say open.
+        std::fs::write(vault.join(CONFIG_PATH), [0xff, 0xfe, 0xfd]).unwrap();
+        assert!(read_raw_checked(&vault).is_err());
     }
 
     #[test]
@@ -304,7 +371,7 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, false, &[]);
+        let (servers, strict) = connector_context(&vault, false, true, &[]);
         assert!(servers.is_empty());
         assert!(strict);
     }
@@ -325,7 +392,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, true, &[linear_key()]);
+        let (servers, strict) = connector_context(&vault, true, true, &[linear_key()]);
         assert!(strict, "an explicit list pins the run to it");
         assert_eq!(servers.len(), 2, "disabled and url-less entries stay out");
         assert_eq!(servers["jira"]["type"], "http");
@@ -350,7 +417,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(strict);
         assert_eq!(servers.len(), 1, "http passes, unapproved stdio is dropped");
         assert!(servers.get("evil").is_none());
@@ -370,7 +437,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, _) = connector_context(&vault, true, &[linear_key()]);
+        let (servers, _) = connector_context(&vault, true, true, &[linear_key()]);
         assert!(servers.is_empty(), "an edited spec is a new spec: approval gone");
     }
 
@@ -392,7 +459,7 @@ mod tests {
             stdio_approval_key("odd-env", "npx", &[], &[]),
             stdio_approval_key("odd-args", "npx", &[], &[]),
         ];
-        let (servers, _) = connector_context(&vault, true, &approved);
+        let (servers, _) = connector_context(&vault, true, true, &approved);
         assert!(servers.is_empty());
     }
 
@@ -437,7 +504,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, _) = connector_context(&vault, true, &[linear_fp()]);
+        let (servers, _) = connector_context(&vault, true, true, &[linear_fp()]);
         assert!(servers.is_empty());
     }
 
@@ -449,7 +516,7 @@ mod tests {
         // must NOT be conflated with the file being absent — an explicit
         // list we cannot read must not widen into "everything".
         std::fs::write(vault.join(CONFIG_PATH), [0xff, 0xfe, 0xfd]).unwrap();
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
         assert!(strict);
     }
@@ -459,7 +526,7 @@ mod tests {
         let vault = temp_vault("broken");
         std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
         std::fs::write(vault.join(CONFIG_PATH), "{not json").unwrap();
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
         assert!(strict, "an unreadable explicit list must not widen into everything");
     }
@@ -481,10 +548,14 @@ mod tests {
         std::os::unix::fs::symlink(&target, vault.join(".cerebro")).unwrap();
 
         // Reads refuse — and fail CLOSED, not into legacy open mode.
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty(), "a config reached through a symlink is never merged");
         assert!(strict);
         assert!(read_raw(&vault).is_none());
+        // Settings reads through the checked variant and must hear BLOCKED —
+        // rendering this as "no explicit list" would claim legacy open mode
+        // while the run above just failed closed (PR #5 review).
+        assert!(read_raw_checked(&vault).is_err());
 
         // Writes refuse — including the empty-payload delete branch, which
         // would otherwise remove a file the symlink points at.
@@ -502,10 +573,11 @@ mod tests {
         std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
         std::os::unix::fs::symlink(target.join("secrets.json"), vault.join(CONFIG_PATH)).unwrap();
 
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
         assert!(strict);
         assert!(read_raw(&vault).is_none());
+        assert!(read_raw_checked(&vault).is_err());
         assert!(save_raw(&vault, "{\"servers\":{}}").is_err());
         assert_eq!(std::fs::read_to_string(target.join("secrets.json")).unwrap(), "{}");
     }
@@ -524,10 +596,10 @@ mod tests {
         let vault = temp_vault("reset");
         save_raw(&vault, "{\"servers\":{}}").unwrap();
         // An empty LIST is not legacy — it pins the run to no servers.
-        assert!(connector_context(&vault, true, &[]).1, "empty list stays strict");
+        assert!(connector_context(&vault, true, true, &[]).1, "empty list stays strict");
         save_raw(&vault, "").unwrap();
         assert!(read_raw(&vault).is_none());
-        let (servers, strict) = connector_context(&vault, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, true, &[]);
         assert!(servers.is_empty());
         assert!(!strict, "deleting the list is the explicit way back to legacy");
     }

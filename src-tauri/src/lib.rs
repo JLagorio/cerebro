@@ -203,9 +203,14 @@ fn run_agent(
     agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
 }
 
+/// Empty string = the vault has no connectors.json (a real state Settings
+/// names). A file that EXISTS but cannot be read — permissions, a blocked
+/// symlink — is an Err, never an empty Ok (PR #5 review): runs fail closed
+/// on that config, and Settings rendering it as "no explicit list" would
+/// claim legacy open mode while runs are pinned to zero servers.
 #[tauri::command(async)]
 fn read_connectors(vault: String) -> Result<String, String> {
-    Ok(connectors::read_raw(Path::new(&vault)).unwrap_or_default())
+    connectors::read_raw_checked(Path::new(&vault))
 }
 
 #[tauri::command(async)]

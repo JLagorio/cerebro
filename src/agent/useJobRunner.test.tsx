@@ -342,4 +342,32 @@ describe('useJobRunner shell gating', () => {
     expect(calls[0][1]).toMatchObject({ shell: true });
     expect(calls[1][1]).toMatchObject({ shell: false });
   });
+
+  it('a background run is never attended, so the legacy MCP fallback stays closed', async () => {
+    // `attended` gates connector_context's absent-file branch (PR #5
+    // security review): with connectors on but no connectors.json, only a
+    // watched panel turn may inherit the user's global MCP config. A
+    // background job executes vault-authored content unattended, and must
+    // say so on every run it starts.
+    useUiStore.setState({ agentConnectors: true });
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'records/skills/digest.md',
+          filename: 'digest.md',
+          folder: 'records/skills',
+          title: 'Digest',
+          type: 'Skill',
+          properties: { schedule: 'daily 09:00' },
+        }),
+      ],
+    });
+    renderHook(() => useJobRunner());
+    await startJob();
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1]).toMatchObject({
+      connectors: true,
+      attended: false,
+    });
+  });
 });

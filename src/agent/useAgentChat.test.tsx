@@ -79,6 +79,20 @@ describe('useAgentChat send expansion', () => {
       ),
     );
   });
+
+  it('a panel turn runs attended — the one run allowed the legacy MCP fallback', async () => {
+    // `attended` gates connector_context's absent-file branch (PR #5
+    // security review): a person typed this turn and is watching it, which
+    // is what makes inheriting their global MCP config defensible at all.
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('hello'));
+    await vi.waitFor(() =>
+      expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
+        '/vault',
+        expect.objectContaining({ attended: true }),
+      ),
+    );
+  });
 });
 
 /**

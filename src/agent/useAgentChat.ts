@@ -236,6 +236,10 @@ export function useAgentChat(
             model,
             shell,
             connectors,
+            // A person typed this turn and is watching it stream — the one
+            // kind of run allowed to fall back to their global MCP config
+            // when the vault has no connectors.json (PR #5 security review).
+            attended: true,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcpRef.current,
           });

@@ -252,6 +252,13 @@ export function useJobRunner(): void {
             // no record can grant itself what Settings denies.
             shell: job.kind === 'agent' && shell && (agent?.shell ?? false),
             connectors,
+            // Unattended, and it matters beyond bookkeeping: with connectors
+            // on but no connectors.json, an attended turn falls back to the
+            // user's global MCP config — this run must not, because it
+            // executes vault-authored content with nobody watching. The one
+            // path to connectors on a schedule is the vault's own explicit
+            // list, stdio entries machine-approved (PR #5 security review).
+            attended: false,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
           });

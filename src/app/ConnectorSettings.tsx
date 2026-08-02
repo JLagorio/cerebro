@@ -35,6 +35,13 @@ export function ConnectorSettings() {
   // file present still pins runs to no servers, so the two need telling
   // apart to say so, and to offer the way back.
   const [filePresent, setFilePresent] = useState(false);
+  // The read FAILED — permissions, or a symlinked `.cerebro` the backend
+  // refuses to follow. Not the same state as "no list" (PR #5 review): runs
+  // fail closed on a config they cannot read, so rendering this as "no
+  // explicit list" would claim legacy open mode while runs are pinned to
+  // zero connectors. Said out loud instead, with the reason.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadSeq, setLoadSeq] = useState(0);
   const [name, setName] = useState('');
   const [transport, setTransport] = useState<'http' | 'stdio'>('http');
   const [target, setTarget] = useState('');
@@ -44,6 +51,7 @@ export function ConnectorSettings() {
     // while the new vault's config loads — a click would write them there.
     setSpecs(null);
     setFilePresent(false);
+    setLoadError(null);
     if (vaultPath === null) return;
     let stale = false;
     void readConnectors(vaultPath)
@@ -52,21 +60,45 @@ export function ConnectorSettings() {
         setSpecs(parseConnectors(raw));
         setFilePresent(raw.trim() !== '');
       })
-      .catch(() => {
-        if (!stale) setSpecs([]);
+      .catch((e: unknown) => {
+        if (!stale) setLoadError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       stale = true;
     };
-  }, [vaultPath]);
+  }, [vaultPath, loadSeq]);
 
-  if (vaultPath === null || specs === null) return null;
+  if (vaultPath === null) return null;
+
+  if (loadError !== null) {
+    return (
+      <div className="mt-1" data-testid="connector-settings-blocked">
+        <p className="m-0 text-[10.5px] leading-[14px] text-[var(--warn-600)]">
+          The connector list can’t be read, so agent runs are pinned to no connectors until this
+          is fixed: {loadError}{' '}
+          <button
+            type="button"
+            onClick={() => setLoadSeq((n) => n + 1)}
+            className="cursor-pointer border-0 bg-transparent p-0 text-[10.5px] underline"
+          >
+            Retry
+          </button>
+        </p>
+      </div>
+    );
+  }
+
+  if (specs === null) return null;
 
   const reload = () =>
-    readConnectors(vaultPath).then((raw) => {
-      setSpecs(parseConnectors(raw));
-      setFilePresent(raw.trim() !== '');
-    });
+    readConnectors(vaultPath)
+      .then((raw) => {
+        setSpecs(parseConnectors(raw));
+        setFilePresent(raw.trim() !== '');
+      })
+      .catch((e: unknown) => {
+        setLoadError(e instanceof Error ? e.message : String(e));
+      });
 
   const persist = (next: ConnectorSpec[]) => {
     setSpecs(next);
@@ -75,7 +107,7 @@ export function ConnectorSettings() {
       toast(e instanceof Error ? e.message : String(e));
       // A failed save must not leave the UI describing a list the run will
       // not use — show what is actually on disk.
-      void reload().catch(() => undefined);
+      void reload();
     });
   };
 
@@ -84,7 +116,7 @@ export function ConnectorSettings() {
     setFilePresent(false);
     void saveConnectors(vaultPath, '').catch((e) => {
       toast(e instanceof Error ? e.message : String(e));
-      void reload().catch(() => undefined);
+      void reload();
     });
   };
 
@@ -227,10 +259,11 @@ export function ConnectorSettings() {
       <p className="m-0 text-[10.5px] leading-[14px] text-[var(--n-400)]">
         Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of
         git checkpoints, and your credentials never leave this vault. Naming servers here pins
-        the assistant to exactly this list; with no list it inherits your global MCP config.
-        stdio connectors run a local command, so one the file names on its own stays out of
-        runs until you approve that exact command here — approval is per machine and any edit
-        to the file asks again.
+        the assistant to exactly this list; with no list, turns you watch inherit your global
+        MCP config — background jobs never do, they only ever get this list. stdio connectors
+        run a local command, so one the file names on its own stays out of runs until you
+        approve that exact command here — approval is per machine and any edit to the file
+        asks again.
       </p>
     </div>
   );

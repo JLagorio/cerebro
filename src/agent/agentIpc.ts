@@ -39,6 +39,12 @@ export interface RunOptions {
   shell: boolean;
   /** Let the run reach the user's own MCP servers (M8.2). */
   connectors: boolean;
+  /** Whether a person is watching this run. Only an attended run may fall
+   * back to the user's global MCP config when the vault has no
+   * connectors.json (PR #5 security review) — a background job executing
+   * vault-authored content unattended never inherits it; for that job the
+   * absent file is the absence of a vault-scoped opt-in, not a grant. */
+  attended: boolean;
   /** Attribute this run's writes to a process identity (M13.4) —
    * `process:<slug>` for an agent record's run; omitted = the default. */
   actor?: string | null;
@@ -77,6 +83,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       model: options.model ?? null,
       shell: options.shell,
       connectors: options.connectors,
+      attended: options.attended,
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
       mcp_url: options.mcp?.url ?? null,

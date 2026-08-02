@@ -68,6 +68,13 @@ pub struct AgentRequest {
     /// friends — so the connector inlet has something to connect with.
     /// Absent reads as false, for the same reason.
     pub connectors: Option<bool>,
+    /// Whether a person is watching this run (the panel's turns) or it is a
+    /// background job executing vault-authored content unattended. Only an
+    /// attended run may fall back to legacy open mode — the user's own MCP
+    /// config — when the vault has no connectors.json (PR #5 security
+    /// review). Absent reads as unattended: a missing field must never
+    /// widen access.
+    pub attended: Option<bool>,
     pub mcp_url: Option<String>,
     pub mcp_token: Option<String>,
     /// Who this run's MCP writes are attributed to (M13.4) — `process:<slug>`
@@ -445,6 +452,7 @@ pub fn stream(
     let (extra_servers, strict_mcp) = crate::connectors::connector_context(
         vault,
         req.connectors.unwrap_or(false),
+        req.attended.unwrap_or(false),
         req.approved_stdio.as_deref().unwrap_or(&[]),
     );
     write_run_config(&config_path, &mcp_config_json(&url, &token, &extra_servers))?;
@@ -656,6 +664,7 @@ mod tests {
                 model: None,
                 shell: Some(shell),
                 connectors: None,
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
@@ -769,6 +778,7 @@ mod tests {
                 model: None,
                 shell: None,
                 connectors: None,
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
@@ -802,6 +812,7 @@ mod tests {
                 model: None,
                 shell: None,
                 connectors: Some(true),
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
@@ -835,6 +846,7 @@ mod tests {
                 model: Some("claude-opus-5".into()),
                 shell: None,
                 connectors: None,
+                attended: None,
                 mcp_url: None,
                 mcp_token: None,
                 actor: None,
