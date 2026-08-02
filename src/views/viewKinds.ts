@@ -22,7 +22,7 @@ export const VIEW_KINDS: ViewKind[] = [
   { value: 'board', label: 'Board', icon: 'columns-3' },
   { value: 'calendar', label: 'Calendar', icon: 'calendar-days', requires: 'date' },
   { value: 'gantt', label: 'Gantt', icon: 'chart-gantt', requires: 'date' },
-  { value: 'timeline', label: 'Timeline', icon: 'gantt-chart', requires: 'date' },
+  { value: 'timeline', label: 'Timeline', icon: 'chart-gantt', requires: 'date' },
 ];
 
 /** Segmented-control options, with the test ids the e2e suite navigates by. */

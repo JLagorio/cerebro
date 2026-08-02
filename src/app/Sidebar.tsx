@@ -304,7 +304,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
                 onClick={() => setAdopting(true)}
                 className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
               >
-                <Icon name="wand-2" size={12} />
+                <Icon name="wand-sparkles" size={12} />
               </button>
               <button
                 type="button"

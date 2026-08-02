@@ -21,7 +21,7 @@ export interface IconProps {
  * user-authored `icon:` frontmatter still carry the old names — and used to
  * render as an empty svg. Aliasing keeps those vaults working.
  */
-const ALIASES: Record<string, string> = {
+export const ICON_ALIASES: Record<string, string> = {
   'alert-circle': 'circle-alert',
   'alert-octagon': 'octagon-alert',
   'alert-triangle': 'triangle-alert',
@@ -37,10 +37,14 @@ const ALIASES: Record<string, string> = {
   'chevron-left-circle': 'circle-chevron-left',
   'chevron-right-circle': 'circle-chevron-right',
   'chevron-up-circle': 'circle-chevron-up',
+  // Renamed twice: help-circle -> circle-help -> circle-question-mark. The
+  // middle hop is dead too, so both old spellings map straight to the survivor.
+  'circle-help': 'circle-question-mark',
   'edit-2': 'pencil',
   'edit-3': 'pen-line',
   'external-link': 'square-arrow-out-up-right',
-  'help-circle': 'circle-help',
+  'gantt-chart': 'chart-gantt',
+  'help-circle': 'circle-question-mark',
   'minus-circle': 'circle-minus',
   'more-horizontal': 'ellipsis',
   'more-vertical': 'ellipsis-vertical',
@@ -49,6 +53,7 @@ const ALIASES: Record<string, string> = {
   'plus-circle': 'circle-plus',
   'stop-circle': 'circle-stop',
   'user-circle': 'circle-user',
+  'wand-2': 'wand-sparkles',
   'x-circle': 'circle-x',
   'x-octagon': 'octagon-x',
   'x-square': 'square-x',
@@ -69,7 +74,7 @@ const warned = new Set<string>();
 export function resolveIcon(name: string): { Comp: (typeof icons)[keyof typeof icons] | null } {
   const direct = icons[pascal(name) as keyof typeof icons];
   if (direct) return { Comp: direct };
-  const aliased = ALIASES[name];
+  const aliased = ICON_ALIASES[name];
   if (aliased) {
     const viaAlias = icons[pascal(aliased) as keyof typeof icons];
     if (viaAlias) return { Comp: viaAlias };

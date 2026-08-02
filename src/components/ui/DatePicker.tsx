@@ -348,7 +348,7 @@ export function DatePicker({
       </div>
       {showRemind && (
         <div className="flex items-center gap-1.5 border-t border-[var(--n-100)] px-2 pb-0.5 pt-2 text-[12px] text-[var(--text-meta)]">
-          <Icon name="circle-help" size={13} />
+          <Icon name="circle-question-mark" size={13} />
           Reminders fire as desktop notifications
         </div>
       )}

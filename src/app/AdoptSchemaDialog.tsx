@@ -181,7 +181,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                   )}
                   {note !== null && (
                     <div className="mt-0.5 inline-flex items-center gap-1 rounded-[5px] bg-[var(--warn-50)] px-1.5 py-px text-[10.5px] text-[var(--warn-700)]">
-                      <Icon name="wand-2" size={10} />
+                      <Icon name="wand-sparkles" size={10} />
                       {note}
                     </div>
                   )}

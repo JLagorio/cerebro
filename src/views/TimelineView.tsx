@@ -97,7 +97,7 @@ export function TimelineView({
         data-testid="timeline-view"
       >
         <EmptyState
-          icon="gantt-chart"
+          icon="chart-gantt"
           title="Nothing here carries a date"
           description="A timeline places records by a date or date-range property. Add one to this type, or pick a different view."
         />
@@ -233,7 +233,7 @@ export function TimelineView({
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">
           <EmptyState
-            icon="gantt-chart"
+            icon="chart-gantt"
             title="No records yet"
             description="Dated records appear here as bars."
           />
