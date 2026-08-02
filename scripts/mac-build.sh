@@ -44,14 +44,23 @@ command -v cargo >/dev/null || die "Rust missing. Install it from https://rustup
 command -v node  >/dev/null || die "Node missing. Install Node 20 or newer from https://nodejs.org"
 command -v pnpm  >/dev/null || die "pnpm missing. Run: corepack enable && corepack prepare pnpm@10 --activate"
 
-# A universal binary is built from both single-architecture targets, so both
-# have to be installed. Adding one already present is a no-op. A Rust that did
-# not come from rustup (Homebrew's, say) has no way to add a target at all —
-# say so here rather than let the linker fail ten minutes in.
-command -v rustup >/dev/null || die "rustup missing (a non-rustup Rust cannot add build targets). Install it from https://rustup.rs"
+# rustup is needed to ADD a target, and only a target this Rust does not
+# already have needs adding. Every Rust can build for the machine it is
+# standing on, so the ordinary native build needs no rustup at all — demanding
+# it turned Homebrew's Rust, which builds this app perfectly well, into a hard
+# stop at the toolchain check. A universal binary is the case that genuinely
+# needs it: it is linked from BOTH single-architecture builds, so the other
+# architecture's standard library has to be fetched, and a non-rustup Rust has
+# no way to fetch it. Say that here rather than let the linker fail ten
+# minutes in. Adding a target already present is a no-op.
+HOST_TARGET="$(rustc -vV | awk '/^host: /{ print $2 }')"
 if [ "$TARGET" = "universal-apple-darwin" ]; then
+  command -v rustup >/dev/null || die "a universal build needs rustup to add the second architecture (this Rust cannot). Install it from https://rustup.rs, or drop --universal to build for this Mac only."
   rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
-else
+elif [ "$TARGET" != "$HOST_TARGET" ]; then
+  # Rust is for a different architecture than the Mac reports — an x86_64
+  # toolchain under Rosetta, say. Cross-compiling back needs the target added.
+  command -v rustup >/dev/null || die "this Rust builds for $HOST_TARGET, not $TARGET, and cannot add targets. Install rustup from https://rustup.rs"
   rustup target add "$TARGET" >/dev/null
 fi
 
