@@ -26,6 +26,7 @@ import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
 import { resolveTarget } from '@/engine/wikilink';
 import { useOpenPath } from '@/app/useOpenPath';
+import { useFocusRestore } from '@/hooks/useFocusRestore';
 import { useNavStore } from '@/stores/navStore';
 import { RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -310,16 +311,10 @@ export function AiPanel() {
   }, [chat.messages]);
 
   // ⌘J is "talk to the assistant", so it has to open something you can type
-  // into; and closing it must not drop focus to <body> (M15).
-  const openerRef = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    openerRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    return () => {
-      const opener = openerRef.current;
-      if (opener !== null && opener.isConnected) opener.focus();
-    };
-  }, []);
+  // into; and closing it must not drop focus to <body> (M15). The opener has
+  // to be read before the composer's autoFocus fires, which is why this is a
+  // render-time capture and not an effect (PR #7 review).
+  useFocusRestore();
 
   // A prompt handed over from elsewhere in the app ("Ask the agent to
   // revise" on a concept) is sent once and then cleared. Held while a turn

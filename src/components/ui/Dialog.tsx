@@ -1,6 +1,7 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
+import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 const css = `
 .cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:64px 24px;z-index:1000;animation:cbFade var(--dur-med) var(--ease-out)}
@@ -65,11 +66,17 @@ function DialogCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
-  // Escape closes, focus moves in on open and back out on close. Without these
-  // the dialog was `aria-modal` in name only: keyboard users tabbed straight
-  // out onto the rail behind the scrim and landed on <body> after closing.
+  // Focus goes back where it came from on close. Captured at render time, not
+  // here: the very child this effect defers to below has ALREADY taken focus
+  // by the time an effect can look, so reading `activeElement` here recorded
+  // QuickOpen's own input as the thing to restore to — a node unmounted with
+  // the dialog, and so never restored to at all (PR #7 review).
+  useFocusRestore();
+
+  // Escape closes and focus moves in on open. Without these the dialog was
+  // `aria-modal` in name only: keyboard users tabbed straight out onto the
+  // rail behind the scrim and landed on <body> after closing.
   useEffect(() => {
-    const restoreTo = document.activeElement as HTMLElement | null;
     const card = cardRef.current;
     // A child that took focus itself (Input autoFocus in QuickOpen) wins —
     // child effects run before this one, so only claim focus if nothing inside
@@ -78,11 +85,6 @@ function DialogCard({
       const first = card.querySelector<HTMLElement>(FOCUSABLE);
       (first ?? card).focus();
     }
-    return () => {
-      if (restoreTo && typeof restoreTo.focus === 'function' && restoreTo.isConnected) {
-        restoreTo.focus();
-      }
-    };
   }, []);
 
   useEffect(() => {

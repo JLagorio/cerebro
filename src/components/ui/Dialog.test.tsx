@@ -104,6 +104,25 @@ describe('Dialog', () => {
     opener.remove();
   });
 
+  // The case the plain restore missed (PR #7 review): an autofocusing child
+  // takes focus during commit, before any effect here can read the opener, so
+  // capturing it from one recorded QuickOpen's OWN input — a node unmounted
+  // with the dialog, leaving focus on <body> after every close.
+  it('restores focus to the opener even when a child autofocused inside', () => {
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+    const { rerender } = render(
+      <Dialog open title="Find">
+        <input autoFocus aria-label="Query" />
+      </Dialog>,
+    );
+    expect(document.activeElement).toBe(screen.getByLabelText('Query'));
+    rerender(<Dialog open={false} title="Find" />);
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
   it('wraps Tab from the last focusable back to the first', () => {
     render(
       <Dialog open title="Create item" primaryAction={{ label: 'Create' }}>
