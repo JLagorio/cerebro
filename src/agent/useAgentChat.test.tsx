@@ -104,7 +104,10 @@ describe('useAgentChat send expansion', () => {
     act(() =>
       result.current.send(
         '/slow',
-        () => new Promise<string>((r) => { release = r; }),
+        () =>
+          new Promise<string>((r) => {
+            release = r;
+          }),
       ),
     );
     act(() => result.current.stop());
@@ -128,7 +131,10 @@ describe('useAgentChat send expansion', () => {
     act(() =>
       result.current.send(
         '/slow',
-        () => new Promise<string>((r) => { release = r; }),
+        () =>
+          new Promise<string>((r) => {
+            release = r;
+          }),
       ),
     );
     act(() => result.current.stop());

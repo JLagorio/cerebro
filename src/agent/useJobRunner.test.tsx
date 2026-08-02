@@ -330,7 +330,8 @@ describe('useJobRunner shell gating', () => {
       folder: 'records/agents',
       title,
       type: 'Agent',
-      properties: tools === undefined ? { schedule: 'daily 09:00' } : { schedule: 'daily 09:00', tools },
+      properties:
+        tools === undefined ? { schedule: 'daily 09:00' } : { schedule: 'daily 09:00', tools },
     });
 
   beforeEach(() => {
