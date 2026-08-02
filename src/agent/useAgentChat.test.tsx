@@ -249,6 +249,38 @@ describe('useAgentChat and the killed run’s trailing events', () => {
     expect(result.current.streaming).toBe(false);
   });
 
+  // The kill that outlives the hook that made it (PR #7 review). Closing the
+  // assistant mid-answer kills the run from an unmount, and that hook is gone
+  // long before the dead Done arrives — so the record of the kill has to
+  // outlive it too, or the next panel adopts the stray as its own.
+  it('remembers a run killed by unmount, so its Done cannot end the next panel’s turn', async () => {
+    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(42);
+    const first = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => first.result.current.send('question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    // ⌘J closes the panel mid-answer: the hook tears down and kills run 42.
+    first.unmount();
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
+
+    // Reopening builds a FRESH hook — the one a per-instance dead-run set
+    // left with an empty filter — and a new question claims the stream.
+    const second = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => second.result.current.send('next question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+
+    // The killed child's terminal Done lands now. It is dead history, not
+    // the end of a turn whose child has not said a word yet.
+    act(() => handlers.forEach((h) => h({ run: 42, kind: 'Done' })));
+    expect(second.result.current.streaming).toBe(true);
+    expect(second.result.current.messages[1].streaming).toBe(true);
+
+    // The live run still ends its own turn.
+    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
+    expect(second.result.current.streaming).toBe(false);
+    second.unmount();
+  });
+
   it('ignores a stray Done delivered before the new turn claims the stream', async () => {
     useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
     vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(7);
@@ -363,6 +395,69 @@ describe('useAgentChat unmounted mid-turn', () => {
     const { unmount } = renderHook(() => useAgentChat('sys', opts, null));
     unmount();
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A tool_id is unique within a turn, so a repeat of it is a REDELIVERY of one
+ * call, never a second call (M15). Appending it blindly put duplicate React
+ * keys in shipped transcripts; rebuilding the row from the start event alone
+ * traded that for a finished tool that goes back to running (PR #7 review).
+ */
+describe('useAgentChat and a redelivered ToolStart', () => {
+  const opts = { shell: false, connectors: false };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ learningPath: null, agentBusy: false });
+  });
+
+  it('keeps a finished tool finished', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    const start = { run: 8, kind: 'ToolStart', tool_id: 't-1', tool_name: 'Read', input: 'a.md' };
+    act(() => handlers.forEach((h) => h(start)));
+    act(() =>
+      handlers.forEach((h) => h({ run: 8, kind: 'ToolDone', tool_id: 't-1', output: 'contents' })),
+    );
+    expect(result.current.messages[1].tools[0]).toMatchObject({
+      done: true,
+      output: 'contents',
+      failed: false,
+    });
+
+    // The same start event again: still one row, and still the result the
+    // user already read — not a blank tool spinning a second time.
+    act(() => handlers.forEach((h) => h(start)));
+    expect(result.current.messages[1].tools).toHaveLength(1);
+    expect(result.current.messages[1].tools[0]).toMatchObject({
+      done: true,
+      output: 'contents',
+      failed: false,
+    });
+  });
+
+  it('still collapses a redelivery that arrives before the tool finishes', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+
+    const start = { run: 8, kind: 'ToolStart', tool_id: 't-1', tool_name: 'Read', input: 'a.md' };
+    act(() => handlers.forEach((h) => h(start)));
+    act(() => handlers.forEach((h) => h(start)));
+    expect(result.current.messages[1].tools).toHaveLength(1);
+    expect(result.current.messages[1].tools[0]).toMatchObject({ done: false, input: 'a.md' });
+
+    // And the completion still lands on it.
+    act(() =>
+      handlers.forEach((h) => h({ run: 8, kind: 'ToolDone', tool_id: 't-1', is_error: true })),
+    );
+    expect(result.current.messages[1].tools[0]).toMatchObject({ done: true, failed: true });
   });
 });
 
