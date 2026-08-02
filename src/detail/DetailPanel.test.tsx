@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
@@ -31,6 +32,9 @@ afterEach(cleanup);
 
 describe('DetailPanel', () => {
   beforeEach(() => {
+    // Layers are module state; a case that leaves one pushed would make every
+    // later Escape assertion pass for the wrong reason.
+    resetLayers();
     useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
     useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
   });
@@ -77,14 +81,24 @@ describe('DetailPanel', () => {
     useUiStore.setState({ diffView: null });
   });
 
-  it('leaves the record panel open when a modal is on top', () => {
+  // M16.1: "something is on top" is now a registered layer, not a rendered
+  // `role="dialog"`. The old probe only saw surfaces that happened to carry
+  // that role, so the add-property panel — which carries none — was invisible
+  // to it, and Escape inside it closed this whole panel.
+  it('leaves the record panel open when any dismissable layer is on top', () => {
     render(<DetailPanel />);
-    const modal = document.createElement('div');
-    modal.setAttribute('role', 'dialog');
-    document.body.appendChild(modal);
+    pushLayer('some-popover');
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useUiStore.getState().detailPath).not.toBeNull();
-    modal.remove();
+    popLayer('some-popover');
+  });
+
+  it('closes once the layer above it has gone', () => {
+    render(<DetailPanel />);
+    pushLayer('some-popover');
+    popLayer('some-popover');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUiStore.getState().detailPath).toBeNull();
   });
 
   it('renders nothing when no detail path is open', () => {

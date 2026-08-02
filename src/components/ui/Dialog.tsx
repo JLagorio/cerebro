@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
+import { isTopLayer, useLayer } from '@/components/ui/layers';
 
 const css = `
 .cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:64px 24px;z-index:1000;animation:cbFade var(--dur-med) var(--ease-out)}
@@ -65,6 +66,7 @@ function DialogCard({
 }: DialogProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const layerId = useLayer();
 
   // Focus goes back where it came from on close. Captured at render time, not
   // here: the very child this effect defers to below has ALREADY taken focus
@@ -96,10 +98,11 @@ function DialogCard({
     const onEscape = (e: KeyboardEvent) => {
       const card = cardRef.current;
       if (e.key !== 'Escape' || !card || !onClose) return;
-      // Nested dialogs: only the last one in document order — the topmost —
-      // takes the keystroke, so Escape dismisses one surface at a time.
-      const dialogs = [...document.querySelectorAll('.cb-dlg')];
-      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== card) return;
+      // Only the innermost dismissable surface takes the keystroke, so Escape
+      // dismisses one thing at a time. This used to compare `.cb-dlg` nodes in
+      // document order, which could only see other dialogs — a popover opened
+      // from inside a dialog was not counted, and both closed at once (M16.1).
+      if (!isTopLayer(layerId)) return;
       e.preventDefault();
       e.stopPropagation();
       onClose();
@@ -107,8 +110,7 @@ function DialogCard({
     const onTab = (e: KeyboardEvent) => {
       const card = cardRef.current;
       if (e.key !== 'Tab' || !card) return;
-      const dialogs = [...document.querySelectorAll('.cb-dlg')];
-      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== card) return;
+      if (!isTopLayer(layerId)) return;
       const items = [...card.querySelectorAll<HTMLElement>(FOCUSABLE)];
       const active = document.activeElement;
       const inside = card.contains(active);
@@ -137,7 +139,7 @@ function DialogCard({
       document.removeEventListener('keydown', onEscape);
       document.removeEventListener('keydown', onTab, true);
     };
-  }, [onClose]);
+  }, [onClose, layerId]);
 
   return (
     <div

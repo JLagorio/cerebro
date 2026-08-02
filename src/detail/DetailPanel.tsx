@@ -18,6 +18,7 @@ import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { augmentDocPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
+import { hasLayers } from '@/components/ui/layers';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 
@@ -110,9 +111,11 @@ export function DetailPanel() {
       if (e.key !== 'Escape') return;
       const ui = useUiStore.getState();
       if (ui.detailPath === null || ui.quickOpenVisible || ui.diffView !== null) return;
-      // Any open modal owns Escape first. Overlays that stop propagation
-      // (Dropdown, FieldPopover, RelationPicker) never reach us at all.
-      if (document.querySelector('[role="dialog"]') !== null) return;
+      // Anything dismissable owns Escape first. This used to probe for
+      // `[role="dialog"]`, which only saw surfaces that happened to render
+      // that role — so the add-property panel, which renders none, was
+      // invisible and Escape inside it closed this whole panel (M16.1).
+      if (hasLayers()) return;
       closeDetail();
     };
     window.addEventListener('keydown', onKey);

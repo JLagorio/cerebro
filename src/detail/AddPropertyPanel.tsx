@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { Switch } from '@/components/ui/Switch';
@@ -6,6 +6,7 @@ import { CREATABLE_PROPERTY_KINDS } from '@/engine/properties';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { FieldKind } from '@/engine/types';
 import { useSchema } from '@/stores/vaultStore';
+import { useDismiss } from '@/components/ui/Popover';
 
 /** "Select", then "Select 2", "Select 3"… — kind-first adds must not collide
  * with a property that already exists (M3.1: a second Select silently failed
@@ -54,12 +55,26 @@ export function AddPropertyPanel({
   onCancel: () => void;
 }) {
   const schema = useSchema();
+  // Click-away and Escape. This surface shipped with neither: the only exits
+  // were the Cancel button and Escape-while-focus-was-in-the-name-input, and
+  // Escape from anywhere else bubbled to the record panel's global handler
+  // and closed the whole panel (M16.1).
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [name, setName] = useState('');
   const [step, setStep] = useState<'catalog' | 'relation'>('catalog');
   const [target, setTarget] = useState<string | null>(null);
   const [single, setSingle] = useState(false);
   const [twoWay, setTwoWay] = useState(false);
   const [reciprocal, setReciprocal] = useState('');
+
+  // Escape steps back out of the relation config rather than discarding the
+  // target/limit/two-way choices made there; a press outside the surface
+  // still means "I am done here".
+  useDismiss({
+    onClose: onCancel,
+    surfaceRef: rootRef,
+    onEscape: step === 'relation' ? () => setStep('catalog') : onCancel,
+  });
 
   const targets = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
 
@@ -101,6 +116,7 @@ export function AddPropertyPanel({
   if (step === 'relation') {
     return (
       <div
+        ref={rootRef}
         data-testid="add-relation-panel"
         className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-[var(--n-200)] p-1.5"
       >
@@ -110,15 +126,6 @@ export function AddPropertyPanel({
           placeholder={target === null ? 'Relation name' : `Related ${target}`}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              // stopPropagation: stepping back to the catalog must not also
-              // reach the record panel's global Escape and tear the whole
-              // panel down, losing the target/limit/two-way choices made here.
-              e.stopPropagation();
-              setStep('catalog');
-            }
-          }}
           className="min-w-0"
           width="100%"
         />
@@ -204,6 +211,7 @@ export function AddPropertyPanel({
 
   return (
     <div
+      ref={rootRef}
       data-testid="add-property-panel"
       className="flex min-w-0 flex-col gap-1 rounded-lg border border-[var(--n-200)] p-1.5"
     >
@@ -215,12 +223,8 @@ export function AddPropertyPanel({
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && name.trim() !== '') onAdd(name, 'text');
-          if (e.key === 'Escape') {
-            // stopPropagation: closing the flyout must not also reach the
-            // record panel's global Escape and tear the whole panel down.
-            e.stopPropagation();
-            onCancel();
-          }
+          // Escape is handled by useDismiss above, for the whole surface
+          // rather than only while this one input holds focus (M16.1).
         }}
         className="min-w-0"
         width="100%"
