@@ -21,7 +21,19 @@ export default defineConfig({
     // their own — never run them. tolaria-main kept by name because it has
     // lived at the repo root too. e2e/ holds Playwright specs
     // (@playwright/test crashes under vitest).
-    exclude: [...configDefaults.exclude, 'docs/**', '**/tolaria-main/**', 'e2e/**'],
+    //
+    // .claude/ holds git worktrees for parallel branches (M15): a worktree is
+    // a full checkout, so `pnpm test:run` from the repo root was collecting
+    // another branch's 24 test files and running them against THIS tree —
+    // hundreds of failures owned by nobody, and a pre-push hook that could
+    // only be satisfied by deleting the worktree or bypassing the hook.
+    exclude: [
+      ...configDefaults.exclude,
+      'docs/**',
+      '**/tolaria-main/**',
+      'e2e/**',
+      '.claude/**',
+    ],
     // setup.ts grants waitFor 5s for shared CI runners, but vitest's default
     // testTimeout is ALSO 5s — so a slow-but-passing waitFor loses the race to
     // the test-level clock (MarkdownEditor's debounce test died exactly this
