@@ -120,7 +120,7 @@ export function Dropdown({
             id={listId}
             role="listbox"
             aria-label={label}
-            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
           >
             <div className="max-h-[264px] overflow-y-auto">
               {options.map((o, i) => (
@@ -131,7 +131,7 @@ export function Dropdown({
                   aria-selected={o.value === value}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => pick(o.value)}
-                  className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] ${
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] ${
                     i === active ? 'bg-[var(--n-50)]' : ''
                   }`}
                 >

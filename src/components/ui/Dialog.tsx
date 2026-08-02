@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 
 const css = `
 .cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:64px 24px;z-index:1000;animation:cbFade var(--dur-med) var(--ease-out)}
 .cb-dlg{background:var(--n-0);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);width:100%;display:flex;flex-direction:column;max-height:calc(100vh - 128px);animation:cbUp var(--dur-med) var(--ease-out)}
+.cb-dlg:focus{outline:none}
 .cb-dlg-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 0 24px}
 .cb-dlg-hd h2{margin:0;font-size:var(--text-lg);line-height:var(--leading-lg);font-weight:600;letter-spacing:var(--track-tight);color:var(--n-900)}
 .cb-dlg-bd{padding:16px 24px;overflow:auto;font-size:var(--text-sm);color:var(--n-800)}
@@ -18,6 +19,9 @@ if (typeof document !== 'undefined' && !document.getElementById('cb-dlg-css')) {
   t.textContent = css;
   document.head.appendChild(t);
 }
+
+const FOCUSABLE =
+  'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 export interface DialogAction {
   label: string;
@@ -40,8 +44,15 @@ export interface DialogProps {
   style?: React.CSSProperties;
 }
 
-export function Dialog({
-  open,
+export function Dialog(props: DialogProps) {
+  // The modal behaviour (escape, focus trap, focus restore) lives in a child
+  // that only exists while open, so its effects mount and unmount with the
+  // dialog rather than needing an `open` guard in every one of them.
+  if (!props.open) return null;
+  return <DialogCard {...props} />;
+}
+
+function DialogCard({
   onClose,
   title,
   children,
@@ -51,7 +62,81 @@ export function Dialog({
   footerNote,
   style,
 }: DialogProps) {
-  if (!open) return null;
+  const cardRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
+  // Escape closes, focus moves in on open and back out on close. Without these
+  // the dialog was `aria-modal` in name only: keyboard users tabbed straight
+  // out onto the rail behind the scrim and landed on <body> after closing.
+  useEffect(() => {
+    const restoreTo = document.activeElement as HTMLElement | null;
+    const card = cardRef.current;
+    // A child that took focus itself (Input autoFocus in QuickOpen) wins —
+    // child effects run before this one, so only claim focus if nothing inside
+    // the card already has it.
+    if (card && !card.contains(document.activeElement)) {
+      const first = card.querySelector<HTMLElement>(FOCUSABLE);
+      (first ?? card).focus();
+    }
+    return () => {
+      if (restoreTo && typeof restoreTo.focus === 'function' && restoreTo.isConnected) {
+        restoreTo.focus();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    // Escape listens on the BUBBLE phase so anything nested that claims the key
+    // first still wins: window-capture overlays (useEscapeToClose) never reach
+    // us at all, and React handlers that call stopPropagation (RelationPicker,
+    // Dropdown, QuickAdd…) stop the native event too. Tab is capture, because
+    // the trap has to beat the browser's own focus move.
+    const onEscape = (e: KeyboardEvent) => {
+      const card = cardRef.current;
+      if (e.key !== 'Escape' || !card || !onClose) return;
+      // Nested dialogs: only the last one in document order — the topmost —
+      // takes the keystroke, so Escape dismisses one surface at a time.
+      const dialogs = [...document.querySelectorAll('.cb-dlg')];
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== card) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    const onTab = (e: KeyboardEvent) => {
+      const card = cardRef.current;
+      if (e.key !== 'Tab' || !card) return;
+      const dialogs = [...document.querySelectorAll('.cb-dlg')];
+      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== card) return;
+      const items = [...card.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      const active = document.activeElement;
+      const inside = card.contains(active);
+      // Focus parked outside the card by something other than the browser's own
+      // tabbing (a portal, a click on the scrim) is left alone; only <body> —
+      // where a click on the scrim lands — is pulled back in.
+      if (!inside && active !== document.body && active !== null) return;
+      if (items.length === 0) {
+        e.preventDefault();
+        card.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (active === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onEscape);
+    document.addEventListener('keydown', onTab, true);
+    return () => {
+      document.removeEventListener('keydown', onEscape);
+      document.removeEventListener('keydown', onTab, true);
+    };
+  }, [onClose]);
+
   return (
     <div
       className="cb-dlg-scrim"
@@ -59,9 +144,17 @@ export function Dialog({
         if (e.target === e.currentTarget && onClose) onClose();
       }}
     >
-      <div className="cb-dlg" role="dialog" aria-modal="true" style={{ maxWidth: width, ...style }}>
+      <div
+        ref={cardRef}
+        className="cb-dlg"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        style={{ maxWidth: width, ...style }}
+      >
         <div className="cb-dlg-hd">
-          <h2>{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <IconButton icon="x" label="Close" onClick={onClose} />
         </div>
         <div className="cb-dlg-bd">{children}</div>

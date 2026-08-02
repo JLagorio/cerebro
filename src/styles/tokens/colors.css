@@ -6,7 +6,11 @@
   --n-100: #eef0f5;
   --n-200: #e3e6ee;
   --n-300: #cdd2df;
-  --n-400: #a8afc2;
+  /* M15: was #a8afc2 — 2.19:1 on --n-0, below even the 3:1 non-text floor, yet
+     it carries ~160 real text sites. Darkened to 3.23:1 on --n-0 / 3.01:1 on
+     --n-50 so borders, icon strokes and disabled labels are perceivable. It is
+     still NOT an AA body-text colour: use --text-meta for anything readable. */
+  --n-400: #888fa3;
   --n-500: #7e8699;
   --n-600: #5a6274;
   --n-700: #3f4657;
@@ -38,6 +42,9 @@
   --success-600: #17814f;
   --success-700: #126740;
   --warn-50: #fcf3e1;
+  /* The only ramp step that existed solely as an inline `var(--warn-300, #f0c36d)`
+     fallback; promoted to a real token in M15 so stripping dead fallbacks is safe. */
+  --warn-300: #f0c36d;
   --warn-500: #de8f0a;
   --warn-600: #b87404;
   --warn-700: #925e04;
@@ -66,6 +73,17 @@
   --swatch-magenta: #d8569e;
   --swatch-vermilion: #e0562e;
   --swatch-sky: #38bdf8;
+  /* avatar backgrounds — same eight hues as --swatch-*, darkened so white
+     initials clear 4.5:1 (5.2–6.9:1). The tinted swatches themselves top out
+     around 2:1 against white and made every avatar's initials unreadable. */
+  --avatar-1: #1f61b0;
+  --avatar-2: #1c7a44;
+  --avatar-3: #8a5a06;
+  --avatar-4: #6c3bc2;
+  --avatar-5: #a82f70;
+  --avatar-6: #0f7a70;
+  --avatar-7: #a83a1c;
+  --avatar-8: #1c6f9e;
   /* workflow status defaults */
   --status-idea: #14b8a6;
   --status-planned: #3d8be8;
@@ -88,6 +106,11 @@
   --text-primary: var(--n-900);
   --text-secondary: var(--n-600);
   --text-muted: var(--n-500);
+  /* Small informational text — keys, counts, timestamps, hints. AA at 6.12:1,
+     because none of --n-400 (3.23:1) or --n-500 (3.65:1) reaches 4.5:1 and all
+     of it ships at 10–12px. --text-disabled stays on --n-400 and is for
+     genuinely disabled controls, borders and icon strokes only. */
+  --text-meta: var(--n-600);
   --text-disabled: var(--n-400);
   --text-inverse: #ffffff;
   --text-link: var(--cortex-500);

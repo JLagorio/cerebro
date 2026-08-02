@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -41,18 +41,25 @@ export function CollectionCard({ node }: { node: CollectionNode }) {
           {node.label}
         </span>
       </div>
-      <div className="text-[11.5px] text-[var(--n-500)]">
+      <div className="text-[11.5px] text-[var(--text-meta)]">
         {count} {count === 1 ? 'thing' : 'things'} inside
       </div>
     </button>
   );
 }
 
+/** One heading style for every Home section, so the visual and semantic
+ *  levels agree instead of the h2s shipping at two different sizes. */
+export const SECTION_HEADING = 'm-0 text-[15px] font-semibold tracking-[-0.005em]';
+
+// Fallback arguments removed (M15): every one of these tokens is defined at
+// :root so the fallback never fired, and the literals recorded a *different*
+// colour than the token — #c5372c for a --danger-600 that is #bc2438.
 const BUCKET_META: { id: DueBucket; label: string; tone: string }[] = [
-  { id: 'overdue', label: 'Overdue', tone: 'text-[var(--danger-600,#c5372c)]' },
-  { id: 'today', label: 'Today', tone: 'text-[var(--warn-700,#8a5a13)]' },
+  { id: 'overdue', label: 'Overdue', tone: 'text-[var(--danger-600)]' },
+  { id: 'today', label: 'Today', tone: 'text-[var(--warn-700)]' },
   { id: 'upcoming', label: 'Upcoming', tone: 'text-[var(--n-600)]' },
-  { id: 'none', label: 'No due date', tone: 'text-[var(--n-500)]' },
+  { id: 'none', label: 'No due date', tone: 'text-[var(--text-meta)]' },
 ];
 
 function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) => void }) {
@@ -62,9 +69,9 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
   const bucket = dueBucket(task.due, todayIso());
   const dueTone =
     bucket === 'overdue'
-      ? 'bg-[var(--danger-50,#fdecec)] text-[var(--danger-600,#c5372c)]'
+      ? 'bg-[var(--danger-50)] text-[var(--danger-600)]'
       : bucket === 'today'
-        ? 'bg-[var(--warn-50,#fdf3e2)] text-[var(--warn-700,#8a5a13)]'
+        ? 'bg-[var(--warn-50)] text-[var(--warn-700)]'
         : 'bg-[var(--n-50)] text-[var(--n-600)]';
 
   return (
@@ -87,14 +94,30 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
       >
         {task.done && <Icon name="check" size={11} />}
       </button>
+      {/* The label no longer eats the row's slack. It used to, which flushed
+          the source chip ~1100px to the right edge: with a shared checklist
+          template every row read as the same task, and the only thing telling
+          them apart sat at the opposite end from the checkbox you click. */}
       <span
         className={[
-          'min-w-0 flex-1 truncate text-[13px]',
-          task.done ? 'text-[var(--n-400)] line-through' : 'text-[var(--n-800)]',
+          'min-w-0 max-w-[62%] truncate text-[13px]',
+          task.done ? 'text-[var(--text-disabled)] line-through' : 'text-[var(--n-800)]',
         ].join(' ')}
       >
         {task.text === '' ? '(untitled task)' : task.text}
       </span>
+      {source !== null && (
+        <button
+          type="button"
+          onClick={() => open(source.path)}
+          className="min-w-0 max-w-[38%] flex-none truncate rounded-[5px] border-0 bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--text-meta)] hover:bg-[var(--n-100)] hover:text-[var(--n-900)]"
+          title={source.path}
+        >
+          {source.title}
+        </button>
+      )}
+      {/* Only the dates and people right-align. */}
+      <span className="flex-1" />
       {task.assignees.map((a) => (
         <span
           key={a}
@@ -110,16 +133,6 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
           <Icon name="calendar" size={11} />
           {formatDue(task.due)}
         </span>
-      )}
-      {source !== null && (
-        <button
-          type="button"
-          onClick={() => open(source.path)}
-          className="flex-none truncate rounded-[5px] border-0 bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
-          title={source.path}
-        >
-          {source.title}
-        </button>
       )}
     </div>
   );
@@ -142,31 +155,57 @@ export function HomeTasks() {
     return [...seen.entries()].sort((x, y) => x[1].localeCompare(y[1]));
   }, [tasks, entries]);
 
-  const open = tasks.filter((t) => !t.done);
-  const filtered =
+  // '· N done' used to be a dead number: nothing anywhere revealed the done
+  // set, and checking a box deleted the row from the screen with no way back.
+  // It is a control now, and with it on a task you tick stays put, struck
+  // through, so a mis-click is one more click to undo.
+  const [showDone, setShowDone] = useState(false);
+
+  const byAssignee = (list: DocTask[]) =>
     assigneeFilter === ''
-      ? open
+      ? list
       : assigneeFilter === '__unassigned__'
-        ? open.filter((t) => t.assignees.length === 0)
-        : open.filter((t) => t.assignees.includes(assigneeFilter));
+        ? list.filter((t) => t.assignees.length === 0)
+        : list.filter((t) => t.assignees.includes(assigneeFilter));
+
+  const openTasks = tasks.filter((t) => !t.done);
+  const filtered = byAssignee(showDone ? tasks : openTasks);
+  const openCount = byAssignee(openTasks).length;
 
   const today = todayIso();
   const byBucket = (bucket: DueBucket) =>
     filtered
       .filter((t) => dueBucket(t.due, today) === bucket)
       .sort(
-        (a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.text.localeCompare(b.text),
+        (a, b) =>
+          Number(a.done) - Number(b.done) ||
+          (a.due ?? '9999').localeCompare(b.due ?? '9999') ||
+          a.text.localeCompare(b.text),
       );
 
-  const doneCount = tasks.length - open.length;
+  const doneCount = tasks.length - openTasks.length;
 
   return (
     <section data-testid="home-tasks" className="mb-7">
       <div className="mb-1.5 flex items-center gap-2">
-        <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">My Tasks</h2>
-        <span className="text-[12px] text-[var(--n-500)]">
-          {filtered.length} open{doneCount > 0 ? ` · ${doneCount} done` : ''}
-        </span>
+        <h2 className={SECTION_HEADING}>My Tasks</h2>
+        <span className="text-[12px] text-[var(--text-meta)]">{openCount} open</span>
+        {doneCount > 0 && (
+          <button
+            type="button"
+            data-testid="home-tasks-show-done"
+            aria-pressed={showDone}
+            onClick={() => setShowDone((v) => !v)}
+            className={[
+              'rounded-[5px] border-0 bg-transparent px-1 py-px text-[12px] underline decoration-dotted underline-offset-2',
+              showDone
+                ? 'text-[var(--cortex-600)]'
+                : 'text-[var(--text-meta)] hover:text-[var(--n-900)]',
+            ].join(' ')}
+          >
+            {doneCount} done
+          </button>
+        )}
         <span className="flex-1" />
         {assignees.length > 0 && (
           <Dropdown
@@ -184,7 +223,7 @@ export function HomeTasks() {
       </div>
       {loading && filtered.length === 0 && <div data-testid="home-tasks-loading" />}
       {!loading && filtered.length === 0 && (
-        <p className="m-0 rounded-[10px] border border-dashed border-[var(--n-200)] px-4 py-3 text-[12.5px] text-[var(--n-500)]">
+        <p className="m-0 rounded-[10px] border border-dashed border-[var(--n-200)] px-4 py-3 text-[12.5px] text-[var(--text-meta)]">
           No open tasks. Add one in any doc with a checklist item — assign with @, set a due date
           with the calendar chip.
         </p>
@@ -237,7 +276,7 @@ export function HomePage() {
           <h1 className="m-0 text-[22px] font-semibold leading-[30px] tracking-[-0.015em]">
             {greeting}
           </h1>
-          <span className="text-[12px] text-[var(--n-500)]">
+          <span className="text-[12px] text-[var(--text-meta)]">
             {roots.length} {roots.length === 1 ? 'collection' : 'collections'}
           </span>
         </div>
@@ -259,7 +298,7 @@ export function HomePage() {
         <HomeTasks />
 
         <div className="mb-2.5 flex items-center gap-2">
-          <h2 className="m-0 text-[15px] font-semibold tracking-[-0.005em]">Collections</h2>
+          <h2 className={SECTION_HEADING}>Collections</h2>
         </div>
         <div className="grid grid-cols-2 gap-2.5">
           {roots.map((node) => (

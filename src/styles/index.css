@@ -75,6 +75,12 @@
   --color-surface-selected: var(--surface-selected);
   --color-surface-ai: var(--surface-ai);
 
+  /* text-on-dark. The --color-*: initial reset above deletes Tailwind's stock
+     palette, so `text-white` compiles to NOTHING and silently leaves near-black
+     ink on saturated fills (M15). `text-inverse` is the DS replacement — use it
+     anywhere a label sits on --accent, --cortex-*, or another dark surface. */
+  --color-inverse: var(--text-inverse);
+
   /* accent */
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);

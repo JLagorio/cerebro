@@ -1,6 +1,6 @@
 ---
 type: Type
-icon: check-square
+icon: square-check
 color: '#3D8BE8'
 statuses:
   - { id: backlog, group: active, color: '#A8AFC2', hollow: true }

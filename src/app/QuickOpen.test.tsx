@@ -68,4 +68,52 @@ describe('QuickOpen', () => {
     });
     expect(useUiStore.getState().detailPath).toBe('people/ana-rios.md');
   });
+
+  // It used to restate the placeholder verbatim ~50px under itself and offer
+  // nothing to press.
+  it('offers the places on an empty query instead of restating the placeholder', () => {
+    render(<QuickOpen />);
+    expect(screen.queryByText('Type to search notes, lists, types, and places to go.')).toBeNull();
+    const options = screen.getAllByRole('option');
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.map((o) => o.textContent).join(' ')).toContain('Home');
+  });
+
+  it('hints the keys in the dialog footer', () => {
+    render(<QuickOpen />);
+    expect(screen.getByText('↑↓ navigate · ↵ open · esc close')).toBeTruthy();
+  });
+
+  it('Enter on the empty query opens the first place', async () => {
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), '{Enter}');
+    expect(useNavStore.getState().selection).toEqual({ kind: 'home' });
+    expect(useUiStore.getState().quickOpenVisible).toBe(false);
+  });
+
+  // Two adjacent spans in the identical mono style read as one phrase: a
+  // record key and a type name were typographically indistinguishable.
+  it('gives the record key and the kind label distinct treatments', async () => {
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'guided');
+    const spans = [...screen.getAllByRole('option')[0].querySelectorAll('span')];
+    const mono = spans.filter((s) => s.className.includes('font-mono'));
+    expect(mono).toHaveLength(1);
+    const kind = spans[spans.length - 1];
+    expect(kind.className).not.toContain('font-mono');
+    // fixed-width column so the category aligns down the list
+    expect(kind.className).toContain('w-[84px]');
+  });
+
+  it('renders a type target count in words rather than a bare number chip', async () => {
+    const user = userEvent.setup();
+    render(<QuickOpen />);
+    await user.type(screen.getByPlaceholderText(PLACEHOLDER), 'person');
+    const rows = screen.getAllByRole('option').map((o) => o.textContent ?? '');
+    // The type target used to carry a bare "4" in a mono chip, styled exactly
+    // like a record key.
+    expect(rows.some((t) => /\d+ records?Type$/.test(t))).toBe(true);
+  });
 });
