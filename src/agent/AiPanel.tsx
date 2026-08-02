@@ -201,15 +201,22 @@ export function AiPanel() {
   }, [chat.messages]);
 
   // A prompt handed over from elsewhere in the app ("Ask the agent to
-  // revise" on a concept) is sent once and then cleared.
+  // revise" on a concept) is sent once and then cleared. Held while a turn
+  // is streaming — sending mid-turn would be dropped by the hook's
+  // one-turn guard — and delivered when the stream ends (PR #5 review).
   const send = chat.send;
+  const streaming = chat.streaming;
   useEffect(() => {
-    if (pendingPrompt === null) return;
+    if (pendingPrompt === null || streaming) return;
     setPendingPrompt(null);
     send(pendingPrompt);
-  }, [pendingPrompt, send, setPendingPrompt]);
+  }, [pendingPrompt, send, setPendingPrompt, streaming]);
 
   const submit = () => {
+    // Mid-turn, Enter is a no-op: the Send button is already replaced by
+    // Stop, and the keyboard must match it. The draft stays in the composer
+    // rather than vanishing into a send the hook would drop (PR #5 review).
+    if (chat.streaming) return;
     const trimmed = draft.trim();
     if (trimmed === '') return;
     // M13.1: `/name …` expands to the skill's body — the transcript shows what

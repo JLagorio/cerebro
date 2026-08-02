@@ -57,6 +57,14 @@ export function useAgentChat(
   const onWrote = useRef(onWroteFiles);
   onWrote.current = onWroteFiles;
   const activeRef = useRef<string | null>(null);
+  // One turn at a time (PR #5 review). `activeRef` cannot double as this
+  // guard: it is deliberately claimed late, after the preempt handoff, and
+  // that async gap is exactly where a second send would slip in — both
+  // turns reach runAgent, the backend's replacement-kill swaps the first
+  // child for the second, and the first child's terminal Done — never
+  // registered as dead, since no stopAgent named it — is adopted as the
+  // second turn's, freezing its bubble before its child says a word.
+  const turnInFlight = useRef(false);
   const mcpRef = useRef<McpInfo | null>(null);
   // Runs this hook has killed (PR #5 review). A killed child's trailing
   // events — its terminal Done above all — must be recognizable as dead
@@ -156,6 +164,7 @@ export function useAgentChat(
         case 'Done':
           patchActive((m) => ({ ...m, streaming: false }));
           activeRef.current = null;
+          turnInFlight.current = false;
           setStreaming(false);
           setAgentBusy(false);
           if (touchedFiles.current) {
@@ -175,6 +184,11 @@ export function useAgentChat(
     (text: string, message?: string | (() => Promise<string>)) => {
       const trimmed = text.trim();
       if (trimmed === '' || vaultPath === null) return;
+      // Callers gate on `streaming`; this closes the same-tick window where
+      // that render state is still stale. Dropped, not queued — the caller
+      // that hit it kept its draft, so nothing is lost.
+      if (turnInFlight.current) return;
+      turnInFlight.current = true;
       const assistantId = nextId();
       lastPrompt.current = trimmed;
       setMessages((prev) => [
@@ -231,6 +245,7 @@ export function useAgentChat(
             prev.map((m) => (m.id === assistantId ? { ...m, error: message, streaming: false } : m)),
           );
           activeRef.current = null;
+          turnInFlight.current = false;
           setStreaming(false);
           setAgentBusy(false);
           toast(message);
@@ -256,6 +271,7 @@ export function useAgentChat(
     killRun();
     patchActive((m) => ({ ...m, streaming: false }));
     activeRef.current = null;
+    turnInFlight.current = false;
     setStreaming(false);
     setAgentBusy(false);
   }, [killRun, patchActive, setAgentBusy]);
@@ -265,6 +281,7 @@ export function useAgentChat(
     sessionRef.current = null;
     setSessionId(null);
     activeRef.current = null;
+    turnInFlight.current = false;
     setStreaming(false);
     setAgentBusy(false);
     setMessages([]);
@@ -276,6 +293,7 @@ export function useAgentChat(
     (restored: ChatMessage[], restoredSession: string | null) => {
       killRun();
       activeRef.current = null;
+      turnInFlight.current = false;
       setStreaming(false);
       setAgentBusy(false);
       sessionRef.current = restoredSession;

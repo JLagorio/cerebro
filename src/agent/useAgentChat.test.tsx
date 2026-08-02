@@ -197,3 +197,61 @@ describe('useAgentChat and the killed run’s trailing events', () => {
     expect(result.current.messages[1].streaming).toBe(true);
   });
 });
+
+/**
+ * One turn at a time (PR #5 review, Bugbot). `activeRef` is claimed
+ * deliberately late — after the preempt handoff — so it cannot double as
+ * the guard: a second send fired in that gap would reach runAgent too, the
+ * backend's replacement-kill would swap children mid-handoff, and the first
+ * child's terminal Done — never named by any stopAgent, so never registered
+ * dead — would be adopted as the second turn's, freezing its bubble before
+ * its own child says a word.
+ */
+describe('useAgentChat one turn at a time', () => {
+  const opts = { shell: false, connectors: false };
+
+  beforeEach(() => {
+    handlers.length = 0;
+    vi.mocked(agentIpc.runAgent).mockClear();
+    vi.mocked(agentIpc.stopAgent).mockClear();
+    useVaultStore.setState({ vaultPath: '/vault' });
+    useUiStore.setState({ learningPath: null, agentBusy: false });
+  });
+
+  it('drops a send fired while a turn is in flight', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => {
+      result.current.send('first');
+      // Same tick: `streaming` render state is still stale here, which is
+      // exactly the window the ref guard exists for.
+      result.current.send('second');
+    });
+    expect(result.current.messages).toHaveLength(2);
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+
+    // The turn's own Done reopens the conversation.
+    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
+    act(() => result.current.send('third'));
+    expect(result.current.messages).toHaveLength(4);
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+  });
+
+  it('a turn that fails to start releases the guard for the next send', async () => {
+    vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error('spawn failed'));
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('doomed'));
+    await vi.waitFor(() => expect(result.current.streaming).toBe(false));
+    act(() => result.current.send('retry'));
+    expect(result.current.messages).toHaveLength(4);
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+  });
+
+  it('stop() releases the guard for the next send', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('first'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
+    act(() => result.current.stop());
+    act(() => result.current.send('second'));
+    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
+  });
+});
