@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { addPropertyToEntry } from '@/app/typeActions';
+import React, { useState } from 'react';
+import { addPropertyToEntry, moveFieldOnType } from '@/app/typeActions';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
 import { inferKindFromValue, visibleProperties } from '@/engine/properties';
+import { useSortableList } from '@/hooks/useSortableList';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -50,31 +51,62 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
     ...Object.keys(entry.relationships),
   ]).filter((k) => !declaredNames.has(k) && k !== 'type' && k !== 'key');
 
+  // M16.8: `moveFieldOnType` has existed since M9.6 — hardened, toast-wired,
+  // and with zero call sites. Declaration order drives the panel here AND the
+  // default column order in every view, and the only way to change it was to
+  // hand-edit the Type doc's YAML.
+  //
+  // `parseFields` is a plain `Object.entries` map, so the i-th row on screen
+  // is the i-th key in the mapping and a target index converts straight to a
+  // delta. Nothing is injected or hidden in between.
+  const sortable = useSortableList({
+    ids: declared.map((f) => f.name),
+    disabled: entry.type === null,
+    labelFor: (id) => humanize(id),
+    onReorder: (name, to) => {
+      const from = declared.findIndex((f) => f.name === name);
+      if (entry.type === null || from === -1 || from === to) return;
+      void moveFieldOnType(entry.type, name, to - from);
+    },
+  });
+
   return (
     <div className="mb-4 flex flex-col gap-[7px]">
-      {declared.map((f) => (
-        <PropertyRow
-          key={f.name}
-          kind={f.kind}
-          name={f.name}
-          align={f.kind === 'checkbox' ? 'center' : 'start'}
-          menu={
-            entry.type === null
-              ? undefined
-              : ({ close }) => (
-                  <PropertyMenu
-                    def={f}
-                    sourceType={entry.type ?? ''}
-                    schema={schema}
-                    recordCount={recordCount}
-                    onClose={close}
-                  />
-                )
-          }
-        >
-          <FieldEditor entry={entry} def={f} schema={schema} />
-        </PropertyRow>
-      ))}
+      {/* Declared fields get their own container: the sortable measures its
+          children as the rows, and undeclared keys are not part of the type's
+          order — they are not in `fields:` at all. */}
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col gap-[7px]"
+      >
+        {declared.map((f, index) => (
+          <PropertyRow
+            key={f.name}
+            kind={f.kind}
+            name={f.name}
+            align={f.kind === 'checkbox' ? 'center' : 'start'}
+            grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
+            gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
+            dragging={sortable.dragging === f.name}
+            style={sortable.dropIndicator(index)}
+            menu={
+              entry.type === null
+                ? undefined
+                : ({ close }) => (
+                    <PropertyMenu
+                      def={f}
+                      sourceType={entry.type ?? ''}
+                      schema={schema}
+                      recordCount={recordCount}
+                      onClose={close}
+                    />
+                  )
+            }
+          >
+            <FieldEditor entry={entry} def={f} schema={schema} />
+          </PropertyRow>
+        ))}
+      </div>
       {undeclared.map((name) => (
         // A key the type no longer declares is still the user's data. It used
         // to render `String(value)` — "[object Object]" for a leftover

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PropertyRow, PROPERTY_LABEL_W } from '@/detail/PropertyRow';
@@ -73,23 +73,53 @@ describe('PropertyRow', () => {
     expect(row().dataset.property).toBe('due_date');
   });
 
-  // 116px runs out at about 14 characters, so the name is exactly the thing
-  // that needs a tooltip.
-  it('gives the truncated name a tooltip', async () => {
+  // 116px runs out at about 14 characters, so a clipped name is exactly the
+  // thing that needs a tooltip. jsdom lays nothing out, so the measurement
+  // the component makes has to be stubbed to be exercised at all.
+  it('gives a clipped name a tooltip', async () => {
     const user = userEvent.setup();
-    render(
-      <PropertyRow kind="text" name="an_extremely_long_property_name_indeed">
-        <span>value</span>
-      </PropertyRow>,
-    );
-    await user.hover(screen.getByText('An extremely long property name indeed'));
-    await waitFor(
-      () =>
-        expect(screen.getByRole('tooltip').textContent).toBe(
-          'An extremely long property name indeed',
-        ),
-      { timeout: 2000 },
-    );
+    const scroll = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(400);
+    const client = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(116);
+    try {
+      render(
+        <PropertyRow kind="text" name="an_extremely_long_property_name_indeed">
+          <span>value</span>
+        </PropertyRow>,
+      );
+      await user.hover(screen.getByText('An extremely long property name indeed'));
+      await waitFor(
+        () =>
+          expect(screen.getByRole('tooltip').textContent).toBe(
+            'An extremely long property name indeed',
+          ),
+        { timeout: 2000 },
+      );
+    } finally {
+      scroll.mockRestore();
+      client.mockRestore();
+    }
+  });
+
+  // A tooltip that repeats text already on screen is noise — and this one
+  // lands on top of the row above it. The first live look at M16.6 showed
+  // "Priority" covering "Status" for a name that fitted with room to spare.
+  it('stays quiet for a name that fits', async () => {
+    const user = userEvent.setup();
+    const scroll = vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(60);
+    const client = vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(116);
+    try {
+      render(
+        <PropertyRow kind="text" name="due">
+          <span>value</span>
+        </PropertyRow>,
+      );
+      await user.hover(screen.getByText('Due'));
+      await new Promise((r) => setTimeout(r, 600));
+      expect(screen.queryByRole('tooltip')).toBeNull();
+    } finally {
+      scroll.mockRestore();
+      client.mockRestore();
+    }
   });
 
   it('adds no wrapper node for the tooltip', () => {

@@ -29,7 +29,7 @@ export interface SortableList {
   dropIndicator: (index: number) => React.CSSProperties | undefined;
 }
 
-interface GripProps {
+export interface GripProps {
   ref: (el: HTMLElement | null) => void;
   role: 'button';
   tabIndex: 0;

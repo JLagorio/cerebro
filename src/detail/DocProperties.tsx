@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { addPropertyToEntry, normalizeFieldName } from '@/app/typeActions';
+import React, { useEffect, useState } from 'react';
+import { addPropertyToEntry, moveFieldOnType, normalizeFieldName } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
@@ -12,6 +12,7 @@ import { EscapeToClose } from '@/detail/FieldPopover';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, PROPERTY_LABEL_W, ROW_ACTION } from '@/detail/PropertyRow';
 import { inferKindFromValue, visibleProperties } from '@/engine/properties';
+import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
@@ -133,6 +134,19 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   };
   const convertTargets = [...schema.types.keys()].filter((t) => t !== 'Type').sort();
 
+  // M16.8: the same reorder the record panel gets. Declaration order is the
+  // type's, so a typed doc's fields move here too.
+  const sortable = useSortableList({
+    ids: declared.map((f) => f.name),
+    disabled: entry.type === null,
+    labelFor: (id) => humanize(id),
+    onReorder: (name, to) => {
+      const from = declared.findIndex((f) => f.name === name);
+      if (entry.type === null || from === -1 || from === to) return;
+      void moveFieldOnType(entry.type, name, to - from);
+    },
+  });
+
   // Adding a property to a TYPED doc extends the type's YAML schema (the
   // properties engine's source of truth); untyped docs get plain
   // frontmatter seeded by kind (M2.x). M3: routed through typeActions so
@@ -194,29 +208,38 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             Convert to record…
           </button>
         )}
-        {declared.map((f) => (
-          <PropertyRow
-            key={f.name}
-            kind={f.kind}
-            name={f.name}
-            align={f.kind === 'checkbox' ? 'center' : 'start'}
-            menu={
-              entry.type === null
-                ? undefined
-                : ({ close }) => (
-                    <PropertyMenu
-                      def={f}
-                      sourceType={entry.type ?? ''}
-                      schema={schema}
-                      recordCount={recordCount}
-                      onClose={close}
-                    />
-                  )
-            }
-          >
-            <FieldEditor entry={entry} def={f} schema={schema} />
-          </PropertyRow>
-        ))}
+        <div
+          ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+          className="flex flex-col gap-[7px]"
+        >
+          {declared.map((f, index) => (
+            <PropertyRow
+              key={f.name}
+              kind={f.kind}
+              name={f.name}
+              align={f.kind === 'checkbox' ? 'center' : 'start'}
+              grip={entry.type === null ? undefined : sortable.gripProps(f.name, index)}
+              gripHint={`Drag to reorder — changes every ${entry.type ?? ''}`}
+              dragging={sortable.dragging === f.name}
+              style={sortable.dropIndicator(index)}
+              menu={
+                entry.type === null
+                  ? undefined
+                  : ({ close }) => (
+                      <PropertyMenu
+                        def={f}
+                        sourceType={entry.type ?? ''}
+                        schema={schema}
+                        recordCount={recordCount}
+                        onClose={close}
+                      />
+                    )
+              }
+            >
+              <FieldEditor entry={entry} def={f} schema={schema} />
+            </PropertyRow>
+          ))}
+        </div>
         {undeclaredScalars.map((name) => (
           <UndeclaredRow key={name} entry={entry} name={name} />
         ))}

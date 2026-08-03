@@ -205,3 +205,83 @@ describe('PropertyMenu', () => {
     expect(screen.queryByTestId('property-menu-delete')).toBeNull();
   });
 });
+
+/**
+ * Dragging a property to a new position (M16.8).
+ *
+ * `moveFieldOnType` has existed since M9.6 — hardened, toast-wired, and with
+ * zero call sites. Declaration order drives this panel AND the default column
+ * order in every view, and the only way to change it was to hand-edit YAML.
+ */
+describe('property reorder', () => {
+  beforeEach(() => {
+    resetLayers();
+    useUiStore.setState({ toasts: [] });
+  });
+  afterEach(cleanup);
+
+  const gripFor = (name: string) =>
+    screen.getByRole('button', { name: new RegExp(`^Reorder ${name},`) });
+
+  it('gives every declared field a grip that says where it sits', () => {
+    setup();
+    // The fixture type declares status, priority, assignee, due.
+    expect(gripFor('Status').getAttribute('aria-label')).toBe('Reorder Status, position 1 of 4');
+    expect(gripFor('Due').getAttribute('aria-label')).toBe('Reorder Due, position 4 of 4');
+  });
+
+  it('moves a property one slot per arrow press, from the keyboard alone', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    gripFor('Priority').focus();
+    await user.keyboard('{ArrowUp}');
+
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
+    // The whole mapping is rewritten: YAML has no reorder operation, and
+    // patchFrontmatter merges keys, so a partial write would change nothing.
+    expect(Object.keys(writtenFields(patchFrontmatter))).toEqual([
+      'priority',
+      'status',
+      'assignee',
+      'due',
+    ]);
+  });
+
+  it('refuses to walk a property off either end', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    gripFor('Status').focus();
+    await user.keyboard('{ArrowUp}');
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+
+    gripFor('Due').focus();
+    await user.keyboard('{ArrowDown}');
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+  });
+
+  // Reordering here rewrites the type's schema, so it reaches every record
+  // of that type — not just the one on screen. The hint names that rather
+  // than saying "drag to reorder".
+  it('says what a drag actually changes, which is the type', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.hover(gripFor('Priority'));
+    await waitFor(
+      () =>
+        expect(screen.getByRole('tooltip').textContent).toBe(
+          'Drag to reorder — changes every Work item',
+        ),
+      { timeout: 2000 },
+    );
+  });
+
+  it('gives an undeclared key no grip — it is not in the type at all', () => {
+    setup();
+    expect(screen.queryByRole('button', { name: /^Reorder Stray note/ })).toBeNull();
+  });
+
+  it('gives an untyped record no grips', () => {
+    setup({ type: null });
+    expect(screen.queryByRole('button', { name: /^Reorder / })).toBeNull();
+  });
+});
