@@ -255,8 +255,19 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                 {list.definition.name}
               </h1>
             </button>
-            <span className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-              {surface.entries.length}
+            {/* M16.31: `sortedEntries`, which is filtered AND searched — not
+                `surface.entries`, which is only filtered. Typing in "Search
+                this view" narrowed the canvas and flipped the chip to
+                "· filtered" while this number stayed where it was, so one
+                header told two different stories about one screen depending
+                on which control you had narrowed with. NOT `shownEntries`: a
+                load limit is truncation, and how much of how much is showing
+                is what ViewLimitNotice says under the records. */}
+            <span
+              data-testid="view-count"
+              className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]"
+            >
+              {sortedEntries.length}
             </span>
             <span className="hidden flex-none items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)] sm:inline-flex">
               {sourceLabel}

@@ -229,8 +229,18 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                 {listing.name}
               </h1>
             </button>
-            <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-              {listing.count}
+            {/* M16.31: the records this view is showing, not `listing.count`
+                — the number of records of this type in the vault. Those are
+                the same number until you filter or search, and then the
+                header goes on reporting the vault while the canvas reports
+                the view. The List page had the milder form of this (it
+                followed filters but not search) and both now read the same
+                thing: what is on screen. */}
+            <span
+              data-testid="view-count"
+              className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]"
+            >
+              {sortedEntries.length}
             </span>
             {listing.system && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">

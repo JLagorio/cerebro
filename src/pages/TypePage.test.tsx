@@ -102,6 +102,21 @@ describe('TypePage — Records tab', () => {
     fireEvent.click(screen.getByTestId('view-control-settings'));
     expect(screen.getByRole('button', { name: 'Delete type' })).toBeTruthy();
   });
+
+  /**
+   * The count beside the type's name read `listing.count` — how many records
+   * of this type are in the VAULT (M16.31). Narrowing the view with the search
+   * box left it untouched, so the header went on reporting the vault while the
+   * canvas reported the view. The List page had the milder version of the same
+   * bug and both now read what is on screen.
+   */
+  it('counts the records on screen, not every record of the type', () => {
+    render(<TypePage selection={{ kind: 'type', name: 'Work item' }} />);
+    expect(screen.getByTestId('view-count').textContent).toBe('2');
+    fireEvent.click(screen.getByLabelText('Search this view'));
+    fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: 'sync' } });
+    expect(screen.getByTestId('view-count').textContent).toBe('1');
+  });
 });
 
 describe('TypePage — property configuration (M12.8: floating, never an aside)', () => {
