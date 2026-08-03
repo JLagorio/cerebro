@@ -168,6 +168,37 @@ function valueList(value: FilterRule['value']): Scalar[] {
   return value === '' ? [] : [value];
 }
 
+/**
+ * `0` and `false` are values. Absence is only undefined, null, or the empty
+ * string the editors seed — anything looser would make "Weight is 0" and
+ * "Done is unchecked" stop filtering.
+ */
+const isPresent = (v: Scalar | undefined | null): boolean =>
+  v !== undefined && v !== null && v !== '';
+
+/**
+ * Whether a rule carries the values its operator reads (M16.29).
+ *
+ * Half of a rule is not a narrower rule, it is an unfinished one. Picking
+ * "is before" on `Due` and not yet a date left `compareValues` with an empty
+ * target, which is not comparable to anything — so every ordered operator
+ * answered false for every record and the grid dropped from 45 rows to
+ * "Nothing matches these filters" before the user had said what to match.
+ * Same for `is any of` with nothing ticked, and for `is between` with one
+ * bound filled.
+ *
+ * `is_empty`/`is_not_empty` are the asymmetry: they are COMPLETE with no
+ * value, and must keep applying the instant they are chosen. Arity already
+ * knows the difference, so nothing here restates the operator list.
+ */
+export function filterRuleIsReady(rule: FilterRule): boolean {
+  const arity = filterOpArity(rule.op);
+  if (arity === 'none') return true;
+  const values = Array.isArray(rule.value) ? rule.value : [rule.value];
+  if (arity === 'two') return values.length >= 2 && isPresent(values[0]) && isPresent(values[1]);
+  return values.some(isPresent);
+}
+
 /** One rule as a chip reads it: "Due is before 2026-08-01". */
 export function describeFilterRule(rule: FilterRule, label: string): string {
   const op = filterOpLabel(rule.op);
@@ -350,8 +381,20 @@ function isGroup(node: FilterRule | FilterGroup): node is FilterGroup {
 export function evaluateFilters(entry: Entry, group: FilterGroup, schema: Schema): boolean {
   const evalNode = (node: FilterRule | FilterGroup): boolean =>
     isGroup(node) ? evaluateFilters(entry, node, schema) : evalRule(entry, node);
-  if ('all' in group) return group.all.every(evalNode);
-  return group.any.some(evalNode);
+
+  // A half-built rule is SKIPPED, not answered (M16.29). Answering it false
+  // empties the view mid-edit; answering it true would make a Match-any group
+  // holding it match every record. Dropping it out of the list is the only
+  // reading of "this condition does not filter yet" that composes both ways.
+  const nodes = 'all' in group ? group.all : group.any;
+  const live = nodes.filter((node) => isGroup(node) || filterRuleIsReady(node));
+
+  if ('all' in group) return live.every(evalNode);
+  // `[].some()` is false, which is right for an AUTHORED empty group — the
+  // builder warns in those words — and wrong for a group whose every
+  // condition is still being written.
+  if (live.length === 0 && nodes.length > 0) return true;
+  return live.some(evalNode);
 }
 
 // --- search and limit (M16.26) ----------------------------------------------

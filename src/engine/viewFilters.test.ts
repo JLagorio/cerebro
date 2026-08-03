@@ -11,6 +11,7 @@ import {
 } from './viewFilters';
 import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
+import { parseListYaml, serializeList } from './views';
 import { FIELD_KINDS, FILTER_OPS } from './types';
 import type { FilterGroup, FilterRule } from './types';
 
@@ -280,6 +281,109 @@ describe('evaluateFilters — the M16.25 operators', () => {
   });
 });
 
+/**
+ * M16.29 regression: a half-built rule emptied the view.
+ *
+ * Reproduced live — Table → Filter → pick `Due` → change the operator to "is
+ * before", and before any date has been picked the grid drops to "Nothing
+ * matches these filters" and the row count goes 45 → 0. `compareValues`
+ * returns null for an empty target, so every ordered operator answered false
+ * for every record, and the surface that was supposed to be MID-EDIT looked
+ * broken instead.
+ *
+ * The invariant: a rule that cannot be evaluated yet does not filter at all.
+ * `is_empty`/`is_not_empty` are the asymmetry to preserve — they need no
+ * value, so they must keep applying the instant they are chosen.
+ */
+describe('evaluateFilters — a rule missing its value is inert (M16.29)', () => {
+  const inert: [string, FilterRule][] = [
+    ['before with no value at all', { field: 'due', op: 'before' }],
+    ['before with the empty string the editor seeds', { field: 'due', op: 'before', value: '' }],
+    ['after with no value', { field: 'due', op: 'after', value: '' }],
+    ['equals with no value', { field: 'status', op: 'equals', value: '' }],
+    ['contains with no needle', { field: 'title', op: 'contains', value: '' }],
+    ['gt with no bound', { field: 'weight', op: 'gt', value: '' }],
+    ['any_of with nothing selected', { field: 'status', op: 'any_of', value: [] }],
+    ['is_between with neither bound', { field: 'weight', op: 'is_between', value: ['', ''] }],
+    ['is_between with only the low bound', { field: 'weight', op: 'is_between', value: [10, ''] }],
+    ['is_between with only the high bound', { field: 'weight', op: 'is_between', value: ['', 20] }],
+  ];
+
+  it.each(inert)('%s keeps the record', (_name, rule) => {
+    expect(evaluateFilters(entry, wrap(rule), schema)).toBe(true);
+  });
+
+  it('still filters the moment the value arrives', () => {
+    expect(
+      evaluateFilters(entry, wrap({ field: 'due', op: 'before', value: '2026-07-01' }), schema),
+    ).toBe(false);
+  });
+
+  /** The asymmetry: these two operators are COMPLETE with no value. */
+  it('is_empty and is_not_empty apply immediately, valueless as they are', () => {
+    expect(evaluateFilters(entry, wrap({ field: 'status', op: 'is_empty' }), schema)).toBe(false);
+    expect(evaluateFilters(entry, wrap({ field: 'estimate', op: 'is_not_empty' }), schema)).toBe(
+      false,
+    );
+  });
+
+  /**
+   * `0` and `false` are values. Treating "absent" as falsy would make
+   * "Weight is 0" and "Done is unchecked" silently stop filtering — the same
+   * class of bug in the opposite direction.
+   */
+  it('zero and false are values, not absence', () => {
+    expect(evaluateFilters(entry, wrap({ field: 'weight', op: 'equals', value: 0 }), schema)).toBe(
+      false,
+    );
+    const flagged = makeEntry({
+      path: 'items/fld-11.md',
+      filename: 'fld-11.md',
+      title: 'Flagged',
+      type: 'Work item',
+      properties: { done: false as never },
+    });
+    expect(
+      evaluateFilters(flagged, wrap({ field: 'done', op: 'equals', value: false }), schema),
+    ).toBe(true);
+  });
+
+  /**
+   * Inside Match-any the half-built rule is skipped rather than counted as a
+   * failed branch — a `some()` over one unbuilt condition is false, which is
+   * how the nested group on the demo vault's "At risk" list emptied the whole
+   * view while its sibling condition was still fine.
+   */
+  it('a Match-any group whose only condition is half-built constrains nothing', () => {
+    const group: FilterGroup = {
+      all: [
+        { field: 'type', op: 'equals', value: 'Work item' },
+        { any: [{ field: 'due', op: 'before', value: '' }] },
+      ],
+    };
+    expect(evaluateFilters(entry, group, schema)).toBe(true);
+  });
+
+  it('a Match-any group still answers on the conditions that ARE built', () => {
+    const group: FilterGroup = {
+      any: [
+        { field: 'status', op: 'equals', value: 'blocked' },
+        { field: 'due', op: 'before', value: '' },
+      ],
+    };
+    expect(evaluateFilters(entry, group, schema)).toBe(false);
+  });
+
+  /**
+   * An AUTHORED empty group is a different thing from a half-built rule, and
+   * the builder already warns in those words ("Match any with nothing to match
+   * hides every record"). Pruning must not quietly make that warning false.
+   */
+  it('an authored empty any group still matches nothing', () => {
+    expect(evaluateFilters(entry, { any: [] }, schema)).toBe(false);
+  });
+});
+
 describe('filterOpsFor — operators are a property of the KIND (M16.25)', () => {
   it('a date gets the date operators and none of the numeric ones', () => {
     const ops = filterOpsFor('date');
@@ -382,6 +486,71 @@ describe('describeFilterRule — what a chip says', () => {
   });
   it('omits the value entirely for a valueless operator', () => {
     expect(describeFilterRule({ field: 'due', op: 'is_empty' }, 'Due')).toBe('Due is empty');
+  });
+});
+
+/**
+ * The worst failure this surface can have is a view that silently loses a
+ * condition, so the round trip is asserted rather than assumed (M16.29).
+ *
+ * Note especially that the M16.29 inertness rule is an EVALUATION rule: a
+ * half-built condition still persists, so reopening the view finds the rule
+ * where you left it rather than an empty filter bar.
+ */
+describe('a saved filter survives YAML', () => {
+  // The demo vault's "At risk" list, verbatim: a top-level set operator beside
+  // a nested Match-any group — the shape the chip bar renders as one chip plus
+  // "2 conditions".
+  const yaml = [
+    'name: At risk',
+    'source:',
+    '  type: Work item',
+    'filters:',
+    '  all:',
+    '    - field: priority',
+    '      op: any_of',
+    '      value:',
+    '        - urgent',
+    '        - high',
+    '    - any:',
+    '        - field: status',
+    '          op: equals',
+    '          value: progress',
+    '        - field: status',
+    '          op: equals',
+    '          value: review',
+    '    - field: due',
+    '      op: before',
+    '    - field: estimate',
+    '      op: is_empty',
+    'presentation:',
+    '  type: table',
+    '',
+  ].join('\n');
+
+  const filtersOf = (text: string) => parseListYaml('at-risk', text).definition.views[0].filters;
+
+  it('re-reads as the same tree it was written from', () => {
+    const first = filtersOf(yaml);
+    const rewritten = filtersOf(serializeList(parseListYaml('at-risk', yaml).definition));
+    expect(rewritten).toEqual(first);
+  });
+
+  it('keeps the nested group, its two conditions, and the valueless ones', () => {
+    const group = filtersOf(serializeList(parseListYaml('at-risk', yaml).definition));
+    expect(group).toEqual({
+      all: [
+        { field: 'priority', op: 'any_of', value: ['urgent', 'high'] },
+        {
+          any: [
+            { field: 'status', op: 'equals', value: 'progress' },
+            { field: 'status', op: 'equals', value: 'review' },
+          ],
+        },
+        { field: 'due', op: 'before' },
+        { field: 'estimate', op: 'is_empty' },
+      ],
+    });
   });
 });
 
