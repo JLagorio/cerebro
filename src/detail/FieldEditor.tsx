@@ -64,6 +64,29 @@ function OptionTag({ label, color }: { label: string; color: string | null }) {
   );
 }
 
+/**
+ * What an unset value draws (M16.35).
+ *
+ * `ghost` is Notion's RECORD PAGE: grey "Empty" standing in for the value, so
+ * the property is still a visible, clickable row. `blank` is Notion's TABLE
+ * CELL: nothing at all — no ghost text, no chevron, no per-cell type icon —
+ * with the affordance arriving on hover/focus instead.
+ *
+ * Deliberately NOT derived from `compact`, which means "this view does not
+ * wrap text": turning column wrapping on would otherwise silently repaint
+ * every empty cell.
+ */
+export type FieldPlaceholder = 'ghost' | 'blank';
+
+/**
+ * A blank cell draws nothing, so the BUTTON has to be the hit target — Notion's
+ * unset cell is clickable across its whole width, not in the 16px of padding
+ * that is all a button with no children would occupy. `flex-1 self-stretch`
+ * fills the cell it is laid into; the `min-h` is the floor when nothing around
+ * it has height either.
+ */
+const BLANK_FILL = 'min-h-[22px] flex-1 self-stretch';
+
 export interface FieldEditorProps {
   entry: Entry;
   def: FieldDef;
@@ -73,6 +96,10 @@ export interface FieldEditorProps {
   compact?: boolean;
   /** M11: how relation chips draw. Per view — see Presentation.chips. */
   chips?: ChipStyle;
+  /** M16.35: how an UNSET value draws. Defaults to the record page's ghost
+   * "Empty" so every existing consumer is unchanged; the table opts into
+   * `blank`. See FieldPlaceholder. */
+  placeholder?: FieldPlaceholder;
 }
 
 export function FieldEditor({
@@ -81,6 +108,7 @@ export function FieldEditor({
   schema,
   compact = false,
   chips = 'plain',
+  placeholder = 'ghost',
 }: FieldEditorProps) {
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
@@ -189,18 +217,26 @@ export function FieldEditor({
       const match = options.find((o) => o.id === v);
       return { id: v, label: match?.label ?? v, color: match?.color ?? null };
     });
+    // Nothing chosen and this is a table cell: paint the cell blank, chevron
+    // included (M16.35).
+    const blank = placeholder === 'blank' && chips.length === 0;
     return (
-      <span className="relative inline-flex min-w-0 max-w-full">
-        {/* No aria-label: the accessible name is the value ("Todo"), which is
-            what both screen readers and the panel tests read. `text-left`
-            matters once values wrap — buttons center their text by default. */}
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
+        {/* No aria-label while there is a value: the accessible name is the
+            value ("Todo"), which is what both screen readers and the panel
+            tests read. A blank cell has no such name, so it borrows the
+            property's. `text-left` matters once values wrap — buttons center
+            their text by default. */}
         <button
           type="button"
+          {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
         >
           {chips.length === 0 ? (
-            <span className="text-[var(--n-400)]">Empty</span>
+            blank ? null : (
+              <span className="text-[var(--n-400)]">Empty</span>
+            )
           ) : multi ? (
             chips.map((c) => <OptionTag key={c.id} label={c.label} color={c.color} />)
           ) : (
@@ -212,7 +248,7 @@ export function FieldEditor({
               {chips[0].label}
             </>
           )}
-          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
         </button>
         {open && (
           <FieldPopover
@@ -256,21 +292,23 @@ export function FieldEditor({
     );
     const values = asList(resolved.raw).map(stripWikilink);
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
+    const blank = placeholder === 'blank' && values.length === 0;
     return (
-      <span className="relative inline-flex min-w-0 max-w-full">
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
+          {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
         >
-          {values.length === 0 && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.length === 0 && !blank && <span className="text-[var(--n-400)]">Empty</span>}
           {values.map((v) => (
             <span key={v} className="inline-flex min-w-0 items-center gap-[5px]">
               <Avatar name={labelOf(v)} size={18} />
               <span className="truncate">{labelOf(v)}</span>
             </span>
           ))}
-          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
         </button>
         {open && (
           <FieldPopover
@@ -328,16 +366,17 @@ export function FieldEditor({
       }
       void Promise.all(jobs);
     };
+    const blank = placeholder === 'blank' && values.length === 0;
     return (
-      <span className="inline-flex min-w-0 max-w-full">
+      <span className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
           data-testid="relation-field"
           aria-label={`Edit ${humanize(def.name)}`}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
         >
-          {values.length === 0 && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.length === 0 && !blank && <span className="text-[var(--n-400)]">Empty</span>}
           {values.map((v) => {
             const target = targetOf(v);
             // M11: a related record is a CHIP. It used to carry an
@@ -359,7 +398,7 @@ export function FieldEditor({
               </span>
             );
           })}
-          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
         </button>
         {open && (
           // M11: a dialog, not a 240px popover. Choosing what to link and
@@ -400,8 +439,11 @@ export function FieldEditor({
       timeFormat: def.timeFormat ?? DEFAULT_TIME_FORMAT,
     };
     const empty = resolved.display === '';
+    // The calendar glyph goes with the ghost text: Notion's Due column is
+    // plain text with no icon, and an unset one is nothing at all (M16.35).
+    const blank = placeholder === 'blank' && empty;
     return (
-      <span className="relative inline-flex min-w-0 max-w-full">
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
           aria-label={humanize(def.name)}
@@ -409,10 +451,11 @@ export function FieldEditor({
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
           // clipped through the row below it (M11 item 3).
-          className="inline-flex min-w-0 max-w-full items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
         >
-          <Icon name="calendar" size={12} color="var(--n-500)" />
-          {empty ? <span className="text-[var(--n-400)]">Empty</span> : resolved.display}
+          {!blank && <Icon name="calendar" size={12} color="var(--n-500)" />}
+          {empty && !blank && <span className="text-[var(--n-400)]">Empty</span>}
+          {!empty && resolved.display}
         </button>
         {open && (
           <>
@@ -603,6 +646,7 @@ export function FieldEditor({
       />
     );
   }
+  const blank = placeholder === 'blank' && resolved.display === '';
   return (
     // max-w-full + truncate keep long text on one line inside a table cell;
     // the full value stays readable in the title and the detail panel.
@@ -611,6 +655,10 @@ export function FieldEditor({
     <button
       type="button"
       title={resolved.display === '' ? undefined : resolved.display}
+      // A blank cell renders no text, so nothing is left to name it. The
+      // property does the naming instead — blank means "draws no glyph", not
+      // "is invisible to a screen reader or a click" (M16.35).
+      {...(blank ? { 'aria-label': humanize(def.name) } : {})}
       // Seed the draft from the RAW value, never the formatted display: a
       // percent field opened holding "76%" and a currency field "$1,840",
       // and commit then rejected the app's own display string as not a
@@ -622,10 +670,12 @@ export function FieldEditor({
             : resolved.display,
         )
       }
-      className="inline-flex min-w-0 max-w-full rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
     >
       {resolved.display === '' ? (
-        <span className="text-[var(--n-400)]">Empty</span>
+        blank ? null : (
+          <span className="text-[var(--n-400)]">Empty</span>
+        )
       ) : (
         <span className="min-w-0 truncate">{resolved.display}</span>
       )}

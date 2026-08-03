@@ -172,13 +172,35 @@ const TableCell = memo(function TableCell({
         // Editing happens in place: the same FieldEditor the panel uses, so
         // validation and popovers behave identically in both surfaces. The
         // wrapper clamps it to one line unless the column wraps (M12.4b).
+        //
+        // `cb-cell-chrome` is what makes the SAME editor read differently in
+        // the two surfaces (M16.35): in the panel an unset property keeps its
+        // chevron and its grey "Empty", which is Notion's record page; in a
+        // table cell the chrome is un-painted until the row is live, which is
+        // Notion's table. The rules live in styles/table-chrome.css rather
+        // than in a prop because FieldEditor is a chain of early returns with
+        // four separate chevrons, and a class on the wrapper reaches all of
+        // them without threading a display mode through any of them.
         <div
           className={[
-            'flex min-w-0 flex-1 overflow-hidden [&>*]:max-w-full',
+            'cb-cell-chrome flex min-w-0 flex-1 overflow-hidden [&>*]:max-w-full',
             wrap ? 'items-start' : 'items-center',
           ].join(' ')}
         >
-          <FieldEditor entry={entry} def={def} schema={schema} compact={!wrap} chips={chips} />
+          {/* placeholder="blank": an unset TABLE cell paints nothing at all —
+              no ghost "Empty", no chevron, no calendar glyph — which is what
+              Notion's table does and what the record panel deliberately does
+              NOT do (M16.35). Kept separate from `compact`, which only says
+              this column does not wrap: a user toggling Wrap content must not
+              change what an empty cell looks like. */}
+          <FieldEditor
+            entry={entry}
+            def={def}
+            schema={schema}
+            compact={!wrap}
+            chips={chips}
+            placeholder="blank"
+          />
         </div>
       )}
     </div>
@@ -521,8 +543,16 @@ const TableRow = memo(function TableRow({
       onClick={onSelect}
       // `group` sits on the ROW so hovering anywhere reveals Open, not only
       // over the name cell.
+      //
+      // `cb-row` is the same idea for the cell chrome (M16.35), in plain CSS
+      // rather than a Tailwind group: the chevrons and calendar glyphs it
+      // un-paints live inside FieldEditor, several components down, and the
+      // reveal has to fire on the KEYBOARD cursor too — `data-focused`, which
+      // rowProps sets above — because this grid drives itself with
+      // aria-activedescendant and DOM focus never reaches a row at all. See
+      // styles/table-chrome.css.
       className={[
-        'group flex border-b border-[var(--n-100)]',
+        'group cb-row flex border-b border-[var(--n-100)]',
         autoHeight ? ROW_MIN_HEIGHT[rowHeight] : ROW_HEIGHT[rowHeight],
         // The cursor row needs to survive a bright screen: the --cortex-50
         // fill alone was 1.13:1 against white, so a left rule carries it.
@@ -619,12 +649,14 @@ const TableRow = memo(function TableRow({
           </span>
         )}
         {/* Reserved space, not inserted space: the glyph is always laid out
-            and only its opacity changes, so the title never reflows under the
-            pointer. */}
-        <span
-          aria-hidden
-          className="flex-none text-[var(--n-400)] opacity-0 group-hover:opacity-100"
-        >
+            and only its VISIBILITY changes, so the title never reflows under
+            the pointer.
+            M16.35: `cb-row-chrome` rather than `opacity-0
+            group-hover:opacity-100`, because group-hover is the pointer and
+            nothing else — an arrow-key user sat on this row and never saw the
+            glyph at all. The shared rule adds the keyboard cursor and
+            focus-within. */}
+        <span aria-hidden className="cb-row-chrome flex-none text-[var(--n-400)]">
           <Icon name="maximize-2" size={11} />
         </span>
       </div>

@@ -6,6 +6,9 @@
 @import './tokens/spacing.css';
 @import './tokens/base.css';
 
+/* Unlayered on purpose — see the file's own header. */
+@import './table-chrome.css';
+
 @theme inline {
   /* M1.x: reset the stock Tailwind palette and radii so only the DS tokens
      below yield utilities — off-DS classes (text-red-500, text-white, …)
@@ -63,6 +66,7 @@
   --color-warn-600: var(--warn-600);
   --color-warn-700: var(--warn-700);
   --color-danger-50: var(--danger-50);
+  --color-danger-200: var(--danger-200);
   --color-danger-500: var(--danger-500);
   --color-danger-600: var(--danger-600);
   --color-danger-700: var(--danger-700);
