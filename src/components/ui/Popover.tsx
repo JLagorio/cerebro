@@ -106,6 +106,13 @@ export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissO
 
 export interface PopoverProps {
   onClose: () => void;
+  /**
+   * What Escape does, when a multi-step surface should step BACK rather than
+   * discard the choices made so far. Passed straight to `useDismiss` — a
+   * surface must not register its own layer inside this one, because child
+   * effects run first and the parent would end up on top of its own child.
+   */
+  onEscape?: () => void;
   children: React.ReactNode;
   /**
    * The element to anchor to. Omit it and the popover measures the nearest
@@ -134,6 +141,7 @@ interface Placement {
 
 export function Popover({
   onClose,
+  onEscape,
   children,
   anchorRef,
   trapFocus = false,
@@ -205,7 +213,7 @@ export function Popover({
     return () => window.removeEventListener('resize', onResize);
   }, [measure]);
 
-  const layerId = useDismiss({ onClose, surfaceRef: panelRef, anchorEl });
+  const layerId = useDismiss({ onClose, surfaceRef: panelRef, anchorEl, onEscape });
 
   useEffect(() => {
     if (!closeOnScroll) return;

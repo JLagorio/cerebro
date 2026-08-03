@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { addPropertyToEntry, moveFieldOnType, normalizeFieldName } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
@@ -94,6 +94,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   const toast = useUiStore((s) => s.toast);
 
   const [adding, setAdding] = useState(false);
+  const addRef = useRef<HTMLButtonElement | null>(null);
   // The property menu edits the TYPE, so it owes the user the blast radius.
   const recordCount = useVaultStore((s) =>
     entry.type === null ? 0 : s.entries.filter((e) => e.type === entry.type).length,
@@ -250,8 +251,22 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             </span>
           </PropertyRow>
         ))}
-        {adding ? (
+        {/* The trigger stays mounted: the surface anchors to it now, and it
+            used to be REPLACED by an inline panel that shoved the footer down
+            as it opened (M16.9). */}
+        <button
+          ref={addRef}
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={adding}
+          onClick={() => setAdding((v) => !v)}
+          className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+        >
+          + Add property
+        </button>
+        {adding && (
           <AddPropertyPanel
+            anchorRef={addRef}
             existingNames={[
               ...declared.map((f) => humanize(f.name)),
               ...undeclaredScalars.map(humanize),
@@ -261,14 +276,6 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             onAdd={addProperty}
             onCancel={() => setAdding(false)}
           />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-          >
-            + Add property
-          </button>
         )}
       </div>
       <div className="mt-4 border-t border-[var(--n-100)] pt-2 text-[10px] text-[var(--n-400)] [font-family:var(--font-mono)]">

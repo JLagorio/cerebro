@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { addPropertyToEntry, moveFieldOnType } from '@/app/typeActions';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
@@ -37,6 +37,7 @@ function undeclaredKind(entry: Entry, name: string): FieldKind {
  */
 export function RecordProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const [addingProp, setAddingProp] = useState(false);
+  const addRef = useRef<HTMLButtonElement | null>(null);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   // The property menu edits the TYPE, so it owes the user the blast radius.
   const recordCount = useVaultStore((s) =>
@@ -132,8 +133,22 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           </span>
         </PropertyRow>
       ))}
-      {addingProp ? (
+      {/* The trigger stays mounted: the surface is anchored to it now, and it
+          used to be REPLACED by an inline panel that shoved the rest of the
+          panel down as it opened (M16.9). */}
+      <button
+        ref={addRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={addingProp}
+        onClick={() => setAddingProp((v) => !v)}
+        className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+      >
+        + Add property
+      </button>
+      {addingProp && (
         <AddPropertyPanel
+          anchorRef={addRef}
           existingNames={[...declared.map((f) => humanize(f.name)), ...undeclared.map(humanize)]}
           ownerType={entry.type}
           onAdd={(name, kind, relation) => {
@@ -143,14 +158,6 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           }}
           onCancel={() => setAddingProp(false)}
         />
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAddingProp(true)}
-          className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-        >
-          + Add property
-        </button>
       )}
     </div>
   );

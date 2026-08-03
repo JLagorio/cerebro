@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { resetLayers } from '@/components/ui/layers';
@@ -101,5 +101,150 @@ describe('AddPropertyPanel dismissal', () => {
     await user.click(screen.getByTestId('property-kind-relation'));
     await user.click(screen.getByTestId('elsewhere'));
     expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+/**
+ * The rebuild (M16.9). It was an inline bordered div that pushed the panel
+ * down as it opened, listing 14 kinds with no search and no sections, and
+ * exiting only through a Cancel button. Notion's is a popover anchored to the
+ * trigger, searchable, with no OK/Cancel at all — picking a type IS the
+ * commit.
+ */
+describe('AddPropertyPanel catalog', () => {
+  beforeEach(() => {
+    resetLayers();
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+  });
+  afterEach(cleanup);
+
+  function setup(props: Partial<Parameters<typeof AddPropertyPanel>[0]> = {}) {
+    const onCancel = vi.fn();
+    const onAdd = vi.fn();
+    render(<AddPropertyPanel ownerType="Work item" onAdd={onAdd} onCancel={onCancel} {...props} />);
+    return { onCancel, onAdd };
+  }
+
+  const kinds = () =>
+    screen
+      .queryAllByTestId(/^property-kind-/)
+      .map((b) => b.getAttribute('data-testid')?.replace('property-kind-', ''));
+
+  it('filters the type list as you search', async () => {
+    const user = userEvent.setup();
+    setup();
+    expect(kinds().length).toBeGreaterThan(10);
+
+    await user.type(screen.getByLabelText('Search property types'), 'sel');
+    expect(kinds()).toEqual(['select', 'multiselect']);
+  });
+
+  it('matches the kind id too, so "multiselect" finds Multi-select', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.type(screen.getByLabelText('Search property types'), 'multiselect');
+    expect(kinds()).toEqual(['multiselect']);
+  });
+
+  it('says so rather than showing an empty box when nothing matches', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.type(screen.getByLabelText('Search property types'), 'zzz');
+    expect(kinds()).toEqual([]);
+    expect(screen.getByText(/No property type matches/)).toBeTruthy();
+  });
+
+  it('commits the first match on Enter, so a search finishes without the pointer', async () => {
+    const user = userEvent.setup();
+    const { onAdd } = setup();
+    await user.type(screen.getByLabelText('Search property types'), 'check{Enter}');
+    expect(onAdd).toHaveBeenCalledWith('Checkbox', 'checkbox');
+  });
+
+  // The guard DocProperties had and RecordProperties did not.
+  it('refuses a name that is already taken, before any write', async () => {
+    const user = userEvent.setup();
+    const { onAdd } = setup({ existingNames: ['Status', 'Priority'] });
+    await user.type(screen.getByLabelText('Property name'), 'priority');
+
+    expect(screen.getByRole('alert').textContent).toContain('already a property here');
+    await user.click(screen.getByTestId('property-kind-text'));
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+
+  it('still names a property after its kind when the name is left blank', async () => {
+    const user = userEvent.setup();
+    const { onAdd } = setup({ existingNames: ['Select'] });
+    await user.click(screen.getByTestId('property-kind-select'));
+    // "Select" is taken, so the kind-first default steps to "Select 2".
+    expect(onAdd).toHaveBeenCalledWith('Select 2', 'select');
+  });
+
+  // A browser never renders `title` on a disabled control, so the one
+  // explanation these tiles owe a user was invisible on exactly the tiles
+  // that needed it (M16.5).
+  it('explains a kind an untyped doc cannot have', async () => {
+    const user = userEvent.setup();
+    setup({ ownerType: null });
+    const tile = screen.getByTestId('property-kind-select') as HTMLButtonElement;
+    expect(tile.disabled).toBe(true);
+    expect(tile.getAttribute('title')).toBeNull();
+
+    await user.hover(tile);
+    await waitFor(
+      () =>
+        expect(screen.getByRole('tooltip').textContent).toBe(
+          'Convert this doc to a record to use typed properties',
+        ),
+      { timeout: 2000 },
+    );
+  });
+
+  it('keeps a way back only where clicking away would close something else', () => {
+    const { unmount } = render(
+      <AddPropertyPanel ownerType="Work item" onAdd={vi.fn()} onCancel={vi.fn()} />,
+    );
+    // Inline: a wizard page inside another popover, so it needs its own exit.
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    unmount();
+
+    const anchor = { current: document.createElement('button') };
+    document.body.append(anchor.current);
+    render(
+      <AddPropertyPanel
+        anchorRef={anchor}
+        ownerType="Work item"
+        onAdd={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    // Anchored: picking a type commits and clicking away dismisses.
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Add a property' })).toBeTruthy();
+  });
+
+  // Nesting a layer-registering surface inside a Popover inverts the stack:
+  // child effects run first, so the Popover would push last and end up on top
+  // of its own content.
+  it('registers exactly one layer when anchored', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const anchor = { current: document.createElement('button') };
+    document.body.append(anchor.current);
+    render(
+      <AddPropertyPanel
+        anchorRef={anchor}
+        ownerType="Work item"
+        onAdd={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+    // Escape reaches the relation step-back, which only the single owning
+    // layer can perform.
+    await user.click(screen.getByTestId('property-kind-relation'));
+    expect(screen.getByTestId('add-relation-panel')).toBeTruthy();
+    await user.keyboard('{Escape}');
+    expect(screen.getByTestId('add-property-panel')).toBeTruthy();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

@@ -159,12 +159,20 @@ describe('DocProperties', () => {
     expect(patchFrontmatter).toHaveBeenCalledWith(DOC, { audience: '' });
   });
 
-  it('refuses a duplicate property name with a toast', () => {
+  // M16.9 moved this from a toast after the write was refused to a refusal
+  // the surface states while you are still typing — and to the panel itself,
+  // so RecordProperties gets the same guard instead of relying on
+  // addPropertyToEntry, whose frontmatter-key check cannot see a declared
+  // field the open record happens to leave empty.
+  it('refuses a duplicate property name in place, before any write', () => {
     const { patchFrontmatter } = setup({ properties: { source: 'x' } });
     fireEvent.click(screen.getByText('+ Add property'));
     fireEvent.change(screen.getByLabelText('Property name'), { target: { value: 'source' } });
+
+    expect(screen.getByRole('alert').textContent).toContain('already a property here');
+    expect((screen.getByTestId('property-kind-text') as HTMLButtonElement).disabled).toBe(true);
+
     fireEvent.keyDown(screen.getByLabelText('Property name'), { key: 'Enter' });
     expect(patchFrontmatter).not.toHaveBeenCalled();
-    expect(useUiStore.getState().toasts.map((t) => t.message)).toContain('Property already exists');
   });
 });
