@@ -25,6 +25,7 @@ import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
+import { useTheme } from '@/hooks/useTheme';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -148,6 +149,11 @@ function VaultChooser() {
 }
 
 function App() {
+  // Above every early return on purpose (M16.36): the vault chooser and the
+  // blank pre-boot frame are painted too, and a launch that shows a white card
+  // for a second before the shell arrives is the flash the theme work exists
+  // to remove. index.html covers the first paint; this owns every one after.
+  useTheme();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const entries = useVaultStore((s) => s.entries);

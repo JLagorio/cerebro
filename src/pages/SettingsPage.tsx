@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
 import { jobQueue } from '@/engine/jobs';
@@ -8,10 +9,16 @@ import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
-import { useUiStore } from '@/stores/uiStore';
+import { asThemeMode, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const APP_VERSION = '0.1.0';
+
+const THEME_OPTIONS = [
+  { value: 'light', label: 'Light', icon: 'sun', testId: 'theme-light' },
+  { value: 'dark', label: 'Dark', icon: 'moon', testId: 'theme-dark' },
+  { value: 'system', label: 'System', icon: 'monitor', testId: 'theme-system' },
+];
 
 /** One labelled toggle with its explanation — settings rows read as prose. */
 function SettingRow({
@@ -43,6 +50,8 @@ export function SettingsPage() {
   const openVault = useVaultStore((s) => s.openVault);
   const status = useVaultStore((s) => s.status);
   const error = useVaultStore((s) => s.error);
+  const themeMode = useUiStore((s) => s.themeMode);
+  const setThemeMode = useUiStore((s) => s.setThemeMode);
   const inboxEnabled = useUiStore((s) => s.inboxEnabled);
   const setInboxEnabled = useUiStore((s) => s.setInboxEnabled);
   const inboxAutoAdvance = useUiStore((s) => s.inboxAutoAdvance);
@@ -126,6 +135,31 @@ export function SettingsPage() {
           >
             Change vault…
           </Button>
+        </section>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Appearance</h2>
+          <p className="mb-4 text-sm text-n-500">
+            How cerebro looks. The choice is remembered on this machine.
+          </p>
+          <div className="flex items-start gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-n-800">Theme</div>
+              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                System follows your operating system and changes with it — including when it
+                switches on its own at sunset.
+              </div>
+            </div>
+            <SegmentedControl
+              ariaLabel="Theme"
+              options={THEME_OPTIONS}
+              value={themeMode}
+              // asThemeMode rather than a cast: SegmentedControl's onChange is
+              // typed `string`, and a cast would let a typo in THEME_OPTIONS
+              // through the compiler and into localStorage.
+              onChange={(v) => setThemeMode(asThemeMode(v))}
+              className="flex-none"
+            />
+          </div>
         </section>
         <section className="mb-6 rounded-xl border border-n-200 p-5">
           <h2 className="mb-1 text-md font-semibold text-n-900">Workflow</h2>

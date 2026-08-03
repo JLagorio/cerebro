@@ -11,10 +11,56 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%233d5bde'/%3E%3Ctext x='16' y='23' font-family='system-ui,-apple-system,sans-serif' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3Ec.%3C/text%3E%3C/svg%3E"
     />
-    <!-- No dark theme exists yet; declaring the scheme stops the UA from
-         force-darkening form controls against a light-only palette. -->
-    <meta name="color-scheme" content="light" />
+    <!-- Both palettes exist as of M16.36, so the UA may paint its own chrome —
+         scrollbars, form controls, the canvas behind the app — either way. The
+         script below narrows "either" to the one actually in force by setting
+         `color-scheme` on <html>. -->
+    <meta name="color-scheme" content="light dark" />
     <title>Cerebro</title>
+    <!--
+      Theme BEFORE first paint.
+
+      This duplicates the store's localStorage key ('cerebro.themeMode' —
+      THEME_MODE_KEY in src/stores/uiStore.ts) ON PURPOSE: it has to run before
+      any module loads, so it cannot import the constant. Change one, change
+      both. Without it, a dark-mode user gets a white flash on every launch,
+      because src/hooks/useTheme.ts cannot run until React has mounted.
+
+      Two nested try/catches, because the two failure modes deserve different
+      answers. localStorage throws outright in private mode, but that only
+      means "no stored choice is readable" — the inner catch falls through to
+      the OS query, so a dark-desktop user in a private window still gets dark
+      rather than the flash this script exists to remove. The outer catch is
+      the backstop for everything else (matchMedia missing in a hardened
+      webview, a throwing setAttribute) and settles on light. Neither failure
+      is allowed to stop the app from booting, so `data-theme` is never absent.
+
+      Both branches write `color-scheme` as well as `data-theme`: the meta tag
+      above says "either is fine", so leaving it unset in the fallback would
+      hand a light app UA-dark scrollbars and form controls until React mounts.
+    -->
+    <script>
+      try {
+        var mode = 'system';
+        try {
+          var stored = window.localStorage.getItem('cerebro.themeMode');
+          if (stored === 'light' || stored === 'dark') mode = stored;
+        } catch (storageError) {
+          // Unreadable storage is not a choice — resolve against the OS below.
+        }
+        var theme =
+          mode === 'system'
+            ? window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+            : mode;
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.colorScheme = theme;
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.documentElement.style.colorScheme = 'light';
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

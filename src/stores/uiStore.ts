@@ -5,6 +5,28 @@ import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
 
+/**
+ * What the person chose, NOT what is on screen (M16.36).
+ *
+ * `system` is a standing instruction — "track the OS" — so it is the value
+ * that persists, and resolving it to a concrete light/dark happens in
+ * `useTheme`. Storing the resolved theme instead would freeze whichever
+ * appearance the OS happened to have the day the choice was made.
+ */
+export type ThemeMode = 'light' | 'dark' | 'system';
+
+/**
+ * Narrow anything to a ThemeMode, defaulting to 'system'.
+ *
+ * Exported because two call sites need the same answer: the loader below
+ * (a hand-edited or half-written localStorage value must not throw or leave
+ * the app themeless) and the Settings control (SegmentedControl's onChange is
+ * typed `string`, and a cast there would let a typo through the compiler).
+ */
+export function asThemeMode(v: unknown): ThemeMode {
+  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system';
+}
+
 interface UiState {
   /**
    * The record showing in the RIGHT-HAND SLOT, or null.
@@ -48,6 +70,15 @@ interface UiState {
   setSidebarCollapsed(v: boolean): void;
   quickOpenVisible: boolean;
   setQuickOpen(v: boolean): void;
+  /**
+   * Light, dark, or follow the OS (M16.36). Persisted; defaults to 'system'.
+   *
+   * The store holds the CHOICE only — nothing here touches the DOM. What ends
+   * up on `<html data-theme>` is resolved by `useTheme`, which is also what
+   * keeps 'system' live when the OS flips mid-session.
+   */
+  themeMode: ThemeMode;
+  setThemeMode(v: ThemeMode): void;
   /**
    * Collapsed group bands and tree rows (M9.1), keyed scope → key → true.
    * Scope is the surface's identity (`view:<id>`, `project:<path>`,
@@ -243,6 +274,14 @@ const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
 const SIDEBAR_COLLAPSED_KEY = 'cerebro.sidebarCollapsed';
 const COLLAPSED_KEY = 'cerebro.collapsed';
+/**
+ * DUPLICATED VERBATIM in index.html's pre-paint theme script (M16.36).
+ *
+ * That script has to run before any module loads — it cannot import this
+ * constant — so changing this string means changing it there too, or a
+ * dark-mode user gets a white flash on every launch.
+ */
+export const THEME_MODE_KEY = 'cerebro.themeMode';
 
 /**
  * Panel sizing (M11).
@@ -496,6 +535,16 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   quickOpenVisible: false,
   setQuickOpen: (v) => set({ quickOpenVisible: v }),
+
+  // Stored as the bare word, matching every other scalar preference here
+  // (docPanelTab, inboxPeriod) — the pre-paint script in index.html reads it
+  // with a plain getItem, so a JSON-quoted value would cost it a parse it has
+  // no business doing. Anything unrecognised reads back as 'system'.
+  themeMode: asThemeMode(loadString(THEME_MODE_KEY, 'system')),
+  setThemeMode: (v) => {
+    storeString(THEME_MODE_KEY, v);
+    set({ themeMode: v });
+  },
 
   autoCheckpoint: loadString(AUTO_CHECKPOINT_KEY, 'true') === 'true',
   setAutoCheckpoint: (v) => {

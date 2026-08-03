@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useUiStore } from './uiStore';
+import { asThemeMode, useUiStore } from './uiStore';
 
 function reset() {
   useUiStore.setState({
@@ -111,6 +111,74 @@ describe('uiStore', () => {
       expect(fresh.getState().isCollapsed('list:delivery', 'doing')).toBe(true);
       expect(fresh.getState().isCollapsed('list:delivery', 'todo')).toBe(false);
       expect(fresh.getState().collapsed.junk).toBeUndefined();
+    });
+  });
+
+  /**
+   * M16.36. The store holds the CHOICE — light/dark/system — and never the
+   * resolved theme: persisting "dark" because the OS was dark the day the
+   * choice was made would freeze it there forever. Resolution lives in
+   * useTheme; what is guarded here is that the choice survives a launch and
+   * that nothing on disk can stop the app booting.
+   */
+  describe('theme mode', () => {
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.themeMode');
+      useUiStore.setState({ themeMode: 'system' });
+    });
+
+    it('defaults to system', () => {
+      expect(useUiStore.getState().themeMode).toBe('system');
+    });
+
+    it('setThemeMode writes the bare word under cerebro.themeMode', () => {
+      useUiStore.getState().setThemeMode('dark');
+      expect(useUiStore.getState().themeMode).toBe('dark');
+      // Bare, not JSON-quoted: index.html's pre-paint script reads this with a
+      // plain getItem before any module has loaded.
+      expect(window.localStorage.getItem('cerebro.themeMode')).toBe('dark');
+    });
+
+    it('reads the choice back on the next launch', async () => {
+      window.localStorage.setItem('cerebro.themeMode', 'dark');
+      vi.resetModules();
+      const fresh = (await import('./uiStore')).useUiStore;
+      expect(fresh.getState().themeMode).toBe('dark');
+    });
+
+    it('falls back to system on a corrupt persisted value rather than throwing', async () => {
+      window.localStorage.setItem('cerebro.themeMode', '{"mode":"dark"}');
+      vi.resetModules();
+      const fresh = (await import('./uiStore')).useUiStore;
+      expect(fresh.getState().themeMode).toBe('system');
+    });
+
+    // Private mode: getItem itself throws. A theme preference must never be
+    // able to take the app down with it.
+    it('falls back to system when localStorage is unreadable', async () => {
+      // On the instance, not Storage.prototype: under Node 22 the test setup
+      // installs a plain-object localStorage (the experimental global shadows
+      // jsdom's), which is not a Storage at all.
+      const getItem = vi.spyOn(window.localStorage, 'getItem').mockImplementation(() => {
+        throw new Error('SecurityError');
+      });
+      try {
+        vi.resetModules();
+        const fresh = (await import('./uiStore')).useUiStore;
+        expect(fresh.getState().themeMode).toBe('system');
+      } finally {
+        getItem.mockRestore();
+      }
+    });
+
+    it('asThemeMode narrows anything unrecognised to system', () => {
+      expect(asThemeMode('light')).toBe('light');
+      expect(asThemeMode('dark')).toBe('dark');
+      expect(asThemeMode('system')).toBe('system');
+      expect(asThemeMode('midnight')).toBe('system');
+      expect(asThemeMode(null)).toBe('system');
+      expect(asThemeMode(undefined)).toBe('system');
+      expect(asThemeMode({ mode: 'dark' })).toBe('system');
     });
   });
 
