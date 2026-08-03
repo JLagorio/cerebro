@@ -238,6 +238,142 @@ describe('TableView column resizing (M11)', () => {
 });
 
 /**
+ * Row gutter and bulk actions (M16.16).
+ *
+ * `TableRow` had none of it: the `maximize-2` glyph in the title cell was
+ * `aria-hidden` decoration, there was no row menu, and bulk selection did not
+ * exist anywhere in the app — `useRowKeyboard` holds a scalar cursor index,
+ * not a set.
+ */
+describe('TableView row gutter (M16.16)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+    useUiStore.setState({ detailPath: null, toasts: [] });
+    useNavStore.setState({
+      selection: { kind: 'list', id: 'at-risk-work' },
+      history: [{ kind: 'list', id: 'at-risk-work' }],
+      historyIndex: 0,
+    });
+  });
+
+  function grid(props: Partial<React.ComponentProps<typeof TableView>> = {}) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.type === 'Work item');
+    render(
+      <TableView
+        entries={items}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+        {...props}
+      />,
+    );
+    return { items };
+  }
+
+  it('gives every row a checkbox and raises a bulk bar once one is ticked', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('1 selected');
+  });
+
+  it('shift-click extends from the last box touched', async () => {
+    const user = userEvent.setup();
+    // Four rows, because a range of two is indistinguishable from two clicks.
+    const extra = ['One', 'Two', 'Three', 'Four'].map((title, i) =>
+      makeEntry({ path: `records/row-${i}.md`, title, type: 'Work item' }),
+    );
+    const entries = [...fixtureVault(), ...extra];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={extra}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />,
+    );
+    await user.click(screen.getByLabelText('Select One'));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByLabelText('Select Three'));
+    await user.keyboard('{/Shift}');
+    // Without an anchor a range select is just a second single click.
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('3 selected');
+  });
+
+  it('select-all ticks every row and clicking it again clears them', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe(
+      `${items.length} selected`,
+    );
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
+  });
+
+  it('drops a selected path the row set no longer contains', () => {
+    // A rescan, a filter or a delete renumbers the rows; a bulk delete must
+    // not still be holding a path that resolves to nothing.
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.type === 'Work item');
+    const view = (list: Entry[]) => (
+      <TableView
+        entries={list}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />
+    );
+    const { rerender } = render(view(items));
+    fireEvent.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.getByTestId('bulk-bar')).toBeTruthy();
+    rerender(view(items.slice(1)));
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
+  });
+
+  it('the grip opens a row menu, which is what a grip can honestly do here', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getAllByLabelText(`Actions for ${items[0].title}`)[0]);
+    await user.click(screen.getByTestId('row-open'));
+    // Row ORDER is the view's sort chain — there is no stored index a drag
+    // could write to — so the grip carries the half of Notion's affordance
+    // that means something: the menu.
+    expect(useUiStore.getState().detailPath).toBe(items[0].path);
+  });
+
+  it('deleting from the row menu asks first', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getAllByLabelText(`Actions for ${items[0].title}`)[0]);
+    await user.click(screen.getByTestId('row-delete'));
+    expect(screen.getByText(`Delete "${items[0].title}"?`)).toBeTruthy();
+  });
+
+  it('offers no insert affordance on a surface that cannot create', () => {
+    grid();
+    expect(screen.queryByTestId('row-insert')).toBeNull();
+  });
+
+  it('the insert affordance opens an input inheriting the row it was clicked on', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(true);
+    grid({ onCreate });
+    await user.click(screen.getAllByTestId('row-insert')[0]);
+    const input = screen.getByLabelText('New record title');
+    await user.type(input, 'Fresh work');
+    await user.keyboard('{Enter}');
+    expect(onCreate).toHaveBeenCalledWith('Fresh work', { groupBy: '', groupValue: '' });
+  });
+});
+
+/**
  * The calculation footer (M16.15).
  *
  * There was no footer element at all and no aggregate module in the engine, so

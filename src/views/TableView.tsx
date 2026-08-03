@@ -1,11 +1,16 @@
 import { resolveOptionColor } from '@/lib/swatch';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
   MIN_COL_W,
@@ -156,6 +161,234 @@ const TableCell = memo(function TableCell({
 /** Indent per nesting level, matching the group-band step. */
 const INDENT = 16;
 
+/**
+ * Width of the leading gutter (M16.16), wide enough for insert + checkbox +
+ * grip. It is laid out on every row rather than inserted on hover: a control
+ * that pushes the whole grid 46px sideways under the pointer is worse than
+ * one that was always there and only faded in.
+ */
+const GUTTER = 46;
+
+/** What a row's own menu can do. Per-row, so the handlers stay in the table
+ * where the vault and the confirm dialog already live. */
+export type RowAction = 'open' | 'copy-link' | 'copy-path' | 'delete';
+
+/**
+ * The row's leading gutter (M16.16): select, insert, and the row menu.
+ *
+ * `TableRow` had none of these. The `maximize-2` glyph in the title cell was
+ * `aria-hidden` decoration, and bulk selection did not exist anywhere in the
+ * app — `useRowKeyboard` holds a scalar cursor index, not a set.
+ *
+ * The grip is Notion's `⠿`, and here it OPENS the row menu rather than
+ * reordering. Row order in this app is the view's sort chain; there is no
+ * stored per-row index for a drag to write to, so a grip that moved a row
+ * would put it back on the next render. Clicking Notion's grip opens the same
+ * menu, which is the half of it that means something here.
+ */
+function RowGutter({
+  entry,
+  checked,
+  selecting,
+  frozen,
+  fill,
+  onCheck,
+  onInsert,
+  onAction,
+}: {
+  entry: Entry;
+  checked: boolean;
+  /** Pins left with the name column — a gutter that scrolls out from under a
+   * frozen name column leaves the row with no way to select it. */
+  frozen: boolean;
+  /** The row's own background, repeated because a sticky cell is opaque. */
+  fill: string;
+  /** True while anything is selected — the boxes stay visible then, so the
+   * selection you are building does not vanish when the pointer leaves. */
+  selecting: boolean;
+  onCheck: (range: boolean) => void;
+  /** Absent on a surface that cannot create. */
+  onInsert?: () => void;
+  onAction: (action: RowAction, entry: Entry) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const gripRef = useRef<HTMLButtonElement | null>(null);
+  // Laid out always, faded in on hover — see GUTTER.
+  const reveal = checked || selecting || open ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+
+  return (
+    <div
+      role="gridcell"
+      className={[
+        frozen ? 'sticky left-0 z-10' : '',
+        'flex flex-none items-center justify-end gap-0.5 pl-1 pr-1',
+        fill,
+      ].join(' ')}
+      style={{ width: GUTTER }}
+      // The gutter's controls all act on the row; a click here must not also
+      // move the keyboard cursor to it.
+      onClick={(e) => e.stopPropagation()}
+    >
+      {onInsert !== undefined && (
+        <Tooltip label="Insert a record here">
+          <button
+            type="button"
+            data-testid="row-insert"
+            aria-label={`Insert a record after ${entry.title}`}
+            onClick={onInsert}
+            className={`flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] ${reveal}`}
+          >
+            <Icon name="plus" size={12} />
+          </button>
+        </Tooltip>
+      )}
+      <input
+        type="checkbox"
+        data-testid="row-select"
+        aria-label={`Select ${entry.title}`}
+        checked={checked}
+        onChange={() => undefined}
+        // onClick, not onChange: shift-extend needs the modifier, and a
+        // change event does not carry one.
+        onClick={(e) => onCheck(e.shiftKey)}
+        className={`h-3.5 w-3.5 flex-none accent-[var(--cortex-500)] ${reveal}`}
+      />
+      <button
+        ref={gripRef}
+        type="button"
+        data-testid="row-menu"
+        aria-label={`Actions for ${entry.title}`}
+        aria-haspopup="menu"
+        onClick={() => setOpen(!open)}
+        className={`flex h-5 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] ${reveal}`}
+      >
+        <Icon name="grip-vertical" size={12} />
+      </button>
+      {open && (
+        <Popover
+          anchorRef={gripRef}
+          onClose={() => setOpen(false)}
+          role="menu"
+          ariaLabel={`Actions for ${entry.title}`}
+          trapFocus
+        >
+          <MenuSurface width={208}>
+            <MenuItem
+              icon="maximize-2"
+              label="Open"
+              testId="row-open"
+              onSelect={() => {
+                setOpen(false);
+                onAction('open', entry);
+              }}
+            />
+            <MenuItem
+              icon="link"
+              label="Copy link"
+              onSelect={() => {
+                setOpen(false);
+                onAction('copy-link', entry);
+              }}
+            />
+            <MenuItem
+              icon="file-text"
+              label="Copy path"
+              onSelect={() => {
+                setOpen(false);
+                onAction('copy-path', entry);
+              }}
+            />
+            <MenuSeparator />
+            <MenuItem
+              icon="trash-2"
+              label="Delete"
+              danger
+              testId="row-delete"
+              onSelect={() => {
+                setOpen(false);
+                onAction('delete', entry);
+              }}
+            />
+          </MenuSurface>
+        </Popover>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The inline create the gutter's `+` opens (M16.16).
+ *
+ * It is NOT `QuickAddInline`, whose two-state shape starts as a button — the
+ * `+` was already that click, and asking for a second one to reach the input
+ * is the affordance failing. Only the editing half is duplicated, and only
+ * because the button half is what makes it wrong here.
+ *
+ * Where the record LANDS is the view's sort chain, not this position: a
+ * markdown vault has no stored per-row index, so "insert here" means "create
+ * here, in this band" and the row appears wherever the sort puts it.
+ */
+function InsertRow({
+  gutter,
+  frozen,
+  indent,
+  onCreate,
+  onCancel,
+}: {
+  gutter: number;
+  frozen: boolean;
+  indent: number;
+  onCreate: (title: string) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState('');
+  // Double-Enter while the write is pending must not create two records.
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = () => {
+    if (submitting || title.trim() === '') return;
+    setSubmitting(true);
+    void (async () => {
+      const ok = await onCreate(title);
+      setSubmitting(false);
+      // On failure the draft stays editable for retry.
+      if (ok) setTitle('');
+    })();
+  };
+
+  return (
+    <div
+      role="row"
+      data-testid="insert-row"
+      className={[
+        frozen ? 'sticky left-0' : '',
+        'flex h-9 items-center border-b border-[var(--n-100)] bg-[var(--n-0)]',
+      ].join(' ')}
+      style={{ width: `calc(var(${TITLE_VAR}) + ${gutter}px)` }}
+    >
+      <span className="flex flex-none items-center justify-end pr-1" style={{ width: gutter }}>
+        <Icon name="plus" size={12} color="var(--n-400)" />
+      </span>
+      <span className="min-w-0 flex-1 pr-2" style={{ paddingLeft: indent }}>
+        <Input
+          autoFocus
+          size="sm"
+          ariaLabel="New record title"
+          placeholder="New record"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+            if (e.key === 'Escape') onCancel();
+          }}
+          onBlur={onCancel}
+          width="100%"
+        />
+      </span>
+    </div>
+  );
+}
+
 const TableRow = memo(function TableRow({
   entry,
   cells,
@@ -171,6 +404,11 @@ const TableRow = memo(function TableRow({
   selected,
   onSelect,
   rowProps,
+  checked,
+  selecting,
+  onCheck,
+  onInsert,
+  onAction,
 }: {
   entry: Entry;
   cells: { def: ColumnDef; wrap: boolean }[];
@@ -192,6 +430,13 @@ const TableRow = memo(function TableRow({
   /** Roving-tabindex bookkeeping from useRowKeyboard — id, aria-selected and
    * the ref the cursor scrolls into view. */
   rowProps: RowKeyboardRowProps;
+  /** M16.16: bulk selection, which is a different thing from the keyboard
+   * cursor above — one row is under the cursor, any number are checked. */
+  checked: boolean;
+  selecting: boolean;
+  onCheck: (range: boolean) => void;
+  onInsert?: () => void;
+  onAction: (action: RowAction, entry: Entry) => void;
 }) {
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
@@ -199,6 +444,10 @@ const TableRow = memo(function TableRow({
   // navigate to the record's project and discard the view you were reading.
   const openPath = useOpenPath('in-place');
   const style = typeStyle(entry.type, schema);
+  // The fill the sticky cells repeat. Checked rows tint like the cursor row:
+  // the two states are different, but both mean "this row is picked out".
+  const fill =
+    selected || checked ? 'bg-[var(--cortex-50)]' : 'bg-[var(--n-0)] group-hover:bg-[var(--n-25)]';
 
   return (
     <div
@@ -217,9 +466,21 @@ const TableRow = memo(function TableRow({
         // fill alone was 1.13:1 against white, so a left rule carries it.
         selected
           ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]'
-          : 'hover:bg-[var(--n-25)]',
+          : checked
+            ? 'bg-[var(--cortex-50)]'
+            : 'hover:bg-[var(--n-25)]',
       ].join(' ')}
     >
+      <RowGutter
+        entry={entry}
+        checked={checked}
+        selecting={selecting}
+        frozen={titleFrozen}
+        fill={fill}
+        onCheck={onCheck}
+        onInsert={onInsert}
+        onAction={onAction}
+      />
       {cells.slice(0, titlePos).map(({ def, wrap }, i) => (
         <TableCell
           key={def.name}
@@ -234,11 +495,18 @@ const TableRow = memo(function TableRow({
       <div
         role="gridcell"
         className={[
-          titleFrozen ? 'sticky left-0 z-10' : '',
+          titleFrozen ? 'sticky z-10' : '',
           'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
-          selected ? 'bg-[var(--cortex-50)]' : 'bg-[var(--n-0)] group-hover:bg-[var(--n-25)]',
+          // The name cell is opaque because it is sticky — it has to hide the
+          // columns sliding under it, so it repeats the row's own fill.
+          fill,
         ].join(' ')}
-        style={{ width: `var(${TITLE_VAR})`, paddingLeft: 12 + depth * INDENT }}
+        style={{
+          width: `var(${TITLE_VAR})`,
+          paddingLeft: 12 + depth * INDENT,
+          // Pinned BESIDE the gutter, not over it (M16.16).
+          ...(titleFrozen ? { left: GUTTER } : {}),
+        }}
       >
         {/* M10: a table nests when the chain has a relation level, so the
             expander belongs here rather than in a separate hierarchy view. A
@@ -456,7 +724,7 @@ function BandHeader({
           The label cluster is the sticky part instead. */}
       <span
         className="sticky left-0 flex items-center gap-2 pr-3"
-        style={{ paddingLeft: 12 + node.depth * INDENT }}
+        style={{ paddingLeft: GUTTER + node.depth * INDENT }}
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
         <span
@@ -1169,7 +1437,10 @@ export function TableView({
    */
   const layout = useMemo(() => {
     const base = resolved.map((c) => c.width);
-    const content = titleWidth + base.reduce((sum, w) => sum + w, 0);
+    // GUTTER is part of the content width (M16.16): leave it out and the
+    // slack calculation hands the columns 46px that the row gutter is
+    // already occupying, so the last column runs off the right edge.
+    const content = GUTTER + titleWidth + base.reduce((sum, w) => sum + w, 0);
     const slack = available - content;
     if (slack <= 0 || base.length === 0) {
       return { title: titleWidth, columns: base, total: content };
@@ -1219,6 +1490,151 @@ export function TableView({
       if (flatRows[i].childCount > 0) toggleCollapsed(scope, flatRows[i].key);
     },
   });
+
+  // --- M16.16: bulk selection -------------------------------------------
+  //
+  // A SET of paths, distinct from the keyboard cursor above: one row is under
+  // the cursor, any number are checked. Paths rather than indices, because a
+  // rescan renumbers the rows and would otherwise slide the selection onto
+  // whatever now occupies those slots.
+  const [checkedPaths, setCheckedPaths] = useState<ReadonlySet<string>>(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const anchorRow = useRef(-1);
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const rescan = useVaultStore((s) => s.rescan);
+  const toast = useUiStore((s) => s.toast);
+
+  const rowPaths = useMemo(() => flatRows.map((r) => r.entry.path), [flatRows]);
+  // A record the filter, a delete, or a rename removed is not selected — it
+  // is gone, and a bulk delete must not be holding a path that resolves to
+  // nothing.
+  useEffect(() => {
+    setCheckedPaths((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(rowPaths);
+      const next = new Set([...prev].filter((p) => live.has(p)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rowPaths]);
+
+  const checked = useMemo(
+    () => flatRows.filter((r) => checkedPaths.has(r.entry.path)).map((r) => r.entry),
+    [flatRows, checkedPaths],
+  );
+
+  const toggleChecked = useCallback(
+    (index: number, range: boolean) => {
+      setCheckedPaths((prev) => {
+        const next = new Set(prev);
+        // Shift extends from the last box you touched, the way every file
+        // list does — without an anchor a range select is a second click.
+        const from = range && anchorRow.current >= 0 ? anchorRow.current : index;
+        const [lo, hi] = from <= index ? [from, index] : [index, from];
+        const add = !prev.has(rowPaths[index]);
+        for (let i = lo; i <= hi; i += 1) {
+          if (add) next.add(rowPaths[i]);
+          else next.delete(rowPaths[i]);
+        }
+        return next;
+      });
+      anchorRow.current = index;
+    },
+    [rowPaths],
+  );
+
+  const clearChecked = useCallback(() => setCheckedPaths(new Set()), []);
+  const allChecked = flatRows.length > 0 && checkedPaths.size >= flatRows.length;
+
+  const copyLinks = useCallback(() => {
+    const text = checked.map((e) => `[[${e.title}]]`).join('\n');
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast(`${checked.length === 1 ? 'Link' : `${checked.length} links`} copied`);
+      } catch {
+        // Clipboard access is a permission, not a certainty — a silent
+        // failure here reads as "the button does nothing".
+        toast("Couldn't copy to the clipboard");
+      }
+    })();
+  }, [checked, toast]);
+
+  /** Delete a set of records. Never throws — it reports and returns, like
+   * every other action that touches the vault. */
+  const deleteRecords = useCallback(
+    (targets: Entry[]) => {
+      setConfirmBulkDelete(false);
+      void (async () => {
+        if (vaultPath === null || targets.length === 0) return;
+        const failed: string[] = [];
+        for (const entry of targets) {
+          try {
+            await deleteNote(vaultPath, entry.path);
+          } catch {
+            failed.push(entry.title);
+          }
+        }
+        // Cleared before the rescan: leaving the paths checked would flash a
+        // bulk bar counting records that are already gone.
+        setCheckedPaths(new Set());
+        if (failed.length > 0) {
+          toast(
+            failed.length === 1
+              ? `Couldn't delete "${failed[0]}"`
+              : `Couldn't delete ${failed.length} records`,
+          );
+        } else {
+          toast(
+            targets.length === 1
+              ? `Deleted "${targets[0].title}"`
+              : `Deleted ${targets.length} records`,
+          );
+        }
+        try {
+          await rescan();
+        } catch {
+          toast("Couldn't refresh vault");
+        }
+      })();
+    },
+    [rescan, toast, vaultPath],
+  );
+
+  const [confirmRow, setConfirmRow] = useState<Entry | null>(null);
+
+  const onRowAction = useCallback(
+    (action: RowAction, entry: Entry) => {
+      switch (action) {
+        case 'open':
+          openPath(entry.path);
+          break;
+        case 'copy-link':
+        case 'copy-path': {
+          const text = action === 'copy-link' ? `[[${entry.title}]]` : entry.path;
+          void (async () => {
+            try {
+              await navigator.clipboard.writeText(text);
+              toast(action === 'copy-link' ? 'Link copied' : 'Path copied');
+            } catch {
+              toast("Couldn't copy to the clipboard");
+            }
+          })();
+          break;
+        }
+        case 'delete':
+          setConfirmRow(entry);
+          break;
+      }
+    },
+    [openPath, toast],
+  );
+
+  /** The row an inline create is open under — its key, and the band it
+   * inherits. Null when nothing is being inserted. */
+  const [inserting, setInserting] = useState<{
+    key: string;
+    band: { groupBy: string; groupValue: string };
+  } | null>(null);
 
   const primarySort = presentation.sort[0];
   // M12.4b: wrap rides with each cell; any wrapped column releases the rows
@@ -1292,8 +1708,12 @@ export function TableView({
       if (row === null) return;
       // Cell midpoints decide which slot the pointer is over. Measured once at
       // drag start — the cells do not move during the drag.
-      const mids = Array.from(row.children).map((c) => {
-        const r = (c as HTMLElement).getBoundingClientRect();
+      //
+      // By ROLE, not by child index (M16.16): the row's first child is the
+      // gutter now, and counting it as a slot shifted every drop one column
+      // to the left.
+      const mids = [...row.querySelectorAll<HTMLElement>('[role="columnheader"]')].map((c) => {
+        const r = c.getBoundingClientRect();
         return r.left + r.width / 2;
       });
       const startX = e.clientX;
@@ -1401,6 +1821,23 @@ export function TableView({
     [onColumnsChange, onPresentationChange, presentation],
   );
 
+  /**
+   * The leaf band each record row sits in (M16.16), so the gutter's insert
+   * can inherit it. `EntryRow` does not carry a band, and `buildRows` emits a
+   * leaf header immediately before its run — so the last header walked is the
+   * run's band. Computed here rather than tracked through the render, which
+   * is a mutation the compiler rules rightly refuse.
+   */
+  const bandForRow = useMemo(() => {
+    const out = new Map<string, GroupNode>();
+    let current: GroupNode | null = null;
+    for (const row of rows) {
+      if (row.kind === 'band') current = row.node;
+      else if (row.kind === 'row' && current !== null) out.set(row.key, current);
+    }
+    return out;
+  }, [rows]);
+
   // Widths ride as custom properties on the grid so a drag can repaint them
   // without React seeing anything.
   const widthVars = useMemo(() => {
@@ -1435,8 +1872,36 @@ export function TableView({
           <div
             ref={headerRowRef}
             role="row"
-            className="sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
+            className="group/head sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
           >
+            {/* M16.16: the gutter's header slot. Deliberately not a
+                columnheader — it holds no column, and the header drag
+                measures slots by that role. */}
+            <div
+              className={[
+                titleFrozen ? 'sticky left-0 z-30 bg-[var(--n-25)]' : '',
+                'flex flex-none items-center justify-end pl-1 pr-1',
+              ].join(' ')}
+              style={{ width: GUTTER }}
+            >
+              {flatRows.length > 0 && (
+                <input
+                  type="checkbox"
+                  data-testid="select-all"
+                  aria-label={allChecked ? 'Clear selection' : 'Select all records'}
+                  checked={allChecked}
+                  ref={(el) => {
+                    // Partial selection is neither checked nor unchecked, and
+                    // `indeterminate` is a DOM property with no attribute.
+                    if (el !== null) el.indeterminate = checked.length > 0 && !allChecked;
+                  }}
+                  onChange={() => setCheckedPaths(allChecked ? new Set() : new Set(rowPaths))}
+                  className={`h-3.5 w-3.5 flex-none accent-[var(--cortex-500)] ${
+                    checked.length > 0 ? 'opacity-100' : 'opacity-0 group-hover/head:opacity-100'
+                  }`}
+                />
+              )}
+            </div>
             {/* M12.8: headers render in DISPLAY order — the name column is one
               of them now, not a fixture bolted to the front. */}
             {displayKeys.map((key, d) => {
@@ -1448,11 +1913,15 @@ export function TableView({
                     onPointerDown={startHeaderDrag('title')}
                     onClickCapture={swallowDraggedClick}
                     className={[
-                      titleFrozen ? 'sticky left-0 z-30' : 'relative',
+                      titleFrozen ? 'sticky z-30' : 'relative',
                       'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
                       drag?.key === 'title' ? 'opacity-60' : '',
                     ].join(' ')}
-                    style={{ width: `var(${TITLE_VAR})`, ...dropStyle(d) }}
+                    style={{
+                      width: `var(${TITLE_VAR})`,
+                      ...(titleFrozen ? { left: GUTTER } : {}),
+                      ...dropStyle(d),
+                    }}
                   >
                     <Icon name="type" size={12} color="var(--n-400)" />
                     <TitleHeaderMenu
@@ -1561,45 +2030,83 @@ export function TableView({
                 <div
                   key={row.key}
                   role="row"
-                  className="sticky left-0"
-                  style={{ width: `var(${TITLE_VAR})` }}
+                  className="sticky left-0 flex"
+                  // Offset by the gutter, not started at it: the create row's
+                  // input has to line up with the names it is creating.
+                  style={{ width: `calc(var(${TITLE_VAR}) + ${GUTTER}px)` }}
                 >
-                  <QuickAddInline
-                    compact
-                    label="New"
-                    ariaLabel={row.band === null ? 'New record' : `New record in ${row.band.label}`}
-                    onCreate={(title) =>
-                      onCreate!(title, {
-                        groupBy: row.band?.field ?? '',
-                        groupValue: row.band?.key ?? '',
-                      })
-                    }
-                  />
+                  <span className="flex-none" style={{ width: GUTTER }} />
+                  <span className="min-w-0 flex-1">
+                    <QuickAddInline
+                      compact
+                      label="New"
+                      ariaLabel={
+                        row.band === null ? 'New record' : `New record in ${row.band.label}`
+                      }
+                      onCreate={(title) =>
+                        onCreate!(title, {
+                          groupBy: row.band?.field ?? '',
+                          groupValue: row.band?.key ?? '',
+                        })
+                      }
+                    />
+                  </span>
                 </div>
               );
             }
             const index = flatRows.indexOf(row);
+            const rowBand = bandForRow.get(row.key) ?? null;
             return (
-              <TableRow
-                key={row.key}
-                entry={row.entry}
-                cells={cells}
-                titlePos={titlePos}
-                titleFrozen={titleFrozen}
-                autoHeight={anyWrap}
-                schema={schema}
-                depth={row.depth}
-                childCount={row.childCount}
-                collapsed={collapsedMap?.[row.key] === true}
-                chips={chips}
-                onToggle={() => toggleCollapsed(scope, row.key)}
-                selected={index === keyboard.index}
-                onSelect={() => keyboard.setIndex(index)}
-                // Without this the hook's `rows` ref stayed empty, so arrowing
-                // past the fold moved an invisible cursor off-screen and the
-                // scroller never followed it.
-                rowProps={keyboard.rowProps(index)}
-              />
+              <Fragment key={row.key}>
+                <TableRow
+                  entry={row.entry}
+                  cells={cells}
+                  titlePos={titlePos}
+                  titleFrozen={titleFrozen}
+                  autoHeight={anyWrap}
+                  schema={schema}
+                  depth={row.depth}
+                  childCount={row.childCount}
+                  collapsed={collapsedMap?.[row.key] === true}
+                  chips={chips}
+                  onToggle={() => toggleCollapsed(scope, row.key)}
+                  selected={index === keyboard.index}
+                  onSelect={() => keyboard.setIndex(index)}
+                  // Without this the hook's `rows` ref stayed empty, so arrowing
+                  // past the fold moved an invisible cursor off-screen and the
+                  // scroller never followed it.
+                  rowProps={keyboard.rowProps(index)}
+                  checked={checkedPaths.has(row.entry.path)}
+                  selecting={checkedPaths.size > 0}
+                  onCheck={(range) => toggleChecked(index, range)}
+                  onInsert={
+                    onCreate === undefined
+                      ? undefined
+                      : () =>
+                          setInserting({
+                            key: row.key,
+                            band: {
+                              groupBy: rowBand?.field ?? '',
+                              groupValue: rowBand?.key ?? '',
+                            },
+                          })
+                  }
+                  onAction={onRowAction}
+                />
+                {inserting?.key === row.key && onCreate !== undefined && (
+                  <InsertRow
+                    gutter={GUTTER}
+                    frozen={titleFrozen}
+                    indent={row.depth * INDENT}
+                    onCancel={() => setInserting(null)}
+                    onCreate={async (title) => {
+                      const ok = await onCreate(title, inserting.band);
+                      if (ok) setInserting(null);
+                      return ok;
+                    }}
+                  />
+                )}
+              </Fragment>
             );
           })}
 
@@ -1612,6 +2119,13 @@ export function TableView({
               data-testid="table-footer"
               className="group/footer sticky bottom-0 z-20 flex h-8 border-t border-[var(--n-200)] bg-[var(--n-25)]"
             >
+              <span
+                className={[
+                  titleFrozen ? 'sticky left-0 z-10 bg-[var(--n-25)]' : '',
+                  'flex-none',
+                ].join(' ')}
+                style={{ width: GUTTER }}
+              />
               {displayKeys.map((key, d) => {
                 const i = d < titlePos ? d : d - 1;
                 const column = key === 'title' ? null : resolved[i];
@@ -1630,10 +2144,13 @@ export function TableView({
                       persists === undefined ? undefined : (next) => setColumnCalc(key, next)
                     }
                     className={[
-                      column === null && titleFrozen ? 'sticky left-0 z-10 bg-[var(--n-25)]' : '',
+                      column === null && titleFrozen ? 'sticky z-10 bg-[var(--n-25)]' : '',
                       'flex flex-none items-center border-r border-[var(--n-100)] px-2 text-[11.5px]',
                     ].join(' ')}
-                    style={{ width: `var(${column === null ? TITLE_VAR : widthVar(i)})` }}
+                    style={{
+                      width: `var(${column === null ? TITLE_VAR : widthVar(i)})`,
+                      ...(column === null && titleFrozen ? { left: GUTTER } : {}),
+                    }}
                   />
                 );
               })}
@@ -1665,6 +2182,69 @@ export function TableView({
           style={{ background: 'linear-gradient(to left, var(--n-200), transparent)' }}
         />
       )}
+      {/* M16.16: the bulk bar. It floats over the rows rather than docking a
+          strip above them, so selecting does not shift the table you are
+          reading by 40px. */}
+      {checked.length > 0 && (
+        <div
+          role="toolbar"
+          data-testid="bulk-bar"
+          aria-label={`${checked.length} selected`}
+          className="absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-2 py-1.5 shadow-[var(--shadow-lg)]"
+        >
+          <span className="px-1 text-[12.5px] font-medium text-[var(--n-700)]">
+            {checked.length} selected
+          </span>
+          <span className="h-4 w-px bg-[var(--n-200)]" />
+          <Button size="sm" variant="ghost" icon="link" onClick={copyLinks}>
+            Copy links
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            icon="trash-2"
+            onClick={() => setConfirmBulkDelete(true)}
+          >
+            Delete
+          </Button>
+          <IconButton icon="x" label="Clear selection" size="sm" onClick={clearChecked} />
+        </div>
+      )}
+      <Dialog
+        open={confirmBulkDelete}
+        onClose={() => setConfirmBulkDelete(false)}
+        title={`Delete ${checked.length} ${checked.length === 1 ? 'record' : 'records'}?`}
+        width={420}
+        footerNote="Recoverable from git history, not from the app."
+        secondaryAction={{ label: 'Cancel', onClick: () => setConfirmBulkDelete(false) }}
+        primaryAction={{ label: 'Delete', onClick: () => deleteRecords(checked) }}
+      >
+        <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
+          {checked.length === 1
+            ? 'The file leaves the vault.'
+            : 'The files leave the vault. Links pointing at them will point at nothing.'}
+        </p>
+      </Dialog>
+      <Dialog
+        open={confirmRow !== null}
+        onClose={() => setConfirmRow(null)}
+        title={`Delete "${confirmRow?.title ?? ''}"?`}
+        width={420}
+        footerNote="Recoverable from git history, not from the app."
+        secondaryAction={{ label: 'Cancel', onClick: () => setConfirmRow(null) }}
+        primaryAction={{
+          label: 'Delete',
+          onClick: () => {
+            const target = confirmRow;
+            setConfirmRow(null);
+            if (target !== null) deleteRecords([target]);
+          },
+        }}
+      >
+        <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
+          The file leaves the vault.
+        </p>
+      </Dialog>
     </div>
   );
 }
