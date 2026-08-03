@@ -114,7 +114,14 @@ export function PropertyEditor({
   const docPath = entries.find((e) => e.type === 'Type' && e.title === sourceType)?.path ?? null;
 
   const hasValues = def.kind === 'select' || def.kind === 'multiselect' || def.kind === 'status';
-  const hasConfig = def.kind === 'rollup' || def.kind === 'number' || def.kind === 'relation';
+  // `person` configures like a relation (M16.13b) — it IS one, with an avatar
+  // renderer. Leaving it out meant a person field had no control anywhere that
+  // could change which records it picks from.
+  const hasConfig =
+    def.kind === 'rollup' ||
+    def.kind === 'number' ||
+    def.kind === 'relation' ||
+    def.kind === 'person';
 
   const commitRename = () => {
     const next = draft.trim();
@@ -212,7 +219,7 @@ export function PropertyEditor({
               def={def}
               onChange={(config) => void setFieldConfig(sourceType, def.name, config)}
             />
-          ) : def.kind === 'relation' ? (
+          ) : def.kind === 'relation' || def.kind === 'person' ? (
             <RelationConfigEditor
               typeName={sourceType}
               def={def}

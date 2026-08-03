@@ -248,3 +248,56 @@ describe('AddPropertyPanel catalog', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Person takes the relation route (M16.13b).
+ *
+ * It used to skip the config step entirely and declare a bare `kind: person`,
+ * whose picker then hardcoded `type === 'Person'`. Choosing where its people
+ * come from was impossible from anywhere in the app.
+ */
+describe('AddPropertyPanel person config', () => {
+  beforeEach(() => {
+    resetLayers();
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+  });
+  afterEach(cleanup);
+
+  function setup() {
+    const onAdd = vi.fn();
+    render(<AddPropertyPanel ownerType="Work item" onAdd={onAdd} onCancel={vi.fn()} />);
+    return { onAdd };
+  }
+
+  it('opens the config step and carries the chosen target through', async () => {
+    const user = userEvent.setup();
+    const { onAdd } = setup();
+    await user.click(screen.getByTestId('property-kind-person'));
+    expect(screen.getByTestId('add-relation-panel')).toBeTruthy();
+
+    await user.click(screen.getByTestId('relation-target-Person'));
+    await user.click(screen.getByTestId('add-relation'));
+    expect(onAdd).toHaveBeenCalledWith('Person', 'person', { target: 'Person' });
+  });
+
+  // Unlike a relation, a person may decline to name one: the engine falls
+  // back to the vault's people types at read time.
+  it('can be added without a target, and says so', async () => {
+    const user = userEvent.setup();
+    const { onAdd } = setup();
+    await user.click(screen.getByTestId('property-kind-person'));
+    expect(screen.getByTestId('relation-target-any')).toBeTruthy();
+    await user.click(screen.getByTestId('add-relation'));
+    expect(onAdd).toHaveBeenCalledWith('Person', 'person');
+  });
+
+  // The relation step stays enforced — that decision is M12.4's and stands.
+  it('still refuses a relation with no data source', async () => {
+    const user = userEvent.setup();
+    const { onAdd } = setup();
+    await user.click(screen.getByTestId('property-kind-relation'));
+    expect(screen.queryByTestId('relation-target-any')).toBeNull();
+    await user.click(screen.getByTestId('add-relation'));
+    expect(onAdd).not.toHaveBeenCalled();
+  });
+});

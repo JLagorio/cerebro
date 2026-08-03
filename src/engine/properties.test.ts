@@ -7,6 +7,9 @@ import {
   inferKindFromValue,
   moveOption,
   optionId,
+  peopleTypes,
+  personCandidates,
+  relationTargetFor,
   isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
@@ -397,5 +400,152 @@ describe('moveOption', () => {
     const copy = [...list];
     moveOption(list, 0, 3);
     expect(list).toEqual(copy);
+  });
+});
+
+/**
+ * Person is a relation with an avatar renderer (M16.13b).
+ *
+ * Three call sites answered "which records can this field point at?" with the
+ * literal string 'Person' — the type-name routing AGENTS.md forbids. A vault
+ * whose people are `Teammate`s got an empty picker, an empty rollup target,
+ * and an @ menu with no people in it, with no control anywhere to fix any of
+ * the three.
+ */
+describe('relation and person targets', () => {
+  const vault = (people: string) => [
+    makeEntry({ path: 'types/task.md', title: 'Task', type: 'Type' }),
+    makeEntry({ path: `types/${people.toLowerCase()}.md`, title: people, type: 'Type' }),
+    makeEntry({ path: 'people/ana.md', title: 'Ana', type: people }),
+    makeEntry({ path: 'people/bo.md', title: 'Bo', type: people }),
+    makeEntry({
+      path: 'tasks/t1.md',
+      title: 'T1',
+      type: 'Task',
+      relationships: { owner: ['ana'] },
+    }),
+  ];
+
+  it('prefers a declared target over anything it could infer', () => {
+    const entries = vault('Teammate');
+    const d = def('person', { name: 'owner', target: 'Task' });
+    expect(relationTargetFor(d, entries, 'Task')).toBe('Task');
+  });
+
+  it('infers a person target from the values already held', () => {
+    const entries = vault('Teammate');
+    const d = def('person', { name: 'owner' });
+    expect(relationTargetFor(d, entries, 'Task')).toBe('Teammate');
+  });
+
+  // The old code answered 'Person' here regardless of what the vault holds.
+  it('does not answer Person for a vault that has no Person type', () => {
+    const entries = vault('Teammate');
+    expect(entries.some((e) => e.type === 'Person')).toBe(false);
+    expect(relationTargetFor(def('person', { name: 'owner' }), entries, 'Task')).toBe('Teammate');
+  });
+
+  // "Any record (unenforced)" is a choice RelationConfigEditor writes as a
+  // deleted key. Inferring over it would silently re-enforce it.
+  it('leaves an unenforced relation unenforced', () => {
+    const entries = vault('Teammate');
+    expect(relationTargetFor(def('relation', { name: 'owner' }), entries, 'Task')).toBeNull();
+  });
+
+  it('reads the derived side of a two-way pair off its owner', () => {
+    const d = def('relation', { name: 'tasks', from: { type: 'Task', field: 'owner' } });
+    expect(relationTargetFor(d, [], null)).toBe('Task');
+  });
+
+  // A field name is not unique across types: two types can both declare
+  // `owner` and point them at different things.
+  it('scopes value inference to the declaring type', () => {
+    const entries = [
+      ...vault('Teammate'),
+      makeEntry({ path: 'types/bug.md', title: 'Bug', type: 'Type' }),
+      makeEntry({ path: 'vendors/acme.md', title: 'Acme', type: 'Vendor' }),
+      makeEntry({
+        path: 'bugs/b1.md',
+        title: 'B1',
+        type: 'Bug',
+        relationships: { owner: ['acme', 'acme'] },
+      }),
+    ];
+    expect(relationTargetFor(def('person', { name: 'owner' }), entries, 'Task')).toBe('Teammate');
+    expect(relationTargetFor(def('person', { name: 'owner' }), entries, 'Bug')).toBe('Vendor');
+  });
+});
+
+describe('peopleTypes', () => {
+  it('is every type a person field points at, however it is named', () => {
+    const entries = [
+      makeEntry({
+        path: 'types/task.md',
+        title: 'Task',
+        type: 'Type',
+        properties: { fields: { owner: { kind: 'person', target: 'Teammate' } } },
+      }),
+      makeEntry({ path: 'types/teammate.md', title: 'Teammate', type: 'Type' }),
+    ];
+    expect([...peopleTypes(buildSchema(entries), entries)]).toEqual(['Teammate']);
+  });
+
+  // A convention of last resort, so a vault with people but no person field
+  // declared anywhere still gets a useful @ menu.
+  it('falls back to a type literally named Person', () => {
+    const entries = [makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type' })];
+    expect([...peopleTypes(buildSchema(entries), entries)]).toEqual(['Person']);
+  });
+
+  // An empty set is a real answer: surfaces drop their People section rather
+  // than offering every record in the vault as a person.
+  it('is empty for a vault with no notion of people', () => {
+    const entries = [makeEntry({ path: 'types/task.md', title: 'Task', type: 'Type' })];
+    expect(peopleTypes(buildSchema(entries), entries).size).toBe(0);
+  });
+});
+
+describe('personCandidates', () => {
+  const typeDocs = [
+    makeEntry({
+      path: 'types/task.md',
+      title: 'Task',
+      type: 'Type',
+      properties: { fields: { owner: { kind: 'person', target: 'Teammate' } } },
+    }),
+    makeEntry({ path: 'types/teammate.md', title: 'Teammate', type: 'Type' }),
+  ];
+  const entries = [
+    ...typeDocs,
+    makeEntry({ path: 'people/ana.md', title: 'Ana', type: 'Teammate' }),
+    makeEntry({ path: 'tasks/t1.md', title: 'T1', type: 'Task' }),
+  ];
+  const schema = buildSchema(entries);
+
+  it('offers records of the declared target', () => {
+    const got = personCandidates(
+      def('person', { name: 'owner', target: 'Teammate' }),
+      schema,
+      entries,
+      'Task',
+    );
+    expect(got.map((e) => e.title)).toEqual(['Ana']);
+  });
+
+  it('falls back to the vault’s people when the field names no target', () => {
+    const got = personCandidates(def('person', { name: 'lead' }), schema, entries, 'Task');
+    expect(got.map((e) => e.title)).toEqual(['Ana']);
+  });
+
+  // A long picker is merely long. The empty one this used to produce was a
+  // dead end with no way out of it.
+  it('offers every record rather than nothing when the vault has no people', () => {
+    const bare = [
+      makeEntry({ path: 'types/task.md', title: 'Task', type: 'Type' }),
+      makeEntry({ path: 'tasks/t1.md', title: 'T1', type: 'Task' }),
+    ];
+    const got = personCandidates(def('person', { name: 'lead' }), buildSchema(bare), bare, 'Task');
+    // Type docs are schema, never candidates.
+    expect(got.map((e) => e.title)).toEqual(['T1']);
   });
 });

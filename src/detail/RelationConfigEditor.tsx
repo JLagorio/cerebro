@@ -51,16 +51,26 @@ export function RelationConfigEditor({
     targetDef?.fields.find(
       (f) => f.kind === 'relation' && f.from?.type === typeName && f.from?.field === def.name,
     ) ?? null;
+  // A person field is a relation with an avatar renderer (M16.13b), so it is
+  // configured here too — and its unset state means something different: not
+  // "any record", but "whoever this vault calls people", which the engine
+  // derives from every person field's target (`peopleTypes`).
+  const isPerson = def.kind === 'person';
 
   return (
     <div className="flex flex-col gap-1.5 py-0.5">
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[12px] text-[var(--n-600)]">Related to</span>
+        <span className="text-[12px] text-[var(--n-600)]">
+          {isPerson ? 'People come from' : 'Related to'}
+        </span>
         <Dropdown
           size="sm"
-          label="Related to"
+          label={isPerson ? 'People come from' : 'Related to'}
           options={[
-            { value: 'none', label: 'Any record (unenforced)' },
+            {
+              value: 'none',
+              label: isPerson ? 'This vault’s people' : 'Any record (unenforced)',
+            },
             ...types.map((t) => ({ value: t, label: t })),
           ]}
           value={def.target ?? 'none'}
@@ -68,7 +78,9 @@ export function RelationConfigEditor({
         />
       </div>
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[12px] text-[var(--n-600)]">Limit to 1 record</span>
+        <span className="text-[12px] text-[var(--n-600)]">
+          Limit to 1 {isPerson ? 'person' : 'record'}
+        </span>
         <Switch
           ariaLabel="Limit to 1 record"
           checked={def.limit === 1}

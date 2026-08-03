@@ -13,6 +13,7 @@
  */
 
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
+import { resolveTarget } from './wikilink';
 import type { Entry, FieldDef, FieldFormat, FieldKind, RollupCalc, Schema } from './types';
 
 // --- System properties (M4) -------------------------------------------------
@@ -302,6 +303,119 @@ export const GROUPABLE_KINDS: ReadonlySet<FieldKind> = new Set(
 export const ORDERABLE_KINDS: ReadonlySet<FieldKind> = new Set(
   PROPERTY_KINDS.filter((k) => k.orderable).map((k) => k.kind),
 );
+
+// --- Relation and person targets (M16.13b) ---------------------------------
+
+/**
+ * The majority type among a set of raw wikilink targets — the type a field is
+ * evidently pointing at, when nobody declared one.
+ *
+ * Lived in `engine/adopt.ts`, where only the adoption doctor could reach it.
+ * It answers exactly the question a person field asks about the values it
+ * already holds, so it moved here rather than being written a second time.
+ */
+export function inferTarget(rawTargets: string[], entries: Entry[]): string | null {
+  const counts = new Map<string, number>();
+  for (const raw of rawTargets) {
+    const resolved = resolveTarget(raw, entries);
+    if (resolved === null || resolved.type === null || resolved.type === '') continue;
+    counts.set(resolved.type, (counts.get(resolved.type) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [type, count] of counts) {
+    if (count > bestCount) {
+      best = type;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+/**
+ * Which type a relation-family field points at, or null for "any record".
+ *
+ * A `person` field IS a relation with an avatar renderer, so it answers the
+ * same question the same way — except that three call sites answered it with
+ * the literal string `'Person'` instead (M16.13b). AGENTS.md forbids exactly
+ * that: behaviour is capability-gated, never routed on a type NAME. A vault
+ * whose people are `Teammate`s got an empty picker, an empty rollup target,
+ * and no control anywhere that could fix either.
+ *
+ * Inference from held values is deliberately restricted to `person`. On a
+ * relation an absent target is the user's explicit "Any record (unenforced)"
+ * choice — `RelationConfigEditor` writes null for it — and narrowing that to
+ * whatever the field happens to hold today would silently re-enforce a
+ * constraint they had turned off.
+ */
+export function relationTargetFor(
+  def: FieldDef,
+  entries: Entry[],
+  /** Restricts value inference to records of the declaring type; a field name
+   * is not unique across types. */
+  ownerType?: string | null,
+): string | null {
+  // The derived side of a two-way pair: the data lives on `from.type`.
+  if (def.from !== undefined) return def.from.type;
+  if (def.target !== undefined && def.target !== '') return def.target;
+  if (def.kind !== 'person') return null;
+  const owned =
+    ownerType === undefined || ownerType === null
+      ? entries
+      : entries.filter((e) => e.type === ownerType);
+  return inferTarget(
+    owned.flatMap((e) => e.relationships[def.name] ?? []),
+    entries,
+  );
+}
+
+/**
+ * The types this vault treats as people: every type a `person` field targets.
+ *
+ * Derived rather than declared, because the surfaces that need it most — the
+ * editor's `@` menu, a person field with no target yet — have no FieldDef to
+ * read a target off. The type named "Person" is a last-resort CONVENTION, not
+ * a rule: it keeps a vault that has people but has declared no person field
+ * working, without making the name load-bearing anywhere else.
+ *
+ * An empty set means this vault has no notion of people, which is a real
+ * answer — surfaces should drop their People section, not list everything.
+ */
+export function peopleTypes(schema: Schema, entries: Entry[]): ReadonlySet<string> {
+  const found = new Set<string>();
+  for (const [typeName, def] of schema.types) {
+    for (const field of def.fields) {
+      if (field.kind !== 'person') continue;
+      const target = relationTargetFor(field, entries, typeName);
+      if (target !== null) found.add(target);
+    }
+  }
+  if (found.size === 0 && schema.types.has('Person')) found.add('Person');
+  return found;
+}
+
+/**
+ * The records a person field may pick from.
+ *
+ * Most specific answer first: the field's declared target, then the majority
+ * type of the people it already holds (both via `relationTargetFor`), then
+ * the vault's people types, and finally every record — an over-long picker
+ * is merely long, while the empty one this used to produce was a dead end.
+ */
+export function personCandidates(
+  def: FieldDef,
+  schema: Schema,
+  entries: Entry[],
+  ownerType?: string | null,
+): Entry[] {
+  const target = relationTargetFor(def, entries, ownerType);
+  if (target !== null) return entries.filter((e) => e.type === target);
+  const people = peopleTypes(schema, entries);
+  // Type docs are schema, never candidates — the same exclusion RelationPicker
+  // applies to an unenforced relation.
+  const records = entries.filter((e) => e.type !== 'Type');
+  return people.size === 0 ? records : records.filter((e) => people.has(e.type ?? ''));
+}
 
 // --- Option identity and order (M16.12) ------------------------------------
 

@@ -1,6 +1,6 @@
 import '@blocknote/mantine/style.css';
 import './editor.css';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BlockNoteSchema,
   createCodeBlockSpec,
@@ -24,11 +24,12 @@ import {
 } from '@blocknote/react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
+import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
 import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { CalloutBlock, MermaidBlock } from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
@@ -180,7 +181,15 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: cerebroSchema });
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  // Who the @ menu offers. This was `e.type === 'Person'` in three places
+  // (M16.13b) — the type-name routing AGENTS.md forbids, and the reason a
+  // vault whose people are `Teammate`s had an @ menu with no people in it.
+  // There is no FieldDef here to read a target off, so the schema answers:
+  // the types every person field points at.
+  const peopleSet = useMemo(() => peopleTypes(schema, entries), [schema, entries]);
+  const isPerson = useCallback((e: Entry) => e.type !== null && peopleSet.has(e.type), [peopleSet]);
   const toast = useUiStore((s) => s.toast);
   const [loaded, setLoaded] = useState(false);
   // Assign-task popover (M2.x feedback): opened from the checklist row's
@@ -315,7 +324,7 @@ export function MarkdownEditor({
       .filter(isLinkableDoc)
       // The @ menu already lists people under "People" — repeating them in
       // "Link page" would render duplicate titles (and duplicate React keys).
-      .filter((e) => !(opts?.excludePeople === true && e.type === 'Person'))
+      .filter((e) => !(opts?.excludePeople === true && isPerson(e)))
       .map((e) => ({
         title: e.title,
         subtext: e.path,
@@ -325,15 +334,13 @@ export function MarkdownEditor({
       }));
 
   const personItems = (): DefaultReactSuggestionItem[] =>
-    entries
-      .filter((e) => e.type === 'Person')
-      .map((e) => ({
-        title: e.title,
-        subtext: 'Assign',
-        group: 'People',
-        icon: <Icon name="circle-user" size={14} />,
-        onItemClick: () => insertChip({ type: 'assignee', props: { target: stem(e) } }),
-      }));
+    entries.filter(isPerson).map((e) => ({
+      title: e.title,
+      subtext: 'Assign',
+      group: 'People',
+      icon: <Icon name="circle-user" size={14} />,
+      onItemClick: () => insertChip({ type: 'assignee', props: { target: stem(e) } }),
+    }));
 
   const dueItems = (): DefaultReactSuggestionItem[] =>
     [
@@ -431,7 +438,7 @@ export function MarkdownEditor({
 
   // --- Assign-task dialog (M2.x feedback) ---------------------------------
 
-  const people = entries.filter((e) => e.type === 'Person');
+  const people = entries.filter(isPerson);
 
   const openAssignDialog = (blockId: string) => {
     const block = editor.getBlock(blockId);

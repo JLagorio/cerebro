@@ -7,7 +7,7 @@ import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
 import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
-import { findOptionByLabel, optionId } from '@/engine/properties';
+import { findOptionByLabel, optionId, personCandidates } from '@/engine/properties';
 import { RelationPicker } from '@/detail/RelationPicker';
 import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -239,9 +239,13 @@ export function FieldEditor({
   if (def.kind === 'person') {
     // M3.1: people hold as many targets as you pick — the popover toggles and
     // stays open, and values render as avatars.
-    const options: FieldPopoverOption[] = entries
-      .filter((e) => e.type === 'Person')
-      .map((c) => ({ id: pathStem(c.path), label: c.title, color: null }));
+    //
+    // Candidates came from `e.type === 'Person'` until M16.13b, which is the
+    // type-name routing AGENTS.md forbids: a vault whose people are
+    // `Teammate`s got an empty picker with no control anywhere to fix it.
+    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry.type).map(
+      (c) => ({ id: pathStem(c.path), label: c.title, color: null }),
+    );
     const values = asList(resolved.raw).map(stripWikilink);
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
     return (

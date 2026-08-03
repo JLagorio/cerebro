@@ -256,7 +256,10 @@ export function buildSchema(entries: Entry[]): Schema {
     // A two-way relation's reciprocal side stores nothing (M12.4): its value
     // is derived — the records of `from.type` whose `from.field` links here.
     // Edits write through to that owning side, never to this frontmatter.
-    if (def?.kind === 'relation' && def.from !== undefined) {
+    // `person` counts (M16.13b): it is a relation that renders avatars, and
+    // gating on the kind NAME left a derived person field reading its own
+    // empty frontmatter and rendering blank.
+    if ((def?.kind === 'relation' || def?.kind === 'person') && def.from !== undefined) {
       const sources = childrenOf(
         e,
         { direction: 'reverse', type: def.from.type, field: def.from.field },

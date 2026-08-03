@@ -102,6 +102,10 @@ export function AddPropertyPanel({
   const [name, setName] = useState('');
   const [query, setQuery] = useState('');
   const [step, setStep] = useState<'catalog' | 'relation'>('catalog');
+  /** Which kind the config step is configuring. `person` is a relation that
+   * renders avatars (M16.13b) and needs a data source for the same reason —
+   * before this it silently picked whatever type was named "Person". */
+  const [configKind, setConfigKind] = useState<'relation' | 'person'>('relation');
   const [target, setTarget] = useState<string | null>(null);
   const [single, setSingle] = useState(false);
   const [twoWay, setTwoWay] = useState(false);
@@ -144,17 +148,30 @@ export function AddPropertyPanel({
     if (!supportedOnOwner(kind) || duplicate) return;
     // A relation on a TYPE gets the enforced-config step. On an untyped doc
     // there is no schema to write, so it stays a plain frontmatter key.
-    if (kind === 'relation' && ownerType !== null) {
+    if ((kind === 'relation' || kind === 'person') && ownerType !== null) {
+      setConfigKind(kind);
+      setTarget(null);
       setStep('relation');
       return;
     }
     onAdd(typed === '' ? uniqueName(label, existingNames) : name, kind);
   };
 
+  const isPerson = configKind === 'person';
+
   const addRelation = () => {
-    if (target === null || duplicate) return;
+    if (duplicate) return;
+    // A relation must name its data source; a person field may decline to,
+    // and falls back to the vault's people types at read time
+    // (`personCandidates`). Enforcing it would be worse than the old
+    // hardcoded guess for a vault that has no people type yet.
+    if (target === null) {
+      if (!isPerson) return;
+      onAdd(typed === '' ? uniqueName('Person', existingNames) : name, 'person');
+      return;
+    }
     const finalName = typed === '' ? uniqueName(target, existingNames) : name;
-    onAdd(finalName, 'relation', {
+    onAdd(finalName, configKind, {
       target,
       ...(single ? { limit: 1 as const } : {}),
       ...(twoWay
@@ -187,7 +204,15 @@ export function AddPropertyPanel({
       <Input
         autoFocus
         ariaLabel="Property name"
-        placeholder={target === null ? 'Relation name' : `Related ${target}`}
+        placeholder={
+          target !== null
+            ? isPerson
+              ? String(target)
+              : `Related ${target}`
+            : isPerson
+              ? 'Person name'
+              : 'Relation name'
+        }
         value={name}
         onChange={(e) => setName(e.target.value)}
         className="min-w-0"
@@ -195,9 +220,28 @@ export function AddPropertyPanel({
       />
       {duplicateNote}
       <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
-        Related to
+        {isPerson ? 'People come from' : 'Related to'}
       </span>
       <div className="max-h-[160px] overflow-y-auto">
+        {isPerson && (
+          <button
+            type="button"
+            role="option"
+            aria-selected={target === null}
+            data-testid="relation-target-any"
+            onClick={() => setTarget(null)}
+            className={[
+              'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
+              target === null
+                ? 'bg-[var(--cortex-50)] text-[var(--n-900)]'
+                : 'bg-transparent text-[var(--n-800)] hover:bg-[var(--n-50)]',
+            ].join(' ')}
+          >
+            <Icon name="users" size={13} color="var(--n-500)" />
+            <span className="min-w-0 flex-1 truncate">Whoever this vault calls people</span>
+            {target === null && <Icon name="check" size={13} color="var(--cortex-600)" />}
+          </button>
+        )}
         {targets.map((t) => {
           const style = typeStyle(t, schema);
           return (
@@ -221,14 +265,16 @@ export function AddPropertyPanel({
             </button>
           );
         })}
-        {targets.length === 0 && (
+        {targets.length === 0 && !isPerson && (
           <p className="m-0 px-1.5 py-2 text-[12px] text-[var(--n-500)]">
             No types to relate to yet — create one first.
           </p>
         )}
       </div>
       <div className="flex items-center justify-between px-1 py-0.5">
-        <span className="text-[12px] text-[var(--n-600)]">Limit to 1 record</span>
+        <span className="text-[12px] text-[var(--n-600)]">
+          Limit to 1 {isPerson ? 'person' : 'record'}
+        </span>
         <Switch ariaLabel="Limit to 1 record" checked={single} onChange={setSingle} />
       </div>
       <div className="flex items-center justify-between px-1 py-0.5">
@@ -253,7 +299,7 @@ export function AddPropertyPanel({
       <button
         type="button"
         data-testid="add-relation"
-        disabled={target === null || duplicate}
+        disabled={(target === null && !isPerson) || duplicate}
         onClick={addRelation}
         // text-[var(--n-0)], never text-white: index.css resets the stock
         // palette with `--color-*: initial` inside @theme inline, so
@@ -261,7 +307,7 @@ export function AddPropertyPanel({
         // on the blue fill (2.34:1 — the button read as disabled).
         className="mt-0.5 rounded-md border-0 bg-[var(--cortex-600)] px-2 py-1.5 text-[12.5px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-700)] disabled:cursor-default disabled:opacity-40"
       >
-        Add relation
+        {isPerson ? 'Add person' : 'Add relation'}
       </button>
       <button
         type="button"

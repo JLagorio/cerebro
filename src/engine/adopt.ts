@@ -1,8 +1,7 @@
 import { isTemplate } from '@/lib/templates';
 import { isKnowledgePath } from './okf';
-import { coerceValueToKind, isSystemProperty, validateValue } from './properties';
+import { coerceValueToKind, inferTarget, isSystemProperty, validateValue } from './properties';
 import type { Entry, FieldKind, Schema } from './types';
-import { resolveTarget } from './wikilink';
 
 /**
  * Vault adoption (M12.6) — the schema doctor.
@@ -92,25 +91,6 @@ export function inferKind(keyName: string, values: unknown[]): FieldKind {
     return 'select';
   }
   return 'text';
-}
-
-/** Majority type among what a relation key's raw targets resolve to. */
-function inferTarget(rawTargets: string[], entries: Entry[]): string | null {
-  const counts = new Map<string, number>();
-  for (const raw of rawTargets) {
-    const resolved = resolveTarget(raw, entries);
-    if (resolved === null || resolved.type === null || resolved.type === '') continue;
-    counts.set(resolved.type, (counts.get(resolved.type) ?? 0) + 1);
-  }
-  let best: string | null = null;
-  let bestCount = 0;
-  for (const [type, count] of counts) {
-    if (count > bestCount) {
-      best = type;
-      bestCount = count;
-    }
-  }
-  return best;
 }
 
 function sample(values: unknown[]): string[] {
