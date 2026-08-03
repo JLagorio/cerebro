@@ -1418,6 +1418,8 @@ function HeaderMenu({
       {confirmDelete && sourceType !== null && onColumnsChange !== undefined && (
         <ConfirmDeleteProperty
           name={name}
+          kind={def.kind}
+          sourceType={sourceType}
           count={allEntriesForCount.filter((e) => e.type === sourceType).length}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => {
