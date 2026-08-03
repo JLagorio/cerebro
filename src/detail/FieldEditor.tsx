@@ -6,6 +6,7 @@ import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
 import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
+import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import { findOptionByLabel, optionId, personCandidates } from '@/engine/properties';
 import { RelationPicker } from '@/detail/RelationPicker';
@@ -504,58 +505,16 @@ export function FieldEditor({
   }
 
   if (def.kind === 'files') {
-    const files = Array.isArray(resolved.raw)
-      ? resolved.raw.map(String)
-      : typeof resolved.raw === 'string' && resolved.raw !== ''
-        ? [resolved.raw]
-        : [];
+    // M16.13c: picking now COPIES into the vault and stores a vault-relative
+    // path, so the value survives the vault being synced or moved. The whole
+    // control lives in its own component because it needs hooks, and this
+    // function is a chain of early returns.
     return (
-      <span className="flex min-w-0 flex-wrap items-center gap-1">
-        {files.map((f) => (
-          <span
-            key={f}
-            className="inline-flex max-w-full items-center gap-1 rounded-md bg-[var(--n-50)] px-1.5 py-px text-[12px] text-[var(--n-700)]"
-          >
-            <Icon name="paperclip" size={11} color="var(--n-500)" />
-            <span className="truncate">{f.split('/').pop()}</span>
-            <button
-              type="button"
-              aria-label={`Remove ${f}`}
-              onClick={() => patch(files.filter((x) => x !== f))}
-              className="border-0 bg-transparent p-0 text-[var(--n-400)] hover:text-[var(--danger-600)]"
-            >
-              <Icon name="x" size={11} />
-            </button>
-          </span>
-        ))}
-        {draft !== null ? (
-          <input
-            autoFocus
-            aria-label={`Add file to ${humanize(def.name)}`}
-            placeholder="Path or URL"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => {
-              if (draft.trim() !== '') patch([...files, draft.trim()]);
-              setDraft(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              if (e.key === 'Escape') setDraft(null);
-            }}
-            className="h-[22px] w-36 rounded-md border border-[var(--cortex-500)] px-1.5 text-[12px] outline-none"
-          />
-        ) : (
-          <button
-            type="button"
-            aria-label={`Add file to ${humanize(def.name)}`}
-            onClick={() => setDraft('')}
-            className="rounded-md border-0 bg-transparent px-1 py-px text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
-          >
-            + Add
-          </button>
-        )}
-      </span>
+      <FilesField
+        values={asList(resolved.raw)}
+        label={humanize(def.name)}
+        onChange={(next) => patch(next.length === 0 ? null : next)}
+      />
     );
   }
 

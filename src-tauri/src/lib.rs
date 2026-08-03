@@ -168,6 +168,39 @@ fn list_folders(vault: String) -> Result<Vec<String>, String> {
     vault::scan::list_folders(Path::new(&vault))
 }
 
+// --- Attachments (M16.13c) --------------------------------------------------
+
+/// Native multi-file picker. Returns absolute paths; empty when cancelled.
+///
+/// Split from `import_attachment` so the copy stays a pure, unit-testable
+/// function and so a future drag-and-drop can reuse it — the picker is the
+/// only half that needs an AppHandle.
+///
+/// Not `(async)` but an `async fn`, matching `pick_vault`: the blocking
+/// dialog must not run on the main thread.
+#[tauri::command]
+async fn pick_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let Some(picked) = app.dialog().file().blocking_pick_files() else {
+        return Ok(Vec::new());
+    };
+    picked
+        .into_iter()
+        .map(|f| {
+            f.into_path()
+                .map(|p| p.to_string_lossy().to_string())
+                .map_err(|e| e.to_string())
+        })
+        .collect()
+}
+
+/// Copy a picked file into the vault's `attachments/` folder; returns its
+/// vault-relative path. No knowledge guard: the destination is fixed inside
+/// `import_attachment` and can never be `knowledge/`.
+#[tauri::command(async)]
+fn import_attachment(vault: String, source: String) -> Result<String, String> {
+    vault::write::import_attachment(Path::new(&vault), &source)
+}
+
 // --- Local agent + MCP (M6) ------------------------------------------------
 
 #[tauri::command(async)]
@@ -266,6 +299,8 @@ pub fn run() {
             rename_note,
             delete_note,
             list_folders,
+            pick_files,
+            import_attachment,
             start_watcher,
             read_connectors,
             save_connectors,

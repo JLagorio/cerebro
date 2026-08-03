@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unknown) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
 
-import { scanVault, updateFrontmatter } from './ipc';
+import { canPickFiles, importAttachment, scanVault, updateFrontmatter } from './ipc';
 
 afterEach(() => {
   invokeSpy.mockClear();
@@ -28,6 +28,29 @@ describe('ipc backend detection', () => {
       vault: '/my-vault',
       path: 'items/a.md',
       patch: { status: 'done' },
+    });
+  });
+});
+
+/**
+ * `canPickFiles` is not cosmetic (M16.13c): a browser build has no native
+ * picker, and `pickFiles` returning [] there is indistinguishable from the
+ * user cancelling. The Files field branches on this to decide between
+ * offering the typed-path fallback and doing nothing at all.
+ */
+describe('attachment IPC', () => {
+  it('reports no native picker outside Tauri, and one inside it', () => {
+    expect(canPickFiles()).toBe(false);
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    expect(canPickFiles()).toBe(true);
+  });
+
+  it('passes the absolute source through and lets the backend choose the folder', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await importAttachment('/my-vault', '/Users/me/report.pdf');
+    expect(invokeSpy).toHaveBeenCalledWith('import_attachment', {
+      vault: '/my-vault',
+      source: '/Users/me/report.pdf',
     });
   });
 });

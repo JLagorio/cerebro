@@ -179,3 +179,36 @@ export function deleteNote(vault: string, path: string): Promise<void> {
 export function listFolders(vault: string): Promise<string[]> {
   return inTauri() ? invokeTauri('list_folders', { vault }) : mock.listFolders(vault);
 }
+
+// --- Attachments (M16.13c) --------------------------------------------------
+
+/**
+ * Whether a native file picker exists at all.
+ *
+ * Browser builds (pnpm dev, vitest, Playwright) have none, and `pickFiles`
+ * returning [] there is indistinguishable from the user cancelling. A files
+ * field has to know the difference: one means "offer the typed-path fallback
+ * instead", the other means "do nothing".
+ */
+export function canPickFiles(): boolean {
+  return inTauri();
+}
+
+/** Native multi-file picker; absolute paths, or [] when cancelled. */
+export function pickFiles(): Promise<string[]> {
+  return inTauri() ? invokeTauri('pick_files') : mock.pickFiles();
+}
+
+/**
+ * Copy a file from anywhere on disk into the vault's `attachments/` folder and
+ * return its VAULT-RELATIVE path.
+ *
+ * Relative is the whole point: an absolute path breaks the moment the vault is
+ * synced to another machine, and a files-first vault has to survive being
+ * moved. The destination folder is chosen by the backend, not passed in.
+ */
+export function importAttachment(vault: string, source: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('import_attachment', { vault, source })
+    : mock.importAttachment(vault, source);
+}
