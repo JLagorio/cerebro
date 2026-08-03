@@ -126,10 +126,67 @@ pub fn commit_all(ws: &GitWorkspaceInfo, message: &str) -> Result<Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    /// A scratch directory for a test that will `git init`, stage and commit
+    /// in it — and a hard refusal to hand back anything but a path under the
+    /// system temp dir.
+    ///
+    /// TWICE these tests have written to the cerebro checkout instead: once
+    /// taking out the M14 branch, once the M16 board branch, each time as a
+    /// commit titled "old state" that deleted every tracked file. Both were
+    /// recovered by hand. The proof it was this module is that the wipe left
+    /// `.cerebro/connectors.json` holding exactly `{"servers":{}}` and a
+    /// `.gitignore` of exactly `# Cerebro\n.DS_Store\n` — the two string
+    /// literals below.
+    ///
+    /// So the FILE writes landed at the checkout root, not just the git
+    /// commands, which means `dir` itself was wrong. Checking that git agrees
+    /// about the repo root cannot catch that: ask a checkout where its root
+    /// is and it will happily answer itself. Containment under `temp_dir()`
+    /// is the check that does, and it has to run before the
+    /// `remove_dir_all` below — that line, pointed at the checkout, deletes
+    /// the working tree outright and its result is discarded.
+    ///
+    /// Both runs happened under `.husky/pre-push`, which invokes `cargo test`
+    /// from the worktree root rather than from `src-tauri/` as AGENTS.md
+    /// documents. Git hooks also run with a sanitized environment, so
+    /// `TMPDIR` may be absent there in a way it never is in a shell.
+    fn scratch_repo_dir(label: &str) -> PathBuf {
+        // Canonicalize BEFORE joining: on macOS `temp_dir()` hands back
+        // /var/folders/… which is a symlink to /private/var/folders/…, so
+        // comparing a path built from one against the resolved form of the
+        // other fails for every run and the guard would fire on itself.
+        let base = std::fs::canonicalize(std::env::temp_dir())
+            .expect("the system temp dir must exist and resolve");
+        let dir = base.join(format!("cerebro-{label}-{}", std::process::id()));
+        assert!(
+            dir.starts_with(&base) && dir != base,
+            "REFUSING to run a destructive git test in {dir:?}: it is not inside the \
+             system temp dir {base:?}. This test removes the directory and then commits \
+             in it, so a wrong path here rewrites a real repository."
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Second belt: after `git init`, git must agree the repo root is our
+    /// scratch dir and nothing above it.
+    fn assert_isolated(dir: &Path) {
+        let top = command::run_str(dir, &["rev-parse", "--show-toplevel"])
+            .expect("the scratch repo must answer rev-parse --show-toplevel");
+        let got = std::fs::canonicalize(top.trim()).expect("that toplevel must exist on disk");
+        let want = std::fs::canonicalize(dir).expect("the scratch dir must exist on disk");
+        assert_eq!(
+            got, want,
+            "REFUSING to stage or commit: git reports the repo root as {got:?}, but this \
+             test's scratch repo is {want:?}."
+        );
+    }
 
     #[test]
     fn gitignore_is_written_once() {
-        let dir = std::env::temp_dir().join(format!("cerebro-ignore-{}", std::process::id()));
+        let dir = scratch_repo_dir("ignore");
         std::fs::create_dir_all(&dir).unwrap();
         ensure_gitignore(&dir).unwrap();
         let first = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
@@ -144,13 +201,14 @@ mod tests {
 
     #[test]
     fn cerebro_config_is_ignored_and_untracked_even_in_existing_repos() {
-        let dir = std::env::temp_dir().join(format!("cerebro-ignore3-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = scratch_repo_dir("ignore3");
         std::fs::create_dir_all(dir.join(".cerebro")).unwrap();
         std::fs::write(dir.join(".cerebro/connectors.json"), "{\"servers\":{}}").unwrap();
         // A pre-M13.3 vault: repo exists, .gitignore already has .DS_Store
         // (the old early-return), and the config is already TRACKED.
         command::run_str(&dir, &["init"]).unwrap();
+        // Before ANY staging or committing — see assert_isolated.
+        assert_isolated(&dir);
         author::ensure_identity(&dir).unwrap();
         std::fs::write(dir.join(".gitignore"), "# Cerebro\n.DS_Store\n").unwrap();
         command::run_str(&dir, &["add", "-A"]).unwrap();
@@ -170,7 +228,7 @@ mod tests {
 
     #[test]
     fn appends_to_an_existing_gitignore() {
-        let dir = std::env::temp_dir().join(format!("cerebro-ignore2-{}", std::process::id()));
+        let dir = scratch_repo_dir("ignore2");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(".gitignore"), "node_modules/\n").unwrap();
         ensure_gitignore(&dir).unwrap();
