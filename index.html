@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Inlined as a data URI rather than public/favicon.svg: the app ships as a
+         Tauri bundle, so an extra asset round-trip buys nothing and an inline
+         mark cannot 404 in dev, dist, or the packaged app. Mirrors the "c."
+         wordmark — #3d5bde / 10px radius, same as the sidebar logo. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%233d5bde'/%3E%3Ctext x='16' y='23' font-family='system-ui,-apple-system,sans-serif' font-size='20' font-weight='700' fill='white' text-anchor='middle'%3Ec.%3C/text%3E%3C/svg%3E"
+    />
+    <!-- No dark theme exists yet; declaring the scheme stops the UA from
+         force-darkening form controls against a light-only palette. -->
+    <meta name="color-scheme" content="light" />
     <title>Cerebro</title>
   </head>
   <body>

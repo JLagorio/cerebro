@@ -29,8 +29,12 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
     );
   }
   if (kind === 'date' || kind === 'daterange') {
+    // Dates ride in the UI font like every other chip kind here. Mono is for
+    // columnar alignment — TableView renders its own cells and keeps it — but
+    // a chip sits inline on a card or list row, where mono buys no alignment
+    // and only makes the one value that is not text look like code.
     return (
-      <span className="inline-flex flex-none [font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">
+      <span className="inline-flex flex-none text-[12px] text-[var(--n-600)]">
         {resolved.display}
       </span>
     );

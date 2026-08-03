@@ -49,6 +49,14 @@
   --warn-600: #b87404;
   --warn-700: #925e04;
   --danger-50: #fdedef;
+  /* Sibling of the --warn-300 promotion above, and the reason it was missed:
+     warn-300 was written `var(--warn-300, #f0c36d)`, so it still painted. The
+     three error banners using --danger-200 (AiActionCard, AiPanel, ChangesPage)
+     carry NO fallback, so the var was invalid at computed-value time and
+     border-color fell back to its initial `currentColor` — rendering the
+     danger-700 text colour as a hard #9a1d2e border on a #fdedef ground.
+     25% danger-500 over danger-50, matching the ramp's hue. */
+  --danger-200: #f5c1c7;
   --danger-500: #de3b4e;
   --danger-600: #bc2438;
   --danger-700: #9a1d2e;
