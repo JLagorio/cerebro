@@ -285,3 +285,140 @@ describe('property reorder', () => {
     expect(screen.queryByRole('button', { name: /^Reorder / })).toBeNull();
   });
 });
+
+/**
+ * Per-property visibility (M16.10).
+ *
+ * There was no model at all: `ColumnSpec.hidden` is per-VIEW and a record
+ * panel has no view to read it from, so a type with twenty optional
+ * properties showed a wall of "Empty" on every record with no way to quiet it.
+ */
+describe('property visibility', () => {
+  beforeEach(() => {
+    resetLayers();
+    useUiStore.setState({ toasts: [] });
+  });
+  afterEach(cleanup);
+
+  /** Rebuild the fixture's Work item type with visibility on some fields. */
+  function setupWithVisibility(vis: Record<string, string>) {
+    const entries = fixtureVault().map((e) => {
+      if (e.path !== TYPE_DOC) return e;
+      const props = e.properties as unknown as { fields: Record<string, Record<string, unknown>> };
+      const fields: Record<string, unknown> = {};
+      for (const [name, spec] of Object.entries(props.fields)) {
+        const base = typeof spec === 'string' ? { kind: spec } : { ...spec };
+        fields[name] = vis[name] === undefined ? base : { ...base, visibility: vis[name] };
+      }
+      // A Type doc's `fields:` is a nested mapping; `properties` is typed for
+      // scalars, and the scanner hands the mapping through as-is.
+      return {
+        ...e,
+        properties: { ...e.properties, fields } as unknown as Entry['properties'],
+      };
+    });
+    const record = makeEntry({
+      path: RECORD,
+      title: 'Ship it',
+      type: 'Work item',
+      properties: { status: 'todo', priority: 'high' },
+    });
+    const all = [...entries, record];
+    const patchFrontmatter = vi.fn().mockResolvedValue(undefined);
+    useVaultStore.setState({ entries: all, vaultPath: '/vault', patchFrontmatter });
+    render(<RecordProperties entry={record} schema={buildSchema(all)} />);
+    return { patchFrontmatter };
+  }
+
+  const rowNames = () =>
+    screen.queryAllByTestId('property-row').map((r) => r.getAttribute('data-property'));
+
+  it('shows everything when the type declares no visibility', () => {
+    setupWithVisibility({});
+    expect(rowNames()).toEqual(['status', 'priority', 'assignee', 'due']);
+    expect(screen.queryByTestId('hidden-properties-toggle')).toBeNull();
+  });
+
+  it('folds an always-hidden property behind a counted expander', async () => {
+    const user = userEvent.setup();
+    setupWithVisibility({ due: 'hide' });
+    expect(rowNames()).toEqual(['status', 'priority', 'assignee']);
+
+    const toggle = screen.getByTestId('hidden-properties-toggle');
+    expect(toggle.textContent).toContain('1 hidden property');
+
+    await user.click(toggle);
+    // Folded, not dropped — it comes back in its declared position.
+    expect(rowNames()).toEqual(['status', 'priority', 'assignee', 'due']);
+    expect(screen.getByTestId('hidden-properties-toggle').textContent).toContain('Hide 1 property');
+  });
+
+  it('folds hide-when-empty only for the records where it is empty', () => {
+    // `assignee` and `due` are unset on this record; `priority` is set.
+    setupWithVisibility({ priority: 'hide_when_empty', assignee: 'hide_when_empty' });
+    expect(rowNames()).toEqual(['status', 'priority', 'due']);
+    expect(screen.getByTestId('hidden-properties-toggle').textContent).toContain(
+      '1 hidden property',
+    );
+  });
+
+  it('counts several as properties, plural', () => {
+    setupWithVisibility({ assignee: 'hide', due: 'hide' });
+    expect(screen.getByTestId('hidden-properties-toggle').textContent).toContain(
+      '2 hidden properties',
+    );
+  });
+
+  it('sets visibility from the property menu, writing the type', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setupWithVisibility({});
+    await openMenu(user, 'Due');
+    await user.click(screen.getByTestId('property-menu-visibility'));
+    await user.click(screen.getByTestId('property-visibility-hide_when_empty'));
+
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
+    const fields = writtenFields(patchFrontmatter) as Record<string, { visibility?: string }>;
+    expect(fields.due.visibility).toBe('hide_when_empty');
+  });
+
+  // A Type doc should not carry the absence of an opinion.
+  it('deletes the key rather than writing the default back', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setupWithVisibility({ due: 'hide' });
+    await user.click(screen.getByTestId('hidden-properties-toggle'));
+    await openMenu(user, 'Due');
+    await user.click(screen.getByTestId('property-menu-visibility'));
+    await user.click(screen.getByTestId('property-visibility-show'));
+
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
+    const fields = writtenFields(patchFrontmatter) as Record<string, { visibility?: string }>;
+    expect('visibility' in fields.due).toBe(false);
+  });
+
+  it('shows which state a property is in without drilling in', async () => {
+    const user = userEvent.setup();
+    setupWithVisibility({ due: 'hide' });
+    await user.click(screen.getByTestId('hidden-properties-toggle'));
+    await openMenu(user, 'Due');
+    expect(screen.getByTestId('property-menu-visibility').textContent).toContain('Always hide');
+  });
+
+  // Dragging over a partial list must not scatter what it cannot see.
+  it('reorders against the full mapping, not the visible index', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setupWithVisibility({ priority: 'hide' });
+    expect(rowNames()).toEqual(['status', 'assignee', 'due']);
+
+    // Move `due` (visible slot 3) up one, to sit before `assignee`.
+    screen.getByRole('button', { name: /^Reorder Due,/ }).focus();
+    await user.keyboard('{ArrowUp}');
+
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
+    expect(Object.keys(writtenFields(patchFrontmatter))).toEqual([
+      'status',
+      'priority',
+      'due',
+      'assignee',
+    ]);
+  });
+});

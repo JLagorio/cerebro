@@ -91,7 +91,25 @@ export interface FieldDef {
   format?: FieldFormat;
   /** decimal places for numeric formats; defaults to 2 (trailing zeros trimmed). */
   precision?: number;
+  /**
+   * Whether the detail panel shows this property (M16.10). PER-PROPERTY, on
+   * the type — not per view. `ColumnSpec.hidden` answers a different
+   * question ("does THIS view show this column"), and a record panel has no
+   * view to read it from.
+   *
+   * Absent means `show`, so every vault that predates this reads unchanged.
+   */
+  visibility?: FieldVisibility;
 }
+
+/**
+ * Notion's three states, verbatim: Always show / Hide when empty / Always
+ * hide. `hide_when_empty` is the one that earns the model — a type with
+ * twenty optional properties shows a wall of "Empty" on every record
+ * otherwise, and per-view column toggles cannot fix a panel.
+ */
+export const FIELD_VISIBILITIES = ['show', 'hide_when_empty', 'hide'] as const;
+export type FieldVisibility = (typeof FIELD_VISIBILITIES)[number];
 
 export interface TypeDef {
   name: string;

@@ -450,7 +450,18 @@ export async function setFieldConfig(
   fieldName: string,
   config: Partial<
     Record<
-      'relation' | 'property' | 'calculate' | 'format' | 'precision' | 'target' | 'limit' | 'from',
+      | 'relation'
+      | 'property'
+      | 'calculate'
+      | 'format'
+      | 'precision'
+      | 'target'
+      | 'limit'
+      | 'from'
+      // M16.10. Pass null for the default ('show') so the key is deleted
+      // rather than written — a Type doc should not carry the absence of an
+      // opinion.
+      | 'visibility',
       unknown
     >
   >,

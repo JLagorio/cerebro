@@ -2,11 +2,16 @@ import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { MenuBack, MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
-import { duplicateFieldOnType, removeFieldFromType, renameFieldOnType } from '@/app/typeActions';
+import {
+  duplicateFieldOnType,
+  removeFieldFromType,
+  renameFieldOnType,
+  setFieldConfig,
+} from '@/app/typeActions';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { isLockedField } from '@/engine/typeCatalog';
-import type { FieldDef, Schema } from '@/engine/types';
+import type { FieldDef, FieldVisibility, Schema } from '@/engine/types';
 import { PropertyEditor } from '@/views/PropertyEditor';
 
 /**
@@ -21,15 +26,21 @@ import { PropertyEditor } from '@/views/PropertyEditor';
  *
  * Notion's order, verbatim: Rename · Edit property › · Comment · ─ · Property
  * visibility › · Duplicate property · Delete property · ─ · Customize layout.
- * Three are deliberately absent. **Comment** has no subsystem anywhere in this
+ * Two are deliberately absent. **Comment** has no subsystem anywhere in this
  * app — no type, no store, no IPC, no Rust command — so a menu row for it
- * would be a button that cannot work. **Property visibility** lands in M16.10,
- * which adds the model it reads. **Customize layout** is M16.11's stretch.
+ * would be a button that cannot work. **Customize layout** is M16.11's stretch.
  *
  * Every action here rewrites the TYPE, not this record: the name, kind and
  * options of a property are the type's, and every record of that type sees
  * the change. The footer says so rather than leaving it to be discovered.
  */
+/** Notion's three, verbatim and in its order. */
+const VISIBILITIES: { value: FieldVisibility; label: string; icon: string }[] = [
+  { value: 'show', label: 'Always show', icon: 'eye' },
+  { value: 'hide_when_empty', label: 'Hide when empty', icon: 'eye-off' },
+  { value: 'hide', label: 'Always hide', icon: 'ban' },
+];
+
 export function PropertyMenu({
   def,
   sourceType,
@@ -45,10 +56,11 @@ export function PropertyMenu({
   recordCount: number;
   onClose: () => void;
 }) {
-  const [step, setStep] = useState<'menu' | 'edit'>('menu');
+  const [step, setStep] = useState<'menu' | 'edit' | 'visibility'>('menu');
   const [draft, setDraft] = useState(humanize(def.name));
   const label = humanize(def.name);
   const locked = isLockedField(sourceType, def.name);
+  const visibility = def.visibility ?? 'show';
 
   const commitRename = () => {
     const next = draft.trim();
@@ -57,6 +69,34 @@ export function PropertyMenu({
     // false rather than throwing.
     void renameFieldOnType(sourceType, def.name, next);
   };
+
+  if (step === 'visibility') {
+    return (
+      <MenuSurface width={216}>
+        <MenuBack title="Property visibility" onBack={() => setStep('menu')} />
+        {VISIBILITIES.map((v) => (
+          <MenuItem
+            key={v.value}
+            icon={v.icon}
+            label={v.label}
+            checked={visibility === v.value}
+            testId={`property-visibility-${v.value}`}
+            onSelect={() => {
+              // null for the default, so a Type doc never carries the
+              // absence of an opinion.
+              void setFieldConfig(sourceType, def.name, {
+                visibility: v.value === 'show' ? null : v.value,
+              });
+              onClose();
+            }}
+          />
+        ))}
+        <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-[var(--n-400)]">
+          Hidden properties fold into an expander — they are still on the record.
+        </div>
+      </MenuSurface>
+    );
+  }
 
   if (step === 'edit') {
     return (
@@ -105,6 +145,14 @@ export function PropertyMenu({
         submenu
         testId="property-menu-edit"
         onSelect={() => setStep('edit')}
+      />
+      <MenuItem
+        icon="eye"
+        label="Property visibility"
+        hint={VISIBILITIES.find((v) => v.value === visibility)?.label}
+        submenu
+        testId="property-menu-visibility"
+        onSelect={() => setStep('visibility')}
       />
       <MenuItem
         icon="copy"

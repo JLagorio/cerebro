@@ -4,6 +4,9 @@ import {
   computeRollup,
   formatTimestamp,
   inferKindFromValue,
+  isEmptyForVisibility,
+  splitByVisibility,
+  visibilityDelta,
   validatePatch,
   validateValue,
 } from './properties';
@@ -240,5 +243,96 @@ describe('inferKindFromValue', () => {
   it('falls back to text for nothing at all', () => {
     expect(inferKindFromValue(null)).toBe('text');
     expect(inferKindFromValue(undefined)).toBe('text');
+  });
+});
+
+/**
+ * Per-property visibility (M16.10). Notion's three states are on the
+ * PROPERTY, not on a view: `ColumnSpec.hidden` answers "does this view show
+ * this column", and a record panel has no view to read it from.
+ */
+describe('splitByVisibility', () => {
+  const f = (name: string, visibility?: 'show' | 'hide_when_empty' | 'hide'): FieldDef => ({
+    name,
+    kind: 'text',
+    ...(visibility === undefined ? {} : { visibility }),
+  });
+
+  it('shows everything a vault that predates the model declares', () => {
+    const { shown, hidden } = splitByVisibility([f('a'), f('b')], () => true);
+    expect(shown.map((x) => x.name)).toEqual(['a', 'b']);
+    expect(hidden).toEqual([]);
+  });
+
+  it('folds an always-hidden property whether or not it has a value', () => {
+    const { shown, hidden } = splitByVisibility([f('a', 'hide'), f('b')], () => false);
+    expect(shown.map((x) => x.name)).toEqual(['b']);
+    expect(hidden.map((x) => x.name)).toEqual(['a']);
+  });
+
+  it('folds hide-when-empty only while it is empty', () => {
+    const fields = [f('filled', 'hide_when_empty'), f('blank', 'hide_when_empty')];
+    const { shown, hidden } = splitByVisibility(fields, (d) => d.name === 'blank');
+    expect(shown.map((x) => x.name)).toEqual(['filled']);
+    expect(hidden.map((x) => x.name)).toEqual(['blank']);
+  });
+
+  it('keeps declaration order inside each half', () => {
+    const { shown } = splitByVisibility([f('a'), f('b', 'hide'), f('c')], () => false);
+    expect(shown.map((x) => x.name)).toEqual(['a', 'c']);
+  });
+});
+
+describe('isEmptyForVisibility', () => {
+  it('treats a blank display as empty', () => {
+    expect(isEmptyForVisibility({ name: 'a', kind: 'text' }, '')).toBe(true);
+    expect(isEmptyForVisibility({ name: 'a', kind: 'text' }, 'x')).toBe(false);
+  });
+
+  // false is an answer, not a blank — hiding every unticked box would make
+  // the state unreachable from the panel.
+  it('never calls a checkbox empty', () => {
+    expect(isEmptyForVisibility({ name: 'done', kind: 'checkbox' }, '')).toBe(false);
+  });
+});
+
+/**
+ * Dragging over a panel that is only showing SOME of the declared order.
+ * Writing the visible index straight into the mapping would scatter the
+ * hidden properties around it.
+ */
+describe('visibilityDelta', () => {
+  const all = ['a', 'b', 'c', 'd'];
+
+  it('is the plain delta when everything is visible', () => {
+    expect(visibilityDelta(all, all, 'c', 0)).toBe(-2);
+    expect(visibilityDelta(all, all, 'a', 3)).toBe(3);
+  });
+
+  // 'b' is hidden between 'a' and 'c'. Dropping 'd' at visible slot 1 puts it
+  // immediately before 'c' — where the insertion line was drawn — so 'd' goes
+  // to mapping index 2, not to the visible index 1 which would jump it past
+  // the hidden 'b' as well.
+  it('lands beside the visible neighbour, not at the visible index', () => {
+    expect(visibilityDelta(all, ['a', 'c', 'd'], 'd', 1)).toBe(2 - 3);
+  });
+
+  it('leaves the hidden properties where they were', () => {
+    const order = ['a', 'b', 'c', 'd'];
+    const delta = visibilityDelta(order, ['a', 'c', 'd'], 'd', 1);
+    const next = [...order];
+    const [moved] = next.splice(order.indexOf('d'), 1);
+    next.splice(order.indexOf('d') + delta, 0, moved);
+    expect(next).toEqual(['a', 'b', 'd', 'c']);
+    // 'b' is still between 'a' and the rest, exactly where it was hidden.
+    expect(next.indexOf('b')).toBe(1);
+  });
+
+  it('past the last visible row lands after it', () => {
+    expect(visibilityDelta(all, ['a', 'c'], 'a', 2)).toBe(2);
+  });
+
+  it('is a no-op for a name that is not declared', () => {
+    expect(visibilityDelta(all, all, 'nope', 0)).toBe(0);
   });
 });

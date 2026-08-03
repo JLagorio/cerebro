@@ -1,11 +1,18 @@
 import React, { useRef, useState } from 'react';
 import { addPropertyToEntry, moveFieldOnType } from '@/app/typeActions';
+import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
-import { inferKindFromValue, visibleProperties } from '@/engine/properties';
+import {
+  inferKindFromValue,
+  isEmptyForVisibility,
+  splitByVisibility,
+  visibilityDelta,
+  visibleProperties,
+} from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -45,8 +52,16 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   );
 
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
-  const declared = typeDef?.fields ?? [];
-  const declaredNames = new Set(declared.map((f) => f.name));
+  const allDeclared = typeDef?.fields ?? [];
+  const declaredNames = new Set(allDeclared.map((f) => f.name));
+
+  // M16.10. Revealing folds the hidden rows back into the same list, which
+  // also makes the reorder mapping below the identity case.
+  const [revealed, setRevealed] = useState(false);
+  const { shown, hidden } = splitByVisibility(allDeclared, (f) =>
+    isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
+  );
+  const declared = revealed ? allDeclared : shown;
   const undeclared = visibleProperties([
     ...Object.keys(entry.properties),
     ...Object.keys(entry.relationships),
@@ -65,9 +80,17 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
     disabled: entry.type === null,
     labelFor: (id) => humanize(id),
     onReorder: (name, to) => {
-      const from = declared.findIndex((f) => f.name === name);
-      if (entry.type === null || from === -1 || from === to) return;
-      void moveFieldOnType(entry.type, name, to - from);
+      if (entry.type === null) return;
+      // The visible list can be a SUBSET of the declared order (M16.10), so
+      // the visible index is not the mapping index — writing it straight
+      // through would scatter the hidden properties around it.
+      const delta = visibilityDelta(
+        allDeclared.map((f) => f.name),
+        declared.map((f) => f.name),
+        name,
+        to,
+      );
+      if (delta !== 0) void moveFieldOnType(entry.type, name, delta);
     },
   });
 
@@ -108,6 +131,23 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           </PropertyRow>
         ))}
       </div>
+      {hidden.length > 0 && (
+        // Notion's expander. Hidden properties are still ON the record — they
+        // are folded, not dropped — so the panel says how many and opens them
+        // in place rather than sending anyone to a settings screen.
+        <button
+          type="button"
+          data-testid="hidden-properties-toggle"
+          aria-expanded={revealed}
+          onClick={() => setRevealed((v) => !v)}
+          className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+        >
+          <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={12} />
+          {revealed
+            ? `Hide ${hidden.length} ${hidden.length === 1 ? 'property' : 'properties'}`
+            : `${hidden.length} hidden ${hidden.length === 1 ? 'property' : 'properties'}`}
+        </button>
+      )}
       {undeclared.map((name) => (
         // A key the type no longer declares is still the user's data. It used
         // to render `String(value)` — "[object Object]" for a leftover

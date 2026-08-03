@@ -175,6 +175,69 @@ export const CREATABLE_PROPERTY_KINDS = PROPERTY_KINDS.filter((k) => k.legacy !=
 export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
   PROPERTY_KINDS.find((k) => k.kind === kind) ?? PROPERTY_KINDS[0];
 
+// --- Per-property visibility (M16.10) --------------------------------------
+
+/**
+ * Whether a property counts as absent for `hide_when_empty`.
+ *
+ * A checkbox is never empty: `false` is an answer, not a blank, and hiding
+ * every unticked box would make the state unreachable from the panel.
+ */
+export function isEmptyForVisibility(def: FieldDef, display: string): boolean {
+  return def.kind !== 'checkbox' && display === '';
+}
+
+/**
+ * Split declared fields into what a record panel shows and what it folds away
+ * behind the "N hidden properties" expander (M16.10).
+ *
+ * Per-property, on the type. `ColumnSpec.hidden` answers a different question
+ * — "does THIS view show this column" — and a record panel has no view to
+ * read it from.
+ */
+export function splitByVisibility(
+  fields: FieldDef[],
+  isEmpty: (def: FieldDef) => boolean,
+): { shown: FieldDef[]; hidden: FieldDef[] } {
+  const shown: FieldDef[] = [];
+  const hidden: FieldDef[] = [];
+  for (const f of fields) {
+    const v = f.visibility ?? 'show';
+    if (v === 'hide' || (v === 'hide_when_empty' && isEmpty(f))) hidden.push(f);
+    else shown.push(f);
+  }
+  return { shown, hidden };
+}
+
+/**
+ * The `moveFieldOnType` delta for dropping `id` into slot `toShownIndex` of a
+ * list that is only PART of the declared order (M16.10).
+ *
+ * Dragging over a panel with hidden properties would otherwise write the
+ * visible index straight into the full mapping and scatter the hidden ones.
+ * The row lands immediately before whichever visible row will occupy that
+ * slot, so the hidden properties around it keep their relative places.
+ */
+export function visibilityDelta(
+  all: string[],
+  shown: string[],
+  id: string,
+  toShownIndex: number,
+): number {
+  const from = all.indexOf(id);
+  if (from === -1) return 0;
+  const rest = all.filter((n) => n !== id);
+  const shownRest = shown.filter((n) => n !== id);
+  const anchor = shownRest[toShownIndex];
+  const at =
+    anchor !== undefined
+      ? rest.indexOf(anchor)
+      : shownRest.length === 0
+        ? rest.length
+        : rest.indexOf(shownRest[shownRest.length - 1]) + 1;
+  return at - from;
+}
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
 

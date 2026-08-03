@@ -3,12 +3,13 @@ import type {
   FieldDef,
   FieldKind,
   FieldOption,
+  FieldVisibility,
   ResolvedField,
   Schema,
   StatusDef,
   TypeDef,
 } from './types';
-import { FIELD_KINDS } from './types';
+import { FIELD_KINDS, FIELD_VISIBILITIES } from './types';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
 import { parseViewList } from './views';
@@ -96,6 +97,14 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   }
   if (typeof s.precision === 'number' && Number.isFinite(s.precision)) {
     def.precision = Math.max(0, Math.min(6, Math.trunc(s.precision)));
+  }
+  // M16.10. An unrecognised value is dropped rather than guessed at: a
+  // property nobody can find is worse than one shown when it need not be.
+  if (
+    typeof s.visibility === 'string' &&
+    (FIELD_VISIBILITIES as readonly string[]).includes(s.visibility)
+  ) {
+    def.visibility = s.visibility as FieldVisibility;
   }
   return def;
 }

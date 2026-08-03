@@ -11,7 +11,13 @@ import { FieldEditor, humanize } from '@/detail/FieldEditor';
 import { EscapeToClose } from '@/detail/FieldPopover';
 import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, PROPERTY_LABEL_W, ROW_ACTION } from '@/detail/PropertyRow';
-import { inferKindFromValue, visibleProperties } from '@/engine/properties';
+import {
+  inferKindFromValue,
+  isEmptyForVisibility,
+  splitByVisibility,
+  visibilityDelta,
+  visibleProperties,
+} from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
@@ -101,8 +107,15 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
   );
 
   const typeDef = entry.type !== null ? (schema.types.get(entry.type) ?? null) : null;
-  const declared = typeDef?.fields ?? [];
-  const declaredNames = new Set(declared.map((f) => f.name));
+  const allDeclared = typeDef?.fields ?? [];
+  const declaredNames = new Set(allDeclared.map((f) => f.name));
+
+  // M16.10, the same split the record panel makes.
+  const [revealed, setRevealed] = useState(false);
+  const { shown, hidden } = splitByVisibility(allDeclared, (f) =>
+    isEmptyForVisibility(f, schema.resolveField(entry, f.name).display),
+  );
+  const declared = revealed ? allDeclared : shown;
   const undeclaredScalars = visibleProperties(Object.keys(entry.properties)).filter(
     (k) => !declaredNames.has(k) && k !== 'type',
   );
@@ -142,9 +155,14 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
     disabled: entry.type === null,
     labelFor: (id) => humanize(id),
     onReorder: (name, to) => {
-      const from = declared.findIndex((f) => f.name === name);
-      if (entry.type === null || from === -1 || from === to) return;
-      void moveFieldOnType(entry.type, name, to - from);
+      if (entry.type === null) return;
+      const delta = visibilityDelta(
+        allDeclared.map((f) => f.name),
+        declared.map((f) => f.name),
+        name,
+        to,
+      );
+      if (delta !== 0) void moveFieldOnType(entry.type, name, delta);
     },
   });
 
@@ -241,6 +259,20 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             </PropertyRow>
           ))}
         </div>
+        {hidden.length > 0 && (
+          <button
+            type="button"
+            data-testid="hidden-properties-toggle"
+            aria-expanded={revealed}
+            onClick={() => setRevealed((v) => !v)}
+            className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          >
+            <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={12} />
+            {revealed
+              ? `Hide ${hidden.length} ${hidden.length === 1 ? 'property' : 'properties'}`
+              : `${hidden.length} hidden ${hidden.length === 1 ? 'property' : 'properties'}`}
+          </button>
+        )}
         {undeclaredScalars.map((name) => (
           <UndeclaredRow key={name} entry={entry} name={name} />
         ))}
