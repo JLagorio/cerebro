@@ -310,7 +310,8 @@ export type CardSize = (typeof CARD_SIZES)[number];
  * one (M16.22's gallery needs the same thing).
  *
  * `content` renders `Entry.snippet` — the first ~160 characters of the body,
- * which the scanner has produced since v1 and no surface has ever shown.
+ * which the scanner has produced since v1 and which, outside the Inbox
+ * queue's rows, no surface has shown.
  */
 export const CARD_PREVIEWS = ['none', 'content'] as const;
 export type CardPreview = (typeof CARD_PREVIEWS)[number];

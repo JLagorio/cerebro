@@ -281,7 +281,8 @@ function BoardCard({
       </div>
       <div className={`font-medium text-[var(--n-900)] ${metrics.title}`}>{entry.title}</div>
       {/* M16.20: Notion's "Card preview › Page content". `Entry.snippet` has
-          been produced by the scanner since v1 and rendered by nothing. */}
+          been produced by the scanner since v1 and, outside the Inbox
+          queue's rows, rendered nowhere. */}
       {presentation.cardPreview === 'content' && entry.snippet !== '' && (
         <p
           data-testid="card-preview"
