@@ -599,6 +599,77 @@ describe('serializeList', () => {
     });
   });
 
+  // M16.20 board card keys. Same rule as the axis keys: written only when
+  // set, so switching a board back to its defaults leaves the file as it was
+  // rather than storing three keys that say "the default".
+  describe('board card keys', () => {
+    const parse = (yaml: string) => presentationOf(parseListYaml('v', yaml));
+
+    it('round-trips cardSize, cardPreview, and colorColumns', () => {
+      const def = oneView(
+        {
+          name: 'Wall',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'board',
+          group: [{ field: 'status' }],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [{ field: 'status' }],
+          cardSize: 'large',
+          cardPreview: 'content',
+          colorColumns: true,
+        },
+      );
+      expect(parseListYaml('w', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('omits them entirely when unset', () => {
+      const yaml = serializeList(
+        oneView(
+          {
+            name: 'Grid',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: null, project: null },
+          },
+          { type: 'table', group: [], sort: [], columns: [] },
+        ),
+      );
+      expect(yaml).not.toContain('cardSize');
+      expect(yaml).not.toContain('cardPreview');
+      expect(yaml).not.toContain('colorColumns');
+    });
+
+    it('drops a card size it does not recognize rather than trusting it', () => {
+      expect(
+        parse('presentation:\n  type: board\n  cardSize: enormous\n').cardSize,
+      ).toBeUndefined();
+    });
+
+    // 'cover' is the one Notion offers and we cannot render — a record has no
+    // cover image. Accepting it here would put a value on disk that the board
+    // silently ignores forever.
+    it('drops a card preview it cannot render', () => {
+      expect(
+        parse('presentation:\n  type: board\n  cardPreview: cover\n').cardPreview,
+      ).toBeUndefined();
+    });
+
+    it('treats anything but true as colorColumns off', () => {
+      expect(parse('presentation:\n  type: board\n  colorColumns: false\n').colorColumns).toBe(
+        undefined,
+      );
+      expect(parse("presentation:\n  type: board\n  colorColumns: 'yes'\n").colorColumns).toBe(
+        undefined,
+      );
+    });
+  });
+
   describe('v1 → v2 presentation migration', () => {
     it('lifts groupBy, orderBy, visibleFields, and childrenVia into chains', () => {
       const view = parseListYaml(

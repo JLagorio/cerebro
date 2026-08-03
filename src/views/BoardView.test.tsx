@@ -202,6 +202,97 @@ describe('BoardView card properties (M16.19)', () => {
 });
 
 /**
+ * Card settings (M16.20).
+ *
+ * `Presentation` carried no card keys at all, so Notion's whole board panel —
+ * card size, card preview, colour columns — had nothing to write to and the
+ * board had nothing to read. `Entry.snippet` in particular has been produced
+ * by the scanner since v1 and rendered by no surface in the app.
+ */
+describe('BoardView card settings (M16.20)', () => {
+  const items = () =>
+    fixtureVault().filter(
+      (e) => e.path.startsWith('projects/onboarding/items/') && e.parseError === null,
+    );
+
+  const withSnippet = () =>
+    items().map((e) =>
+      e.path.endsWith('fld-1.md') ? { ...e, snippet: 'A first-run flow nobody has drawn yet.' } : e,
+    );
+
+  it('shows no preview until the view asks for one', () => {
+    const schema = buildSchema(fixtureVault());
+    render(<BoardView entries={withSnippet()} presentation={presentation} schema={schema} />);
+    expect(screen.queryByTestId('card-preview')).toBeNull();
+  });
+
+  it('previews the body when the view asks for page content', () => {
+    const schema = buildSchema(fixtureVault());
+    render(
+      <BoardView
+        entries={withSnippet()}
+        presentation={{ ...presentation, cardPreview: 'content' }}
+        schema={schema}
+      />,
+    );
+    expect(screen.getByTestId('card-preview').textContent).toBe(
+      'A first-run flow nobody has drawn yet.',
+    );
+  });
+
+  it('leaves a card with no body text alone rather than reserving empty space', () => {
+    const schema = buildSchema(fixtureVault());
+    render(
+      <BoardView
+        entries={items()}
+        presentation={{ ...presentation, cardPreview: 'content' }}
+        schema={schema}
+      />,
+    );
+    expect(screen.queryByTestId('card-preview')).toBeNull();
+  });
+
+  it('narrows the columns for small cards and widens them for large', () => {
+    const schema = buildSchema(fixtureVault());
+    const widthAt = (cardSize: 'small' | 'medium' | 'large') => {
+      cleanup();
+      render(
+        <BoardView
+          entries={items()}
+          presentation={{ ...presentation, cardSize }}
+          schema={schema}
+        />,
+      );
+      return screen.getAllByTestId('board-column')[0].style.width;
+    };
+    expect(widthAt('small')).toBe('240px');
+    expect(widthAt('medium')).toBe('280px');
+    expect(widthAt('large')).toBe('320px');
+  });
+
+  it('paints a column in its own colour only when the view says to', () => {
+    const schema = buildSchema(fixtureVault());
+    const { rerender } = render(
+      <BoardView entries={items()} presentation={presentation} schema={schema} />,
+    );
+    expect(screen.getAllByTestId('board-column')[0].querySelector('[data-tinted]')).toBeNull();
+    rerender(
+      <BoardView
+        entries={items()}
+        presentation={{ ...presentation, colorColumns: true }}
+        schema={schema}
+      />,
+    );
+    const body = screen.getAllByTestId('board-column')[0].querySelector('[data-tinted]');
+    expect(body).not.toBeNull();
+    // The status colours in the fixture are raw `var(--…)` values, which
+    // `resolveOptionColor` mixes rather than concatenating an alpha onto —
+    // `var(--n-500)22` is a declaration the browser drops (M16.12).
+    expect((body as HTMLElement).style.background).toContain('color-mix');
+  });
+});
+
+/**
  * The filtered empty state (M16.19).
  *
  * A board emptied by its own filters said "No items yet", which reads as "this

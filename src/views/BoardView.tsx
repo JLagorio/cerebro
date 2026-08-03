@@ -21,6 +21,7 @@ import { bandLevels } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import type {
+  CardSize,
   Entry,
   FieldKind,
   GroupNode,
@@ -44,6 +45,38 @@ export interface BoardViewProps {
 
 /** The key `groupEntries` pins the "No <field>" bucket under (see types.ts). */
 const NO_VALUE_KEY = '__none__';
+
+/**
+ * What each card size means, in one place (M16.20).
+ *
+ * Column width and card density move together on purpose: a 240px column
+ * with 14px type and 12px padding fits two words per line, so choosing "Small
+ * cards" and getting wide columns of cramped text would be the wrong half of
+ * the decision.
+ */
+const CARD_METRICS: Record<
+  CardSize,
+  { column: number; pad: string; title: string; clamp: string }
+> = {
+  small: {
+    column: 240,
+    pad: 'px-2.5 py-1.5',
+    title: 'text-[12.5px] leading-[17px]',
+    clamp: 'line-clamp-1',
+  },
+  medium: {
+    column: 280,
+    pad: 'px-[11px] py-[9px]',
+    title: 'text-[13px] leading-[18px]',
+    clamp: 'line-clamp-2',
+  },
+  large: {
+    column: 320,
+    pad: 'px-3.5 py-3',
+    title: 'text-[14px] leading-[20px]',
+    clamp: 'line-clamp-3',
+  },
+};
 
 /**
  * One drop target: a column, inside a lane when the board sub-groups.
@@ -191,6 +224,7 @@ function BoardCard({
   });
   const dragKeyDown = listeners?.onKeyDown as ((e: React.KeyboardEvent) => void) | undefined;
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
+  const metrics = CARD_METRICS[presentation.cardSize ?? 'medium'];
   // M16.19: the card shows what the view says it shows. It used to resolve
   // `priority` and `assignee` by NAME, so the shared Properties page — the eye
   // toggles every other layout obeys — was a visible no-op here, and a vault
@@ -235,7 +269,7 @@ function BoardCard({
         opacity: isDragging ? 0.6 : 1,
         zIndex: isDragging ? 20 : undefined,
       }}
-      className="relative cursor-pointer rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-[11px] py-[9px] shadow-[var(--shadow-xs)] hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)]"
+      className={`relative cursor-pointer rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-xs)] hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
     >
       <div className="mb-1 flex items-center gap-1.5">
         <span
@@ -245,9 +279,17 @@ function BoardCard({
           {key}
         </span>
       </div>
-      <div className="text-[13px] font-medium leading-[18px] text-[var(--n-900)]">
-        {entry.title}
-      </div>
+      <div className={`font-medium text-[var(--n-900)] ${metrics.title}`}>{entry.title}</div>
+      {/* M16.20: Notion's "Card preview › Page content". `Entry.snippet` has
+          been produced by the scanner since v1 and rendered by nothing. */}
+      {presentation.cardPreview === 'content' && entry.snippet !== '' && (
+        <p
+          data-testid="card-preview"
+          className={`m-0 mt-1 text-[11.5px] leading-[16px] text-[var(--n-500)] ${metrics.clamp}`}
+        >
+          {entry.snippet}
+        </p>
+      )}
       {chips.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
           {chips.map((c) => (
@@ -279,6 +321,14 @@ function BoardColumn({
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.path });
+  const metrics = CARD_METRICS[presentation.cardSize ?? 'medium'];
+  // M16.20 — Notion's "Color columns". A ghost or uncoloured column gets the
+  // neutral tint rather than nothing: half a board painted and half of it
+  // transparent reads as a rendering fault, not as a setting.
+  const tinted = presentation.colorColumns === true;
+  // `resolveOptionColor` answers neutral for a ghost or uncoloured column, so
+  // the tint is never a hex with an alpha suffix glued on (the M16.12 bug).
+  const tint = column.ghost ? 'var(--n-100)' : resolveOptionColor(column.color).tint;
 
   return (
     <div
@@ -287,7 +337,8 @@ function BoardColumn({
       // The droppable id, exposed so a test can prove the board never
       // registers two of them under one id (see BoardColumnNode).
       data-column-path={column.path}
-      className="w-[280px] flex-none"
+      className="flex-none"
+      style={{ width: metrics.column }}
     >
       <div className="flex items-center gap-[7px] px-1 pb-[9px]">
         <span
@@ -308,8 +359,11 @@ function BoardColumn({
       </div>
       <div
         ref={setNodeRef}
-        className="flex min-h-[60px] flex-col gap-2 rounded-[10px] p-0.5"
-        style={{ background: isOver ? 'var(--cortex-50)' : 'transparent' }}
+        data-tinted={tinted ? 'true' : undefined}
+        className={`flex min-h-[60px] flex-col gap-2 rounded-[10px] ${tinted ? 'p-1.5' : 'p-0.5'}`}
+        style={{
+          background: isOver ? 'var(--cortex-50)' : tinted ? tint : 'transparent',
+        }}
       >
         {column.entries.map((e) => (
           <BoardCard

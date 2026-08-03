@@ -288,6 +288,33 @@ export type ViewType = (typeof VIEW_TYPES)[number];
  */
 export type ChipStyle = 'plain' | 'type-icon';
 
+/**
+ * How big a board card is (M16.20) — Notion's Small / Medium / Large.
+ *
+ * It sets the column width and the card's density together, because those
+ * are one decision: a 240px column with roomy cards shows two of them.
+ * Absent means `medium`, which is the size every board rendered at before
+ * this was expressible, so no saved view changes appearance.
+ */
+export const CARD_SIZES = ['small', 'medium', 'large'] as const;
+export type CardSize = (typeof CARD_SIZES)[number];
+
+/**
+ * What a board card previews above its properties (M16.20).
+ *
+ * Notion offers None / Page cover / Page content. **Page cover is
+ * deliberately absent**: a record has no cover — `Entry` carries a per-TYPE
+ * icon and nothing per record — so the option would be a menu row that
+ * changes nothing on screen, which is the exact class of control this
+ * milestone exists to delete. It becomes offerable the day records carry
+ * one (M16.22's gallery needs the same thing).
+ *
+ * `content` renders `Entry.snippet` — the first ~160 characters of the body,
+ * which the scanner has produced since v1 and no surface has ever shown.
+ */
+export const CARD_PREVIEWS = ['none', 'content'] as const;
+export type CardPreview = (typeof CARD_PREVIEWS)[number];
+
 export interface Presentation {
   type: ViewType;
   /** Ordered grouping chain; empty = flat. */
@@ -305,6 +332,17 @@ export interface Presentation {
   titlePosition?: number;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
+  /** Board card density; omitted = 'medium'. */
+  cardSize?: CardSize;
+  /** Board card preview block; omitted = 'none'. */
+  cardPreview?: CardPreview;
+  /**
+   * Paint each board column in its own option colour (Notion's "Color
+   * columns"). Off unless asked for: the colour is already carried by the
+   * dot in the header, and ten tinted columns is a lot of paint to acquire
+   * by accident.
+   */
+  colorColumns?: boolean;
   /**
    * Date property placing records on the calendar/timeline/gantt axis. Omitted
    * means "infer it" — engine/schedule.ts picks the type's first daterange, or
