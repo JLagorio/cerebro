@@ -616,3 +616,92 @@ Commits: `type(scope): sentence (M16.<n>)`. One phase per commit where possible.
 Coverage thresholds in `vite.config.ts` ratchet **up** only. Never
 `--no-verify`. Plans are force-added (`git add -f`) because `docs/` is
 gitignored.
+
+---
+
+# Shipped — 2026-08-03
+
+All 28 phases are on `m16-notion-parity` (PR #8). **1830 vitest / 178 cargo /
+27 e2e**, lint + typecheck + prettier + rustfmt + clippy clean. Nine view
+kinds: table, list, board, calendar, gantt, timeline, **gallery, chart,
+dashboard**.
+
+Phases 3–7 were built by five agents in parallel git worktrees, then merged in
+four passes and re-verified in a live browser twice. Two rounds of fixes
+followed the verification (M16.29–M16.34).
+
+## What the plan got wrong
+
+- **M16.15's aggregate module did not exist when M16.27 needed it.** The chart
+  extracted `aggregateNumbers` out of `computeRollup` instead. Both now share it.
+- **A record has no cover.** The plan listed Notion's "Card preview › Page
+  cover" as parity for the board. `Entry` carries a per-TYPE icon and nothing
+  per record, so the option would have been an inert menu row. The parser
+  rejects `cover` if a file states it.
+- **`Entry.snippet` is not "rendered by nothing"** — `InboxPage` has shown it
+  since M4.
+- **The board's filtered empty state was not a `ViewCanvas` fix**; the prop had
+  to be added to `BoardView` and threaded.
+- **`newView` needed no `moveView` action** — both pages already had a persist
+  path.
+
+## Deliberately not built, with reasons
+
+- **Image previews / Gallery covers.** Needs `assetProtocol` enabled AND the
+  CSP widened. That is a deliberate change to what the webview may load and
+  deserves its own commit; a cover names its file instead of showing a broken
+  image, and says so in the settings panel.
+- **Date reminders on properties.** `DatePicker` has the UI and `remindAt`
+  computes the time, but nothing schedules or delivers a notification.
+  Shipping the toggle would promise what the app cannot do.
+- **Collapsing `date` and `daterange` into one kind.** Notion's model and the
+  honest end state, but `resolveDateField`, CalendarView, the timeline and the
+  settings pickers all key on the distinction.
+- **Created by / Last edited by.** No author exists in `Entry` or the Rust
+  scanner, and git yields a constant because of auto-checkpoint. The only
+  honest build is stamp-on-write from `uiStore.actorId`, whose real value is
+  **me vs the assistant** — something git cannot tell you. Awaiting a decision.
+- **Within-column card reorder and list row drag.** Needs `@dnd-kit/sortable`
+  (not installed) plus a manual-order key on the view — a model decision.
+- **Stacked/series charts.** A chart uses the first band level; a second would
+  have to become a stacked series, which is a different renderer.
+
+## Known open, all reported rather than dropped
+
+1. **A load limit changes a board's AXIS shape.** `groupEntries` derives ghost
+   and no-value buckets from the VISIBLE entries, so those columns vanish under
+   a limit while declared options survive at 0. Real design question: should the
+   axis follow all records or the loaded ones? Fixing it touches `groupTree` /
+   `buildRows` and four layouts.
+2. **`hideEmpty` wants a per-layout default** — a board needs empty columns as
+   drop targets, a table does not. Blocked on the capability catalog living in
+   `src/views/` while `engine/` must not import it.
+3. **Five `FixedBelowAnchor` surfaces** now register a layer but still have no
+   Escape of their own. Migrating them to `Popover` is the M16.1 backlog item.
+4. **Option COLOUR swatches** are missing in filter checklists — needs a swatch
+   prop on the shared `MenuItem`/`Dropdown`.
+5. **`ViewSettingsPanel` / `ViewSettingsDialog`** embed `FilterBuilder` with
+   unenriched fields, so a Status rule there is still a text box.
+6. **The title column can never wrap**, because `wrapAllColumns` only touches
+   `presentation.columns`, which excludes the implicit title column. Pre-dates
+   M16 but is more visible now the setting reads "Wrap all columns".
+7. **Filter and view-settings popovers carry no `role`** — invisible to the
+   accessibility tree.
+8. **`e2e/collections.spec.ts` "views: all six are reachable"** passes but is
+   stale; there are nine, and the three new kinds have no e2e coverage.
+9. **No demo-vault fixture** for gallery / chart / dashboard, deliberately —
+   editing it churns e2e assertions.
+
+## The incident worth remembering
+
+Three times during this milestone a commit titled **"old state"** deleted every
+tracked file. The cause is `GIT_DIR` inheritance, documented in full in
+`src-tauri/src/git/command.rs`: git exports `GIT_DIR` to its hooks, it outranks
+`Command::current_dir()`, and `git_command()` scrubbed nothing — so a test
+building a throwaway repo under `temp_dir()` staged and committed into this
+checkout instead, but only ever under `.husky/pre-push`.
+
+The dead end cost the most: a containment guard that asks git where it is
+CANNOT catch this, because `rev-parse --show-toplevel` reports the work tree
+(which follows cwd) while the commit goes where `GIT_DIR` says. One guard was
+shipped, and the wipe happened again with it in place.
