@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
-import { popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
+import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -99,6 +100,55 @@ describe('DetailPanel', () => {
     popLayer('some-popover');
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  /**
+   * Escape closed the wrong layer across the panel boundary (M16.29).
+   *
+   * Within the panel, precedence was already right: a property menu is a
+   * `Popover`, which registers a layer and swallows the keystroke, so Escape
+   * closed the menu and left the panel. Across the boundary it inverted. The
+   * View settings popover mounts through `FixedBelowAnchor` — the pre-M16.1
+   * positioner six surfaces still use — which registered nothing, so
+   * `hasLayers()` answered false with a popover open on screen and this panel
+   * took the keystroke. The record vanished and the popover was left floating
+   * over an empty canvas.
+   *
+   * The panel now registers a layer of its own and asks whether it is the
+   * innermost one, instead of asking whether anything at all is open.
+   */
+  it('leaves the record panel open when a popover outside it is on top', async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <DetailPanel />
+        {/* What ViewControlIcons mounts the View settings panel in. */}
+        <span style={{ position: 'relative' }}>
+          <FixedBelowAnchor onClose={() => {}}>
+            <div data-testid="view-settings">View settings</div>
+          </FixedBelowAnchor>
+        </span>
+      </div>,
+    );
+    await user.keyboard('{Escape}');
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+  });
+
+  // The other half: the panel is a layer, so it must stop being one the
+  // moment it closes — a stale entry would sit on top of every popover
+  // opened afterwards and eat their Escape instead.
+  it('leaves the stack when it closes', () => {
+    const { rerender } = render(<DetailPanel />);
+    expect(hasLayers()).toBe(true);
+    useUiStore.setState({ detailPath: null });
+    rerender(<DetailPanel />);
+    expect(hasLayers()).toBe(false);
+  });
+
+  it('is not a layer while it has no record to show', () => {
+    useUiStore.setState({ detailPath: null });
+    render(<DetailPanel />);
+    expect(hasLayers()).toBe(false);
   });
 
   it('renders nothing when no detail path is open', () => {

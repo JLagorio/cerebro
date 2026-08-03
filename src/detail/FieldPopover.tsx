@@ -3,6 +3,7 @@ import { resolveOptionColor } from '@/lib/swatch';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { useEscapeLayer } from '@/components/ui/Popover';
 
 /**
  * Escape dismisses THIS overlay and nothing behind it.
@@ -33,10 +34,29 @@ export function useEscapeToClose(onClose: () => void): void {
  * `relative` trigger wrapper and clamps them inside the viewport. Escapes
  * overflow containers (the doc side panel scrolls), which plain `absolute`
  * popovers cannot.
+ *
+ * It is also a LAYER (M16.29). `Popover` (M16.1) registers one; this older
+ * wrapper registered nothing, and the View settings panel, the view-tab menus,
+ * the chain builder and the sync badge all still mount through it. A whole
+ * family of dismissable surfaces was therefore invisible to the stack, so
+ * `hasLayers()` answered false while one of them was open on screen and the
+ * record panel's Escape handler closed the RECORD — leaving the popover over
+ * an empty canvas. Registering here fixes every one of them at once.
+ *
+ * Pass `onClose` and it takes the keystroke as well. Without one it still
+ * registers, because a surface the stack cannot see is a surface whose
+ * keystrokes land on whatever is behind it.
  */
-export function FixedBelowAnchor({ children }: { children: React.ReactNode }) {
+export function FixedBelowAnchor({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose?: () => void;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  useEscapeLayer(onClose);
   useLayoutEffect(() => {
     const node = ref.current;
     if (node === null) return;

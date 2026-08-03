@@ -19,7 +19,7 @@ import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { augmentDocPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
-import { hasLayers } from '@/components/ui/layers';
+import { isTopLayer, useLayer } from '@/components/ui/layers';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 
@@ -75,6 +75,46 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
   );
 }
 
+/**
+ * The record panel's own place in the layer stack (M16.29).
+ *
+ * The handler used to live in `DetailPanel` and ask `hasLayers()` — "is
+ * anything dismissable open anywhere" — which made the panel a bystander to
+ * its own keystroke rather than a participant in the stack. It got the answer
+ * wrong in both directions. False negatives: the pre-M16.1 popovers register
+ * nothing, so with the View settings panel open over a record, `hasLayers()`
+ * said false, this handler ran, and Escape closed the RECORD and left the
+ * popover floating over an empty canvas. And it could never say "the panel is
+ * the innermost thing", only "nothing else is open".
+ *
+ * It lives in a child so the layer mounts and unmounts with the OPEN panel —
+ * `DetailPanel`'s hooks run whether or not there is a record to show, and
+ * `useLayer` up there would park a permanent entry on the stack for a
+ * component rendering null. `Dialog` splits itself the same way and for the
+ * same reason. Rendered first inside the panel so it registers before
+ * anything the panel contains, since child effects run before their parent's.
+ */
+function DetailEscapeLayer({ onClose }: { onClose: () => void }) {
+  const id = useLayer();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Anything registered above this owns the keystroke.
+      if (!isTopLayer(id)) return;
+      // Two surfaces that are not layers yet and would otherwise lose their
+      // Escape to this one: QuickOpen sits over the whole window, and the
+      // inline diff renders INSIDE this panel, so the stack cannot tell it
+      // apart from the panel it is in.
+      const ui = useUiStore.getState();
+      if (ui.quickOpenVisible || ui.diffView !== null) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [id, onClose]);
+  return null;
+}
+
 export function DetailPanel() {
   const detailPath = useUiStore((s) => s.detailPath);
   const closeDetail = useUiStore((s) => s.closeDetail);
@@ -100,28 +140,6 @@ export function DetailPanel() {
     // handle until the new editor reports ready.
     editorRef.current = null;
   }, [entry?.path, entry?.title]);
-
-  // Escape closes the record panel only when the record panel is the
-  // innermost dismissable thing on screen. The effect cannot move below the
-  // null-guard (hooks are unconditional), so the guard lives in the handler:
-  // with nothing open it did close the panel out from under QuickOpen, the
-  // inline diff, and any modal — one keystroke dismissing two surfaces, and
-  // in the modal case dismissing the one the user could not see.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      const ui = useUiStore.getState();
-      if (ui.detailPath === null || ui.quickOpenVisible || ui.diffView !== null) return;
-      // Anything dismissable owns Escape first. This used to probe for
-      // `[role="dialog"]`, which only saw surfaces that happened to render
-      // that role — so the add-property panel, which renders none, was
-      // invisible and Escape inside it closed this whole panel (M16.1).
-      if (hasLayers()) return;
-      closeDetail();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [closeDetail]);
 
   if (!detailPath || !entry) return null;
 
@@ -189,6 +207,8 @@ export function DetailPanel() {
       // behind. Shrinking still works: the slot's cap wins, and 100% follows.
       style={{ width, maxWidth: '100%' }}
     >
+      {/* First, so the panel is on the stack before anything it contains. */}
+      <DetailEscapeLayer onClose={closeDetail} />
       <ResizeHandle
         label="Resize detail panel"
         side="left"

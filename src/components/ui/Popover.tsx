@@ -42,6 +42,55 @@ export interface DismissOptions {
 }
 
 /**
+ * A surface's place in the layer stack, and the Escape that belongs to it
+ * (M16.29).
+ *
+ * Split out of `useDismiss` for the surfaces that already own their own
+ * click-away. `FixedBelowAnchor` — the pre-M16.1 positioner six popovers
+ * still mount through, the View settings panel among them — registered no
+ * layer at all, so `hasLayers()` answered false with one of them open and the
+ * record panel took their Escape: the record closed and the popover was left
+ * floating over an empty canvas. They each render their own scrim with their
+ * own commit semantics, so `useDismiss` wholesale would silently rewrite what
+ * a click away from them does.
+ *
+ * `onClose` is optional on purpose. Registering is worth doing on its own:
+ * a surface the stack cannot see is a surface whose keystrokes land on
+ * whatever happens to be behind it.
+ *
+ * Returns the layer id, so a caller that also needs to know whether it is on
+ * top (a focus trap) can reuse it instead of registering a second layer and
+ * shadowing itself.
+ */
+export function useEscapeLayer(onClose: (() => void) | undefined): string {
+  const id = useLayer();
+  const latest = useRef(onClose);
+  latest.current = onClose;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Only the innermost surface reacts, so one keystroke closes one thing.
+      if (!isTopLayer(id)) return;
+      const close = latest.current;
+      // Registered but not listening: swallowing the key here would leave a
+      // surface whose Escape belongs to a sibling handler with none at all.
+      if (close === undefined) return;
+      // stopImmediatePropagation, not stopPropagation: sibling listeners on
+      // window would otherwise all still run — stopPropagation only governs
+      // travel between nodes, not other handlers on this one.
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      close();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [id]);
+
+  return id;
+}
+
+/**
  * Click-away and Escape for any dismissable surface (M16.1).
  *
  * Split out of `Popover` because not every surface is anchored — the
@@ -53,11 +102,9 @@ export interface DismissOptions {
  * second layer and shadowing itself.
  */
 export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissOptions): string {
-  const id = useLayer();
+  const id = useEscapeLayer(onEscape ?? onClose);
   const latest = useRef(onClose);
   latest.current = onClose;
-  const latestEscape = useRef(onEscape ?? onClose);
-  latestEscape.current = onEscape ?? onClose;
 
   // Outside press. Capture phase on pointerdown, not click: a click fires
   // after mouseup, by which time a drag that started inside and ended outside
@@ -84,22 +131,6 @@ export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissO
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [surfaceRef, anchorEl]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      // Only the innermost surface reacts, so one keystroke closes one thing.
-      if (!isTopLayer(id)) return;
-      // stopImmediatePropagation, not stopPropagation: sibling listeners on
-      // window would otherwise all still run — stopPropagation only governs
-      // travel between nodes, not other handlers on this one.
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      latestEscape.current();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [id]);
 
   return id;
 }

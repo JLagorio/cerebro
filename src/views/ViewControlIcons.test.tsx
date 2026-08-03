@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetLayers } from '@/components/ui/layers';
 import type { ColumnDef } from '@/engine/columns';
 import type { Presentation } from '@/engine/types';
 import { ViewControlIcons } from './ViewControlIcons';
@@ -75,6 +76,46 @@ describe('search within the view (M16.26)', () => {
   it('absent on a surface that cannot hold the query', () => {
     setup();
     expect(screen.queryByTestId('view-control-search')).toBeNull();
+  });
+});
+
+/**
+ * The View settings popover had a click-away scrim and no keyboard exit at
+ * all (M16.29). It mounts through `FixedBelowAnchor`, which registered no
+ * layer, so Escape fell past it to the record panel's handler behind it: the
+ * record closed and this popover was left floating over an empty canvas.
+ */
+describe('View settings dismissal', () => {
+  // Layers are module state; a case that leaves one pushed would make the
+  // isTopLayer check here pass or fail for the wrong reason.
+  beforeEach(() => resetLayers());
+
+  function openSettings() {
+    const onSettingsOpenChange = vi.fn();
+    setup({
+      settingsOpen: true,
+      onSettingsOpenChange,
+      settingsPanel: <div data-testid="settings-panel">settings</div>,
+    });
+    return onSettingsOpenChange;
+  }
+
+  it('closes on Escape', () => {
+    const onSettingsOpenChange = openSettings();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onSettingsOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps the keystroke away from whatever is behind it', () => {
+    const behind = vi.fn();
+    document.addEventListener('keydown', behind);
+    try {
+      openSettings();
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      expect(behind).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', behind);
+    }
   });
 });
 

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { FieldPopover } from '@/detail/FieldPopover';
+import { FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
+import { hasLayers, pushLayer, resetLayers } from '@/components/ui/layers';
 
 afterEach(cleanup);
 
@@ -85,5 +86,76 @@ describe('FieldPopover', () => {
     fireEvent.change(screen.getByPlaceholderText('Search…'), { target: { value: 'Blocked' } });
     fireEvent.click(screen.getByText('Blocked').closest('button')!);
     expect(onCreate).toHaveBeenCalledWith('Blocked');
+  });
+});
+
+/**
+ * The positioner six popovers still mount through, and the stack could not
+ * see any of them (M16.29).
+ *
+ * `Popover` (M16.1) registers a layer; this pre-M16.1 wrapper registered
+ * nothing, and the View settings panel, the view-tab menus, the chain builder
+ * and the sync badge all still render through it. So `hasLayers()` answered
+ * false with one of them open on screen, and the record panel's Escape
+ * handler — which asked exactly that question — closed the record instead,
+ * leaving the popover over an empty canvas.
+ *
+ * Registration is the fix; taking the keystroke is the caller's choice,
+ * because each of these surfaces already owns its own click-away scrim with
+ * its own commit semantics and `useDismiss` would rewrite that too.
+ */
+describe('FixedBelowAnchor', () => {
+  beforeEach(() => resetLayers());
+
+  it('registers as a layer for as long as it is mounted', () => {
+    const { unmount } = render(
+      <FixedBelowAnchor>
+        <div>panel</div>
+      </FixedBelowAnchor>,
+    );
+    expect(hasLayers()).toBe(true);
+    unmount();
+    expect(hasLayers()).toBe(false);
+  });
+
+  it('takes Escape when the caller gives it something to close', () => {
+    const onClose = vi.fn();
+    render(
+      <FixedBelowAnchor onClose={onClose}>
+        <div>panel</div>
+      </FixedBelowAnchor>,
+    );
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('stands down for whatever opened on top of it', () => {
+    const onClose = vi.fn();
+    render(
+      <FixedBelowAnchor onClose={onClose}>
+        <div>panel</div>
+      </FixedBelowAnchor>,
+    );
+    pushLayer('a-dialog-opened-from-inside');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('leaves the keystroke alone when it has no onClose to run', () => {
+    const behind = vi.fn();
+    document.addEventListener('keydown', behind);
+    try {
+      render(
+        <FixedBelowAnchor>
+          <div>panel</div>
+        </FixedBelowAnchor>,
+      );
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      // FieldEditor pairs this wrapper with a sibling `EscapeToClose`; a
+      // swallowed keystroke would leave that surface with no Escape at all.
+      expect(behind).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener('keydown', behind);
+    }
   });
 });

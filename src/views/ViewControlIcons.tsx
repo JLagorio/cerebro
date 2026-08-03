@@ -153,7 +153,12 @@ export function ViewControlIcons({
                 onWheel={() => onSettingsOpenChange(false)}
                 className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
               />
-              <FixedBelowAnchor>{settingsPanel}</FixedBelowAnchor>
+              {/* Escape closes THIS, which it never did (M16.29): the panel
+                  had a click-away scrim and no keyboard exit at all, so the
+                  keystroke fell through to the record panel behind it. */}
+              <FixedBelowAnchor onClose={() => onSettingsOpenChange(false)}>
+                {settingsPanel}
+              </FixedBelowAnchor>
             </>
           )}
         </span>
