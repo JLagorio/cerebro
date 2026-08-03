@@ -159,6 +159,11 @@ function parsePresentation(raw: unknown): Presentation {
     ...(typeof obj.dependencyField === 'string' && obj.dependencyField.trim() !== ''
       ? { dependencyField: obj.dependencyField.trim() }
       : {}),
+    // M16.23 grid chrome. Every one is stored only off its default, so a view
+    // file that never touched them stays byte-identical.
+    ...(obj.calendarSpan === 'week' ? { calendarSpan: 'week' as const } : {}),
+    ...(obj.showWeekends === false ? { showWeekends: false } : {}),
+    ...(obj.weekStart === 'monday' ? { weekStart: 'monday' as const } : {}),
   };
 }
 
@@ -563,6 +568,9 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
     ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
     ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
+    ...(p.calendarSpan === 'week' ? { calendarSpan: p.calendarSpan } : {}),
+    ...(p.showWeekends === false ? { showWeekends: false } : {}),
+    ...(p.weekStart === 'monday' ? { weekStart: p.weekStart } : {}),
   };
 }
 

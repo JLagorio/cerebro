@@ -1,24 +1,35 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
-import { toIsoDate } from '@/engine/dates';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
+import { addDays, toIsoDate } from '@/engine/dates';
 import {
   addMonths,
+  dayOffset,
   isSameMonth,
   monthGrid,
   monthLabel,
   onDay,
+  packWeek,
+  rescheduleValue,
   resolveDateField,
+  shiftSpan,
   spanOf,
   unscheduled,
+  visibleDays,
+  weekGrid,
+  weekLabel,
+  weekStartIndex,
   weekdayLabels,
 } from '@/engine/schedule';
 import { typeStyle } from '@/engine/typeCatalog';
 import type { ColumnDef } from '@/engine/columns';
-import type { Span } from '@/engine/schedule';
+import type { Scheduled } from '@/engine/schedule';
 import type { Entry, Presentation, Schema } from '@/engine/types';
+import { useVaultStore } from '@/stores/vaultStore';
+import { useTimeDrag } from '@/views/useTimeDrag';
 
 /** Single-day chips beyond this in one cell collapse into a "+N more" row. */
 const MAX_CHIPS = 3;
@@ -26,63 +37,8 @@ const MAX_CHIPS = 3;
 const LANE_H = 18;
 /** Bar lanes a week will draw before the rest fall into the day overflow. */
 const MAX_LANES = 3;
-
-/** One multi-day span, clipped to the week that draws it. */
-interface Segment {
-  entry: Entry;
-  span: Span;
-  /** Weekday column (0-6) the bar starts and ends in, inclusive. */
-  startCol: number;
-  endCol: number;
-  lane: number;
-  continuesLeft: boolean;
-  continuesRight: boolean;
-}
-
-/**
- * Lay a week's multi-day spans out as continuous bars.
- *
- * Every entry used to be re-rendered as its own chip in EVERY day it covered,
- * so a two-week item was drawn fourteen times and all 42 cells showed the same
- * three truncated titles plus a "+N more". Nothing said how long anything ran,
- * when it started, or which day was busier — the one question a month grid
- * exists to answer. Greedy lane packing: earliest start first, longest first
- * on a tie, each bar taking the first lane that is free at its start column.
- */
-function layoutWeek(spans: { entry: Entry; span: Span }[], days: string[]): Segment[] {
-  const weekStart = days[0];
-  const weekEnd = days[days.length - 1];
-  const inWeek = spans
-    .filter(({ span }) => span.end > span.start && span.start <= weekEnd && span.end >= weekStart)
-    .sort((a, b) =>
-      a.span.start === b.span.start
-        ? b.span.end.localeCompare(a.span.end)
-        : a.span.start.localeCompare(b.span.start),
-    );
-  const laneEnd: number[] = [];
-  return inWeek.map(({ entry, span }) => {
-    const from = days.indexOf(span.start);
-    const to = days.indexOf(span.end);
-    const startCol = span.start < weekStart || from === -1 ? 0 : from;
-    const endCol = span.end > weekEnd || to === -1 ? days.length - 1 : to;
-    let lane = laneEnd.findIndex((end) => end < startCol);
-    if (lane === -1) {
-      lane = laneEnd.length;
-      laneEnd.push(endCol);
-    } else {
-      laneEnd[lane] = endCol;
-    }
-    return {
-      entry,
-      span,
-      startCol,
-      endCol,
-      lane,
-      continuesLeft: span.start < weekStart,
-      continuesRight: span.end > weekEnd,
-    };
-  });
-}
+/** Minimum cell height, per span. A week has one row to fill, a month six. */
+const CELL_H = { month: 92, week: 420 };
 
 export interface CalendarViewProps {
   entries: Entry[];
@@ -97,11 +53,15 @@ export interface CalendarViewProps {
 }
 
 /**
- * Calendar (M10): the month grid.
+ * Calendar (M10): the month grid, and — since M16.23 — the week grid.
  *
  * A record appears on every day its span covers, so a two-week range reads as a
  * band across the weeks rather than as a single chip on its start date — which
  * is the whole reason a `daterange` is a distinct kind.
+ *
+ * Dragging a chip or a bar to another day WRITES the date property. Before
+ * M16.23 the only way to move something by a day was to open it and retype a
+ * date, which is the gesture a calendar exists to replace.
  */
 export function CalendarView({
   entries,
@@ -115,26 +75,70 @@ export function CalendarView({
   const [anchor, setAnchor] = useState(today);
   const [expanded, setExpanded] = useState<string | null>(null);
   const openPath = useOpenPath('in-place');
+  const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
 
-  const days = useMemo(() => monthGrid(anchor), [anchor]);
+  // A local override beats the stored setting, rather than the stored setting
+  // beating the control. The timeline's `presentation.zoom ?? local` shape
+  // means the in-view control goes dead the moment the value is persisted;
+  // this calendar has no way to persist at all (ViewCanvas hands it no
+  // presentation writer), so that shape would have made the toggle one-way.
+  const [spanOverride, setSpanOverride] = useState<'month' | 'week' | null>(null);
+  const span = spanOverride ?? presentation.calendarSpan ?? 'month';
+  const weekStart = weekStartIndex(presentation);
+  const showWeekends = presentation.showWeekends !== false;
+
+  const weeks = useMemo(() => {
+    if (span === 'week') return [weekGrid(anchor, weekStart)];
+    const days = monthGrid(anchor, weekStart);
+    return Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7));
+  }, [span, anchor, weekStart]);
+  const columns = useMemo(() => weekdayLabels(weekStart, showWeekends), [weekStart, showWeekends]);
+
   const dated = useMemo(
     () => entries.filter((e) => spanOf(e, dateField) !== null),
     [entries, dateField],
   );
   const undated = useMemo(() => unscheduled(entries, dateField), [entries, dateField]);
   const [showUndated, setShowUndated] = useState(false);
-  /** Each dated entry with its span resolved once — the layout needs both. */
-  const spans = useMemo(
-    () =>
-      dated
-        .map((entry) => ({ entry, span: spanOf(entry, dateField) as Span }))
-        .filter((s) => s.span !== null),
-    [dated, dateField],
-  );
-  const weeks = useMemo(
-    () => Array.from({ length: days.length / 7 }, (_, i) => days.slice(i * 7, i * 7 + 7)),
-    [days],
-  );
+
+  // The day the pointer went down on, so a drop can be read as a delta from it
+  // rather than as "wherever the record's own start happens to be".
+  const grabDay = useRef<string | null>(null);
+  const drag = useTimeDrag({
+    rowDays: 7,
+    disabled: dateField === null,
+    onCommit: (path, edge, days) => {
+      if (dateField === null) return;
+      const entry = dated.find((e) => e.path === path);
+      const current = entry === undefined ? null : spanOf(entry, dateField);
+      if (entry === undefined || current === null) return;
+      // The calendar only ever MOVES. Resizing needs an edge you can aim at,
+      // and a grid cell's edge is already the week's edge.
+      if (edge !== 'move') return;
+      const kind = dateKindOf(entry, dateField, schema);
+      void patchFrontmatter(entry.path, {
+        [dateField]: rescheduleValue(entry.properties[dateField], kind, shiftSpan(current, days)),
+      });
+    },
+  });
+
+  /** Each dated entry with its span resolved once, with the drag previewed. */
+  const spans: Scheduled[] = useMemo(() => {
+    const active = drag.drag;
+    return dated.flatMap((entry) => {
+      const resolved = spanOf(entry, dateField);
+      if (resolved === null) return [];
+      const preview =
+        active !== null && active.id === entry.path ? shiftSpan(resolved, active.days) : resolved;
+      return [{ entry, span: preview }];
+    });
+  }, [dated, dateField, drag.drag]);
+
+  /** Move the grid by one screenful of whatever it is showing. */
+  const step = (direction: -1 | 1) =>
+    setAnchor(span === 'week' ? addDays(anchor, direction * 7) : addMonths(anchor, direction));
+  const onScreen =
+    span === 'week' ? weekGrid(anchor, weekStart).includes(today) : isSameMonth(anchor, today);
 
   // No date property anywhere on this collection's type — the view cannot be
   // made to work by paging months, so say what would fix it.
@@ -153,30 +157,49 @@ export function CalendarView({
     );
   }
 
+  /** Spread onto anything draggable, remembering which day it was grabbed on. */
+  const grabProps = (path: string, day: string) => {
+    const handle = drag.handleProps(path);
+    return {
+      ...handle,
+      onPointerDown: (e: ReactPointerEvent) => {
+        grabDay.current = day;
+        handle.onPointerDown(e);
+      },
+    };
+  };
+
+  const openUnlessDragged = (path: string) => () => {
+    if (drag.consumeClick()) return;
+    openPath(path);
+  };
+
   return (
     <div
       data-testid="calendar-view"
       data-date-field={dateField}
+      data-span={span}
+      data-week-start={weekStart === 1 ? 'monday' : 'sunday'}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
       <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
         <IconButton
           icon="chevron-left"
-          label="Previous month"
-          onClick={() => setAnchor(addMonths(anchor, -1))}
+          label={span === 'week' ? 'Previous week' : 'Previous month'}
+          onClick={() => step(-1)}
         />
         <IconButton
           icon="chevron-right"
-          label="Next month"
-          onClick={() => setAnchor(addMonths(anchor, 1))}
+          label={span === 'week' ? 'Next week' : 'Next month'}
+          onClick={() => step(1)}
         />
         <span
           data-testid="calendar-month"
           className="ml-1 text-[13px] font-semibold text-[var(--n-900)]"
         >
-          {monthLabel(anchor)}
+          {span === 'week' ? weekLabel(weekGrid(anchor, weekStart)) : monthLabel(anchor)}
         </span>
-        {!isSameMonth(anchor, today) && (
+        {!onScreen && (
           <button
             type="button"
             onClick={() => setAnchor(today)}
@@ -186,6 +209,16 @@ export function CalendarView({
           </button>
         )}
         <span className="flex-1" />
+        <SegmentedControl
+          size="sm"
+          ariaLabel="Calendar span"
+          options={[
+            { value: 'month', label: 'Month', testId: 'calendar-span-month' },
+            { value: 'week', label: 'Week', testId: 'calendar-span-week' },
+          ]}
+          value={span}
+          onChange={(v) => setSpanOverride(v as 'month' | 'week')}
+        />
         {/* Honest about coverage: a calendar that silently omits a third of
             the collection looks complete and is not. */}
         {undated.length > 0 && (
@@ -209,8 +242,11 @@ export function CalendarView({
         )}
       </div>
 
-      <div className="grid flex-none grid-cols-7 border-b border-[var(--n-200)]">
-        {weekdayLabels().map((label) => (
+      <div
+        className="grid flex-none border-b border-[var(--n-200)]"
+        style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+      >
+        {columns.map((label) => (
           <div
             key={label}
             className="px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--n-500)]"
@@ -221,8 +257,9 @@ export function CalendarView({
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto">
-        {weeks.map((days) => {
-          const segments = layoutWeek(spans, days);
+        {weeks.map((week) => {
+          const visible = visibleDays(week, showWeekends);
+          const segments = packWeek(spans, week, visible);
           const drawn = segments.filter((s) => s.lane < MAX_LANES);
           const spilled = segments.filter((s) => s.lane >= MAX_LANES);
           const lanes = Math.min(
@@ -230,30 +267,43 @@ export function CalendarView({
             MAX_LANES,
           );
           return (
-            <div key={days[0]} className="relative grid grid-cols-7">
-              {days.map((day, col) => {
-                const inMonth = isSameMonth(day, anchor);
+            <div
+              key={week[0]}
+              className="relative grid"
+              style={{ gridTemplateColumns: `repeat(${visible.length}, minmax(0, 1fr))` }}
+            >
+              {visible.map((day, col) => {
+                const inMonth = span === 'week' || isSameMonth(day, anchor);
                 // The cell stack is single-day items ONLY, plus whatever
                 // spilled past the lane cap — a bar is not repeated as a chip.
                 const singles = spans
-                  .filter(({ span }) => span.start === span.end && span.start === day)
-                  .map(({ entry }) => entry);
+                  .filter((s) => s.span.start === s.span.end && s.span.start === day)
+                  .map((s) => s.entry);
                 const overflowed = spilled
                   .filter((s) => s.startCol <= col && s.endCol >= col)
                   .map((s) => s.entry);
                 const stack = [...singles, ...overflowed];
                 const showAll = expanded === day;
-                const visible = showAll ? stack : stack.slice(0, MAX_CHIPS);
+                const shown = showAll ? stack : stack.slice(0, MAX_CHIPS);
                 return (
                   <div
                     key={day}
                     data-testid="calendar-day"
                     data-day={day}
                     data-count={onDay(dated, dateField, day).length}
+                    // Where a release would land. `pointerover` and not
+                    // `pointerenter`: React derives enter from over/out at the
+                    // root, so a dispatched `pointerenter` reaches no handler.
+                    onPointerOver={() => {
+                      if (grabDay.current === null) return;
+                      drag.hover(dayOffset({ start: grabDay.current, end: grabDay.current }, day));
+                    }}
                     className={[
-                      'group/day flex min-h-[92px] min-w-0 flex-col gap-0.5 border-b border-r border-[var(--n-100)] p-1',
+                      'group/day flex min-w-0 flex-col gap-0.5 border-b border-r border-[var(--n-100)] p-1',
                       inMonth ? '' : 'bg-[var(--n-25)]',
+                      drag.drag !== null ? 'hover:bg-[var(--cortex-50)]' : '',
                     ].join(' ')}
+                    style={{ minHeight: CELL_H[span] }}
                   >
                     <div className="flex flex-none items-center gap-1">
                       <span
@@ -275,7 +325,7 @@ export function CalendarView({
                         same height, so the bars painted over the row land in
                         the gap rather than on top of a chip. */}
                     <div aria-hidden className="flex-none" style={{ height: lanes * LANE_H }} />
-                    {visible.map((entry) => {
+                    {shown.map((entry) => {
                       const style = typeStyle(entry.type, schema);
                       return (
                         <button
@@ -283,22 +333,29 @@ export function CalendarView({
                           type="button"
                           data-testid="calendar-chip"
                           data-path={entry.path}
-                          onClick={() => openPath(entry.path)}
+                          {...grabProps(entry.path, day)}
+                          onClick={openUnlessDragged(entry.path)}
                           title={entry.title}
-                          className="flex min-w-0 items-center gap-1 rounded border-0 bg-[var(--n-50)] px-1 py-px text-left text-[11.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+                          aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
+                          className={[
+                            'flex min-w-0 touch-none select-none items-center gap-1 rounded border-0 bg-[var(--n-50)] px-1 py-px text-left text-[11.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]',
+                            drag.drag?.id === entry.path
+                              ? 'opacity-60 ring-1 ring-[var(--cortex-500)]'
+                              : '',
+                          ].join(' ')}
                         >
                           <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
                           <span className="min-w-0 flex-1 truncate">{entry.title}</span>
                         </button>
                       );
                     })}
-                    {stack.length > visible.length && (
+                    {stack.length > shown.length && (
                       <button
                         type="button"
                         onClick={() => setExpanded(day)}
                         className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-[var(--n-500)] hover:text-[var(--n-800)]"
                       >
-                        {`+${stack.length - visible.length} more`}
+                        {`+${stack.length - shown.length} more`}
                       </button>
                     )}
                     {showAll && stack.length > MAX_CHIPS && (
@@ -326,20 +383,23 @@ export function CalendarView({
                   const style = typeStyle(seg.entry.type, schema);
                   return (
                     <button
-                      key={`${seg.entry.path}:${days[0]}`}
+                      key={`${seg.entry.path}:${week[0]}`}
                       type="button"
                       data-testid="calendar-bar"
                       data-path={seg.entry.path}
-                      onClick={() => openPath(seg.entry.path)}
+                      {...grabProps(seg.entry.path, visible[seg.startCol])}
+                      onClick={openUnlessDragged(seg.entry.path)}
                       title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
+                      aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}. Arrow keys move it.`}
                       className={[
-                        'pointer-events-auto absolute flex items-center gap-1 overflow-hidden border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]',
+                        'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]',
                         seg.continuesLeft ? 'border-l-0' : 'rounded-l-[5px]',
                         seg.continuesRight ? 'border-r-0' : 'rounded-r-[5px]',
+                        drag.drag?.id === seg.entry.path ? 'opacity-70' : '',
                       ].join(' ')}
                       style={{
-                        left: `calc(${(seg.startCol / 7) * 100}% + 3px)`,
-                        width: `calc(${((seg.endCol - seg.startCol + 1) / 7) * 100}% - 6px)`,
+                        left: `calc(${(seg.startCol / visible.length) * 100}% + 3px)`,
+                        width: `calc(${((seg.endCol - seg.startCol + 1) / visible.length) * 100}% - 6px)`,
                         top: seg.lane * LANE_H,
                         height: LANE_H - 3,
                       }}
@@ -390,6 +450,22 @@ export function CalendarView({
       )}
     </div>
   );
+}
+
+/**
+ * Which shape a reschedule writes back into.
+ *
+ * The declared kind decides, because the schema is what the next read
+ * validates against. An UNDECLARED field keeps whatever shape is already on
+ * disk instead of being normalised to a scalar — a hand-written `{start, end}`
+ * that nothing declares is still a range, and flattening it on a drag would
+ * delete the end date as a side effect of moving the record by a day.
+ */
+export function dateKindOf(entry: Entry, field: string, schema: Schema): 'date' | 'daterange' {
+  const declared = schema.resolveField(entry, field).def?.kind;
+  if (declared === 'date' || declared === 'daterange') return declared;
+  const raw: unknown = entry.properties[field];
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? 'daterange' : 'date';
 }
 
 /**

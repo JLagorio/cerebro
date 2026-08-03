@@ -320,6 +320,15 @@ export interface Presentation {
    * guess here draws a schedule that isn't the one the data states.
    */
   dependencyField?: string;
+  /** How much of the calendar one screen holds. Omitted = a month (M16.23). */
+  calendarSpan?: 'month' | 'week';
+  /** False drops Saturday and Sunday from the grid. Stored only when false. */
+  showWeekends?: boolean;
+  /**
+   * The weekday a grid row begins on. A name, not an index: a vault is edited
+   * by hand, and `weekStart: 1` is a number you have to know the convention for.
+   */
+  weekStart?: 'sunday' | 'monday';
 }
 
 /**

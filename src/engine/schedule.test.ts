@@ -17,11 +17,19 @@ import {
   monthStart,
   onDay,
   overlaps,
+  packWeek,
   PX_PER_DAY,
+  rescheduleValue,
+  resizeSpan,
   resolveDateField,
+  shiftSpan,
   spanBounds,
   spanOf,
   unscheduled,
+  visibleDays,
+  weekGrid,
+  weekLabel,
+  weekStartIndex,
   weekdayLabels,
 } from './schedule';
 import { makeEntry } from './testHelpers';
@@ -208,6 +216,212 @@ describe('month grid', () => {
     expect(onDay([e, other], 'w', '2026-07-02').map((x) => x.path)).toEqual(['a.md']);
     expect(onDay([e, other], 'w', '2026-07-03').map((x) => x.path)).toEqual(['a.md', 'b.md']);
     expect(onDay([e, other], 'w', '2026-07-04')).toEqual([]);
+  });
+});
+
+/**
+ * The week grid and the weekday settings (M16.23).
+ *
+ * `monthGrid` took a `weekStart` from the day it was written and was called
+ * with no argument from both of its two call sites, so the parameter was a
+ * setting nothing could reach.
+ */
+describe('week grid and weekday settings', () => {
+  it('gives the seven days of the week a date falls in', () => {
+    // 2026-08-12 is a Wednesday.
+    expect(weekGrid('2026-08-12', 0)[0]).toBe('2026-08-09');
+    expect(weekGrid('2026-08-12', 1)[0]).toBe('2026-08-10');
+    expect(weekGrid('2026-08-12')).toHaveLength(7);
+  });
+
+  it('reads the week start off the view as a name, not an index', () => {
+    expect(weekStartIndex(pres())).toBe(0);
+    expect(weekStartIndex(pres({ weekStart: 'sunday' }))).toBe(0);
+    expect(weekStartIndex(pres({ weekStart: 'monday' }))).toBe(1);
+  });
+
+  it('drops weekends entirely rather than narrowing them', () => {
+    const week = weekGrid('2026-08-12', 0); // Sun 9 → Sat 15
+    expect(visibleDays(week, true)).toHaveLength(7);
+    expect(visibleDays(week, false)).toEqual([
+      '2026-08-10',
+      '2026-08-11',
+      '2026-08-12',
+      '2026-08-13',
+      '2026-08-14',
+    ]);
+  });
+
+  it('labels the weekday header to match the columns it heads', () => {
+    expect(weekdayLabels(0, false)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    expect(weekdayLabels(1, false)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    expect(weekdayLabels(1, true)[6]).toBe('Sun');
+  });
+
+  it('names the week, repeating the month only when the week crosses one', () => {
+    expect(weekLabel(weekGrid('2026-08-12', 0))).toBe('Aug 9 – 15, 2026');
+    expect(weekLabel(weekGrid('2026-09-02', 0))).toBe('Aug 30 – Sep 5, 2026');
+    expect(weekLabel([])).toBe('');
+  });
+});
+
+/**
+ * Bar packing (M16.23) — moved out of CalendarView so the column arithmetic
+ * can be tested without a DOM, and generalised because columns and calendar
+ * days stopped being the same thing once weekends could be hidden.
+ */
+describe('packWeek', () => {
+  const week = weekGrid('2026-08-12', 0); // Sun Aug 9 → Sat Aug 15
+  const workdays = visibleDays(week, false);
+  const item = (path: string, start: string, end: string) => ({
+    entry: makeEntry({ path }),
+    span: { start, end },
+  });
+
+  it('ignores single-day records — those are chips, not bars', () => {
+    expect(packWeek([item('a.md', '2026-08-11', '2026-08-11')], week, week)).toEqual([]);
+  });
+
+  it('clips a span to the week and marks which ends continue', () => {
+    const [seg] = packWeek([item('a.md', '2026-08-06', '2026-08-20')], week, week);
+    expect(seg.startCol).toBe(0);
+    expect(seg.endCol).toBe(6);
+    expect(seg.continuesLeft).toBe(true);
+    expect(seg.continuesRight).toBe(true);
+  });
+
+  it('packs overlapping spans into distinct lanes, longest first on a tie', () => {
+    const segs = packWeek(
+      [item('a.md', '2026-08-10', '2026-08-12'), item('b.md', '2026-08-10', '2026-08-14')],
+      week,
+      week,
+    );
+    expect(segs.map((s) => s.entry.path)).toEqual(['b.md', 'a.md']);
+    expect(segs.map((s) => s.lane)).toEqual([0, 1]);
+  });
+
+  it('reuses a lane once the bar in it has ended', () => {
+    const segs = packWeek(
+      [item('a.md', '2026-08-09', '2026-08-10'), item('b.md', '2026-08-12', '2026-08-14')],
+      week,
+      week,
+    );
+    expect(segs.map((s) => s.lane)).toEqual([0, 0]);
+  });
+
+  it('columns a weekend-spanning bar against the VISIBLE days', () => {
+    // Sat 15 → Tue 18. The old `days.indexOf(span.start)` returned -1 for a
+    // Saturday start and fell back to column 0, drawing a bar that began on
+    // Monday morning — on a day the record does not cover.
+    const nextWeek = weekGrid('2026-08-17', 0);
+    const [seg] = packWeek(
+      [item('a.md', '2026-08-15', '2026-08-18')],
+      nextWeek,
+      visibleDays(nextWeek, false),
+    );
+    expect(seg.startCol).toBe(0); // Mon 17
+    expect(seg.endCol).toBe(1); // Tue 18
+    expect(seg.continuesLeft).toBe(true);
+  });
+
+  it('drops a span that falls entirely on hidden days', () => {
+    // Sat 15 → Sun 16 with weekends off has no column to occupy, and
+    // inventing one puts the record on a day it does not cover.
+    expect(packWeek([item('a.md', '2026-08-15', '2026-08-16')], week, workdays)).toEqual([]);
+  });
+
+  it('returns nothing when every column is hidden', () => {
+    expect(packWeek([item('a.md', '2026-08-10', '2026-08-14')], week, [])).toEqual([]);
+  });
+});
+
+/**
+ * Moving a record on the axis (M16.23/M16.24). Writing the value back is the
+ * half a drag gesture cannot fake: the shape has to survive its own schema.
+ */
+describe('reschedule', () => {
+  it('shifts a span without changing its duration', () => {
+    expect(shiftSpan({ start: '2026-08-10', end: '2026-08-14' }, 3)).toEqual({
+      start: '2026-08-13',
+      end: '2026-08-17',
+    });
+    expect(shiftSpan({ start: '2026-08-01', end: '2026-08-01' }, -2)).toEqual({
+      start: '2026-07-30',
+      end: '2026-07-30',
+    });
+  });
+
+  it('resizes one endpoint and holds the other', () => {
+    const span = { start: '2026-08-10', end: '2026-08-14' };
+    expect(resizeSpan(span, 'start', -2)).toEqual({ start: '2026-08-08', end: '2026-08-14' });
+    expect(resizeSpan(span, 'end', 3)).toEqual({ start: '2026-08-10', end: '2026-08-17' });
+  });
+
+  it('clamps rather than inverting — a backwards span reads back as a milestone', () => {
+    const span = { start: '2026-08-10', end: '2026-08-14' };
+    expect(resizeSpan(span, 'start', 30)).toEqual({ start: '2026-08-14', end: '2026-08-14' });
+    expect(resizeSpan(span, 'end', -30)).toEqual({ start: '2026-08-10', end: '2026-08-10' });
+  });
+
+  it('writes a scalar for a date field and a mapping for a daterange', () => {
+    expect(rescheduleValue('2026-08-10', 'date', { start: '2026-08-12', end: '2026-08-12' })).toBe(
+      '2026-08-12',
+    );
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: '2026-08-14' }, 'daterange', {
+        start: '2026-08-12',
+        end: '2026-08-16',
+      }),
+    ).toEqual({ start: '2026-08-12', end: '2026-08-16' });
+  });
+
+  it('carries the time through the move', () => {
+    // A 9:00 standup dragged to Thursday is still at 9:00. Dropping the time
+    // en route would silently reschedule the meeting as well as the day.
+    expect(
+      rescheduleValue('2026-08-10 09:00', 'date', { start: '2026-08-13', end: '2026-08-13' }),
+    ).toBe('2026-08-13 09:00');
+    expect(
+      rescheduleValue({ start: '2026-08-10 09:00', end: '2026-08-10 17:30' }, 'daterange', {
+        start: '2026-08-13',
+        end: '2026-08-13',
+      }),
+    ).toEqual({ start: '2026-08-13 09:00', end: '2026-08-13 17:30' });
+  });
+
+  it('leaves an open-ended range open when it is only moved', () => {
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: null }, 'daterange', {
+        start: '2026-08-12',
+        end: '2026-08-12',
+      }),
+    ).toEqual({ start: '2026-08-12', end: null });
+  });
+
+  it('gives an open-ended range a real end once one is dragged out', () => {
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: null }, 'daterange', {
+        start: '2026-08-10',
+        end: '2026-08-14',
+      }),
+    ).toEqual({ start: '2026-08-10', end: '2026-08-14' });
+  });
+
+  it('never writes `{start,end}` into a plain date field, whatever it is handed', () => {
+    // The schema would reject the mapping on the very next read, so a drag
+    // that produced one would fail the write it had just optimistically shown.
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: '2026-08-14' }, 'date', {
+        start: '2026-08-12',
+        end: '2026-08-16',
+      }),
+    ).toBe('2026-08-12');
+  });
+
+  it('schedules a record whose field was empty', () => {
+    expect(rescheduleValue(undefined, 'date', { start: '2026-08-12', end: '2026-08-12' })).toBe(
+      '2026-08-12',
+    );
   });
 });
 
