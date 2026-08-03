@@ -1,4 +1,5 @@
 import { parse, stringify } from 'yaml';
+import { parseAggregateCalc } from './aggregate';
 import type {
   ChildrenSpec,
   ChipStyle,
@@ -128,6 +129,7 @@ export const MAX_GROUP_DEPTH = 3;
  */
 function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
+  const titleCalc = parseAggregateCalc(obj.titleCalc);
   return {
     type: parseViewType(obj.type),
     group: parseGroupChain(obj),
@@ -147,6 +149,7 @@ function parsePresentation(raw: unknown): Presentation {
     obj.titlePosition > 0
       ? { titlePosition: obj.titlePosition }
       : {}),
+    ...(titleCalc !== null ? { titleCalc } : {}),
     ...(obj.chips === 'plain' || obj.chips === 'type-icon'
       ? { chips: obj.chips as ChipStyle }
       : {}),
@@ -289,6 +292,8 @@ function parseColumns(obj: Record<string, unknown>): ColumnSpec[] {
         if (typeof c.width === 'number' && Number.isFinite(c.width)) spec.width = c.width;
         if (c.hidden === true) spec.hidden = true;
         if (c.wrap === true) spec.wrap = true;
+        const calc = parseAggregateCalc(c.calc);
+        if (calc !== null) spec.calc = calc;
         return spec;
       })
       .filter((c): c is ColumnSpec => c !== null);
@@ -557,6 +562,7 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.titlePosition !== undefined && p.titlePosition > 0
       ? { titlePosition: p.titlePosition }
       : {}),
+    ...(p.titleCalc !== undefined ? { titleCalc: p.titleCalc } : {}),
     ...(p.chips !== undefined ? { chips: p.chips } : {}),
     // M10 axis configuration — written only when set, so a table's YAML
     // does not carry three keys about date axes it has no use for.

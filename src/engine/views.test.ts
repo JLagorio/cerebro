@@ -362,6 +362,28 @@ describe('views', () => {
     expect(parseListYaml('styled', serializeList(def)).definition).toEqual(def);
   });
 
+  it('round-trips the footer calculations, per column and on the name column', () => {
+    const def = parseListYaml(
+      'totals',
+      'views:\n  - { id: v, presentation: { type: table, titleCalc: count_all, columns: [{ field: cost, calc: sum }] } }\n',
+    ).definition;
+    expect(def.views[0].presentation.titleCalc).toBe('count_all');
+    expect(def.views[0].presentation.columns[0].calc).toBe('sum');
+    expect(parseListYaml('totals', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('drops a calculation it cannot compute rather than storing it', () => {
+    // A hand-edited view file naming `median` must degrade to "no
+    // calculation"; letting it through would reach `aggregate`'s exhaustive
+    // guard with a value the union says cannot exist.
+    const def = parseListYaml(
+      'bogus',
+      'views:\n  - { id: v, presentation: { titleCalc: median, columns: [{ field: cost, calc: mode }] } }\n',
+    ).definition;
+    expect(def.views[0].presentation.titleCalc).toBeUndefined();
+    expect(def.views[0].presentation.columns[0].calc).toBeUndefined();
+  });
+
   it('drops a chip style it does not recognize rather than trusting it', () => {
     const def = parseListYaml(
       'bad',

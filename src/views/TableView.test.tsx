@@ -238,6 +238,110 @@ describe('TableView column resizing (M11)', () => {
 });
 
 /**
+ * The calculation footer (M16.15).
+ *
+ * There was no footer element at all and no aggregate module in the engine, so
+ * the single most-used question about a column of numbers — what do they add
+ * up to — could not be asked anywhere in the app.
+ */
+describe('TableView calculation footer (M16.15)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+  });
+
+  function footer(columns: Presentation['columns'], extra: Partial<Presentation> = {}) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const onColumnsChange = vi.fn();
+    const onPresentationChange = vi.fn();
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, columns, ...extra }}
+        schema={schema}
+        fields={[
+          ...(schema.types.get('Work item')?.fields ?? []),
+          { name: 'estimate', kind: 'number' },
+        ]}
+        onColumnsChange={onColumnsChange}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    return { onColumnsChange, onPresentationChange };
+  }
+
+  it('shows a footer cell per column, blank until one is configured', () => {
+    footer([{ field: 'status' }, { field: 'priority' }]);
+    expect(screen.getByTestId('table-footer')).toBeTruthy();
+    // Notion's resting state: the offer is there, the number is not. A table
+    // that volunteers nine totals nobody asked for is noise.
+    expect(screen.getByTestId('calc-status').textContent).toBe('Calculate');
+  });
+
+  it('computes the configured calculation over the rows on screen', () => {
+    const { onColumnsChange } = footer([{ field: 'status', calc: 'count_all' }]);
+    const items = fixtureVault().filter((e) => e.type === 'Work item');
+    expect(screen.getByTestId('calc-status').textContent).toContain(String(items.length));
+    expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+
+  it('persists the choice to the column, not to component state', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = footer([{ field: 'status' }]);
+    await user.click(screen.getByTestId('calc-status'));
+    await user.click(screen.getByTestId('calc-option-count_empty'));
+    expect(onColumnsChange.mock.calls[0][0]).toContainEqual({
+      field: 'status',
+      calc: 'count_empty',
+    });
+  });
+
+  it('None clears the key rather than storing a "none" calculation', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = footer([{ field: 'status', calc: 'count_all' }]);
+    await user.click(screen.getByTestId('calc-status'));
+    await user.click(screen.getByTestId('calc-option-none'));
+    expect(onColumnsChange.mock.calls[0][0]).toEqual([{ field: 'status' }]);
+  });
+
+  it('offers Sum on a number column and withholds it from a select', async () => {
+    const user = userEvent.setup();
+    footer([{ field: 'estimate' }, { field: 'status' }]);
+    await user.click(screen.getByTestId('calc-estimate'));
+    expect(screen.queryByTestId('calc-option-sum')).not.toBeNull();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByTestId('calc-status'));
+    // Capability-gated on the KIND, so a status column cannot be asked for a
+    // total it has no numbers to produce.
+    expect(screen.queryByTestId('calc-option-sum')).toBeNull();
+  });
+
+  it('the name column calculates too, and writes to the presentation', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = footer([{ field: 'status' }]);
+    await user.click(screen.getByTestId('calc-title'));
+    await user.click(screen.getByTestId('calc-option-count_all'));
+    // The name column has been a peer of the data columns since M12.8, but it
+    // has no ColumnSpec to carry a calc on.
+    expect(onPresentationChange.mock.calls[0][0].titleCalc).toBe('count_all');
+  });
+
+  it('renders no footer at all when there is nothing to count', () => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={[]}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />,
+    );
+    expect(screen.queryByTestId('table-footer')).toBeNull();
+  });
+});
+
+/**
  * Relation chips (M11).
  *
  * A related record is a chip, not an arrow glyph followed by a title. Whether

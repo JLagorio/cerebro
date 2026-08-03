@@ -1,3 +1,4 @@
+import type { AggregateCalc } from './aggregate';
 import type { DateDisplayFormat, TimeDisplayFormat } from './dates';
 import type { RelationIndex } from './relations';
 
@@ -242,6 +243,10 @@ export interface ColumnSpec {
   width?: number;
   hidden?: boolean;
   wrap?: boolean;
+  /** The footer calculation for this column (M16.15). Absent = no footer
+   * cell, which is Notion's resting state and stays the default: a table that
+   * volunteers nine numbers nobody asked for is noise. */
+  calc?: AggregateCalc;
 }
 
 /**
@@ -303,6 +308,9 @@ export interface Presentation {
   titleFrozen?: boolean;
   /** The name column's index among the visible columns. Omitted = first. */
   titlePosition?: number;
+  /** The name column's footer calculation (M16.15). It is a column like any
+   * other since M12.8, but it has no ColumnSpec to carry this on. */
+  titleCalc?: AggregateCalc;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
   /**

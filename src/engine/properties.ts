@@ -128,6 +128,9 @@ export interface PropertyKindMeta {
   groupable: boolean;
   /** Values have a total order, so a view can sort by this field. */
   orderable: boolean;
+  /** Values are numbers, so a column of them can be summed and averaged
+   * (M16.15 — the table's calculation footer). */
+  numeric: boolean;
 }
 
 /**
@@ -147,6 +150,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    numeric: false,
   },
   number: {
     label: 'Number',
@@ -155,6 +159,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    numeric: true,
   },
   select: {
     label: 'Select',
@@ -163,6 +168,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    numeric: false,
   },
   multiselect: {
     label: 'Multi-select',
@@ -172,6 +178,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    numeric: false,
   },
   status: {
     label: 'Status',
@@ -180,6 +187,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    numeric: false,
   },
   date: {
     label: 'Date',
@@ -188,6 +196,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    numeric: false,
   },
   daterange: {
     label: 'Date range',
@@ -197,6 +206,7 @@ const KIND_META = {
     legacy: true,
     groupable: false,
     orderable: true,
+    numeric: false,
   },
   person: {
     label: 'Person',
@@ -206,6 +216,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    numeric: false,
   },
   files: {
     label: 'Files & media',
@@ -215,6 +226,7 @@ const KIND_META = {
     multi: true,
     groupable: false,
     orderable: false,
+    numeric: false,
   },
   checkbox: {
     label: 'Checkbox',
@@ -223,8 +235,17 @@ const KIND_META = {
     seed: false,
     groupable: true,
     orderable: true,
+    numeric: false,
   },
-  url: { label: 'URL', icon: 'link', computed: false, seed: '', groupable: false, orderable: true },
+  url: {
+    label: 'URL',
+    icon: 'link',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    numeric: false,
+  },
   email: {
     label: 'Email',
     icon: 'mail',
@@ -232,6 +253,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    numeric: false,
   },
   phone: {
     label: 'Phone',
@@ -240,6 +262,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    numeric: false,
   },
   relation: {
     label: 'Relation',
@@ -249,6 +272,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    numeric: false,
   },
   rollup: {
     label: 'Rollup',
@@ -257,6 +281,11 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    // Every rollup calculation but `show` produces a number, and a `show`
+    // rollup asked for a Sum answers with nothing — which is the truth about
+    // a column holding no numbers, and cheaper than a second registry of
+    // which calculations return which shape.
+    numeric: true,
   },
   created_time: {
     label: 'Created time',
@@ -265,6 +294,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    numeric: false,
   },
   last_edited_time: {
     label: 'Last edited time',
@@ -273,6 +303,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    numeric: false,
   },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
 

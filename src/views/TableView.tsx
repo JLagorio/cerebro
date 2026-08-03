@@ -3,7 +3,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
+import { Popover } from '@/components/ui/Popover';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
   MIN_COL_W,
   insertColumn,
@@ -24,6 +27,7 @@ import type {
   ColumnSpec,
   Entry,
   FieldDef,
+  FieldKind,
   GroupNode,
   Presentation,
   Schema,
@@ -480,6 +484,107 @@ function BandHeader({
         </span>
       </span>
     </button>
+  );
+}
+
+/**
+ * One footer cell of the calculation row (M16.15).
+ *
+ * Notion's shape, and the reason the row is not a wall of numbers: a column
+ * with no calculation set shows nothing until the footer is hovered, and then
+ * offers "Calculate". Only what someone asked for is on screen.
+ */
+function CalcCell({
+  field,
+  label,
+  kind,
+  calc,
+  result,
+  onChange,
+  className,
+  style,
+}: {
+  field: string;
+  label: string;
+  kind: FieldKind;
+  calc: AggregateCalc | undefined;
+  /** Already computed by the table — one pass over the rows, not one per cell. */
+  result: string;
+  /** Absent on a surface with no view file to persist the choice to. */
+  onChange?: (next: AggregateCalc | null) => void;
+  className: string;
+  style: React.CSSProperties;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const meta = calc === undefined ? null : aggregateMeta(calc);
+
+  const body =
+    meta === null ? (
+      <span className="text-[var(--n-400)] opacity-0 group-hover/footer:opacity-100">
+        Calculate
+      </span>
+    ) : (
+      <>
+        <span className="truncate text-[var(--n-400)]">{meta.short}</span>
+        <span className="flex-none font-medium text-[var(--n-700)] [font-variant-numeric:tabular-nums]">
+          {result === '' ? '—' : result}
+        </span>
+      </>
+    );
+
+  return (
+    <div role="gridcell" className={className} style={style}>
+      {onChange === undefined ? (
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">{body}</span>
+      ) : (
+        <button
+          ref={ref}
+          type="button"
+          data-testid={`calc-${field}`}
+          aria-label={`${label} calculation`}
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-[5px] border-0 bg-transparent px-1 py-0.5 text-[11.5px] hover:bg-[var(--n-100)] focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+        >
+          {body}
+        </button>
+      )}
+      {open && onChange !== undefined && (
+        <Popover
+          anchorRef={ref}
+          onClose={() => setOpen(false)}
+          role="menu"
+          ariaLabel={`${label} calculation`}
+        >
+          <MenuSurface width={200}>
+            <MenuLabel>Calculate</MenuLabel>
+            <MenuItem
+              label="None"
+              icon="minus"
+              checked={calc === undefined}
+              testId="calc-option-none"
+              onSelect={() => {
+                setOpen(false);
+                onChange(null);
+              }}
+            />
+            <MenuSeparator />
+            {aggregatesFor(kind).map((a) => (
+              <MenuItem
+                key={a.calc}
+                label={a.label}
+                checked={calc === a.calc}
+                testId={`calc-option-${a.calc}`}
+                onSelect={() => {
+                  setOpen(false);
+                  onChange(a.calc);
+                }}
+              />
+            ))}
+          </MenuSurface>
+        </Popover>
+      )}
+    </div>
   );
 }
 
@@ -1245,6 +1350,57 @@ export function TableView({
     return undefined;
   };
 
+  /**
+   * The footer's numbers (M16.15). Computed for the columns that ASKED for a
+   * calculation — resolving every field of every row to fill a row nobody
+   * configured would cost a rollup evaluation per cell.
+   *
+   * Over `flatRows`, not `entries`: the footer reports the rows on screen,
+   * including the ones nesting pulled in from outside the query.
+   */
+  const calcResults = useMemo(() => {
+    const out: Record<string, string> = {};
+    const shown = flatRows.map((r) => r.entry);
+    if (presentation.titleCalc !== undefined) {
+      out.title = aggregate(
+        presentation.titleCalc,
+        shown.map((e) => ({ raw: e.title, display: e.title })),
+      );
+    }
+    for (const { spec, def } of resolved) {
+      if (spec.calc === undefined) continue;
+      out[spec.field] = aggregate(
+        spec.calc,
+        shown.map((e) => {
+          const r = schema.resolveField(e, spec.field);
+          return { raw: r.raw, display: r.display };
+        }),
+        def,
+      );
+    }
+    return out;
+  }, [flatRows, resolved, schema, presentation.titleCalc]);
+
+  const setColumnCalc = useCallback(
+    (field: string, next: AggregateCalc | null) => {
+      if (field === 'title') {
+        if (onPresentationChange === undefined) return;
+        const { titleCalc: _drop, ...rest } = presentation;
+        onPresentationChange(next === null ? rest : { ...rest, titleCalc: next });
+        return;
+      }
+      if (onColumnsChange === undefined) return;
+      onColumnsChange(
+        presentation.columns.map((c) => {
+          if (c.field !== field) return c;
+          const { calc: _clear, ...rest } = c;
+          return next === null ? rest : { ...rest, calc: next };
+        }),
+      );
+    },
+    [onColumnsChange, onPresentationChange, presentation],
+  );
+
   // Widths ride as custom properties on the grid so a drag can repaint them
   // without React seeing anything.
   const widthVars = useMemo(() => {
@@ -1446,6 +1602,43 @@ export function TableView({
               />
             );
           })}
+
+          {/* M16.15: the calculation footer. Pinned to the bottom of the
+              scroller, because a total you have to scroll to is a total you
+              do not read. */}
+          {flatRows.length > 0 && (
+            <div
+              role="row"
+              data-testid="table-footer"
+              className="group/footer sticky bottom-0 z-20 flex h-8 border-t border-[var(--n-200)] bg-[var(--n-25)]"
+            >
+              {displayKeys.map((key, d) => {
+                const i = d < titlePos ? d : d - 1;
+                const column = key === 'title' ? null : resolved[i];
+                const persists = column === null ? onPresentationChange : onColumnsChange;
+                return (
+                  <CalcCell
+                    key={key}
+                    field={key}
+                    label={column === null ? 'Name' : humanize(column.def.name)}
+                    // The name column holds titles: text, so the numeric
+                    // calculations are correctly absent from its menu.
+                    kind={column === null ? 'text' : column.def.kind}
+                    calc={column === null ? presentation.titleCalc : column.spec.calc}
+                    result={calcResults[key] ?? ''}
+                    onChange={
+                      persists === undefined ? undefined : (next) => setColumnCalc(key, next)
+                    }
+                    className={[
+                      column === null && titleFrozen ? 'sticky left-0 z-10 bg-[var(--n-25)]' : '',
+                      'flex flex-none items-center border-r border-[var(--n-100)] px-2 text-[11.5px]',
+                    ].join(' ')}
+                    style={{ width: `var(${column === null ? TITLE_VAR : widthVar(i)})` }}
+                  />
+                );
+              })}
+            </div>
+          )}
 
           {entries.length === 0 && (
             <div role="row" className="sticky left-0 px-3 py-8">
