@@ -1,3 +1,5 @@
+import { findOptionByLabel } from '@/engine/properties';
+import { resolveOptionColor } from '@/lib/swatch';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
@@ -88,6 +90,13 @@ export interface FieldPopoverProps {
   /** Shown instead of "No matches" when the field has no options at all, so a
    * freshly declared Select says where its options come from. */
   emptyHint?: string;
+  /**
+   * Shown in place of the Create row when a label is typed but this surface
+   * cannot create (M16.12). `emptyHint` cannot carry it: that only renders
+   * when the option list is EMPTY, and the case that needs explaining most —
+   * a status set a project overrides — always has options in it.
+   */
+  unavailableHint?: string;
   onPick: (id: string) => void;
   onClose: () => void;
 }
@@ -100,6 +109,7 @@ export function FieldPopover({
   searchable,
   onCreate,
   emptyHint,
+  unavailableHint,
   onPick,
   onClose,
 }: FieldPopoverProps) {
@@ -113,10 +123,18 @@ export function FieldPopover({
   // Multi mode keeps the popover open so several values land in one visit.
   const multi = activeIds !== undefined;
   const selected = new Set(activeIds ?? (activeId != null ? [activeId] : []));
-  const canCreate =
-    onCreate !== undefined &&
-    trimmed !== '' &&
-    !options.some((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+  // By SLUG, not by label (M16.12). The id is a slug, so "In-Progress" and
+  // "In Progress" are one option under two labels — comparing labels offered
+  // to create the second, the write APPENDED, and the type doc ended holding
+  // two entries with the same id. Every lookup in the app is a `.find` on id,
+  // so the FIRST won: the new label was invisible forever, the record kept
+  // rendering the old one, and the write reported success.
+  const clash = trimmed === '' ? undefined : findOptionByLabel(options, trimmed);
+  const canCreate = onCreate !== undefined && trimmed !== '' && clash === undefined;
+  // A slug collision whose LABEL does not match the filter used to leave the
+  // popover showing "No matches" with no create row — a hard dead end on a
+  // value that already exists. Show the option instead.
+  const rows = visible.length === 0 && clash !== undefined ? [clash] : visible;
 
   return (
     <>
@@ -149,7 +167,7 @@ export function FieldPopover({
             </div>
           )}
           <div className="max-h-[264px] overflow-y-auto">
-            {visible.map((o) => (
+            {rows.map((o) => (
               <button
                 key={o.id}
                 type="button"
@@ -165,17 +183,30 @@ export function FieldPopover({
                   className="box-border h-2 w-2 flex-none rounded-full"
                   style={
                     o.hollow || !o.color
-                      ? { border: `1.5px solid ${o.color ?? 'var(--n-400)'}` }
-                      : { background: o.color }
+                      ? {
+                          border: `1.5px solid ${
+                            o.color === null ? 'var(--n-400)' : resolveOptionColor(o.color).solid
+                          }`,
+                        }
+                      : { background: resolveOptionColor(o.color).solid }
                   }
                 />
                 <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 {selected.has(o.id) && <Icon name="check" size={14} color="var(--cortex-600)" />}
               </button>
             ))}
-            {visible.length === 0 && !canCreate && (
+            {rows.length === 0 && !canCreate && (
               <div className="p-2 text-[12px] leading-relaxed text-[var(--n-500)]">
                 {options.length === 0 && emptyHint !== undefined ? emptyHint : 'No matches'}
+              </div>
+            )}
+            {/* A footer, not a response to typing: when creation is
+                unavailable the popover is not even searchable (`searchable`
+                is derived from onCreate), so there is no box to type into and
+                no moment at which a typed-only hint would ever appear. */}
+            {!canCreate && clash === undefined && unavailableHint !== undefined && (
+              <div className="border-t border-[var(--n-100)] px-2 pb-1 pt-1.5 text-[11.5px] leading-relaxed text-[var(--n-500)]">
+                {unavailableHint}
               </div>
             )}
             {canCreate && (

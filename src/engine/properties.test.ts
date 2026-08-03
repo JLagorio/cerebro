@@ -3,7 +3,10 @@ import {
   coerceValueToKind,
   computeRollup,
   formatTimestamp,
+  findOptionByLabel,
   inferKindFromValue,
+  moveOption,
+  optionId,
   isEmptyForVisibility,
   splitByVisibility,
   visibilityDelta,
@@ -334,5 +337,57 @@ describe('visibilityDelta', () => {
 
   it('is a no-op for a name that is not declared', () => {
     expect(visibilityDelta(all, all, 'nope', 0)).toBe(0);
+  });
+});
+
+/**
+ * Option identity (M16.12). The inline-create row compared LABELS while the
+ * id was a slug, so two labels that slug the same both got written.
+ */
+describe('option identity', () => {
+  const opts = [
+    { id: 'in-progress', label: 'In Progress' },
+    { id: 'done', label: 'Done' },
+  ];
+
+  it('slugs a label the way the id is built', () => {
+    expect(optionId('  In   Progress ')).toBe('in-progress');
+    expect(optionId('Done')).toBe('done');
+  });
+
+  // The whole bug in one assertion.
+  it('finds the collision a label comparison misses', () => {
+    expect(findOptionByLabel(opts, 'In-Progress')?.id).toBe('in-progress');
+    expect(findOptionByLabel(opts, 'in progress')?.id).toBe('in-progress');
+    expect(opts.some((o) => o.label.toLowerCase() === 'in-progress')).toBe(false);
+  });
+
+  it('still catches a plain label match', () => {
+    expect(findOptionByLabel(opts, 'done')?.id).toBe('done');
+  });
+
+  it('returns nothing for a genuinely new label', () => {
+    expect(findOptionByLabel(opts, 'Blocked')).toBeUndefined();
+  });
+});
+
+describe('moveOption', () => {
+  const list = ['a', 'b', 'c', 'd'];
+
+  it('moves an item to a new index', () => {
+    expect(moveOption(list, 0, 2)).toEqual(['b', 'c', 'a', 'd']);
+    expect(moveOption(list, 3, 0)).toEqual(['d', 'a', 'b', 'c']);
+  });
+
+  it('returns the same array for a no-op or an out-of-range move', () => {
+    expect(moveOption(list, 1, 1)).toBe(list);
+    expect(moveOption(list, -1, 2)).toBe(list);
+    expect(moveOption(list, 0, 9)).toBe(list);
+  });
+
+  it('does not mutate the input', () => {
+    const copy = [...list];
+    moveOption(list, 0, 3);
+    expect(list).toEqual(copy);
   });
 });

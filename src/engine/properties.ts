@@ -175,6 +175,45 @@ export const CREATABLE_PROPERTY_KINDS = PROPERTY_KINDS.filter((k) => k.legacy !=
 export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
   PROPERTY_KINDS.find((k) => k.kind === kind) ?? PROPERTY_KINDS[0];
 
+// --- Option identity and order (M16.12) ------------------------------------
+
+/**
+ * The id a new option's label slugs to.
+ *
+ * It lived in `detail/OptionListEditor.tsx`, which is why `FieldPopover`'s
+ * create row could not see it and compared LABELS instead — see
+ * `findOptionByLabel`.
+ */
+export const optionId = (label: string): string => label.trim().replace(/\s+/g, '-').toLowerCase();
+
+/**
+ * The option a label would collide with, by SLUG rather than by label.
+ *
+ * "In-Progress" and "In Progress" are different labels and the same id. The
+ * inline-create row compared labels, so it offered to create the second one;
+ * nothing overwrote anything, because the write APPENDS — the type doc ended
+ * holding two entries with id `in-progress`, and every lookup in the app is a
+ * `.find` on id, so the FIRST won. The new label was invisible forever, the
+ * record kept rendering the old one, and the write reported success.
+ */
+export function findOptionByLabel<T extends { id: string; label: string }>(
+  list: T[],
+  label: string,
+): T | undefined {
+  const id = optionId(label);
+  const lower = label.trim().toLowerCase();
+  return list.find((o) => o.id === id || o.label.trim().toLowerCase() === lower);
+}
+
+/** Move one item to a new index, returning a new array. */
+export function moveOption<T>(list: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || from >= list.length || to < 0 || to >= list.length) return list;
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
 // --- Per-property visibility (M16.10) --------------------------------------
 
 /**

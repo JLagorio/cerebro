@@ -1,3 +1,4 @@
+import { resolveOptionColor } from '@/lib/swatch';
 import { Avatar } from '@/components/ui/Avatar';
 import type { ResolvedField } from '@/engine/types';
 
@@ -35,7 +36,8 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
     );
   }
   if (kind === 'status' || kind === 'select' || kind === 'multiselect') {
-    const color = resolved.color ?? 'var(--n-400)';
+    const sw = resolveOptionColor(resolved.color);
+    const color = resolved.color === null ? 'var(--n-400)' : sw.solid;
     const hollow = optionHollow(resolved);
     return (
       <span className="inline-flex flex-none items-center gap-1.5 text-[12px] text-[var(--n-700)]">

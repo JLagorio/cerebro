@@ -196,6 +196,27 @@ export function buildSchema(entries: Entry[]): Schema {
     return DEFAULT_STATUSES;
   }
 
+  /**
+   * WHICH link in that chain answered (M16.12).
+   *
+   * The inline status creator needs it: writing a new status to the TYPE is a
+   * silent no-op for a record whose statuses come from a project override,
+   * because the override wins on the very next read. Rather than write
+   * something the user will not see, the picker says where the statuses
+   * actually live.
+   */
+  function statusSourceFor(e: Entry): 'project' | 'type' | 'default' {
+    if (e.project !== null) {
+      const project = byPath.get(e.project);
+      if (project !== undefined) {
+        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        if (override.length > 0) return 'project';
+      }
+    }
+    const own = e.type !== null ? types.get(e.type)?.statuses : undefined;
+    return own !== undefined && own.length > 0 ? 'type' : 'default';
+  }
+
   function resolveField(e: Entry, field: string): ResolvedField {
     const typeDef = e.type !== null ? types.get(e.type) : undefined;
     const def = typeDef?.fields.find((f) => f.name === field) ?? null;
@@ -305,5 +326,13 @@ export function buildSchema(entries: Entry[]): Schema {
     return { def, raw, display, color: null, ghost: false };
   }
 
-  return { types, relations, projectForEntry, statusSetForProject, statusSetFor, resolveField };
+  return {
+    types,
+    relations,
+    projectForEntry,
+    statusSetForProject,
+    statusSetFor,
+    statusSourceFor,
+    resolveField,
+  };
 }

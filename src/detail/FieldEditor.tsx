@@ -1,13 +1,13 @@
 import { useState } from 'react';
-import { TYPE_COLORS } from '@/app/TypeDialogs';
-import { setFieldOptions } from '@/app/typeActions';
+import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
+import { setFieldOptions, setTypeStatuses } from '@/app/typeActions';
 import { Avatar } from '@/components/ui/Avatar';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
 import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
-import { optionId } from '@/detail/OptionListEditor';
+import { findOptionByLabel, optionId } from '@/engine/properties';
 import { RelationPicker } from '@/detail/RelationPicker';
 import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
@@ -36,16 +36,20 @@ const stripWikilink = (v: string) => v.replace(/^\[\[/, '').replace(/\]\]$/, '')
 const toggle = (values: string[], id: string): string[] =>
   values.includes(id) ? values.filter((v) => v !== id) : [...values, id];
 
-/** A selected multi-select value: filled pill in the option's color. */
+/**
+ * A selected multi-select value: a pill tinted with the option's colour.
+ *
+ * It used to paint the LABEL in the raw option colour over a 13% tint of that
+ * same colour — amber text on amber at about 1.8:1 — and built the tint by
+ * string concatenation, so `#fff` became `#fff22`, an invalid declaration the
+ * browser drops, and a three-digit hex rendered a clear pill (M16.12).
+ */
 function OptionTag({ label, color }: { label: string; color: string | null }) {
+  const sw = resolveOptionColor(color);
   return (
     <span
       className="inline-flex items-center rounded-[5px] px-1.5 py-px text-[11.5px] leading-[16px]"
-      style={
-        color === null
-          ? { background: 'var(--n-100)', color: 'var(--n-700)' }
-          : { background: `${color}22`, color }
-      }
+      style={{ background: sw.tint, color: sw.ink }}
     >
       {label}
     </span>
@@ -81,35 +85,92 @@ export function FieldEditor({
 
   if (def.kind === 'status' || def.kind === 'select' || def.kind === 'multiselect') {
     const statuses = schema.statusSetFor(entry);
+    const multi = def.kind === 'multiselect';
+    const values = asList(resolved.raw);
+    const ownerType = entry.type;
+
+    // The options THIS RECORD's type declares, not whatever `def` carries.
+    //
+    // In a typeless view `columnUniverse` unions the field across every type
+    // present and keeps the first declaration's options, flagging
+    // `heterogeneous` only when the KINDS differ. Two types each declaring a
+    // select named `status` are therefore not flagged, so creating an option
+    // on a row of type B wrote `setFieldOptions(B, name, [...A's options,
+    // new])` — replacing B's option set with A's (M16.12).
+    const ownerDef =
+      ownerType === null
+        ? undefined
+        : schema.types.get(ownerType)?.fields.find((f) => f.name === def.name);
+    const declaredOptions = ownerDef?.options ?? [];
     const options: FieldPopoverOption[] =
       def.kind === 'status'
         ? statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, hollow: s.hollow }))
-        : (def.options ?? []).map((o) => ({
+        : (ownerDef?.options ?? def.options ?? []).map((o) => ({
             id: o.id,
             label: o.label,
             color: o.color,
             hollow: o.hollow,
           }));
-    const multi = def.kind === 'multiselect';
-    const values = asList(resolved.raw);
-    // A freshly declared Select has no options, and the popover was a dead
-    // end: "No matches", nothing to type into, no way out. Typing a label now
-    // declares it on the type (the same write the type screen makes) and picks
-    // it. Statuses are a different store (the type's status set) and untyped
-    // docs have no schema to write to, so both keep the read-only hint below.
-    const ownerType = entry.type;
-    const declaredOptions = def.options ?? [];
+
+    // Where a status set comes from decides whether writing to the type would
+    // do anything: a project override lives on the project, not the type.
+    const statusSource = schema.statusSourceFor(entry);
+    const canWriteOptions =
+      ownerType !== null && ownerDef !== undefined && ownerDef.kind === def.kind;
+
+    /**
+     * Typing a label into the picker declares it (M3.1, extended M16.12).
+     *
+     * A freshly declared Select had no options and the popover was a dead
+     * end. Status was excluded outright and told you to go to the type
+     * screen — which is no longer even the only place, since M16.7 mounts the
+     * editors in the record panel. Statuses live in a different store (the
+     * type's `statuses:`), so they take a different write, not no write.
+     */
     const createOption =
-      def.kind !== 'status' && ownerType !== null
+      (def.kind === 'status' ? statusSource === 'type' || statusSource === 'default' : true) &&
+      canWriteOptions &&
+      ownerType !== null
         ? (label: string) => {
+            // Slug-aware: if the label collides with an option that already
+            // exists, SELECT it rather than appending a shadowed twin.
+            const existing = findOptionByLabel(
+              def.kind === 'status' ? statuses : declaredOptions,
+              label,
+            );
+            if (existing !== undefined) {
+              patch(multi ? toggle(values, existing.id) : existing.id);
+              return;
+            }
             const id = optionId(label);
             void (async () => {
+              if (def.kind === 'status') {
+                // Spreading `statuses` when it is DEFAULT_STATUSES is
+                // deliberate: it materialises the default chain onto the Type
+                // doc, which is the list the user is looking at. docPath is
+                // null because setTypeStatuses resolves the doc itself and
+                // creates one when it is missing.
+                const ok = await setTypeStatuses({ name: ownerType, docPath: null }, [
+                  ...statuses,
+                  {
+                    id,
+                    label,
+                    color: PICKABLE_OPTION_COLORS[statuses.length % PICKABLE_OPTION_COLORS.length],
+                    // The engine's own fallback; there is no group picker in
+                    // a one-line create row.
+                    group: 'active',
+                  },
+                ]);
+                if (ok) patch(id);
+                return;
+              }
               const ok = await setFieldOptions(ownerType, def.name, [
                 ...declaredOptions,
                 {
                   id,
                   label,
-                  color: TYPE_COLORS[declaredOptions.length % TYPE_COLORS.length],
+                  color:
+                    PICKABLE_OPTION_COLORS[declaredOptions.length % PICKABLE_OPTION_COLORS.length],
                 },
               ]);
               if (ok) patch(multi ? toggle(values, id) : id);
@@ -138,7 +199,7 @@ export function FieldEditor({
             <>
               <span
                 className="box-border h-[9px] w-[9px] flex-none rounded-full"
-                style={{ background: chips[0].color ?? 'var(--n-300)' }}
+                style={{ background: resolveOptionColor(chips[0].color).solid }}
               />
               {chips[0].label}
             </>
@@ -150,10 +211,21 @@ export function FieldEditor({
             options={options}
             searchable={options.length > 6 || multi || createOption !== undefined}
             {...(createOption !== undefined ? { onCreate: createOption } : {})}
+            // Both hints used to send you to the type screen, which stopped
+            // being the only route when M16.7 put the property editor in the
+            // record panel — and for status it was a dead end, since nothing
+            // here could create one at all.
             emptyHint={
-              def.kind === 'status'
-                ? 'No statuses yet — add them on the type screen.'
-                : 'No options yet — add them on the type screen.'
+              canWriteOptions
+                ? `No ${def.kind === 'status' ? 'statuses' : 'options'} yet — type one to add it.`
+                : `No ${def.kind === 'status' ? 'statuses' : 'options'} yet — add them from the property menu.`
+            }
+            unavailableHint={
+              def.kind === 'status' && statusSource === 'project'
+                ? 'Statuses come from this record’s project — edit them there.'
+                : canWriteOptions
+                  ? undefined
+                  : 'Add options from the property menu.'
             }
             {...(multi ? { activeIds: values } : { activeId: values[0] ?? null })}
             onPick={(id) => patch(multi ? toggle(values, id) : id)}

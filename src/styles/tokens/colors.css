@@ -73,6 +73,52 @@
   --swatch-magenta: #d8569e;
   --swatch-vermilion: #e0562e;
   --swatch-sky: #38bdf8;
+  /* option & status colours — Notion's ten, named (M16.12).
+     Distinct from --swatch-* above, which is the older eight-hue set the type
+     picker and timeline bars use. These are the palette a SELECT option, a
+     multi-select tag and a workflow status draw from, and each is a triple:
+
+       --opt-<n>      the dot / solid fill
+       --opt-<n>-bg   the pill behind a tag, ~13% of the hue
+       --opt-<n>-ink  text ON that pill, >= 4.5:1 against it
+
+     The ink is the point. Tags used to paint their label in the raw option
+     colour over a 13% tint of the same colour — amber on amber at about
+     1.8:1 — which is the failure mode M15 spent a phase removing from the
+     neutral ramp. Nothing here reuses #A8AFC2, the value that ramp dropped.
+
+     These triples are also the seam a dark theme would override
+     (`:root[data-theme='dark']`). No such block exists yet: the app has no
+     dark mode at all, and inventing half of one here would be worse than
+     leaving the seam visible. */
+  --opt-gray: #7e8699;
+  --opt-gray-bg: #eef0f4;
+  --opt-gray-ink: #4a5163;
+  --opt-brown: #9a6b4f;
+  --opt-brown-bg: #f4ede8;
+  --opt-brown-ink: #6d4a36;
+  --opt-orange: #d97514;
+  --opt-orange-bg: #fdf0e3;
+  --opt-orange-ink: #8a4a0b;
+  --opt-yellow: #d9a406;
+  --opt-yellow-bg: #fdf6e0;
+  --opt-yellow-ink: #7a5c02;
+  --opt-green: #1f9d61;
+  --opt-green-bg: #e6f6ee;
+  --opt-green-ink: #14653f;
+  --opt-blue: #3d8be8;
+  --opt-blue-bg: #e8f1fd;
+  --opt-blue-ink: #1a5694;
+  --opt-purple: #8250dc;
+  --opt-purple-bg: #f1ebfc;
+  --opt-purple-ink: #58309b;
+  --opt-pink: #d8569e;
+  --opt-pink-bg: #fceaf4;
+  --opt-pink-ink: #93316a;
+  --opt-red: #de3b4e;
+  --opt-red-bg: #fdeaec;
+  --opt-red-ink: #99202f;
+
   /* avatar backgrounds — same eight hues as --swatch-*, darkened so white
      initials clear 4.5:1 (5.2–6.9:1). The tinted swatches themselves top out
      around 2:1 against white and made every avatar's initials unreadable. */

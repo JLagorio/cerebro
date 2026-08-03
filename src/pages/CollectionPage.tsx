@@ -126,8 +126,11 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           <span
             className="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
             style={{
+              // color-mix, not `${color}1a`: a collection colour is
+              // user-supplied and may be a 3-digit hex or a var(), both of
+              // which concatenation turns into a dropped declaration.
               background: collection.definition.color
-                ? `${collection.definition.color}1a`
+                ? `color-mix(in srgb, ${collection.definition.color} 10%, var(--n-0))`
                 : 'var(--n-100)',
             }}
           >

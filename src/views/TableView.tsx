@@ -1,3 +1,4 @@
+import { resolveOptionColor } from '@/lib/swatch';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
@@ -459,7 +460,10 @@ function BandHeader({
           style={
             node.ghost || !node.color
               ? { border: '1.5px solid var(--n-400)' }
-              : { background: node.color, border: `1.5px solid ${node.color}` }
+              : {
+                  background: resolveOptionColor(node.color).solid,
+                  border: `1.5px solid ${resolveOptionColor(node.color).solid}`,
+                }
           }
         />
         <span

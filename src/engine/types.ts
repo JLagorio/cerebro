@@ -498,5 +498,9 @@ export interface Schema {
   // M3.1: the same chain with the entry's OWN type consulted before the
   // Work item fallback, so every type can carry its own status set.
   statusSetFor(entry: Entry): StatusDef[];
+  /** Which link in that chain answered — the inline status creator needs to
+   * know, because writing to the type is a silent no-op under a project
+   * override (M16.12). */
+  statusSourceFor(entry: Entry): 'project' | 'type' | 'default';
   resolveField(e: Entry, field: string): ResolvedField;
 }

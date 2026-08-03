@@ -1,3 +1,4 @@
+import { resolveOptionColor } from '@/lib/swatch';
 import {
   DndContext,
   KeyboardSensor,
@@ -115,7 +116,9 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
       }}
       style={{
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-        borderLeft: `3px solid ${group.ghost || !group.color ? 'var(--n-300)' : group.color}`,
+        borderLeft: `3px solid ${
+          group.ghost || !group.color ? 'var(--n-300)' : resolveOptionColor(group.color).solid
+        }`,
         opacity: isDragging ? 0.6 : 1,
         zIndex: isDragging ? 20 : undefined,
       }}
@@ -139,7 +142,9 @@ function BoardCard({ entry, group, schema }: { entry: Entry; group: Group; schem
               bare
               size="sm"
               label={priority.display}
-              color={priority.color ?? 'var(--n-400)'}
+              color={
+                priority.color === null ? 'var(--n-400)' : resolveOptionColor(priority.color).solid
+              }
             />
           </span>
         )}
@@ -176,7 +181,10 @@ function BoardColumn({
           style={
             group.ghost || !group.color
               ? { border: '1.5px solid var(--n-400)' }
-              : { background: group.color, border: `1.5px solid ${group.color}` }
+              : {
+                  background: resolveOptionColor(group.color).solid,
+                  border: `1.5px solid ${resolveOptionColor(group.color).solid}`,
+                }
           }
         />
         <span className="text-[12.5px] font-semibold text-[var(--n-800)]">{group.label}</span>
