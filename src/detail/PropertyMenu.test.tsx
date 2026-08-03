@@ -96,15 +96,90 @@ describe('PropertyMenu', () => {
     expect(names.indexOf('priority_copy')).toBe(names.indexOf('priority') + 1);
   });
 
-  it('deletes a property from the type', async () => {
+  it('deletes a property from the type, once the confirmation is answered', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await openMenu(user, 'Priority');
+    await user.click(screen.getByTestId('property-menu-delete'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
+    expect(Object.keys(writtenFields(patchFrontmatter))).not.toContain('priority');
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  /**
+   * One click on "Delete property" destroyed a type's schema (M16.29).
+   *
+   * The menu already COMPUTES the blast radius — its footer reads "Changes
+   * Work item — 45 records" — and then fired `removeFieldFromType` straight
+   * off the menu item anyway. The field vanished from every record at once,
+   * their frontmatter kept the now-invisible values, and a select's option
+   * list and colours were gone with no undo anywhere in the app. Deleting one
+   * record has asked first since M16.11; deleting a property from every record
+   * of a type asked nothing.
+   */
+  it('writes nothing until the deletion is confirmed', async () => {
     const user = userEvent.setup();
     const { patchFrontmatter } = setup();
     await openMenu(user, 'Priority');
     await user.click(screen.getByTestId('property-menu-delete'));
 
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('leaves the schema alone when the confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await openMenu(user, 'Priority');
+    await user.click(screen.getByTestId('property-menu-delete'));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Priority property menu' })).toBeTruthy();
+  });
+
+  // The consequence has to be stated in the terms the footer already used —
+  // the type and the record count — plus the part no surface said anywhere:
+  // the values stay in the files and simply stop being shown.
+  it('states the blast radius and what happens to the values on disk', async () => {
+    const user = userEvent.setup();
+    setup();
+    await openMenu(user, 'Priority');
+    await user.click(screen.getByTestId('property-menu-delete'));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toMatch(/Work item — \d+ records?/);
+    expect(dialog.textContent).toContain('frontmatter');
+    // A select loses its option set and its colours, and that is the part
+    // nothing in the app can rebuild for you.
+    expect(dialog.textContent).toContain('option list');
+  });
+
+  it('does not promise a select warning to a property that has no options', async () => {
+    const user = userEvent.setup();
+    setup();
+    await openMenu(user, 'Due');
+    await user.click(screen.getByTestId('property-menu-delete'));
+
+    expect(screen.getByRole('dialog').textContent).not.toContain('option list');
+  });
+
+  // The same button lives in the drilled-in editor, reachable from a table
+  // column header and the view settings panel as well as from here.
+  it('guards the delete inside the property editor too', async () => {
+    const user = userEvent.setup();
+    const { patchFrontmatter } = setup();
+    await openMenu(user, 'Priority');
+    await user.click(screen.getByTestId('property-menu-edit'));
+    await user.click(screen.getByRole('button', { name: 'Delete property' }));
+
+    expect(patchFrontmatter).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(patchFrontmatter).toHaveBeenCalled());
     expect(Object.keys(writtenFields(patchFrontmatter))).not.toContain('priority');
-    expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('drills into the property editor, and comes back', async () => {

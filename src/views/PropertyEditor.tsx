@@ -75,6 +75,60 @@ export function ConfirmKindChange({
   );
 }
 
+/**
+ * The confirmation deleting a property owes the user (M16.29).
+ *
+ * `removeFieldFromType` rewrites the TYPE, so one click took the property off
+ * every record of that type at once, with no confirmation and no undo. The
+ * cruelty was that the surface it fired from — the record panel's property
+ * menu — already computes and PRINTS the blast radius in its footer ("Changes
+ * Work item — 45 records") and then guarded nothing.
+ *
+ * What the deletion actually does is not obvious from watching it, so the
+ * dialog says all three parts: how far it reaches, that the stored values stay
+ * in the files and merely stop being shown, and — for the kinds that carry
+ * one — that the option list and its colours go with the property. Only the
+ * last is truly unrecoverable, and only git can bring it back.
+ */
+export function ConfirmDeleteProperty({
+  name,
+  kind,
+  sourceType,
+  count,
+  onConfirm,
+  onCancel,
+}: {
+  /** Humanized, as the user reads it on the row. */
+  name: string;
+  kind: FieldDef['kind'];
+  /** The type the property is declared on — the footer's own words. */
+  sourceType: string;
+  /** Records of this type the removal reaches. */
+  count: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const losesOptions = kind === 'select' || kind === 'multiselect' || kind === 'status';
+  return (
+    <Dialog
+      open
+      onClose={onCancel}
+      title={`Delete "${name}"?`}
+      width={440}
+      footerNote="Recoverable from git history, not from the app."
+      primaryAction={{ label: 'Delete', onClick: onConfirm }}
+      secondaryAction={{ label: 'Cancel', onClick: onCancel }}
+    >
+      <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
+        This changes {sourceType} — {count === 1 ? '1 record' : `${count} records`}. Each one keeps
+        its {name.toLowerCase()} value in its frontmatter, but nothing in the app will show or edit
+        it again until the property is declared once more.
+        {losesOptions ? " The property's option list and its colours are not kept anywhere." : ''}
+      </p>
+    </Dialog>
+  );
+}
+
 export function PropertyEditor({
   def,
   sourceType,
@@ -104,6 +158,7 @@ export function PropertyEditor({
   const [draft, setDraft] = useState(humanize(def.name));
   const [changingKind, setChangingKind] = useState(false);
   const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const locked = isLockedField(sourceType, def.name);
   const typeDef = schema.types.get(sourceType);
@@ -245,7 +300,24 @@ export function PropertyEditor({
       {!locked && (
         <button
           type="button"
-          onClick={() => {
+          // Asks first (M16.29). This used to remove the property from the
+          // type on the click, which took it off every record at once.
+          onClick={() => setConfirmDelete(true)}
+          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-1 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
+        >
+          <Icon name="trash-2" size={13} />
+          Delete property
+        </button>
+      )}
+      {confirmDelete && (
+        <ConfirmDeleteProperty
+          name={humanize(def.name)}
+          kind={def.kind}
+          sourceType={sourceType}
+          count={entries.filter((e) => e.type === sourceType).length}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false);
             void (async () => {
               if (await removeFieldFromType(sourceType, def.name)) {
                 onColumnsChange?.(columns.filter((c) => c.field !== def.name));
@@ -253,11 +325,7 @@ export function PropertyEditor({
               }
             })();
           }}
-          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-1 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
-        >
-          <Icon name="trash-2" size={13} />
-          Delete property
-        </button>
+        />
       )}
       {pendingKind !== null && (
         <ConfirmKindChange

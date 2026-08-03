@@ -193,6 +193,8 @@ describe('TypePage — property configuration (M12.8: floating, never an aside)'
     openProperties('Person');
     fireEvent.click(screen.getByTestId('property-row-pronouns'));
     fireEvent.click(screen.getByRole('button', { name: 'Delete property' }));
+    // M16.29: the removal reaches every record of the type, so it asks first.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(patches).toEqual([{ path: 'types/person.md', patch: { fields: {} } }]);
   });
 

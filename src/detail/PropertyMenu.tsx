@@ -12,7 +12,7 @@ import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { isLockedField } from '@/engine/typeCatalog';
 import type { FieldDef, FieldVisibility, Schema } from '@/engine/types';
-import { PropertyEditor } from '@/views/PropertyEditor';
+import { ConfirmDeleteProperty, PropertyEditor } from '@/views/PropertyEditor';
 
 /**
  * The menu behind a property's name in the detail panel (M16.7).
@@ -57,6 +57,7 @@ export function PropertyMenu({
   onClose: () => void;
 }) {
   const [step, setStep] = useState<'menu' | 'edit' | 'visibility'>('menu');
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState(humanize(def.name));
   const label = humanize(def.name);
   const locked = isLockedField(sourceType, def.name);
@@ -111,76 +112,99 @@ export function PropertyMenu({
   }
 
   return (
-    <MenuSurface width={232}>
-      <div className="px-1 pb-1 pt-0.5">
-        {locked ? (
-          <div className="flex items-center gap-1.5 px-1 py-0.5 text-[12.5px] text-[var(--n-600)]">
-            <Icon name="lock" size={11} />
-            <span className="min-w-0 truncate">{label}</span>
-            <span className="flex-none text-[11px] text-[var(--n-400)]">Built-in</span>
-          </div>
-        ) : (
-          <Input
-            size="sm"
-            ariaLabel={`Rename ${label}`}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commitRename}
-            // Enter and an outside click commit; Escape abandons. No inner
-            // Escape handler: the dismiss listener is on window in the
-            // capture phase, so it runs BEFORE anything in here could revert
-            // a draft — and two Escapes to leave one menu is worse than one.
-            // The abandon is by construction: unmounting never fires blur.
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-            }}
-            width="100%"
-          />
+    // The confirmation is a SIBLING of the menu surface, not a child of it:
+    // MenuSurface owns arrow keys for its own items, and a dialog nested
+    // inside it would hand its buttons to that keyboard handler. It stays
+    // inside the Popover's panel, so the dismiss listener still reads a press
+    // on it as a press inside the menu.
+    <>
+      <MenuSurface width={232}>
+        <div className="px-1 pb-1 pt-0.5">
+          {locked ? (
+            <div className="flex items-center gap-1.5 px-1 py-0.5 text-[12.5px] text-[var(--n-600)]">
+              <Icon name="lock" size={11} />
+              <span className="min-w-0 truncate">{label}</span>
+              <span className="flex-none text-[11px] text-[var(--n-400)]">Built-in</span>
+            </div>
+          ) : (
+            <Input
+              size="sm"
+              ariaLabel={`Rename ${label}`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitRename}
+              // Enter and an outside click commit; Escape abandons. No inner
+              // Escape handler: the dismiss listener is on window in the
+              // capture phase, so it runs BEFORE anything in here could revert
+              // a draft — and two Escapes to leave one menu is worse than one.
+              // The abandon is by construction: unmounting never fires blur.
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              width="100%"
+            />
+          )}
+        </div>
+        <MenuItem
+          icon="settings-2"
+          label="Edit property"
+          hint={kindMeta(def.kind).label}
+          submenu
+          testId="property-menu-edit"
+          onSelect={() => setStep('edit')}
+        />
+        <MenuItem
+          icon="eye"
+          label="Property visibility"
+          hint={VISIBILITIES.find((v) => v.value === visibility)?.label}
+          submenu
+          testId="property-menu-visibility"
+          onSelect={() => setStep('visibility')}
+        />
+        <MenuItem
+          icon="copy"
+          label="Duplicate property"
+          testId="property-menu-duplicate"
+          onSelect={() => {
+            void duplicateFieldOnType(sourceType, def.name);
+            onClose();
+          }}
+        />
+        {!locked && (
+          <>
+            <MenuSeparator />
+            <MenuItem
+              icon="trash-2"
+              label="Delete property"
+              danger
+              testId="property-menu-delete"
+              // The footer below already says this reaches every record of
+              // the type. Until M16.29 the menu said it and then did it on
+              // the click anyway.
+              onSelect={() => setConfirmDelete(true)}
+            />
+          </>
         )}
-      </div>
-      <MenuItem
-        icon="settings-2"
-        label="Edit property"
-        hint={kindMeta(def.kind).label}
-        submenu
-        testId="property-menu-edit"
-        onSelect={() => setStep('edit')}
-      />
-      <MenuItem
-        icon="eye"
-        label="Property visibility"
-        hint={VISIBILITIES.find((v) => v.value === visibility)?.label}
-        submenu
-        testId="property-menu-visibility"
-        onSelect={() => setStep('visibility')}
-      />
-      <MenuItem
-        icon="copy"
-        label="Duplicate property"
-        testId="property-menu-duplicate"
-        onSelect={() => {
-          void duplicateFieldOnType(sourceType, def.name);
-          onClose();
-        }}
-      />
-      {!locked && (
-        <>
-          <MenuSeparator />
-          <MenuItem
-            icon="trash-2"
-            label="Delete property"
-            danger
-            testId="property-menu-delete"
-            onSelect={() => {
-              void removeFieldFromType(sourceType, def.name);
-              onClose();
-            }}
-          />
-        </>
+        <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-[var(--n-400)]">
+          Changes {sourceType} — {recordCount === 1 ? '1 record' : `${recordCount} records`}
+        </div>
+      </MenuSurface>
+      {confirmDelete && (
+        <ConfirmDeleteProperty
+          name={label}
+          kind={def.kind}
+          sourceType={sourceType}
+          count={recordCount}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false);
+            // Fire-and-forget by the store contract: typeActions toast and
+            // return false rather than throwing.
+            void removeFieldFromType(sourceType, def.name);
+            onClose();
+          }}
+        />
       )}
-      <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-[var(--n-400)]">
-        Changes {sourceType} — {recordCount === 1 ? '1 record' : `${recordCount} records`}
-      </div>
-    </MenuSurface>
+    </>
   );
 }
