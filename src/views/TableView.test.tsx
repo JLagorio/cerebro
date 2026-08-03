@@ -650,6 +650,42 @@ describe('TableView header settings (M16.18)', () => {
     return { onColumnsChange, onPresentationChange };
   }
 
+  /**
+   * Deleting a property destroys a schema declaration and, with it, the way
+   * every record of the type is read. There is no undo in the app — recovery
+   * is git. `PropertyMenu` and `PropertyEditor` were given a confirmation;
+   * THIS menu has its own `Delete property` item, which called
+   * `removeFieldFromType` on the single click, from a surface that already
+   * tells you it edits N records. Third call site, same dialog.
+   */
+  it('does not delete a property until the confirmation is accepted', async () => {
+    const user = userEvent.setup();
+    const written: string[] = [];
+    useVaultStore.setState({
+      entries: fixtureVault(),
+      patchFrontmatter: vi.fn(async (path: string) => {
+        written.push(path);
+      }),
+    });
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
+    // Nothing written to the type doc, and the column is still in the view.
+    expect(written).toEqual([]);
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('backing out of the confirmation leaves the property alone', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+
   it('freezes up to a column, not just the name one', async () => {
     const user = userEvent.setup();
     const { onPresentationChange } = grid();

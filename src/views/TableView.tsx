@@ -51,7 +51,7 @@ import {
   renameFieldOnType,
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
-import { ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
+import { ConfirmDeleteProperty, ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
 import { QuickAddInline } from '@/views/QuickAdd';
 import {
   useRowKeyboard,
@@ -1152,6 +1152,11 @@ function HeaderMenu({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [changingKind, setChangingKind] = useState(false);
   const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
+  // The third unguarded delete. `PropertyMenu` and `PropertyEditor` were
+  // guarded; this menu has its OWN "Delete property" item that called
+  // `removeFieldFromType` on one click, from a surface that already tells you
+  // it edits N records. Same dialog, so all three say the same thing.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // M12.8: the full property editor, flown out IN this popover next to the
   // column it configures — config never docks a side panel.
   const [editing, setEditing] = useState(false);
@@ -1166,6 +1171,7 @@ function HeaderMenu({
       setDraft(humanize(def.name));
       setChangingKind(false);
       setEditing(false);
+      setConfirmDelete(false);
     }
   }, [open, def.name]);
 
@@ -1283,13 +1289,7 @@ function HeaderMenu({
           label: 'Delete property',
           icon: 'trash-2',
           danger: true,
-          run: () => {
-            void (async () => {
-              if (await removeFieldFromType(sourceType, def.name)) {
-                onColumnsChange(columns.filter((c) => c.field !== def.name));
-              }
-            })();
-          },
+          run: () => setConfirmDelete(true),
         },
       );
     }
@@ -1414,6 +1414,21 @@ function HeaderMenu({
             )}
           </MenuSurface>
         </Popover>
+      )}
+      {confirmDelete && sourceType !== null && onColumnsChange !== undefined && (
+        <ConfirmDeleteProperty
+          name={name}
+          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false);
+            void (async () => {
+              if (await removeFieldFromType(sourceType, def.name)) {
+                onColumnsChange(columns.filter((c) => c.field !== def.name));
+              }
+            })();
+          }}
+        />
       )}
       {pendingKind !== null && sourceType !== null && (
         <ConfirmKindChange
