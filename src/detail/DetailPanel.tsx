@@ -19,7 +19,7 @@ import { setNoteTitle } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
 import { augmentDocPrompt } from '@/lib/prompts';
 import { useNavStore } from '@/stores/navStore';
-import { isTopLayer, useLayer } from '@/components/ui/layers';
+import { ownsEscape, useLayer } from '@/components/ui/layers';
 import { useEntry, useSchema, useVaultStore } from '@/stores/vaultStore';
 import { DETAIL_WIDTH_MAX, DETAIL_WIDTH_MIN, useUiStore } from '@/stores/uiStore';
 
@@ -99,8 +99,10 @@ function DetailEscapeLayer({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      // Anything registered above this owns the keystroke.
-      if (!isTopLayer(id)) return;
+      // Anything registered above this owns the keystroke — a tooltip
+      // included (M16.35). `isTopLayer` skips tooltips on purpose, so asking
+      // it here let one Escape dismiss a header tooltip AND this whole panel.
+      if (!ownsEscape(id)) return;
       // Two surfaces that are not layers yet and would otherwise lose their
       // Escape to this one: QuickOpen sits over the whole window, and the
       // inline diff renders INSIDE this panel, so the stack cannot tell it

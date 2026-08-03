@@ -1,10 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { IconButton } from '@/components/ui/IconButton';
+import { hasLayers, resetLayers } from '@/components/ui/layers';
 
 afterEach(cleanup);
+// Layers are module state; a case that leaves one pushed would make every
+// later assertion about ownership pass for the wrong reason.
+beforeEach(() => resetLayers());
 
 /**
  * What the native `title` attribute could not do (M16.5), which is why 124
@@ -91,6 +95,58 @@ describe('Tooltip', () => {
 
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+  });
+
+  /**
+   * …and dismisses ONLY itself (M16.35).
+   *
+   * The listener above used to be a bubble-phase `window` handler that
+   * stopped nothing and registered no layer, so the same keystroke reached
+   * every global handler behind it — one Escape over a header button hid the
+   * hint and closed the whole record panel with it.
+   */
+  it('keeps that Escape away from listeners behind it', async () => {
+    const user = userEvent.setup();
+    const behind = vi.fn();
+    // Exactly how DetailPanel listens.
+    window.addEventListener('keydown', behind);
+    try {
+      render(
+        <Tooltip label="Archive this" delayMs={0}>
+          <button type="button">go</button>
+        </Tooltip>,
+      );
+      await user.hover(screen.getByRole('button'));
+      await waitFor(() => expect(screen.queryByRole('tooltip')).toBeTruthy());
+      behind.mockClear();
+
+      await user.keyboard('{Escape}');
+      expect(behind).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+    } finally {
+      window.removeEventListener('keydown', behind);
+    }
+  });
+
+  /**
+   * A tooltip takes its Escape without being modal (M16.35).
+   *
+   * It registers as a layer of kind `tooltip`, which every question about the
+   * innermost SURFACE skips. Counting as one would hand a focus-trapped
+   * popover's Tab to a bubble floating over it — and Tab inside a trapped
+   * popover is exactly what makes a tooltip appear.
+   */
+  it('does not count as a dismissable surface while it is up', async () => {
+    const user = userEvent.setup();
+    render(
+      <Tooltip label="Archive this" delayMs={0}>
+        <button type="button">go</button>
+      </Tooltip>,
+    );
+    await user.hover(screen.getByRole('button'));
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeTruthy());
+
+    expect(hasLayers()).toBe(false);
   });
 });
 

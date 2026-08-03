@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useEscapeLayer } from '@/components/ui/Popover';
 
 /**
  * A tooltip that shows up (M16.5).
@@ -25,6 +26,33 @@ import { createPortal } from 'react-dom';
 const DELAY_MS = 400;
 const GAP = 6;
 const EDGE = 8;
+
+/**
+ * A visible tooltip is a layer too — the one non-modal kind (M16.35).
+ *
+ * Escape used to be a bubble-phase `window` listener that stopped nothing and
+ * registered nothing, so one keystroke over a header button dismissed the
+ * tooltip AND the record panel behind it. The panel was not at fault: it asks
+ * the stack who owns the key, the stack had never heard of the tooltip, and so
+ * it was told the keystroke was unclaimed.
+ *
+ * `kind: 'tooltip'` because a bubble must not pass for the innermost SURFACE.
+ * Tab inside a focus-trapped popover moves focus, focus shows a tooltip, and a
+ * tooltip counted as a surface would take that popover's own `Tab` handling
+ * away from it on the next keypress.
+ *
+ * The cost is that Escape over a visible tooltip dismisses only the tooltip,
+ * and the surface underneath needs a second one. That is the point: the old
+ * behaviour was one keystroke closing two things, and this is the same rule
+ * every other layer already follows.
+ *
+ * A child component, so the layer lives exactly as long as the bubble does —
+ * the shape `DropdownEscapeLayer` established in M16.34.
+ */
+function TooltipEscapeLayer({ onClose }: { onClose: () => void }) {
+  useEscapeLayer(onClose, { kind: 'tooltip' });
+  return null;
+}
 
 export interface TooltipProps {
   /** The text. Nothing renders when this is empty. */
@@ -88,17 +116,6 @@ export function Tooltip({
 
   useEffect(() => cancel, [cancel]);
 
-  // Escape dismisses without moving the pointer — otherwise a tooltip can sit
-  // over the thing you are trying to read.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-
   useLayoutEffect(() => {
     if (!open) return;
     const anchor = anchorRef.current;
@@ -135,6 +152,10 @@ export function Tooltip({
 
   return (
     <>
+      {/* Escape dismisses without moving the pointer — otherwise a tooltip can
+          sit over the thing you are trying to read — and it dismisses ONLY
+          this. */}
+      {open && <TooltipEscapeLayer onClose={hide} />}
       {React.cloneElement(child, {
         onPointerEnter: chain(show, childProps.onPointerEnter),
         onPointerLeave: chain(hide, childProps.onPointerLeave),

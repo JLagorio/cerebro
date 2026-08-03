@@ -106,7 +106,13 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
       if (vaultPath === null) return;
       // Step to a neighbour BEFORE the record goes, so deleting from a list
       // leaves you in the list rather than on nothing.
-      const next = siblings[at + 1] ?? siblings[at - 1] ?? null;
+      //
+      // `at` is -1 when the open record is not in this view's list at all — it
+      // was opened from a backlink, a dossier or search while some other list
+      // filled `detailSiblings`. There is no neighbour to land on, so the panel
+      // closes. Without the guard `siblings[-1 + 1]` is `siblings[0]`, and the
+      // delete would teleport the user to an unrelated record.
+      const next = at === -1 ? null : (siblings[at + 1] ?? siblings[at - 1] ?? null);
       try {
         await deleteNote(vaultPath, entry.path);
       } catch {

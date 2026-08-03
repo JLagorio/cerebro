@@ -158,6 +158,18 @@ describe('DetailHeaderActions', () => {
     await waitFor(() => expect(useUiStore.getState().detailPath).toBe(C));
   });
 
+  // Deleting the last record in the list has no next to land on.
+  it('falls back to the previous record when the deleted one was last', async () => {
+    const user = userEvent.setup();
+    setup([A, B, C], C);
+    await user.click(screen.getByRole('button', { name: 'Record actions' }));
+    await user.click(await screen.findByTestId('record-delete'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(useUiStore.getState().detailPath).toBe(B));
+    expect(deleteNote).toHaveBeenCalledWith('/vault', C);
+  });
+
   it('closes the panel when the deleted record was the only one', async () => {
     const user = userEvent.setup();
     setup([B], B);
@@ -166,6 +178,22 @@ describe('DetailHeaderActions', () => {
     await user.click(screen.getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => expect(useUiStore.getState().detailPath).toBeNull());
+  });
+
+  // Opened from a backlink or search, the record is not in the list the canvas
+  // put in `detailSiblings` at all. `siblings[-1 + 1]` is `siblings[0]`, so
+  // without a guard the delete lands on an unrelated record.
+  it('closes the panel rather than jumping when the record is not a sibling', async () => {
+    const user = userEvent.setup();
+    setup([A, C], B);
+    await user.click(screen.getByRole('button', { name: 'Record actions' }));
+    await user.click(await screen.findByTestId('record-delete'));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(deleteNote).toHaveBeenCalledWith('/vault', B));
+    await waitFor(() => expect(useUiStore.getState().detailPath).not.toBe(B));
+    expect(useUiStore.getState().detailPath).not.toBe(A);
+    expect(useUiStore.getState().detailPath).toBeNull();
   });
 
   it('keeps the record when the delete fails, and says so', async () => {

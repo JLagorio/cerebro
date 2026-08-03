@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
-import { isTopLayer, useLayer } from '@/components/ui/layers';
+import { isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
 
 const css = `
 .cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:64px 24px;z-index:1000;animation:cbFade var(--dur-med) var(--ease-out)}
@@ -102,7 +102,10 @@ function DialogCard({
       // dismisses one thing at a time. This used to compare `.cb-dlg` nodes in
       // document order, which could only see other dialogs — a popover opened
       // from inside a dialog was not counted, and both closed at once (M16.1).
-      if (!isTopLayer(layerId)) return;
+      // `ownsEscape`, not `isTopLayer`: the latter skips tooltips, which is
+      // right for the Tab trap below and wrong here, where a visible tooltip
+      // is exactly what the keystroke is aimed at (M16.35).
+      if (!ownsEscape(layerId)) return;
       e.preventDefault();
       e.stopPropagation();
       onClose();

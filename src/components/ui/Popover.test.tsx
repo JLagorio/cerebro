@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { StrictMode, useRef, useState } from 'react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Popover } from '@/components/ui/Popover';
 import { hasLayers, resetLayers } from '@/components/ui/layers';
@@ -189,7 +189,9 @@ describe('Popover stacking', () => {
             </button>
             {inner && (
               <Popover onClose={() => setInner(false)} role="listbox" ariaLabel="Inner">
-                <button type="button">leaf</button>
+                <button type="button" data-testid="leaf">
+                  leaf
+                </button>
               </Popover>
             )}
           </Popover>
@@ -212,5 +214,82 @@ describe('Popover stacking', () => {
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  /**
+   * The outside-press check had the gap Escape did not (M16.35).
+   *
+   * Escape asked the layer stack who owned the keystroke; the pointerdown
+   * handler asked only `surfaceRef.contains(target)`. A `Popover` portals to
+   * `document.body`, so the inner menu is NOT a descendant of the outer one —
+   * every press the user aimed at the inner menu read as "outside" to the
+   * outer one and tore it down, taking the inner menu with it.
+   *
+   * `FilterValueEditor` had already met this and worked around it by writing
+   * a non-portalling surface of its own ("pressing a day in a portalled date
+   * picker closed the rule editor it was opened from"). The stack answers it
+   * for every nesting instead.
+   */
+  it('leaves the parent open when the press lands in a menu opened from it', async () => {
+    const user = userEvent.setup();
+    render(<Nested />);
+    await user.click(screen.getByTestId('trigger'));
+    await user.click(screen.getByTestId('open-inner'));
+
+    await user.click(screen.getByTestId('leaf'));
+    expect(screen.queryByRole('listbox')).toBeTruthy();
+    expect(screen.queryByRole('menu')).toBeTruthy();
+  });
+
+  // A press past both of them still dismisses both — the fix suppresses the
+  // parent's dismissal only for nodes a layer ABOVE it claims as its own.
+  it('still closes both when the press lands past everything', async () => {
+    const user = userEvent.setup();
+    render(<Nested />);
+    await user.click(screen.getByTestId('trigger'));
+    await user.click(screen.getByTestId('open-inner'));
+
+    await user.click(document.body);
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  // Same gap, same fix: `closeOnScroll` fired on any scroll outside the
+  // panel's own subtree, so scrolling a long nested menu dismissed the menu
+  // that opened it.
+  it('leaves the parent open when a menu opened from it scrolls', async () => {
+    const user = userEvent.setup();
+    render(<Nested />);
+    await user.click(screen.getByTestId('trigger'));
+    await user.click(screen.getByTestId('open-inner'));
+
+    fireEvent.scroll(screen.getByRole('listbox'));
+    expect(screen.queryByRole('menu')).toBeTruthy();
+  });
+
+  /**
+   * The app renders under StrictMode, which mounts every effect twice —
+   * mount, cleanup, mount. Registration moved into the layout phase (M16.35)
+   * and the stack is ORDERED, so a double invoke that re-ordered or duplicated
+   * entries would unwind these surfaces backwards or strand one on the stack
+   * for every popover opened afterwards to lose its Escape to.
+   */
+  it('unwinds in the same order under StrictMode, and leaves nothing behind', async () => {
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <Nested />
+      </StrictMode>,
+    );
+    await user.click(screen.getByTestId('trigger'));
+    await user.click(screen.getByTestId('open-inner'));
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.queryByRole('menu')).toBeTruthy();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(hasLayers()).toBe(false);
   });
 });

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
-import { isTopLayer, useLayer } from '@/components/ui/layers';
+import type { LayerOptions } from '@/components/ui/layers';
+import { isInsideLayerAbove, isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
 
 /**
  * The one anchored-surface primitive (M16.1).
@@ -61,17 +62,24 @@ export interface DismissOptions {
  * Returns the layer id, so a caller that also needs to know whether it is on
  * top (a focus trap) can reuse it instead of registering a second layer and
  * shadowing itself.
+ *
+ * `options` describes the layer to the stack — the surface it owns, and its
+ * kind for the one non-modal case (a tooltip). See `layers.ts`.
  */
-export function useEscapeLayer(onClose: (() => void) | undefined): string {
-  const id = useLayer();
+export function useEscapeLayer(onClose: (() => void) | undefined, options?: LayerOptions): string {
+  const id = useLayer(options);
   const latest = useRef(onClose);
   latest.current = onClose;
 
-  useEffect(() => {
+  // Layout phase for the same reason `useLayer` registers there (M16.35): a
+  // listener that only exists after the browser has painted is a listener the
+  // first keystroke after opening misses, and that keystroke then lands on
+  // whatever was already listening — the record panel.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      // Only the innermost surface reacts, so one keystroke closes one thing.
-      if (!isTopLayer(id)) return;
+      // Only the innermost layer reacts, so one keystroke closes one thing.
+      if (!ownsEscape(id)) return;
       const close = latest.current;
       // Registered but not listening: swallowing the key here would leave a
       // surface whose Escape belongs to a sibling handler with none at all.
@@ -102,7 +110,11 @@ export function useEscapeLayer(onClose: (() => void) | undefined): string {
  * second layer and shadowing itself.
  */
 export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissOptions): string {
-  const id = useEscapeLayer(onEscape ?? onClose);
+  const id = useEscapeLayer(onEscape ?? onClose, {
+    // Tell the stack which nodes are this surface's own, so the layers BELOW
+    // it can tell a press aimed here from a press aimed past everything.
+    contains: (node) => surfaceRef.current?.contains(node) === true,
+  });
   const latest = useRef(onClose);
   latest.current = onClose;
 
@@ -118,6 +130,13 @@ export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissO
       // press on it would close here and reopen there, and the surface would
       // never appear.
       if (anchorEl?.()?.contains(target) === true) return;
+      // A press inside a surface stacked ABOVE this one belongs to that
+      // surface (M16.35). Escape already asked the stack who owns the
+      // keystroke; this asked only its own subtree, and `Popover` portals to
+      // `document.body` — so a menu opened from inside this one is not a
+      // descendant of it and every click in the child closed the parent out
+      // from under the user.
+      if (isInsideLayerAbove(id, target)) return;
       // Let an editor inside the surface commit first. Unmounting a subtree
       // never fires blur, so a name typed into a popover's rename box was
       // silently discarded by the very click the user made to accept it.
@@ -130,7 +149,7 @@ export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissO
     };
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
-  }, [surfaceRef, anchorEl]);
+  }, [surfaceRef, anchorEl, id]);
 
   return id;
 }
@@ -250,14 +269,20 @@ export function Popover({
     if (!closeOnScroll) return;
     const onScroll = (e: Event) => {
       const target = e.target;
-      if (target instanceof Node && panelRef.current?.contains(target) === true) return;
+      if (target instanceof Node) {
+        if (panelRef.current?.contains(target) === true) return;
+        // Same gap as the outside press had (M16.35): scrolling a long menu
+        // opened FROM this one is not the page scrolling out from under it,
+        // but the nested panel is portalled and so is not inside `panelRef`.
+        if (isInsideLayerAbove(layerId, target)) return;
+      }
       latestClose.current();
     };
     // Capture: scroll does not bubble, so a scrolling pane deeper in the tree
     // is only observable from above.
     document.addEventListener('scroll', onScroll, true);
     return () => document.removeEventListener('scroll', onScroll, true);
-  }, [closeOnScroll]);
+  }, [closeOnScroll, layerId]);
 
   useEffect(() => {
     if (!trapFocus) return;

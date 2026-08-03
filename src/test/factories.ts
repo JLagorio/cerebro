@@ -31,10 +31,13 @@ export function fixtureVault(): Entry[] {
       properties: {
         icon: 'circle-check',
         color: 'var(--cortex-500)',
+        // Hex, like every `color:` in the demo vault and every real vault. A
+        // `var(…)` here stopped being a colour the resolver will emit when the
+        // paren check became an allowlist (M16.35).
         statuses: [
-          { id: 'todo', group: 'active', color: 'var(--n-500)', hollow: true },
-          { id: 'doing', group: 'active', color: 'var(--warn-500)' },
-          { id: 'done', group: 'done', color: 'var(--success-500)' },
+          { id: 'todo', group: 'active', color: '#7E8699', hollow: true },
+          { id: 'doing', group: 'active', color: '#DE8F0A' },
+          { id: 'done', group: 'done', color: '#1F9D61' },
         ],
         fields: {
           status: { kind: 'status' },
