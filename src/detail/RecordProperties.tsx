@@ -3,8 +3,9 @@ import { addPropertyToEntry } from '@/app/typeActions';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
-import { visibleProperties } from '@/engine/properties';
-import type { Entry, Schema } from '@/engine/types';
+import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
+import { inferKindFromValue, visibleProperties } from '@/engine/properties';
+import type { Entry, FieldKind, Schema } from '@/engine/types';
 import { useVaultStore } from '@/stores/vaultStore';
 
 /** Readable text for a key the type does not declare. `properties` holds
@@ -18,6 +19,12 @@ function undeclaredDisplay(entry: Entry, name: string): string {
   if (Array.isArray(value)) return value.map(String).join(', ');
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+/** Which icon leads an undeclared row. A wikilink field is a relation
+ * whatever its value looks like; everything else is read off the shape. */
+function undeclaredKind(entry: Entry, name: string): FieldKind {
+  return name in entry.relationships ? 'relation' : inferKindFromValue(entry.properties[name]);
 }
 
 /**
@@ -41,41 +48,39 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
   return (
     <div className="mb-4 flex flex-col gap-[7px]">
       {declared.map((f) => (
-        // items-start + a flexible value column: multi-value fields (people,
-        // relations) wrap onto several lines and must not be squeezed into a
-        // content-width box beside the label.
-        <div key={f.name} className="flex min-w-0 items-start gap-2">
-          <span className="w-24 flex-none pt-[3px] text-[12px] text-[var(--n-500)]">
-            {humanize(f.name)}
-          </span>
-          <div className="min-w-0 flex-1">
-            <FieldEditor entry={entry} def={f} schema={schema} />
-          </div>
-        </div>
+        <PropertyRow
+          key={f.name}
+          kind={f.kind}
+          name={f.name}
+          align={f.kind === 'checkbox' ? 'center' : 'start'}
+        >
+          <FieldEditor entry={entry} def={f} schema={schema} />
+        </PropertyRow>
       ))}
       {undeclared.map((name) => (
         // A key the type no longer declares is still the user's data. It used
         // to render `String(value)` — "[object Object]" for a leftover
         // daterange — inside a fixed-width row, with no way to remove it from
         // the panel at all. Now it reads, wraps, and can be dropped.
-        <div key={name} className="group flex min-w-0 items-start gap-2">
-          <span className="w-24 flex-none truncate pt-[3px] text-[12px] text-[var(--n-500)]">
-            {humanize(name)}
-          </span>
-          <div className="min-w-0 flex-1">
-            <span className="block text-[12.5px] text-[var(--n-700)] [overflow-wrap:anywhere]">
-              {undeclaredDisplay(entry, name)}
+        <PropertyRow
+          key={name}
+          kind={undeclaredKind(entry, name)}
+          name={name}
+          trailing={
+            <span className={ROW_ACTION}>
+              <IconButton
+                icon="x"
+                label={`Remove ${humanize(name)}`}
+                size="sm"
+                onClick={() => void patchFrontmatter(entry.path, { [name]: null })}
+              />
             </span>
-          </div>
-          <span className="inline-flex flex-none opacity-0 focus-within:opacity-100 group-hover:opacity-100">
-            <IconButton
-              icon="x"
-              label={`Remove ${humanize(name)}`}
-              size="sm"
-              onClick={() => void patchFrontmatter(entry.path, { [name]: null })}
-            />
+          }
+        >
+          <span className="block pt-[3px] text-[12.5px] text-[var(--n-700)] [overflow-wrap:anywhere]">
+            {undeclaredDisplay(entry, name)}
           </span>
-        </div>
+        </PropertyRow>
       ))}
       {addingProp ? (
         <AddPropertyPanel

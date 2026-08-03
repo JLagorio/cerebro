@@ -3,6 +3,7 @@ import {
   coerceValueToKind,
   computeRollup,
   formatTimestamp,
+  inferKindFromValue,
   validatePatch,
   validateValue,
 } from './properties';
@@ -201,5 +202,43 @@ describe('coerceValueToKind', () => {
   it('to relation wraps names as wikilinks, splitting comma lists', () => {
     expect(coerceValueToKind('alpha, beta', 'relation')).toEqual(['[[alpha]]', '[[beta]]']);
     expect(coerceValueToKind(['[[gamma]]'], 'relation')).toEqual(['[[gamma]]']);
+  });
+});
+
+/**
+ * The kind icon an undeclared key gets (M16.6). A loose key has no declared
+ * kind and the row leads with one, so the shape of the stored value is the
+ * only evidence — this pins what each shape claims.
+ */
+describe('inferKindFromValue', () => {
+  it('reads scalars off their JS type', () => {
+    expect(inferKindFromValue(true)).toBe('checkbox');
+    expect(inferKindFromValue(42)).toBe('number');
+    expect(inferKindFromValue('just words')).toBe('text');
+  });
+
+  it('recognises the two string shapes that are not prose', () => {
+    expect(inferKindFromValue('2026-08-02')).toBe('date');
+    expect(inferKindFromValue('https://example.com')).toBe('url');
+    expect(inferKindFromValue('mailto:a@b.co')).toBe('url');
+    // Not a date: a partial one has no honest calendar reading.
+    expect(inferKindFromValue('2026-08')).toBe('text');
+  });
+
+  it('calls a list multi-select rather than text', () => {
+    expect(inferKindFromValue(['work', 'urgent'])).toBe('multiselect');
+    expect(inferKindFromValue([])).toBe('multiselect');
+  });
+
+  // The documented leftover: a daterange outlives the field that declared it,
+  // and String(value) used to render it "[object Object]".
+  it('recognises a start/end mapping, and only that mapping', () => {
+    expect(inferKindFromValue({ start: '2026-01-01', end: null })).toBe('daterange');
+    expect(inferKindFromValue({ owner: 'ada' })).toBe('text');
+  });
+
+  it('falls back to text for nothing at all', () => {
+    expect(inferKindFromValue(null)).toBe('text');
+    expect(inferKindFromValue(undefined)).toBe('text');
   });
 });

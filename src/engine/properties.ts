@@ -178,6 +178,37 @@ export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
 
+/**
+ * The kind an UNDECLARED frontmatter value looks like (M16.6).
+ *
+ * Every property row leads with its kind's icon, and a loose key has no
+ * declared kind — an empty slot there reads as a rendering fault rather than
+ * as "this key is not on the type". The stored shape is the only evidence
+ * available, and it is the same evidence `coerceValueToKind` reads in the
+ * other direction.
+ *
+ * This describes what the value IS. It never writes anything, and it is not
+ * a suggestion the schema should adopt: promoting a loose key to a declared
+ * field stays an explicit act.
+ */
+export function inferKindFromValue(value: unknown): FieldKind {
+  if (typeof value === 'boolean') return 'checkbox';
+  if (typeof value === 'number') return 'number';
+  if (Array.isArray(value)) return 'multiselect';
+  if (typeof value === 'string') {
+    if (ISO_DATE.test(value)) return 'date';
+    if (URL_SHAPE.test(value)) return 'url';
+    return 'text';
+  }
+  // A leftover from a field dropped off its type: the daterange mapping
+  // outlives the declaration that gave it meaning.
+  if (typeof value === 'object' && value !== null) {
+    const r = value as Record<string, unknown>;
+    return 'start' in r || 'end' in r ? 'daterange' : 'text';
+  }
+  return 'text';
+}
+
 const isScalarString = (v: unknown): v is string => typeof v === 'string';
 const isStringArray = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((x) => typeof x === 'string');
