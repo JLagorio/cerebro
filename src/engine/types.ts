@@ -309,6 +309,14 @@ export type ChipStyle = 'plain' | 'type-icon';
 /** How wide a gallery card is — a named step, not a pixel count, so the grid
  * stays responsive and two vaults agree on what "medium" looks like. */
 /**
+ * How tall a table row is. Derived rather than an inline union on
+ * `Presentation`, so the settings page offering the choices and the table
+ * mapping them to heights cannot list different ones (M16.29).
+ */
+export const ROW_HEIGHTS = ['compact', 'default', 'tall'] as const;
+export type RowHeight = (typeof ROW_HEIGHTS)[number];
+
+/**
  * How big a board card is (M16.20) — Notion's Small / Medium / Large.
  *
  * It sets the column width and the card's density together, because those
@@ -334,8 +342,10 @@ export interface GallerySpec {
    * promote whatever attachment happened to be first.
    */
   cover?: string;
-  /** Absent = 'medium'. */
-  size?: CardSize;
+  /* Card SIZE is deliberately not here. It lived here as `size` while the
+   * board kept the same setting as a top-level `cardSize`, so one control
+   * appeared twice in the settings panel writing two different keys — and
+   * whichever one you found, only one of the two layouts read it (M16.29). */
   /** True = the cover is fitted whole inside the tile; absent/false = cropped
    * to fill it. Notion's "Fit media", same default (off). */
   fit?: boolean;
@@ -439,7 +449,7 @@ export interface Presentation {
   /** Ordered sort chain; never empty in practice (parse supplies a default). */
   sort: SortSpec[];
   columns: ColumnSpec[];
-  rowHeight?: 'compact' | 'default' | 'tall';
+  rowHeight?: RowHeight;
   /** Width of the sticky name column. Omitted = the layout's default. */
   titleWidth?: number;
   /**
@@ -461,7 +471,8 @@ export interface Presentation {
   titleCalc?: AggregateCalc;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
-  /** Board card density; omitted = 'medium'. */
+  /** Card density for every layout that draws cards; omitted = 'medium'. A
+   * pre-M16.29 gallery stored this as `gallery.size` and is migrated on read. */
   cardSize?: CardSize;
   /** Board card preview block; omitted = 'none'. */
   cardPreview?: CardPreview;

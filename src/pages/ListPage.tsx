@@ -15,14 +15,8 @@ import type {
   ViewType,
 } from '@/engine/types';
 import { addFieldToType, addRelationProperty, normalizeFieldName } from '@/app/typeActions';
-import {
-  clonePresentation,
-  layoutLabel,
-  moveView,
-  newView,
-  resolveView,
-  toggleSort,
-} from '@/engine/views';
+import { clonePresentation, layoutLabel, moveView, resolveView, toggleSort } from '@/engine/views';
+import { seedView } from '@/app/viewActions';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
@@ -209,8 +203,10 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     void (async () => {
       // Seeded from the tab you are on: "same columns, drawn as a board" is
       // what people mean by adding a view, and starting blank throws away the
-      // configuration they just did.
-      const seeded = newView(
+      // configuration they just did. `seedView` decides what may travel —
+      // this used to hand the whole presentation over and swap `type`, so a
+      // table born on the gantt kept `zoom` forever (M16.29).
+      const seeded = seedView(
         name,
         type,
         list.definition.views.map((v) => v.id),
@@ -259,8 +255,19 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                 {list.definition.name}
               </h1>
             </button>
-            <span className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-              {surface.entries.length}
+            {/* M16.31: `sortedEntries`, which is filtered AND searched — not
+                `surface.entries`, which is only filtered. Typing in "Search
+                this view" narrowed the canvas and flipped the chip to
+                "· filtered" while this number stayed where it was, so one
+                header told two different stories about one screen depending
+                on which control you had narrowed with. NOT `shownEntries`: a
+                load limit is truncation, and how much of how much is showing
+                is what ViewLimitNotice says under the records. */}
+            <span
+              data-testid="view-count"
+              className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]"
+            >
+              {sortedEntries.length}
             </span>
             <span className="hidden flex-none items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)] sm:inline-flex">
               {sourceLabel}

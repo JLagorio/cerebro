@@ -9,14 +9,8 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
-import {
-  clonePresentation,
-  layoutLabel,
-  moveView,
-  newView,
-  nextViewId,
-  toggleSort,
-} from '@/engine/views';
+import { clonePresentation, layoutLabel, moveView, nextViewId, toggleSort } from '@/engine/views';
+import { seedView } from '@/app/viewActions';
 import { listTypes, typeViews, type TypeListing } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ViewDefinition, ViewType } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
@@ -146,7 +140,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const createView = (name: string, type: ViewType) => {
     // Seeded from the tab you are on, and written together with the current
     // tabs — which also materializes the default view the first time.
-    const seeded = newView(
+    // `seedView` decides what may travel: this handed the whole presentation
+    // over and swapped `type`, so a table born on the gantt kept the gantt's
+    // axis keys in the Type doc forever (M16.29).
+    const seeded = seedView(
       name,
       type,
       savedViews.map((v) => v.id),
@@ -232,8 +229,18 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                 {listing.name}
               </h1>
             </button>
-            <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-              {listing.count}
+            {/* M16.31: the records this view is showing, not `listing.count`
+                — the number of records of this type in the vault. Those are
+                the same number until you filter or search, and then the
+                header goes on reporting the vault while the canvas reports
+                the view. The List page had the milder form of this (it
+                followed filters but not search) and both now read the same
+                thing: what is on screen. */}
+            <span
+              data-testid="view-count"
+              className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]"
+            >
+              {sortedEntries.length}
             </span>
             {listing.system && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">

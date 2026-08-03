@@ -194,6 +194,7 @@ function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
   const titleCalc = parseAggregateCalc(obj.titleCalc);
   const gallery = parseGallery(obj.gallery);
+  const cardSize = parseCardSize(obj.cardSize) ?? parseCardSize(asRecord(obj.gallery).size);
   const chart = parseChart(obj.chart);
   const dashboard = parseDashboard(obj.dashboard);
   return {
@@ -228,11 +229,13 @@ function parsePresentation(raw: unknown): Presentation {
     ...(obj.chips === 'plain' || obj.chips === 'type-icon'
       ? { chips: obj.chips as ChipStyle }
       : {}),
-    // Board cards (M16.20). Stored only off their defaults, so a table's
+    // Card settings (M16.20). Stored only off their defaults, so a table's
     // YAML never grows three keys about a layout it is not in.
-    ...(typeof obj.cardSize === 'string' && CARD_SIZE_SET.has(obj.cardSize)
-      ? { cardSize: obj.cardSize as CardSize }
-      : {}),
+    //
+    // The gallery kept its own `gallery.size` until M16.29, when the two
+    // spellings of one setting were collapsed onto this key. A file written
+    // by the old panel migrates on read rather than losing the choice.
+    ...(cardSize !== undefined ? { cardSize } : {}),
     ...(typeof obj.cardPreview === 'string' && CARD_PREVIEW_SET.has(obj.cardPreview)
       ? { cardPreview: obj.cardPreview as CardPreview }
       : {}),
@@ -266,7 +269,6 @@ function parsePresentation(raw: unknown): Presentation {
   };
 }
 
-const SIZES = new Set<string>(CARD_SIZES);
 const KINDS = new Set<string>(CHART_KINDS);
 const AGGS = new Set<string>(CHART_AGGS);
 
@@ -280,9 +282,14 @@ function parseGallery(raw: unknown): GallerySpec | undefined {
   const obj = asRecord(raw);
   const spec: GallerySpec = {};
   if (typeof obj.cover === 'string' && obj.cover.trim() !== '') spec.cover = obj.cover.trim();
-  if (typeof obj.size === 'string' && SIZES.has(obj.size)) spec.size = obj.size as CardSize;
   if (obj.fit === true) spec.fit = true;
   return Object.keys(spec).length === 0 ? undefined : spec;
+}
+
+/** A stored card size, or undefined. Used twice: once for `cardSize`, once for
+ * the pre-M16.29 `gallery.size` it absorbed. */
+function parseCardSize(raw: unknown): CardSize | undefined {
+  return typeof raw === 'string' && CARD_SIZE_SET.has(raw) ? (raw as CardSize) : undefined;
 }
 
 /**

@@ -845,10 +845,33 @@ describe('serializeList', () => {
           group: [],
           sort: [{ field: 'title', dir: 'asc' }],
           columns: [{ field: 'status' }],
-          gallery: { cover: 'artwork', size: 'large', fit: true },
+          cardSize: 'large',
+          gallery: { cover: 'artwork', fit: true },
         },
       );
       expect(parseListYaml('g', serializeList(def)).definition).toEqual(def);
+    });
+
+    /**
+     * A pre-M16.29 gallery stored its card size as `gallery.size` while the
+     * board stored the same setting as `cardSize`, so the settings panel
+     * offered the control twice and each copy wrote a key the other layout
+     * ignored. The two collapsed onto `cardSize`; a file written by the old
+     * panel has to keep the size its owner chose rather than snap to medium.
+     */
+    it('migrates a pre-M16.29 gallery.size onto cardSize', () => {
+      const p = parse('presentation:\n  type: gallery\n  gallery:\n    size: large\n');
+      expect(p.cardSize).toBe('large');
+      expect(p.gallery).toBeUndefined();
+    });
+
+    /** Both spellings on one file can only come from a hand edit; the current
+     * key wins rather than being overwritten by the legacy one. */
+    it('prefers cardSize over a legacy gallery.size', () => {
+      const p = parse(
+        'presentation:\n  type: gallery\n  cardSize: small\n  gallery:\n    size: large\n',
+      );
+      expect(p.cardSize).toBe('small');
     });
 
     it('omits the block entirely when the gallery was never configured', () => {
@@ -866,9 +889,9 @@ describe('serializeList', () => {
     // A hand-edited size that no layout implements would otherwise reach the
     // grid as an unknown key and index METRICS to undefined.
     it('drops a card size it does not recognize', () => {
-      expect(
-        parse('presentation:\n  type: gallery\n  gallery:\n    size: enormous\n').gallery,
-      ).toBeUndefined();
+      const p = parse('presentation:\n  type: gallery\n  gallery:\n    size: enormous\n');
+      expect(p.cardSize).toBeUndefined();
+      expect(p.gallery).toBeUndefined();
     });
 
     /**

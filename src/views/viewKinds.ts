@@ -1,4 +1,4 @@
-import { VIEW_TYPES, type ViewType } from '@/engine/types';
+import { VIEW_TYPES, type Presentation, type ViewType } from '@/engine/types';
 
 /**
  * Every view kind and what it can do, in the order they appear everywhere.
@@ -30,6 +30,41 @@ export interface ViewKind {
   dependencies?: boolean;
   /** Draws records as cards, so it gets the Cards settings page (M16.22). */
   cards?: boolean;
+  /**
+   * Draws a snippet of the record's BODY on its card (Notion's "Card preview
+   * › Page content"). Narrower than `cards`: the gallery's card is a cover,
+   * a title and chips, so offering the control there set a key nothing read.
+   */
+  preview?: boolean;
+  /** Draws a COVER on its cards, from a media property. Narrower than `cards`
+   * for the mirror-image reason: the board's card has no cover slot. */
+  covers?: boolean;
+  /**
+   * Draws each group as its own side-by-side COLUMN, which is what lets a
+   * column be tinted and dropped onto. The gallery bands its cards into
+   * stacked sections instead, so "Color columns" there coloured nothing.
+   */
+  groupColumns?: boolean;
+  /**
+   * Places records in a day GRID rather than on a scrolling axis — so it has
+   * a span, a week start, and weekends to drop.
+   *
+   * This was `isDayGrid`, a local `type === 'calendar'` predicate inside the
+   * settings panel whose own comment said it belonged here and was blocked
+   * only by the panel and this file being in different phases (M16.22).
+   */
+  dayGrid?: boolean;
+  /**
+   * Draws records as a grid of rows and columns: row height, wrapping,
+   * freezing, where the name column sits and what its footer calculates.
+   */
+  tabular?: boolean;
+  /**
+   * Keeps a name column whose width the view stores. Wider than `tabular` —
+   * a timeline and a gantt draw a table BESIDE the axis (M16.24) and size its
+   * name column with the same key the table does.
+   */
+  nameColumn?: boolean;
   /** Draws an aggregation rather than records, so it gets the Chart page
    * (M16.27). Its X axis is the grouping chain, hence `groupable` too. */
   charted?: boolean;
@@ -45,15 +80,30 @@ export interface ViewKind {
  * new kind was simply invisible in all five pickers with no error.
  */
 const CAPABILITIES = {
-  table: { label: 'Table', icon: 'table-2', groupable: true, chips: true },
+  table: {
+    label: 'Table',
+    icon: 'table-2',
+    groupable: true,
+    chips: true,
+    tabular: true,
+    nameColumn: true,
+  },
   list: { label: 'List', icon: 'list', groupable: true, chips: true },
   // `cards` was added by the gallery (M16.22) while the board's own card-ness
   // still lived in a second capability table inside BoardSettings.tsx, so the
   // board never declared it here. Collapsing the two tables at merge time is
   // what surfaced that — which is the argument for one registry, made by the
   // registry itself.
-  board: { label: 'Board', icon: 'columns-3', groupable: true, chips: true, cards: true },
-  calendar: { label: 'Calendar', icon: 'calendar-days', dated: true },
+  board: {
+    label: 'Board',
+    icon: 'columns-3',
+    groupable: true,
+    chips: true,
+    cards: true,
+    preview: true,
+    groupColumns: true,
+  },
+  calendar: { label: 'Calendar', icon: 'calendar-days', dated: true, dayGrid: true },
   gantt: {
     label: 'Gantt',
     icon: 'chart-gantt',
@@ -61,6 +111,7 @@ const CAPABILITIES = {
     groupable: true,
     zoomable: true,
     dependencies: true,
+    nameColumn: true,
   },
   timeline: {
     label: 'Timeline',
@@ -70,6 +121,7 @@ const CAPABILITIES = {
     dated: true,
     groupable: true,
     zoomable: true,
+    nameColumn: true,
   },
   gallery: {
     label: 'Gallery',
@@ -77,6 +129,7 @@ const CAPABILITIES = {
     groupable: true,
     chips: true,
     cards: true,
+    covers: true,
   },
   chart: {
     label: 'Chart',
@@ -136,6 +189,31 @@ export function showsCards(type: ViewType): boolean {
   return viewKind(type).cards === true;
 }
 
+/** True for the card layouts that draw a body snippet on the card (M16.29). */
+export function showsPreview(type: ViewType): boolean {
+  return viewKind(type).preview === true;
+}
+
+/** True for the card layouts that draw a cover (M16.29). */
+export function showsCovers(type: ViewType): boolean {
+  return viewKind(type).covers === true;
+}
+
+/** True for the layouts whose groups are side-by-side columns (M16.29). */
+export function hasGroupColumns(type: ViewType): boolean {
+  return viewKind(type).groupColumns === true;
+}
+
+/** True for the layouts that place records in a day grid (M16.29). */
+export function isDayGrid(type: ViewType): boolean {
+  return viewKind(type).dayGrid === true;
+}
+
+/** True for the layouts that draw a grid of rows and columns (M16.29). */
+export function isTabular(type: ViewType): boolean {
+  return viewKind(type).tabular === true;
+}
+
 /** True for the layouts that draw an aggregation rather than records (M16.27). */
 export function isCharted(type: ViewType): boolean {
   return viewKind(type).charted === true;
@@ -165,4 +243,76 @@ export function hasBlocks(type: ViewType): boolean {
 export function axesFor(type: ViewType): { sort: boolean; group: boolean } {
   // Days ARE the calendar's grouping. Sort still orders the chips inside a day.
   return { sort: true, group: viewKind(type).groupable === true };
+}
+
+/** Everything on a ViewKind that answers yes/no about what a layout can do. */
+type Capability = Exclude<keyof ViewKind, 'value' | 'label' | 'icon'>;
+
+/**
+ * The presentation keys every layout reads, so they always travel.
+ *
+ * These are the QUERY — which records, in what order, banded how, showing
+ * which properties. "Another view of this data" that arrived as a blank table
+ * would be worse than one carrying a key too many.
+ */
+type SharedKey = 'type' | 'group' | 'sort' | 'columns' | 'limit';
+
+/**
+ * Which capability each layout-specific presentation key needs to mean
+ * anything (M16.29).
+ *
+ * `satisfies Record<Exclude<keyof Presentation, …>, Capability>` is the
+ * enforcement, and the reason this map is worth its length: add a key to
+ * `Presentation` and this stops compiling until someone says which layouts
+ * read it. There is no way to add a key that quietly travels everywhere.
+ */
+const KEY_NEEDS = {
+  rowHeight: 'tabular',
+  frozenColumns: 'tabular',
+  titlePosition: 'tabular',
+  titleCalc: 'tabular',
+  titleWidth: 'nameColumn',
+  chips: 'chips',
+  cardSize: 'cards',
+  cardPreview: 'preview',
+  colorColumns: 'groupColumns',
+  gallery: 'covers',
+  dateField: 'dated',
+  calendarSpan: 'dayGrid',
+  showWeekends: 'dayGrid',
+  weekStart: 'dayGrid',
+  zoom: 'zoomable',
+  showTable: 'zoomable',
+  dependencyField: 'dependencies',
+  chart: 'charted',
+  dashboard: 'blocks',
+} satisfies Record<Exclude<keyof Presentation, SharedKey>, Capability>;
+
+/**
+ * The part of a presentation a NEW view of another kind may inherit (M16.29).
+ *
+ * "Add a view" seeds from the tab you are standing on, which is what people
+ * mean by it — but it used to copy the whole presentation and only swap
+ * `type`. A Table born on the Gallery inherited `colorColumns`; one born on
+ * the Gantt inherited `dateField`, `zoom` and `dependencyField`. None of those
+ * mean anything to a table, nothing on screen ever mentioned them again, and
+ * they were written to the user's YAML on the first save — permanently.
+ *
+ * So a key travels only to a kind that can read it. The query — columns, sort,
+ * grouping, limit — travels always.
+ *
+ * This lives here rather than beside `newView` because the capability catalog
+ * is here: `engine/` is the pure domain core and does not import the view
+ * layer, and a second copy of the table in the engine is exactly the drift
+ * M16.3 spent a commit deleting.
+ */
+export function carryOver(base: Presentation, type: ViewType): Presentation {
+  const kind = viewKind(type);
+  const kept = Object.fromEntries(
+    Object.entries(base).filter(([key]) => {
+      const needs = KEY_NEEDS[key as keyof typeof KEY_NEEDS];
+      return needs === undefined || kind[needs] === true;
+    }),
+  ) as Presentation;
+  return { ...kept, type };
 }

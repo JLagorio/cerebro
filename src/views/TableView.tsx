@@ -37,6 +37,7 @@ import type {
   FieldKind,
   GroupNode,
   Presentation,
+  RowHeight,
   Schema,
 } from '@/engine/types';
 import {
@@ -50,7 +51,7 @@ import {
   renameFieldOnType,
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
-import { ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
+import { ConfirmDeleteProperty, ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
 import { QuickAddInline } from '@/views/QuickAdd';
 import {
   useRowKeyboard,
@@ -201,20 +202,17 @@ const GUTTER = 46;
  * setting round-trip and the table ignored it. Tailwind classes rather than
  * numbers because the row is also `min-h-` when a column wraps, and one map
  * per spelling is one map too many.
+ *
+ * `Record<RowHeight, …>` since M16.29, when the height list moved to
+ * `engine/types` — the settings page offering the choices and this map
+ * rendering them cannot list different ones.
  */
-const ROW_HEIGHT = { compact: 'h-8', default: 'h-9', tall: 'h-12' } as const;
-const ROW_MIN_HEIGHT = { compact: 'min-h-8', default: 'min-h-9', tall: 'min-h-12' } as const;
-
-type RowHeight = NonNullable<Presentation['rowHeight']>;
-
-/** Derived from the class map, so the menu cannot offer a height the rows
- * cannot render. */
-const ROW_HEIGHT_CHOICES: { value: RowHeight; label: string }[] = (
-  Object.keys(ROW_HEIGHT) as RowHeight[]
-).map((value) => ({ value, label: `${value[0].toUpperCase()}${value.slice(1)}` }));
-
-const rowHeightLabel = (h: RowHeight): string =>
-  ROW_HEIGHT_CHOICES.find((c) => c.value === h)?.label ?? 'Default';
+const ROW_HEIGHT: Record<RowHeight, string> = { compact: 'h-8', default: 'h-9', tall: 'h-12' };
+const ROW_MIN_HEIGHT: Record<RowHeight, string> = {
+  compact: 'min-h-8',
+  default: 'min-h-9',
+  tall: 'min-h-12',
+};
 
 /** Widest a fit-to-content column may become. Past this the column stops
  * being a column and becomes the table. */
@@ -1154,6 +1152,11 @@ function HeaderMenu({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [changingKind, setChangingKind] = useState(false);
   const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
+  // The third unguarded delete. `PropertyMenu` and `PropertyEditor` were
+  // guarded; this menu has its OWN "Delete property" item that called
+  // `removeFieldFromType` on one click, from a surface that already tells you
+  // it edits N records. Same dialog, so all three say the same thing.
+  const [confirmDelete, setConfirmDelete] = useState(false);
   // M12.8: the full property editor, flown out IN this popover next to the
   // column it configures — config never docks a side panel.
   const [editing, setEditing] = useState(false);
@@ -1168,6 +1171,7 @@ function HeaderMenu({
       setDraft(humanize(def.name));
       setChangingKind(false);
       setEditing(false);
+      setConfirmDelete(false);
     }
   }, [open, def.name]);
 
@@ -1285,13 +1289,7 @@ function HeaderMenu({
           label: 'Delete property',
           icon: 'trash-2',
           danger: true,
-          run: () => {
-            void (async () => {
-              if (await removeFieldFromType(sourceType, def.name)) {
-                onColumnsChange(columns.filter((c) => c.field !== def.name));
-              }
-            })();
-          },
+          run: () => setConfirmDelete(true),
         },
       );
     }
@@ -1417,6 +1415,21 @@ function HeaderMenu({
           </MenuSurface>
         </Popover>
       )}
+      {confirmDelete && sourceType !== null && onColumnsChange !== undefined && (
+        <ConfirmDeleteProperty
+          name={name}
+          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false);
+            void (async () => {
+              if (await removeFieldFromType(sourceType, def.name)) {
+                onColumnsChange(columns.filter((c) => c.field !== def.name));
+              }
+            })();
+          }}
+        />
+      )}
       {pendingKind !== null && sourceType !== null && (
         <ConfirmKindChange
           name={name}
@@ -1446,38 +1459,23 @@ function TitleHeaderMenu({
   frozen,
   atStart,
   atEnd,
-  rowHeight,
-  allWrapped,
   onPresentationChange,
   onFilterField,
   onMove,
   onFreeze,
-  onWrapAll,
 }: {
   presentation: Presentation;
   frozen: boolean;
   atStart: boolean;
   atEnd: boolean;
-  /** M16.18: the two settings that are about the WHOLE table rather than one
-   * column, hosted on the name column's menu — the table's own settings
-   * surface since M12.8, and the only one that needs no capability flag to
-   * say "this is a table". */
-  rowHeight: NonNullable<Presentation['rowHeight']>;
-  allWrapped: boolean;
   onPresentationChange?: (next: Presentation) => void;
   onFilterField?: (field: string) => void;
   onMove: (delta: -1 | 1) => void;
   onFreeze: () => void;
-  onWrapAll?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [heights, setHeights] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const close = () => setOpen(false);
-
-  useEffect(() => {
-    if (open) setHeights(false);
-  }, [open]);
 
   const items: HeaderItem[] = [];
   if (onFilterField !== undefined) {
@@ -1508,7 +1506,7 @@ function TitleHeaderMenu({
     if (!atEnd) items.push({ label: 'Move right', icon: 'arrow-right', run: () => onMove(1) });
   }
 
-  if (items.length === 0 && onWrapAll === undefined) {
+  if (items.length === 0) {
     return <span className="min-w-0 flex-1 truncate">Name</span>;
   }
 
@@ -1528,72 +1526,35 @@ function TitleHeaderMenu({
         <Popover
           anchorRef={triggerRef}
           onClose={close}
-          onEscape={heights ? () => setHeights(false) : close}
+          onEscape={close}
           role="menu"
           ariaLabel="Name column menu"
           trapFocus
         >
+          {/* M16.29: "Row height" and "Wrap all columns" are gone from here.
+              Both are settings for the WHOLE table, and this menu was the only
+              place either could be reached — a menu whose every other item acts
+              on the name column, and which no other column's header carries. So
+              someone looking for row height opened Priority's menu, found
+              sort/filter/hide/freeze and no height, and had no way to know
+              Name's menu was different. They live in view settings › Rows,
+              beside every other setting for the whole view. */}
           <MenuSurface width={224}>
-            {heights ? (
-              <>
-                <MenuBack title="Row height" onBack={() => setHeights(false)} />
-                {ROW_HEIGHT_CHOICES.map((choice) => (
-                  <MenuItem
-                    key={choice.value}
-                    label={choice.label}
-                    checked={rowHeight === choice.value}
-                    testId={`row-height-${choice.value}`}
-                    onSelect={() => {
-                      close();
-                      onPresentationChange?.({ ...presentation, rowHeight: choice.value });
-                    }}
-                  />
-                ))}
-              </>
-            ) : (
-              <>
-                <MenuLabel>Name</MenuLabel>
-                {items.map((item) => (
-                  <Fragment key={item.label}>
-                    {item.section === true && <MenuSeparator />}
-                    <MenuItem
-                      icon={item.icon}
-                      label={item.label}
-                      checked={item.active}
-                      onSelect={() => {
-                        item.run();
-                        close();
-                      }}
-                    />
-                  </Fragment>
-                ))}
-                {(onPresentationChange !== undefined || onWrapAll !== undefined) && (
-                  <MenuSeparator />
-                )}
-                {onPresentationChange !== undefined && (
-                  <MenuItem
-                    icon="rows-2"
-                    label="Row height"
-                    hint={rowHeightLabel(rowHeight)}
-                    submenu
-                    testId="row-height"
-                    onSelect={() => setHeights(true)}
-                  />
-                )}
-                {onWrapAll !== undefined && (
-                  <MenuItem
-                    icon="wrap-text"
-                    label="Wrap all columns"
-                    checked={allWrapped}
-                    testId="wrap-all"
-                    onSelect={() => {
-                      close();
-                      onWrapAll();
-                    }}
-                  />
-                )}
-              </>
-            )}
+            <MenuLabel>Name</MenuLabel>
+            {items.map((item) => (
+              <Fragment key={item.label}>
+                {item.section === true && <MenuSeparator />}
+                <MenuItem
+                  icon={item.icon}
+                  label={item.label}
+                  checked={item.active}
+                  onSelect={() => {
+                    item.run();
+                    close();
+                  }}
+                />
+              </Fragment>
+            ))}
           </MenuSurface>
         </Popover>
       )}
@@ -2017,20 +1978,6 @@ export function TableView({
   );
 
   const rowHeight = presentation.rowHeight ?? 'default';
-  const allWrapped = resolved.length > 0 && resolved.every((c) => c.spec.wrap === true);
-
-  /** Wrap every column, or unwrap them all when they already are. */
-  const wrapAll = useCallback(() => {
-    if (onColumnsChange === undefined) return;
-    onColumnsChange(
-      presentation.columns.map((c) => {
-        if (!allWrapped) return { ...c, wrap: true };
-        const { wrap: _drop, ...rest } = c;
-        return rest;
-      }),
-    );
-  }, [allWrapped, onColumnsChange, presentation.columns]);
-
   /**
    * Reorder by display slot: remove `key`, re-insert at `slot` (an index into
    * the display list). Writes titlePosition AND the column order in ONE
@@ -2307,13 +2254,10 @@ export function TableView({
                       frozen={titleFrozen}
                       atStart={titlePos === 0}
                       atEnd={titlePos === resolved.length}
-                      rowHeight={rowHeight}
-                      allWrapped={allWrapped}
                       onPresentationChange={onPresentationChange}
                       onFilterField={onFilterField}
                       onMove={(delta) => moveDisplay('title', delta)}
                       onFreeze={() => freezeThrough(d)}
-                      onWrapAll={onColumnsChange === undefined ? undefined : wrapAll}
                     />
                     <SortMark presentation={presentation} field="title" />
                     <Icon

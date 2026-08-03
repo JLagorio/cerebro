@@ -298,7 +298,10 @@ export function GalleryView({
   scope = 'gallery',
   filtered,
 }: GalleryViewProps) {
-  const size: CardSize = presentation.gallery?.size ?? 'medium';
+  // `presentation.cardSize`, the key the board already used. It was
+  // `gallery.size` here, so one setting had two spellings and the settings
+  // panel offered both of them to both card layouts (M16.29).
+  const size: CardSize = presentation.cardSize ?? 'medium';
   const metrics = METRICS[size];
   const bands = groupTree(entries, presentation.group, schema);
 

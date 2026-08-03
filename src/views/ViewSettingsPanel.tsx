@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
-import { moveColumnTo, toggleColumn } from '@/engine/columns';
+import { allColumnsWrap, moveColumnTo, toggleColumn, wrapAllColumns } from '@/engine/columns';
 import { GROUPABLE_KINDS, MEDIA_KINDS, NUMERIC_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import {
@@ -21,8 +21,17 @@ import { DEFAULT_ZOOM, ZOOM_LABELS } from '@/engine/schedule';
 import { humanize } from '@/engine/schema';
 import { PropertyEditor } from '@/views/PropertyEditor';
 import { measureLabel } from '@/engine/chart';
-import { CARD_SIZES, CHART_AGGS, CHART_KINDS, bandLevels, nestLevels } from '@/engine/types';
+import {
+  CARD_PREVIEWS,
+  CARD_SIZES,
+  CHART_AGGS,
+  CHART_KINDS,
+  ROW_HEIGHTS,
+  bandLevels,
+  nestLevels,
+} from '@/engine/types';
 import type {
+  CardPreview,
   CardSize,
   ChartAgg,
   ChartKind,
@@ -34,11 +43,11 @@ import type {
   GallerySpec,
   GroupSpec,
   Presentation,
+  RowHeight,
   Schema,
   SortSpec,
   ListDefinition,
   ViewDefinition,
-  ViewType,
 } from '@/engine/types';
 import {
   MAX_GROUP_DEPTH,
@@ -48,18 +57,22 @@ import {
   nextDashboardBlockId,
 } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
-import { BoardSettings } from '@/views/BoardSettings';
 import { useVaultStore } from '@/stores/vaultStore';
 import {
   VIEW_KINDS,
   axesFor,
   hasDependencies,
+  hasGroupColumns,
+  isDayGrid,
+  isTabular,
   isZoomable,
   hasBlocks,
   isCharted,
   needsDate,
   showsCards,
   showsChips,
+  showsCovers,
+  showsPreview,
 } from '@/views/viewKinds';
 
 /**
@@ -79,6 +92,7 @@ type Page =
   | 'sort'
   | 'group'
   | 'limit'
+  | 'rows'
   | 'axis'
   | 'cards'
   | 'chart'
@@ -97,10 +111,30 @@ const CARD_SIZE_LABEL: Record<CardSize, string> = {
   large: 'Large',
 };
 
+const CARD_PREVIEW_LABEL: Record<CardPreview, string> = {
+  none: 'None',
+  content: 'Page content',
+};
+
+const ROW_HEIGHT_LABEL: Record<RowHeight, string> = {
+  compact: 'Compact',
+  default: 'Default',
+  tall: 'Tall',
+};
+
 const CHART_KIND_LABEL: Record<ChartKind, string> = {
   bar: 'Bar',
   line: 'Line',
   donut: 'Donut',
+};
+
+/** What one band of a chart is CALLED, per kind — the word the Chart page's
+ * footnote uses. `Record<ChartKind, …>` so a fourth kind cannot be drawn
+ * without being named (M16.29). */
+const CHART_PARTS: Record<ChartKind, string> = {
+  bar: 'bars',
+  line: 'points',
+  donut: 'slices',
 };
 
 const CHART_AGG_LABEL: Record<ChartAgg, string> = {
@@ -287,6 +321,18 @@ export function ViewSettingsPanel({
                 onClick={() => setPage('group')}
               />
             )}
+            {/* M16.29: row height and "Wrap all columns" are settings for the
+                whole table, and both could only be reached from the NAME
+                column's header menu — not here, where every other whole-view
+                setting is, and not from any other column's menu. */}
+            {isTabular(p.type) && (
+              <Row
+                icon="rows-2"
+                label="Rows"
+                value={ROW_HEIGHT_LABEL[p.rowHeight ?? 'default']}
+                onClick={() => setPage('rows')}
+              />
+            )}
             {/* M16.26: Notion loads 25 and offers more; every view of ours
                 rendered `entries` in full, so a type with 4,000 records laid
                 out 4,000 rows before the first paint. */}
@@ -307,14 +353,17 @@ export function ViewSettingsPanel({
               />
             )}
 
-            {/* M16.22: the gallery's cards — cover, size, fit. Declared on the
-                kind (`cards`), so a future card layout gets this page by
-                saying so rather than by being added to a string set. */}
+            {/* M16.22: the card settings — size, and whatever else the layout
+                can actually draw on a card. Declared on the kind (`cards`), so
+                a future card layout gets this page by saying so rather than by
+                being added to a string set. M16.29: and the page's own rows are
+                gated the same way, because `cards` was too coarse for all of
+                them. */}
             {showsCards(p.type) && (
               <Row
                 icon="layout-grid"
                 label="Cards"
-                value={CARD_SIZE_LABEL[p.gallery?.size ?? 'medium']}
+                value={CARD_SIZE_LABEL[p.cardSize ?? 'medium']}
                 onClick={() => setPage('cards')}
               />
             )}
@@ -379,9 +428,6 @@ export function ViewSettingsPanel({
                 </div>
               </div>
             )}
-
-            {/* M16.20: card settings, for the layouts that draw cards. */}
-            {showsCards(p.type) && <BoardSettings presentation={p} onChange={setPresentation} />}
 
             <div className="mt-2 border-t border-[var(--n-100)] pt-2">
               {surface === 'list' && (
@@ -593,6 +639,8 @@ export function ViewSettingsPanel({
           <LimitPage limit={p.limit} onChange={(limit) => setPresentation({ ...p, limit })} />
         )}
 
+        {page === 'rows' && <RowsPage presentation={p} onChange={setPresentation} />}
+
         {page === 'group' && (
           <GroupPage
             group={p.group}
@@ -621,6 +669,8 @@ function titleFor(page: Page): string {
       return 'Group';
     case 'limit':
       return 'Load limit';
+    case 'rows':
+      return 'Rows';
     case 'axis':
       return 'Date axis';
     case 'cards':
@@ -852,20 +902,6 @@ function PropertiesPage({
 }
 
 /**
- * Which dated layouts draw a day GRID rather than a scrolling axis.
- *
- * This is a capability and belongs in `viewKinds.ts` beside `zoomable`, which
- * is where M16.3 put the other four after finding them as loose `p.type === …`
- * comparisons scattered through this file. It is named here, once, because
- * that file belongs to another M16 phase in flight — a `grid: true` on the
- * calendar kind is the intended end state and this predicate is its only
- * caller. Reported rather than done quietly.
- */
-function isDayGrid(type: ViewType): boolean {
-  return type === 'calendar';
-}
-
-/**
  * The date axis a calendar/timeline/gantt draws on (M12.8) — which property
  * places records, how coarse the scale is, and (gantt) which relation draws
  * dependency arrows. Configuration that only dated layouts have a use for.
@@ -1022,20 +1058,33 @@ function AxisPage({
 }
 
 /**
- * The gallery's cards (M16.22): what covers one, how wide it is, and whether
- * a cover is fitted whole or cropped to fill.
+ * Everything about a card, in ONE place, each row gated on the capability it
+ * actually needs (M16.22, consolidated M16.29).
  *
- * WHICH properties a card shows is not here — that is the Properties page, the
- * same one the table uses. A gallery-only visibility list would be a second
- * answer to one question, and switching a view between Table and Gallery would
- * quietly lose the choice made on the other side.
+ * There were two card sections: this page (the gallery's cover, size and fit)
+ * and a `BoardSettings` block on the ROOT page (the board's size, preview and
+ * "Color columns"). Both were shown to both card layouts, because both hung
+ * off one `showsCards` check — so a gallery offered "Color columns", wrote
+ * `colorColumns: true` to its view file, and coloured nothing: a gallery has
+ * no columns. And "Card size" appeared twice, once per section, writing
+ * `cardSize` in one and `gallery.size` in the other.
+ *
+ * Each control now asks the kind for the capability it depends on — `preview`
+ * for a body snippet, `covers` for a cover, `groupColumns` for a tint — so a
+ * new card layout gets exactly the settings it can honour, and `satisfies`
+ * makes it answer.
+ *
+ * WHICH properties a card shows is deliberately absent: that is the Properties
+ * page, the same one the table uses. A card-only visibility list would be a
+ * second answer to one question, and switching a view between Table and
+ * Gallery would quietly lose the choice made on the other side.
  *
  * Cover candidates come from the kind's `media` flag rather than a
  * `kind === 'files'` compare, so the day a second file-bearing kind exists it
  * is offered here without anyone remembering to come back (M16.4's rule).
  */
 function CardsPage({
-  presentation,
+  presentation: p,
   fields,
   onChange,
 }: {
@@ -1044,62 +1093,108 @@ function CardsPage({
   onChange: (next: Presentation) => void;
 }) {
   const NONE = '__none__';
-  const gallery = presentation.gallery ?? {};
+  const gallery = p.gallery ?? {};
   const covers = fields.filter((f) => MEDIA_KINDS.has(f.kind));
   // Only stored off its default, so an untouched gallery writes no key at all.
-  const patch = (next: GallerySpec) => {
+  const patchGallery = (next: GallerySpec) => {
     const cleaned: GallerySpec = {
       ...(next.cover !== undefined && next.cover !== '' ? { cover: next.cover } : {}),
-      ...(next.size !== undefined && next.size !== 'medium' ? { size: next.size } : {}),
       ...(next.fit === true ? { fit: true } : {}),
     };
-    const { gallery: _drop, ...rest } = presentation;
+    const { gallery: _drop, ...rest } = p;
     onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, gallery: cleaned });
   };
 
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card cover</span>
-        <Select
-          size="sm"
-          value={gallery.cover ?? NONE}
-          options={[
-            { value: NONE, label: 'None' },
-            ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
-          ]}
-          onChange={(e) =>
-            patch({ ...gallery, cover: e.target.value === NONE ? undefined : e.target.value })
-          }
-          width="100%"
-        />
-        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
-          {covers.length === 0
-            ? 'No files property on this type yet — add one and it becomes a cover.'
-            : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
-        </p>
-      </div>
-      <div>
         <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card size</span>
         <Select
           size="sm"
-          value={gallery.size ?? 'medium'}
+          value={p.cardSize ?? 'medium'}
           options={CARD_SIZES.map((s) => ({ value: s, label: CARD_SIZE_LABEL[s] }))}
-          onChange={(e) => patch({ ...gallery, size: e.target.value as CardSize })}
+          onChange={(e) => onChange({ ...p, cardSize: e.target.value as CardSize })}
           width="100%"
         />
       </div>
-      <div className="border-t border-[var(--n-100)] pt-2">
-        <Switch
-          checked={gallery.fit === true}
-          onChange={(fit) => patch({ ...gallery, fit })}
-          label="Fit media"
-          ariaLabel="Fit media"
-        />
-        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
-          Fit the whole cover inside the tile instead of cropping it to fill.
-        </p>
-      </div>
+
+      {showsPreview(p.type) && (
+        <div>
+          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
+            Card preview
+          </span>
+          <Select
+            size="sm"
+            value={p.cardPreview ?? 'none'}
+            options={CARD_PREVIEWS.map((v) => ({ value: v, label: CARD_PREVIEW_LABEL[v] }))}
+            onChange={(e) => onChange({ ...p, cardPreview: e.target.value as CardPreview })}
+            width="100%"
+          />
+          <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            Page content shows the first line or two of the record&rsquo;s body.
+          </p>
+        </div>
+      )}
+
+      {showsCovers(p.type) && (
+        <>
+          <div>
+            <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
+              Card cover
+            </span>
+            <Select
+              size="sm"
+              value={gallery.cover ?? NONE}
+              options={[
+                { value: NONE, label: 'None' },
+                ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
+              ]}
+              onChange={(e) =>
+                patchGallery({
+                  ...gallery,
+                  cover: e.target.value === NONE ? undefined : e.target.value,
+                })
+              }
+              width="100%"
+            />
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+              {covers.length === 0
+                ? 'No files property on this type yet — add one and it becomes a cover.'
+                : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
+            </p>
+          </div>
+          <div className="border-t border-[var(--n-100)] pt-2">
+            <Switch
+              checked={gallery.fit === true}
+              onChange={(fit) => patchGallery({ ...gallery, fit })}
+              label="Fit media"
+              ariaLabel="Fit media"
+            />
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+              Fit the whole cover inside the tile instead of cropping it to fill.
+            </p>
+          </div>
+        </>
+      )}
+
+      {hasGroupColumns(p.type) && (
+        <div className="border-t border-[var(--n-100)] pt-2">
+          <Switch
+            checked={p.colorColumns === true}
+            label="Color columns"
+            ariaLabel="Color columns"
+            onChange={(on) => {
+              // Written only when true, so turning it back off leaves the view
+              // file as it was rather than storing a false nobody asked for.
+              const { colorColumns: _was, ...rest } = p;
+              onChange(on ? { ...rest, colorColumns: true } : rest);
+            }}
+          />
+          <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            Paints each column in its group&rsquo;s own colour.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1200,10 +1295,14 @@ function ChartPage({
           ariaLabel="Omit zero values"
         />
       </div>
+      {/* M16.29: the shape is named from the chart kind. This said "bars"
+          whatever was selected, so the one sentence explaining where a chart's
+          X axis comes from described a bar chart to someone looking at a
+          donut. */}
       <p className="m-0 border-t border-[var(--n-100)] pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
         {band === undefined
-          ? 'The bars come from the view’s grouping, and this view has none yet — pick a property under Group.'
-          : `The bars come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+          ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
+          : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
       </p>
     </div>
   );
@@ -1563,6 +1662,66 @@ function LimitPage({
 
 function labelFor(field: string): string {
   return META_SORTS.find((m) => m.value === field)?.label ?? humanize(field);
+}
+
+/**
+ * How tall a row is, and whether its cells wrap (M16.29).
+ *
+ * Both are settings for the WHOLE table, and both used to live only on the
+ * NAME column's header menu — a menu whose other items are all about the name
+ * column itself, and which no other column's menu carried. Someone looking for
+ * row height opened Priority's menu, found sort/filter/hide/freeze and no
+ * height, and had no reason to think Name's menu held two extra items.
+ *
+ * They are still writes to `presentation`/`columns`, so the table redraws the
+ * moment either changes — nothing about this page is a copy of the table's
+ * state.
+ */
+function RowsPage({
+  presentation: p,
+  onChange,
+}: {
+  presentation: Presentation;
+  onChange: (next: Presentation) => void;
+}) {
+  const height = p.rowHeight ?? 'default';
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+        Row height
+      </div>
+      {ROW_HEIGHTS.map((value) => (
+        <button
+          key={value}
+          type="button"
+          data-testid={`row-height-${value}`}
+          aria-pressed={height === value}
+          onClick={() => onChange({ ...p, rowHeight: value })}
+          className={[
+            'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+            height === value
+              ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
+              : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+          ].join(' ')}
+        >
+          <span className="flex-1">{ROW_HEIGHT_LABEL[value]}</span>
+          {height === value && <Icon name="check" size={12} />}
+        </button>
+      ))}
+      <div className="mt-2 border-t border-[var(--n-100)] px-1 pt-2">
+        <Switch
+          checked={allColumnsWrap(p.columns)}
+          onChange={() => onChange({ ...p, columns: wrapAllColumns(p.columns) })}
+          label="Wrap all columns"
+          ariaLabel="Wrap all columns"
+        />
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          Wrapped cells grow the row instead of clipping. One column at a time is still on its own
+          header menu.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /**

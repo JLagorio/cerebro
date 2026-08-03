@@ -650,6 +650,42 @@ describe('TableView header settings (M16.18)', () => {
     return { onColumnsChange, onPresentationChange };
   }
 
+  /**
+   * Deleting a property destroys a schema declaration and, with it, the way
+   * every record of the type is read. There is no undo in the app — recovery
+   * is git. `PropertyMenu` and `PropertyEditor` were given a confirmation;
+   * THIS menu has its own `Delete property` item, which called
+   * `removeFieldFromType` on the single click, from a surface that already
+   * tells you it edits N records. Third call site, same dialog.
+   */
+  it('does not delete a property until the confirmation is accepted', async () => {
+    const user = userEvent.setup();
+    const written: string[] = [];
+    useVaultStore.setState({
+      entries: fixtureVault(),
+      patchFrontmatter: vi.fn(async (path: string) => {
+        written.push(path);
+      }),
+    });
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
+    // Nothing written to the type doc, and the column is still in the view.
+    expect(written).toEqual([]);
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('backing out of the confirmation leaves the property alone', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+
   it('freezes up to a column, not just the name one', async () => {
     const user = userEvent.setup();
     const { onPresentationChange } = grid();
@@ -691,14 +727,9 @@ describe('TableView header settings (M16.18)', () => {
     ]);
   });
 
-  it('row height is a setting the rows finally read', async () => {
-    const user = userEvent.setup();
-    const { onPresentationChange } = grid();
+  it('defaults its rows to the default height', () => {
+    grid();
     expect(screen.getAllByTestId('table-row')[0].className).toContain('h-9');
-    await user.click(screen.getByLabelText('Name column menu'));
-    await user.click(screen.getByTestId('row-height'));
-    await user.click(screen.getByTestId('row-height-tall'));
-    expect(onPresentationChange.mock.calls[0][0].rowHeight).toBe('tall');
   });
 
   it('renders the stored row height instead of ignoring it', () => {
@@ -706,16 +737,36 @@ describe('TableView header settings (M16.18)', () => {
     expect(screen.getAllByTestId('table-row')[0].className).toContain('h-8');
   });
 
-  it('wraps every column at once, and unwraps them the same way', async () => {
+  /**
+   * Row height and "Wrap all columns" left this menu in M16.29. They are
+   * settings for the WHOLE table and this was the only place either could be
+   * reached — a menu whose every other item acts on the name column, and which
+   * no other column's header carries, so someone hunting for row height opened
+   * Priority's menu and found nothing. They live in view settings › Rows now
+   * (see ViewSettingsPanel.test.tsx), and offering them in both places would
+   * be the same duplication that gave "Card size" two homes.
+   */
+  it('keeps whole-table settings out of the name column’s menu', async () => {
+    const user = userEvent.setup();
+    grid();
+    await user.click(screen.getByLabelText('Name column menu'));
+    expect(screen.queryByTestId('row-height')).toBeNull();
+    expect(screen.queryByTestId('wrap-all')).toBeNull();
+    // What IS the name column's business stays.
+    expect(screen.getByRole('menuitem', { name: /Sort ascending/ })).toBeTruthy();
+  });
+
+  /** Per-COLUMN wrapping is a column's own business and stays on its menu. */
+  it('still wraps one column from that column’s menu', async () => {
     const user = userEvent.setup();
     const { onColumnsChange } = grid({
       columns: [{ field: 'status' }, { field: 'priority' }],
     });
-    await user.click(screen.getByLabelText('Name column menu'));
-    await user.click(screen.getByTestId('wrap-all'));
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Wrap content/ }));
     expect(onColumnsChange.mock.calls[0][0]).toEqual([
       { field: 'status', wrap: true },
-      { field: 'priority', wrap: true },
+      { field: 'priority' },
     ]);
   });
 
