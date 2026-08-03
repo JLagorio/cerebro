@@ -222,7 +222,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             // Indented to the value column: it acts on the Type row above it,
             // and hanging it under the label read as a third, unrelated row.
             style={{ marginLeft: PROPERTY_LABEL_W + 6 }}
-            className="self-start whitespace-nowrap rounded-md border border-n-200 bg-transparent px-2 py-1 text-[12px] text-n-600 hover:bg-n-50 hover:text-n-900"
+            className="self-start whitespace-nowrap rounded-md border border-n-200 bg-transparent px-2 py-1 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
           >
             Convert to record…
           </button>
@@ -265,7 +265,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             data-testid="hidden-properties-toggle"
             aria-expanded={revealed}
             onClick={() => setRevealed((v) => !v)}
-            className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
+            className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={12} />
             {revealed
@@ -292,7 +292,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
           aria-haspopup="dialog"
           aria-expanded={adding}
           onClick={() => setAdding((v) => !v)}
-          className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
+          className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
         >
           + Add property
         </button>
@@ -334,7 +334,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
               },
             }}
           >
-            <p className="mb-2 text-[12px] leading-relaxed text-n-500">
+            <p className="mb-2 text-xs leading-relaxed text-n-500">
               A record belongs to a type: it opens in the record panel, appears in that type&apos;s
               views and Lists, and leaves the Docs tree. Its text and properties come along
               unchanged.
@@ -365,13 +365,13 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
                     >
                       <Icon name={style.icon} size={14} />
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-n-900">{t}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-n-900">{t}</span>
                     {picked && <Icon name="check" size={14} color="var(--cortex-600)" />}
                   </button>
                 );
               })}
               {convertTargets.length === 0 && (
-                <div className="px-2.5 py-4 text-[12px] text-n-500">
+                <div className="px-2.5 py-4 text-xs text-n-500">
                   No types yet — create one from the Types section of the sidebar first.
                 </div>
               )}

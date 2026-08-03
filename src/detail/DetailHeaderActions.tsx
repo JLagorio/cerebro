@@ -151,7 +151,7 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
           />
           {at !== -1 && (
             <Tooltip label="Position in this view">
-              <span className="px-1 text-[11px] tabular-nums text-n-400">
+              <span className="px-1 text-2xs tabular-nums text-n-400">
                 {at + 1}/{siblings.length}
               </span>
             </Tooltip>
@@ -233,7 +233,7 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
           primaryAction={{ label: 'Delete', onClick: remove }}
         >
-          <p className="m-0 text-[13px] leading-relaxed text-n-600">
+          <p className="m-0 text-sm leading-relaxed text-n-600">
             The file leaves the vault.
             {links > 0
               ? ` ${links === 1 ? 'One record links' : `${links} records link`} here, and those links will point at nothing.`

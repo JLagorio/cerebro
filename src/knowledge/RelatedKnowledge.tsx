@@ -71,11 +71,11 @@ export function RelatedKnowledge({
     >
       <div className="flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
+        <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
           What the assistant knows
         </h3>
         {related.length > 0 && (
-          <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
+          <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
             {related.length}
           </span>
         )}

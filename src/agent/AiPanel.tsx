@@ -82,7 +82,7 @@ function UserMessage({ text }: { text: string }) {
         // `whitespace-pre-wrap` (M15): a Shift+Enter multi-line question used
         // to come back as one run-on line in your own bubble.
         className={[
-          'max-w-[85%] whitespace-pre-wrap break-words rounded-[12px] rounded-br-[4px] bg-cortex-500 px-3 py-2 text-[12.5px] leading-[18px] text-n-0',
+          'max-w-[85%] whitespace-pre-wrap break-words rounded-[12px] rounded-br-xs bg-cortex-500 px-3 py-2 text-[12.5px] leading-[18px] text-n-0',
           long && !expanded ? 'max-h-[112px] overflow-hidden' : '',
         ].join(' ')}
       >
@@ -140,14 +140,14 @@ function Message({
         </div>
       )}
       {message.error !== undefined && (
-        <div className="flex flex-col items-start gap-1.5 rounded-[10px] border border-danger-200 bg-danger-50 px-3 py-2 text-[12px] leading-[17px] text-danger-700">
+        <div className="flex flex-col items-start gap-1.5 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs leading-[17px] text-danger-700">
           <span>{message.error}</span>
           {onRetry !== undefined && (
             <button
               type="button"
               data-testid="retry-turn"
               onClick={onRetry}
-              className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-[11px] text-danger-700 hover:border-danger-500"
+              className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-danger-700 hover:border-danger-500"
             >
               Retry
             </button>
@@ -453,7 +453,7 @@ export function AiPanel() {
                   key={suggestion}
                   type="button"
                   onClick={() => chat.send(suggestion)}
-                  className="rounded-[9px] border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-[12px] text-n-700 hover:border-n-300 hover:bg-n-25"
+                  className="rounded-[9px] border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
                 >
                   {suggestion}
                 </button>
@@ -481,7 +481,7 @@ export function AiPanel() {
             type="button"
             data-testid="jump-to-latest"
             onClick={jumpToLatest}
-            className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-n-200 bg-n-0 px-2.5 py-1 text-[11px] text-n-600 shadow-[var(--shadow-lg)] hover:border-n-400"
+            className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-n-200 bg-n-0 px-2.5 py-1 text-2xs text-n-600 shadow-[var(--shadow-lg)] hover:border-n-400"
           >
             Jump to latest
           </button>

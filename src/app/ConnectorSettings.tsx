@@ -179,10 +179,10 @@ export function ConnectorSettings() {
             key={spec.name}
             className="flex items-center gap-2 rounded-[9px] border border-n-200 px-2.5 py-1.5"
           >
-            <span className="text-[12px] font-medium text-n-800">{spec.name}</span>
+            <span className="text-xs font-medium text-n-800">{spec.name}</span>
             <span
               title={shown}
-              className="min-w-0 flex-1 truncate text-[11px] text-n-500 [font-family:var(--font-mono)]"
+              className="min-w-0 flex-1 truncate text-2xs text-n-500 [font-family:var(--font-mono)]"
             >
               {shown}
             </span>
@@ -225,7 +225,7 @@ export function ConnectorSettings() {
           aria-label="Connector transport"
           value={transport}
           onChange={(e) => setTransport(e.target.value as 'http' | 'stdio')}
-          className="h-[28px] flex-none rounded-[8px] border border-n-200 bg-n-0 px-1.5 text-[12px] text-n-800"
+          className="h-[28px] flex-none rounded-md border border-n-200 bg-n-0 px-1.5 text-xs text-n-800"
         >
           <option value="http">http</option>
           <option value="stdio">stdio</option>

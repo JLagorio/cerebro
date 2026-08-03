@@ -57,7 +57,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
       <Dialog open onClose={onClose} title="Adopt vault schema" width={480}>
         <div className="flex items-start gap-2.5 py-2">
           <Icon name="badge-check" size={18} color="var(--success-500)" />
-          <p className="m-0 text-[13px] leading-relaxed text-n-600">
+          <p className="m-0 text-sm leading-relaxed text-n-600">
             Nothing to adopt. Every type in this vault is declared, and every stored value fits its
             declared kind.
           </p>
@@ -90,7 +90,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
         where they are.
       </p>
       <div className="flex min-h-0 gap-3" style={{ height: 380 }}>
-        <div className="flex w-[200px] flex-none flex-col gap-px overflow-y-auto rounded-[10px] border border-n-200 p-1">
+        <div className="flex w-[200px] flex-none flex-col gap-px overflow-y-auto rounded-lg border border-n-200 p-1">
           {proposals.map((p, i) => {
             const style = typeStyle(p.name, schema);
             return (
@@ -122,7 +122,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
             );
           })}
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-y-auto rounded-[10px] border border-n-200 p-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-1 overflow-y-auto rounded-lg border border-n-200 p-2">
           {current.fields.map((f) => {
             const on = included(current.name, f.name);
             const note = convertSummary(f);
@@ -130,7 +130,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
               <div
                 key={f.name}
                 data-testid="adopt-field-row"
-                className="flex items-start gap-2 rounded-[8px] px-1.5 py-1.5 hover:bg-n-25"
+                className="flex items-start gap-2 rounded-md px-1.5 py-1.5 hover:bg-n-25"
               >
                 <button
                   type="button"
@@ -157,8 +157,8 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-n-900">{humanize(f.name)}</span>
-                    <span className="text-[11px] text-n-400">
+                    <span className="text-sm font-medium text-n-900">{humanize(f.name)}</span>
+                    <span className="text-2xs text-n-400">
                       {kindMeta(f.kind).label}
                       {f.kind === 'relation' && f.target !== null && ` → ${f.target}`}
                       {f.declared && ' · declared'}

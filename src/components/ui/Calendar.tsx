@@ -160,7 +160,7 @@ export function Calendar({
   return (
     <div data-testid="calendar" className="select-none">
       <div className="flex items-center gap-1 px-1 pb-1.5">
-        <span className="text-[13px] font-semibold text-n-900">
+        <span className="text-sm font-semibold text-n-900">
           {MONTH_SHORT[m - 1]} {y}
         </span>
         <span className="flex-1" />
@@ -168,7 +168,7 @@ export function Calendar({
           <button
             type="button"
             onClick={onToday}
-            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-n-500 hover:bg-n-50 hover:text-n-800"
+            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
           >
             {todayLabel}
           </button>
@@ -225,7 +225,7 @@ export function Calendar({
                 onPick(date);
               }}
               className={[
-                'flex h-8 w-full items-center justify-center border-0 text-[13px]',
+                'flex h-8 w-full items-center justify-center border-0 text-sm',
                 isEndpoint
                   ? 'rounded-lg bg-cortex-500 font-medium text-n-0'
                   : inRange

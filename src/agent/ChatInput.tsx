@@ -128,7 +128,7 @@ export function ChatInput({
       {slashOpen && (
         <div
           data-testid="skill-menu"
-          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-[10px] border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
+          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
         >
           {skillMatches.map((skill, i) => (
             <button
@@ -137,7 +137,7 @@ export function ChatInput({
               onMouseEnter={() => setActive(i)}
               onClick={() => completeSkill(skill)}
               className={[
-                'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-[12px]',
+                'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-xs',
                 i === active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
               ].join(' ')}
             >
@@ -153,7 +153,7 @@ export function ChatInput({
       {open && (
         <div
           data-testid="wikilink-menu"
-          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-[10px] border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
+          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
         >
           {matches.map((entry, i) => {
             const style = typeStyle(entry.type, schema);
@@ -164,7 +164,7 @@ export function ChatInput({
                 onMouseEnter={() => setActive(i)}
                 onClick={() => complete(entry)}
                 className={[
-                  'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-[12px]',
+                  'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-xs',
                   i === active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
                 ].join(' ')}
               >

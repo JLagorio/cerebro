@@ -66,7 +66,7 @@ function EntryText({
             type="button"
             data-testid="log-concept-link"
             onClick={() => onOpenConcept(path)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
+            className="cursor-pointer border-0 bg-transparent p-0 text-sm text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
           >
             {match[1]}
           </button>
@@ -115,14 +115,14 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6" data-testid="knowledge-log">
       <div className="mx-auto w-full max-w-[720px] px-6">
         <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-n-900">Update log</h1>
-        <p className="mb-6 mt-1.5 text-[13px] leading-[19px] text-n-600">
+        <p className="mb-6 mt-1.5 text-sm leading-[19px] text-n-600">
           What the assistant has learned, and when. Every entry names the concept it touched.
         </p>
 
         {days.map((day) => (
           <section key={day.date} data-testid="log-day" className="mb-5">
             <div className="sticky top-0 flex items-center gap-2 bg-n-0 pb-2 pt-1">
-              <span className="text-[12px] font-semibold tabular-nums text-n-700">{day.date}</span>
+              <span className="text-xs font-semibold tabular-nums text-n-700">{day.date}</span>
               <span className="h-px flex-1 bg-n-100" />
             </div>
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
@@ -147,7 +147,7 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
                           {style.label}
                         </span>
                       )}
-                      <span className="text-[13px] leading-[20px] text-n-700">
+                      <span className="text-sm leading-[20px] text-n-700">
                         <EntryText entry={entry} onOpenConcept={onOpenConcept} />
                       </span>
                     </span>

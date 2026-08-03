@@ -61,7 +61,7 @@ export function TimeAxisHeader({
           data-testid="axis-tick"
           data-major={tick.major}
           className={[
-            'flex flex-none items-center overflow-hidden whitespace-nowrap px-1 text-[11px]',
+            'flex flex-none items-center overflow-hidden whitespace-nowrap px-1 text-2xs',
             tick.major
               ? 'border-l border-n-300 font-semibold text-n-700'
               : 'border-l border-n-100 text-n-500',
@@ -273,10 +273,8 @@ export function TimeTable({
                 size={12}
                 color="var(--n-400)"
               />
-              <span className="truncate text-[12px] font-semibold text-n-800">
-                {row.node.label}
-              </span>
-              <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
+              <span className="truncate text-xs font-semibold text-n-800">{row.node.label}</span>
+              <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
                 {row.node.count}
               </span>
             </button>

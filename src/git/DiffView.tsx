@@ -24,13 +24,13 @@ export function DiffView({
 
   return (
     <div data-testid="diff-view" className="flex min-h-0 flex-col">
-      <div className="flex flex-none items-center gap-3 pb-1.5 text-[11px]">
+      <div className="flex flex-none items-center gap-3 pb-1.5 text-2xs">
         <span className="[font-family:var(--font-mono)] text-success-600">+{stats.added}</span>
         <span className="[font-family:var(--font-mono)] text-danger-500">−{stats.removed}</span>
       </div>
       {/* Diffs are wide; they scroll inside their own box rather than making
           the panel scroll sideways. */}
-      <div className="min-h-0 overflow-auto rounded-[8px] border border-n-200 bg-n-25">
+      <div className="min-h-0 overflow-auto rounded-md border border-n-200 bg-n-25">
         <pre className="m-0 min-w-full p-0 [font-family:var(--font-mono)] text-[11.5px] leading-[17px]">
           {lines.map((line, i) => (
             <div

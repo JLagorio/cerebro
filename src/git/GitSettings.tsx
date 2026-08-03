@@ -77,17 +77,17 @@ export function GitSettings() {
 
   return (
     <section data-testid="git-settings" className="flex flex-col gap-3">
-      <h2 className="m-0 text-[13px] font-semibold text-n-900">History</h2>
+      <h2 className="m-0 text-sm font-semibold text-n-900">History</h2>
 
       {provider !== null && !provider.native.available && (
-        <div className="flex items-start gap-2 rounded-[10px] border border-[var(--warn-300)] bg-warn-50 px-3 py-2.5 text-[12.5px] leading-[18px] text-n-700">
+        <div className="flex items-start gap-2 rounded-lg border border-[var(--warn-300)] bg-warn-50 px-3 py-2.5 text-[12.5px] leading-[18px] text-n-700">
           <Icon name="triangle-alert" size={13} style={{ marginTop: 2 }} />
           <span>{provider.native.message}</span>
         </div>
       )}
 
       {!isRepo ? (
-        <div className="flex flex-col items-start gap-2 rounded-[10px] border border-n-200 px-3 py-2.5">
+        <div className="flex flex-col items-start gap-2 rounded-lg border border-n-200 px-3 py-2.5">
           <p className="m-0 text-[12.5px] leading-[18px] text-n-600">
             This vault is not tracked. Turning on history keeps every version of every note — and
             makes the assistant's own edits reviewable, since it writes to{' '}
@@ -105,7 +105,7 @@ export function GitSettings() {
         </div>
       ) : (
         <>
-          <label className="flex items-center gap-3 rounded-[10px] border border-n-200 px-3 py-2.5">
+          <label className="flex items-center gap-3 rounded-lg border border-n-200 px-3 py-2.5">
             <span className="flex-1">
               <span className="block text-[12.5px] font-medium text-n-800">
                 Automatic checkpoints
@@ -119,9 +119,9 @@ export function GitSettings() {
           </label>
 
           {identity !== null && (
-            <div className="rounded-[10px] border border-n-200 px-3 py-2.5">
+            <div className="rounded-lg border border-n-200 px-3 py-2.5">
               <div className="text-[12.5px] font-medium text-n-800">Commits are by</div>
-              <div className="text-[12px] text-n-600">
+              <div className="text-xs text-n-600">
                 {identity.name} &lt;{identity.email}&gt;{' '}
                 <span className="text-n-400">({identity.source})</span>
               </div>
@@ -162,7 +162,7 @@ function RemoteRow({
 }) {
   if (remote !== null) {
     return (
-      <div className="flex items-center gap-2 rounded-[10px] border border-n-200 px-3 py-2.5">
+      <div className="flex items-center gap-2 rounded-lg border border-n-200 px-3 py-2.5">
         <Icon name="cloud" size={13} color="var(--n-500)" />
         <span className="min-w-0 flex-1 truncate text-[12.5px] text-n-700">
           {remote.upstream ?? remote.branch}
@@ -174,7 +174,7 @@ function RemoteRow({
     );
   }
   return (
-    <div className="rounded-[10px] border border-n-200 px-3 py-2.5">
+    <div className="rounded-lg border border-n-200 px-3 py-2.5">
       <div className="mb-1.5 text-[12.5px] font-medium text-n-800">Remote</div>
       <div className="flex items-center gap-2">
         <Input

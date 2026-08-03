@@ -269,7 +269,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
             </button>
           </div>
           {tree.length === 0 ? (
-            <div className="px-2 py-1 text-[12px] leading-[17px] text-n-400">
+            <div className="px-2 py-1 text-xs leading-[17px] text-n-400">
               No collections yet — make one to hold lists, folders, and docs.
             </div>
           ) : null}
@@ -333,7 +333,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
                 >
                   <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap">{t.name}</span>
-                  <span className="ml-auto [font-family:var(--font-mono)] text-[11px] text-n-400">
+                  <span className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">
                     {t.count}
                   </span>
                 </button>

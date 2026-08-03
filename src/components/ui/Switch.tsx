@@ -5,7 +5,7 @@ import React from 'react';
 // on"), but Task 3's 17-primitive port did not include it. Source:
 // docs/Cerebro Design System/components/core/Switch.jsx + Switch.d.ts.
 const css = `
-.cb-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:var(--text-sm);user-select:none}
+.cb-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:var(--fs-sm);user-select:none}
 .cb-switch input{position:absolute;opacity:0;width:0;height:0}
 .cb-switch .cb-track{width:32px;height:18px;border-radius:var(--r-full);background:var(--n-300);position:relative;transition:background var(--dur-fast) var(--ease-out);flex:none}
 .cb-switch .cb-track::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:var(--shadow-xs);transition:transform var(--dur-fast) var(--ease-out)}

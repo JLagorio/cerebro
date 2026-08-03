@@ -30,7 +30,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
         data-testid="conversation-switcher"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-600 hover:bg-n-50 hover:text-n-900"
+        className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-600 hover:bg-n-50 hover:text-n-900"
       >
         <span className="max-w-[150px] truncate">{state.active?.title ?? 'Assistant'}</span>
         <Icon name="chevron-down" size={11} />
@@ -44,7 +44,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
             onWheel={() => setOpen(false)}
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
-          <div className="cb-menu-in absolute left-0 top-6 z-50 w-[260px] rounded-[10px] border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]">
+          <div className="cb-menu-in absolute left-0 top-6 z-50 w-[260px] rounded-lg border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]">
             <button
               type="button"
               onClick={() => {
@@ -68,7 +68,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                 >
                   {confirming === c.id ? (
                     <>
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-n-600">
+                      <span className="min-w-0 flex-1 truncate text-xs text-n-600">
                         Delete “{c.title}”?
                       </span>
                       <button
@@ -103,7 +103,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                         if (e.key === 'Escape') setRenaming(null);
                       }}
                       aria-label={`Rename ${c.title}`}
-                      className="min-w-0 flex-1 rounded border border-cortex-400 bg-n-0 px-1 py-0.5 text-[12px] outline-none"
+                      className="min-w-0 flex-1 rounded border border-cortex-400 bg-n-0 px-1 py-0.5 text-xs outline-none"
                     />
                   ) : (
                     <>

@@ -151,7 +151,7 @@ export function QuickAddInline({
         }}
         placeholder="Title — Enter to create"
         aria-label={ariaLabel}
-        className="h-6 flex-1 border-none bg-transparent text-[13px] text-n-900 outline-none"
+        className="h-6 flex-1 border-none bg-transparent text-sm text-n-900 outline-none"
       />
     </div>
   );

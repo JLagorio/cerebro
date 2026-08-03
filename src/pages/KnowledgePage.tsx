@@ -61,7 +61,7 @@ function ConceptRow({
       <span className="flex min-w-0 items-center gap-1.5">
         <span
           className={[
-            'truncate text-[13px]',
+            'truncate text-sm',
             // M8.7 — a replaced concept is struck through in the list. The
             // alternative is hiding it, which loses the record of what was
             // believed before; this keeps it readable and unmistakable.
@@ -302,7 +302,7 @@ export function KnowledgePage({
         <h1 className="m-0 text-[15px] font-semibold text-n-900" data-testid="knowledge-heading">
           {heading}
         </h1>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
+        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
           {concepts.length}
         </span>
         {/* On an entity slice the subject itself is one click away — that link
@@ -388,7 +388,7 @@ export function KnowledgePage({
               {selected.supersededBy !== null && (
                 <div
                   data-testid="superseded-banner"
-                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[10px] border border-n-200 bg-warn-50 px-3 py-2 text-[12px] text-warn-700"
+                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
                 >
                   <Icon name="archive" size={12} />
                   <span>No longer believed. Replaced by</span>
@@ -396,13 +396,13 @@ export function KnowledgePage({
                     type="button"
                     data-path={selected.supersededBy}
                     onClick={() => openConcept(replacedBy)}
-                    className="border-0 bg-transparent p-0 text-[12px] font-medium text-warn-700 underline underline-offset-2"
+                    className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
                   >
                     {replacement?.title ?? 'a newer concept'}
                   </button>
                 </div>
               )}
-              <div className="mb-1 flex items-center gap-2 text-[11px] text-n-400">
+              <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
                 <span className="[font-family:var(--font-mono)]">{selected.id}</span>
               </div>
               {/* h2: the concept is a section of the Knowledge page, not the

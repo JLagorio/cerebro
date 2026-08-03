@@ -172,7 +172,7 @@ export function ChangesPage() {
       {conflicts.length > 0 && (
         <div
           data-testid="conflict-banner"
-          className="mx-5 mb-2 flex-none rounded-[10px] border border-danger-200 bg-danger-50 p-3"
+          className="mx-5 mb-2 flex-none rounded-lg border border-danger-200 bg-danger-50 p-3"
         >
           <div className="mb-1.5 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger-700">
             <Icon name="triangle-alert" size={13} />
@@ -181,7 +181,7 @@ export function ChangesPage() {
           </div>
           {conflicts.map((path) => (
             <div key={path} className="flex items-center gap-2 py-0.5">
-              <span className="min-w-0 flex-1 truncate text-[12px] text-n-800">{path}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-n-800">{path}</span>
               <Button size="sm" variant="secondary" onClick={() => void resolve(path, 'ours')}>
                 Keep mine
               </Button>

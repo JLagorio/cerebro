@@ -131,7 +131,7 @@ export function IconPicker({
         ))}
         {matches.length === 0 && (
           <div
-            className="py-3 text-center text-[12px] text-n-400"
+            className="py-3 text-center text-xs text-n-400"
             style={{ gridColumn: `span ${columns} / span ${columns}` }}
           >
             No icons match "{query}"

@@ -161,7 +161,7 @@ function CollectionRow({
           </button>
         )}
         {container && count > 0 && (
-          <span className="ml-auto flex-none [font-family:var(--font-mono)] text-[11px] text-n-400 group-hover/row:hidden group-focus-within/row:hidden">
+          <span className="ml-auto flex-none [font-family:var(--font-mono)] text-2xs text-n-400 group-hover/row:hidden group-focus-within/row:hidden">
             {count}
           </span>
         )}

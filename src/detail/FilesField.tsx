@@ -86,7 +86,7 @@ export function FilesField({
       {values.map((f) => (
         <span
           key={f}
-          className="inline-flex max-w-full items-center gap-1 rounded-md bg-n-50 px-1.5 py-px text-[12px] text-n-700"
+          className="inline-flex max-w-full items-center gap-1 rounded-md bg-n-50 px-1.5 py-px text-xs text-n-700"
         >
           <Icon name={isUrl(f) ? 'link' : 'paperclip'} size={11} color="var(--n-500)" />
           {isUrl(f) ? (
@@ -127,7 +127,7 @@ export function FilesField({
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
             if (e.key === 'Escape') setDraft(null);
           }}
-          className="h-[22px] w-36 rounded-md border border-cortex-500 px-1.5 text-[12px] outline-none"
+          className="h-[22px] w-36 rounded-md border border-cortex-500 px-1.5 text-xs outline-none"
         />
       ) : (
         <button
@@ -136,7 +136,7 @@ export function FilesField({
           aria-label={`Add file to ${label}`}
           disabled={busy}
           onClick={() => setMenu((v) => !v)}
-          className="rounded-md border-0 bg-transparent px-1 py-px text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700 disabled:opacity-50"
+          className="rounded-md border-0 bg-transparent px-1 py-px text-xs text-n-400 hover:bg-n-50 hover:text-n-700 disabled:opacity-50"
         >
           {busy ? 'Adding…' : '+ Add'}
         </button>

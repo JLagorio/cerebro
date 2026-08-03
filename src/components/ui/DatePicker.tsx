@@ -62,7 +62,7 @@ function FlyoutMenu<T extends string>({
           role="menuitemradio"
           aria-checked={o.id === activeId}
           onClick={() => onPick(o.id)}
-          className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[7px] text-left text-[13px] text-n-800 hover:bg-n-50"
+          className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[7px] text-left text-sm text-n-800 hover:bg-n-50"
         >
           <span className="min-w-0 flex-1 truncate">{o.label}</span>
           {o.id === activeId && <Icon name="check" size={14} color="var(--n-700)" />}
@@ -85,7 +85,7 @@ function SettingRow({
 }) {
   const inner = (
     <>
-      <span className="text-[13px] text-n-800">{label}</span>
+      <span className="text-sm text-n-800">{label}</span>
       <span className="flex-1" />
       {value}
     </>
@@ -110,7 +110,7 @@ function SettingRow({
 
 const boxClass = (active: boolean) =>
   [
-    'flex h-8 min-w-0 flex-1 items-center rounded-lg border px-2.5 text-[13px]',
+    'flex h-8 min-w-0 flex-1 items-center rounded-lg border px-2.5 text-sm',
     active
       ? 'border-cortex-500 bg-cortex-50 text-n-900 shadow-[0_0_0_2px_var(--cortex-100)]'
       : 'border-n-200 bg-[var(--n-25,var(--n-50))] text-n-800',
@@ -366,7 +366,7 @@ export function DatePicker({
         <SettingRow label="Clear" onClick={onClear} />
       </div>
       {showRemind && (
-        <div className="flex items-center gap-1.5 border-t border-n-100 px-2 pb-0.5 pt-2 text-[12px] text-[var(--text-meta)]">
+        <div className="flex items-center gap-1.5 border-t border-n-100 px-2 pb-0.5 pt-2 text-xs text-[var(--text-meta)]">
           <Icon name="circle-question-mark" size={13} />
           Reminders fire as desktop notifications
         </div>

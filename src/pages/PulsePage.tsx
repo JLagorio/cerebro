@@ -75,13 +75,13 @@ export function PulsePage() {
               onClick={(e) => {
                 if ((e.target as HTMLElement).closest('button') === null) show(c.hash, c.message);
               }}
-              className="cursor-pointer rounded-[10px] border border-n-200 p-3 hover:border-n-300 hover:bg-n-25"
+              className="cursor-pointer rounded-lg border border-n-200 p-3 hover:border-n-300 hover:bg-n-25"
             >
               <div className="flex min-w-0 items-baseline gap-2">
                 <button
                   type="button"
                   onClick={() => show(c.hash, c.message)}
-                  className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] font-medium text-n-900 hover:text-cortex-600"
+                  className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm font-medium text-n-900 hover:text-cortex-600"
                 >
                   {c.message}
                 </button>
@@ -89,7 +89,7 @@ export function PulsePage() {
                   {c.shortHash}
                 </span>
               </div>
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-n-500">
+              <div className="mt-0.5 flex items-center gap-2 text-2xs text-n-500">
                 <span>{c.author}</span>
                 <span>·</span>
                 <span>{relativeDate(c.date)}</span>
@@ -132,13 +132,13 @@ export function PulsePage() {
                       type="button"
                       onClick={() => openPath(f.path)}
                       title={f.path}
-                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-n-200 bg-transparent px-2 py-[2px] text-[11px] text-n-600 hover:border-n-400 hover:text-n-900"
+                      className="inline-flex max-w-full items-center gap-1 rounded-full border border-n-200 bg-transparent px-2 py-[2px] text-2xs text-n-600 hover:border-n-400 hover:text-n-900"
                     >
                       <span className="truncate">{f.title}</span>
                     </button>
                   ))}
                   {c.files.length > 8 && (
-                    <span className="self-center text-[11px] text-n-400">
+                    <span className="self-center text-2xs text-n-400">
                       +{c.files.length - 8} more
                     </span>
                   )}

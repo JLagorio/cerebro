@@ -194,7 +194,7 @@ export function CalendarView({
           label={span === 'week' ? 'Next week' : 'Next month'}
           onClick={() => step(1)}
         />
-        <span data-testid="calendar-month" className="ml-1 text-[13px] font-semibold text-n-900">
+        <span data-testid="calendar-month" className="ml-1 text-sm font-semibold text-n-900">
           {span === 'week' ? weekLabel(weekGrid(anchor, weekStart)) : monthLabel(anchor)}
         </span>
         {!onScreen && (
@@ -247,7 +247,7 @@ export function CalendarView({
         {columns.map((label) => (
           <div
             key={label}
-            className="px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-n-500"
+            className="px-2 py-1 text-2xs font-medium uppercase tracking-[0.04em] text-n-500"
           >
             {label}
           </div>
@@ -306,7 +306,7 @@ export function CalendarView({
                     <div className="flex flex-none items-center gap-1">
                       <span
                         className={[
-                          'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[11px]',
+                          'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-2xs',
                           day === today
                             ? 'bg-cortex-500 font-semibold text-n-0'
                             : inMonth
@@ -349,7 +349,7 @@ export function CalendarView({
                       <button
                         type="button"
                         onClick={() => setExpanded(day)}
-                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-n-500 hover:text-n-800"
+                        className="rounded border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
                       >
                         {`+${stack.length - shown.length} more`}
                       </button>
@@ -358,7 +358,7 @@ export function CalendarView({
                       <button
                         type="button"
                         onClick={() => setExpanded(null)}
-                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-n-500 hover:text-n-800"
+                        className="rounded border-0 bg-transparent px-1 text-left text-2xs text-n-500 hover:text-n-800"
                       >
                         Show less
                       </button>
@@ -423,7 +423,7 @@ export function CalendarView({
           data-testid="calendar-undated"
           className="max-h-[180px] flex-none overflow-y-auto border-t border-n-200 bg-n-25 px-5 py-2"
         >
-          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <div className="pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Without a date
           </div>
           {undated.map((entry) => (

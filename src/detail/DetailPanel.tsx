@@ -49,7 +49,7 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
         data-testid="detail-knowledge-toggle"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500 hover:text-n-800"
+        className="flex items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500 hover:text-n-800"
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
         Knowledge
@@ -228,23 +228,23 @@ export function DetailPanel() {
         >
           <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
-        <span className="text-[12px] font-medium text-n-700">{entry.type ?? 'Note'}</span>
+        <span className="text-xs font-medium text-n-700">{entry.type ?? 'Note'}</span>
         {key !== '' && (
-          <span className="[font-family:var(--font-mono)] text-[11px] text-n-500">{key}</span>
+          <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{key}</span>
         )}
         {/* M9.3/M12.5: opening a record no longer drags you to its container,
             so the container becomes something you press rather than something
             that happens to you. Hidden when you are already standing on it. */}
         {container !== null && containerFolder !== null && (
           <>
-            <span aria-hidden className="text-[11px] text-n-300">
+            <span aria-hidden className="text-2xs text-n-300">
               /
             </span>
             <button
               type="button"
               data-testid="detail-collection-crumb"
               onClick={() => navigate({ kind: 'collection', folder: containerFolder })}
-              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-500 hover:bg-n-50 hover:text-n-800"
+              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
             >
               <Icon name="folder-open" size={11} />
               <span className="truncate">{container.title}</span>
@@ -274,7 +274,7 @@ export function DetailPanel() {
           }}
           // focus-visible + the shared --ring token: every other control in
           // the app uses that halo and suppresses it on plain mouse clicks.
-          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-[16px] font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
+          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-lg font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
         />
         {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
@@ -285,7 +285,7 @@ export function DetailPanel() {
             and related-concepts view, collapsed until asked (M8.3's rule:
             the assistant never speaks first). */}
         <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500">
+        <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
           Description
         </div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by

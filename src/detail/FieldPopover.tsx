@@ -261,7 +261,7 @@ export function FieldPopover({
           tabIndex={-1}
           aria-activedescendant={activeDescendant}
           onKeyDown={onKeyDown}
-          className="w-60 rounded-[10px] border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)] outline-none"
+          className="w-60 rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)] outline-none"
         >
           {searchable && (
             <div className="pb-1.5">
@@ -296,7 +296,7 @@ export function FieldPopover({
                   onPick(o.id);
                   if (!multi) onClose();
                 }}
-                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-n-800 hover:bg-n-50 ${
+                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-sm text-n-800 hover:bg-n-50 ${
                   i === active ? 'bg-n-50' : ''
                 }`}
               >
@@ -317,7 +317,7 @@ export function FieldPopover({
               </button>
             ))}
             {rows.length === 0 && !canCreate && (
-              <div className="p-2 text-[12px] leading-relaxed text-n-500">
+              <div className="p-2 text-xs leading-relaxed text-n-500">
                 {options.length === 0 && emptyHint !== undefined ? emptyHint : 'No matches'}
               </div>
             )}
@@ -336,7 +336,7 @@ export function FieldPopover({
                 type="button"
                 onMouseEnter={() => setHighlight(rows.length)}
                 onClick={create}
-                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-n-700 hover:bg-n-50 ${
+                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-sm text-n-700 hover:bg-n-50 ${
                   createActive ? 'bg-n-50' : ''
                 }`}
               >
@@ -348,7 +348,7 @@ export function FieldPopover({
             )}
           </div>
           {multi && (
-            <div className="border-t border-n-100 px-2 pb-0.5 pt-1.5 text-[11px] text-n-400">
+            <div className="border-t border-n-100 px-2 pb-0.5 pt-1.5 text-2xs text-n-400">
               Pick as many as you need — Esc or click away to close.
             </div>
           )}

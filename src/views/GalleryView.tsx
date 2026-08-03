@@ -144,13 +144,13 @@ function GalleryCard({
       <div
         data-testid="gallery-card"
         data-path={entry.path}
-        className="flex flex-col gap-1 rounded-[10px] border border-warn-500 bg-n-0 px-2.5 py-2"
+        className="flex flex-col gap-1 rounded-lg border border-warn-500 bg-n-0 px-2.5 py-2"
       >
-        <span className="inline-flex items-center gap-1.5 text-[12px] text-warn-500">
+        <span className="inline-flex items-center gap-1.5 text-xs text-warn-500">
           <Icon name="triangle-alert" size={13} />
           Cannot parse
         </span>
-        <span className="truncate text-[12px] text-n-600">{entry.filename}</span>
+        <span className="truncate text-xs text-n-600">{entry.filename}</span>
       </div>
     );
   }
@@ -164,7 +164,7 @@ function GalleryCard({
       data-testid="gallery-card"
       data-path={entry.path}
       onClick={() => openPath(entry.path)}
-      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-[10px] border border-n-200 bg-n-0 p-0 text-left shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0 p-0 text-left shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
     >
       {gallery?.cover !== undefined && (
         <CoverTile
@@ -176,7 +176,7 @@ function GalleryCard({
         />
       )}
       <span className="flex min-w-0 flex-col gap-1.5 px-2.5 py-2">
-        <span className="truncate text-[13px] font-medium leading-[18px] text-n-900">
+        <span className="truncate text-sm font-medium leading-[18px] text-n-900">
           {entry.title}
         </span>
         {chips.length > 0 && (
@@ -260,7 +260,7 @@ function Band({
           }
         />
         {node.label}
-        <span className="[font-family:var(--font-mono)] text-[11px] font-normal text-n-400">
+        <span className="[font-family:var(--font-mono)] text-2xs font-normal text-n-400">
           {node.count}
         </span>
       </button>

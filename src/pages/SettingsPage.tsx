@@ -30,7 +30,7 @@ function SettingRow({
   return (
     <div className={`flex items-start gap-3 py-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-n-800">{label}</div>
+        <div className="text-sm font-medium text-n-800">{label}</div>
         <div className="mt-0.5 text-[11.5px] leading-[16px] text-n-500">{hint}</div>
       </div>
       <Switch ariaLabel={label} checked={checked} onChange={onChange} disabled={disabled} />
@@ -104,19 +104,19 @@ export function SettingsPage() {
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="settings-page">
       <div className="mx-auto w-full max-w-[640px] px-8 py-8">
         <h1 className="mb-6 text-[18px] font-semibold tracking-[-0.01em] text-n-900">Settings</h1>
-        <section className="mb-6 rounded-[14px] border border-n-200 p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-n-900">Vault</h2>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Vault</h2>
           <p className="mb-3 text-[12.5px] text-n-500">
             Cerebro reads and writes plain markdown files in this folder.
           </p>
-          <div className="mb-4 rounded-lg border border-n-200 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-[12px] text-n-700">
+          <div className="mb-4 rounded-lg border border-n-200 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-xs text-n-700">
             {vaultPath ?? 'No vault open'}
           </div>
           {status === 'error' && error ? (
             // Deviation from the plan's verbatim body (execution-log note 15a,
             // reported): vaultStore.status === 'error' was displayed nowhere —
             // surface it beside the recovery action.
-            <p className="mb-4 text-[12px] text-danger-500">{error}</p>
+            <p className="mb-4 text-xs text-danger-500">{error}</p>
           ) : null}
           <Button
             variant="secondary"
@@ -127,8 +127,8 @@ export function SettingsPage() {
             Change vault…
           </Button>
         </section>
-        <section className="mb-6 rounded-[14px] border border-n-200 p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-n-900">Workflow</h2>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Workflow</h2>
           <p className="mb-4 text-[12.5px] text-n-500">
             Capture fast, organize deliberately. A note stays in the Inbox until it has a type.
           </p>
@@ -146,8 +146,8 @@ export function SettingsPage() {
             disabled={!inboxEnabled}
           />
         </section>
-        <section className="mb-6 rounded-[14px] border border-n-200 p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-n-900">Assistant</h2>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
           <p className="mb-4 text-[12.5px] leading-[18px] text-n-500">
             What the assistant may change follows from where it is writing, not from a mode you pick
             each time: it owns <span className="[font-family:var(--font-mono)]">knowledge/</span>{' '}
@@ -169,7 +169,7 @@ export function SettingsPage() {
           {connectors && <ConnectorSettings />}
           <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-n-800">Issue keys</div>
+              <div className="text-sm font-medium text-n-800">Issue keys</div>
               <div className="mt-0.5 text-[11.5px] leading-[16px] text-n-500">
                 Your tracker's project keys, comma separated —{' '}
                 <span className="[font-family:var(--font-mono)]">PHX, SYN</span>. These cannot be
@@ -188,8 +188,8 @@ export function SettingsPage() {
             />
           </div>
         </section>
-        <section className="mb-6 rounded-[14px] border border-n-200 p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-n-900">Knowledge</h2>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Knowledge</h2>
           <p className="mb-4 text-[12.5px] text-n-500">
             The AI knowledge base in{' '}
             <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the
@@ -210,7 +210,7 @@ export function SettingsPage() {
           )}
           <div className="flex items-start gap-3 py-2">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-n-800">Your identity</div>
+              <div className="text-sm font-medium text-n-800">Your identity</div>
               <div className="mt-0.5 text-[11.5px] leading-[16px] text-n-500">
                 Stamped as{' '}
                 <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when
@@ -226,11 +226,11 @@ export function SettingsPage() {
             />
           </div>
         </section>
-        <section className="mb-6 rounded-[14px] border border-n-200 p-5">
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
           <GitSettings />
         </section>
-        <section className="rounded-[14px] border border-n-200 p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-n-900">About</h2>
+        <section className="rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">About</h2>
           <p className="text-[12.5px] text-n-500">
             Cerebro <span className="[font-family:var(--font-mono)]">{APP_VERSION}</span>
           </p>

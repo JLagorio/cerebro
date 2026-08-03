@@ -305,7 +305,7 @@ export function GanttView({
                         data-path={row.entry.path}
                         onClick={() => openPath(row.entry.path)}
                         title={`${row.entry.title} · no ${dateField} — open to set one`}
-                        className="absolute top-1.5 rounded-[4px] border border-dashed border-n-400 bg-transparent text-[10.5px] text-n-500 hover:border-cortex-500 hover:text-cortex-600"
+                        className="absolute top-1.5 rounded-xs border border-dashed border-n-400 bg-transparent text-[10.5px] text-n-500 hover:border-cortex-500 hover:text-cortex-600"
                         style={{
                           left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
                           width: 96,
@@ -334,7 +334,7 @@ export function GanttView({
                           // spine so it reads as the roll-up of what is under it
                           // rather than as another task competing with them.
                           className={[
-                            'absolute touch-none select-none rounded-[4px] border',
+                            'absolute touch-none select-none rounded-xs border',
                             isParent
                               ? 'top-3 border-n-600 bg-n-600'
                               : 'top-1.5 border-cortex-500 bg-cortex-400',

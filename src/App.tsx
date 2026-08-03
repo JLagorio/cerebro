@@ -122,17 +122,17 @@ function VaultChooser() {
 
   return (
     <div className="flex h-screen items-center justify-center bg-n-25">
-      <div className="flex w-[380px] flex-col gap-3 rounded-[14px] border border-n-200 bg-n-0 p-7 shadow-[var(--shadow-md)]">
+      <div className="flex w-[380px] flex-col gap-3 rounded-xl border border-n-200 bg-n-0 p-7 shadow-[var(--shadow-md)]">
         <span className="text-[18px] font-bold tracking-[-0.02em]">
           cerebro<span className="text-synapse-500">.</span>
         </span>
-        <h1 className="m-0 text-[16px] font-semibold text-n-900">Open a vault</h1>
-        <p className="m-0 text-[13px] leading-[19px] text-n-600">
+        <h1 className="m-0 text-lg font-semibold text-n-900">Open a vault</h1>
+        <p className="m-0 text-sm leading-[19px] text-n-600">
           A vault is a folder of markdown files — projects, docs, and work items live there as plain
           text.
         </p>
         {(error ?? pickError) ? (
-          <p className="m-0 text-[12px] text-danger-500">{error ?? pickError}</p>
+          <p className="m-0 text-xs text-danger-500">{error ?? pickError}</p>
         ) : null}
         <div className="mt-1 flex gap-2">
           <Button variant="primary" onClick={guarded(openDemo)}>
@@ -246,13 +246,13 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-n-0 text-[13px] leading-5 text-n-900">
+    <div className="flex h-screen overflow-hidden bg-n-0 text-sm leading-5 text-n-900">
       {/* The rail and the whole sidebar tree sit between the top of the tab
           order and the content, which in a real vault is dozens of stops. */}
       <button
         type="button"
         onClick={() => document.getElementById('main')?.focus()}
-        className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-[12px] font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+        className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-xs font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
       >
         Skip to content
       </button>

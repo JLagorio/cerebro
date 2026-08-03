@@ -15,6 +15,14 @@
      produce no CSS instead of silently shipping non-DS styling. */
   --color-*: initial;
   --radius-*: initial;
+  /* Same argument, extended to type (M16.36). Stock Tailwind ships its own
+     --text-* and --leading-* scale in rem, and the DS scale used to occupy the
+     same names from an unlayered file — so both reached :root and disagreed
+     (stock --text-lg is 18px; the DS says 16px) and the DS won on cascade
+     order alone. The scale now lives on --fs-* and --lh-* and is mapped in below,
+     so `text-sm` means one thing and off-DS sizes produce no CSS. */
+  --text-*: initial;
+  --leading-*: initial;
 
   /* fonts — literal mirrors of --font-ui / --font-mono in tokens/typography.css */
   --font-sans: 'Instrument Sans', -apple-system, 'Segoe UI', sans-serif;
@@ -99,6 +107,31 @@
   --color-swatch-magenta: var(--swatch-magenta);
   --color-swatch-vermilion: var(--swatch-vermilion);
   --color-swatch-sky: var(--swatch-sky);
+
+  /* type scale — mirrors tokens/typography.css.
+   *
+   * Font sizes are registered WITHOUT their paired line-height. Tailwind emits
+   * both properties when a `--text-<step>--line-height` exists, and the ~340
+   * call sites this replaces were `text-[Npx]`, which sets font-size only.
+   * Pairing them here would silently add a line-height to every one of them
+   * and reflow the app. The pairs stay addressable — `text-sm leading-sm` —
+   * so the intent survives as something a call site opts into. */
+  --text-2xs: var(--fs-2xs);
+  --text-xs: var(--fs-xs);
+  --text-sm: var(--fs-sm);
+  --text-md: var(--fs-md);
+  --text-lg: var(--fs-lg);
+  --text-xl: var(--fs-xl);
+  --text-2xl: var(--fs-2xl);
+  --text-3xl: var(--fs-3xl);
+  --leading-2xs: var(--lh-2xs);
+  --leading-xs: var(--lh-xs);
+  --leading-sm: var(--lh-sm);
+  --leading-md: var(--lh-md);
+  --leading-lg: var(--lh-lg);
+  --leading-xl: var(--lh-xl);
+  --leading-2xl: var(--lh-2xl);
+  --leading-3xl: var(--lh-3xl);
 
   /* radii */
   --radius-xs: var(--r-xs);

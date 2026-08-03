@@ -131,7 +131,7 @@ function GroupEditor({
       className={
         depth === 0
           ? 'flex flex-col gap-1.5'
-          : 'flex flex-col gap-1.5 rounded-[10px] border border-n-200 bg-n-25 p-2'
+          : 'flex flex-col gap-1.5 rounded-lg border border-n-200 bg-n-25 p-2'
       }
     >
       <div className="flex items-center gap-2">
@@ -225,7 +225,7 @@ function GroupEditor({
               ]),
             )
           }
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-n-500 hover:bg-n-100 hover:text-n-800"
+          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-800"
         >
           <Icon name="plus" size={12} />
           Add filter
@@ -239,7 +239,7 @@ function GroupEditor({
             // group's own hint said it showed everything. `[].every()` is true,
             // so an empty `all` group really is the no-op the hint promises.
             onClick={() => onChange(withChildren(group, [...children, { all: [] }]))}
-            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-n-500 hover:bg-n-100 hover:text-n-800"
+            className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-500 hover:bg-n-100 hover:text-n-800"
           >
             <Icon name="plus" size={12} />
             Add group

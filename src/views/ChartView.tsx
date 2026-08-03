@@ -295,16 +295,14 @@ function DonutChart({ data }: { data: ChartData }) {
           <li
             key={s.key || s.label}
             data-testid="chart-legend-item"
-            className="flex items-center gap-2 text-[12px] text-n-700"
+            className="flex items-center gap-2 text-xs text-n-700"
           >
             <span
               className="box-border h-2.5 w-2.5 flex-none rounded-full"
               style={{ background: sliceColor(s, i) }}
             />
             <span className="min-w-0 flex-1 truncate">{s.label}</span>
-            <span className="[font-family:var(--font-mono)] text-[11px] text-n-500">
-              {s.display}
-            </span>
+            <span className="[font-family:var(--font-mono)] text-2xs text-n-500">{s.display}</span>
           </li>
         ))}
       </ul>
@@ -376,7 +374,7 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
             data.total <= 0 ? (
               // A donut of nothing is a full grey ring that reads as one
               // enormous slice.
-              <p className="m-0 py-6 text-center text-[12px] text-n-500">
+              <p className="m-0 py-6 text-center text-xs text-n-500">
                 Every band measures zero, so there is no ring to draw.
               </p>
             ) : (

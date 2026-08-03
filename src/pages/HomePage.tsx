@@ -21,7 +21,7 @@ export function greetingForHour(hour: number): string {
 }
 
 const CARD =
-  'flex min-w-0 flex-col gap-2 rounded-[10px] border border-n-200 bg-n-0 px-[14px] py-[13px] text-left hover:border-n-300 hover:shadow-[var(--shadow-sm)]';
+  'flex min-w-0 flex-col gap-2 rounded-lg border border-n-200 bg-n-0 px-[14px] py-[13px] text-left hover:border-n-300 hover:shadow-[var(--shadow-sm)]';
 
 /** One root Collection (M12.5 — the grid used to be projects). */
 export function CollectionCard({ node }: { node: CollectionNode }) {
@@ -100,7 +100,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
           them apart sat at the opposite end from the checkbox you click. */}
       <span
         className={[
-          'min-w-0 max-w-[62%] truncate text-[13px]',
+          'min-w-0 max-w-[62%] truncate text-sm',
           task.done ? 'text-[var(--text-disabled)] line-through' : 'text-n-800',
         ].join(' ')}
       >
@@ -110,7 +110,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
         <button
           type="button"
           onClick={() => open(source.path)}
-          className="min-w-0 max-w-[38%] flex-none truncate rounded-[5px] border-0 bg-n-50 px-1.5 py-px text-[11px] text-[var(--text-meta)] hover:bg-n-100 hover:text-n-900"
+          className="min-w-0 max-w-[38%] flex-none truncate rounded-[5px] border-0 bg-n-50 px-1.5 py-px text-2xs text-[var(--text-meta)] hover:bg-n-100 hover:text-n-900"
           title={source.path}
         >
           {source.title}
@@ -121,14 +121,14 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
       {task.assignees.map((a) => (
         <span
           key={a}
-          className="flex-none rounded-full border border-n-200 bg-n-0 px-1.5 py-px text-[11px] text-n-600"
+          className="flex-none rounded-full border border-n-200 bg-n-0 px-1.5 py-px text-2xs text-n-600"
         >
           {resolveTarget(a, entries)?.title ?? a}
         </span>
       ))}
       {task.due !== null && (
         <span
-          className={`flex-none items-center gap-1 rounded-[5px] px-1.5 py-px text-[11px] ${dueTone} inline-flex`}
+          className={`flex-none items-center gap-1 rounded-[5px] px-1.5 py-px text-2xs ${dueTone} inline-flex`}
         >
           <Icon name="calendar" size={11} />
           {formatDue(task.due)}
@@ -189,7 +189,7 @@ export function HomeTasks() {
     <section data-testid="home-tasks" className="mb-7">
       <div className="mb-1.5 flex items-center gap-2">
         <h2 className={SECTION_HEADING}>My Tasks</h2>
-        <span className="text-[12px] text-[var(--text-meta)]">{openCount} open</span>
+        <span className="text-xs text-[var(--text-meta)]">{openCount} open</span>
         {doneCount > 0 && (
           <button
             type="button"
@@ -197,7 +197,7 @@ export function HomeTasks() {
             aria-pressed={showDone}
             onClick={() => setShowDone((v) => !v)}
             className={[
-              'rounded-[5px] border-0 bg-transparent px-1 py-px text-[12px] underline decoration-dotted underline-offset-2',
+              'rounded-[5px] border-0 bg-transparent px-1 py-px text-xs underline decoration-dotted underline-offset-2',
               showDone ? 'text-cortex-600' : 'text-[var(--text-meta)] hover:text-n-900',
             ].join(' ')}
           >
@@ -221,7 +221,7 @@ export function HomeTasks() {
       </div>
       {loading && filtered.length === 0 && <div data-testid="home-tasks-loading" />}
       {!loading && filtered.length === 0 && (
-        <p className="m-0 rounded-[10px] border border-dashed border-n-200 px-4 py-3 text-[12.5px] text-[var(--text-meta)]">
+        <p className="m-0 rounded-lg border border-dashed border-n-200 px-4 py-3 text-[12.5px] text-[var(--text-meta)]">
           No open tasks. Add one in any doc with a checklist item — assign with @, set a due date
           with the calendar chip.
         </p>
@@ -232,7 +232,7 @@ export function HomeTasks() {
         return (
           <div key={id} className="mb-2">
             <h3
-              className={`mb-0.5 mt-2 text-[11px] font-semibold uppercase tracking-[0.06em] ${tone}`}
+              className={`mb-0.5 mt-2 text-2xs font-semibold uppercase tracking-[0.06em] ${tone}`}
             >
               {label} · {group.length}
             </h3>
@@ -274,7 +274,7 @@ export function HomePage() {
           <h1 className="m-0 text-[22px] font-semibold leading-[30px] tracking-[-0.015em]">
             {greeting}
           </h1>
-          <span className="text-[12px] text-[var(--text-meta)]">
+          <span className="text-xs text-[var(--text-meta)]">
             {roots.length} {roots.length === 1 ? 'collection' : 'collections'}
           </span>
         </div>

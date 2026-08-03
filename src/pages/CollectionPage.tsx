@@ -124,7 +124,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
       <header className="flex-none px-8 pb-4 pt-8">
         <div className="flex min-w-0 items-start gap-3">
           <span
-            className="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
+            className="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-lg"
             style={{
               // color-mix, not `${color}1a`: a collection colour is
               // user-supplied and may be a 3-digit hex or a var(), both of
@@ -141,7 +141,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
             />
           </span>
           <div className="min-w-0 flex-1">
-            <h1 className="m-0 truncate text-[24px] font-bold leading-[30px] tracking-[-0.02em] text-n-900">
+            <h1 className="m-0 truncate text-2xl font-bold leading-[30px] tracking-[-0.02em] text-n-900">
               {collection.definition.name}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-n-400">
@@ -211,13 +211,13 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
                       data-testid="collection-card"
                       data-kind="collection"
                       onClick={() => navigate({ kind: 'collection', folder: c.id })}
-                      className="flex items-center gap-2.5 rounded-[10px] border border-n-200 bg-n-0 px-3 py-2.5 text-left hover:border-n-300 hover:bg-n-25"
+                      className="flex items-center gap-2.5 rounded-lg border border-n-200 bg-n-0 px-3 py-2.5 text-left hover:border-n-300 hover:bg-n-25"
                     >
                       <Icon name={c.icon} size={16} color={c.color ?? 'var(--n-500)'} />
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-n-900">
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-n-900">
                         {c.label}
                       </span>
-                      <span className="flex-none [font-family:var(--font-mono)] text-[11px] text-n-400">
+                      <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
                         {nodeCount(c)}
                       </span>
                     </button>
@@ -263,10 +263,8 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
                       className="flex h-9 items-center gap-2.5 rounded-md border-0 bg-transparent px-2 text-left hover:bg-n-25"
                     >
                       <Icon name={d.icon} size={14} color={d.color ?? 'var(--n-500)'} />
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-n-800">
-                        {d.label}
-                      </span>
-                      <span className="flex-none truncate [font-family:var(--font-mono)] text-[11px] text-n-400">
+                      <span className="min-w-0 flex-1 truncate text-sm text-n-800">{d.label}</span>
+                      <span className="flex-none truncate [font-family:var(--font-mono)] text-2xs text-n-400">
                         {d.path}
                       </span>
                     </button>
@@ -286,7 +284,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
                       key={f.id}
                       data-testid="collection-content-row"
                       data-kind="folder"
-                      className="inline-flex items-center gap-1.5 rounded-full border border-n-200 px-2.5 py-1 text-[12px] text-n-600"
+                      className="inline-flex items-center gap-1.5 rounded-full border border-n-200 px-2.5 py-1 text-xs text-n-600"
                     >
                       <Icon name="folder" size={12} color="var(--n-400)" />
                       {f.label}
@@ -316,10 +314,10 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
                         className="flex h-9 items-center gap-2.5 rounded-md border-0 bg-transparent px-2 text-left hover:bg-n-25"
                       >
                         <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
-                        <span className="min-w-0 flex-1 truncate text-[13px] text-n-800">
+                        <span className="min-w-0 flex-1 truncate text-sm text-n-800">
                           {e.title}
                         </span>
-                        <span className="flex-none [font-family:var(--font-mono)] text-[11px] text-n-400">
+                        <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
                           {e.modifiedAt.slice(0, 10)}
                         </span>
                       </button>
@@ -355,7 +353,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmRemove(false) }}
         >
-          <p className="m-0 text-[13px] text-n-600">
+          <p className="m-0 text-sm text-n-600">
             The folder stops being a collection. The {total} {total === 1 ? 'thing' : 'things'}{' '}
             inside stay on disk in <code>{collection.folder}/</code> — removing a container is not a
             way to lose work.
@@ -401,7 +399,7 @@ function Section({
 }) {
   return (
     <section>
-      <h2 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.07em] text-n-500">
+      <h2 className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.07em] text-n-500">
         {title}
         {count !== undefined && (
           <span className="[font-family:var(--font-mono)] text-[10.5px] font-normal text-n-400">
@@ -449,7 +447,7 @@ function ListCard({
     <div
       data-testid="collection-card"
       data-kind="list"
-      className="flex flex-col gap-2 rounded-[10px] border border-n-200 bg-n-0 p-3 hover:border-n-300"
+      className="flex flex-col gap-2 rounded-lg border border-n-200 bg-n-0 p-3 hover:border-n-300"
     >
       {/* The icon and the count sit OUTSIDE the button on purpose: folded in,
           they became part of its accessible name, so the card announced
@@ -536,7 +534,7 @@ function Description({ collection }: { collection: CollectionFile }) {
         type="button"
         data-testid="collection-description"
         onClick={() => setEditing(true)}
-        className="mt-2.5 block w-full max-w-[720px] rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-[13px] leading-[19px] text-n-600 hover:bg-n-50"
+        className="mt-2.5 block w-full max-w-[720px] rounded-md border-0 bg-transparent px-1 py-0.5 text-left text-sm leading-[19px] text-n-600 hover:bg-n-50"
       >
         {stored}
       </button>
@@ -565,7 +563,7 @@ function Description({ collection }: { collection: CollectionFile }) {
         }
       }}
       placeholder="What is this collection for?"
-      className="mt-2.5 block w-full max-w-[720px] resize-y rounded-lg border border-cortex-500 px-2 py-1.5 text-[13px] leading-[19px] text-n-800 shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
+      className="mt-2.5 block w-full max-w-[720px] resize-y rounded-lg border border-cortex-500 px-2 py-1.5 text-sm leading-[19px] text-n-800 shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
     />
   );
 }

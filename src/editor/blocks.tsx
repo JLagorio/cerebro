@@ -86,7 +86,7 @@ function CalloutView({
       >
         <Icon name={style.icon} size={16} color={style.fg} />
       </button>
-      <div className="min-w-0 flex-1 text-[14px] leading-[1.5]" ref={contentRef} />
+      <div className="min-w-0 flex-1 text-md leading-[1.5]" ref={contentRef} />
     </div>
   );
 }

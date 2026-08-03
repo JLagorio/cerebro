@@ -117,8 +117,8 @@ function ListRow({
         <span className="inline-flex flex-none text-warn-500">
           <Icon name="triangle-alert" size={14} />
         </span>
-        <span className="truncate text-[13px] text-n-700">{entry.filename}</span>
-        <span className="inline-flex flex-none items-center rounded-md border border-warn-500 px-1.5 py-0.5 text-[11px] text-warn-500">
+        <span className="truncate text-sm text-n-700">{entry.filename}</span>
+        <span className="inline-flex flex-none items-center rounded-md border border-warn-500 px-1.5 py-0.5 text-2xs text-warn-500">
           Cannot parse
         </span>
       </div>
@@ -152,7 +152,7 @@ function ListRow({
       >
         <Icon name={typeStyle(entry.type, schema).icon} size={14} />
       </span>
-      <span className="truncate text-[13px] text-n-900">{entry.title}</span>
+      <span className="truncate text-sm text-n-900">{entry.title}</span>
       <span className="flex-1" />
       {/* M9.6: editable in place, the same FieldEditor the table and
           hierarchy use. A read-only chip here meant the same property was
@@ -263,14 +263,14 @@ function BandHeader({
       />
       <span
         className={[
-          node.depth === 0 ? 'text-[12.5px] font-semibold' : 'text-[12px] font-medium',
+          node.depth === 0 ? 'text-[12.5px] font-semibold' : 'text-xs font-medium',
           'min-w-0 truncate text-n-800',
         ].join(' ')}
       >
         {node.label}
       </span>
       {/* Recursive count: a collapsed parent still reports what is inside. */}
-      <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">{node.count}</span>
+      <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{node.count}</span>
     </header>
   );
 }
@@ -349,7 +349,7 @@ export function ListView({
               style={{ border: '1.5px solid var(--n-400)' }}
             />
             <span className="text-[12.5px] font-semibold text-n-800">All items</span>
-            <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
+            <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
               {entries.length}
             </span>
           </header>

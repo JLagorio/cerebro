@@ -224,10 +224,8 @@ export function TimelineView({
                           size={12}
                           color="var(--n-400)"
                         />
-                        <span className="text-[12px] font-semibold text-n-800">
-                          {row.node.label}
-                        </span>
-                        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
+                        <span className="text-xs font-semibold text-n-800">{row.node.label}</span>
+                        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
                           {row.node.count}
                         </span>
                       </span>
@@ -301,7 +299,7 @@ export function TimelineView({
           data-testid="timeline-undated"
           className="max-h-[180px] flex-none overflow-y-auto border-t border-n-200 bg-n-25 px-5 py-2"
         >
-          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <div className="pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Without a date
           </div>
           {undated.map((entry) => (

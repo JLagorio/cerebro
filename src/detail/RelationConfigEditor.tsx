@@ -33,7 +33,7 @@ export function RelationConfigEditor({
 
   if (def.from !== undefined) {
     return (
-      <p className="m-0 flex items-start gap-1.5 px-1 py-1 text-[12px] leading-relaxed text-n-500">
+      <p className="m-0 flex items-start gap-1.5 px-1 py-1 text-xs leading-relaxed text-n-500">
         <Icon name="arrow-left-right" size={12} style={{ marginTop: 2 }} />
         <span>
           Two-way relation: this is the derived side of{' '}
@@ -60,9 +60,7 @@ export function RelationConfigEditor({
   return (
     <div className="flex flex-col gap-1.5 py-0.5">
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[12px] text-n-600">
-          {isPerson ? 'People come from' : 'Related to'}
-        </span>
+        <span className="text-xs text-n-600">{isPerson ? 'People come from' : 'Related to'}</span>
         <Dropdown
           size="sm"
           label={isPerson ? 'People come from' : 'Related to'}
@@ -78,7 +76,7 @@ export function RelationConfigEditor({
         />
       </div>
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[12px] text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
+        <span className="text-xs text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
         <Switch
           ariaLabel="Limit to 1 record"
           checked={def.limit === 1}
@@ -86,9 +84,9 @@ export function RelationConfigEditor({
         />
       </div>
       <div className="flex items-center gap-2 px-1">
-        <span className="flex-none text-[12px] text-n-600">Related property</span>
+        <span className="flex-none text-xs text-n-600">Related property</span>
         {reciprocal !== null ? (
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-[12px] text-n-700">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-n-700">
             <Icon name="arrow-left-right" size={11} color="var(--n-400)" />
             <span className="truncate">
               {humanize(reciprocal.name)} on {def.target}

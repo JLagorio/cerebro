@@ -60,7 +60,7 @@ function PeriodPills({
               if (!empty) onChange(value);
             }}
             className={[
-              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium',
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium',
               on
                 ? 'border-n-300 bg-n-100 text-n-900'
                 : empty
@@ -116,7 +116,7 @@ function OrganizeChecklist({
               {c.label}
             </span>
             {!c.done && (
-              <span className="mt-0.5 block text-[11px] leading-[15px] text-n-500">{c.hint}</span>
+              <span className="mt-0.5 block text-2xs leading-[15px] text-n-500">{c.hint}</span>
             )}
           </span>
         );
@@ -127,7 +127,7 @@ function OrganizeChecklist({
                 type="button"
                 data-testid={`checklist-fix-${c.id}`}
                 onClick={() => onFix(c.id)}
-                className="-mx-1 flex w-full gap-2 rounded-[6px] border-0 bg-transparent px-1 py-0.5 text-left hover:bg-n-50"
+                className="-mx-1 flex w-full gap-2 rounded-sm border-0 bg-transparent px-1 py-0.5 text-left hover:bg-n-50"
               >
                 {glyph}
                 {text}
@@ -223,7 +223,7 @@ function OrganizePanel({
           implicit association a wrapping label gives. Clicking "Type" now
           focuses the dropdown too. */}
       <label ref={typeField} className="flex items-center gap-2">
-        <span className="flex-none text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500">
+        <span className="flex-none text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
           Type
         </span>
         <Select
@@ -263,7 +263,7 @@ function OrganizePanel({
         </div>
 
         <div className="border-t border-n-100 pt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500">
+          <div className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
             Before you file
           </div>
           {/* Said out loud, because a list of unmet items reads as a blocker
@@ -557,7 +557,7 @@ export function InboxPage() {
           <span className="inline-flex flex-none text-success-600">
             <Icon name="circle-check" size={13} />
           </span>
-          <span className="min-w-0 truncate text-[12px] text-n-600">Filed “{lastFiled.title}”</span>
+          <span className="min-w-0 truncate text-xs text-n-600">Filed “{lastFiled.title}”</span>
           <Button
             size="sm"
             variant="secondary"
@@ -583,10 +583,10 @@ export function InboxPage() {
       {dragDepth > 0 && (
         <div
           data-testid="inbox-dropzone"
-          className="pointer-events-none absolute inset-0 z-10 m-3 flex flex-col items-center justify-center gap-2 rounded-[14px] border-2 border-dashed border-cortex-400 bg-cortex-50"
+          className="pointer-events-none absolute inset-0 z-10 m-3 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-cortex-400 bg-cortex-50"
         >
           <Icon name="file-down" size={22} color="var(--cortex-600)" />
-          <span className="text-[13px] font-medium text-cortex-700">Drop to file in the Inbox</span>
+          <span className="text-sm font-medium text-cortex-700">Drop to file in the Inbox</span>
           <span className="text-[11.5px] text-n-500">
             Transcripts and notes — {INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(' ')}
           </span>
@@ -686,7 +686,7 @@ export function InboxPage() {
                       // width most of them clip mid-word.
                       title={e.title}
                       className={[
-                        'truncate text-[13px]',
+                        'truncate text-sm',
                         ready
                           ? 'font-medium text-n-500'
                           : active
@@ -700,7 +700,7 @@ export function InboxPage() {
                   {e.snippet !== '' && (
                     <span className="truncate text-[11.5px] text-n-500">{e.snippet}</span>
                   )}
-                  <span className="flex items-center gap-2 text-[11px] text-n-400">
+                  <span className="flex items-center gap-2 text-2xs text-n-400">
                     <span>{e.createdAt.slice(0, 10)}</span>
                     {/* M7: what the agent wrote is labelled, so the review
                         queue never hides machine output among your own. */}
@@ -761,11 +761,11 @@ export function InboxPage() {
                   >
                     {hasRealTitle(selected) ? selected.title : '(untitled capture)'}
                   </span>
-                  <span className="block text-[11px] text-n-500">
+                  <span className="block text-2xs text-n-500">
                     Captured {selected.createdAt.slice(0, 10)}
                   </span>
                 </span>
-                <span className="flex-none text-[11px] tabular-nums text-n-500">
+                <span className="flex-none text-2xs tabular-nums text-n-500">
                   {index + 1} of {queue.entries.length}
                 </span>
                 <span className="flex flex-none items-center gap-0.5">

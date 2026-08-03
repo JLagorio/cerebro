@@ -245,7 +245,7 @@ export function ViewSettingsPanel({
         {page !== 'root' && (
           <IconButton icon="arrow-left" label="Back" size="sm" onClick={() => setPage('root')} />
         )}
-        <span className="flex-1 truncate text-[13px] font-semibold text-n-900">
+        <span className="flex-1 truncate text-sm font-semibold text-n-900">
           {page === 'root' ? view.name : titleFor(page)}
         </span>
         <IconButton icon="x" label="Close view settings" size="sm" onClick={onClose} />
@@ -418,7 +418,7 @@ export function ViewSettingsPanel({
                       />
                       <span className="min-w-0 flex-1">
                         {style.label}
-                        <span className="mt-px block text-[11px] leading-[15px] text-n-400">
+                        <span className="mt-px block text-2xs leading-[15px] text-n-400">
                           {style.hint}
                         </span>
                       </span>
@@ -576,7 +576,7 @@ export function ViewSettingsPanel({
         {page === 'field' &&
           editingField !== null &&
           (list.source.type === null ? (
-            <p className="m-0 px-2 py-3 text-[12px] leading-[17px] text-n-500">
+            <p className="m-0 px-2 py-3 text-xs leading-[17px] text-n-500">
               This property can't be edited here — the view has no single source type that declares
               it.
             </p>
@@ -840,7 +840,7 @@ function PropertiesPage({
           <button
             type="button"
             onClick={() => onChange(columns.map((c) => ({ ...c, hidden: true })))}
-            className="border-0 bg-transparent p-0 text-[11px] text-cortex-600 hover:underline"
+            className="border-0 bg-transparent p-0 text-2xs text-cortex-600 hover:underline"
           >
             Hide all
           </button>
@@ -868,7 +868,7 @@ function PropertiesPage({
                   .map((f) => ({ field: f.name })),
               ])
             }
-            className="border-0 bg-transparent p-0 text-[11px] text-cortex-600 hover:underline"
+            className="border-0 bg-transparent p-0 text-2xs text-cortex-600 hover:underline"
           >
             Show all
           </button>
@@ -877,9 +877,7 @@ function PropertiesPage({
       {hidden.map((f) => (matches(f) ? row(f, false) : null))}
 
       {visible.length === 0 && hidden.length === 0 && (
-        <p className="m-0 px-2 py-3 text-[12px] text-n-400">
-          This type declares no properties yet.
-        </p>
+        <p className="m-0 px-2 py-3 text-xs text-n-400">This type declares no properties yet.</p>
       )}
 
       {onNewProperty !== undefined && canEdit && (
@@ -981,7 +979,7 @@ function AxisPage({
               onChange={(on) => onChange({ ...presentation, showWeekends: on })}
               label="Show weekends"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               Off drops Saturday and Sunday from the grid, rather than narrowing them.
             </p>
           </div>
@@ -1014,7 +1012,7 @@ function AxisPage({
               onChange={(on) => onChange({ ...presentation, showTable: on })}
               label="Show table"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               The rows beside the axis, carrying this view&rsquo;s properties.
             </p>
           </div>
@@ -1038,7 +1036,7 @@ function AxisPage({
             }
             width="100%"
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+          <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
             The relation naming what each record waits on — the arrows the gantt draws.
           </p>
         </div>
@@ -1118,7 +1116,7 @@ function CardsPage({
             onChange={(e) => onChange({ ...p, cardPreview: e.target.value as CardPreview })}
             width="100%"
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+          <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
             Page content shows the first line or two of the record&rsquo;s body.
           </p>
         </div>
@@ -1143,7 +1141,7 @@ function CardsPage({
               }
               width="100%"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               {covers.length === 0
                 ? 'No files property on this type yet — add one and it becomes a cover.'
                 : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
@@ -1156,7 +1154,7 @@ function CardsPage({
               label="Fit media"
               ariaLabel="Fit media"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               Fit the whole cover inside the tile instead of cropping it to fill.
             </p>
           </div>
@@ -1176,7 +1174,7 @@ function CardsPage({
               onChange(on ? { ...rest, colorColumns: true } : rest);
             }}
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+          <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
             Paints each column in its group&rsquo;s own colour.
           </p>
         </div>
@@ -1265,7 +1263,7 @@ function ChartPage({
             width="100%"
           />
           {numeric.length === 0 && (
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
               This view has no number property to add up.
             </p>
           )}
@@ -1283,7 +1281,7 @@ function ChartPage({
           whatever was selected, so the one sentence explaining where a chart's
           X axis comes from described a bar chart to someone looking at a
           donut. */}
-      <p className="m-0 border-t border-n-100 pt-2 text-[11px] leading-[15px] text-n-400">
+      <p className="m-0 border-t border-n-100 pt-2 text-2xs leading-[15px] text-n-400">
         {band === undefined
           ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
           : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
@@ -1367,7 +1365,7 @@ function BlocksPage({
             key={block.id}
             data-testid={`block-row-${block.id}`}
             className={[
-              'mb-1.5 rounded-[8px] border border-n-200 p-1.5',
+              'mb-1.5 rounded-md border border-n-200 p-1.5',
               sortable.dragging === block.id ? 'opacity-60' : '',
             ].join(' ')}
             style={sortable.dropIndicator(i)}
@@ -1466,12 +1464,12 @@ function BlocksPage({
           width="100%"
         />
       ) : (
-        <p className="m-0 px-2 text-[11px] leading-[15px] text-n-400">
+        <p className="m-0 px-2 text-2xs leading-[15px] text-n-400">
           There are no saved lists in the vault to embed yet.
         </p>
       )}
 
-      <p className="m-0 border-t border-n-100 px-1 pt-2 text-[11px] leading-[15px] text-n-400">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
         A number measures this view’s own records, so its filters apply. A saved view is shown as it
         is configured where it lives.
       </p>
@@ -1581,7 +1579,7 @@ function SortPage({
         />
       )}
       {atCap && (
-        <p className="m-0 px-1 pt-1 text-[11px] leading-[15px] text-n-400">
+        <p className="m-0 px-1 pt-1 text-2xs leading-[15px] text-n-400">
           {MAX_SORT_KEYS} keys is the maximum — a fifth tiebreak never decides anything.
         </p>
       )}
@@ -1636,7 +1634,7 @@ function LimitPage({
           {limit === l.value && <Icon name="check" size={12} />}
         </button>
       ))}
-      <p className="m-0 border-t border-n-100 px-1 pt-2 text-[11px] leading-[15px] text-n-400">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
         A limited view says how many of how many it is showing, under the records. Nothing
         disappears without saying so.
       </p>
@@ -1699,7 +1697,7 @@ function RowsPage({
           label="Wrap all columns"
           ariaLabel="Wrap all columns"
         />
-        <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
+        <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
           Wrapped cells grow the row instead of clipping. One column at a time is still on its own
           header menu.
         </p>
@@ -1765,7 +1763,7 @@ function GroupPage({
     <div className="flex flex-col gap-1.5">
       {group.map((level, i) => (
         <div key={`${i}:${level.field}`} className="flex items-center gap-1.5">
-          <span className="w-8 flex-none text-[11px] text-n-400">{i === 0 ? 'By' : 'then'}</span>
+          <span className="w-8 flex-none text-2xs text-n-400">{i === 0 ? 'By' : 'then'}</span>
           <Select
             size="sm"
             value={
@@ -1823,7 +1821,7 @@ function GroupPage({
             level.descend !== undefined ? null : (
               <label
                 key={`hide:${i}:${level.field}`}
-                className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12px] text-n-700"
+                className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-xs text-n-700"
               >
                 <span className="min-w-0 flex-1 truncate">
                   Hide empty {humanize(level.field).toLowerCase()} groups
@@ -1847,7 +1845,7 @@ function GroupPage({
 
       {addOptions.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <span className="w-8 flex-none text-[11px] text-n-400">
+          <span className="w-8 flex-none text-2xs text-n-400">
             {group.length === 0 ? 'By' : 'then'}
           </span>
           <Select
@@ -1863,7 +1861,7 @@ function GroupPage({
         </div>
       )}
 
-      <p className="m-0 border-t border-n-100 px-1 pt-2 text-[11px] leading-[15px] text-n-400">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
         A property bands records by its value. A relation (↳) nests them under what they link to.
       </p>
     </div>

@@ -244,7 +244,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               {sortedEntries.length}
             </span>
             {listing.system && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-[11px] text-n-500">
+              <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
                 <Icon name="lock" size={10} />
                 System type
               </span>

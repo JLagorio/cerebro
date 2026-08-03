@@ -87,11 +87,11 @@ export function KnowledgeCommit({
     >
       <div className="flex items-center gap-2">
         <Icon name={heading.icon} size={14} color={heading.color} />
-        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
+        <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
           {heading.label}
         </h3>
         {learned !== null && (
-          <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">{learned}</span>
+          <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{learned}</span>
         )}
       </div>
 

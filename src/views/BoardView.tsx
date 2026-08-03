@@ -75,13 +75,13 @@ const CARD_METRICS: Record<
   medium: {
     column: 280,
     pad: 'px-[11px] py-[9px]',
-    title: 'text-[13px] leading-[18px]',
+    title: 'text-sm leading-[18px]',
     clamp: 'line-clamp-2',
   },
   large: {
     column: 320,
     pad: 'px-3.5 py-3',
-    title: 'text-[14px] leading-[20px]',
+    title: 'text-md leading-[20px]',
     clamp: 'line-clamp-3',
   },
 };
@@ -277,7 +277,7 @@ function BoardCard({
         opacity: isDragging ? 0.6 : 1,
         zIndex: isDragging ? 20 : undefined,
       }}
-      className={`relative cursor-pointer rounded-[10px] border border-n-200 bg-n-0 shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
+      className={`relative cursor-pointer rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
     >
       <div className="mb-1 flex items-center gap-1.5">
         <span
@@ -362,14 +362,14 @@ function BoardColumn({
           }
         />
         <span className="text-[12.5px] font-semibold text-n-800">{column.label}</span>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
+        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
           {column.entries.length}
         </span>
       </div>
       <div
         ref={setNodeRef}
         data-tinted={tinted ? 'true' : undefined}
-        className={`flex min-h-[60px] flex-col gap-2 rounded-[10px] ${tinted ? 'p-1.5' : 'p-0.5'}`}
+        className={`flex min-h-[60px] flex-col gap-2 rounded-lg ${tinted ? 'p-1.5' : 'p-0.5'}`}
         style={{
           background: isOver ? 'var(--cortex-50)' : tinted ? tint : 'transparent',
         }}
@@ -436,7 +436,7 @@ function Swimlane({
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         {label}
-        <span className="[font-family:var(--font-mono)] text-[11px] font-normal text-n-400">
+        <span className="[font-family:var(--font-mono)] text-2xs font-normal text-n-400">
           {count}
         </span>
       </button>
@@ -586,7 +586,7 @@ export function BoardView({
         </DndContext>
       )}
       {hiddenCount > 0 && (
-        <div className="pt-3 text-[12px] text-n-400">
+        <div className="pt-3 text-xs text-n-400">
           {hiddenCount} unparseable item{hiddenCount === 1 ? '' : 's'} hidden
         </div>
       )}

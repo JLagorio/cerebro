@@ -67,7 +67,7 @@ function LinksTab({ entry }: { entry: Entry }) {
   const section = (label: string, links: DocLink[]) =>
     links.length === 0 ? null : (
       <>
-        <h3 className="mb-1 mt-3 px-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500 first:mt-1">
+        <h3 className="mb-1 mt-3 px-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500 first:mt-1">
           {label}
         </h3>
         <div className="flex flex-col gap-px">
@@ -119,7 +119,7 @@ export function DocSidePanel({
             data-testid={`doc-panel-tab-${t.id}`}
             onClick={() => setTab(t.id)}
             className={[
-              'rounded-md border-0 px-2.5 py-1 text-[12px]',
+              'rounded-md border-0 px-2.5 py-1 text-xs',
               tab === t.id
                 ? 'bg-n-100 font-medium text-n-900'
                 : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',

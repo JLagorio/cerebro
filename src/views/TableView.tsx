@@ -92,7 +92,7 @@ function ProgressCell({ display }: { display: string }) {
           }}
         />
       </span>
-      <span className="flex-none [font-family:var(--font-mono)] text-[11px] text-n-600">
+      <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-600">
         {display}
       </span>
     </span>
@@ -638,7 +638,7 @@ const TableRow = memo(function TableRow({
             e.stopPropagation();
             openPath(entry.path);
           }}
-          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] text-n-900 hover:underline focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-900 hover:underline focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
         >
           {entry.title}
         </button>
@@ -866,12 +866,12 @@ function BandHeader({
           className={
             node.depth === 0
               ? 'text-[12.5px] font-semibold text-n-800'
-              : 'text-[12px] font-medium text-n-700'
+              : 'text-xs font-medium text-n-700'
           }
         >
           {node.label}
         </span>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">{node.count}</span>
+        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{node.count}</span>
       </span>
     </button>
   );
@@ -1385,7 +1385,7 @@ function HeaderMenu({
                     />
                   </div>
                 ) : (
-                  <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-n-800">{name}</div>
+                  <div className="px-2 pb-1 pt-1 text-xs font-medium text-n-800">{name}</div>
                 )}
                 {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
                   <MenuItem
@@ -2564,7 +2564,7 @@ export function TableView({
           role="toolbar"
           data-testid="bulk-bar"
           aria-label={`${checked.length} selected`}
-          className="absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-n-200 bg-n-0 px-2 py-1.5 shadow-[var(--shadow-lg)]"
+          className="absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border border-n-200 bg-n-0 px-2 py-1.5 shadow-[var(--shadow-lg)]"
         >
           <span className="px-1 text-[12.5px] font-medium text-n-700">
             {checked.length} selected
@@ -2593,7 +2593,7 @@ export function TableView({
         secondaryAction={{ label: 'Cancel', onClick: () => setConfirmBulkDelete(false) }}
         primaryAction={{ label: 'Delete', onClick: () => deleteRecords(checked) }}
       >
-        <p className="m-0 text-[13px] leading-relaxed text-n-600">
+        <p className="m-0 text-sm leading-relaxed text-n-600">
           {checked.length === 1
             ? 'The file leaves the vault.'
             : 'The files leave the vault. Links pointing at them will point at nothing.'}
@@ -2615,7 +2615,7 @@ export function TableView({
           },
         }}
       >
-        <p className="m-0 text-[13px] leading-relaxed text-n-600">The file leaves the vault.</p>
+        <p className="m-0 text-sm leading-relaxed text-n-600">The file leaves the vault.</p>
       </Dialog>
     </div>
   );

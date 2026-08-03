@@ -124,7 +124,7 @@ export function PropertyMenu({
             <div className="flex items-center gap-1.5 px-1 py-0.5 text-[12.5px] text-n-600">
               <Icon name="lock" size={11} />
               <span className="min-w-0 truncate">{label}</span>
-              <span className="flex-none text-[11px] text-n-400">Built-in</span>
+              <span className="flex-none text-2xs text-n-400">Built-in</span>
             </div>
           ) : (
             <Input

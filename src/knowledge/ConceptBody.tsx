@@ -84,7 +84,7 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
       nodes.push(
         <code
           key={key++}
-          className="rounded bg-n-100 px-1 py-[1px] [font-family:var(--font-mono)] text-[12px] text-n-800"
+          className="rounded bg-n-100 px-1 py-[1px] [font-family:var(--font-mono)] text-xs text-n-800"
         >
           {m[1].slice(1, -1)}
         </code>,
@@ -142,8 +142,8 @@ const isFootnoteDef = (line: string): boolean => /^\[\^[^\]\s]+\]:/.test(line);
 
 const HEADING_CLASS: Record<number, string> = {
   1: 'mb-2 mt-6 text-[22px] font-semibold tracking-[-0.01em] text-n-900',
-  2: 'mb-2 mt-6 text-[16px] font-semibold text-n-900',
-  3: 'mb-1.5 mt-5 text-[14px] font-semibold text-n-800',
+  2: 'mb-2 mt-6 text-lg font-semibold text-n-900',
+  3: 'mb-1.5 mt-5 text-md font-semibold text-n-800',
 };
 
 export function ConceptBody({
@@ -182,7 +182,7 @@ export function ConceptBody({
       blocks.push(
         <pre
           key={key++}
-          className="my-3 overflow-x-auto rounded-lg border border-n-200 bg-n-25 px-3 py-2.5 [font-family:var(--font-mono)] text-[12px] leading-[18px] text-n-800"
+          className="my-3 overflow-x-auto rounded-lg border border-n-200 bg-n-25 px-3 py-2.5 [font-family:var(--font-mono)] text-xs leading-[18px] text-n-800"
         >
           <code>{code.join('\n')}</code>
         </pre>,
@@ -262,7 +262,7 @@ export function ConceptBody({
       blocks.push(
         <blockquote
           key={key++}
-          className="my-3 border-0 border-l-2 border-solid border-n-200 pl-3 text-[13px] text-n-600"
+          className="my-3 border-0 border-l-2 border-solid border-n-200 pl-3 text-sm text-n-600"
         >
           {inline(quote.join(' '))}
         </blockquote>,

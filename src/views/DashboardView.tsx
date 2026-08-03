@@ -62,7 +62,7 @@ function BlockShell({
           {title}
         </span>
         {subtitle !== undefined && subtitle !== '' && (
-          <span className="flex-none text-[11px] text-n-400">{subtitle}</span>
+          <span className="flex-none text-2xs text-n-400">{subtitle}</span>
         )}
       </header>
       {children}
@@ -85,7 +85,7 @@ function BrokenBlock({
 }) {
   return (
     <BlockShell title={title} wide={wide} testId="dashboard-block">
-      <p className="m-0 flex items-start gap-2 px-3 py-4 text-[12px] leading-[17px] text-n-500">
+      <p className="m-0 flex items-start gap-2 px-3 py-4 text-xs leading-[17px] text-n-500">
         <Icon name={icon} size={14} color="var(--n-400)" />
         {message}
       </p>

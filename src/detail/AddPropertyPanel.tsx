@@ -191,7 +191,7 @@ export function AddPropertyPanel({
   const onEscape = step === 'relation' ? () => setStep('catalog') : onCancel;
 
   const duplicateNote = duplicate ? (
-    <p role="alert" className="m-0 px-1.5 pt-0.5 text-[11px] leading-[1.35] text-danger-600">
+    <p role="alert" className="m-0 px-1.5 pt-0.5 text-2xs leading-[1.35] text-danger-600">
       “{typed}” is already a property here.
     </p>
   ) : null;
@@ -263,17 +263,17 @@ export function AddPropertyPanel({
           );
         })}
         {targets.length === 0 && !isPerson && (
-          <p className="m-0 px-1.5 py-2 text-[12px] text-n-500">
+          <p className="m-0 px-1.5 py-2 text-xs text-n-500">
             No types to relate to yet — create one first.
           </p>
         )}
       </div>
       <div className="flex items-center justify-between px-1 py-0.5">
-        <span className="text-[12px] text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
+        <span className="text-xs text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
         <Switch ariaLabel="Limit to 1 record" checked={single} onChange={setSingle} />
       </div>
       <div className="flex items-center justify-between px-1 py-0.5">
-        <span className="text-[12px] text-n-600">Add related property</span>
+        <span className="text-xs text-n-600">Add related property</span>
         <Switch
           ariaLabel="Add related property"
           checked={twoWay}
@@ -307,7 +307,7 @@ export function AddPropertyPanel({
       <button
         type="button"
         onClick={() => setStep('catalog')}
-        className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-n-400 hover:text-n-700"
+        className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-400 hover:text-n-700"
       >
         Back
       </button>
@@ -384,13 +384,13 @@ export function AddPropertyPanel({
           );
         })}
         {matches.length === 0 && (
-          <p className="m-0 px-1.5 py-2 text-[12px] text-n-500">
+          <p className="m-0 px-1.5 py-2 text-xs text-n-500">
             No property type matches “{query.trim()}”.
           </p>
         )}
       </div>
       {ownerType === null && (
-        <p className="m-0 px-1.5 pb-0.5 pt-1 text-[11px] leading-relaxed text-n-500">
+        <p className="m-0 px-1.5 pb-0.5 pt-1 text-2xs leading-relaxed text-n-500">
           A doc has no schema, so it can only hold plain values. Convert it to a record to use
           Select, Status, Date, Person, Checkbox, Files or Relation.
         </p>
@@ -403,7 +403,7 @@ export function AddPropertyPanel({
         <button
           type="button"
           onClick={onCancel}
-          className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-n-400 hover:text-n-700"
+          className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-400 hover:text-n-700"
         >
           Cancel
         </button>

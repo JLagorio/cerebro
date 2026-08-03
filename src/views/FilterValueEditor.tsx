@@ -72,7 +72,7 @@ export function FilterValueEditor({
           width={half}
           ariaLabel="Filter value, from"
         />
-        <span className="flex-none text-[11px] text-n-400">and</span>
+        <span className="flex-none text-2xs text-n-400">and</span>
         <SingleValue
           def={def}
           family={family}
@@ -390,7 +390,7 @@ function InlineSurface({
         onClick={() => onOpenChange(!open)}
         style={{ width }}
         className={[
-          'inline-flex h-7 items-center gap-1.5 overflow-hidden rounded-md border border-n-200 bg-n-0 px-2 text-left text-[12px] hover:border-n-400',
+          'inline-flex h-7 items-center gap-1.5 overflow-hidden rounded-md border border-n-200 bg-n-0 px-2 text-left text-xs hover:border-n-400',
           empty ? 'text-n-400' : 'text-n-800',
         ].join(' ')}
       >
@@ -439,7 +439,7 @@ function SurfacePanel({
       role={role}
       aria-label={ariaLabel}
       style={{ width }}
-      className="absolute left-0 top-full z-50 mt-1 rounded-[10px] border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]"
+      className="absolute left-0 top-full z-50 mt-1 rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]"
     >
       {children}
     </div>

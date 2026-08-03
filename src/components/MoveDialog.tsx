@@ -82,7 +82,7 @@ export function MoveDialog({
             type="button"
             onClick={() => setSelected(f)}
             className={[
-              'flex items-center gap-1.5 rounded-md border-0 px-2 py-1.5 text-left text-[13px]',
+              'flex items-center gap-1.5 rounded-md border-0 px-2 py-1.5 text-left text-sm',
               selected === f
                 ? 'bg-cortex-50 font-medium text-cortex-600'
                 : 'bg-transparent text-n-700 hover:bg-n-50',

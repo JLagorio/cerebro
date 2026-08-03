@@ -635,7 +635,7 @@ export function FieldEditor({
             setDraft(null);
           }
         }}
-        className="h-[26px] w-40 rounded-md border border-cortex-500 px-1.5 text-[13px] text-n-900 shadow-[var(--ring)] outline-none"
+        className="h-[26px] w-40 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[var(--ring)] outline-none"
       />
     );
   }
@@ -663,7 +663,7 @@ export function FieldEditor({
             : resolved.display,
         )
       }
-      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-[13px] text-n-800 hover:bg-n-50`}
+      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
     >
       {resolved.display === '' ? (
         blank ? null : (

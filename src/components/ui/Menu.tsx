@@ -16,7 +16,7 @@ import { Icon } from '@/components/ui/Icon';
  */
 
 const ITEM_BASE =
-  'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-[5px] text-left text-[12.5px]';
+  'flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-[5px] text-left text-[12.5px]';
 
 /** A disabled item is still in the DOM and still reads as a menuitem, but it
  * must not take an arrow-key stop — a keyboard user would land on something
@@ -137,7 +137,7 @@ export function MenuItem({
         <Icon name={icon} size={13} color={danger ? undefined : 'var(--n-500)'} />
       )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hint !== undefined && <span className="flex-none text-[11px] text-n-400">{hint}</span>}
+      {hint !== undefined && <span className="flex-none text-2xs text-n-400">{hint}</span>}
       {checked && <Icon name="check" size={12} color="var(--cortex-600)" />}
       {submenu && <Icon name="chevron-right" size={11} color="var(--n-400)" />}
     </button>

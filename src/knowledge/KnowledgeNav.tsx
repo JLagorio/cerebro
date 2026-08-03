@@ -57,9 +57,7 @@ function NavRow({
       <Icon name={icon} size={15} color={color ?? 'var(--n-500)'} />
       <span className="overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
       {count !== undefined && (
-        <span className="ml-auto [font-family:var(--font-mono)] text-[11px] text-n-400">
-          {count}
-        </span>
+        <span className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">{count}</span>
       )}
     </button>
   );

@@ -29,9 +29,7 @@ export function DocPagesPanel({
       className="flex w-[216px] flex-none flex-col border-r border-n-200 bg-n-0"
     >
       <div className="flex flex-none items-center gap-1 border-b border-n-100 py-1.5 pl-3 pr-2">
-        <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
-          Pages
-        </span>
+        <span className="text-xs font-semibold uppercase tracking-[0.06em] text-n-500">Pages</span>
         <span className="flex-1" />
         <IconButton
           icon="panel-left-close"
@@ -71,7 +69,7 @@ export function DocPagesPanel({
         <button
           type="button"
           onClick={onAddPage}
-          className="mt-0.5 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
+          className="mt-0.5 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
         >
           <Icon name="plus" size={13} />
           Add page

@@ -121,7 +121,7 @@ export function Dropdown({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         style={{ height: size === 'sm' ? 'var(--control-h-sm)' : 'var(--control-h)' }}
-        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-n-300 bg-n-0 pl-2.5 pr-2 text-[13px] text-n-800 outline-none hover:bg-n-50 focus-visible:border-cortex-500 focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-n-50 disabled:text-n-400"
+        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-n-300 bg-n-0 pl-2.5 pr-2 text-sm text-n-800 outline-none hover:bg-n-50 focus-visible:border-cortex-500 focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-n-50 disabled:text-n-400"
       >
         {selected?.icon && <Icon name={selected.icon} size={13} color="var(--n-500)" />}
         <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? ''}</span>
@@ -164,7 +164,7 @@ export function Dropdown({
                   aria-selected={o.value === value}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => pick(o.value)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] text-n-800 ${
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-800 ${
                     i === active ? 'bg-n-50' : ''
                   }`}
                 >

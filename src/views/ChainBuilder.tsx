@@ -110,7 +110,7 @@ export function ChainBuilder({
         <Icon name={icon} size={13} color={active ? 'var(--cortex-600)' : 'var(--n-500)'} />
         {summary === '' ? label : summary}
         {rows.length > 1 && (
-          <span className="[font-family:var(--font-mono)] text-[11px] opacity-70">
+          <span className="[font-family:var(--font-mono)] text-2xs opacity-70">
             +{rows.length - 1}
           </span>
         )}
@@ -125,7 +125,7 @@ export function ChainBuilder({
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[330px] rounded-[10px] border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
+            <div className="w-[330px] rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
               <div className="px-0.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
                 {label}
               </div>
@@ -153,7 +153,7 @@ export function ChainBuilder({
                     <span className="relative flex w-8 flex-none items-center">
                       <span
                         className={[
-                          'text-[11px] text-n-400',
+                          'text-2xs text-n-400',
                           onMove === undefined ? '' : 'group-hover:opacity-0',
                         ].join(' ')}
                       >
@@ -203,7 +203,7 @@ export function ChainBuilder({
               </div>
               {!atCap && addOptions.length > 0 && (
                 <div className="mt-1.5 flex items-center gap-1.5 border-t border-n-100 pt-2">
-                  <span className="w-8 flex-none text-[11px] text-n-400">
+                  <span className="w-8 flex-none text-2xs text-n-400">
                     {rows.length === 0 ? 'By' : 'then'}
                   </span>
                   <Select
@@ -218,7 +218,7 @@ export function ChainBuilder({
                 </div>
               )}
               {!atCap && addOptions.length === 0 && blockedHint !== undefined && (
-                <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-[11px] leading-[15px] text-n-400">
+                <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-2xs leading-[15px] text-n-400">
                   {blockedHint}
                 </p>
               )}
@@ -234,7 +234,7 @@ export function ChainBuilder({
 function atcapNote(atCap: boolean, max: number) {
   if (!atCap) return null;
   return (
-    <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-[11px] text-n-400">
+    <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-2xs text-n-400">
       {max} levels is the maximum — deeper nesting stops being readable.
     </p>
   );

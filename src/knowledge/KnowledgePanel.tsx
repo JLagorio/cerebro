@@ -25,7 +25,7 @@ import { useSchema, useVaultStore } from '@/stores/vaultStore';
  * judges; the format just refuses to hide the evidence.
  */
 
-const LABEL = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500';
+const LABEL = 'text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
 /** "3 days ago" — freshness is what makes a trust tier actionable. */
 export function relativeDay(iso: string | null, today: string): string | null {
@@ -46,12 +46,12 @@ function ActorLine({ stamp, today }: { stamp: Stamp; today: string }) {
   const icon =
     stamp.by.kind === 'human' ? 'user-round' : stamp.by.kind === 'process' ? 'cog' : 'bot';
   return (
-    <div className="flex items-center gap-1.5 text-[12px] text-n-700">
+    <div className="flex items-center gap-1.5 text-xs text-n-700">
       <Icon name={icon} size={12} color="var(--n-500)" />
       <span className="truncate [font-family:var(--font-mono)] text-[11.5px]">
         {stamp.by.label}
       </span>
-      {when !== null && <span className="flex-none text-[11px] text-n-400">{when}</span>}
+      {when !== null && <span className="flex-none text-2xs text-n-400">{when}</span>}
     </div>
   );
 }
@@ -81,17 +81,17 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
             href={source.resource}
             target="_blank"
             rel="noreferrer noopener"
-            className="block truncate text-[12px] text-cortex-600 underline decoration-cortex-200 underline-offset-2"
+            className="block truncate text-xs text-cortex-600 underline decoration-cortex-200 underline-offset-2"
           >
             {source.title ?? source.resource}
           </a>
         ) : (
           // Not every resource is followable: OKF also allows a scope
           // descriptor ("all queries in project X"), which has no link.
-          <span className="block text-[12px] text-n-700">{source.title ?? source.resource}</span>
+          <span className="block text-xs text-n-700">{source.title ?? source.resource}</span>
         )}
         {signals.length > 0 && (
-          <span className="mt-0.5 block text-[11px] leading-[15px] text-n-500">
+          <span className="mt-0.5 block text-2xs leading-[15px] text-n-500">
             {signals.join(' · ')}
           </span>
         )}
@@ -132,7 +132,7 @@ function AboutBlock({
               <span
                 key={target}
                 data-testid="about-entity"
-                className="flex items-center gap-1.5 text-[12px] text-n-400"
+                className="flex items-center gap-1.5 text-xs text-n-400"
               >
                 <Icon name="link-2-off" size={12} color="var(--n-300)" />
                 <span className="truncate">{target}</span>
@@ -146,7 +146,7 @@ function AboutBlock({
               data-testid="about-entity"
               data-path={entry.path}
               onClick={() => onOpenEntity(entry.path)}
-              className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-[12px] text-cortex-600 hover:underline"
+              className="flex items-center gap-1.5 border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
             >
               <Icon name={style.icon} size={12} color={style.color ?? 'var(--n-500)'} />
               <span className="truncate">{entry.title}</span>
@@ -207,7 +207,7 @@ function RelationsBlock({
       >
         {label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[12px] text-cortex-600">{title}</span>
+      <span className="min-w-0 flex-1 truncate text-xs text-cortex-600">{title}</span>
     </button>
   );
 
@@ -307,7 +307,7 @@ export function KnowledgePanel({
           {concept.generated !== null ? (
             <ActorLine stamp={concept.generated} today={today} />
           ) : (
-            <span className="text-[12px] text-n-400">Not recorded</span>
+            <span className="text-xs text-n-400">Not recorded</span>
           )}
         </div>
       </div>
@@ -320,7 +320,7 @@ export function KnowledgePanel({
             // and a nightly process are different claims, so both are shown.
             concept.verified.map((stamp, i) => <ActorLine key={i} stamp={stamp} today={today} />)
           ) : (
-            <span className="text-[12px] text-n-400">Nobody yet</span>
+            <span className="text-xs text-n-400">Nobody yet</span>
           )}
         </div>
       </div>

@@ -65,13 +65,13 @@ export function InlineDiff({ path }: { path: string }) {
         <button
           type="button"
           onClick={closeDiff}
-          className="inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-cortex-600 hover:bg-n-100"
+          className="inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-cortex-600 hover:bg-n-100"
         >
           <Icon name="arrow-left" size={12} />
           Return to the editor
         </button>
         {commit !== null && (
-          <span className="ml-2 [font-family:var(--font-mono)] text-[11px] text-n-400">
+          <span className="ml-2 [font-family:var(--font-mono)] text-2xs text-n-400">
             {commit.slice(0, 7)}
           </span>
         )}

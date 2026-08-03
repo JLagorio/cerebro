@@ -104,7 +104,7 @@ export function PropertyRow({
   }, [label]);
 
   const nameClass = [
-    'min-w-0 flex-1 truncate rounded-[5px] text-left text-[12px] text-n-500',
+    'min-w-0 flex-1 truncate rounded-[5px] text-left text-xs text-n-500',
     align === 'center' ? '' : 'pt-[3px]',
   ].join(' ');
 
@@ -116,7 +116,7 @@ export function PropertyRow({
       // -mx-1/px-1: the hover background has to reach past the text on both
       // sides or it reads as a highlight on the label rather than on the row.
       className={[
-        'group -mx-1 flex min-w-0 gap-1.5 rounded-[6px] px-1',
+        'group -mx-1 flex min-w-0 gap-1.5 rounded-sm px-1',
         'hover:bg-n-25',
         align === 'center' ? 'items-center' : 'items-start',
         dragging ? 'opacity-40' : '',

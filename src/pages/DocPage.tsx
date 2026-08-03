@@ -126,20 +126,20 @@ function BlankPageBar({
         <Icon name="layout-template" size={14} color="var(--n-500)" />
         {templates.length > 0 ? (
           <>
-            <span className="flex-none text-[12px] text-n-500">Start from a template</span>
+            <span className="flex-none text-xs text-n-500">Start from a template</span>
             {templates.map((t) => (
               <button
                 key={t.path}
                 type="button"
                 onClick={() => onPick(t)}
-                className="flex-none rounded-full border border-n-200 bg-n-0 px-2.5 py-0.5 text-[12px] text-n-700 hover:border-cortex-500 hover:text-cortex-600"
+                className="flex-none rounded-full border border-n-200 bg-n-0 px-2.5 py-0.5 text-xs text-n-700 hover:border-cortex-500 hover:text-cortex-600"
               >
                 {templateDisplayName(t)}
               </button>
             ))}
           </>
         ) : (
-          <span className="text-[12px] text-n-500">
+          <span className="text-xs text-n-500">
             No templates yet — build this page, then ⋯ → Save as template to reuse it.
           </span>
         )}
@@ -458,7 +458,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       <button
         type="button"
         onClick={opts.onClick}
-        className="inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[13px] text-n-500 hover:bg-n-50 hover:text-n-800"
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-sm text-n-500 hover:bg-n-50 hover:text-n-800"
       >
         {opts.icon !== undefined && <Icon name={opts.icon} size={13} />}
         <span className="truncate">{label}</span>
@@ -466,7 +466,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     ) : (
       <span
         className={[
-          'inline-flex min-w-0 items-center gap-1.5 px-1 text-[13px]',
+          'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm',
           opts.strong === true ? 'font-medium text-n-900' : 'text-n-500',
         ].join(' ')}
       >
@@ -697,7 +697,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
         >
-          <p className="m-0 text-[13px] text-n-600">
+          <p className="m-0 text-sm text-n-600">
             {isDocMain
               ? 'The whole doc — every page in it — moves to the system Trash.'
               : 'The page moves to the system Trash.'}

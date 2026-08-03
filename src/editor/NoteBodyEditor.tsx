@@ -116,7 +116,7 @@ export function NoteBodyEditor({
   };
 
   if (failed) {
-    return <p className="m-0 px-1 py-2 text-[13px] text-n-500">This page couldn't be loaded.</p>;
+    return <p className="m-0 px-1 py-2 text-sm text-n-500">This page couldn't be loaded.</p>;
   }
   if (loaded === null || loaded.path !== path) {
     return <div data-testid="note-body-loading" />;
@@ -141,7 +141,7 @@ export function NoteBodyEditor({
             <button
               type="button"
               onClick={() => setUnlocked(true)}
-              className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-[12px] font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
+              className="flex-none rounded-md border border-warn-500 bg-transparent px-2 py-0.5 text-xs font-medium text-warn-700 hover:bg-warn-500 hover:text-n-0"
             >
               Edit anyway (raw HTML will be removed)
             </button>

@@ -140,7 +140,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           data-testid="hidden-properties-toggle"
           aria-expanded={revealed}
           onClick={() => setRevealed((v) => !v)}
-          className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
+          className="-mx-1 mt-0.5 flex items-center gap-1 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
         >
           <Icon name={revealed ? 'chevron-down' : 'chevron-right'} size={12} />
           {revealed
@@ -182,7 +182,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
         aria-haspopup="dialog"
         aria-expanded={addingProp}
         onClick={() => setAddingProp((v) => !v)}
-        className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
+        className="mt-0.5 self-start rounded-md border-0 bg-transparent px-1 py-0.5 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
       >
         + Add property
       </button>

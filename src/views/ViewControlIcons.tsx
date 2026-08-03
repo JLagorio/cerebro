@@ -322,7 +322,7 @@ function QuickAxisIcon({
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[240px] rounded-[10px] border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]">
+            <div className="w-[240px] rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]">
               <input
                 autoFocus
                 aria-label={placeholder}
@@ -364,7 +364,7 @@ function QuickAxisIcon({
                     // The highlight wears the hover background, so pointer and
                     // keyboard say "this is the one Enter takes" the same way.
                     className={[
-                      'flex w-full items-center gap-2 rounded-[6px] border-0 px-2 py-1.5 text-left text-[12.5px] text-n-700 hover:bg-n-50',
+                      'flex w-full items-center gap-2 rounded-sm border-0 px-2 py-1.5 text-left text-[12.5px] text-n-700 hover:bg-n-50',
                       i === at ? 'bg-n-50' : 'bg-transparent',
                     ].join(' ')}
                   >
@@ -373,7 +373,7 @@ function QuickAxisIcon({
                   </button>
                 ))}
                 {shown.length === 0 && (
-                  <div className="px-2 py-1.5 text-[12px] text-n-400">Nothing matches.</div>
+                  <div className="px-2 py-1.5 text-xs text-n-400">Nothing matches.</div>
                 )}
               </div>
             </div>

@@ -27,7 +27,7 @@ import { useVaultStore } from '@/stores/vaultStore';
  * active thing on it is a button, pressed by a person.
  */
 
-const LABEL = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500';
+const LABEL = 'text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
 function ConceptRow({
   concept,
@@ -73,14 +73,14 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
           size={12}
         />
       </span>
-      <span className="min-w-0 flex-1 text-[12px] leading-[17px] text-n-700">
+      <span className="min-w-0 flex-1 text-xs leading-[17px] text-n-700">
         {item.reason === 'contradicts' ? (
           <>
             <button
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => onOpen(item.concept.entry.path)}
-              className="border-0 bg-transparent p-0 text-[12px] text-cortex-600 hover:underline"
+              className="border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline"
             >
               {item.concept.title}
             </button>{' '}
@@ -89,7 +89,7 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => item.other !== null && onOpen(item.other.entry.path)}
-              className="border-0 bg-transparent p-0 text-[12px] text-cortex-600 hover:underline"
+              className="border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline"
             >
               {item.other?.title ?? 'another concept'}
             </button>
@@ -101,7 +101,7 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => onOpen(item.concept.entry.path)}
-              className="border-0 bg-transparent p-0 text-[12px] text-cortex-600 hover:underline"
+              className="border-0 bg-transparent p-0 text-xs text-cortex-600 hover:underline"
             >
               {item.concept.title}
             </button>{' '}
@@ -158,14 +158,14 @@ export function EntityDossier({
     >
       <div className="flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
+        <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
           What the assistant knows
         </h3>
         {/* Growth, stated once, in words. The alternative is a number that
             ticks up somewhere permanent, which is the pattern these surfaces
             are barred from. */}
         {dossier.current.length > 0 && since !== null && (
-          <span className="text-[11px] text-n-400">
+          <span className="text-2xs text-n-400">
             {dossier.current.length} {dossier.current.length === 1 ? 'thing' : 'things'}, first
             learned {since}
             {latest !== null && latest !== since ? `, most recently ${latest}` : ''}
@@ -214,7 +214,7 @@ export function EntityDossier({
                       className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left hover:bg-n-50"
                     >
                       <Icon name="file-text" size={12} color="var(--n-400)" />
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-n-700">
+                      <span className="min-w-0 flex-1 truncate text-xs text-n-700">
                         {source.title ?? source.resource}
                       </span>
                       {source.citedBy > 1 && (

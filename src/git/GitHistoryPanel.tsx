@@ -39,10 +39,10 @@ export function GitHistoryPanel({ path }: { path: string }) {
             <button
               type="button"
               onClick={() => openDiff(path, c.hash)}
-              className="w-full truncate border-0 bg-transparent p-0 text-left text-[12px] text-cortex-600 hover:underline"
+              className="w-full truncate border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
               title={`View what ${c.shortHash} changed`}
             >
-              <span className="[font-family:var(--font-mono)] text-[11px]">{c.shortHash}</span>
+              <span className="[font-family:var(--font-mono)] text-2xs">{c.shortHash}</span>
               {' · '}
               {c.message}
             </button>
