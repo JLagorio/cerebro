@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUiStore } from './uiStore';
 
 function reset() {
@@ -61,6 +61,57 @@ describe('uiStore', () => {
     expect(toasts.map((t) => t.message)).toEqual(['Saved', 'Vault refreshed']);
     expect(toasts[1].id).toBeGreaterThan(toasts[0].id);
     expect(new Set(toasts.map((t) => t.id)).size).toBe(2);
+  });
+
+  /**
+   * M16.21: this was the one member of the store's collapse family that never
+   * wrote itself back — `expandedFolders`, `docPagesOpen`, `typesOpen` and the
+   * sidebar all persist. So a list's bands sprang open on every reload and a
+   * three-level nesting had to be re-collapsed once a session.
+   */
+  describe('collapsed bands persist', () => {
+    beforeEach(() => {
+      window.localStorage.removeItem('cerebro.collapsed');
+      useUiStore.setState({ collapsed: {} });
+    });
+
+    it('writes a collapsed band to localStorage under its scope', () => {
+      useUiStore.getState().toggleCollapsed('list:delivery', 'doing');
+      expect(useUiStore.getState().isCollapsed('list:delivery', 'doing')).toBe(true);
+      expect(JSON.parse(window.localStorage.getItem('cerebro.collapsed') ?? '{}')).toEqual({
+        'list:delivery': { doing: true },
+      });
+    });
+
+    // A `false` per band anyone ever touched would grow the stored map without
+    // adding information: absent already means expanded to every reader.
+    it('deletes the key on the way back open rather than storing false', () => {
+      useUiStore.getState().toggleCollapsed('list:delivery', 'doing');
+      useUiStore.getState().toggleCollapsed('list:delivery', 'doing');
+      expect(useUiStore.getState().isCollapsed('list:delivery', 'doing')).toBe(false);
+      expect(JSON.parse(window.localStorage.getItem('cerebro.collapsed') ?? '{}')).toEqual({
+        'list:delivery': {},
+      });
+    });
+
+    it('keeps scopes apart, so the same band key in two views is two states', () => {
+      useUiStore.getState().toggleCollapsed('list:delivery', 'doing');
+      expect(useUiStore.getState().isCollapsed('type:Work item', 'doing')).toBe(false);
+    });
+
+    // The whole point: the state survives the next launch. A fresh module
+    // registry is what "next launch" means for a store built at import time.
+    it('reads collapsed bands back on the next launch, ignoring a malformed scope', async () => {
+      window.localStorage.setItem(
+        'cerebro.collapsed',
+        JSON.stringify({ 'list:delivery': { doing: true, todo: false }, junk: 'nope' }),
+      );
+      vi.resetModules();
+      const fresh = (await import('./uiStore')).useUiStore;
+      expect(fresh.getState().isCollapsed('list:delivery', 'doing')).toBe(true);
+      expect(fresh.getState().isCollapsed('list:delivery', 'todo')).toBe(false);
+      expect(fresh.getState().collapsed.junk).toBeUndefined();
+    });
   });
 
   it('dismissToast removes only the matching toast', () => {

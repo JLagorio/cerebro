@@ -38,6 +38,7 @@ import type {
   ViewDefinition,
 } from '@/engine/types';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, nextDashboardBlockId } from '@/engine/views';
+import { BoardSettings } from '@/views/BoardSettings';
 import { useVaultStore } from '@/stores/vaultStore';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import {
@@ -359,6 +360,9 @@ export function ViewSettingsPanel({
                 </div>
               </div>
             )}
+
+            {/* M16.20: card settings, for the layouts that draw cards. */}
+            {showsCards(p.type) && <BoardSettings presentation={p} onChange={setPresentation} />}
 
             <div className="mt-2 border-t border-[var(--n-100)] pt-2">
               {surface === 'list' && (

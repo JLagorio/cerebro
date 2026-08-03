@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { FieldChip } from '@/views/FieldChip';
 import { QuickAddInline, useQuickAdd } from '@/views/QuickAdd';
+import { RecordRowMenu } from '@/views/RecordRowMenu';
 import { buildRows, entryRows } from '@/engine/rows';
 import { typeStyle } from '@/engine/typeCatalog';
 import { visibleColumns } from '@/engine/views';
@@ -135,7 +136,7 @@ function ListRow({
         openPath(entry.path);
       }}
       className={[
-        'flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]',
+        'group flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]',
         selected ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
       ].join(' ')}
       style={{ paddingLeft: 20 + depth * INDENT }}
@@ -176,6 +177,40 @@ function ListRow({
             </span>
           );
         })}
+      {/* M16.21: the row's own controls.
+          The row is a `<div role="row">` with an onClick — clickable with a
+          mouse and openable with the grid's Enter key, but carrying no NAMED
+          control anywhere, so assistive tech saw a strip of text with no
+          announced way to act on it. And the only thing a list could do to a
+          record was open it: copying a link to one, duplicating it, or
+          deleting it all meant opening it first to reach the panel's header.
+          Reserved with opacity rather than mounted on hover, so rows do not
+          reflow under the pointer as it moves down the list. */}
+      <span
+        className="ml-1 flex flex-none items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+        onClick={(e) => e.stopPropagation()}
+        role="presentation"
+      >
+        <button
+          type="button"
+          data-testid="row-open-affordance"
+          aria-label={`Open ${entry.title}`}
+          onClick={() => {
+            onSelect();
+            openPath(entry.path);
+          }}
+          className="rounded-[5px] border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-[0.04em] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+        >
+          Open
+        </button>
+        <RecordRowMenu
+          entry={entry}
+          onOpen={() => {
+            onSelect();
+            openPath(entry.path);
+          }}
+        />
+      </span>
     </div>
   );
 }

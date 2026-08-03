@@ -222,6 +222,56 @@ describe('ListView keyboard and empty state (M15)', () => {
   });
 });
 
+/**
+ * Row affordances (M16.21).
+ *
+ * A list row was a `<div role="row">` with an onClick: clickable with a mouse,
+ * openable with the grid's Enter key, and carrying no NAMED control anywhere —
+ * so assistive tech saw a strip of text with no announced way to act on it.
+ * And opening was the only thing a list could do to a record: copying a link,
+ * duplicating, deleting all meant opening it first to reach the panel header.
+ */
+describe('ListView row affordances (M16.21)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    useUiStore.setState({ detailPath: null });
+  });
+
+  it('gives every row a named Open control', () => {
+    setup();
+    const open = screen.getAllByTestId('row-open-affordance');
+    expect(open.length).toBeGreaterThan(0);
+    expect(open[0].getAttribute('aria-label')).toBe('Open Design first-run flow');
+  });
+
+  it('opens the record from that control', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Open Design first-run flow' }));
+    expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
+  });
+
+  it('offers the record actions the panel header has, without opening the record', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Design first-run flow' }));
+    expect(screen.getByTestId('row-copy-link')).toBeTruthy();
+    expect(screen.getByTestId('row-duplicate')).toBeTruthy();
+    expect(screen.getByTestId('row-delete')).toBeTruthy();
+    // Opening the menu is not opening the row — the click must not fall
+    // through to the row's own handler.
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  it('confirms before deleting, naming what links to the record', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Design first-run flow' }));
+    await user.click(screen.getByTestId('row-delete'));
+    expect(screen.getByText('Delete "Design first-run flow"?')).toBeTruthy();
+  });
+});
+
 describe('FieldChip', () => {
   afterEach(cleanup);
 

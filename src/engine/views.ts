@@ -1,30 +1,31 @@
 import { parse, stringify } from 'yaml';
 import { parseAggregateCalc } from './aggregate';
 import type {
+  CardPreview,
   CardSize,
   ChartAgg,
   ChartKind,
   ChartSpec,
   ChildrenSpec,
-  DashboardBlock,
-  DashboardSpec,
   ChipStyle,
   ColumnSpec,
+  DashboardBlock,
+  DashboardSpec,
   FilterGroup,
   FilterOp,
   FilterRule,
   GallerySpec,
   GroupSpec,
-  Presentation,
-  Scalar,
-  SortSpec,
   ListDefinition,
   ListFile,
   ListSource,
+  Presentation,
+  Scalar,
+  SortSpec,
   ViewDefinition,
   ViewType,
 } from './types';
-import { CARD_SIZES, CHART_AGGS, CHART_KINDS, VIEW_TYPES } from './types';
+import { CARD_PREVIEWS, CARD_SIZES, CHART_AGGS, CHART_KINDS, VIEW_TYPES } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
 export const DEFAULT_PRESENTATION: Presentation = {
@@ -129,6 +130,11 @@ const RETIRED_LAYOUTS: Record<string, ViewType> = { tree: 'table', split: 'table
 
 const ZOOMS = new Set(['day', 'week', 'month', 'quarter']);
 
+// Derived from the const arrays for the reason LAYOUTS is: a hand-written
+// second copy is a value the parser silently drops the day someone adds one.
+const CARD_SIZE_SET = new Set<string>(CARD_SIZES);
+const CARD_PREVIEW_SET = new Set<string>(CARD_PREVIEWS);
+
 /** Beyond this a nesting chain stops being legible and starts being a cycle. */
 export const MAX_NEST_DEPTH = 6;
 /** Notion caps sub-grouping here for the same reason: nesting stops reading. */
@@ -180,6 +186,15 @@ function parsePresentation(raw: unknown): Presentation {
     ...(obj.chips === 'plain' || obj.chips === 'type-icon'
       ? { chips: obj.chips as ChipStyle }
       : {}),
+    // Board cards (M16.20). Stored only off their defaults, so a table's
+    // YAML never grows three keys about a layout it is not in.
+    ...(typeof obj.cardSize === 'string' && CARD_SIZE_SET.has(obj.cardSize)
+      ? { cardSize: obj.cardSize as CardSize }
+      : {}),
+    ...(typeof obj.cardPreview === 'string' && CARD_PREVIEW_SET.has(obj.cardPreview)
+      ? { cardPreview: obj.cardPreview as CardPreview }
+      : {}),
+    ...(obj.colorColumns === true ? { colorColumns: true } : {}),
     ...(typeof obj.dateField === 'string' && obj.dateField.trim() !== ''
       ? { dateField: obj.dateField.trim() }
       : {}),
@@ -706,6 +721,9 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
       : {}),
     ...(p.titleCalc !== undefined ? { titleCalc: p.titleCalc } : {}),
     ...(p.chips !== undefined ? { chips: p.chips } : {}),
+    ...(p.cardSize !== undefined ? { cardSize: p.cardSize } : {}),
+    ...(p.cardPreview !== undefined ? { cardPreview: p.cardPreview } : {}),
+    ...(p.colorColumns === true ? { colorColumns: true } : {}),
     // M10 axis configuration — written only when set, so a table's YAML
     // does not carry three keys about date axes it has no use for.
     ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
