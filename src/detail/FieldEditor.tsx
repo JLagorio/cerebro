@@ -231,11 +231,11 @@ export function FieldEditor({
           type="button"
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-n-800 hover:bg-n-50`}
         >
           {chips.length === 0 ? (
             blank ? null : (
-              <span className="text-[var(--n-400)]">Empty</span>
+              <span className="text-n-400">Empty</span>
             )
           ) : multi ? (
             chips.map((c) => <OptionTag key={c.id} label={c.label} color={c.color} />)
@@ -299,9 +299,9 @@ export function FieldEditor({
           type="button"
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-n-800 hover:bg-n-50`}
         >
-          {values.length === 0 && !blank && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
           {values.map((v) => (
             <span key={v} className="inline-flex min-w-0 items-center gap-[5px]">
               <Avatar name={labelOf(v)} size={18} />
@@ -374,9 +374,9 @@ export function FieldEditor({
           data-testid="relation-field"
           aria-label={`Edit ${humanize(def.name)}`}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-n-800 hover:bg-n-50`}
         >
-          {values.length === 0 && !blank && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
           {values.map((v) => {
             const target = targetOf(v);
             // M11: a related record is a CHIP. It used to carry an
@@ -389,7 +389,7 @@ export function FieldEditor({
               <span
                 key={v}
                 data-testid="relation-chip"
-                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[5px] bg-[var(--n-100)] px-1.5 py-px leading-[17px] text-[var(--n-700)]"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[5px] bg-n-100 px-1.5 py-px leading-[17px] text-n-700"
               >
                 {style !== null && (
                   <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
@@ -451,10 +451,10 @@ export function FieldEditor({
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
           // clipped through the row below it (M11 item 3).
-          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-n-800 hover:bg-n-50`}
         >
           {!blank && <Icon name="calendar" size={12} color="var(--n-500)" />}
-          {empty && !blank && <span className="text-[var(--n-400)]">Empty</span>}
+          {empty && !blank && <span className="text-n-400">Empty</span>}
           {!empty && resolved.display}
         </button>
         {open && (
@@ -512,7 +512,7 @@ export function FieldEditor({
             href={href}
             target="_blank"
             rel="noreferrer"
-            className="truncate text-[12.5px] text-[var(--cortex-600)] hover:underline"
+            className="truncate text-[12.5px] text-cortex-600 hover:underline"
           >
             {url}
           </a>
@@ -520,7 +520,7 @@ export function FieldEditor({
             type="button"
             aria-label={`Edit ${humanize(def.name)}`}
             onClick={() => setDraft(url)}
-            className="flex-none rounded-md border-0 bg-transparent p-1 text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            className="flex-none rounded-md border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name="pencil" size={11} />
           </button>
@@ -546,17 +546,14 @@ export function FieldEditor({
           : `tel:${value.replace(/[^\d+]/g, '')}`;
       return (
         <span className="inline-flex min-w-0 items-center gap-1">
-          <a
-            href={href}
-            className="truncate text-[12.5px] text-[var(--cortex-600)] hover:underline"
-          >
+          <a href={href} className="truncate text-[12.5px] text-cortex-600 hover:underline">
             {value.replace(/^mailto:/, '')}
           </a>
           <button
             type="button"
             aria-label={`Edit ${humanize(def.name)}`}
             onClick={() => setDraft(value)}
-            className="flex-none rounded-md border-0 bg-transparent p-1 text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            className="flex-none rounded-md border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name="pencil" size={11} />
           </button>
@@ -584,13 +581,9 @@ export function FieldEditor({
     return (
       <span
         title="Computed from the vault — read only"
-        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-[12.5px] text-[var(--n-600)]"
+        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-[12.5px] text-n-600"
       >
-        {resolved.display === '' ? (
-          <span className="text-[var(--n-400)]">—</span>
-        ) : (
-          resolved.display
-        )}
+        {resolved.display === '' ? <span className="text-n-400">—</span> : resolved.display}
         <Icon name="lock" size={10} color="var(--n-300)" />
       </span>
     );
@@ -642,7 +635,7 @@ export function FieldEditor({
             setDraft(null);
           }
         }}
-        className="h-[26px] w-40 rounded-md border border-[var(--cortex-500)] px-1.5 text-[13px] text-[var(--n-900)] shadow-[var(--ring)] outline-none"
+        className="h-[26px] w-40 rounded-md border border-cortex-500 px-1.5 text-[13px] text-n-900 shadow-[var(--ring)] outline-none"
       />
     );
   }
@@ -670,11 +663,11 @@ export function FieldEditor({
             : resolved.display,
         )
       }
-      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-[13px] text-n-800 hover:bg-n-50`}
     >
       {resolved.display === '' ? (
         blank ? null : (
-          <span className="text-[var(--n-400)]">Empty</span>
+          <span className="text-n-400">Empty</span>
         )
       ) : (
         <span className="min-w-0 truncate">{resolved.display}</span>

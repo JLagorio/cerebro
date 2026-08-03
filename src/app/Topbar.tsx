@@ -8,19 +8,19 @@ export function Topbar() {
   const setQuickOpen = useUiStore((s) => s.setQuickOpen);
 
   return (
-    <div className="relative z-[5] flex h-16 flex-none items-center gap-3 border-b border-[var(--n-200)] bg-[var(--n-0)] px-4">
+    <div className="relative z-[5] flex h-16 flex-none items-center gap-3 border-b border-n-200 bg-n-0 px-4">
       <span className="text-[16px] font-bold tracking-[-0.02em]">
-        cerebro<span className="text-[var(--synapse-500)]">.</span>
+        cerebro<span className="text-synapse-500">.</span>
       </span>
       <div className="flex flex-1 justify-center">
         <button
           type="button"
           onClick={() => setQuickOpen(true)}
-          className="flex h-9 w-[480px] items-center gap-2 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-25)] px-3 text-[13px] text-[var(--n-400)] hover:border-[var(--n-300)]"
+          className="flex h-9 w-[480px] items-center gap-2 rounded-[10px] border border-n-200 bg-n-25 px-3 text-[13px] text-n-400 hover:border-n-300"
         >
           <Icon name="search" size={15} />
           <span className="flex-1 text-left">Search or jump to…</span>
-          <kbd className="rounded-[5px] border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 text-[11px] text-[var(--n-500)] [font-family:var(--font-mono)]">
+          <kbd className="rounded-[5px] border border-n-200 bg-n-0 px-1.5 text-[11px] text-n-500 [font-family:var(--font-mono)]">
             ⌘K
           </kbd>
         </button>

@@ -241,7 +241,7 @@ export function ViewToolbar({
     // M11 responsiveness: the controls WRAP rather than overflowing a fixed
     // row. At a narrow window the old row simply ran off the right edge, so
     // "Properties" became unreachable instead of moving to the next line.
-    <div className="flex flex-none flex-wrap items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
+    <div className="flex flex-none flex-wrap items-center gap-2 border-b border-n-200 px-5 py-2">
       {/* M10: the six views, one selected at a time. "Hierarchy" is gone —
           any of these nests when the grouping chain has a relation level, so
           a whole view kind for it was a control that duplicated another. */}

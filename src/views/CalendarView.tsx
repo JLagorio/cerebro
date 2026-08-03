@@ -183,7 +183,7 @@ export function CalendarView({
       data-week-start={weekStart === 1 ? 'monday' : 'sunday'}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
+      <div className="flex flex-none items-center gap-2 border-b border-n-200 px-5 py-2">
         <IconButton
           icon="chevron-left"
           label={span === 'week' ? 'Previous week' : 'Previous month'}
@@ -194,17 +194,14 @@ export function CalendarView({
           label={span === 'week' ? 'Next week' : 'Next month'}
           onClick={() => step(1)}
         />
-        <span
-          data-testid="calendar-month"
-          className="ml-1 text-[13px] font-semibold text-[var(--n-900)]"
-        >
+        <span data-testid="calendar-month" className="ml-1 text-[13px] font-semibold text-n-900">
           {span === 'week' ? weekLabel(weekGrid(anchor, weekStart)) : monthLabel(anchor)}
         </span>
         {!onScreen && (
           <button
             type="button"
             onClick={() => setAnchor(today)}
-            className="rounded-md border border-[var(--n-200)] bg-transparent px-2 py-0.5 text-[11.5px] text-[var(--n-600)] hover:border-[var(--n-400)]"
+            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-[11.5px] text-n-600 hover:border-n-400"
           >
             Today
           </button>
@@ -234,8 +231,8 @@ export function CalendarView({
             className={[
               'rounded-md border px-2 py-0.5 text-[11.5px]',
               showUndated
-                ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-600)]'
-                : 'border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]',
+                ? 'border-cortex-500 bg-cortex-50 text-cortex-600'
+                : 'border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800',
             ].join(' ')}
           >
             {undated.length} without a date
@@ -244,13 +241,13 @@ export function CalendarView({
       </div>
 
       <div
-        className="grid flex-none border-b border-[var(--n-200)]"
+        className="grid flex-none border-b border-n-200"
         style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
       >
         {columns.map((label) => (
           <div
             key={label}
-            className="px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--n-500)]"
+            className="px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-n-500"
           >
             {label}
           </div>
@@ -300,9 +297,9 @@ export function CalendarView({
                       drag.hover(dayOffset({ start: grabDay.current, end: grabDay.current }, day));
                     }}
                     className={[
-                      'group/day flex min-w-0 flex-col gap-0.5 border-b border-r border-[var(--n-100)] p-1',
-                      inMonth ? '' : 'bg-[var(--n-25)]',
-                      drag.drag !== null ? 'hover:bg-[var(--cortex-50)]' : '',
+                      'group/day flex min-w-0 flex-col gap-0.5 border-b border-r border-n-100 p-1',
+                      inMonth ? '' : 'bg-n-25',
+                      drag.drag !== null ? 'hover:bg-cortex-50' : '',
                     ].join(' ')}
                     style={{ minHeight: CELL_H[span] }}
                   >
@@ -311,10 +308,10 @@ export function CalendarView({
                         className={[
                           'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[11px]',
                           day === today
-                            ? 'bg-[var(--cortex-500)] font-semibold text-[var(--n-0)]'
+                            ? 'bg-cortex-500 font-semibold text-n-0'
                             : inMonth
-                              ? 'text-[var(--n-700)]'
-                              : 'text-[var(--n-400)]',
+                              ? 'text-n-700'
+                              : 'text-n-400',
                         ].join(' ')}
                       >
                         {Number(day.slice(8, 10))}
@@ -339,10 +336,8 @@ export function CalendarView({
                           title={entry.title}
                           aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
                           className={[
-                            'flex min-w-0 touch-none select-none items-center gap-1 rounded border-0 bg-[var(--n-50)] px-1 py-px text-left text-[11.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]',
-                            drag.drag?.id === entry.path
-                              ? 'opacity-60 ring-1 ring-[var(--cortex-500)]'
-                              : '',
+                            'flex min-w-0 touch-none select-none items-center gap-1 rounded border-0 bg-n-50 px-1 py-px text-left text-[11.5px] text-n-800 hover:bg-n-100',
+                            drag.drag?.id === entry.path ? 'opacity-60 ring-1 ring-cortex-500' : '',
                           ].join(' ')}
                         >
                           <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
@@ -354,7 +349,7 @@ export function CalendarView({
                       <button
                         type="button"
                         onClick={() => setExpanded(day)}
-                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-n-500 hover:text-n-800"
                       >
                         {`+${stack.length - shown.length} more`}
                       </button>
@@ -363,7 +358,7 @@ export function CalendarView({
                       <button
                         type="button"
                         onClick={() => setExpanded(null)}
-                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+                        className="rounded border-0 bg-transparent px-1 text-left text-[11px] text-n-500 hover:text-n-800"
                       >
                         Show less
                       </button>
@@ -393,7 +388,7 @@ export function CalendarView({
                       title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
                       aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}. Arrow keys move it.`}
                       className={[
-                        'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]',
+                        'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-cortex-500 bg-cortex-50 px-1 text-left text-[11.5px] text-n-900 hover:bg-cortex-100',
                         seg.continuesLeft ? 'border-l-0' : 'rounded-l-[5px]',
                         seg.continuesRight ? 'border-r-0' : 'rounded-r-[5px]',
                         drag.drag?.id === seg.entry.path ? 'opacity-70' : '',
@@ -426,9 +421,9 @@ export function CalendarView({
       {showUndated && undated.length > 0 && (
         <div
           data-testid="calendar-undated"
-          className="max-h-[180px] flex-none overflow-y-auto border-t border-[var(--n-200)] bg-[var(--n-25)] px-5 py-2"
+          className="max-h-[180px] flex-none overflow-y-auto border-t border-n-200 bg-n-25 px-5 py-2"
         >
-          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-400">
             Without a date
           </div>
           {undated.map((entry) => (
@@ -437,7 +432,7 @@ export function CalendarView({
               type="button"
               data-path={entry.path}
               onClick={() => openPath(entry.path)}
-              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-n-800 hover:bg-n-100"
             >
               <Icon
                 name={typeStyle(entry.type, schema).icon}
@@ -483,7 +478,7 @@ function DayAdd({
         // chosen day, so without a mouse there was no way to do it at all.
         // Opacity keeps the 4x4 slot reserved, so a day does not reflow when
         // the plus appears.
-        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] opacity-0 hover:bg-[var(--n-100)] hover:text-[var(--n-800)] focus-visible:opacity-100 group-hover/day:opacity-100"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-800 focus-visible:opacity-100 group-hover/day:opacity-100"
       >
         <Icon name="plus" size={11} />
       </button>
@@ -516,7 +511,7 @@ function DayAdd({
         }
       }}
       placeholder="Title"
-      className="h-4 w-full min-w-0 border-none bg-transparent text-[11.5px] text-[var(--n-900)] outline-none"
+      className="h-4 w-full min-w-0 border-none bg-transparent text-[11.5px] text-n-900 outline-none"
     />
   );
 }

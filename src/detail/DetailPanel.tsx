@@ -43,13 +43,13 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
   const isSubject =
     open && conceptsAbout(entry.path, listConcepts(entries, todayIso()), entries).length > 0;
   return (
-    <section data-testid="detail-knowledge" className="mb-3.5 border-t border-[var(--n-100)] pt-2">
+    <section data-testid="detail-knowledge" className="mb-3.5 border-t border-n-100 pt-2">
       <button
         type="button"
         data-testid="detail-knowledge-toggle"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)] hover:text-[var(--n-800)]"
+        className="flex items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500 hover:text-n-800"
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={11} />
         Knowledge
@@ -57,7 +57,7 @@ function KnowledgeSection({ entry }: { entry: Entry }) {
       {open && (
         <div className="flex flex-col gap-4 pb-1 pt-2">
           <KnowledgeCommit entry={entry} variant="panel" />
-          <div className="border-t border-[var(--n-100)] pt-3.5">
+          <div className="border-t border-n-100 pt-3.5">
             {isSubject ? (
               <EntityDossier entry={entry} variant="panel" />
             ) : (
@@ -199,7 +199,7 @@ export function DetailPanel() {
     <aside
       data-testid="detail-panel"
       aria-label="Detail panel"
-      className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      className="cb-panel-in relative z-30 flex h-full min-w-0 flex-none flex-col border-l border-n-200 bg-n-0"
       // 100%, not 50%: the parent is now the right-panel SLOT, which is itself
       // sized from this width and already capped at `100% - CANVAS_MIN_WIDTH`.
       // A 50% cap here resolved against that slot, so the panel rendered at
@@ -219,7 +219,7 @@ export function DetailPanel() {
         max={DETAIL_WIDTH_MAX}
         onResize={setWidth}
       />
-      <header className="flex items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
+      <header className="flex items-center gap-2 border-b border-n-100 px-4 py-3">
         {/* M9.6: one resolver everywhere — a Risk looks like a Risk in the
             panel, the table, QuickOpen, and the assistant's transcript. */}
         <span
@@ -228,25 +228,23 @@ export function DetailPanel() {
         >
           <Icon name={typeStyle(entry.type, schema).icon} size={14} />
         </span>
-        <span className="text-[12px] font-medium text-[var(--n-700)]">{entry.type ?? 'Note'}</span>
+        <span className="text-[12px] font-medium text-n-700">{entry.type ?? 'Note'}</span>
         {key !== '' && (
-          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">
-            {key}
-          </span>
+          <span className="[font-family:var(--font-mono)] text-[11px] text-n-500">{key}</span>
         )}
         {/* M9.3/M12.5: opening a record no longer drags you to its container,
             so the container becomes something you press rather than something
             that happens to you. Hidden when you are already standing on it. */}
         {container !== null && containerFolder !== null && (
           <>
-            <span aria-hidden className="text-[11px] text-[var(--n-300)]">
+            <span aria-hidden className="text-[11px] text-n-300">
               /
             </span>
             <button
               type="button"
               data-testid="detail-collection-crumb"
               onClick={() => navigate({ kind: 'collection', folder: containerFolder })}
-              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+              className="inline-flex min-w-0 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12px] text-n-500 hover:bg-n-50 hover:text-n-800"
             >
               <Icon name="folder-open" size={11} />
               <span className="truncate">{container.title}</span>
@@ -276,7 +274,7 @@ export function DetailPanel() {
           }}
           // focus-visible + the shared --ring token: every other control in
           // the app uses that halo and suppresses it on plain mouse clicks.
-          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-[16px] font-semibold leading-[22px] tracking-[-0.01em] text-[var(--n-900)] outline-none hover:border-[var(--n-200)] focus-visible:border-[var(--cortex-500)] focus-visible:shadow-[var(--ring)]"
+          className="-ml-2 mb-3.5 w-full rounded-lg border border-transparent px-2 py-1 text-[16px] font-semibold leading-[22px] tracking-[-0.01em] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
         />
         {/* M3: extracted to RecordProperties — shared with the split view.
             Keyed per record (prefixed: the sibling NoteBodyEditor also keys
@@ -287,7 +285,7 @@ export function DetailPanel() {
             and related-concepts view, collapsed until asked (M8.3's rule:
             the assistant never speaks first). */}
         <KnowledgeSection key={`knowledge:${entry.path}`} entry={entry} />
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500">
           Description
         </div>
         {/* Task 12: rich markdown editor replaces the raw textarea. Keyed by
@@ -307,7 +305,7 @@ export function DetailPanel() {
         {/* M9.7 — the diff appears under the body, not over the panel. */}
         <InlineDiff path={entry.path} />
       </div>
-      <footer className="flex items-center gap-3 border-t border-[var(--n-100)] px-4 py-2.5 [font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]">
+      <footer className="flex items-center gap-3 border-t border-n-100 px-4 py-2.5 [font-family:var(--font-mono)] text-[10px] text-n-400">
         <span>Created {entry.createdAt.slice(0, 10)}</span>
         <span>Modified {entry.modifiedAt.slice(0, 10)}</span>
       </footer>

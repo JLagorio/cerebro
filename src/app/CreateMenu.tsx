@@ -20,7 +20,7 @@ function MenuEntry({ label, icon, onClick }: { label: string; icon: string; onCl
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)] focus-visible:bg-[var(--n-50)]"
+      className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-n-800 hover:bg-n-50 focus-visible:bg-n-50"
     >
       <Icon name={icon} size={14} color="var(--n-500)" />
       {label}
@@ -102,7 +102,7 @@ export function CreateMenu() {
             ref={popup}
             role="menu"
             aria-label="New"
-            className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-md)]"
+            className="cb-menu-in absolute right-0 top-full z-50 mt-1 w-44 rounded-[10px] border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-md)]"
           >
             {/* `circle-check` is the app's completion glyph — it marks notes
                 organized and rows ready — so the primary create action read as
@@ -175,7 +175,7 @@ function NewRecordDialog({ onClose }: { onClose: () => void }) {
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
       <div className="flex flex-col gap-3">
-        <label className="flex flex-col gap-1 text-[12px] text-[var(--n-600)]">
+        <label className="flex flex-col gap-1 text-[12px] text-n-600">
           Title
           <Input
             autoFocus
@@ -185,7 +185,7 @@ function NewRecordDialog({ onClose }: { onClose: () => void }) {
             width="100%"
           />
         </label>
-        <label className="flex flex-col gap-1 text-[12px] text-[var(--n-600)]">
+        <label className="flex flex-col gap-1 text-[12px] text-n-600">
           Type
           <Select
             options={types.map((t) => ({ value: t, label: t }))}
@@ -194,13 +194,13 @@ function NewRecordDialog({ onClose }: { onClose: () => void }) {
             width="100%"
           />
           {types.length === 0 && (
-            <span className="text-[11px] text-[var(--n-500)]">
+            <span className="text-[11px] text-n-500">
               No types yet — create one from the Types section of the sidebar first.
             </span>
           )}
         </label>
         {typeName !== '' && (
-          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--n-500)]">
+          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-n-500">
             <Icon
               name={typeStyle(typeName, schema).icon}
               size={12}
@@ -255,7 +255,7 @@ function NewDocDialog({ onClose }: { onClose: () => void }) {
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
-      <label className="flex flex-col gap-1 text-[12px] text-[var(--n-600)]">
+      <label className="flex flex-col gap-1 text-[12px] text-n-600">
         Title
         <Input
           autoFocus

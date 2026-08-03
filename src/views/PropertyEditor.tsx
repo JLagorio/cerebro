@@ -66,7 +66,7 @@ export function ConfirmKindChange({
       primaryAction={{ label: 'Change type', onClick: onConfirm }}
       secondaryAction={{ label: 'Cancel', onClick: onCancel }}
     >
-      <p className="m-0 text-[13px] text-[var(--n-600)]">
+      <p className="m-0 text-[13px] text-n-600">
         This rewrites {count === 1 ? '1 record' : `${count} records`} on disk
         {losesOptions ? " and discards this property's option list" : ''}. Values that cannot be
         read as {kindMeta(to).label.toLowerCase()} are dropped. This cannot be undone from the app.
@@ -119,7 +119,7 @@ export function ConfirmDeleteProperty({
       primaryAction={{ label: 'Delete', onClick: onConfirm }}
       secondaryAction={{ label: 'Cancel', onClick: onCancel }}
     >
-      <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
+      <p className="m-0 text-[13px] leading-relaxed text-n-600">
         This changes {sourceType} — {count === 1 ? '1 record' : `${count} records`}. Each one keeps
         its {name.toLowerCase()} value in its frontmatter, but nothing in the app will show or edit
         it again until the property is declared once more.
@@ -195,12 +195,12 @@ export function PropertyEditor({
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Name</span>
+        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Name</span>
         {locked ? (
-          <div className="flex items-center gap-1.5 px-1 text-[12.5px] text-[var(--n-600)]">
+          <div className="flex items-center gap-1.5 px-1 text-[12.5px] text-n-600">
             <Icon name="lock" size={11} />
             {humanize(def.name)}
-            <span className="text-[11px] text-[var(--n-400)]">Built-in</span>
+            <span className="text-[11px] text-n-400">Built-in</span>
           </div>
         ) : (
           <Input
@@ -224,24 +224,24 @@ export function PropertyEditor({
             type="button"
             data-testid="property-editor-type"
             onClick={() => setChangingKind(!changingKind)}
-            className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+            className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-n-700 hover:bg-n-50"
           >
             <Icon name="repeat-2" size={12} color="var(--n-500)" />
             <span className="min-w-0 flex-1">Type</span>
-            <span className="flex items-center gap-1 text-[11px] text-[var(--n-400)]">
+            <span className="flex items-center gap-1 text-[11px] text-n-400">
               {kindMeta(def.kind).label}
               <Icon name={changingKind ? 'chevron-down' : 'chevron-right'} size={11} />
             </span>
           </button>
           {changingKind && (
-            <div className="mt-1 max-h-[200px] overflow-y-auto rounded-[7px] bg-[var(--n-25)] p-0.5">
+            <div className="mt-1 max-h-[200px] overflow-y-auto rounded-[7px] bg-n-25 p-0.5">
               {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
                 <button
                   key={k.kind}
                   type="button"
                   data-testid={`change-type-${k.kind}`}
                   onClick={() => setPendingKind(k.kind)}
-                  className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                  className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-n-700 hover:bg-n-50"
                 >
                   <Icon name={k.icon} size={12} color="var(--n-500)" />
                   <span className="min-w-0 flex-1">{k.label}</span>
@@ -254,7 +254,7 @@ export function PropertyEditor({
       )}
 
       {(hasValues || hasConfig) && (
-        <div className="border-t border-[var(--n-100)] pt-1.5">
+        <div className="border-t border-n-100 pt-1.5">
           {def.kind === 'status' ? (
             // Statuses are the type's workflow, editable even on system
             // types: the lock covers the field, not the team's stages.
@@ -303,7 +303,7 @@ export function PropertyEditor({
           // Asks first (M16.29). This used to remove the property from the
           // type on the click, which took it off every record at once.
           onClick={() => setConfirmDelete(true)}
-          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-1 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
+          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-n-100 bg-transparent px-1 py-1.5 text-left text-[12.5px] text-danger-600 hover:bg-danger-50"
         >
           <Icon name="trash-2" size={13} />
           Delete property

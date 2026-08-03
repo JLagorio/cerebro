@@ -26,10 +26,10 @@ export function DocPagesPanel({
     <aside
       data-testid="doc-pages-panel"
       aria-label="Doc pages"
-      className="flex w-[216px] flex-none flex-col border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      className="flex w-[216px] flex-none flex-col border-r border-n-200 bg-n-0"
     >
-      <div className="flex flex-none items-center gap-1 border-b border-[var(--n-100)] py-1.5 pl-3 pr-2">
-        <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+      <div className="flex flex-none items-center gap-1 border-b border-n-100 py-1.5 pl-3 pr-2">
+        <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
           Pages
         </span>
         <span className="flex-1" />
@@ -53,8 +53,8 @@ export function DocPagesPanel({
                   className={[
                     'flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
                     active
-                      ? 'bg-[var(--cortex-50)] font-medium text-[var(--cortex-600)]'
-                      : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)] hover:text-[var(--n-900)]',
+                      ? 'bg-cortex-50 font-medium text-cortex-600'
+                      : 'bg-transparent text-n-700 hover:bg-n-50 hover:text-n-900',
                   ].join(' ')}
                 >
                   <Icon
@@ -71,7 +71,7 @@ export function DocPagesPanel({
         <button
           type="button"
           onClick={onAddPage}
-          className="mt-0.5 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          className="mt-0.5 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
         >
           <Icon name="plus" size={13} />
           Add page
@@ -90,7 +90,7 @@ export function DocPagesFloatingButton() {
       aria-label="Show pages"
       data-testid="doc-pages-floating"
       onClick={() => setOpen(true)}
-      className="absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] text-[var(--n-500)] shadow-[0_2px_8px_rgba(22,26,36,0.08)] hover:border-[var(--cortex-500)] hover:text-[var(--cortex-600)]"
+      className="absolute left-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-lg border border-n-200 bg-n-0 text-n-500 shadow-[0_2px_8px_rgba(22,26,36,0.08)] hover:border-cortex-500 hover:text-cortex-600"
     >
       <Icon name="list" size={16} />
     </button>

@@ -51,7 +51,7 @@ function InlineSurface({
     <div
       ref={ref}
       data-testid={testId}
-      className="flex min-w-0 flex-col gap-1 rounded-lg border border-[var(--n-200)] p-1.5"
+      className="flex min-w-0 flex-col gap-1 rounded-lg border border-n-200 p-1.5"
     >
       {children}
     </div>
@@ -191,10 +191,7 @@ export function AddPropertyPanel({
   const onEscape = step === 'relation' ? () => setStep('catalog') : onCancel;
 
   const duplicateNote = duplicate ? (
-    <p
-      role="alert"
-      className="m-0 px-1.5 pt-0.5 text-[11px] leading-[1.35] text-[var(--danger-600)]"
-    >
+    <p role="alert" className="m-0 px-1.5 pt-0.5 text-[11px] leading-[1.35] text-danger-600">
       “{typed}” is already a property here.
     </p>
   ) : null;
@@ -219,7 +216,7 @@ export function AddPropertyPanel({
         width="100%"
       />
       {duplicateNote}
-      <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+      <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
         {isPerson ? 'People come from' : 'Related to'}
       </span>
       <div className="max-h-[160px] overflow-y-auto">
@@ -233,8 +230,8 @@ export function AddPropertyPanel({
             className={[
               'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
               target === null
-                ? 'bg-[var(--cortex-50)] text-[var(--n-900)]'
-                : 'bg-transparent text-[var(--n-800)] hover:bg-[var(--n-50)]',
+                ? 'bg-cortex-50 text-n-900'
+                : 'bg-transparent text-n-800 hover:bg-n-50',
             ].join(' ')}
           >
             <Icon name="users" size={13} color="var(--n-500)" />
@@ -255,8 +252,8 @@ export function AddPropertyPanel({
               className={[
                 'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
                 target === t
-                  ? 'bg-[var(--cortex-50)] text-[var(--n-900)]'
-                  : 'bg-transparent text-[var(--n-800)] hover:bg-[var(--n-50)]',
+                  ? 'bg-cortex-50 text-n-900'
+                  : 'bg-transparent text-n-800 hover:bg-n-50',
               ].join(' ')}
             >
               <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-500)'} />
@@ -266,19 +263,17 @@ export function AddPropertyPanel({
           );
         })}
         {targets.length === 0 && !isPerson && (
-          <p className="m-0 px-1.5 py-2 text-[12px] text-[var(--n-500)]">
+          <p className="m-0 px-1.5 py-2 text-[12px] text-n-500">
             No types to relate to yet — create one first.
           </p>
         )}
       </div>
       <div className="flex items-center justify-between px-1 py-0.5">
-        <span className="text-[12px] text-[var(--n-600)]">
-          Limit to 1 {isPerson ? 'person' : 'record'}
-        </span>
+        <span className="text-[12px] text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
         <Switch ariaLabel="Limit to 1 record" checked={single} onChange={setSingle} />
       </div>
       <div className="flex items-center justify-between px-1 py-0.5">
-        <span className="text-[12px] text-[var(--n-600)]">Add related property</span>
+        <span className="text-[12px] text-n-600">Add related property</span>
         <Switch
           ariaLabel="Add related property"
           checked={twoWay}
@@ -301,18 +296,18 @@ export function AddPropertyPanel({
         data-testid="add-relation"
         disabled={(target === null && !isPerson) || duplicate}
         onClick={addRelation}
-        // text-[var(--n-0)], never text-white: index.css resets the stock
+        // text-n-0, never text-white: index.css resets the stock
         // palette with `--color-*: initial` inside @theme inline, so
         // `text-white` emits no CSS at all and the label inherited --n-900
         // on the blue fill (2.34:1 — the button read as disabled).
-        className="mt-0.5 rounded-md border-0 bg-[var(--cortex-600)] px-2 py-1.5 text-[12.5px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-700)] disabled:cursor-default disabled:opacity-40"
+        className="mt-0.5 rounded-md border-0 bg-cortex-600 px-2 py-1.5 text-[12.5px] font-medium text-n-0 hover:bg-cortex-700 disabled:cursor-default disabled:opacity-40"
       >
         {isPerson ? 'Add person' : 'Add relation'}
       </button>
       <button
         type="button"
         onClick={() => setStep('catalog')}
-        className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-[var(--n-400)] hover:text-[var(--n-700)]"
+        className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-n-400 hover:text-n-700"
       >
         Back
       </button>
@@ -336,7 +331,7 @@ export function AddPropertyPanel({
         width="100%"
       />
       {duplicateNote}
-      <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+      <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
         Type
       </span>
       <Input
@@ -366,7 +361,7 @@ export function AddPropertyPanel({
               data-testid={`property-kind-${k.kind}`}
               disabled={unsupported || duplicate}
               onClick={() => pick(k.kind, k.label)}
-              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)] disabled:cursor-default disabled:text-[var(--n-400)] disabled:hover:bg-transparent"
+              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12.5px] text-n-800 hover:bg-n-50 disabled:cursor-default disabled:text-n-400 disabled:hover:bg-transparent"
             >
               <Icon name={k.icon} size={13} color="var(--n-500)" />
               {k.label}
@@ -389,13 +384,13 @@ export function AddPropertyPanel({
           );
         })}
         {matches.length === 0 && (
-          <p className="m-0 px-1.5 py-2 text-[12px] text-[var(--n-500)]">
+          <p className="m-0 px-1.5 py-2 text-[12px] text-n-500">
             No property type matches “{query.trim()}”.
           </p>
         )}
       </div>
       {ownerType === null && (
-        <p className="m-0 px-1.5 pb-0.5 pt-1 text-[11px] leading-relaxed text-[var(--n-500)]">
+        <p className="m-0 px-1.5 pb-0.5 pt-1 text-[11px] leading-relaxed text-n-500">
           A doc has no schema, so it can only hold plain values. Convert it to a record to use
           Select, Status, Date, Person, Checkbox, Files or Relation.
         </p>
@@ -408,7 +403,7 @@ export function AddPropertyPanel({
         <button
           type="button"
           onClick={onCancel}
-          className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-[var(--n-400)] hover:text-[var(--n-700)]"
+          className="self-start rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-n-400 hover:text-n-700"
         >
           Cancel
         </button>
@@ -428,7 +423,7 @@ export function AddPropertyPanel({
         role="dialog"
         ariaLabel="Add a property"
         trapFocus
-        className="w-[260px] rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+        className="w-[260px] rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]"
       >
         <div data-testid={testId} className="flex min-w-0 flex-col gap-1">
           {body}

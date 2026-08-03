@@ -102,13 +102,13 @@ function OptionRow({
   return (
     <div
       style={style}
-      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-[var(--n-25)] ${dragging ? 'opacity-40' : ''}`}
+      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-n-25 ${dragging ? 'opacity-40' : ''}`}
     >
       <div className="flex items-center gap-2">
         {grip !== undefined && (
           <span
             {...grip}
-            className="flex flex-none cursor-grab items-center justify-center rounded-[3px] text-[var(--n-300)] opacity-0 hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+            className="flex flex-none cursor-grab items-center justify-center rounded-[3px] text-n-300 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
           >
             <Icon name="grip-vertical" size={12} />
           </span>
@@ -146,7 +146,7 @@ function OptionRow({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-0 py-0.5 text-left text-[12.5px] text-[var(--n-800)]"
+            className="min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-0 py-0.5 text-left text-[12.5px] text-n-800"
           >
             {option.label}
           </button>
@@ -242,7 +242,7 @@ export function OptionListEditor({
         ))}
       </div>
       {options.length === 0 && (
-        <span className="px-1 py-0.5 text-[11.5px] text-[var(--n-400)]">
+        <span className="px-1 py-0.5 text-[11.5px] text-n-400">
           No options yet — add the first one below.
         </span>
       )}

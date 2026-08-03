@@ -33,13 +33,13 @@ export function RelationConfigEditor({
 
   if (def.from !== undefined) {
     return (
-      <p className="m-0 flex items-start gap-1.5 px-1 py-1 text-[12px] leading-relaxed text-[var(--n-500)]">
+      <p className="m-0 flex items-start gap-1.5 px-1 py-1 text-[12px] leading-relaxed text-n-500">
         <Icon name="arrow-left-right" size={12} style={{ marginTop: 2 }} />
         <span>
           Two-way relation: this is the derived side of{' '}
-          <strong className="font-medium text-[var(--n-700)]">{humanize(def.from.field)}</strong> on{' '}
-          <strong className="font-medium text-[var(--n-700)]">{def.from.type}</strong>. It stores
-          nothing — the link lives there, and edits here write through.
+          <strong className="font-medium text-n-700">{humanize(def.from.field)}</strong> on{' '}
+          <strong className="font-medium text-n-700">{def.from.type}</strong>. It stores nothing —
+          the link lives there, and edits here write through.
         </span>
       </p>
     );
@@ -60,7 +60,7 @@ export function RelationConfigEditor({
   return (
     <div className="flex flex-col gap-1.5 py-0.5">
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[12px] text-[var(--n-600)]">
+        <span className="text-[12px] text-n-600">
           {isPerson ? 'People come from' : 'Related to'}
         </span>
         <Dropdown
@@ -78,9 +78,7 @@ export function RelationConfigEditor({
         />
       </div>
       <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-[12px] text-[var(--n-600)]">
-          Limit to 1 {isPerson ? 'person' : 'record'}
-        </span>
+        <span className="text-[12px] text-n-600">Limit to 1 {isPerson ? 'person' : 'record'}</span>
         <Switch
           ariaLabel="Limit to 1 record"
           checked={def.limit === 1}
@@ -88,16 +86,16 @@ export function RelationConfigEditor({
         />
       </div>
       <div className="flex items-center gap-2 px-1">
-        <span className="flex-none text-[12px] text-[var(--n-600)]">Related property</span>
+        <span className="flex-none text-[12px] text-n-600">Related property</span>
         {reciprocal !== null ? (
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-[12px] text-[var(--n-700)]">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-[12px] text-n-700">
             <Icon name="arrow-left-right" size={11} color="var(--n-400)" />
             <span className="truncate">
               {humanize(reciprocal.name)} on {def.target}
             </span>
           </span>
         ) : def.target === undefined ? (
-          <span className="text-[11.5px] text-[var(--n-400)]">Pick a target type first</span>
+          <span className="text-[11.5px] text-n-400">Pick a target type first</span>
         ) : (
           <>
             <Input
@@ -112,7 +110,7 @@ export function RelationConfigEditor({
               data-testid="add-reciprocal"
               disabled={reciprocalDraft.trim() === ''}
               onClick={() => onAddReciprocal(reciprocalDraft)}
-              className="flex-none rounded-md border border-[var(--n-200)] bg-transparent px-2 py-0.5 text-[11.5px] text-[var(--n-700)] hover:bg-[var(--n-50)] disabled:opacity-40"
+              className="flex-none rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-[11.5px] text-n-700 hover:bg-n-50 disabled:opacity-40"
             >
               Add on {def.target}
             </button>

@@ -163,7 +163,7 @@ export function TimelineView({
       data-zoom={zoom}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-3 border-b border-[var(--n-200)] px-5 py-2">
+      <div className="flex flex-none items-center gap-3 border-b border-n-200 px-5 py-2">
         <ZoomControl zoom={zoom} onChange={setZoom} />
         <Switch checked={showTable} onChange={setShowTable} label="Show table" />
         <span className="flex-1" />
@@ -173,7 +173,7 @@ export function TimelineView({
             data-testid="timeline-undated-toggle"
             aria-expanded={showUndated}
             onClick={() => setShowUndated(!showUndated)}
-            className="rounded-md border border-[var(--n-200)] bg-transparent px-2 py-0.5 text-[11.5px] text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]"
+            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-[11.5px] text-n-500 hover:border-n-400 hover:text-n-800"
           >
             {undated.length} without a date
           </button>
@@ -210,7 +210,7 @@ export function TimelineView({
                       data-testid="timeline-band"
                       data-depth={row.node.depth}
                       onClick={() => toggle(scope, row.key)}
-                      className="relative z-10 flex w-full items-center border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
+                      className="relative z-10 flex w-full items-center border-b border-n-100 bg-n-25 text-left"
                       style={{ width: '100%', height: BAND_H }}
                     >
                       {/* Full-width band cannot be sticky itself (no room to
@@ -224,10 +224,10 @@ export function TimelineView({
                           size={12}
                           color="var(--n-400)"
                         />
-                        <span className="text-[12px] font-semibold text-[var(--n-800)]">
+                        <span className="text-[12px] font-semibold text-n-800">
                           {row.node.label}
                         </span>
-                        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
                           {row.node.count}
                         </span>
                       </span>
@@ -242,7 +242,7 @@ export function TimelineView({
                   return showTable ? (
                     <div
                       key={row.key}
-                      className="border-b border-[var(--n-100)]"
+                      className="border-b border-n-100"
                       style={{ height: ROW_H }}
                     />
                   ) : null;
@@ -255,7 +255,7 @@ export function TimelineView({
                     key={row.key}
                     data-testid="timeline-row"
                     data-path={row.entry.path}
-                    className="relative border-b border-[var(--n-100)] hover:bg-[var(--n-25)]"
+                    className="relative border-b border-n-100 hover:bg-n-25"
                     style={{ height: ROW_H }}
                   >
                     <button
@@ -271,7 +271,7 @@ export function TimelineView({
                       }}
                       title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
                       aria-label={`${row.entry.title}, ${span.start} to ${span.end}. Arrow keys move it; hold Shift to change its end.`}
-                      className="absolute top-1 flex touch-none select-none items-center gap-1 overflow-hidden rounded-[5px] border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1.5 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]"
+                      className="absolute top-1 flex touch-none select-none items-center gap-1 overflow-hidden rounded-[5px] border border-cortex-500 bg-cortex-50 px-1.5 text-left text-[11.5px] text-n-900 hover:bg-cortex-100"
                       style={{ ...geo, height: ROW_H - 9 }}
                     >
                       <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
@@ -299,9 +299,9 @@ export function TimelineView({
       {showUndated && undated.length > 0 && (
         <div
           data-testid="timeline-undated"
-          className="max-h-[180px] flex-none overflow-y-auto border-t border-[var(--n-200)] bg-[var(--n-25)] px-5 py-2"
+          className="max-h-[180px] flex-none overflow-y-auto border-t border-n-200 bg-n-25 px-5 py-2"
         >
-          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <div className="pb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-n-400">
             Without a date
           </div>
           {undated.map((entry) => (
@@ -310,7 +310,7 @@ export function TimelineView({
               type="button"
               data-path={entry.path}
               onClick={() => openPath(entry.path)}
-              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-100)]"
+              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-n-800 hover:bg-n-100"
             >
               <Icon
                 name={typeStyle(entry.type, schema).icon}

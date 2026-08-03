@@ -203,7 +203,7 @@ export function GanttView({
       data-zoom={zoom}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-3 border-b border-[var(--n-200)] px-5 py-2">
+      <div className="flex flex-none items-center gap-3 border-b border-n-200 px-5 py-2">
         <ZoomControl zoom={zoom} onChange={setZoom} />
         <Switch checked={showTable} onChange={setShowTable} label="Show table" />
         <span className="flex-1" />
@@ -216,13 +216,13 @@ export function GanttView({
               data-testid="gantt-slips"
               title="Go to the next slipping dependency"
               onClick={stepSlip}
-              className="rounded-md border border-[var(--danger-500)] bg-transparent px-2 py-0.5 text-[11.5px] font-medium text-[var(--danger-500)] hover:bg-[var(--danger-50)]"
+              className="rounded-md border border-danger-500 bg-transparent px-2 py-0.5 text-[11.5px] font-medium text-danger-500 hover:bg-danger-50"
             >
               {slips.length} dependency {slips.length === 1 ? 'conflict' : 'conflicts'}
               {focusedSlip >= 0 && ` · ${focusedSlip + 1}/${slips.length}`}
             </button>
           ) : (
-            <span data-testid="gantt-slips" className="text-[11.5px] text-[var(--n-500)]">
+            <span data-testid="gantt-slips" className="text-[11.5px] text-n-500">
               No dependency conflicts
             </span>
           ))}
@@ -235,8 +235,8 @@ export function GanttView({
             className={[
               'rounded-md border px-2 py-0.5 text-[11.5px]',
               showUndated
-                ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-600)]'
-                : 'border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]',
+                ? 'border-cortex-500 bg-cortex-50 text-cortex-600'
+                : 'border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800',
             ].join(' ')}
           >
             {undated.length} without a date
@@ -277,7 +277,7 @@ export function GanttView({
                   return (
                     <div
                       key={row.key}
-                      className="border-b border-[var(--n-100)] bg-[var(--n-25)]"
+                      className="border-b border-n-100 bg-n-25"
                       style={{ height: BAND_H }}
                     />
                   );
@@ -292,7 +292,7 @@ export function GanttView({
                     data-testid="gantt-row"
                     data-path={row.entry.path}
                     data-row-index={rowIndex}
-                    className="relative border-b border-[var(--n-100)]"
+                    className="relative border-b border-n-100"
                     style={{ height: ROW_H }}
                   >
                     {span === null && showUndated && (
@@ -305,7 +305,7 @@ export function GanttView({
                         data-path={row.entry.path}
                         onClick={() => openPath(row.entry.path)}
                         title={`${row.entry.title} · no ${dateField} — open to set one`}
-                        className="absolute top-1.5 rounded-[4px] border border-dashed border-[var(--n-400)] bg-transparent text-[10.5px] text-[var(--n-500)] hover:border-[var(--cortex-500)] hover:text-[var(--cortex-600)]"
+                        className="absolute top-1.5 rounded-[4px] border border-dashed border-n-400 bg-transparent text-[10.5px] text-n-500 hover:border-cortex-500 hover:text-cortex-600"
                         style={{
                           left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
                           width: 96,
@@ -336,8 +336,8 @@ export function GanttView({
                           className={[
                             'absolute touch-none select-none rounded-[4px] border',
                             isParent
-                              ? 'top-3 border-[var(--n-600)] bg-[var(--n-600)]'
-                              : 'top-1.5 border-[var(--cortex-500)] bg-[var(--cortex-400)]',
+                              ? 'top-3 border-n-600 bg-n-600'
+                              : 'top-1.5 border-cortex-500 bg-cortex-400',
                           ].join(' ')}
                           style={{ ...geo, height: isParent ? 5 : ROW_H - 12 }}
                         />

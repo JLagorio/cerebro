@@ -121,18 +121,18 @@ function VaultChooser() {
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[var(--n-25)]">
-      <div className="flex w-[380px] flex-col gap-3 rounded-[14px] border border-[var(--n-200)] bg-[var(--n-0)] p-7 shadow-[var(--shadow-md)]">
+    <div className="flex h-screen items-center justify-center bg-n-25">
+      <div className="flex w-[380px] flex-col gap-3 rounded-[14px] border border-n-200 bg-n-0 p-7 shadow-[var(--shadow-md)]">
         <span className="text-[18px] font-bold tracking-[-0.02em]">
-          cerebro<span className="text-[var(--synapse-500)]">.</span>
+          cerebro<span className="text-synapse-500">.</span>
         </span>
-        <h1 className="m-0 text-[16px] font-semibold text-[var(--n-900)]">Open a vault</h1>
-        <p className="m-0 text-[13px] leading-[19px] text-[var(--n-600)]">
+        <h1 className="m-0 text-[16px] font-semibold text-n-900">Open a vault</h1>
+        <p className="m-0 text-[13px] leading-[19px] text-n-600">
           A vault is a folder of markdown files — projects, docs, and work items live there as plain
           text.
         </p>
         {(error ?? pickError) ? (
-          <p className="m-0 text-[12px] text-[var(--danger-500)]">{error ?? pickError}</p>
+          <p className="m-0 text-[12px] text-danger-500">{error ?? pickError}</p>
         ) : null}
         <div className="mt-1 flex gap-2">
           <Button variant="primary" onClick={guarded(openDemo)}>
@@ -246,13 +246,13 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
+    <div className="flex h-screen overflow-hidden bg-n-0 text-[13px] leading-5 text-n-900">
       {/* The rail and the whole sidebar tree sit between the top of the tab
           order and the content, which in a real vault is dozens of stops. */}
       <button
         type="button"
         onClick={() => document.getElementById('main')?.focus()}
-        className="sr-only rounded-md bg-[var(--cortex-500)] px-3 py-1.5 text-[12px] font-medium text-[var(--n-0)] focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+        className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-[12px] font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
       >
         Skip to content
       </button>
@@ -277,7 +277,7 @@ function App() {
             the canvas. `overflow-hidden` is the box nothing may paint outside,
             and `@container/canvas` lets a page respond to the width it actually
             has rather than the viewport's. */}
-        <div className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--n-0)]">
+        <div className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0">
           <main
             id="main"
             // -1 so the skip link can put focus here; no ring, because a ring

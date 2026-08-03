@@ -27,7 +27,7 @@ import { useVaultStore } from '@/stores/vaultStore';
  * active thing on it is a button, pressed by a person.
  */
 
-const LABEL = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]';
+const LABEL = 'text-[11px] font-semibold uppercase tracking-[0.06em] text-n-500';
 
 function ConceptRow({
   concept,
@@ -45,20 +45,18 @@ function ConceptRow({
       data-path={concept.entry.path}
       data-retired={retired ? 'true' : 'false'}
       onClick={() => onOpen(concept.entry.path)}
-      className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
+      className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
     >
       <span className="min-w-0 flex-1">
         <span
           className={`block truncate text-[12.5px] font-medium ${
-            retired ? 'text-[var(--n-400)] line-through' : 'text-[var(--n-800)]'
+            retired ? 'text-n-400 line-through' : 'text-n-800'
           }`}
         >
           {concept.title}
         </span>
         {concept.description !== null && !retired && (
-          <span className="block truncate text-[11.5px] text-[var(--n-500)]">
-            {concept.description}
-          </span>
+          <span className="block truncate text-[11.5px] text-n-500">{concept.description}</span>
         )}
       </span>
       {!retired && <TrustChip tier={concept.trust} size="sm" />}
@@ -69,20 +67,20 @@ function ConceptRow({
 function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string) => void }) {
   return (
     <li className="flex items-start gap-2 px-2 py-1">
-      <span className="mt-[3px] flex-none text-[var(--warn-600)]">
+      <span className="mt-[3px] flex-none text-warn-600">
         <Icon
           name={item.reason === 'contradicts' ? 'git-compare-arrows' : 'clock-alert'}
           size={12}
         />
       </span>
-      <span className="min-w-0 flex-1 text-[12px] leading-[17px] text-[var(--n-700)]">
+      <span className="min-w-0 flex-1 text-[12px] leading-[17px] text-n-700">
         {item.reason === 'contradicts' ? (
           <>
             <button
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => onOpen(item.concept.entry.path)}
-              className="border-0 bg-transparent p-0 text-[12px] text-[var(--cortex-600)] hover:underline"
+              className="border-0 bg-transparent p-0 text-[12px] text-cortex-600 hover:underline"
             >
               {item.concept.title}
             </button>{' '}
@@ -91,7 +89,7 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => item.other !== null && onOpen(item.other.entry.path)}
-              className="border-0 bg-transparent p-0 text-[12px] text-[var(--cortex-600)] hover:underline"
+              className="border-0 bg-transparent p-0 text-[12px] text-cortex-600 hover:underline"
             >
               {item.other?.title ?? 'another concept'}
             </button>
@@ -103,7 +101,7 @@ function UnsettledRow({ item, onOpen }: { item: Unsettled; onOpen: (path: string
               type="button"
               data-testid="dossier-unsettled-link"
               onClick={() => onOpen(item.concept.entry.path)}
-              className="border-0 bg-transparent p-0 text-[12px] text-[var(--cortex-600)] hover:underline"
+              className="border-0 bg-transparent p-0 text-[12px] text-cortex-600 hover:underline"
             >
               {item.concept.title}
             </button>{' '}
@@ -156,18 +154,18 @@ export function EntityDossier({
     <section
       data-testid="entity-dossier"
       data-count={dossier.current.length}
-      className={variant === 'panel' ? '' : 'mt-8 border-t border-[var(--n-100)] pt-5'}
+      className={variant === 'panel' ? '' : 'mt-8 border-t border-n-100 pt-5'}
     >
       <div className="flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
           What the assistant knows
         </h3>
         {/* Growth, stated once, in words. The alternative is a number that
             ticks up somewhere permanent, which is the pattern these surfaces
             are barred from. */}
         {dossier.current.length > 0 && since !== null && (
-          <span className="text-[11px] text-[var(--n-400)]">
+          <span className="text-[11px] text-n-400">
             {dossier.current.length} {dossier.current.length === 1 ? 'thing' : 'things'}, first
             learned {since}
             {latest !== null && latest !== since ? `, most recently ${latest}` : ''}
@@ -176,9 +174,7 @@ export function EntityDossier({
       </div>
 
       {isEmptyDossier(dossier) ? (
-        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-[var(--n-500)]">
-          Nothing yet about this.
-        </p>
+        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-n-500">Nothing yet about this.</p>
       ) : (
         <>
           <ul className="m-0 mt-2 flex list-none flex-col gap-px p-0">
@@ -215,14 +211,14 @@ export function EntityDossier({
                       data-testid="dossier-source"
                       data-path={source.resource}
                       onClick={() => openPath(source.resource)}
-                      className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left hover:bg-[var(--n-50)]"
+                      className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left hover:bg-n-50"
                     >
                       <Icon name="file-text" size={12} color="var(--n-400)" />
-                      <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--n-700)]">
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-n-700">
                         {source.title ?? source.resource}
                       </span>
                       {source.citedBy > 1 && (
-                        <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
+                        <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
                           ×{source.citedBy}
                         </span>
                       )}

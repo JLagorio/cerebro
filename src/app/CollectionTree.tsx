@@ -128,7 +128,7 @@ function CollectionRow({
               e.stopPropagation();
               toggle(key);
             }}
-            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-700"
           >
             <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={12} />
           </button>
@@ -155,13 +155,13 @@ function CollectionRow({
               e.stopPropagation();
               onAdd(node);
             }}
-            className="flex h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] opacity-0 hover:bg-[var(--n-100)] hover:text-[var(--n-700)] focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+            className="flex h-5 w-5 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 opacity-0 hover:bg-n-100 hover:text-n-700 focus-visible:opacity-100 group-hover/row:opacity-100 group-focus-within/row:opacity-100"
           >
             <Icon name="plus" size={13} />
           </button>
         )}
         {container && count > 0 && (
-          <span className="ml-auto flex-none [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)] group-hover/row:hidden group-focus-within/row:hidden">
+          <span className="ml-auto flex-none [font-family:var(--font-mono)] text-[11px] text-n-400 group-hover/row:hidden group-focus-within/row:hidden">
             {count}
           </span>
         )}
@@ -181,7 +181,7 @@ function CollectionRow({
           like it failed to load. */}
       {expanded && node.children.length === 0 && (
         <div
-          className="py-1 text-[11.5px] text-[var(--n-400)]"
+          className="py-1 text-[11.5px] text-n-400"
           style={{ paddingLeft: 8 + (depth + 1) * INDENT + 20 }}
         >
           Empty

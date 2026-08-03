@@ -103,8 +103,8 @@ export function ChainBuilder({
           // two controls (M11 responsiveness).
           'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-[12.5px]',
           active
-            ? 'border-[var(--cortex-300)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-            : 'border-[var(--n-300)] bg-[var(--n-0)] text-[var(--n-700)] hover:border-[var(--n-400)]',
+            ? 'border-cortex-300 bg-cortex-50 text-cortex-700'
+            : 'border-n-300 bg-n-0 text-n-700 hover:border-n-400',
         ].join(' ')}
       >
         <Icon name={icon} size={13} color={active ? 'var(--cortex-600)' : 'var(--n-500)'} />
@@ -125,12 +125,12 @@ export function ChainBuilder({
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[330px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            <div className="w-[330px] rounded-[10px] border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
+              <div className="px-0.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
                 {label}
               </div>
               {rows.length === 0 && emptyHint !== undefined && (
-                <p className="m-0 px-0.5 pb-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+                <p className="m-0 px-0.5 pb-2 text-[11.5px] leading-[16px] text-n-500">
                   {emptyHint}
                 </p>
               )}
@@ -153,7 +153,7 @@ export function ChainBuilder({
                     <span className="relative flex w-8 flex-none items-center">
                       <span
                         className={[
-                          'text-[11px] text-[var(--n-400)]',
+                          'text-[11px] text-n-400',
                           onMove === undefined ? '' : 'group-hover:opacity-0',
                         ].join(' ')}
                       >
@@ -166,7 +166,7 @@ export function ChainBuilder({
                             // Opacity, not `hidden`: a hidden grip is out of
                             // the tab order, and arrow-key reordering is the
                             // point of the primitive underneath it.
-                            className="absolute inset-0 flex cursor-grab items-center justify-start rounded-[3px] text-[var(--n-400)] opacity-0 hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+                            className="absolute inset-0 flex cursor-grab items-center justify-start rounded-[3px] text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             <Icon name="grip-vertical" size={13} />
                           </span>
@@ -185,7 +185,7 @@ export function ChainBuilder({
                         type="button"
                         aria-label={`Level ${i + 1} direction: ${row.dir === 'asc' ? 'ascending' : 'descending'}`}
                         onClick={() => onToggleDir(i)}
-                        className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]"
+                        className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800"
                       >
                         <Icon name={row.dir === 'asc' ? 'arrow-up' : 'arrow-down'} size={12} />
                       </button>
@@ -194,7 +194,7 @@ export function ChainBuilder({
                       type="button"
                       aria-label={`Remove level ${i + 1}`}
                       onClick={() => onRemove(i)}
-                      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+                      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-50 hover:text-n-800"
                     >
                       <Icon name="x" size={12} />
                     </button>
@@ -202,8 +202,8 @@ export function ChainBuilder({
                 ))}
               </div>
               {!atCap && addOptions.length > 0 && (
-                <div className="mt-1.5 flex items-center gap-1.5 border-t border-[var(--n-100)] pt-2">
-                  <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
+                <div className="mt-1.5 flex items-center gap-1.5 border-t border-n-100 pt-2">
+                  <span className="w-8 flex-none text-[11px] text-n-400">
                     {rows.length === 0 ? 'By' : 'then'}
                   </span>
                   <Select
@@ -218,7 +218,7 @@ export function ChainBuilder({
                 </div>
               )}
               {!atCap && addOptions.length === 0 && blockedHint !== undefined && (
-                <p className="m-0 mt-1.5 border-t border-[var(--n-100)] px-0.5 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+                <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-[11px] leading-[15px] text-n-400">
                   {blockedHint}
                 </p>
               )}
@@ -234,7 +234,7 @@ export function ChainBuilder({
 function atcapNote(atCap: boolean, max: number) {
   if (!atCap) return null;
   return (
-    <p className="m-0 mt-1.5 border-t border-[var(--n-100)] px-0.5 pt-2 text-[11px] text-[var(--n-400)]">
+    <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-[11px] text-n-400">
       {max} levels is the maximum — deeper nesting stops being readable.
     </p>
   );

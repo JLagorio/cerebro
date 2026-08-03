@@ -556,10 +556,8 @@ export function FileTree({
         onDrop={onRowDrop(node)}
         className={[
           'group flex min-w-0 items-center gap-1 rounded-md pr-1',
-          active ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-100)]',
-          hint === 'into'
-            ? 'bg-[var(--cortex-50)] shadow-[inset_0_0_0_1.5px_var(--cortex-500)]'
-            : '',
+          active ? 'bg-cortex-50' : 'hover:bg-n-100',
+          hint === 'into' ? 'bg-cortex-50 shadow-[inset_0_0_0_1.5px_var(--cortex-500)]' : '',
           hint === 'before' ? 'shadow-[inset_0_2px_0_var(--cortex-500)]' : '',
           hint === 'after' ? 'shadow-[inset_0_-2px_0_var(--cortex-500)]' : '',
           dragPath === node.path ? 'opacity-50' : '',
@@ -579,9 +577,7 @@ export function FileTree({
       const active =
         (node.kind === 'file' && node.path === activePath) ||
         (node.kind === 'doc' && node.mainPath === activePath);
-      const labelClass = ['truncate', active ? 'font-medium text-[var(--cortex-600)]' : ''].join(
-        ' ',
-      );
+      const labelClass = ['truncate', active ? 'font-medium text-cortex-600' : ''].join(' ');
 
       return (
         <li key={node.path} className="list-none">
@@ -595,7 +591,7 @@ export function FileTree({
                 data-testid="tree-folder"
                 aria-expanded={isOpen}
                 onClick={() => toggleFolder(node.path)}
-                className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-[13px] text-[var(--n-800)]"
+                className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] text-left text-[13px] text-n-800"
               >
                 <Icon
                   name={isOpen ? 'chevron-down' : 'chevron-right'}
@@ -617,7 +613,7 @@ export function FileTree({
                   aria-label={isOpen ? `Collapse ${node.label}` : `Expand ${node.label}`}
                   aria-expanded={isOpen}
                   onClick={() => toggleFolder(node.path)}
-                  className="inline-flex flex-none items-center border-0 bg-transparent py-[5px] pl-1 pr-0.5 text-[var(--n-400)]"
+                  className="inline-flex flex-none items-center border-0 bg-transparent py-[5px] pl-1 pr-0.5 text-n-400"
                 >
                   <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={13} />
                 </button>
@@ -625,7 +621,7 @@ export function FileTree({
                   type="button"
                   data-testid="tree-doc"
                   onClick={() => node.mainPath !== undefined && onOpen(node.mainPath)}
-                  className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent py-[5px] pr-1 text-left text-[13px] text-[var(--n-700)]"
+                  className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent py-[5px] pr-1 text-left text-[13px] text-n-700"
                 >
                   <Icon
                     name="file-stack"
@@ -645,7 +641,7 @@ export function FileTree({
                 type="button"
                 data-testid="tree-file"
                 onClick={() => onOpen(node.path)}
-                className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-[13px] text-[var(--n-700)]"
+                className="inline-flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent px-1 py-[5px] pl-[19px] text-left text-[13px] text-n-700"
               >
                 {(() => {
                   const style = typeStyle(entryByPath.get(node.path)?.type ?? null, schema);
@@ -664,18 +660,12 @@ export function FileTree({
             <ul className="m-0 p-0">{renderNodes(node.children, depth + 1)}</ul>
           )}
           {node.kind === 'folder' && isOpen && node.children.length === 0 && (
-            <p
-              className="m-0 py-1 text-[12px] text-[var(--n-400)]"
-              style={{ paddingLeft: depth * 14 + 40 }}
-            >
+            <p className="m-0 py-1 text-[12px] text-n-400" style={{ paddingLeft: depth * 14 + 40 }}>
               Empty folder
             </p>
           )}
           {node.kind === 'doc' && isOpen && node.children.length === 0 && (
-            <p
-              className="m-0 py-1 text-[12px] text-[var(--n-400)]"
-              style={{ paddingLeft: depth * 14 + 40 }}
-            >
+            <p className="m-0 py-1 text-[12px] text-n-400" style={{ paddingLeft: depth * 14 + 40 }}>
               No extra pages
             </p>
           )}
@@ -693,7 +683,7 @@ export function FileTree({
         <button
           type="button"
           onClick={() => openDialog({ mode: 'new-page', dir: root })}
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-n-500 hover:bg-n-100 hover:text-n-700"
         >
           <Icon name="file-plus" size={13} />
           New page
@@ -701,14 +691,14 @@ export function FileTree({
         <button
           type="button"
           onClick={() => openDialog({ mode: 'new-folder', dir: root })}
-          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+          className="inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-n-500 hover:bg-n-100 hover:text-n-700"
         >
           <Icon name="folder-plus" size={13} />
           New folder
         </button>
       </div>
       {tree.length === 0 ? (
-        <p className="m-0 px-1.5 py-2 text-[13px] text-[var(--n-500)]">
+        <p className="m-0 px-1.5 py-2 text-[13px] text-n-500">
           No pages yet. Use New page to write the first one.
         </p>
       ) : (
@@ -754,7 +744,7 @@ export function FileTree({
             />
             {dialog.mode === 'new-page' && templates.length > 0 && (
               <div className="flex items-center gap-2">
-                <span className="flex-none text-[12px] text-[var(--n-500)]">Template</span>
+                <span className="flex-none text-[12px] text-n-500">Template</span>
                 <Dropdown
                   size="sm"
                   label="Template"
@@ -797,7 +787,7 @@ export function FileTree({
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(null) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">
+          <p className="m-0 text-[13px] text-n-600">
             {confirmDelete.kind === 'file'
               ? 'The page moves to the system Trash.'
               : 'The folder and everything inside it move to the system Trash.'}

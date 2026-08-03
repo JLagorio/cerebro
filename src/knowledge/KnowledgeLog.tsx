@@ -52,7 +52,7 @@ function EntryText({
               href={link.url}
               target="_blank"
               rel="noreferrer noopener"
-              className="text-[var(--cortex-600)] underline decoration-[var(--cortex-200)] underline-offset-2"
+              className="text-cortex-600 underline decoration-cortex-200 underline-offset-2"
             >
               {match[1]}
             </a>
@@ -66,7 +66,7 @@ function EntryText({
             type="button"
             data-testid="log-concept-link"
             onClick={() => onOpenConcept(path)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-[var(--cortex-600)] underline decoration-[var(--cortex-200)] underline-offset-2 hover:decoration-[var(--cortex-500)]"
+            className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
           >
             {match[1]}
           </button>
@@ -114,20 +114,16 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
   return (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6" data-testid="knowledge-log">
       <div className="mx-auto w-full max-w-[720px] px-6">
-        <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-[var(--n-900)]">
-          Update log
-        </h1>
-        <p className="mb-6 mt-1.5 text-[13px] leading-[19px] text-[var(--n-600)]">
+        <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-n-900">Update log</h1>
+        <p className="mb-6 mt-1.5 text-[13px] leading-[19px] text-n-600">
           What the assistant has learned, and when. Every entry names the concept it touched.
         </p>
 
         {days.map((day) => (
           <section key={day.date} data-testid="log-day" className="mb-5">
-            <div className="sticky top-0 flex items-center gap-2 bg-[var(--n-0)] pb-2 pt-1">
-              <span className="text-[12px] font-semibold tabular-nums text-[var(--n-700)]">
-                {day.date}
-              </span>
-              <span className="h-px flex-1 bg-[var(--n-100)]" />
+            <div className="sticky top-0 flex items-center gap-2 bg-n-0 pb-2 pt-1">
+              <span className="text-[12px] font-semibold tabular-nums text-n-700">{day.date}</span>
+              <span className="h-px flex-1 bg-n-100" />
             </div>
             <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
               {day.entries.map((entry, i) => {
@@ -151,7 +147,7 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
                           {style.label}
                         </span>
                       )}
-                      <span className="text-[13px] leading-[20px] text-[var(--n-700)]">
+                      <span className="text-[13px] leading-[20px] text-n-700">
                         <EntryText entry={entry} onOpenConcept={onOpenConcept} />
                       </span>
                     </span>

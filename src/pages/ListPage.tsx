@@ -245,7 +245,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               data-testid="list-title-edit"
               title="Edit list name & settings"
               onClick={() => setSettingsOpen(true)}
-              className="flex min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-[var(--n-50)]"
+              className="flex min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
             >
               <Icon
                 name={list.definition.icon ?? 'layout-list'}
@@ -266,11 +266,11 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                 is what ViewLimitNotice says under the records. */}
             <span
               data-testid="view-count"
-              className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]"
+              className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-n-400"
             >
               {sortedEntries.length}
             </span>
-            <span className="hidden flex-none items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)] sm:inline-flex">
+            <span className="hidden flex-none items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-[11px] text-n-500 sm:inline-flex">
               {sourceLabel}
               {filtered && ' · filtered'}
             </span>
@@ -452,7 +452,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">
+          <p className="m-0 text-[13px] text-n-600">
             The list's configuration is removed, including its{' '}
             {list.definition.views.length === 1 ? 'view' : `${list.definition.views.length} views`}.
             The records it held are untouched — a list is a saved query, not the notes themselves.

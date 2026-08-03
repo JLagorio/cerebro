@@ -215,7 +215,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               data-testid="type-icon-edit"
               title="Change icon & color"
               onClick={() => setDialog('style')}
-              className="flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-[var(--n-50)]"
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-n-50"
             >
               <Icon name={listing.icon} size={16} color={listing.color ?? 'var(--n-600)'} />
             </button>
@@ -224,7 +224,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               data-testid="type-title-edit"
               title={listing.system ? 'Change icon & color' : 'Change display name'}
               onClick={() => setDialog(listing.system ? 'style' : 'rename')}
-              className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-[var(--n-50)]"
+              className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
             >
               <h1 className="m-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
                 {listing.name}
@@ -239,12 +239,12 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                 thing: what is on screen. */}
             <span
               data-testid="view-count"
-              className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]"
+              className="[font-family:var(--font-mono)] text-[11.5px] text-n-400"
             >
               {sortedEntries.length}
             </span>
             {listing.system && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
+              <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-[11px] text-n-500">
                 <Icon name="lock" size={10} />
                 System type
               </span>

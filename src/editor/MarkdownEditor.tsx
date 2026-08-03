@@ -570,16 +570,16 @@ export function MarkdownEditor({
             role="dialog"
             aria-label="Assign task"
             data-testid="assign-task-popover"
-            className="absolute flex w-[300px] flex-col gap-2 rounded-xl border border-[var(--n-200)] bg-[var(--n-0)] p-3 shadow-[0_8px_28px_rgba(22,26,36,0.16)]"
+            className="absolute flex w-[300px] flex-col gap-2 rounded-xl border border-n-200 bg-n-0 p-3 shadow-[0_8px_28px_rgba(22,26,36,0.16)]"
             style={{ left: assign.x, top: assign.y }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2">
               <Icon name="user-round-plus" size={14} color="var(--n-500)" />
-              <span className="text-[12.5px] font-semibold text-[var(--n-800)]">Assign task</span>
+              <span className="text-[12.5px] font-semibold text-n-800">Assign task</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-16 flex-none text-[12px] text-[var(--n-500)]">Assignee</span>
+              <span className="w-16 flex-none text-[12px] text-n-500">Assignee</span>
               <Dropdown
                 size="sm"
                 label="Assignee"
@@ -593,7 +593,7 @@ export function MarkdownEditor({
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-16 flex-none text-[12px] text-[var(--n-500)]">Due</span>
+              <span className="w-16 flex-none text-[12px] text-n-500">Due</span>
               <input
                 type="date"
                 autoFocus
@@ -603,21 +603,21 @@ export function MarkdownEditor({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') submitAssign();
                 }}
-                className="h-7 flex-1 rounded-md border border-[var(--n-200)] px-2 text-[13px] text-[var(--n-800)]"
+                className="h-7 flex-1 rounded-md border border-n-200 px-2 text-[13px] text-n-800"
               />
             </div>
             <div className="mt-0.5 flex items-center justify-end gap-1.5">
               <button
                 type="button"
                 onClick={() => setAssign(null)}
-                className="h-7 rounded-md border-0 bg-transparent px-2 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+                className="h-7 rounded-md border-0 bg-transparent px-2 text-[12px] text-n-500 hover:bg-n-50 hover:text-n-800"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={submitAssign}
-                className="h-7 rounded-md border-0 bg-[var(--cortex-500)] px-2.5 text-[12px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-600)]"
+                className="h-7 rounded-md border-0 bg-cortex-500 px-2.5 text-[12px] font-medium text-n-0 hover:bg-cortex-600"
               >
                 Apply
               </button>

@@ -82,7 +82,7 @@ export function MenuSurface({
       onKeyDown={onKeyDown}
       style={width === undefined ? undefined : { width }}
       className={[
-        'rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]',
+        'rounded-[9px] border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]',
         className ?? '',
       ].join(' ')}
     >
@@ -127,19 +127,17 @@ export function MenuItem({
       className={[
         ITEM_BASE,
         disabled
-          ? 'cursor-default text-[var(--n-400)]'
+          ? 'cursor-default text-n-400'
           : danger
-            ? 'text-[var(--danger-600)] hover:bg-[var(--danger-50)] focus-visible:bg-[var(--danger-50)]'
-            : 'text-[var(--n-700)] hover:bg-[var(--n-50)] focus-visible:bg-[var(--n-50)]',
+            ? 'text-danger-600 hover:bg-danger-50 focus-visible:bg-danger-50'
+            : 'text-n-700 hover:bg-n-50 focus-visible:bg-n-50',
       ].join(' ')}
     >
       {icon !== undefined && (
         <Icon name={icon} size={13} color={danger ? undefined : 'var(--n-500)'} />
       )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {hint !== undefined && (
-        <span className="flex-none text-[11px] text-[var(--n-400)]">{hint}</span>
-      )}
+      {hint !== undefined && <span className="flex-none text-[11px] text-n-400">{hint}</span>}
       {checked && <Icon name="check" size={12} color="var(--cortex-600)" />}
       {submenu && <Icon name="chevron-right" size={11} color="var(--n-400)" />}
     </button>
@@ -147,14 +145,14 @@ export function MenuItem({
 }
 
 export function MenuSeparator() {
-  return <div role="separator" className="my-1 h-px bg-[var(--n-100)]" />;
+  return <div role="separator" className="my-1 h-px bg-n-100" />;
 }
 
 /** A section heading. Not a menuitem: it is not selectable and must not
  * absorb an arrow-key stop on the way past. */
 export function MenuLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2 pb-0.5 pt-1 text-[10.5px] font-medium uppercase tracking-wide text-[var(--n-400)]">
+    <div className="px-2 pb-0.5 pt-1 text-[10.5px] font-medium uppercase tracking-wide text-n-400">
       {children}
     </div>
   );
@@ -168,13 +166,11 @@ export function MenuBack({ title, onBack }: { title: string; onBack: () => void 
         type="button"
         aria-label={`Back to ${title}`}
         onClick={onBack}
-        className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)]"
+        className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50"
       >
         <Icon name="arrow-left" size={13} />
       </button>
-      <span className="min-w-0 truncate text-[12.5px] font-semibold text-[var(--n-900)]">
-        {title}
-      </span>
+      <span className="min-w-0 truncate text-[12.5px] font-semibold text-n-900">{title}</span>
     </div>
   );
 }

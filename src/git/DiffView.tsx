@@ -19,22 +19,18 @@ export function DiffView({
   const stats = useMemo(() => diffStats(diff), [diff]);
 
   if (diff.trim() === '') {
-    return <p className="m-0 px-1 py-3 text-[12.5px] text-[var(--n-400)]">{emptyLabel}</p>;
+    return <p className="m-0 px-1 py-3 text-[12.5px] text-n-400">{emptyLabel}</p>;
   }
 
   return (
     <div data-testid="diff-view" className="flex min-h-0 flex-col">
       <div className="flex flex-none items-center gap-3 pb-1.5 text-[11px]">
-        <span className="[font-family:var(--font-mono)] text-[var(--success-600)]">
-          +{stats.added}
-        </span>
-        <span className="[font-family:var(--font-mono)] text-[var(--danger-500)]">
-          −{stats.removed}
-        </span>
+        <span className="[font-family:var(--font-mono)] text-success-600">+{stats.added}</span>
+        <span className="[font-family:var(--font-mono)] text-danger-500">−{stats.removed}</span>
       </div>
       {/* Diffs are wide; they scroll inside their own box rather than making
           the panel scroll sideways. */}
-      <div className="min-h-0 overflow-auto rounded-[8px] border border-[var(--n-200)] bg-[var(--n-25)]">
+      <div className="min-h-0 overflow-auto rounded-[8px] border border-n-200 bg-n-25">
         <pre className="m-0 min-w-full p-0 [font-family:var(--font-mono)] text-[11.5px] leading-[17px]">
           {lines.map((line, i) => (
             <div
@@ -43,14 +39,14 @@ export function DiffView({
               className={[
                 'whitespace-pre px-2',
                 line.kind === 'add'
-                  ? 'bg-[var(--success-50)] text-[var(--success-700)]'
+                  ? 'bg-success-50 text-success-700'
                   : line.kind === 'del'
-                    ? 'bg-[var(--danger-50)] text-[var(--danger-700)]'
+                    ? 'bg-danger-50 text-danger-700'
                     : line.kind === 'hunk'
-                      ? 'bg-[var(--n-100)] text-[var(--n-500)]'
+                      ? 'bg-n-100 text-n-500'
                       : line.kind === 'meta'
-                        ? 'text-[var(--n-400)]'
-                        : 'text-[var(--n-700)]',
+                        ? 'text-n-400'
+                        : 'text-n-700',
               ].join(' ')}
             >
               {line.text === '' ? ' ' : line.text}

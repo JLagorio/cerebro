@@ -51,13 +51,13 @@ function StatusRow({
   return (
     <div
       style={style}
-      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-[var(--n-25)] ${dragging ? 'opacity-40' : ''}`}
+      className={`group flex flex-col rounded-md px-1 py-1 hover:bg-n-25 ${dragging ? 'opacity-40' : ''}`}
     >
       <div className="flex items-center gap-2">
         {grip !== undefined && (
           <span
             {...grip}
-            className="flex flex-none cursor-grab items-center justify-center rounded-[3px] text-[var(--n-300)] opacity-0 hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+            className="flex flex-none cursor-grab items-center justify-center rounded-[3px] text-n-300 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
           >
             <Icon name="grip-vertical" size={12} />
           </span>
@@ -94,14 +94,12 @@ function StatusRow({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-0 py-0.5 text-left text-[12.5px] text-[var(--n-800)]"
+            className="min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-0 py-0.5 text-left text-[12.5px] text-n-800"
           >
             {status.label}
           </button>
         )}
-        <span className="[font-family:var(--font-mono)] text-[10.5px] text-[var(--n-300)]">
-          {status.id}
-        </span>
+        <span className="[font-family:var(--font-mono)] text-[10.5px] text-n-300">{status.id}</span>
         {/* Revealed on hover OR focus — see OptionListEditor: `hidden` took
             the remove button out of the tab order entirely. */}
         <span className="inline-flex flex-none opacity-0 focus-within:opacity-100 group-hover:opacity-100">
@@ -195,11 +193,11 @@ function StatusGroup({
   return (
     <div className="flex flex-col">
       <div className="flex items-center gap-1.5 px-1">
-        <span className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
           {label}
         </span>
         <Tooltip label={hint}>
-          <span className="inline-flex text-[var(--n-300)]">
+          <span className="inline-flex text-n-300">
             <Icon name="info" size={11} />
           </span>
         </Tooltip>
@@ -220,7 +218,7 @@ function StatusGroup({
         ))}
       </div>
       {rows.length === 0 && !adding && (
-        <span className="px-1 py-0.5 text-[11.5px] text-[var(--n-400)]">None yet</span>
+        <span className="px-1 py-0.5 text-[11.5px] text-n-400">None yet</span>
       )}
       {adding && (
         <div className="px-1 py-1">

@@ -128,7 +128,7 @@ export function RecordRowMenu({ entry, onOpen }: { entry: Entry; onOpen: () => v
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
           primaryAction={{ label: 'Delete', onClick: remove }}
         >
-          <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
+          <p className="m-0 text-[13px] leading-relaxed text-n-600">
             The file leaves the vault.
             {links > 0
               ? ` ${links === 1 ? 'One record links' : `${links} records link`} here, and those links will point at nothing.`

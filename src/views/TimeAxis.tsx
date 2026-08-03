@@ -51,7 +51,7 @@ export function TimeAxisHeader({
   return (
     <div
       role="row"
-      className="sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
+      className="sticky top-0 z-20 flex h-8 border-b border-n-200 bg-n-25"
       style={{ width: axisWidth(axis, zoom) }}
     >
       {ticks.map((tick) => (
@@ -63,8 +63,8 @@ export function TimeAxisHeader({
           className={[
             'flex flex-none items-center overflow-hidden whitespace-nowrap px-1 text-[11px]',
             tick.major
-              ? 'border-l border-[var(--n-300)] font-semibold text-[var(--n-700)]'
-              : 'border-l border-[var(--n-100)] text-[var(--n-500)]',
+              ? 'border-l border-n-300 font-semibold text-n-700'
+              : 'border-l border-n-100 text-n-500',
           ].join(' ')}
           style={{ width: tick.days * PX_PER_DAY[zoom] }}
         >
@@ -78,7 +78,7 @@ export function TimeAxisHeader({
       {onAxis && (
         <span
           data-testid="today-label"
-          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-[var(--cortex-500)] px-1.5 py-px text-[10px] font-semibold text-[var(--n-0)]"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-cortex-500 px-1.5 py-px text-[10px] font-semibold text-n-0"
           style={{ left: dayOffset(axis, today) * PX_PER_DAY[zoom], top: 4 }}
         >
           Today
@@ -95,10 +95,7 @@ export function TimeGridLines({ ticks, zoom }: { ticks: AxisTick[]; zoom: Zoom }
       {ticks.map((tick) => (
         <div
           key={tick.iso}
-          className={[
-            'flex-none border-l',
-            tick.major ? 'border-[var(--n-200)]' : 'border-[var(--n-100)]',
-          ].join(' ')}
+          className={['flex-none border-l', tick.major ? 'border-n-200' : 'border-n-100'].join(' ')}
           style={{ width: tick.days * PX_PER_DAY[zoom] }}
         />
       ))}
@@ -116,7 +113,7 @@ export function TodayLine({ axis, zoom, today }: { axis: Span; zoom: Zoom; today
     <div
       aria-hidden
       data-testid="today-line"
-      className="pointer-events-none absolute bottom-0 top-0 z-10 w-px bg-[var(--cortex-500)] opacity-70"
+      className="pointer-events-none absolute bottom-0 top-0 z-10 w-px bg-cortex-500 opacity-70"
       style={{ left: dayOffset(axis, today) * PX_PER_DAY[zoom] }}
     />
   );
@@ -231,15 +228,12 @@ export function TimeTable({
   return (
     <div
       data-testid="time-table"
-      className="sticky left-0 z-30 flex-none bg-[var(--n-0)]"
+      className="sticky left-0 z-30 flex-none bg-n-0"
       style={{ width: total }}
     >
-      <div
-        className="flex border-b border-[var(--n-200)] bg-[var(--n-25)]"
-        style={{ height: HEAD_H }}
-      >
+      <div className="flex border-b border-n-200 bg-n-25" style={{ height: HEAD_H }}>
         <div
-          className="relative flex flex-none items-center border-r border-[var(--n-200)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]"
+          className="relative flex flex-none items-center border-r border-n-200 px-3 text-[11.5px] font-semibold text-n-600"
           style={{ width: nameWidth }}
         >
           {nameLabel}
@@ -255,7 +249,7 @@ export function TimeTable({
         {columns.map((c) => (
           <div
             key={c.def.name}
-            className="flex flex-none items-center overflow-hidden truncate border-r border-[var(--n-200)] px-2 text-[11.5px] font-semibold text-[var(--n-600)]"
+            className="flex flex-none items-center overflow-hidden truncate border-r border-n-200 px-2 text-[11.5px] font-semibold text-n-600"
             style={{ width: c.width }}
           >
             {humanize(c.def.name)}
@@ -271,7 +265,7 @@ export function TimeTable({
               type="button"
               data-testid="time-table-band"
               onClick={() => onToggle(row.key)}
-              className="flex w-full items-center gap-2 border-b border-r border-[var(--n-100)] bg-[var(--n-25)] text-left"
+              className="flex w-full items-center gap-2 border-b border-r border-n-100 bg-n-25 text-left"
               style={{ height: BAND_H, paddingLeft: 12 + row.node.depth * INDENT }}
             >
               <Icon
@@ -279,10 +273,10 @@ export function TimeTable({
                 size={12}
                 color="var(--n-400)"
               />
-              <span className="truncate text-[12px] font-semibold text-[var(--n-800)]">
+              <span className="truncate text-[12px] font-semibold text-n-800">
                 {row.node.label}
               </span>
-              <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+              <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
                 {row.node.count}
               </span>
             </button>
@@ -294,7 +288,7 @@ export function TimeTable({
             <div
               data-testid="time-table-name"
               data-depth={row.depth}
-              className="flex flex-none items-center gap-1.5 overflow-hidden border-b border-r border-[var(--n-100)] pr-2"
+              className="flex flex-none items-center gap-1.5 overflow-hidden border-b border-r border-n-100 pr-2"
               style={{ width: nameWidth, paddingLeft: 10 + row.depth * INDENT }}
             >
               {row.childCount > 0 ? (
@@ -303,7 +297,7 @@ export function TimeTable({
                   aria-expanded={!isCollapsed(row.key)}
                   aria-label={`${isCollapsed(row.key) ? 'Expand' : 'Collapse'} ${row.entry.title}`}
                   onClick={() => onToggle(row.key)}
-                  className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)]"
+                  className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100"
                 >
                   <Icon name={isCollapsed(row.key) ? 'chevron-right' : 'chevron-down'} size={12} />
                 </button>
@@ -314,7 +308,7 @@ export function TimeTable({
               <button
                 type="button"
                 onClick={() => onOpen(row.entry.path)}
-                className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-[var(--n-900)] hover:underline"
+                className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-n-900 hover:underline"
               >
                 {row.entry.title}
               </button>
@@ -328,10 +322,10 @@ export function TimeTable({
                 <div
                   key={c.def.name}
                   data-testid="time-table-cell"
-                  className="flex flex-none items-center overflow-hidden border-b border-r border-[var(--n-100)] px-2"
+                  className="flex flex-none items-center overflow-hidden border-b border-r border-n-100 px-2"
                   style={{ width: c.width }}
                 >
-                  <span className="truncate whitespace-nowrap text-[12.5px] text-[var(--n-600)]">
+                  <span className="truncate whitespace-nowrap text-[12.5px] text-n-600">
                     {display === '' ? '—' : display}
                   </span>
                 </div>
@@ -382,7 +376,7 @@ export function ResizeGrips({
       {...drag.handleProps(id, edge)}
       className={[
         'absolute z-10 cursor-col-resize touch-none rounded-[2px] border-0 bg-transparent p-0',
-        'opacity-0 hover:bg-[var(--cortex-600)] focus-visible:opacity-100 hover:opacity-100',
+        'opacity-0 hover:bg-cortex-600 focus-visible:opacity-100 hover:opacity-100',
       ].join(' ')}
       style={{
         // Straddles the edge so it is grabbable from either side of a thin bar.

@@ -55,7 +55,7 @@ export function MessageText({ text, onOpen }: { text: string; onOpen: (target: s
               key={i}
               type="button"
               onClick={() => onOpen(target)}
-              className="cursor-pointer border-0 bg-transparent p-0 text-[var(--cortex-600)] underline decoration-[var(--cortex-200)] underline-offset-2 hover:decoration-[var(--cortex-500)]"
+              className="cursor-pointer border-0 bg-transparent p-0 text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
             >
               {alias ?? entry?.title ?? target}
             </button>
@@ -82,7 +82,7 @@ function UserMessage({ text }: { text: string }) {
         // `whitespace-pre-wrap` (M15): a Shift+Enter multi-line question used
         // to come back as one run-on line in your own bubble.
         className={[
-          'max-w-[85%] whitespace-pre-wrap break-words rounded-[12px] rounded-br-[4px] bg-[var(--cortex-500)] px-3 py-2 text-[12.5px] leading-[18px] text-[var(--n-0)]',
+          'max-w-[85%] whitespace-pre-wrap break-words rounded-[12px] rounded-br-[4px] bg-cortex-500 px-3 py-2 text-[12.5px] leading-[18px] text-n-0',
           long && !expanded ? 'max-h-[112px] overflow-hidden' : '',
         ].join(' ')}
       >
@@ -93,7 +93,7 @@ function UserMessage({ text }: { text: string }) {
           type="button"
           data-testid="prompt-toggle"
           onClick={() => setExpanded(!expanded)}
-          className="border-0 bg-transparent p-0 text-[10.5px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+          className="border-0 bg-transparent p-0 text-[10.5px] text-n-500 hover:text-n-800"
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -135,19 +135,19 @@ function Message({
           that wrote three paragraphs and then failed used to show only the red
           box, throwing away work that was still sitting in state. */}
       {message.text !== '' && (
-        <div className="whitespace-pre-wrap break-words text-[12.5px] leading-[19px] text-[var(--n-800)]">
+        <div className="whitespace-pre-wrap break-words text-[12.5px] leading-[19px] text-n-800">
           <MessageText text={message.text} onOpen={onOpen} />
         </div>
       )}
       {message.error !== undefined && (
-        <div className="flex flex-col items-start gap-1.5 rounded-[10px] border border-[var(--danger-200)] bg-[var(--danger-50)] px-3 py-2 text-[12px] leading-[17px] text-[var(--danger-700)]">
+        <div className="flex flex-col items-start gap-1.5 rounded-[10px] border border-danger-200 bg-danger-50 px-3 py-2 text-[12px] leading-[17px] text-danger-700">
           <span>{message.error}</span>
           {onRetry !== undefined && (
             <button
               type="button"
               data-testid="retry-turn"
               onClick={onRetry}
-              className="rounded-md border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 py-0.5 text-[11px] text-[var(--danger-700)] hover:border-[var(--danger-500)]"
+              className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-[11px] text-danger-700 hover:border-danger-500"
             >
               Retry
             </button>
@@ -155,7 +155,7 @@ function Message({
         </div>
       )}
       {message.streaming === true && message.text === '' && message.error === undefined && (
-        <span className="text-[12.5px] text-[var(--n-400)]">Thinking…</span>
+        <span className="text-[12.5px] text-n-400">Thinking…</span>
       )}
     </div>
   );
@@ -398,7 +398,7 @@ export function AiPanel() {
       // `relative` hosts the drag handle; `min-w-0` + a 100% ceiling let the
       // panel SHRINK inside the shell's right-hand slot instead of having its
       // close button clipped off the edge (M15 layout contract).
-      className="relative flex min-w-0 flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      className="relative flex min-w-0 flex-none flex-col border-l border-n-200 bg-n-0"
       style={{ width, maxWidth: '100%' }}
     >
       <ResizeHandle
@@ -412,13 +412,13 @@ export function AiPanel() {
           saveAiWidth(next);
         }}
       />
-      <header className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-3 py-2">
+      <header className="flex flex-none items-center gap-2 border-b border-n-200 px-3 py-2">
         <Icon name="sparkles" size={14} color="var(--synapse-500)" />
         {/* M9.5: conversations are kept and named, so this is a switcher
             rather than a label beside a button that erased the transcript. */}
         <ConversationSwitcher state={conversations} />
         {status !== null && !status.installed && (
-          <span className="text-[10.5px] text-[var(--warn-600)]">not installed</span>
+          <span className="text-[10.5px] text-warn-600">not installed</span>
         )}
         <span className="flex-1" />
         <IconButton
@@ -442,7 +442,7 @@ export function AiPanel() {
       >
         {chat.messages.length === 0 ? (
           <div className="flex flex-col gap-2 pt-2">
-            <p className="m-0 text-[12.5px] leading-[18px] text-[var(--n-500)]">
+            <p className="m-0 text-[12.5px] leading-[18px] text-n-500">
               {status?.installed === false
                 ? 'Claude Code was not found on this machine. Install it and reopen cerebro.'
                 : 'I can read and write this vault through cerebro. I maintain the Knowledge bundle; you verify it.'}
@@ -453,7 +453,7 @@ export function AiPanel() {
                   key={suggestion}
                   type="button"
                   onClick={() => chat.send(suggestion)}
-                  className="rounded-[9px] border border-[var(--n-200)] bg-transparent px-2.5 py-1.5 text-left text-[12px] text-[var(--n-700)] hover:border-[var(--n-300)] hover:bg-[var(--n-25)]"
+                  className="rounded-[9px] border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-[12px] text-n-700 hover:border-n-300 hover:bg-n-25"
                 >
                   {suggestion}
                 </button>
@@ -473,7 +473,7 @@ export function AiPanel() {
         )}
       </div>
 
-      <div className="relative flex-none border-t border-[var(--n-200)] p-2.5">
+      <div className="relative flex-none border-t border-n-200 p-2.5">
         {/* Only offered when you have actually scrolled away — the transcript
             is sticky to the bottom the rest of the time. */}
         {!atBottom && chat.messages.length > 0 && (
@@ -481,7 +481,7 @@ export function AiPanel() {
             type="button"
             data-testid="jump-to-latest"
             onClick={jumpToLatest}
-            className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--n-200)] bg-[var(--n-0)] px-2.5 py-1 text-[11px] text-[var(--n-600)] shadow-[var(--shadow-lg)] hover:border-[var(--n-400)]"
+            className="absolute -top-8 left-1/2 z-10 -translate-x-1/2 rounded-full border border-n-200 bg-n-0 px-2.5 py-1 text-[11px] text-n-600 shadow-[var(--shadow-lg)] hover:border-n-400"
           >
             Jump to latest
           </button>
@@ -491,7 +491,7 @@ export function AiPanel() {
             the agent has to go searching for. */}
         <ChatInput autoFocus value={draft} onChange={setDraft} onSubmit={submit} />
         <div className="mt-1.5 flex items-center gap-2">
-          <span className="flex-1 text-[10.5px] text-[var(--n-400)]">
+          <span className="flex-1 text-[10.5px] text-n-400">
             {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}
           </span>
           {chat.streaming ? (

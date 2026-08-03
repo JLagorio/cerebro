@@ -92,7 +92,7 @@ export function PropertyMenu({
             }}
           />
         ))}
-        <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-[var(--n-400)]">
+        <div className="border-t border-n-100 px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-n-400">
           Hidden properties fold into an expander — they are still on the record.
         </div>
       </MenuSurface>
@@ -121,10 +121,10 @@ export function PropertyMenu({
       <MenuSurface width={232}>
         <div className="px-1 pb-1 pt-0.5">
           {locked ? (
-            <div className="flex items-center gap-1.5 px-1 py-0.5 text-[12.5px] text-[var(--n-600)]">
+            <div className="flex items-center gap-1.5 px-1 py-0.5 text-[12.5px] text-n-600">
               <Icon name="lock" size={11} />
               <span className="min-w-0 truncate">{label}</span>
-              <span className="flex-none text-[11px] text-[var(--n-400)]">Built-in</span>
+              <span className="flex-none text-[11px] text-n-400">Built-in</span>
             </div>
           ) : (
             <Input
@@ -185,7 +185,7 @@ export function PropertyMenu({
             />
           </>
         )}
-        <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-[var(--n-400)]">
+        <div className="border-t border-n-100 px-2 pb-0.5 pt-1.5 text-[10.5px] leading-[1.35] text-n-400">
           Changes {sourceType} — {recordCount === 1 ? '1 record' : `${recordCount} records`}
         </div>
       </MenuSurface>

@@ -121,7 +121,7 @@ export function Dropdown({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         style={{ height: size === 'sm' ? 'var(--control-h-sm)' : 'var(--control-h)' }}
-        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--n-300)] bg-[var(--n-0)] pl-2.5 pr-2 text-[13px] text-[var(--n-800)] outline-none hover:bg-[var(--n-50)] focus-visible:border-[var(--cortex-500)] focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-[var(--n-50)] disabled:text-[var(--n-400)]"
+        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-n-300 bg-n-0 pl-2.5 pr-2 text-[13px] text-n-800 outline-none hover:bg-n-50 focus-visible:border-cortex-500 focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-n-50 disabled:text-n-400"
       >
         {selected?.icon && <Icon name={selected.icon} size={13} color="var(--n-500)" />}
         <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? ''}</span>
@@ -152,7 +152,7 @@ export function Dropdown({
             aria-activedescendant={
               options[active] === undefined ? undefined : `${listId}-${options[active].value}`
             }
-            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]"
           >
             <div className="max-h-[264px] overflow-y-auto">
               {options.map((o, i) => (
@@ -164,8 +164,8 @@ export function Dropdown({
                   aria-selected={o.value === value}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => pick(o.value)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] ${
-                    i === active ? 'bg-[var(--n-50)]' : ''
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] text-n-800 ${
+                    i === active ? 'bg-n-50' : ''
                   }`}
                 >
                   {o.icon && <Icon name={o.icon} size={13} color="var(--n-500)" />}

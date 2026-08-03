@@ -127,7 +127,7 @@ export function QuickAddInline({
         data-testid="quick-add"
         aria-label={ariaLabel}
         onClick={() => setEditing(true)}
-        className={`flex ${height} w-full items-center gap-2 border-b border-[var(--n-100)] px-3 text-[12.5px] text-[var(--n-400)] hover:bg-[var(--n-25)] hover:text-[var(--n-700)]`}
+        className={`flex ${height} w-full items-center gap-2 border-b border-n-100 px-3 text-[12.5px] text-n-400 hover:bg-n-25 hover:text-n-700`}
       >
         <Icon name="plus" size={13} />
         {label}
@@ -136,7 +136,7 @@ export function QuickAddInline({
   }
 
   return (
-    <div className={`flex ${height} items-center gap-2 border-b border-[var(--n-100)] px-3`}>
+    <div className={`flex ${height} items-center gap-2 border-b border-n-100 px-3`}>
       <Icon name="plus" size={13} color="var(--n-400)" />
       <input
         autoFocus
@@ -151,7 +151,7 @@ export function QuickAddInline({
         }}
         placeholder="Title — Enter to create"
         aria-label={ariaLabel}
-        className="h-6 flex-1 border-none bg-transparent text-[13px] text-[var(--n-900)] outline-none"
+        className="h-6 flex-1 border-none bg-transparent text-[13px] text-n-900 outline-none"
       />
     </div>
   );

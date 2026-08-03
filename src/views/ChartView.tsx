@@ -295,14 +295,14 @@ function DonutChart({ data }: { data: ChartData }) {
           <li
             key={s.key || s.label}
             data-testid="chart-legend-item"
-            className="flex items-center gap-2 text-[12px] text-[var(--n-700)]"
+            className="flex items-center gap-2 text-[12px] text-n-700"
           >
             <span
               className="box-border h-2.5 w-2.5 flex-none rounded-full"
               style={{ background: sliceColor(s, i) }}
             />
             <span className="min-w-0 flex-1 truncate">{s.label}</span>
-            <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">
+            <span className="[font-family:var(--font-mono)] text-[11px] text-n-500">
               {s.display}
             </span>
           </li>
@@ -352,7 +352,7 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
       data-testid="chart-view"
       data-chart-kind={kind}
       data-chart-measure={data.measure}
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--n-25)] px-5 py-4"
+      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
     >
       {data.blocked !== null ? (
         <div data-testid="chart-empty" data-reason={data.blocked}>
@@ -367,16 +367,16 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
           />
         </div>
       ) : (
-        <figure className="m-0 rounded-[12px] border border-[var(--n-200)] bg-[var(--n-0)] p-4">
-          <figcaption className="pb-3 text-[12.5px] font-semibold text-[var(--n-800)]">
+        <figure className="m-0 rounded-[12px] border border-n-200 bg-n-0 p-4">
+          <figcaption className="pb-3 text-[12.5px] font-semibold text-n-800">
             {data.measure}
-            <span className="pl-1.5 font-normal text-[var(--n-500)]">by {data.axis}</span>
+            <span className="pl-1.5 font-normal text-n-500">by {data.axis}</span>
           </figcaption>
           {kind === 'donut' ? (
             data.total <= 0 ? (
               // A donut of nothing is a full grey ring that reads as one
               // enormous slice.
-              <p className="m-0 py-6 text-center text-[12px] text-[var(--n-500)]">
+              <p className="m-0 py-6 text-center text-[12px] text-n-500">
                 Every band measures zero, so there is no ring to draw.
               </p>
             ) : (

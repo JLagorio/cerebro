@@ -261,7 +261,7 @@ export function FieldPopover({
           tabIndex={-1}
           aria-activedescendant={activeDescendant}
           onKeyDown={onKeyDown}
-          className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)] outline-none"
+          className="w-60 rounded-[10px] border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)] outline-none"
         >
           {searchable && (
             <div className="pb-1.5">
@@ -296,8 +296,8 @@ export function FieldPopover({
                   onPick(o.id);
                   if (!multi) onClose();
                 }}
-                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)] ${
-                  i === active ? 'bg-[var(--n-50)]' : ''
+                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-n-800 hover:bg-n-50 ${
+                  i === active ? 'bg-n-50' : ''
                 }`}
               >
                 <span
@@ -317,7 +317,7 @@ export function FieldPopover({
               </button>
             ))}
             {rows.length === 0 && !canCreate && (
-              <div className="p-2 text-[12px] leading-relaxed text-[var(--n-500)]">
+              <div className="p-2 text-[12px] leading-relaxed text-n-500">
                 {options.length === 0 && emptyHint !== undefined ? emptyHint : 'No matches'}
               </div>
             )}
@@ -326,7 +326,7 @@ export function FieldPopover({
                 is derived from onCreate), so there is no box to type into and
                 no moment at which a typed-only hint would ever appear. */}
             {!canCreate && clash === undefined && unavailableHint !== undefined && (
-              <div className="border-t border-[var(--n-100)] px-2 pb-1 pt-1.5 text-[11.5px] leading-relaxed text-[var(--n-500)]">
+              <div className="border-t border-n-100 px-2 pb-1 pt-1.5 text-[11.5px] leading-relaxed text-n-500">
                 {unavailableHint}
               </div>
             )}
@@ -336,19 +336,19 @@ export function FieldPopover({
                 type="button"
                 onMouseEnter={() => setHighlight(rows.length)}
                 onClick={create}
-                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-700)] hover:bg-[var(--n-50)] ${
-                  createActive ? 'bg-[var(--n-50)]' : ''
+                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-n-700 hover:bg-n-50 ${
+                  createActive ? 'bg-n-50' : ''
                 }`}
               >
                 <Icon name="plus" size={13} color="var(--n-400)" />
                 <span className="min-w-0 flex-1 truncate">
-                  Create <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
+                  Create <span className="font-medium text-n-900">{trimmed}</span>
                 </span>
               </button>
             )}
           </div>
           {multi && (
-            <div className="border-t border-[var(--n-100)] px-2 pb-0.5 pt-1.5 text-[11px] text-[var(--n-400)]">
+            <div className="border-t border-n-100 px-2 pb-0.5 pt-1.5 text-[11px] text-n-400">
               Pick as many as you need — Esc or click away to close.
             </div>
           )}

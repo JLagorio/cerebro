@@ -78,10 +78,10 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
       <div className="flex flex-col gap-3">
-        <p className="m-0 text-[13px] leading-[19px] text-[var(--n-600)]">
+        <p className="m-0 text-[13px] leading-[19px] text-n-600">
           A type is a document schema: notes of this type inherit its properties and styling.
         </p>
-        <label className="flex flex-col gap-1 text-[12px] text-[var(--n-600)]">
+        <label className="flex flex-col gap-1 text-[12px] text-n-600">
           Type name
           <Input
             autoFocus
@@ -91,7 +91,7 @@ export function NewTypeDialog({ onClose }: { onClose: () => void }) {
             width="100%"
           />
           {duplicate && (
-            <span className="text-[11px] text-[var(--danger-500)]">
+            <span className="text-[11px] text-danger-500">
               A type named "{trimmed}" already exists.
             </span>
           )}
@@ -175,16 +175,16 @@ export function RenameTypeDialog({
           : undefined
       }
     >
-      <label className="flex flex-col gap-1 text-[12px] text-[var(--n-600)]">
+      <label className="flex flex-col gap-1 text-[12px] text-n-600">
         Display name
         <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} width="100%" />
         {duplicate && (
-          <span className="text-[11px] text-[var(--danger-500)]">
+          <span className="text-[11px] text-danger-500">
             A type named "{trimmed}" already exists.
           </span>
         )}
         {isSystemType(trimmed) && trimmed !== listing.name && (
-          <span className="text-[11px] text-[var(--danger-500)]">
+          <span className="text-[11px] text-danger-500">
             "{trimmed}" is a reserved system type name.
           </span>
         )}
@@ -233,7 +233,7 @@ export function TypeStyleDialog({
     >
       <div className="flex flex-col gap-4">
         <div>
-          <div className="mb-1.5 text-[12px] text-[var(--n-600)]">Color</div>
+          <div className="mb-1.5 text-[12px] text-n-600">Color</div>
           <div className="flex gap-2">
             {TYPE_COLORS.map((c) => (
               <button
@@ -252,7 +252,7 @@ export function TypeStyleDialog({
           </div>
         </div>
         <div>
-          <div className="mb-1.5 text-[12px] text-[var(--n-600)]">Icon</div>
+          <div className="mb-1.5 text-[12px] text-n-600">Icon</div>
           {/* M16.26: the grid this replaces was the app's only icon picker,
               inline and reachable from nothing else — which is why a view tab
               could not have an icon. It also offered every lucide export
@@ -261,10 +261,10 @@ export function TypeStyleDialog({
               picking one wrote a dead name into the type's frontmatter. */}
           <IconPicker value={icon} onChange={setIcon} color={color} />
         </div>
-        <div className="flex items-center gap-2 rounded-lg border border-[var(--n-200)] bg-[var(--n-25)] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-lg border border-n-200 bg-n-25 px-3 py-2">
           <Icon name={icon} size={16} color={color} />
-          <span className="text-[13px] text-[var(--n-800)]">{listing.name}</span>
-          <span className="ml-auto text-[11px] text-[var(--n-400)]">Preview</span>
+          <span className="text-[13px] text-n-800">{listing.name}</span>
+          <span className="ml-auto text-[11px] text-n-400">Preview</span>
         </div>
       </div>
     </Dialog>
@@ -309,7 +309,7 @@ export function DeleteTypeDialog({
       primaryAction={{ label: 'Delete type', onClick: () => void remove(), disabled: submitting }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
-      <p className="m-0 text-[13px] leading-[19px] text-[var(--n-700)]">
+      <p className="m-0 text-[13px] leading-[19px] text-n-700">
         The type document moves to the trash.{' '}
         {listing.count > 0
           ? `${listing.count} ${listing.count === 1 ? 'record keeps' : 'records keep'} the "${listing.name}" tag but lose its properties and styling.`

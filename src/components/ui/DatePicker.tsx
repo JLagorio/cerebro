@@ -53,7 +53,7 @@ function FlyoutMenu<T extends string>({
       ref={ref}
       role="menu"
       style={{ transform: shiftX === 0 ? undefined : `translateX(${shiftX}px)` }}
-      className="absolute left-full top-[-6px] z-50 ml-1.5 w-56 rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+      className="absolute left-full top-[-6px] z-50 ml-1.5 w-56 rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]"
     >
       {options.map((o) => (
         <button
@@ -62,7 +62,7 @@ function FlyoutMenu<T extends string>({
           role="menuitemradio"
           aria-checked={o.id === activeId}
           onClick={() => onPick(o.id)}
-          className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+          className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-[7px] text-left text-[13px] text-n-800 hover:bg-n-50"
         >
           <span className="min-w-0 flex-1 truncate">{o.label}</span>
           {o.id === activeId && <Icon name="check" size={14} color="var(--n-700)" />}
@@ -85,7 +85,7 @@ function SettingRow({
 }) {
   const inner = (
     <>
-      <span className="text-[13px] text-[var(--n-800)]">{label}</span>
+      <span className="text-[13px] text-n-800">{label}</span>
       <span className="flex-1" />
       {value}
     </>
@@ -96,7 +96,7 @@ function SettingRow({
         <button
           type="button"
           onClick={onClick}
-          className="flex h-8 w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left hover:bg-[var(--n-50)]"
+          className="flex h-8 w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left hover:bg-n-50"
         >
           {inner}
         </button>
@@ -112,8 +112,8 @@ const boxClass = (active: boolean) =>
   [
     'flex h-8 min-w-0 flex-1 items-center rounded-lg border px-2.5 text-[13px]',
     active
-      ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--n-900)] shadow-[0_0_0_2px_var(--cortex-100)]'
-      : 'border-[var(--n-200)] bg-[var(--n-25,var(--n-50))] text-[var(--n-800)]',
+      ? 'border-cortex-500 bg-cortex-50 text-n-900 shadow-[0_0_0_2px_var(--cortex-100)]'
+      : 'border-n-200 bg-[var(--n-25,var(--n-50))] text-n-800',
   ].join(' ');
 
 export interface DatePickerProps {
@@ -231,7 +231,7 @@ export function DatePicker({
             aria-label={`${which === 'start' ? 'Start' : 'End'} time`}
             value={time}
             onChange={setTime(which === 'start' ? 'startTime' : 'endTime')}
-            className="h-8 w-[92px] flex-none rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 text-[12.5px] text-[var(--n-800)]"
+            className="h-8 w-[92px] flex-none rounded-lg border border-n-200 bg-n-0 px-1.5 text-[12.5px] text-n-800"
           />
         )}
       </div>
@@ -243,7 +243,7 @@ export function DatePicker({
   return (
     <div
       data-testid="date-picker"
-      className="flex w-[300px] flex-col gap-0.5 rounded-xl border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[0_8px_28px_rgba(22,26,36,0.16)]"
+      className="flex w-[300px] flex-col gap-0.5 rounded-xl border border-n-200 bg-n-0 p-2.5 shadow-[0_8px_28px_rgba(22,26,36,0.16)]"
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="flex flex-col gap-1.5 pb-2">
@@ -262,7 +262,7 @@ export function DatePicker({
         todayLabel={hasTime ? 'Now' : 'Today'}
         onToday={jumpToday}
       />
-      <div className="mt-1.5 border-t border-[var(--n-100)] pt-1.5">
+      <div className="mt-1.5 border-t border-n-100 pt-1.5">
         {showEndToggle && (
           <SettingRow
             label="End date"
@@ -276,7 +276,7 @@ export function DatePicker({
             label="Date format"
             onClick={() => setFlyout(flyout === 'format' ? null : 'format')}
             value={
-              <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
+              <span className="flex items-center gap-1 text-[12.5px] text-n-500">
                 {FORMAT_OPTIONS.find((o) => o.id === value.format)?.label}
                 <Icon name="chevron-right" size={13} color="var(--n-400)" />
               </span>
@@ -307,7 +307,7 @@ export function DatePicker({
                 label="Time format"
                 onClick={() => setFlyout(flyout === 'timeformat' ? null : 'timeformat')}
                 value={
-                  <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
+                  <span className="flex items-center gap-1 text-[12.5px] text-n-500">
                     {TIME_FORMAT_OPTIONS.find((o) => o.id === value.timeFormat)?.label}
                     <Icon name="chevron-right" size={13} color="var(--n-400)" />
                   </span>
@@ -328,7 +328,7 @@ export function DatePicker({
             <SettingRow
               label="Timezone"
               value={
-                <span className="text-[12.5px] text-[var(--n-500)]" title={tz.zone}>
+                <span className="text-[12.5px] text-n-500" title={tz.zone}>
                   {tz.short}
                 </span>
               }
@@ -340,7 +340,7 @@ export function DatePicker({
             label="Remind"
             onClick={() => setFlyout(flyout === 'remind' ? null : 'remind')}
             value={
-              <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
+              <span className="flex items-center gap-1 text-[12.5px] text-n-500">
                 {REMIND_OPTIONS.find((o) => o.id === (value.remind ?? 'none'))?.label.replace(
                   / \(9:00 AM\)$/,
                   '',
@@ -362,11 +362,11 @@ export function DatePicker({
           </SettingRow>
         )}
       </div>
-      <div className="border-t border-[var(--n-100)] pt-1">
+      <div className="border-t border-n-100 pt-1">
         <SettingRow label="Clear" onClick={onClear} />
       </div>
       {showRemind && (
-        <div className="flex items-center gap-1.5 border-t border-[var(--n-100)] px-2 pb-0.5 pt-2 text-[12px] text-[var(--text-meta)]">
+        <div className="flex items-center gap-1.5 border-t border-n-100 px-2 pb-0.5 pt-2 text-[12px] text-[var(--text-meta)]">
           <Icon name="circle-question-mark" size={13} />
           Reminders fire as desktop notifications
         </div>

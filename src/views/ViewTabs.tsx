@@ -154,7 +154,7 @@ export function ViewTabs({
   };
 
   return (
-    <div className="flex min-w-0 flex-none items-end border-b border-[var(--n-200)] px-5">
+    <div className="flex min-w-0 flex-none items-end border-b border-n-200 px-5">
       {deleting !== null && (
         <Dialog
           open
@@ -171,7 +171,7 @@ export function ViewTabs({
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setDeleting(null) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">
+          <p className="m-0 text-[13px] text-n-600">
             This removes the tab and everything it holds — its{' '}
             {layoutLabel(deleting.presentation.type).toLowerCase()} layout, filters, sort, grouping
             and column arrangement. The records stay where they are.
@@ -234,7 +234,7 @@ export function ViewTabs({
                       // Opacity, not `hidden`: a hidden grip is out of the tab
                       // order, and Left/Right reordering is the point of the
                       // primitive underneath it.
-                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-[3px] text-[var(--n-400)] opacity-0 hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-[3px] text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
                     >
                       <Icon name="grip-vertical" size={11} />
                     </span>
@@ -263,8 +263,8 @@ export function ViewTabs({
                   className={[
                     'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-[13px]',
                     active
-                      ? 'border-[var(--cortex-500)] font-semibold text-[var(--n-900)]'
-                      : 'border-transparent font-normal text-[var(--n-500)] hover:text-[var(--n-800)]',
+                      ? 'border-cortex-500 font-semibold text-n-900'
+                      : 'border-transparent font-normal text-n-500 hover:text-n-800',
                   ].join(' ')}
                   style={{ borderBottomStyle: 'solid' }}
                 >
@@ -308,7 +308,7 @@ export function ViewTabs({
             data-testid="new-view"
             aria-label="New view"
             onClick={() => setCreating(true)}
-            className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name="plus" size={13} />
             View
@@ -368,7 +368,7 @@ function RenameTab({
             onCommit('');
           }
         }}
-        className="h-[26px] w-32 rounded-md border border-[var(--cortex-500)] px-1.5 text-[13px] text-[var(--n-900)] shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
+        className="h-[26px] w-32 rounded-md border border-cortex-500 px-1.5 text-[13px] text-n-900 shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
       />
     </span>
   );
@@ -400,7 +400,7 @@ function LayoutPicker({
         <div
           role="listbox"
           aria-label="Layout"
-          className="z-50 w-[188px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]"
+          className="z-50 w-[188px] rounded-[10px] border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]"
         >
           {VIEW_KINDS.map((k) => (
             <button
@@ -413,8 +413,8 @@ function LayoutPicker({
               className={[
                 'flex w-full items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
                 k.value === current
-                  ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                  : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                  ? 'bg-cortex-50 text-cortex-700'
+                  : 'bg-transparent text-n-700 hover:bg-n-50',
               ].join(' ')}
             >
               <Icon name={k.icon} size={13} />
@@ -466,9 +466,9 @@ function ViewIconPicker({
       <FixedBelowAnchor>
         <div
           data-testid="view-icon-picker"
-          className="z-50 w-[300px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]"
+          className="z-50 w-[300px] rounded-[10px] border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
         >
-          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
             Tab icon
           </div>
           <IconPicker
@@ -536,9 +536,9 @@ function NewViewForm({
         <div
           ref={ref}
           data-testid="new-view-form"
-          className="z-50 w-[268px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]"
+          className="z-50 w-[268px] rounded-[10px] border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
         >
-          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
             New view
           </div>
           <Input
@@ -567,8 +567,8 @@ function NewViewForm({
                 className={[
                   'flex flex-col items-center gap-1 rounded-[8px] border px-1 py-2 text-[11px]',
                   k.value === type
-                    ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                    : 'border-[var(--n-200)] bg-transparent text-[var(--n-600)] hover:bg-[var(--n-50)]',
+                    ? 'border-cortex-500 bg-cortex-50 text-cortex-700'
+                    : 'border-n-200 bg-transparent text-n-600 hover:bg-n-50',
                 ].join(' ')}
               >
                 <Icon name={k.icon} size={15} />
@@ -580,7 +580,7 @@ function NewViewForm({
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-md border border-[var(--n-200)] bg-transparent px-2.5 py-1 text-[12px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+              className="rounded-md border border-n-200 bg-transparent px-2.5 py-1 text-[12px] text-n-700 hover:bg-n-50"
             >
               Cancel
             </button>
@@ -588,7 +588,7 @@ function NewViewForm({
               type="button"
               data-testid="create-view"
               onClick={() => onCreate(effective, type)}
-              className="rounded-md border-0 bg-[var(--cortex-500)] px-2.5 py-1 text-[12px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-600)]"
+              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-[12px] font-medium text-n-0 hover:bg-cortex-600"
             >
               Create
             </button>

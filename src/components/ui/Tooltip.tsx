@@ -170,7 +170,7 @@ export function Tooltip({
             ref={bubbleRef}
             id={id}
             role="tooltip"
-            className="pointer-events-none fixed z-[1100] max-w-[260px] rounded-[6px] bg-[var(--n-900)] px-2 py-1 text-[12px] leading-[1.4] text-[var(--n-0)] shadow-[var(--shadow-lg)]"
+            className="pointer-events-none fixed z-[1100] max-w-[260px] rounded-[6px] bg-n-900 px-2 py-1 text-[12px] leading-[1.4] text-n-0 shadow-[var(--shadow-lg)]"
             style={
               pos === null
                 ? { left: 0, top: 0, visibility: 'hidden' }

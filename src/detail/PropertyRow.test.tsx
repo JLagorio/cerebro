@@ -159,10 +159,10 @@ describe('PropertyRow', () => {
         <span>v</span>
       </PropertyRow>,
     );
-    expect(row().className).toContain('hover:bg-[var(--n-25)]');
+    expect(row().className).toContain('hover:bg-n-25');
     // The value control's own hover is --n-50; a row painted the same colour
     // reads flat under it.
-    expect(row().className).not.toContain('hover:bg-[var(--n-50)]');
+    expect(row().className).not.toContain('hover:bg-n-50');
   });
 
   it('reveals a trailing action on focus, not only on hover', () => {

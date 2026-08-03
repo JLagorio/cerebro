@@ -67,24 +67,22 @@ export function RelatedKnowledge({
     <section
       data-testid="related-knowledge"
       data-count={related.length}
-      className={variant === 'panel' ? '' : 'mt-8 border-t border-[var(--n-100)] pt-5'}
+      className={variant === 'panel' ? '' : 'mt-8 border-t border-n-100 pt-5'}
     >
       <div className="flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-n-500">
           What the assistant knows
         </h3>
         {related.length > 0 && (
-          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+          <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
             {related.length}
           </span>
         )}
       </div>
 
       {shown.length === 0 ? (
-        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-[var(--n-500)]">
-          Nothing yet about this.
-        </p>
+        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-n-500">Nothing yet about this.</p>
       ) : (
         <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
           {shown.map((concept) => (
@@ -99,14 +97,14 @@ export function RelatedKnowledge({
                   closeDetail();
                   navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path });
                 }}
-                className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
+                className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] font-medium text-[var(--n-800)]">
+                  <span className="block truncate text-[12.5px] font-medium text-n-800">
                     {concept.title}
                   </span>
                   {concept.description !== null && variant === 'section' && (
-                    <span className="block truncate text-[11.5px] text-[var(--n-500)]">
+                    <span className="block truncate text-[11.5px] text-n-500">
                       {concept.description}
                     </span>
                   )}
@@ -119,9 +117,7 @@ export function RelatedKnowledge({
         </ul>
       )}
 
-      {rest > 0 && (
-        <p className="m-0 mt-1.5 px-2 text-[11.5px] text-[var(--n-400)]">and {rest} more</p>
-      )}
+      {rest > 0 && <p className="m-0 mt-1.5 px-2 text-[11.5px] text-n-400">and {rest} more</p>}
 
       {askPrompt !== undefined && (
         <div className="mt-2.5">

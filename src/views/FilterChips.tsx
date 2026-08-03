@@ -92,7 +92,7 @@ export function FilterChips({
       {children.map((node, i) => (
         <span key={i} className="inline-flex items-center gap-1">
           {i === 0 ? (
-            <span className="text-[11px] text-[var(--n-400)]">Where</span>
+            <span className="text-[11px] text-n-400">Where</span>
           ) : (
             <Tooltip
               label={
@@ -110,7 +110,7 @@ export function FilterChips({
                 onClick={() =>
                   onChange(conjunction === 'and' ? { any: [...children] } : { all: [...children] })
                 }
-                className="rounded border-0 bg-transparent px-1 text-[11px] text-[var(--n-500)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+                className="rounded border-0 bg-transparent px-1 text-[11px] text-n-500 hover:bg-n-100 hover:text-n-800"
               >
                 {conjunction}
               </button>
@@ -132,7 +132,7 @@ export function FilterChips({
         type="button"
         data-testid="filter-add"
         onClick={add}
-        className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-[var(--n-300)] bg-transparent px-2 text-[12px] text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]"
+        className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-md border border-dashed border-n-300 bg-transparent px-2 text-[12px] text-n-500 hover:border-n-400 hover:text-n-800"
       >
         <Icon name="plus" size={12} />
         Filter
@@ -147,7 +147,7 @@ export function FilterChips({
             aria-label="Advanced filters"
             aria-expanded={advanced}
             onClick={() => setAdvanced(!advanced)}
-            className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+            className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800"
           >
             <Icon name="sliders-horizontal" size={13} />
           </button>
@@ -159,8 +159,8 @@ export function FilterChips({
             role="dialog"
             ariaLabel="Filter this view"
           >
-            <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-[10px] border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]">
+              <div className="px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
                 Filter this view
               </div>
               <FilterBuilder filters={filters} fields={defs} onChange={onChange} />
@@ -206,14 +206,14 @@ function Chip({
   return (
     <span
       ref={anchor}
-      className="inline-flex h-7 items-center overflow-hidden rounded-md border border-[var(--cortex-300)] bg-[var(--cortex-50)]"
+      className="inline-flex h-7 items-center overflow-hidden rounded-md border border-cortex-300 bg-cortex-50"
     >
       <button
         type="button"
         data-testid={`filter-chip-${index}`}
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
-        className="inline-flex h-full max-w-[240px] items-center gap-1 border-0 bg-transparent pl-2 pr-1 text-[12px] text-[var(--cortex-700)] hover:bg-[var(--cortex-100)]"
+        className="inline-flex h-full max-w-[240px] items-center gap-1 border-0 bg-transparent pl-2 pr-1 text-[12px] text-cortex-700 hover:bg-cortex-100"
       >
         {nested && <Icon name="brackets" size={11} color="var(--cortex-600)" />}
         <span className="min-w-0 truncate">{label}</span>
@@ -227,7 +227,7 @@ function Chip({
           role="dialog"
           ariaLabel="Edit filter"
         >
-          <div className="rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2 shadow-[var(--shadow-lg)]">
+          <div className="rounded-[10px] border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
             {nested ? (
               <div className="w-[520px] max-w-[calc(100vw-32px)]">
                 <FilterBuilder

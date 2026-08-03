@@ -239,13 +239,13 @@ export function ViewSettingsPanel({
       data-testid="view-settings-panel"
       role="dialog"
       aria-label="View settings"
-      className="flex max-h-[min(70vh,640px)] w-[320px] flex-col overflow-hidden rounded-[12px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-lg)]"
+      className="flex max-h-[min(70vh,640px)] w-[320px] flex-col overflow-hidden rounded-[12px] border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
     >
-      <header className="flex flex-none items-center gap-1.5 border-b border-[var(--n-200)] px-3 py-2.5">
+      <header className="flex flex-none items-center gap-1.5 border-b border-n-200 px-3 py-2.5">
         {page !== 'root' && (
           <IconButton icon="arrow-left" label="Back" size="sm" onClick={() => setPage('root')} />
         )}
-        <span className="flex-1 truncate text-[13px] font-semibold text-[var(--n-900)]">
+        <span className="flex-1 truncate text-[13px] font-semibold text-n-900">
           {page === 'root' ? view.name : titleFor(page)}
         </span>
         <IconButton icon="x" label="Close view settings" size="sm" onClick={onClose} />
@@ -392,8 +392,8 @@ export function ViewSettingsPanel({
             {/* M11: how related records draw, per view. A dense table wants
                 bare chips; a mixed one wants to see which type each points at. */}
             {showsChips(p.type) && (
-              <div className="mt-2 border-t border-[var(--n-100)] pt-2">
-                <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+              <div className="mt-2 border-t border-n-100 pt-2">
+                <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
                   Related records
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -407,8 +407,8 @@ export function ViewSettingsPanel({
                       className={[
                         'flex items-start gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
                         chipStyle === style.value
-                          ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                          : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                          ? 'bg-cortex-50 text-cortex-700'
+                          : 'bg-transparent text-n-700 hover:bg-n-50',
                       ].join(' ')}
                     >
                       <Icon
@@ -418,7 +418,7 @@ export function ViewSettingsPanel({
                       />
                       <span className="min-w-0 flex-1">
                         {style.label}
-                        <span className="mt-px block text-[11px] leading-[15px] text-[var(--n-400)]">
+                        <span className="mt-px block text-[11px] leading-[15px] text-n-400">
                           {style.hint}
                         </span>
                       </span>
@@ -429,10 +429,10 @@ export function ViewSettingsPanel({
               </div>
             )}
 
-            <div className="mt-2 border-t border-[var(--n-100)] pt-2">
+            <div className="mt-2 border-t border-n-100 pt-2">
               {surface === 'list' && (
                 <>
-                  <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+                  <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
                     This list
                   </div>
                   <Row
@@ -447,7 +447,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteView}
-                  className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-600)] hover:bg-[var(--n-50)]"
+                  className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-n-600 hover:bg-n-50"
                 >
                   <Icon name="trash-2" size={13} />
                   Delete this view
@@ -457,7 +457,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteList}
-                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
+                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-danger-600 hover:bg-danger-50"
                 >
                   <Icon name="trash-2" size={13} />
                   {surface === 'type' ? 'Delete type' : 'Delete list'}
@@ -470,9 +470,7 @@ export function ViewSettingsPanel({
         {page === 'list' && (
           <div className="flex flex-col gap-2 px-1">
             <div>
-              <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-                List name
-              </span>
+              <span className="mb-1 block text-[11.5px] font-medium text-n-600">List name</span>
               <Input
                 ariaLabel="List name"
                 placeholder="List name"
@@ -490,22 +488,22 @@ export function ViewSettingsPanel({
                 width="100%"
               />
             </div>
-            <p className="m-0 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+            <p className="m-0 text-[11.5px] leading-[16px] text-n-500">
               Records come from{' '}
-              <span className="font-medium text-[var(--n-800)]">
+              <span className="font-medium text-n-800">
                 {list.source.type ?? 'everything in the vault'}
               </span>
               . The source is what the list IS — changing it would invalidate every view's columns,
               so it is fixed once created.
             </p>
-            <div className="border-t border-[var(--n-100)] pt-2">
-              <div className="pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            <div className="border-t border-n-100 pt-2">
+              <div className="pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
                 Views
               </div>
               {list.views.map((v) => (
                 <div
                   key={v.id}
-                  className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12.5px] text-[var(--n-700)]"
+                  className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12.5px] text-n-700"
                 >
                   <Icon
                     name={
@@ -518,7 +516,7 @@ export function ViewSettingsPanel({
                   />
                   <span className="min-w-0 flex-1 truncate">{v.name}</span>
                   {v.id === view.id && (
-                    <span className="flex-none text-[10.5px] text-[var(--n-400)]">open</span>
+                    <span className="flex-none text-[10.5px] text-n-400">open</span>
                   )}
                 </div>
               ))}
@@ -537,8 +535,8 @@ export function ViewSettingsPanel({
                 className={[
                   'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
                   p.type === l.value
-                    ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                    : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                    ? 'bg-cortex-50 text-cortex-700'
+                    : 'bg-transparent text-n-700 hover:bg-n-50',
                 ].join(' ')}
               >
                 <Icon name={l.icon} size={13} />
@@ -578,7 +576,7 @@ export function ViewSettingsPanel({
         {page === 'field' &&
           editingField !== null &&
           (list.source.type === null ? (
-            <p className="m-0 px-2 py-3 text-[12px] leading-[17px] text-[var(--n-500)]">
+            <p className="m-0 px-2 py-3 text-[12px] leading-[17px] text-n-500">
               This property can't be edited here — the view has no single source type that declares
               it.
             </p>
@@ -706,10 +704,8 @@ function Row({
   const content = (
     <>
       <Icon name={icon} size={13} color="var(--n-500)" />
-      <span className={`flex-1 ${muted ? 'text-[var(--n-500)]' : 'text-[var(--n-800)]'}`}>
-        {label}
-      </span>
-      {value !== '' && <span className="text-[11.5px] text-[var(--n-400)]">{value}</span>}
+      <span className={`flex-1 ${muted ? 'text-n-500' : 'text-n-800'}`}>{label}</span>
+      {value !== '' && <span className="text-[11.5px] text-n-400">{value}</span>}
       {onClick !== undefined && <Icon name="chevron-right" size={12} color="var(--n-400)" />}
     </>
   );
@@ -725,7 +721,7 @@ function Row({
       type="button"
       data-testid={`view-settings-${label.toLowerCase()}`}
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] hover:bg-[var(--n-50)]"
+      className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] hover:bg-n-50"
     >
       {content}
     </button>
@@ -781,7 +777,7 @@ function PropertiesPage({
     <div
       key={f.name}
       className={[
-        'group flex items-center gap-1.5 rounded-[7px] px-1 py-1 hover:bg-[var(--n-50)]',
+        'group flex items-center gap-1.5 rounded-[7px] px-1 py-1 hover:bg-n-50',
         sortable.dragging === f.name ? 'opacity-60' : '',
       ].join(' ')}
       style={index !== undefined ? sortable.dropIndicator(index) : undefined}
@@ -789,7 +785,7 @@ function PropertiesPage({
       {on && !searching && index !== undefined ? (
         <span
           {...sortable.gripProps(f.name, index)}
-          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)] focus-visible:text-[var(--cortex-600)] focus-visible:outline-none"
+          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
         >
           <Icon name="grip-vertical" size={12} />
         </span>
@@ -803,13 +799,13 @@ function PropertiesPage({
           data-testid={`property-row-${f.name}`}
           title={`Edit ${humanize(f.name)}`}
           onClick={() => onEditField(f.name)}
-          className={`min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] hover:underline ${on ? 'text-[var(--n-800)]' : 'text-[var(--n-400)]'}`}
+          className={`min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] hover:underline ${on ? 'text-n-800' : 'text-n-400'}`}
         >
           {humanize(f.name)}
         </button>
       ) : (
         <span
-          className={`min-w-0 flex-1 truncate text-[12.5px] ${on ? 'text-[var(--n-800)]' : 'text-[var(--n-400)]'}`}
+          className={`min-w-0 flex-1 truncate text-[12.5px] ${on ? 'text-n-800' : 'text-n-400'}`}
         >
           {humanize(f.name)}
         </span>
@@ -838,13 +834,13 @@ function PropertiesPage({
 
       {visible.filter(matches).length > 0 && (
         <div className="flex items-center px-2 pb-0.5">
-          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
             Shown in this view
           </span>
           <button
             type="button"
             onClick={() => onChange(columns.map((c) => ({ ...c, hidden: true })))}
-            className="border-0 bg-transparent p-0 text-[11px] text-[var(--cortex-600)] hover:underline"
+            className="border-0 bg-transparent p-0 text-[11px] text-cortex-600 hover:underline"
           >
             Hide all
           </button>
@@ -859,7 +855,7 @@ function PropertiesPage({
 
       {hidden.filter(matches).length > 0 && (
         <div className="mt-1.5 flex items-center px-2 pb-0.5">
-          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
             Hidden in this view
           </span>
           <button
@@ -872,7 +868,7 @@ function PropertiesPage({
                   .map((f) => ({ field: f.name })),
               ])
             }
-            className="border-0 bg-transparent p-0 text-[11px] text-[var(--cortex-600)] hover:underline"
+            className="border-0 bg-transparent p-0 text-[11px] text-cortex-600 hover:underline"
           >
             Show all
           </button>
@@ -881,7 +877,7 @@ function PropertiesPage({
       {hidden.map((f) => (matches(f) ? row(f, false) : null))}
 
       {visible.length === 0 && hidden.length === 0 && (
-        <p className="m-0 px-2 py-3 text-[12px] text-[var(--n-400)]">
+        <p className="m-0 px-2 py-3 text-[12px] text-n-400">
           This type declares no properties yet.
         </p>
       )}
@@ -891,7 +887,7 @@ function PropertiesPage({
           type="button"
           data-testid="new-property"
           onClick={onNewProperty}
-          className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+          className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-n-100 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           <Icon name="plus" size={13} />
           New property
@@ -922,9 +918,7 @@ function AxisPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-          Date property
-        </span>
+        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Date property</span>
         <Select
           size="sm"
           value={presentation.dateField ?? AUTO}
@@ -944,7 +938,7 @@ function AxisPage({
       {isDayGrid(presentation.type) && (
         <>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
+            <span className="mb-1 block text-[11.5px] font-medium text-n-600">
               Show calendar as
             </span>
             <Select
@@ -964,9 +958,7 @@ function AxisPage({
             />
           </div>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-              Start week on
-            </span>
+            <span className="mb-1 block text-[11.5px] font-medium text-n-600">Start week on</span>
             <Select
               size="sm"
               value={presentation.weekStart ?? 'sunday'}
@@ -989,7 +981,7 @@ function AxisPage({
               onChange={(on) => onChange({ ...presentation, showWeekends: on })}
               label="Show weekends"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
               Off drops Saturday and Sunday from the grid, rather than narrowing them.
             </p>
           </div>
@@ -998,7 +990,7 @@ function AxisPage({
       {isZoomable(presentation.type) && (
         <>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Zoom</span>
+            <span className="mb-1 block text-[11.5px] font-medium text-n-600">Zoom</span>
             <Select
               size="sm"
               // DEFAULT_ZOOM, not a literal: this said 'week' while GanttView
@@ -1022,7 +1014,7 @@ function AxisPage({
               onChange={(on) => onChange({ ...presentation, showTable: on })}
               label="Show table"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
               The rows beside the axis, carrying this view&rsquo;s properties.
             </p>
           </div>
@@ -1030,9 +1022,7 @@ function AxisPage({
       )}
       {hasDependencies(presentation.type) && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-            Dependencies
-          </span>
+          <span className="mb-1 block text-[11.5px] font-medium text-n-600">Dependencies</span>
           <Select
             size="sm"
             value={presentation.dependencyField ?? AUTO}
@@ -1048,7 +1038,7 @@ function AxisPage({
             }
             width="100%"
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
             The relation naming what each record waits on — the arrows the gantt draws.
           </p>
         </div>
@@ -1108,7 +1098,7 @@ function CardsPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card size</span>
+        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Card size</span>
         <Select
           size="sm"
           value={p.cardSize ?? 'medium'}
@@ -1120,9 +1110,7 @@ function CardsPage({
 
       {showsPreview(p.type) && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-            Card preview
-          </span>
+          <span className="mb-1 block text-[11.5px] font-medium text-n-600">Card preview</span>
           <Select
             size="sm"
             value={p.cardPreview ?? 'none'}
@@ -1130,7 +1118,7 @@ function CardsPage({
             onChange={(e) => onChange({ ...p, cardPreview: e.target.value as CardPreview })}
             width="100%"
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
             Page content shows the first line or two of the record&rsquo;s body.
           </p>
         </div>
@@ -1139,9 +1127,7 @@ function CardsPage({
       {showsCovers(p.type) && (
         <>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-              Card cover
-            </span>
+            <span className="mb-1 block text-[11.5px] font-medium text-n-600">Card cover</span>
             <Select
               size="sm"
               value={gallery.cover ?? NONE}
@@ -1157,20 +1143,20 @@ function CardsPage({
               }
               width="100%"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
               {covers.length === 0
                 ? 'No files property on this type yet — add one and it becomes a cover.'
                 : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
             </p>
           </div>
-          <div className="border-t border-[var(--n-100)] pt-2">
+          <div className="border-t border-n-100 pt-2">
             <Switch
               checked={gallery.fit === true}
               onChange={(fit) => patchGallery({ ...gallery, fit })}
               label="Fit media"
               ariaLabel="Fit media"
             />
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
               Fit the whole cover inside the tile instead of cropping it to fill.
             </p>
           </div>
@@ -1178,7 +1164,7 @@ function CardsPage({
       )}
 
       {hasGroupColumns(p.type) && (
-        <div className="border-t border-[var(--n-100)] pt-2">
+        <div className="border-t border-n-100 pt-2">
           <Switch
             checked={p.colorColumns === true}
             label="Color columns"
@@ -1190,7 +1176,7 @@ function CardsPage({
               onChange(on ? { ...rest, colorColumns: true } : rest);
             }}
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
             Paints each column in its group&rsquo;s own colour.
           </p>
         </div>
@@ -1244,7 +1230,7 @@ function ChartPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Chart type</span>
+        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Chart type</span>
         <Select
           size="sm"
           value={chart.kind ?? 'bar'}
@@ -1254,7 +1240,7 @@ function ChartPage({
         />
       </div>
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Measure</span>
+        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Measure</span>
         <Select
           size="sm"
           value={agg}
@@ -1265,9 +1251,7 @@ function ChartPage({
       </div>
       {agg !== 'count' && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-            Of property
-          </span>
+          <span className="mb-1 block text-[11.5px] font-medium text-n-600">Of property</span>
           <Select
             size="sm"
             value={chart.value ?? NONE}
@@ -1281,13 +1265,13 @@ function ChartPage({
             width="100%"
           />
           {numeric.length === 0 && (
-            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
               This view has no number property to add up.
             </p>
           )}
         </div>
       )}
-      <div className="border-t border-[var(--n-100)] pt-2">
+      <div className="border-t border-n-100 pt-2">
         <Switch
           checked={chart.omitZero === true}
           onChange={(omitZero) => patch({ ...chart, omitZero })}
@@ -1299,7 +1283,7 @@ function ChartPage({
           whatever was selected, so the one sentence explaining where a chart's
           X axis comes from described a bar chart to someone looking at a
           donut. */}
-      <p className="m-0 border-t border-[var(--n-100)] pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+      <p className="m-0 border-t border-n-100 pt-2 text-[11px] leading-[15px] text-n-400">
         {band === undefined
           ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
           : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
@@ -1383,7 +1367,7 @@ function BlocksPage({
             key={block.id}
             data-testid={`block-row-${block.id}`}
             className={[
-              'mb-1.5 rounded-[8px] border border-[var(--n-200)] p-1.5',
+              'mb-1.5 rounded-[8px] border border-n-200 p-1.5',
               sortable.dragging === block.id ? 'opacity-60' : '',
             ].join(' ')}
             style={sortable.dropIndicator(i)}
@@ -1391,7 +1375,7 @@ function BlocksPage({
             <div className="flex items-center gap-1">
               <span
                 {...sortable.gripProps(block.id, i)}
-                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)] focus-visible:text-[var(--cortex-600)] focus-visible:outline-none"
+                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
               >
                 <Icon name="grip-vertical" size={12} />
               </span>
@@ -1460,7 +1444,7 @@ function BlocksPage({
         type="button"
         data-testid="add-number-block"
         onClick={addNumber}
-        className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-600)] hover:bg-[var(--n-50)]"
+        className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-n-600 hover:bg-n-50"
       >
         <Icon name="hash" size={13} />
         Add a number
@@ -1482,12 +1466,12 @@ function BlocksPage({
           width="100%"
         />
       ) : (
-        <p className="m-0 px-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+        <p className="m-0 px-2 text-[11px] leading-[15px] text-n-400">
           There are no saved lists in the vault to embed yet.
         </p>
       )}
 
-      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-[11px] leading-[15px] text-n-400">
         A number measures this view’s own records, so its filters apply. A saved view is shown as it
         is configured where it lives.
       </p>
@@ -1548,7 +1532,7 @@ function SortPage({
             <Tooltip label="Drag to reorder — the first key breaks ties first">
               <span
                 {...sortable.gripProps(s.field, i)}
-                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-[3px] text-[var(--n-300)] hover:text-[var(--n-600)] focus-visible:text-[var(--n-600)] group-hover:text-[var(--n-500)]"
+                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-[3px] text-n-300 hover:text-n-600 focus-visible:text-n-600 group-hover:text-n-500"
               >
                 <Icon name="grip-vertical" size={13} />
               </span>
@@ -1597,12 +1581,12 @@ function SortPage({
         />
       )}
       {atCap && (
-        <p className="m-0 px-1 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+        <p className="m-0 px-1 pt-1 text-[11px] leading-[15px] text-n-400">
           {MAX_SORT_KEYS} keys is the maximum — a fifth tiebreak never decides anything.
         </p>
       )}
       {sort.length === 0 && (
-        <p className="m-0 px-1 pt-1 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+        <p className="m-0 px-1 pt-1 text-[11.5px] leading-[16px] text-n-500">
           Records appear in vault order.
         </p>
       )}
@@ -1644,15 +1628,15 @@ function LimitPage({
           className={[
             'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
             limit === l.value
-              ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-              : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+              ? 'bg-cortex-50 text-cortex-700'
+              : 'bg-transparent text-n-700 hover:bg-n-50',
           ].join(' ')}
         >
           <span className="flex-1">{l.label}</span>
           {limit === l.value && <Icon name="check" size={12} />}
         </button>
       ))}
-      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-[11px] leading-[15px] text-n-400">
         A limited view says how many of how many it is showing, under the records. Nothing
         disappears without saying so.
       </p>
@@ -1687,7 +1671,7 @@ function RowsPage({
   const height = p.rowHeight ?? 'default';
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+      <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
         Row height
       </div>
       {ROW_HEIGHTS.map((value) => (
@@ -1700,22 +1684,22 @@ function RowsPage({
           className={[
             'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
             height === value
-              ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-              : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+              ? 'bg-cortex-50 text-cortex-700'
+              : 'bg-transparent text-n-700 hover:bg-n-50',
           ].join(' ')}
         >
           <span className="flex-1">{ROW_HEIGHT_LABEL[value]}</span>
           {height === value && <Icon name="check" size={12} />}
         </button>
       ))}
-      <div className="mt-2 border-t border-[var(--n-100)] px-1 pt-2">
+      <div className="mt-2 border-t border-n-100 px-1 pt-2">
         <Switch
           checked={allColumnsWrap(p.columns)}
           onChange={() => onChange({ ...p, columns: wrapAllColumns(p.columns) })}
           label="Wrap all columns"
           ariaLabel="Wrap all columns"
         />
-        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-n-400">
           Wrapped cells grow the row instead of clipping. One column at a time is still on its own
           header menu.
         </p>
@@ -1781,9 +1765,7 @@ function GroupPage({
     <div className="flex flex-col gap-1.5">
       {group.map((level, i) => (
         <div key={`${i}:${level.field}`} className="flex items-center gap-1.5">
-          <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
-            {i === 0 ? 'By' : 'then'}
-          </span>
+          <span className="w-8 flex-none text-[11px] text-n-400">{i === 0 ? 'By' : 'then'}</span>
           <Select
             size="sm"
             value={
@@ -1833,15 +1815,15 @@ function GroupPage({
           inside them usually does not. One switch for the whole chain would
           have to lie about a mixed state. */}
       {bandLevels(group).length > 0 && (
-        <div className="mt-1 flex flex-col gap-1 border-t border-[var(--n-100)] pt-2">
-          <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+        <div className="mt-1 flex flex-col gap-1 border-t border-n-100 pt-2">
+          <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
             Empty groups
           </div>
           {group.map((level, i) =>
             level.descend !== undefined ? null : (
               <label
                 key={`hide:${i}:${level.field}`}
-                className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12px] text-[var(--n-700)]"
+                className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12px] text-n-700"
               >
                 <span className="min-w-0 flex-1 truncate">
                   Hide empty {humanize(level.field).toLowerCase()} groups
@@ -1865,7 +1847,7 @@ function GroupPage({
 
       {addOptions.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
+          <span className="w-8 flex-none text-[11px] text-n-400">
             {group.length === 0 ? 'By' : 'then'}
           </span>
           <Select
@@ -1881,7 +1863,7 @@ function GroupPage({
         </div>
       )}
 
-      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-[11px] leading-[15px] text-n-400">
         A property bands records by its value. A relation (↳) nests them under what they link to.
       </p>
     </div>

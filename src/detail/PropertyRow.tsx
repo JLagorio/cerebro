@@ -104,7 +104,7 @@ export function PropertyRow({
   }, [label]);
 
   const nameClass = [
-    'min-w-0 flex-1 truncate rounded-[5px] text-left text-[12px] text-[var(--n-500)]',
+    'min-w-0 flex-1 truncate rounded-[5px] text-left text-[12px] text-n-500',
     align === 'center' ? '' : 'pt-[3px]',
   ].join(' ');
 
@@ -117,7 +117,7 @@ export function PropertyRow({
       // sides or it reads as a highlight on the label rather than on the row.
       className={[
         'group -mx-1 flex min-w-0 gap-1.5 rounded-[6px] px-1',
-        'hover:bg-[var(--n-25)]',
+        'hover:bg-n-25',
         align === 'center' ? 'items-center' : 'items-start',
         dragging ? 'opacity-40' : '',
       ].join(' ')}
@@ -146,7 +146,7 @@ export function PropertyRow({
                 // Opacity, not `hidden`: a hidden grip is out of the tab
                 // order, and arrow-key reordering is the whole point of the
                 // primitive underneath this.
-                className="absolute inset-0 flex cursor-grab items-center justify-center rounded-[3px] text-[var(--n-400)] opacity-0 hover:bg-[var(--n-100)] hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+                className="absolute inset-0 flex cursor-grab items-center justify-center rounded-[3px] text-n-400 opacity-0 hover:bg-n-100 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <Icon name="grip-vertical" size={13} />
               </span>
@@ -168,7 +168,7 @@ export function PropertyRow({
               aria-expanded={menuOpen}
               aria-label={`${label} property menu`}
               onClick={() => setMenuOpen((v) => !v)}
-              className={`${nameClass} border-0 bg-transparent p-0 hover:bg-[var(--n-100)] hover:text-[var(--n-700)]`}
+              className={`${nameClass} border-0 bg-transparent p-0 hover:bg-n-100 hover:text-n-700`}
             >
               {label}
             </button>

@@ -83,7 +83,7 @@ function ProgressCell({ display }: { display: string }) {
     // w-full: the bar is flex-1, so without a sized parent it collapses to
     // zero inside a content-width cell.
     <span className="flex w-full min-w-0 items-center gap-2">
-      <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--n-100)]">
+      <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-n-100">
         <span
           className="block h-full rounded-full"
           style={{
@@ -92,7 +92,7 @@ function ProgressCell({ display }: { display: string }) {
           }}
         />
       </span>
-      <span className="flex-none [font-family:var(--font-mono)] text-[11px] text-[var(--n-600)]">
+      <span className="flex-none [font-family:var(--font-mono)] text-[11px] text-n-600">
         {display}
       </span>
     </span>
@@ -146,7 +146,7 @@ const TableCell = memo(function TableCell({
       {...cellProps}
       aria-colindex={colIndex + 1}
       className={[
-        'flex flex-none overflow-hidden border-r border-[var(--n-100)] px-2',
+        'flex flex-none overflow-hidden border-r border-n-100 px-2',
         wrap ? 'items-start py-1.5' : 'items-center',
         freeze === undefined ? '' : `z-10 ${fill}`,
         // The ring is inset, not a border: a border would add a pixel to a
@@ -161,7 +161,7 @@ const TableCell = memo(function TableCell({
         ) : (
           <span
             className={[
-              'text-[12.5px] text-[var(--n-600)]',
+              'text-[12.5px] text-n-600',
               wrap ? 'whitespace-normal [overflow-wrap:anywhere]' : 'truncate whitespace-nowrap',
             ].join(' ')}
           >
@@ -310,7 +310,7 @@ function RowGutter({
             data-testid="row-insert"
             aria-label={`Insert a record after ${entry.title}`}
             onClick={onInsert}
-            className={`flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] ${reveal}`}
+            className={`flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800 ${reveal}`}
           >
             <Icon name="plus" size={12} />
           </button>
@@ -325,7 +325,7 @@ function RowGutter({
         // onClick, not onChange: shift-extend needs the modifier, and a
         // change event does not carry one.
         onClick={(e) => onCheck(e.shiftKey)}
-        className={`h-3.5 w-3.5 flex-none accent-[var(--cortex-500)] ${reveal}`}
+        className={`h-3.5 w-3.5 flex-none accent-cortex-500 ${reveal}`}
       />
       <button
         ref={gripRef}
@@ -334,7 +334,7 @@ function RowGutter({
         aria-label={`Actions for ${entry.title}`}
         aria-haspopup="menu"
         onClick={() => setOpen(!open)}
-        className={`flex h-5 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] ${reveal}`}
+        className={`flex h-5 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800 ${reveal}`}
       >
         <Icon name="grip-vertical" size={12} />
       </button>
@@ -436,7 +436,7 @@ function InsertRow({
       data-testid="insert-row"
       className={[
         frozen ? 'sticky left-0' : '',
-        'flex h-9 items-center border-b border-[var(--n-100)] bg-[var(--n-0)]',
+        'flex h-9 items-center border-b border-n-100 bg-n-0',
       ].join(' ')}
       style={{ width: `calc(var(${TITLE_VAR}) + ${gutter}px)` }}
     >
@@ -530,8 +530,7 @@ const TableRow = memo(function TableRow({
   const style = typeStyle(entry.type, schema);
   // The fill the sticky cells repeat. Checked rows tint like the cursor row:
   // the two states are different, but both mean "this row is picked out".
-  const fill =
-    selected || checked ? 'bg-[var(--cortex-50)]' : 'bg-[var(--n-0)] group-hover:bg-[var(--n-25)]';
+  const fill = selected || checked ? 'bg-cortex-50' : 'bg-n-0 group-hover:bg-n-25';
 
   return (
     <div
@@ -552,15 +551,15 @@ const TableRow = memo(function TableRow({
       // aria-activedescendant and DOM focus never reaches a row at all. See
       // styles/table-chrome.css.
       className={[
-        'group cb-row flex border-b border-[var(--n-100)]',
+        'group cb-row flex border-b border-n-100',
         autoHeight ? ROW_MIN_HEIGHT[rowHeight] : ROW_HEIGHT[rowHeight],
         // The cursor row needs to survive a bright screen: the --cortex-50
         // fill alone was 1.13:1 against white, so a left rule carries it.
         selected
-          ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]'
+          ? 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]'
           : checked
-            ? 'bg-[var(--cortex-50)]'
-            : 'hover:bg-[var(--n-25)]',
+            ? 'bg-cortex-50'
+            : 'hover:bg-n-25',
       ].join(' ')}
     >
       <RowGutter
@@ -597,7 +596,7 @@ const TableRow = memo(function TableRow({
         className={[
           titleFrozen ? 'z-10' : '',
           'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
-          'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
+          'flex flex-none items-center gap-1.5 border-r border-n-100 pr-3',
           // The name cell is opaque because it is sticky — it has to hide the
           // columns sliding under it, so it repeats the row's own fill.
           fill,
@@ -620,7 +619,7 @@ const TableRow = memo(function TableRow({
               e.stopPropagation();
               onToggle();
             }}
-            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+            className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
           >
             <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
           </button>
@@ -639,12 +638,12 @@ const TableRow = memo(function TableRow({
             e.stopPropagation();
             openPath(entry.path);
           }}
-          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] text-[var(--n-900)] hover:underline focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13px] text-n-900 hover:underline focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
         >
           {entry.title}
         </button>
         {childCount > 0 && (
-          <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
+          <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
             {childCount}
           </span>
         )}
@@ -656,7 +655,7 @@ const TableRow = memo(function TableRow({
             nothing else — an arrow-key user sat on this row and never saw the
             glyph at all. The shared rule adds the keyboard cursor and
             focus-within. */}
-        <span aria-hidden className="cb-row-chrome flex-none text-[var(--n-400)]">
+        <span aria-hidden className="cb-row-chrome flex-none text-n-400">
           <Icon name="maximize-2" size={11} />
         </span>
       </div>
@@ -779,7 +778,7 @@ function ColumnResizer({
       <span
         className={[
           'w-[2px] rounded-full transition-colors',
-          active ? 'bg-[var(--cortex-500)]' : 'bg-transparent hover:bg-[var(--cortex-300)]',
+          active ? 'bg-cortex-500' : 'bg-transparent hover:bg-cortex-300',
         ].join(' ')}
       />
     </span>
@@ -842,7 +841,7 @@ function BandHeader({
       data-testid="table-group-header"
       data-depth={node.depth}
       onClick={onToggle}
-      className="flex h-8 w-full items-center border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
+      className="flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
     >
       {/* The band spans the full scroll width, so the band itself cannot be
           sticky (a sticky box as wide as its container has no room to shift).
@@ -866,15 +865,13 @@ function BandHeader({
         <span
           className={
             node.depth === 0
-              ? 'text-[12.5px] font-semibold text-[var(--n-800)]'
-              : 'text-[12px] font-medium text-[var(--n-700)]'
+              ? 'text-[12.5px] font-semibold text-n-800'
+              : 'text-[12px] font-medium text-n-700'
           }
         >
           {node.label}
         </span>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-          {node.count}
-        </span>
+        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">{node.count}</span>
       </span>
     </button>
   );
@@ -914,13 +911,11 @@ function CalcCell({
 
   const body =
     meta === null ? (
-      <span className="text-[var(--n-400)] opacity-0 group-hover/footer:opacity-100">
-        Calculate
-      </span>
+      <span className="text-n-400 opacity-0 group-hover/footer:opacity-100">Calculate</span>
     ) : (
       <>
-        <span className="truncate text-[var(--n-400)]">{meta.short}</span>
-        <span className="flex-none font-medium text-[var(--n-700)] [font-variant-numeric:tabular-nums]">
+        <span className="truncate text-n-400">{meta.short}</span>
+        <span className="flex-none font-medium text-n-700 [font-variant-numeric:tabular-nums]">
           {result === '' ? '—' : result}
         </span>
       </>
@@ -937,7 +932,7 @@ function CalcCell({
           data-testid={`calc-${field}`}
           aria-label={`${label} calculation`}
           onClick={() => setOpen(!open)}
-          className="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-[5px] border-0 bg-transparent px-1 py-0.5 text-[11.5px] hover:bg-[var(--n-100)] focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+          className="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-[5px] border-0 bg-transparent px-1 py-0.5 text-[11.5px] hover:bg-n-100 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
         >
           {body}
         </button>
@@ -999,7 +994,7 @@ function SortMark({ presentation, field }: { presentation: Presentation; field: 
     >
       <span
         data-testid={`sort-mark-${field}`}
-        className="flex flex-none items-center text-[var(--cortex-600)]"
+        className="flex flex-none items-center text-cortex-600"
       >
         <Icon name={spec.dir === 'asc' ? 'arrow-up' : 'arrow-down'} size={11} />
         {multi && <span className="[font-family:var(--font-mono)] text-[9.5px]">{at + 1}</span>}
@@ -1053,7 +1048,7 @@ function AddColumnButton({
 
   return (
     <div
-      className="relative flex flex-none items-center justify-center border-r border-[var(--n-100)]"
+      className="relative flex flex-none items-center justify-center border-r border-n-100"
       style={{ width: ADD_W }}
     >
       <button
@@ -1063,7 +1058,7 @@ function AddColumnButton({
         aria-label="Add a column"
         aria-haspopup="menu"
         onClick={() => setStep(step === 'closed' ? 'menu' : 'closed')}
-        className="flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        className="flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name="plus" size={13} />
       </button>
@@ -1335,7 +1330,7 @@ function HeaderMenu({
         aria-label={`${name} column menu`}
         aria-haspopup="menu"
         onClick={() => setOpen(!open)}
-        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-medium text-[var(--n-600)] hover:text-[var(--n-900)]"
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-medium text-n-600 hover:text-n-900"
       >
         {name}
       </button>
@@ -1390,9 +1385,7 @@ function HeaderMenu({
                     />
                   </div>
                 ) : (
-                  <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">
-                    {name}
-                  </div>
+                  <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-n-800">{name}</div>
                 )}
                 {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
                   <MenuItem
@@ -1414,7 +1407,7 @@ function HeaderMenu({
                   />
                 )}
                 {changingKind && sourceType !== null && (
-                  <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-[var(--n-25)] p-0.5">
+                  <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-n-25 p-0.5">
                     {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
                       <MenuItem
                         key={k.kind}
@@ -1552,7 +1545,7 @@ function TitleHeaderMenu({
         aria-label="Name column menu"
         aria-haspopup="menu"
         onClick={() => setOpen(!open)}
-        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-semibold text-[var(--n-600)] hover:text-[var(--n-900)]"
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-semibold text-n-600 hover:text-n-900"
       >
         Name
       </button>
@@ -2230,14 +2223,14 @@ export function TableView({
           <div
             ref={headerRowRef}
             role="row"
-            className="group/head sticky top-0 z-20 flex h-8 border-b border-[var(--n-200)] bg-[var(--n-25)]"
+            className="group/head sticky top-0 z-20 flex h-8 border-b border-n-200 bg-n-25"
           >
             {/* M16.16: the gutter's header slot. Deliberately not a
                 columnheader — it holds no column, and the header drag
                 measures slots by that role. */}
             <div
               className={[
-                frozenCount > 0 ? 'sticky left-0 z-30 bg-[var(--n-25)]' : '',
+                frozenCount > 0 ? 'sticky left-0 z-30 bg-n-25' : '',
                 'flex flex-none items-center justify-end pl-1 pr-1',
               ].join(' ')}
               style={{ width: GUTTER }}
@@ -2254,7 +2247,7 @@ export function TableView({
                     if (el !== null) el.indeterminate = checked.length > 0 && !allChecked;
                   }}
                   onChange={() => setCheckedPaths(allChecked ? new Set() : new Set(rowPaths))}
-                  className={`h-3.5 w-3.5 flex-none accent-[var(--cortex-500)] ${
+                  className={`h-3.5 w-3.5 flex-none accent-cortex-500 ${
                     checked.length > 0 ? 'opacity-100' : 'opacity-0 group-hover/head:opacity-100'
                   }`}
                 />
@@ -2273,7 +2266,7 @@ export function TableView({
                     aria-colindex={d + 1}
                     className={[
                       titleFrozen ? 'z-30' : 'relative',
-                      'group/header flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
+                      'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-[11.5px] font-semibold text-n-600',
                       drag?.key === 'title' ? 'opacity-60' : '',
                     ].join(' ')}
                     style={{
@@ -2325,8 +2318,8 @@ export function TableView({
                   onClickCapture={swallowDraggedClick}
                   aria-colindex={d + 1}
                   className={[
-                    'group/header flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]',
-                    d < frozenCount ? 'z-30 bg-[var(--n-25)]' : 'relative',
+                    'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-[11.5px] font-medium text-n-600',
+                    d < frozenCount ? 'z-30 bg-n-25' : 'relative',
                     drag?.key === def.name ? 'opacity-60' : '',
                   ].join(' ')}
                   style={{ width: `var(${widthVar(i)})`, ...freezeStyle(d), ...dropStyle(d) }}
@@ -2353,7 +2346,7 @@ export function TableView({
                   />
                   {def.heterogeneous === true && (
                     <Tooltip label="Declared with different kinds across the types in this view">
-                      <span className="flex-none text-[var(--warn-500)]">
+                      <span className="flex-none text-warn-500">
                         <Icon name="triangle-alert" size={10} />
                       </span>
                     </Tooltip>
@@ -2498,13 +2491,12 @@ export function TableView({
             <div
               role="row"
               data-testid="table-footer"
-              className="group/footer sticky bottom-0 z-20 flex h-8 border-t border-[var(--n-200)] bg-[var(--n-25)]"
+              className="group/footer sticky bottom-0 z-20 flex h-8 border-t border-n-200 bg-n-25"
             >
               <span
-                className={[
-                  frozenCount > 0 ? 'sticky left-0 z-10 bg-[var(--n-25)]' : '',
-                  'flex-none',
-                ].join(' ')}
+                className={[frozenCount > 0 ? 'sticky left-0 z-10 bg-n-25' : '', 'flex-none'].join(
+                  ' ',
+                )}
                 style={{ width: GUTTER }}
               />
               {displayKeys.map((key, d) => {
@@ -2525,8 +2517,8 @@ export function TableView({
                       persists === undefined ? undefined : (next) => setColumnCalc(key, next)
                     }
                     className={[
-                      d < frozenCount ? 'z-10 bg-[var(--n-25)]' : '',
-                      'flex flex-none items-center border-r border-[var(--n-100)] px-2 text-[11.5px]',
+                      d < frozenCount ? 'z-10 bg-n-25' : '',
+                      'flex flex-none items-center border-r border-n-100 px-2 text-[11.5px]',
                     ].join(' ')}
                     style={{
                       width: `var(${column === null ? TITLE_VAR : widthVar(i)})`,
@@ -2572,12 +2564,12 @@ export function TableView({
           role="toolbar"
           data-testid="bulk-bar"
           aria-label={`${checked.length} selected`}
-          className="absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-2 py-1.5 shadow-[var(--shadow-lg)]"
+          className="absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-n-200 bg-n-0 px-2 py-1.5 shadow-[var(--shadow-lg)]"
         >
-          <span className="px-1 text-[12.5px] font-medium text-[var(--n-700)]">
+          <span className="px-1 text-[12.5px] font-medium text-n-700">
             {checked.length} selected
           </span>
-          <span className="h-4 w-px bg-[var(--n-200)]" />
+          <span className="h-4 w-px bg-n-200" />
           <Button size="sm" variant="ghost" icon="link" onClick={copyLinks}>
             Copy links
           </Button>
@@ -2601,7 +2593,7 @@ export function TableView({
         secondaryAction={{ label: 'Cancel', onClick: () => setConfirmBulkDelete(false) }}
         primaryAction={{ label: 'Delete', onClick: () => deleteRecords(checked) }}
       >
-        <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
+        <p className="m-0 text-[13px] leading-relaxed text-n-600">
           {checked.length === 1
             ? 'The file leaves the vault.'
             : 'The files leave the vault. Links pointing at them will point at nothing.'}
@@ -2623,9 +2615,7 @@ export function TableView({
           },
         }}
       >
-        <p className="m-0 text-[13px] leading-relaxed text-[var(--n-600)]">
-          The file leaves the vault.
-        </p>
+        <p className="m-0 text-[13px] leading-relaxed text-n-600">The file leaves the vault.</p>
       </Dialog>
     </div>
   );

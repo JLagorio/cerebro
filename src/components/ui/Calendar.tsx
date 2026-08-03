@@ -160,7 +160,7 @@ export function Calendar({
   return (
     <div data-testid="calendar" className="select-none">
       <div className="flex items-center gap-1 px-1 pb-1.5">
-        <span className="text-[13px] font-semibold text-[var(--n-900)]">
+        <span className="text-[13px] font-semibold text-n-900">
           {MONTH_SHORT[m - 1]} {y}
         </span>
         <span className="flex-1" />
@@ -168,7 +168,7 @@ export function Calendar({
           <button
             type="button"
             onClick={onToday}
-            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[12px] text-n-500 hover:bg-n-50 hover:text-n-800"
           >
             {todayLabel}
           </button>
@@ -177,7 +177,7 @@ export function Calendar({
           type="button"
           aria-label="Previous month"
           onClick={() => onMonthChange(shiftMonth(month, -1))}
-          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)]"
+          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50"
         >
           <Icon name="chevron-left" size={14} />
         </button>
@@ -185,7 +185,7 @@ export function Calendar({
           type="button"
           aria-label="Next month"
           onClick={() => onMonthChange(shiftMonth(month, 1))}
-          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)]"
+          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50"
         >
           <Icon name="chevron-right" size={14} />
         </button>
@@ -227,11 +227,11 @@ export function Calendar({
               className={[
                 'flex h-8 w-full items-center justify-center border-0 text-[13px]',
                 isEndpoint
-                  ? 'rounded-lg bg-[var(--cortex-500)] font-medium text-[var(--n-0)]'
+                  ? 'rounded-lg bg-cortex-500 font-medium text-n-0'
                   : inRange
-                    ? 'rounded-none bg-[var(--cortex-100)] text-[var(--n-800)]'
-                    : `rounded-lg bg-transparent hover:bg-[var(--n-50)] ${
-                        inMonth ? 'text-[var(--n-800)]' : 'text-[var(--n-300)]'
+                    ? 'rounded-none bg-cortex-100 text-n-800'
+                    : `rounded-lg bg-transparent hover:bg-n-50 ${
+                        inMonth ? 'text-n-800' : 'text-n-300'
                       }`,
               ].join(' ')}
             >

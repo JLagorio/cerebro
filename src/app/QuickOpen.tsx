@@ -258,14 +258,12 @@ export function QuickOpen() {
             >
               <Icon name={r.target.icon} size={14} />
             </span>
-            <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-900)]">
-              {r.target.label}
-            </span>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-n-900">{r.target.label}</span>
             {/* The record's key: a mono chip, because it is an identifier you
                 might have typed. Distinct from the kind label, which used to
                 sit beside it in the identical style and read as one phrase. */}
             {r.target.hint !== '' && (
-              <span className="flex-none rounded-[4px] bg-[var(--n-100)] px-1 py-px [font-family:var(--font-mono)] text-[11px] text-[var(--text-meta)]">
+              <span className="flex-none rounded-[4px] bg-n-100 px-1 py-px [font-family:var(--font-mono)] text-[11px] text-[var(--text-meta)]">
                 {r.target.hint}
               </span>
             )}

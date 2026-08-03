@@ -21,7 +21,7 @@ export function greetingForHour(hour: number): string {
 }
 
 const CARD =
-  'flex min-w-0 flex-col gap-2 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] px-[14px] py-[13px] text-left hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)]';
+  'flex min-w-0 flex-col gap-2 rounded-[10px] border border-n-200 bg-n-0 px-[14px] py-[13px] text-left hover:border-n-300 hover:shadow-[var(--shadow-sm)]';
 
 /** One root Collection (M12.5 — the grid used to be projects). */
 export function CollectionCard({ node }: { node: CollectionNode }) {
@@ -37,7 +37,7 @@ export function CollectionCard({ node }: { node: CollectionNode }) {
     >
       <div className="flex min-w-0 items-center gap-2">
         <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-[var(--n-900)]">
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-n-900">
           {node.label}
         </span>
       </div>
@@ -56,9 +56,9 @@ export const SECTION_HEADING = 'm-0 text-[15px] font-semibold tracking-[-0.005em
 // :root so the fallback never fired, and the literals recorded a *different*
 // colour than the token — #c5372c for a --danger-600 that is #bc2438.
 const BUCKET_META: { id: DueBucket; label: string; tone: string }[] = [
-  { id: 'overdue', label: 'Overdue', tone: 'text-[var(--danger-600)]' },
-  { id: 'today', label: 'Today', tone: 'text-[var(--warn-700)]' },
-  { id: 'upcoming', label: 'Upcoming', tone: 'text-[var(--n-600)]' },
+  { id: 'overdue', label: 'Overdue', tone: 'text-danger-600' },
+  { id: 'today', label: 'Today', tone: 'text-warn-700' },
+  { id: 'upcoming', label: 'Upcoming', tone: 'text-n-600' },
   { id: 'none', label: 'No due date', tone: 'text-[var(--text-meta)]' },
 ];
 
@@ -69,15 +69,15 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
   const bucket = dueBucket(task.due, todayIso());
   const dueTone =
     bucket === 'overdue'
-      ? 'bg-[var(--danger-50)] text-[var(--danger-600)]'
+      ? 'bg-danger-50 text-danger-600'
       : bucket === 'today'
-        ? 'bg-[var(--warn-50)] text-[var(--warn-700)]'
-        : 'bg-[var(--n-50)] text-[var(--n-600)]';
+        ? 'bg-warn-50 text-warn-700'
+        : 'bg-n-50 text-n-600';
 
   return (
     <div
       data-testid="home-task"
-      className="group flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-[var(--n-50)]"
+      className="group flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 hover:bg-n-50"
     >
       <button
         type="button"
@@ -88,8 +88,8 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
         className={[
           'flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border',
           task.done
-            ? 'border-[var(--cortex-500)] bg-[var(--cortex-500)] text-[var(--n-0)]'
-            : 'border-[var(--n-300)] bg-[var(--n-0)] hover:border-[var(--cortex-500)]',
+            ? 'border-cortex-500 bg-cortex-500 text-n-0'
+            : 'border-n-300 bg-n-0 hover:border-cortex-500',
         ].join(' ')}
       >
         {task.done && <Icon name="check" size={11} />}
@@ -101,7 +101,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
       <span
         className={[
           'min-w-0 max-w-[62%] truncate text-[13px]',
-          task.done ? 'text-[var(--text-disabled)] line-through' : 'text-[var(--n-800)]',
+          task.done ? 'text-[var(--text-disabled)] line-through' : 'text-n-800',
         ].join(' ')}
       >
         {task.text === '' ? '(untitled task)' : task.text}
@@ -110,7 +110,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
         <button
           type="button"
           onClick={() => open(source.path)}
-          className="min-w-0 max-w-[38%] flex-none truncate rounded-[5px] border-0 bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--text-meta)] hover:bg-[var(--n-100)] hover:text-[var(--n-900)]"
+          className="min-w-0 max-w-[38%] flex-none truncate rounded-[5px] border-0 bg-n-50 px-1.5 py-px text-[11px] text-[var(--text-meta)] hover:bg-n-100 hover:text-n-900"
           title={source.path}
         >
           {source.title}
@@ -121,7 +121,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
       {task.assignees.map((a) => (
         <span
           key={a}
-          className="flex-none rounded-full border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 py-px text-[11px] text-[var(--n-600)]"
+          className="flex-none rounded-full border border-n-200 bg-n-0 px-1.5 py-px text-[11px] text-n-600"
         >
           {resolveTarget(a, entries)?.title ?? a}
         </span>
@@ -198,9 +198,7 @@ export function HomeTasks() {
             onClick={() => setShowDone((v) => !v)}
             className={[
               'rounded-[5px] border-0 bg-transparent px-1 py-px text-[12px] underline decoration-dotted underline-offset-2',
-              showDone
-                ? 'text-[var(--cortex-600)]'
-                : 'text-[var(--text-meta)] hover:text-[var(--n-900)]',
+              showDone ? 'text-cortex-600' : 'text-[var(--text-meta)] hover:text-n-900',
             ].join(' ')}
           >
             {doneCount} done
@@ -223,7 +221,7 @@ export function HomeTasks() {
       </div>
       {loading && filtered.length === 0 && <div data-testid="home-tasks-loading" />}
       {!loading && filtered.length === 0 && (
-        <p className="m-0 rounded-[10px] border border-dashed border-[var(--n-200)] px-4 py-3 text-[12.5px] text-[var(--text-meta)]">
+        <p className="m-0 rounded-[10px] border border-dashed border-n-200 px-4 py-3 text-[12.5px] text-[var(--text-meta)]">
           No open tasks. Add one in any doc with a checklist item — assign with @, set a due date
           with the calendar chip.
         </p>
@@ -270,7 +268,7 @@ export function HomePage() {
   const greeting = greetingForHour(new Date().getHours());
 
   return (
-    <div className="min-w-0 flex-1 overflow-y-auto bg-[var(--n-0)]">
+    <div className="min-w-0 flex-1 overflow-y-auto bg-n-0">
       <div className="mx-auto max-w-[1080px] px-8 pb-14 pt-8">
         <div className="mb-[18px] flex items-baseline gap-3">
           <h1 className="m-0 text-[22px] font-semibold leading-[30px] tracking-[-0.015em]">

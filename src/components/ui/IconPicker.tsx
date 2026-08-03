@@ -81,9 +81,7 @@ export function IconPicker({
   const tile = (selected: boolean) =>
     [
       'flex h-9 w-9 items-center justify-center rounded-md border',
-      selected
-        ? 'border-[var(--cortex-500)] bg-[var(--n-50)]'
-        : 'border-transparent hover:bg-[var(--n-50)]',
+      selected ? 'border-cortex-500 bg-n-50' : 'border-transparent hover:bg-n-50',
     ].join(' ');
 
   return (
@@ -133,7 +131,7 @@ export function IconPicker({
         ))}
         {matches.length === 0 && (
           <div
-            className="py-3 text-center text-[12px] text-[var(--n-400)]"
+            className="py-3 text-center text-[12px] text-n-400"
             style={{ gridColumn: `span ${columns} / span ${columns}` }}
           >
             No icons match "{query}"

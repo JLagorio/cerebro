@@ -138,8 +138,8 @@ export function ViewControlIcons({
             className={[
               'flex h-7 w-7 items-center justify-center rounded-md border-0',
               settingsOpen
-                ? 'bg-[var(--n-100)] text-[var(--n-800)]'
-                : 'bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+                ? 'bg-n-100 text-n-800'
+                : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
             ].join(' ')}
           >
             <Icon name="sliders-horizontal" size={14} />
@@ -199,7 +199,7 @@ function SearchBox({ query, onChange }: { query: string; onChange: (q: string) =
           data-testid="view-control-search"
           aria-label="Search this view"
           onClick={() => setOpen(true)}
-          className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+          className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           <Icon name="search" size={14} />
         </button>
@@ -208,7 +208,7 @@ function SearchBox({ query, onChange }: { query: string; onChange: (q: string) =
   }
 
   return (
-    <span className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--n-300)] bg-[var(--n-0)] pl-1.5 pr-0.5">
+    <span className="inline-flex h-7 items-center gap-1 rounded-md border border-n-300 bg-n-0 pl-1.5 pr-0.5">
       <Icon name="search" size={12} color="var(--n-400)" />
       <input
         ref={input}
@@ -228,7 +228,7 @@ function SearchBox({ query, onChange }: { query: string; onChange: (q: string) =
           onChange('');
           setOpen(false);
         }}
-        className="h-6 w-[124px] border-0 bg-transparent text-[12.5px] text-[var(--n-800)] outline-none placeholder:text-[var(--n-400)]"
+        className="h-6 w-[124px] border-0 bg-transparent text-[12.5px] text-n-800 outline-none placeholder:text-n-400"
       />
       {query !== '' && (
         <IconButton
@@ -306,8 +306,8 @@ function QuickAxisIcon({
         className={[
           'flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent',
           active
-            ? 'text-[var(--cortex-600)] hover:bg-[var(--cortex-50)]'
-            : 'text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+            ? 'text-cortex-600 hover:bg-cortex-50'
+            : 'text-n-500 hover:bg-n-50 hover:text-n-800',
         ].join(' ')}
       >
         <Icon name={icon} size={14} />
@@ -322,7 +322,7 @@ function QuickAxisIcon({
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[240px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]">
+            <div className="w-[240px] rounded-[10px] border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]">
               <input
                 autoFocus
                 aria-label={placeholder}
@@ -348,7 +348,7 @@ function QuickAxisIcon({
                     onPick(shown[at].value);
                   }
                 }}
-                className="mb-1 h-7 w-full rounded-md border border-[var(--n-200)] px-2 text-[12.5px] text-[var(--n-800)] outline-none focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]"
+                className="mb-1 h-7 w-full rounded-md border border-n-200 px-2 text-[12.5px] text-n-800 outline-none focus:border-cortex-500 focus:shadow-[0_0_0_3px_var(--cortex-100)]"
               />
               <div className="max-h-[264px] overflow-y-auto">
                 {shown.map((o, i) => (
@@ -364,8 +364,8 @@ function QuickAxisIcon({
                     // The highlight wears the hover background, so pointer and
                     // keyboard say "this is the one Enter takes" the same way.
                     className={[
-                      'flex w-full items-center gap-2 rounded-[6px] border-0 px-2 py-1.5 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]',
-                      i === at ? 'bg-[var(--n-50)]' : 'bg-transparent',
+                      'flex w-full items-center gap-2 rounded-[6px] border-0 px-2 py-1.5 text-left text-[12.5px] text-n-700 hover:bg-n-50',
+                      i === at ? 'bg-n-50' : 'bg-transparent',
                     ].join(' ')}
                   >
                     <Icon name={o.icon} size={12} color="var(--n-500)" />
@@ -373,9 +373,7 @@ function QuickAxisIcon({
                   </button>
                 ))}
                 {shown.length === 0 && (
-                  <div className="px-2 py-1.5 text-[12px] text-[var(--n-400)]">
-                    Nothing matches.
-                  </div>
+                  <div className="px-2 py-1.5 text-[12px] text-n-400">Nothing matches.</div>
                 )}
               </div>
             </div>

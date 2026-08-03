@@ -55,14 +55,14 @@ function BlockShell({
       data-testid={testId}
       data-wide={wide ? 'true' : 'false'}
       style={wide ? { gridColumn: '1 / -1' } : undefined}
-      className="flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--n-200)] bg-[var(--n-0)]"
+      className="flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-n-200 bg-n-0"
     >
-      <header className="flex flex-none items-baseline gap-2 border-b border-[var(--n-100)] px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-[var(--n-800)]">
+      <header className="flex flex-none items-baseline gap-2 border-b border-n-100 px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-n-800">
           {title}
         </span>
         {subtitle !== undefined && subtitle !== '' && (
-          <span className="flex-none text-[11px] text-[var(--n-400)]">{subtitle}</span>
+          <span className="flex-none text-[11px] text-n-400">{subtitle}</span>
         )}
       </header>
       {children}
@@ -85,7 +85,7 @@ function BrokenBlock({
 }) {
   return (
     <BlockShell title={title} wide={wide} testId="dashboard-block">
-      <p className="m-0 flex items-start gap-2 px-3 py-4 text-[12px] leading-[17px] text-[var(--n-500)]">
+      <p className="m-0 flex items-start gap-2 px-3 py-4 text-[12px] leading-[17px] text-n-500">
         <Icon name={icon} size={14} color="var(--n-400)" />
         {message}
       </p>
@@ -116,11 +116,11 @@ function NumberBlock({
         data-blocked={measured.blocked ?? ''}
         className="flex flex-col items-start gap-1 px-3 py-4"
       >
-        <span className="text-[30px] font-semibold leading-none tracking-[var(--track-tight)] text-[var(--n-900)]">
+        <span className="text-[30px] font-semibold leading-none tracking-[var(--track-tight)] text-n-900">
           {measured.display}
         </span>
         {measured.blocked !== null && (
-          <span className="text-[11.5px] leading-[16px] text-[var(--n-500)]">
+          <span className="text-[11.5px] leading-[16px] text-n-500">
             {measured.blocked === 'no-value-field'
               ? 'Choose a number property for this block in view settings.'
               : 'No record in view holds a number for that property.'}
@@ -206,7 +206,7 @@ export function DashboardView({ entries, presentation, schema }: DashboardViewPr
     <div
       data-testid="dashboard-view"
       data-blocks={blocks.length}
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--n-25)] px-5 py-4"
+      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
     >
       {blocks.length === 0 ? (
         <EmptyState

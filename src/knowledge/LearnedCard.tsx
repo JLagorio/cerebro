@@ -35,12 +35,12 @@ export function LearnedCard() {
   return (
     <section
       data-testid="learned-card"
-      className="mb-7 rounded-[12px] border border-[var(--n-200)] bg-[var(--n-25)] p-4"
+      className="mb-7 rounded-[12px] border border-n-200 bg-n-25 p-4"
     >
       <div className="mb-2 flex items-center gap-2">
         <Icon name="brain" size={14} color="var(--cortex-500)" />
-        <h2 className={`${SECTION_HEADING} text-[var(--n-800)]`}>Recently learned</h2>
-        <span className="text-[11.5px] text-[var(--n-500)]">nobody has confirmed these yet</span>
+        <h2 className={`${SECTION_HEADING} text-n-800`}>Recently learned</h2>
+        <span className="text-[11.5px] text-n-500">nobody has confirmed these yet</span>
       </div>
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {learned.map((concept) => (
@@ -55,14 +55,14 @@ export function LearnedCard() {
               onClick={() =>
                 navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path })
               }
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] font-medium text-[var(--n-800)]">
+                <span className="block truncate text-[12.5px] font-medium text-n-800">
                   {concept.title}
                 </span>
                 {concept.description !== null && (
-                  <span className="block truncate text-[11.5px] text-[var(--n-500)]">
+                  <span className="block truncate text-[11.5px] text-n-500">
                     {concept.description}
                   </span>
                 )}

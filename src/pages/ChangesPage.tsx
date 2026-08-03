@@ -163,7 +163,7 @@ export function ChangesPage() {
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="file-diff" size={16} color="var(--n-600)" />
           <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">Changes</h1>
-          <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
+          <span className="[font-family:var(--font-mono)] text-[11.5px] text-n-400">
             {modified.length}
           </span>
         </div>
@@ -172,18 +172,16 @@ export function ChangesPage() {
       {conflicts.length > 0 && (
         <div
           data-testid="conflict-banner"
-          className="mx-5 mb-2 flex-none rounded-[10px] border border-[var(--danger-200)] bg-[var(--danger-50)] p-3"
+          className="mx-5 mb-2 flex-none rounded-[10px] border border-danger-200 bg-danger-50 p-3"
         >
-          <div className="mb-1.5 flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--danger-700)]">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger-700">
             <Icon name="triangle-alert" size={13} />
             {conflicts.length} file{conflicts.length === 1 ? '' : 's'} conflict
             {conflictMode !== 'none' && ` (${conflictMode} in progress)`}
           </div>
           {conflicts.map((path) => (
             <div key={path} className="flex items-center gap-2 py-0.5">
-              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--n-800)]">
-                {path}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-n-800">{path}</span>
               <Button size="sm" variant="secondary" onClick={() => void resolve(path, 'ours')}>
                 Keep mine
               </Button>
@@ -219,7 +217,7 @@ export function ChangesPage() {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          <div className="flex w-[320px] min-w-0 flex-none flex-col border-r border-[var(--n-200)]">
+          <div className="flex w-[320px] min-w-0 flex-none flex-col border-r border-n-200">
             <div className="min-h-0 flex-1 overflow-y-auto">
               {modified.map((file) => {
                 const style = STATUS_STYLE[file.status];
@@ -234,8 +232,8 @@ export function ChangesPage() {
                     key={file.path}
                     data-testid="changed-file"
                     className={[
-                      'group flex h-9 items-center gap-2 border-b border-[var(--n-100)] px-3',
-                      active ? 'bg-[var(--cortex-50)]' : 'hover:bg-[var(--n-25)]',
+                      'group flex h-9 items-center gap-2 border-b border-n-100 px-3',
+                      active ? 'bg-cortex-50' : 'hover:bg-n-25',
                     ].join(' ')}
                   >
                     <Icon name={style.icon} size={13} color={style.color} />
@@ -243,7 +241,7 @@ export function ChangesPage() {
                       type="button"
                       onClick={() => setSelected(file.path)}
                       title={file.path}
-                      className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-[var(--n-800)]"
+                      className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-n-800"
                     >
                       {file.path}
                     </button>
@@ -251,7 +249,7 @@ export function ChangesPage() {
                       type="button"
                       aria-label={`Open ${file.path}`}
                       onClick={() => openPath(file.path)}
-                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] opacity-0 hover:text-[var(--n-800)] focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-n-800 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="maximize-2" size={11} />
                     </button>
@@ -259,7 +257,7 @@ export function ChangesPage() {
                       type="button"
                       aria-label={`Discard changes to ${file.path}`}
                       onClick={() => void discard(file)}
-                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-[var(--n-400)] opacity-0 hover:text-[var(--danger-500)] focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                      className="inline-flex flex-none rounded border-0 bg-transparent p-0.5 text-n-400 opacity-0 hover:text-danger-500 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
                     >
                       <Icon name="undo-2" size={11} />
                     </button>
@@ -267,7 +265,7 @@ export function ChangesPage() {
                 );
               })}
             </div>
-            <div className="flex-none border-t border-[var(--n-200)] p-2.5">
+            <div className="flex-none border-t border-n-200 p-2.5">
               <Input
                 ariaLabel="Commit message"
                 placeholder="What changed?"
@@ -290,9 +288,7 @@ export function ChangesPage() {
           </div>
           <div className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
             {selected === null ? (
-              <p className="m-0 text-[12.5px] text-[var(--n-400)]">
-                Pick a file to see what changed.
-              </p>
+              <p className="m-0 text-[12.5px] text-n-400">Pick a file to see what changed.</p>
             ) : (
               <DiffView diff={diff} />
             )}

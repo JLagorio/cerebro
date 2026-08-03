@@ -277,24 +277,24 @@ function BoardCard({
         opacity: isDragging ? 0.6 : 1,
         zIndex: isDragging ? 20 : undefined,
       }}
-      className={`relative cursor-pointer rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-xs)] hover:border-[var(--n-300)] hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
+      className={`relative cursor-pointer rounded-[10px] border border-n-200 bg-n-0 shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
     >
       <div className="mb-1 flex items-center gap-1.5">
         <span
           data-testid="card-key"
-          className="[font-family:var(--font-mono)] text-[10px] text-[var(--n-400)]"
+          className="[font-family:var(--font-mono)] text-[10px] text-n-400"
         >
           {key}
         </span>
       </div>
-      <div className={`font-medium text-[var(--n-900)] ${metrics.title}`}>{entry.title}</div>
+      <div className={`font-medium text-n-900 ${metrics.title}`}>{entry.title}</div>
       {/* M16.20: Notion's "Card preview › Page content". `Entry.snippet` has
           been produced by the scanner since v1 and, outside the Inbox
           queue's rows, rendered nowhere. */}
       {presentation.cardPreview === 'content' && entry.snippet !== '' && (
         <p
           data-testid="card-preview"
-          className={`m-0 mt-1 text-[11.5px] leading-[16px] text-[var(--n-500)] ${metrics.clamp}`}
+          className={`m-0 mt-1 text-[11.5px] leading-[16px] text-n-500 ${metrics.clamp}`}
         >
           {entry.snippet}
         </p>
@@ -361,8 +361,8 @@ function BoardColumn({
                 }
           }
         />
-        <span className="text-[12.5px] font-semibold text-[var(--n-800)]">{column.label}</span>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+        <span className="text-[12.5px] font-semibold text-n-800">{column.label}</span>
+        <span className="[font-family:var(--font-mono)] text-[11px] text-n-400">
           {column.entries.length}
         </span>
       </div>
@@ -432,11 +432,11 @@ function Swimlane({
         type="button"
         aria-expanded={!collapsed}
         onClick={() => toggle(scope, path)}
-        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] font-semibold text-[var(--n-800)] hover:bg-[var(--n-100)]"
+        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] font-semibold text-n-800 hover:bg-n-100"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         {label}
-        <span className="[font-family:var(--font-mono)] text-[11px] font-normal text-[var(--n-400)]">
+        <span className="[font-family:var(--font-mono)] text-[11px] font-normal text-n-400">
           {count}
         </span>
       </button>
@@ -518,7 +518,7 @@ export function BoardView({
     // plan's min-h-full for the placeholder's scroll-container classes.
     <div
       data-testid="board-view"
-      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-[var(--n-25)] px-5 py-4"
+      className="box-border min-h-0 min-w-0 flex-1 overflow-auto bg-n-25 px-5 py-4"
     >
       {columns.length === 0 ? (
         // Fix (execution-log note 17a): groupEntries([], …) returns [] — an
@@ -586,7 +586,7 @@ export function BoardView({
         </DndContext>
       )}
       {hiddenCount > 0 && (
-        <div className="pt-3 text-[12px] text-[var(--n-400)]">
+        <div className="pt-3 text-[12px] text-n-400">
           {hiddenCount} unparseable item{hiddenCount === 1 ? '' : 's'} hidden
         </div>
       )}
