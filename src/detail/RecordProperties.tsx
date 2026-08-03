@@ -3,6 +3,7 @@ import { addPropertyToEntry } from '@/app/typeActions';
 import { IconButton } from '@/components/ui/IconButton';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import { FieldEditor, humanize } from '@/detail/FieldEditor';
+import { PropertyMenu } from '@/detail/PropertyMenu';
 import { PropertyRow, ROW_ACTION } from '@/detail/PropertyRow';
 import { inferKindFromValue, visibleProperties } from '@/engine/properties';
 import type { Entry, FieldKind, Schema } from '@/engine/types';
@@ -36,6 +37,10 @@ function undeclaredKind(entry: Entry, name: string): FieldKind {
 export function RecordProperties({ entry, schema }: { entry: Entry; schema: Schema }) {
   const [addingProp, setAddingProp] = useState(false);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+  // The property menu edits the TYPE, so it owes the user the blast radius.
+  const recordCount = useVaultStore((s) =>
+    entry.type === null ? 0 : s.entries.filter((e) => e.type === entry.type).length,
+  );
 
   const typeDef = entry.type ? (schema.types.get(entry.type) ?? null) : null;
   const declared = typeDef?.fields ?? [];
@@ -53,6 +58,19 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
           kind={f.kind}
           name={f.name}
           align={f.kind === 'checkbox' ? 'center' : 'start'}
+          menu={
+            entry.type === null
+              ? undefined
+              : ({ close }) => (
+                  <PropertyMenu
+                    def={f}
+                    sourceType={entry.type ?? ''}
+                    schema={schema}
+                    recordCount={recordCount}
+                    onClose={close}
+                  />
+                )
+          }
         >
           <FieldEditor entry={entry} def={f} schema={schema} />
         </PropertyRow>

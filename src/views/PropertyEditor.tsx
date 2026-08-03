@@ -79,7 +79,7 @@ export function PropertyEditor({
   def,
   sourceType,
   schema,
-  columns,
+  columns = [],
   onColumnsChange,
   onRenamed,
   onDeleted,
@@ -88,9 +88,14 @@ export function PropertyEditor({
   /** The type whose schema the edits write. */
   sourceType: string;
   schema: Schema;
-  /** The open view's columns — a rename must follow the field it names. */
-  columns: ColumnSpec[];
-  onColumnsChange: (next: ColumnSpec[]) => void;
+  /**
+   * The open view's columns — a rename must follow the field it names.
+   * Optional because the detail panel (M16.7) mounts this too and has none:
+   * a record's property list IS the type's declared order, not a per-view
+   * selection of it.
+   */
+  columns?: ColumnSpec[];
+  onColumnsChange?: (next: ColumnSpec[]) => void;
   /** Hosts track the edited property by name; a rename must retarget them. */
   onRenamed?: (next: string) => void;
   onDeleted?: () => void;
@@ -117,7 +122,7 @@ export function PropertyEditor({
     void (async () => {
       if (await renameFieldOnType(sourceType, def.name, next)) {
         const normalized = normalizeFieldName(next);
-        onColumnsChange(
+        onColumnsChange?.(
           columns.map((c) => (c.field === def.name ? { ...c, field: normalized } : c)),
         );
         onRenamed?.(normalized);
@@ -236,7 +241,7 @@ export function PropertyEditor({
           onClick={() => {
             void (async () => {
               if (await removeFieldFromType(sourceType, def.name)) {
-                onColumnsChange(columns.filter((c) => c.field !== def.name));
+                onColumnsChange?.(columns.filter((c) => c.field !== def.name));
                 onDeleted?.();
               }
             })();

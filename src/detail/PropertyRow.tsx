@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { humanize } from '@/detail/FieldEditor';
 import { kindMeta } from '@/engine/properties';
@@ -48,6 +49,12 @@ export interface PropertyRowProps {
   align?: 'start' | 'center';
   /** Revealed on hover or focus at the end of the row, e.g. Remove. */
   trailing?: React.ReactNode;
+  /**
+   * Makes the NAME a menu trigger, which is where Notion puts it (M16.7).
+   * Omitted for rows with no schema behind them — a doc's Type, an
+   * undeclared key — where there would be nothing for the menu to edit.
+   */
+  menu?: (args: { close: () => void }) => React.ReactNode;
 }
 
 export function PropertyRow({
@@ -57,8 +64,19 @@ export function PropertyRow({
   icon,
   align = 'start',
   trailing,
+  menu,
 }: PropertyRowProps) {
   const label = humanize(name);
+  const labelRef = useRef<HTMLButtonElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const labelClass = [
+    'flex flex-none items-center gap-1.5 rounded-[5px] text-left text-[12px] text-[var(--n-500)]',
+    align === 'center' ? '' : 'pt-[3px]',
+  ].join(' ');
+  const glyph = <Icon name={icon ?? kindMeta(kind).icon} size={13} color="var(--n-400)" />;
+  const text = <span className="min-w-0 truncate">{label}</span>;
+
   return (
     <div
       data-testid="property-row"
@@ -72,21 +90,43 @@ export function PropertyRow({
       ].join(' ')}
     >
       {/* The name is what truncates, so it is the name that needs the
-          tooltip — 116px runs out at about 14 characters. */}
-      <Tooltip label={label}>
-        <span
-          className={[
-            'flex flex-none items-center gap-1.5 text-[12px] text-[var(--n-500)]',
-            align === 'center' ? '' : 'pt-[3px]',
-          ].join(' ')}
-          style={{ width: PROPERTY_LABEL_W }}
-        >
-          <Icon name={icon ?? kindMeta(kind).icon} size={13} color="var(--n-400)" />
-          <span className="min-w-0 truncate">{label}</span>
-        </span>
+          tooltip — 116px runs out at about 14 characters. Suppressed while
+          the menu is open, where it would sit on top of what it opened. */}
+      <Tooltip label={label} disabled={menuOpen}>
+        {menu === undefined ? (
+          <span className={labelClass} style={{ width: PROPERTY_LABEL_W }}>
+            {glyph}
+            {text}
+          </span>
+        ) : (
+          <button
+            ref={labelRef}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`${label} property menu`}
+            onClick={() => setMenuOpen((v) => !v)}
+            style={{ width: PROPERTY_LABEL_W }}
+            className={`${labelClass} border-0 bg-transparent p-0 hover:bg-[var(--n-100)] hover:text-[var(--n-700)]`}
+          >
+            {glyph}
+            {text}
+          </button>
+        )}
       </Tooltip>
       <div className="min-w-0 flex-1">{children}</div>
       {trailing}
+      {menu !== undefined && menuOpen && (
+        <Popover
+          anchorRef={labelRef}
+          onClose={() => setMenuOpen(false)}
+          role="menu"
+          ariaLabel={`${label} property`}
+          trapFocus
+        >
+          {menu({ close: () => setMenuOpen(false) })}
+        </Popover>
+      )}
     </div>
   );
 }

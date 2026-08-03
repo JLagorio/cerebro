@@ -71,6 +71,14 @@ export function useDismiss({ onClose, surfaceRef, anchorEl, onEscape }: DismissO
       // press on it would close here and reopen there, and the surface would
       // never appear.
       if (anchorEl?.()?.contains(target) === true) return;
+      // Let an editor inside the surface commit first. Unmounting a subtree
+      // never fires blur, so a name typed into a popover's rename box was
+      // silently discarded by the very click the user made to accept it.
+      // Escape stays destructive — that is what Escape means.
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && surfaceRef.current?.contains(active) === true) {
+        active.blur();
+      }
       latest.current();
     };
     document.addEventListener('pointerdown', onDown, true);
