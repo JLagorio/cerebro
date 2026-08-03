@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/Switch';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
-import { moveColumnTo, toggleColumn } from '@/engine/columns';
+import { allColumnsWrap, moveColumnTo, toggleColumn, wrapAllColumns } from '@/engine/columns';
 import { GROUPABLE_KINDS, MEDIA_KINDS, NUMERIC_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import {
@@ -26,6 +26,7 @@ import {
   CARD_SIZES,
   CHART_AGGS,
   CHART_KINDS,
+  ROW_HEIGHTS,
   bandLevels,
   nestLevels,
 } from '@/engine/types';
@@ -42,6 +43,7 @@ import type {
   GallerySpec,
   GroupSpec,
   Presentation,
+  RowHeight,
   Schema,
   SortSpec,
   ListDefinition,
@@ -62,6 +64,7 @@ import {
   hasDependencies,
   hasGroupColumns,
   isDayGrid,
+  isTabular,
   isZoomable,
   hasBlocks,
   isCharted,
@@ -89,6 +92,7 @@ type Page =
   | 'sort'
   | 'group'
   | 'limit'
+  | 'rows'
   | 'axis'
   | 'cards'
   | 'chart'
@@ -112,10 +116,25 @@ const CARD_PREVIEW_LABEL: Record<CardPreview, string> = {
   content: 'Page content',
 };
 
+const ROW_HEIGHT_LABEL: Record<RowHeight, string> = {
+  compact: 'Compact',
+  default: 'Default',
+  tall: 'Tall',
+};
+
 const CHART_KIND_LABEL: Record<ChartKind, string> = {
   bar: 'Bar',
   line: 'Line',
   donut: 'Donut',
+};
+
+/** What one band of a chart is CALLED, per kind — the word the Chart page's
+ * footnote uses. `Record<ChartKind, …>` so a fourth kind cannot be drawn
+ * without being named (M16.29). */
+const CHART_PARTS: Record<ChartKind, string> = {
+  bar: 'bars',
+  line: 'points',
+  donut: 'slices',
 };
 
 const CHART_AGG_LABEL: Record<ChartAgg, string> = {
@@ -300,6 +319,18 @@ export function ViewSettingsPanel({
                       : `${bands.length} + ${nesting.length} nested`
                 }
                 onClick={() => setPage('group')}
+              />
+            )}
+            {/* M16.29: row height and "Wrap all columns" are settings for the
+                whole table, and both could only be reached from the NAME
+                column's header menu — not here, where every other whole-view
+                setting is, and not from any other column's menu. */}
+            {isTabular(p.type) && (
+              <Row
+                icon="rows-2"
+                label="Rows"
+                value={ROW_HEIGHT_LABEL[p.rowHeight ?? 'default']}
+                onClick={() => setPage('rows')}
               />
             )}
             {/* M16.26: Notion loads 25 and offers more; every view of ours
@@ -608,6 +639,8 @@ export function ViewSettingsPanel({
           <LimitPage limit={p.limit} onChange={(limit) => setPresentation({ ...p, limit })} />
         )}
 
+        {page === 'rows' && <RowsPage presentation={p} onChange={setPresentation} />}
+
         {page === 'group' && (
           <GroupPage
             group={p.group}
@@ -636,6 +669,8 @@ function titleFor(page: Page): string {
       return 'Group';
     case 'limit':
       return 'Load limit';
+    case 'rows':
+      return 'Rows';
     case 'axis':
       return 'Date axis';
     case 'cards':
@@ -1260,10 +1295,14 @@ function ChartPage({
           ariaLabel="Omit zero values"
         />
       </div>
+      {/* M16.29: the shape is named from the chart kind. This said "bars"
+          whatever was selected, so the one sentence explaining where a chart's
+          X axis comes from described a bar chart to someone looking at a
+          donut. */}
       <p className="m-0 border-t border-[var(--n-100)] pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
         {band === undefined
-          ? 'The bars come from the view’s grouping, and this view has none yet — pick a property under Group.'
-          : `The bars come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+          ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
+          : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
       </p>
     </div>
   );
@@ -1623,6 +1662,66 @@ function LimitPage({
 
 function labelFor(field: string): string {
   return META_SORTS.find((m) => m.value === field)?.label ?? humanize(field);
+}
+
+/**
+ * How tall a row is, and whether its cells wrap (M16.29).
+ *
+ * Both are settings for the WHOLE table, and both used to live only on the
+ * NAME column's header menu — a menu whose other items are all about the name
+ * column itself, and which no other column's menu carried. Someone looking for
+ * row height opened Priority's menu, found sort/filter/hide/freeze and no
+ * height, and had no reason to think Name's menu held two extra items.
+ *
+ * They are still writes to `presentation`/`columns`, so the table redraws the
+ * moment either changes — nothing about this page is a copy of the table's
+ * state.
+ */
+function RowsPage({
+  presentation: p,
+  onChange,
+}: {
+  presentation: Presentation;
+  onChange: (next: Presentation) => void;
+}) {
+  const height = p.rowHeight ?? 'default';
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+        Row height
+      </div>
+      {ROW_HEIGHTS.map((value) => (
+        <button
+          key={value}
+          type="button"
+          data-testid={`row-height-${value}`}
+          aria-pressed={height === value}
+          onClick={() => onChange({ ...p, rowHeight: value })}
+          className={[
+            'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+            height === value
+              ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
+              : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+          ].join(' ')}
+        >
+          <span className="flex-1">{ROW_HEIGHT_LABEL[value]}</span>
+          {height === value && <Icon name="check" size={12} />}
+        </button>
+      ))}
+      <div className="mt-2 border-t border-[var(--n-100)] px-1 pt-2">
+        <Switch
+          checked={allColumnsWrap(p.columns)}
+          onChange={() => onChange({ ...p, columns: wrapAllColumns(p.columns) })}
+          label="Wrap all columns"
+          ariaLabel="Wrap all columns"
+        />
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          Wrapped cells grow the row instead of clipping. One column at a time is still on its own
+          header menu.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /**

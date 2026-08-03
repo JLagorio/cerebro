@@ -214,6 +214,96 @@ describe('card settings (M16.29)', () => {
   });
 });
 
+/**
+ * The Chart page's footnote named a shape the chart was not drawing (M16.29).
+ *
+ * "The bars come from the view's grouping" is correct for a bar chart and a
+ * lie for the other two thirds of the control right above it: a donut has
+ * slices and a line has points. The one sentence explaining where a chart's X
+ * axis comes from — which is the Group row, not this page — was the sentence
+ * describing the wrong chart.
+ */
+/**
+ * Row height and "Wrap all columns" are settings for the WHOLE table, and the
+ * only place either could be reached was the Name column's header menu
+ * (M16.29). Not view settings, where every other whole-view setting lives, and
+ * not any other column's menu — so a user looking for them opened Priority's
+ * menu, found neither, and had no reason to think Name's was different.
+ */
+describe('row settings (M16.29)', () => {
+  const openRows = () => fireEvent.click(screen.getByTestId('view-settings-rows'));
+
+  it('reports the current height on the root row', () => {
+    setup({ rowHeight: 'tall' });
+    expect(screen.getByTestId('view-settings-rows').textContent).toContain('Tall');
+  });
+
+  it('sets the row height', () => {
+    const { nextPresentation } = setup();
+    openRows();
+    fireEvent.click(screen.getByTestId('row-height-compact'));
+    expect(nextPresentation().rowHeight).toBe('compact');
+  });
+
+  it('wraps every column at once', () => {
+    const { nextPresentation } = setup({ columns: [{ field: 'status' }, { field: 'due' }] });
+    openRows();
+    fireEvent.click(screen.getByLabelText('Wrap all columns'));
+    expect(nextPresentation().columns).toEqual([
+      { field: 'status', wrap: true },
+      { field: 'due', wrap: true },
+    ]);
+  });
+
+  /** Unwrapping deletes the key rather than storing `wrap: false` per column. */
+  it('unwraps them the same way, without leaving a false behind', () => {
+    const { nextPresentation } = setup({
+      columns: [
+        { field: 'status', wrap: true },
+        { field: 'due', wrap: true },
+      ],
+    });
+    openRows();
+    fireEvent.click(screen.getByLabelText('Wrap all columns'));
+    expect(nextPresentation().columns).toEqual([{ field: 'status' }, { field: 'due' }]);
+  });
+
+  /** A board has no rows to make taller and no columns to wrap. */
+  it('is absent on a layout that draws no table', () => {
+    setup({ type: 'board' });
+    expect(screen.queryByTestId('view-settings-rows')).toBeNull();
+  });
+});
+
+describe('chart settings (M16.29)', () => {
+  const openChart = () => fireEvent.click(screen.getByTestId('view-settings-chart'));
+
+  it('says bars for a bar chart', () => {
+    setup({ type: 'chart', group: [{ field: 'status' }] });
+    openChart();
+    expect(screen.getByText(/^The bars come from/)).toBeTruthy();
+  });
+
+  it('says slices for a donut', () => {
+    setup({ type: 'chart', group: [{ field: 'status' }], chart: { kind: 'donut' } });
+    openChart();
+    expect(screen.getByText(/^The slices come from/)).toBeTruthy();
+  });
+
+  it('says points for a line', () => {
+    setup({ type: 'chart', group: [{ field: 'status' }], chart: { kind: 'line' } });
+    openChart();
+    expect(screen.getByText(/^The points come from/)).toBeTruthy();
+  });
+
+  /** The ungrouped wording is the same sentence, and drifted the same way. */
+  it('names the shape in the ungrouped case too', () => {
+    setup({ type: 'chart', group: [], chart: { kind: 'donut' } });
+    openChart();
+    expect(screen.getByText(/^The slices come from .* this view has none yet/)).toBeTruthy();
+  });
+});
+
 describe('sort page (M16.26)', () => {
   const twoKeys = {
     sort: [

@@ -309,6 +309,14 @@ export type ChipStyle = 'plain' | 'type-icon';
 /** How wide a gallery card is — a named step, not a pixel count, so the grid
  * stays responsive and two vaults agree on what "medium" looks like. */
 /**
+ * How tall a table row is. Derived rather than an inline union on
+ * `Presentation`, so the settings page offering the choices and the table
+ * mapping them to heights cannot list different ones (M16.29).
+ */
+export const ROW_HEIGHTS = ['compact', 'default', 'tall'] as const;
+export type RowHeight = (typeof ROW_HEIGHTS)[number];
+
+/**
  * How big a board card is (M16.20) — Notion's Small / Medium / Large.
  *
  * It sets the column width and the card's density together, because those
@@ -441,7 +449,7 @@ export interface Presentation {
   /** Ordered sort chain; never empty in practice (parse supplies a default). */
   sort: SortSpec[];
   columns: ColumnSpec[];
-  rowHeight?: 'compact' | 'default' | 'tall';
+  rowHeight?: RowHeight;
   /** Width of the sticky name column. Omitted = the layout's default. */
   titleWidth?: number;
   /**

@@ -155,6 +155,32 @@ export function setColumnWrap(columns: ColumnSpec[], field: string): ColumnSpec[
   return columns.map((c) => (c.field === field ? { ...c, wrap: c.wrap !== true } : c));
 }
 
+/** True when every column the view shows already wraps — what "Wrap all
+ * columns" reports back, and what decides whether pressing it wraps or
+ * unwraps. */
+export function allColumnsWrap(columns: ColumnSpec[]): boolean {
+  const shown = columns.filter((c) => c.hidden !== true);
+  return shown.length > 0 && shown.every((c) => c.wrap === true);
+}
+
+/**
+ * Wrap every column, or unwrap them all when they already are (M16.29).
+ *
+ * Off is stored as an ABSENT key rather than `wrap: false`, so unwrapping
+ * leaves the view file as it was rather than growing a line per column. One
+ * implementation, because this is offered from two places now — the table's
+ * own header and view settings — and two copies of "are they all wrapped?"
+ * would eventually disagree about a hidden column.
+ */
+export function wrapAllColumns(columns: ColumnSpec[]): ColumnSpec[] {
+  const on = !allColumnsWrap(columns);
+  return columns.map((c) => {
+    if (on) return { ...c, wrap: true };
+    const { wrap: _drop, ...rest } = c;
+    return rest;
+  });
+}
+
 /**
  * Insert a column beside another (M12.4b — Insert left / Insert right). A
  * spec the view already holds (even hidden) is moved rather than duplicated.
