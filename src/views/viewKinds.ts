@@ -47,7 +47,12 @@ export interface ViewKind {
 const CAPABILITIES = {
   table: { label: 'Table', icon: 'table-2', groupable: true, chips: true },
   list: { label: 'List', icon: 'list', groupable: true, chips: true },
-  board: { label: 'Board', icon: 'columns-3', groupable: true, chips: true },
+  // `cards` was added by the gallery (M16.22) while the board's own card-ness
+  // still lived in a second capability table inside BoardSettings.tsx, so the
+  // board never declared it here. Collapsing the two tables at merge time is
+  // what surfaced that — which is the argument for one registry, made by the
+  // registry itself.
+  board: { label: 'Board', icon: 'columns-3', groupable: true, chips: true, cards: true },
   calendar: { label: 'Calendar', icon: 'calendar-days', dated: true },
   gantt: {
     label: 'Gantt',
