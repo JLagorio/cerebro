@@ -252,7 +252,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                 size={16}
                 color={list.definition.color ?? 'var(--n-600)'}
               />
-              <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+              <h1 className="m-0 min-w-0 truncate text-lg font-semibold leading-6 tracking-[-0.005em]">
                 {list.definition.name}
               </h1>
             </button>
@@ -266,7 +266,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
                 is what ViewLimitNotice says under the records. */}
             <span
               data-testid="view-count"
-              className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-n-400"
+              className="flex-none [font-family:var(--font-mono)] text-xs text-n-400"
             >
               {sortedEntries.length}
             </span>

@@ -305,7 +305,7 @@ export function DetailPanel() {
         {/* M9.7 — the diff appears under the body, not over the panel. */}
         <InlineDiff path={entry.path} />
       </div>
-      <footer className="flex items-center gap-3 border-t border-n-100 px-4 py-2.5 [font-family:var(--font-mono)] text-[10px] text-n-400">
+      <footer className="flex items-center gap-3 border-t border-n-100 px-4 py-2.5 [font-family:var(--font-mono)] text-2xs text-n-400">
         <span>Created {entry.createdAt.slice(0, 10)}</span>
         <span>Modified {entry.modifiedAt.slice(0, 10)}</span>
       </footer>

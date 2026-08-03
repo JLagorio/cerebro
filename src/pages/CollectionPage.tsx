@@ -144,7 +144,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
             <h1 className="m-0 truncate text-2xl font-bold leading-[30px] tracking-[-0.02em] text-n-900">
               {collection.definition.name}
             </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] text-n-400">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-n-400">
               {/* The folder is the Collection's identity, and the name can
                   drift from it — so the page says which folder you are on. */}
               <span className="[font-family:var(--font-mono)]">{collection.folder}/</span>
@@ -288,7 +288,7 @@ export function CollectionPage({ selection }: { selection: CollectionSelection }
                     >
                       <Icon name="folder" size={12} color="var(--n-400)" />
                       {f.label}
-                      <span className="[font-family:var(--font-mono)] text-[10.5px] text-n-400">
+                      <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
                         {nodeCount(f)}
                       </span>
                     </span>
@@ -402,7 +402,7 @@ function Section({
       <h2 className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.07em] text-n-500">
         {title}
         {count !== undefined && (
-          <span className="[font-family:var(--font-mono)] text-[10.5px] font-normal text-n-400">
+          <span className="[font-family:var(--font-mono)] text-2xs font-normal text-n-400">
             {count}
           </span>
         )}
@@ -457,16 +457,14 @@ function ListCard({
         <button
           type="button"
           onClick={onOpen}
-          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[13.5px] font-medium text-n-900 hover:underline"
+          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-md font-medium text-n-900 hover:underline"
         >
           {node.label}
         </button>
-        <span className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-n-400">
-          {count}
-        </span>
+        <span className="flex-none [font-family:var(--font-mono)] text-xs text-n-400">{count}</span>
       </div>
       <div className="flex flex-wrap items-center gap-1">
-        <span className="inline-flex items-center rounded-full border border-n-200 px-1.5 py-px text-[10.5px] text-n-500">
+        <span className="inline-flex items-center rounded-full border border-n-200 px-1.5 py-px text-2xs text-n-500">
           {list.definition.source.type ?? 'Everything'}
         </span>
         {list.definition.views.map((v) => (
@@ -476,7 +474,7 @@ function ListCard({
             data-testid="collection-card-view"
             onClick={() => onOpenView(v.id)}
             title={`Open the ${v.name} view`}
-            className="inline-flex items-center gap-1 rounded-full border border-n-200 px-1.5 py-px text-[10.5px] text-n-500 hover:border-cortex-300 hover:bg-cortex-50 hover:text-cortex-700"
+            className="inline-flex items-center gap-1 rounded-full border border-n-200 px-1.5 py-px text-2xs text-n-500 hover:border-cortex-300 hover:bg-cortex-50 hover:text-cortex-700"
           >
             <Icon name={v.icon ?? viewKind(v.presentation.type).icon} size={10} />
             {v.name}
@@ -521,7 +519,7 @@ function Description({ collection }: { collection: CollectionFile }) {
         type="button"
         data-testid="collection-add-description"
         onClick={() => setEditing(true)}
-        className="mt-2.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] text-n-400 hover:bg-n-50 hover:text-n-700"
+        className="mt-2.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-sm text-n-400 hover:bg-n-50 hover:text-n-700"
       >
         + Add a description
       </button>

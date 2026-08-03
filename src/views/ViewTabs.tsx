@@ -234,7 +234,7 @@ export function ViewTabs({
                       // Opacity, not `hidden`: a hidden grip is out of the tab
                       // order, and Left/Right reordering is the point of the
                       // primitive underneath it.
-                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-[3px] text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
+                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
                     >
                       <Icon name="grip-vertical" size={11} />
                     </span>
@@ -411,7 +411,7 @@ function LayoutPicker({
               data-testid={`view-switch-${k.value}`}
               onClick={() => onPick(k.value)}
               className={[
-                'flex w-full items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                'flex w-full items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
                 k.value === current
                   ? 'bg-cortex-50 text-cortex-700'
                   : 'bg-transparent text-n-700 hover:bg-n-50',
@@ -468,7 +468,7 @@ function ViewIconPicker({
           data-testid="view-icon-picker"
           className="z-50 w-[300px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
         >
-          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <div className="mb-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Tab icon
           </div>
           <IconPicker
@@ -538,7 +538,7 @@ function NewViewForm({
           data-testid="new-view-form"
           className="z-50 w-[268px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
         >
-          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             New view
           </div>
           <Input

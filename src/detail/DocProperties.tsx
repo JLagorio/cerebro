@@ -65,7 +65,7 @@ function UndeclaredRow({ entry, name }: { entry: Entry; name: string }) {
     return (
       <PropertyRow kind={kind} name={name} trailing={remove}>
         <Tooltip label="A list or map — edit it in the file, or declare it on a type">
-          <span className="block pt-[3px] text-[12.5px] text-n-700 [overflow-wrap:anywhere]">
+          <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
             {Array.isArray(value) ? value.map(String).join(', ') : JSON.stringify(value)}
           </span>
         </Tooltip>
@@ -196,7 +196,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
             is not in `fields:` — so it takes an explicit icon rather than a
             kind glyph that would claim otherwise. */}
         <PropertyRow kind="text" icon="shapes" name="Type" align="center">
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-[12.5px] text-n-700">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-n-700">
             <Icon
               name={entry.type === null ? 'file-text' : typeStyle(entry.type, schema).icon}
               size={13}
@@ -278,7 +278,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
         ))}
         {undeclaredRelations.map((name) => (
           <PropertyRow key={name} kind="relation" name={name}>
-            <span className="block pt-[3px] text-[12.5px] text-n-700 [overflow-wrap:anywhere]">
+            <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
               {entry.relationships[name].join(', ')}
             </span>
           </PropertyRow>
@@ -310,7 +310,7 @@ export function DocProperties({ entry, schema }: { entry: Entry; schema: Schema 
           />
         )}
       </div>
-      <div className="mt-4 border-t border-n-100 pt-2 text-[10px] text-n-400 [font-family:var(--font-mono)]">
+      <div className="mt-4 border-t border-n-100 pt-2 text-2xs text-n-400 [font-family:var(--font-mono)]">
         <div>Created {entry.createdAt.slice(0, 10)}</div>
         <div>Modified {entry.modifiedAt.slice(0, 10)}</div>
       </div>

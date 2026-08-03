@@ -181,7 +181,7 @@ function CollectionRow({
           like it failed to load. */}
       {expanded && node.children.length === 0 && (
         <div
-          className="py-1 text-[11.5px] text-n-400"
+          className="py-1 text-xs text-n-400"
           style={{ paddingLeft: 8 + (depth + 1) * INDENT + 20 }}
         >
           Empty

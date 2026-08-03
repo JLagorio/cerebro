@@ -216,13 +216,13 @@ export function GanttView({
               data-testid="gantt-slips"
               title="Go to the next slipping dependency"
               onClick={stepSlip}
-              className="rounded-md border border-danger-500 bg-transparent px-2 py-0.5 text-[11.5px] font-medium text-danger-500 hover:bg-danger-50"
+              className="rounded-md border border-danger-500 bg-transparent px-2 py-0.5 text-xs font-medium text-danger-500 hover:bg-danger-50"
             >
               {slips.length} dependency {slips.length === 1 ? 'conflict' : 'conflicts'}
               {focusedSlip >= 0 && ` · ${focusedSlip + 1}/${slips.length}`}
             </button>
           ) : (
-            <span data-testid="gantt-slips" className="text-[11.5px] text-n-500">
+            <span data-testid="gantt-slips" className="text-xs text-n-500">
               No dependency conflicts
             </span>
           ))}
@@ -233,7 +233,7 @@ export function GanttView({
             aria-expanded={showUndated}
             onClick={() => setShowUndated(!showUndated)}
             className={[
-              'rounded-md border px-2 py-0.5 text-[11.5px]',
+              'rounded-md border px-2 py-0.5 text-xs',
               showUndated
                 ? 'border-cortex-500 bg-cortex-50 text-cortex-600'
                 : 'border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800',
@@ -305,7 +305,7 @@ export function GanttView({
                         data-path={row.entry.path}
                         onClick={() => openPath(row.entry.path)}
                         title={`${row.entry.title} · no ${dateField} — open to set one`}
-                        className="absolute top-1.5 rounded-xs border border-dashed border-n-400 bg-transparent text-[10.5px] text-n-500 hover:border-cortex-500 hover:text-cortex-600"
+                        className="absolute top-1.5 rounded-xs border border-dashed border-n-400 bg-transparent text-2xs text-n-500 hover:border-cortex-500 hover:text-cortex-600"
                         style={{
                           left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
                           width: 96,

@@ -296,7 +296,7 @@ export function FieldPopover({
                   onPick(o.id);
                   if (!multi) onClose();
                 }}
-                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-sm text-n-800 hover:bg-n-50 ${
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-800 hover:bg-n-50 ${
                   i === active ? 'bg-n-50' : ''
                 }`}
               >
@@ -326,7 +326,7 @@ export function FieldPopover({
                 is derived from onCreate), so there is no box to type into and
                 no moment at which a typed-only hint would ever appear. */}
             {!canCreate && clash === undefined && unavailableHint !== undefined && (
-              <div className="border-t border-n-100 px-2 pb-1 pt-1.5 text-[11.5px] leading-relaxed text-n-500">
+              <div className="border-t border-n-100 px-2 pb-1 pt-1.5 text-xs leading-relaxed text-n-500">
                 {unavailableHint}
               </div>
             )}
@@ -336,7 +336,7 @@ export function FieldPopover({
                 type="button"
                 onMouseEnter={() => setHighlight(rows.length)}
                 onClick={create}
-                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-sm text-n-700 hover:bg-n-50 ${
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-700 hover:bg-n-50 ${
                   createActive ? 'bg-n-50' : ''
                 }`}
               >

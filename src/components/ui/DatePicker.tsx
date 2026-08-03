@@ -231,7 +231,7 @@ export function DatePicker({
             aria-label={`${which === 'start' ? 'Start' : 'End'} time`}
             value={time}
             onChange={setTime(which === 'start' ? 'startTime' : 'endTime')}
-            className="h-8 w-[92px] flex-none rounded-lg border border-n-200 bg-n-0 px-1.5 text-[12.5px] text-n-800"
+            className="h-8 w-[92px] flex-none rounded-lg border border-n-200 bg-n-0 px-1.5 text-sm text-n-800"
           />
         )}
       </div>
@@ -276,7 +276,7 @@ export function DatePicker({
             label="Date format"
             onClick={() => setFlyout(flyout === 'format' ? null : 'format')}
             value={
-              <span className="flex items-center gap-1 text-[12.5px] text-n-500">
+              <span className="flex items-center gap-1 text-sm text-n-500">
                 {FORMAT_OPTIONS.find((o) => o.id === value.format)?.label}
                 <Icon name="chevron-right" size={13} color="var(--n-400)" />
               </span>
@@ -307,7 +307,7 @@ export function DatePicker({
                 label="Time format"
                 onClick={() => setFlyout(flyout === 'timeformat' ? null : 'timeformat')}
                 value={
-                  <span className="flex items-center gap-1 text-[12.5px] text-n-500">
+                  <span className="flex items-center gap-1 text-sm text-n-500">
                     {TIME_FORMAT_OPTIONS.find((o) => o.id === value.timeFormat)?.label}
                     <Icon name="chevron-right" size={13} color="var(--n-400)" />
                   </span>
@@ -328,7 +328,7 @@ export function DatePicker({
             <SettingRow
               label="Timezone"
               value={
-                <span className="text-[12.5px] text-n-500" title={tz.zone}>
+                <span className="text-sm text-n-500" title={tz.zone}>
                   {tz.short}
                 </span>
               }
@@ -340,7 +340,7 @@ export function DatePicker({
             label="Remind"
             onClick={() => setFlyout(flyout === 'remind' ? null : 'remind')}
             value={
-              <span className="flex items-center gap-1 text-[12.5px] text-n-500">
+              <span className="flex items-center gap-1 text-sm text-n-500">
                 {REMIND_OPTIONS.find((o) => o.id === (value.remind ?? 'none'))?.label.replace(
                   / \(9:00 AM\)$/,
                   '',

@@ -124,6 +124,7 @@
   --text-xl: var(--fs-xl);
   --text-2xl: var(--fs-2xl);
   --text-3xl: var(--fs-3xl);
+  --text-4xl: var(--fs-4xl);
   --leading-2xs: var(--lh-2xs);
   --leading-xs: var(--lh-xs);
   --leading-sm: var(--lh-sm);
@@ -132,6 +133,7 @@
   --leading-xl: var(--lh-xl);
   --leading-2xl: var(--lh-2xl);
   --leading-3xl: var(--lh-3xl);
+  --leading-4xl: var(--lh-4xl);
 
   /* radii */
   --radius-xs: var(--r-xs);

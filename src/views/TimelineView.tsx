@@ -173,7 +173,7 @@ export function TimelineView({
             data-testid="timeline-undated-toggle"
             aria-expanded={showUndated}
             onClick={() => setShowUndated(!showUndated)}
-            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-[11.5px] text-n-500 hover:border-n-400 hover:text-n-800"
+            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-500 hover:border-n-400 hover:text-n-800"
           >
             {undated.length} without a date
           </button>
@@ -269,7 +269,7 @@ export function TimelineView({
                       }}
                       title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
                       aria-label={`${row.entry.title}, ${span.start} to ${span.end}. Arrow keys move it; hold Shift to change its end.`}
-                      className="absolute top-1 flex touch-none select-none items-center gap-1 overflow-hidden rounded-[5px] border border-cortex-500 bg-cortex-50 px-1.5 text-left text-[11.5px] text-n-900 hover:bg-cortex-100"
+                      className="absolute top-1 flex touch-none select-none items-center gap-1 overflow-hidden rounded-sm border border-cortex-500 bg-cortex-50 px-1.5 text-left text-xs text-n-900 hover:bg-cortex-100"
                       style={{ ...geo, height: ROW_H - 9 }}
                     >
                       <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
@@ -308,7 +308,7 @@ export function TimelineView({
               type="button"
               data-path={entry.path}
               onClick={() => openPath(entry.path)}
-              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-n-800 hover:bg-n-100"
+              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-sm text-n-800 hover:bg-n-100"
             >
               <Icon
                 name={typeStyle(entry.type, schema).icon}

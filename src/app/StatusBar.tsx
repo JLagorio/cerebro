@@ -49,7 +49,7 @@ function Segment({
           ? 'var(--danger-500)'
           : 'var(--n-500)';
   const className = [
-    'inline-flex h-6 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-[11.5px]',
+    'inline-flex h-6 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-xs',
     onClick !== undefined ? 'hover:bg-n-100' : 'cursor-default',
   ].join(' ');
 

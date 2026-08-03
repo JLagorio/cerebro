@@ -38,7 +38,7 @@ export function DocsPage() {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="docs-page">
       <div className="flex flex-none items-center gap-2 px-5 pb-2 pt-3.5">
         <Icon name="library" size={16} color="var(--n-600)" />
-        <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">Docs</h1>
+        <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">Docs</h1>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
         {recents.length === 0 && (
@@ -77,7 +77,7 @@ export function DocsPage() {
                       {e.title}
                     </span>
                     {projectTitle(e) !== null && (
-                      <span className="hidden min-w-0 shrink truncate rounded-[5px] bg-n-50 px-1.5 py-px text-2xs text-n-600 @[380px]/canvas:inline-block">
+                      <span className="hidden min-w-0 shrink truncate rounded-sm bg-n-50 px-1.5 py-px text-2xs text-n-600 @[380px]/canvas:inline-block">
                         {projectTitle(e)}
                       </span>
                     )}

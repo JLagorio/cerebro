@@ -49,7 +49,7 @@ export function DocPagesPanel({
                   data-testid="doc-pages-row"
                   onClick={() => navigate({ kind: 'doc', path: page.path })}
                   className={[
-                    'flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
+                    'flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 px-1.5 py-[5px] text-left text-sm',
                     active
                       ? 'bg-cortex-50 font-medium text-cortex-600'
                       : 'bg-transparent text-n-700 hover:bg-n-50 hover:text-n-900',

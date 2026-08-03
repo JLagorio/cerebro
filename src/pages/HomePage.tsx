@@ -37,11 +37,11 @@ export function CollectionCard({ node }: { node: CollectionNode }) {
     >
       <div className="flex min-w-0 items-center gap-2">
         <Icon name={node.icon} size={15} color={node.color ?? 'var(--n-500)'} />
-        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-n-900">
+        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-md font-semibold text-n-900">
           {node.label}
         </span>
       </div>
-      <div className="text-[11.5px] text-[var(--text-meta)]">
+      <div className="text-xs text-[var(--text-meta)]">
         {count} {count === 1 ? 'thing' : 'things'} inside
       </div>
     </button>
@@ -50,7 +50,7 @@ export function CollectionCard({ node }: { node: CollectionNode }) {
 
 /** One heading style for every Home section, so the visual and semantic
  *  levels agree instead of the h2s shipping at two different sizes. */
-export const SECTION_HEADING = 'm-0 text-[15px] font-semibold tracking-[-0.005em]';
+export const SECTION_HEADING = 'm-0 text-lg font-semibold tracking-[-0.005em]';
 
 // Fallback arguments removed (M15): every one of these tokens is defined at
 // :root so the fallback never fired, and the literals recorded a *different*
@@ -86,7 +86,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
         aria-label={`Mark "${task.text}" ${task.done ? 'open' : 'done'}`}
         onClick={() => onToggle(!task.done)}
         className={[
-          'flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border',
+          'flex h-4 w-4 flex-none items-center justify-center rounded-sm border',
           task.done
             ? 'border-cortex-500 bg-cortex-500 text-n-0'
             : 'border-n-300 bg-n-0 hover:border-cortex-500',
@@ -110,7 +110,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
         <button
           type="button"
           onClick={() => open(source.path)}
-          className="min-w-0 max-w-[38%] flex-none truncate rounded-[5px] border-0 bg-n-50 px-1.5 py-px text-2xs text-[var(--text-meta)] hover:bg-n-100 hover:text-n-900"
+          className="min-w-0 max-w-[38%] flex-none truncate rounded-sm border-0 bg-n-50 px-1.5 py-px text-2xs text-[var(--text-meta)] hover:bg-n-100 hover:text-n-900"
           title={source.path}
         >
           {source.title}
@@ -128,7 +128,7 @@ function TaskRow({ task, onToggle }: { task: DocTask; onToggle: (done: boolean) 
       ))}
       {task.due !== null && (
         <span
-          className={`flex-none items-center gap-1 rounded-[5px] px-1.5 py-px text-2xs ${dueTone} inline-flex`}
+          className={`flex-none items-center gap-1 rounded-sm px-1.5 py-px text-2xs ${dueTone} inline-flex`}
         >
           <Icon name="calendar" size={11} />
           {formatDue(task.due)}
@@ -197,7 +197,7 @@ export function HomeTasks() {
             aria-pressed={showDone}
             onClick={() => setShowDone((v) => !v)}
             className={[
-              'rounded-[5px] border-0 bg-transparent px-1 py-px text-xs underline decoration-dotted underline-offset-2',
+              'rounded-sm border-0 bg-transparent px-1 py-px text-xs underline decoration-dotted underline-offset-2',
               showDone ? 'text-cortex-600' : 'text-[var(--text-meta)] hover:text-n-900',
             ].join(' ')}
           >
@@ -221,7 +221,7 @@ export function HomeTasks() {
       </div>
       {loading && filtered.length === 0 && <div data-testid="home-tasks-loading" />}
       {!loading && filtered.length === 0 && (
-        <p className="m-0 rounded-lg border border-dashed border-n-200 px-4 py-3 text-[12.5px] text-[var(--text-meta)]">
+        <p className="m-0 rounded-lg border border-dashed border-n-200 px-4 py-3 text-sm text-[var(--text-meta)]">
           No open tasks. Add one in any doc with a checklist item — assign with @, set a due date
           with the calendar chip.
         </p>
@@ -271,7 +271,7 @@ export function HomePage() {
     <div className="min-w-0 flex-1 overflow-y-auto bg-n-0">
       <div className="mx-auto max-w-[1080px] px-8 pb-14 pt-8">
         <div className="mb-[18px] flex items-baseline gap-3">
-          <h1 className="m-0 text-[22px] font-semibold leading-[30px] tracking-[-0.015em]">
+          <h1 className="m-0 text-2xl font-semibold leading-[30px] tracking-[-0.015em]">
             {greeting}
           </h1>
           <span className="text-xs text-[var(--text-meta)]">

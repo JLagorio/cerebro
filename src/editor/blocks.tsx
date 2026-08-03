@@ -169,11 +169,9 @@ function MermaidView({
     >
       <div className="flex items-center gap-1.5 border-b border-n-100 px-2.5 py-1">
         <Icon name="waypoints" size={13} color="var(--n-500)" />
-        <span className="text-[11.5px] font-medium uppercase tracking-[0.05em] text-n-500">
-          Mermaid
-        </span>
+        <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">Mermaid</span>
         {error !== null && (
-          <span className="min-w-0 flex-1 truncate text-[11.5px] text-danger-600">{error}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-danger-600">{error}</span>
         )}
         <span className="flex-1" />
         <button
@@ -189,7 +187,7 @@ function MermaidView({
               setEditing(true);
             }
           }}
-          className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[11.5px] text-n-500 hover:bg-n-50 hover:text-n-800"
+          className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           {editing ? 'Done' : 'Edit'}
         </button>
@@ -204,7 +202,7 @@ function MermaidView({
           onBlur={commit}
           onKeyDown={(e) => e.stopPropagation()}
           rows={Math.max(4, draft.split('\n').length + 1)}
-          className="w-full resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-[12.5px] leading-[1.5] text-n-800 outline-none"
+          className="w-full resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-sm leading-[1.5] text-n-800 outline-none"
         />
       )}
       {!editing && svg !== null && (
@@ -221,7 +219,7 @@ function MermaidView({
             setDraft(code);
             setEditing(true);
           }}
-          className="w-full border-0 bg-transparent px-3 py-3 text-left text-[12.5px] text-n-400"
+          className="w-full border-0 bg-transparent px-3 py-3 text-left text-sm text-n-400"
         >
           {error !== null
             ? 'Fix the diagram source…'

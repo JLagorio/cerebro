@@ -20,7 +20,7 @@ function MenuEntry({ label, icon, onClick }: { label: string; icon: string; onCl
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-sm text-n-800 hover:bg-n-50 focus-visible:bg-n-50"
+      className="flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-800 hover:bg-n-50 focus-visible:bg-n-50"
     >
       <Icon name={icon} size={14} color="var(--n-500)" />
       {label}
@@ -200,7 +200,7 @@ function NewRecordDialog({ onClose }: { onClose: () => void }) {
           )}
         </label>
         {typeName !== '' && (
-          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-n-500">
+          <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
             <Icon
               name={typeStyle(typeName, schema).icon}
               size={12}

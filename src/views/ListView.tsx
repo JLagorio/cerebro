@@ -141,7 +141,7 @@ function ListRow({
       ].join(' ')}
       style={{ paddingLeft: 20 + depth * INDENT }}
     >
-      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
+      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
         {key}
       </span>
       {expander}
@@ -199,7 +199,7 @@ function ListRow({
             onSelect();
             openPath(entry.path);
           }}
-          className="rounded-[5px] border border-n-200 bg-n-0 px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800"
+          className="rounded-sm border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           Open
         </button>
@@ -263,7 +263,7 @@ function BandHeader({
       />
       <span
         className={[
-          node.depth === 0 ? 'text-[12.5px] font-semibold' : 'text-xs font-medium',
+          node.depth === 0 ? 'text-sm font-semibold' : 'text-xs font-medium',
           'min-w-0 truncate text-n-800',
         ].join(' ')}
       >
@@ -348,7 +348,7 @@ export function ListView({
               className="box-border h-2.5 w-2.5 flex-none rounded-full"
               style={{ border: '1.5px solid var(--n-400)' }}
             />
-            <span className="text-[12.5px] font-semibold text-n-800">All items</span>
+            <span className="text-sm font-semibold text-n-800">All items</span>
             <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
               {entries.length}
             </span>

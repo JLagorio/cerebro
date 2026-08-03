@@ -132,7 +132,7 @@ export function OutlineTab({
               type="button"
               onClick={() => jumpTo(item.id)}
               className={[
-                'block w-full truncate rounded-md border-0 bg-transparent py-[5px] text-left text-[12.5px]',
+                'block w-full truncate rounded-md border-0 bg-transparent py-[5px] text-left text-sm',
                 item.id === activeId
                   ? 'bg-cortex-50 font-medium text-cortex-600'
                   : 'text-n-600 hover:bg-n-50 hover:text-n-900',

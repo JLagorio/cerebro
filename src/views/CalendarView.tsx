@@ -201,7 +201,7 @@ export function CalendarView({
           <button
             type="button"
             onClick={() => setAnchor(today)}
-            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-[11.5px] text-n-600 hover:border-n-400"
+            className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-600 hover:border-n-400"
           >
             Today
           </button>
@@ -229,7 +229,7 @@ export function CalendarView({
             aria-expanded={showUndated}
             onClick={() => setShowUndated(!showUndated)}
             className={[
-              'rounded-md border px-2 py-0.5 text-[11.5px]',
+              'rounded-md border px-2 py-0.5 text-xs',
               showUndated
                 ? 'border-cortex-500 bg-cortex-50 text-cortex-600'
                 : 'border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800',
@@ -336,7 +336,7 @@ export function CalendarView({
                           title={entry.title}
                           aria-label={`${entry.title} on ${day}. Arrow keys move it.`}
                           className={[
-                            'flex min-w-0 touch-none select-none items-center gap-1 rounded border-0 bg-n-50 px-1 py-px text-left text-[11.5px] text-n-800 hover:bg-n-100',
+                            'flex min-w-0 touch-none select-none items-center gap-1 rounded border-0 bg-n-50 px-1 py-px text-left text-xs text-n-800 hover:bg-n-100',
                             drag.drag?.id === entry.path ? 'opacity-60 ring-1 ring-cortex-500' : '',
                           ].join(' ')}
                         >
@@ -388,9 +388,9 @@ export function CalendarView({
                       title={`${seg.entry.title} · ${seg.span.start} → ${seg.span.end}`}
                       aria-label={`${seg.entry.title}, ${seg.span.start} to ${seg.span.end}. Arrow keys move it.`}
                       className={[
-                        'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-cortex-500 bg-cortex-50 px-1 text-left text-[11.5px] text-n-900 hover:bg-cortex-100',
-                        seg.continuesLeft ? 'border-l-0' : 'rounded-l-[5px]',
-                        seg.continuesRight ? 'border-r-0' : 'rounded-r-[5px]',
+                        'pointer-events-auto absolute flex touch-none select-none items-center gap-1 overflow-hidden border border-cortex-500 bg-cortex-50 px-1 text-left text-xs text-n-900 hover:bg-cortex-100',
+                        seg.continuesLeft ? 'border-l-0' : 'rounded-l-sm',
+                        seg.continuesRight ? 'border-r-0' : 'rounded-r-sm',
                         drag.drag?.id === seg.entry.path ? 'opacity-70' : '',
                       ].join(' ')}
                       style={{
@@ -432,7 +432,7 @@ export function CalendarView({
               type="button"
               data-path={entry.path}
               onClick={() => openPath(entry.path)}
-              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-n-800 hover:bg-n-100"
+              className="flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left text-sm text-n-800 hover:bg-n-100"
             >
               <Icon
                 name={typeStyle(entry.type, schema).icon}
@@ -511,7 +511,7 @@ function DayAdd({
         }
       }}
       placeholder="Title"
-      className="h-4 w-full min-w-0 border-none bg-transparent text-[11.5px] text-n-900 outline-none"
+      className="h-4 w-full min-w-0 border-none bg-transparent text-xs text-n-900 outline-none"
     />
   );
 }

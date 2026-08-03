@@ -78,7 +78,7 @@ export function TimeAxisHeader({
       {onAxis && (
         <span
           data-testid="today-label"
-          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-cortex-500 px-1.5 py-px text-[10px] font-semibold text-n-0"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-full bg-cortex-500 px-1.5 py-px text-2xs font-semibold text-n-0"
           style={{ left: dayOffset(axis, today) * PX_PER_DAY[zoom], top: 4 }}
         >
           Today
@@ -233,7 +233,7 @@ export function TimeTable({
     >
       <div className="flex border-b border-n-200 bg-n-25" style={{ height: HEAD_H }}>
         <div
-          className="relative flex flex-none items-center border-r border-n-200 px-3 text-[11.5px] font-semibold text-n-600"
+          className="relative flex flex-none items-center border-r border-n-200 px-3 text-xs font-semibold text-n-600"
           style={{ width: nameWidth }}
         >
           {nameLabel}
@@ -249,7 +249,7 @@ export function TimeTable({
         {columns.map((c) => (
           <div
             key={c.def.name}
-            className="flex flex-none items-center overflow-hidden truncate border-r border-n-200 px-2 text-[11.5px] font-semibold text-n-600"
+            className="flex flex-none items-center overflow-hidden truncate border-r border-n-200 px-2 text-xs font-semibold text-n-600"
             style={{ width: c.width }}
           >
             {humanize(c.def.name)}
@@ -306,7 +306,7 @@ export function TimeTable({
               <button
                 type="button"
                 onClick={() => onOpen(row.entry.path)}
-                className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-n-900 hover:underline"
+                className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-900 hover:underline"
               >
                 {row.entry.title}
               </button>
@@ -323,7 +323,7 @@ export function TimeTable({
                   className="flex flex-none items-center overflow-hidden border-b border-r border-n-100 px-2"
                   style={{ width: c.width }}
                 >
-                  <span className="truncate whitespace-nowrap text-[12.5px] text-n-600">
+                  <span className="truncate whitespace-nowrap text-sm text-n-600">
                     {display === '' ? '—' : display}
                   </span>
                 </div>
@@ -373,7 +373,7 @@ export function ResizeGrips({
       aria-label={`Change ${edge === 'start' ? 'start' : 'end'} date of ${title}`}
       {...drag.handleProps(id, edge)}
       className={[
-        'absolute z-10 cursor-col-resize touch-none rounded-[2px] border-0 bg-transparent p-0',
+        'absolute z-10 cursor-col-resize touch-none rounded-xs border-0 bg-transparent p-0',
         'opacity-0 hover:bg-cortex-600 focus-visible:opacity-100 hover:opacity-100',
       ].join(' ')}
       style={{

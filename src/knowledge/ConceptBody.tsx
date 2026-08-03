@@ -60,7 +60,7 @@ function Citation({ id, ctx }: { id: string; ctx: InlineContext }) {
       }
       onClick={known ? () => ctx.onCite?.(id) : undefined}
       className={[
-        'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-[9.5px] font-semibold [font-family:var(--font-mono)]',
+        'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-2xs font-semibold [font-family:var(--font-mono)]',
         known
           ? 'cursor-pointer bg-cortex-50 text-cortex-600 hover:bg-cortex-100'
           : 'cursor-default bg-n-100 text-n-400',
@@ -141,7 +141,7 @@ const isDivider = (line: string): boolean => /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(l
 const isFootnoteDef = (line: string): boolean => /^\[\^[^\]\s]+\]:/.test(line);
 
 const HEADING_CLASS: Record<number, string> = {
-  1: 'mb-2 mt-6 text-[22px] font-semibold tracking-[-0.01em] text-n-900',
+  1: 'mb-2 mt-6 text-2xl font-semibold tracking-[-0.01em] text-n-900',
   2: 'mb-2 mt-6 text-lg font-semibold text-n-900',
   3: 'mb-1.5 mt-5 text-md font-semibold text-n-800',
 };
@@ -220,7 +220,7 @@ export function ConceptBody({
       }
       blocks.push(
         <div key={key++} className="my-3 overflow-x-auto">
-          <table className="w-full border-collapse text-[12.5px]">
+          <table className="w-full border-collapse text-sm">
             <thead>
               <tr>
                 {header.map((cell, c) => (
@@ -285,7 +285,7 @@ export function ConceptBody({
       blocks.push(
         <ListTag
           key={key++}
-          className={`my-2 flex list-outside flex-col gap-1 pl-5 text-[13.5px] leading-[21px] text-n-700 ${
+          className={`my-2 flex list-outside flex-col gap-1 pl-5 text-md leading-[21px] text-n-700 ${
             ordered ? 'list-decimal' : 'list-disc'
           }`}
         >
@@ -310,7 +310,7 @@ export function ConceptBody({
     }
     if (paragraph.length > 0) {
       blocks.push(
-        <p key={key++} className="my-2.5 text-[13.5px] leading-[21px] text-n-700">
+        <p key={key++} className="my-2.5 text-md leading-[21px] text-n-700">
           {inline(paragraph.join(' '))}
         </p>,
       );

@@ -76,25 +76,22 @@ function ConceptRow({
         </span>
       </span>
       {concept.description !== null && (
-        <span className="line-clamp-2 text-[11.5px] leading-[16px] text-n-500">
+        <span className="line-clamp-2 text-xs leading-[16px] text-n-500">
           {concept.description}
         </span>
       )}
       <span className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[10.5px] text-n-400">{concept.conceptType}</span>
+        <span className="text-2xs text-n-400">{concept.conceptType}</span>
         {/* M15: a strikethrough alone is a legend nobody has — deleted,
             deprecated, done and filtered-out all look like this. */}
         {concept.supersededBy !== null && (
-          <span
-            data-testid="replaced-tag"
-            className="rounded-[5px] bg-n-100 px-1 text-[10px] text-n-500"
-          >
+          <span data-testid="replaced-tag" className="rounded-sm bg-n-100 px-1 text-2xs text-n-500">
             Replaced
           </span>
         )}
         <TrustChip tier={concept.trust} size="sm" />
         {concept.stale && (
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-warn-600">
+          <span className="inline-flex items-center gap-1 text-2xs text-warn-600">
             <Icon name="clock-alert" size={10} />
             Stale
           </span>
@@ -299,7 +296,7 @@ export function KnowledgePage({
         {/* h1, like the other five page-chrome titles (Docs, Changes, Pulse,
             List, Type). Knowledge was the last page with no h1 at all, so a
             screen reader's heading list started at the selected concept. */}
-        <h1 className="m-0 text-[15px] font-semibold text-n-900" data-testid="knowledge-heading">
+        <h1 className="m-0 text-lg font-semibold text-n-900" data-testid="knowledge-heading">
           {heading}
         </h1>
         <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
@@ -331,7 +328,7 @@ export function KnowledgePage({
           </Button>
         )}
         {!narrow && (
-          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-n-500">
+          <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
             <Icon name="lock" size={12} />
             Maintained by the agent
           </span>
@@ -407,11 +404,11 @@ export function KnowledgePage({
               </div>
               {/* h2: the concept is a section of the Knowledge page, not the
                   page itself. Size is unchanged — the level is the fix. */}
-              <h2 className="m-0 text-[26px] font-semibold tracking-[-0.02em] text-n-900">
+              <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
                 {selected.title}
               </h2>
               {selected.description !== null && (
-                <p className="mb-1 mt-1.5 text-[13.5px] leading-[20px] text-n-600">
+                <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
                   {selected.description}
                 </p>
               )}

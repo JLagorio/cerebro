@@ -103,7 +103,7 @@ function UntitledDocHeading({
       }}
       // 45 + 1px border + 8px padding = the editor's 54px block gutter, so the
       // heading and the first paragraph share one left edge.
-      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-[42px] font-bold leading-[63px] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
+      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-4xl font-bold leading-[63px] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
     />
   );
 }
@@ -518,7 +518,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             data-testid="doc-save-state"
             title={saveState === 'failed' ? undefined : 'Saves automatically — ⌘S to save now'}
             className={[
-              'mr-1 flex-none whitespace-nowrap text-[11.5px]',
+              'mr-1 flex-none whitespace-nowrap text-xs',
               saveState === 'failed' ? 'font-medium text-danger-600' : 'text-[var(--text-meta)]',
             ].join(' ')}
           >
@@ -633,7 +633,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setAddingPage(false) }}
         >
-          <p className="m-0 mb-2 text-[12.5px] text-n-500">
+          <p className="m-0 mb-2 text-sm text-n-500">
             {docPages === null
               ? 'This turns the page into a multi-page doc — its pages show as tabs.'
               : `Adds a page to "${docPages.main.title}".`}
@@ -663,7 +663,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setRenaming(null) }}
         >
-          <p className="m-0 mb-2 text-[12.5px] text-n-500">
+          <p className="m-0 mb-2 text-sm text-n-500">
             This rewrites the page's heading — the filename on disk stays as it is.
           </p>
           <Input

@@ -127,7 +127,7 @@ export function QuickAddInline({
         data-testid="quick-add"
         aria-label={ariaLabel}
         onClick={() => setEditing(true)}
-        className={`flex ${height} w-full items-center gap-2 border-b border-n-100 px-3 text-[12.5px] text-n-400 hover:bg-n-25 hover:text-n-700`}
+        className={`flex ${height} w-full items-center gap-2 border-b border-n-100 px-3 text-sm text-n-400 hover:bg-n-25 hover:text-n-700`}
       >
         <Icon name="plus" size={13} />
         {label}

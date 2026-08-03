@@ -365,8 +365,8 @@ export function ChartView({ entries, presentation, schema, filtered }: ChartView
           />
         </div>
       ) : (
-        <figure className="m-0 rounded-[12px] border border-n-200 bg-n-0 p-4">
-          <figcaption className="pb-3 text-[12.5px] font-semibold text-n-800">
+        <figure className="m-0 rounded-xl border border-n-200 bg-n-0 p-4">
+          <figcaption className="pb-3 text-sm font-semibold text-n-800">
             {data.measure}
             <span className="pl-1.5 font-normal text-n-500">by {data.axis}</span>
           </figcaption>

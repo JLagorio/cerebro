@@ -58,7 +58,7 @@ export function PulsePage() {
       <div className="flex-none px-5 pb-2 pt-3.5">
         <div className="mx-auto flex w-full min-w-0 max-w-[720px] items-center gap-2">
           <Icon name="activity" size={16} color="var(--n-600)" />
-          <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">History</h1>
+          <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">History</h1>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
@@ -85,7 +85,7 @@ export function PulsePage() {
                 >
                   {c.message}
                 </button>
-                <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
+                <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
                   {c.shortHash}
                 </span>
               </div>

@@ -104,7 +104,7 @@ export function PropertyRow({
   }, [label]);
 
   const nameClass = [
-    'min-w-0 flex-1 truncate rounded-[5px] text-left text-xs text-n-500',
+    'min-w-0 flex-1 truncate rounded-sm text-left text-xs text-n-500',
     align === 'center' ? '' : 'pt-[3px]',
   ].join(' ');
 
@@ -146,7 +146,7 @@ export function PropertyRow({
                 // Opacity, not `hidden`: a hidden grip is out of the tab
                 // order, and arrow-key reordering is the whole point of the
                 // primitive underneath this.
-                className="absolute inset-0 flex cursor-grab items-center justify-center rounded-[3px] text-n-400 opacity-0 hover:bg-n-100 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
+                className="absolute inset-0 flex cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:bg-n-100 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
               >
                 <Icon name="grip-vertical" size={13} />
               </span>

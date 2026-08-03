@@ -56,7 +56,7 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
           {changes.map(([label, value]) => (
             <div key={label} className="contents">
               <dt className="text-2xs text-n-500">{label}</dt>
-              <dd className="m-0 min-w-0 truncate text-[11.5px] font-medium text-n-800">{value}</dd>
+              <dd className="m-0 min-w-0 truncate text-xs font-medium text-n-800">{value}</dd>
             </div>
           ))}
         </dl>

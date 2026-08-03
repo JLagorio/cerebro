@@ -51,7 +51,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                 state.start();
                 setOpen(false);
               }}
-              className="mb-1 flex w-full items-center gap-1.5 rounded-[7px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-n-700 hover:bg-n-50"
+              className="mb-1 flex w-full items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1 text-left text-sm text-n-700 hover:bg-n-50"
             >
               <Icon name="plus" size={12} color="var(--n-500)" />
               New conversation
@@ -62,7 +62,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                   key={c.id}
                   data-testid="conversation-row"
                   className={[
-                    'group flex items-center gap-1 rounded-[7px] px-2 py-1',
+                    'group flex items-center gap-1 rounded-md px-2 py-1',
                     c.id === state.activeId ? 'bg-cortex-50' : 'hover:bg-n-50',
                   ].join(' ')}
                 >
@@ -79,7 +79,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                           setConfirming(null);
                           state.remove(c.id);
                         }}
-                        className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-[11.5px] font-medium text-danger-600 hover:bg-danger-50"
+                        className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-xs font-medium text-danger-600 hover:bg-danger-50"
                       >
                         Delete
                       </button>
@@ -87,7 +87,7 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                         type="button"
                         aria-label="Keep conversation"
                         onClick={() => setConfirming(null)}
-                        className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-[11.5px] text-n-500 hover:bg-n-100"
+                        className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-xs text-n-500 hover:bg-n-100"
                       >
                         Keep
                       </button>
@@ -113,11 +113,11 @@ export function ConversationSwitcher({ state }: { state: ConversationState }) {
                           state.select(c.id);
                           setOpen(false);
                         }}
-                        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-n-800"
+                        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-800"
                       >
                         {c.title}
                         {c.messages.length > 0 && (
-                          <span className="ml-1.5 text-[10.5px] text-n-400">
+                          <span className="ml-1.5 text-2xs text-n-400">
                             {c.messages.filter((m) => m.role === 'user').length}
                           </span>
                         )}

@@ -228,7 +228,7 @@ function SearchBox({ query, onChange }: { query: string; onChange: (q: string) =
           onChange('');
           setOpen(false);
         }}
-        className="h-6 w-[124px] border-0 bg-transparent text-[12.5px] text-n-800 outline-none placeholder:text-n-400"
+        className="h-6 w-[124px] border-0 bg-transparent text-sm text-n-800 outline-none placeholder:text-n-400"
       />
       {query !== '' && (
         <IconButton
@@ -348,7 +348,7 @@ function QuickAxisIcon({
                     onPick(shown[at].value);
                   }
                 }}
-                className="mb-1 h-7 w-full rounded-md border border-n-200 px-2 text-[12.5px] text-n-800 outline-none focus:border-cortex-500 focus:shadow-[0_0_0_3px_var(--cortex-100)]"
+                className="mb-1 h-7 w-full rounded-md border border-n-200 px-2 text-sm text-n-800 outline-none focus:border-cortex-500 focus:shadow-[0_0_0_3px_var(--cortex-100)]"
               />
               <div className="max-h-[264px] overflow-y-auto">
                 {shown.map((o, i) => (
@@ -364,7 +364,7 @@ function QuickAxisIcon({
                     // The highlight wears the hover background, so pointer and
                     // keyboard say "this is the one Enter takes" the same way.
                     className={[
-                      'flex w-full items-center gap-2 rounded-sm border-0 px-2 py-1.5 text-left text-[12.5px] text-n-700 hover:bg-n-50',
+                      'flex w-full items-center gap-2 rounded-sm border-0 px-2 py-1.5 text-left text-sm text-n-700 hover:bg-n-50',
                       i === at ? 'bg-n-50' : 'bg-transparent',
                     ].join(' ')}
                   >

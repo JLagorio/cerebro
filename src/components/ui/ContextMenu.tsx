@@ -102,7 +102,7 @@ export function ContextMenu({
               item.onSelect();
             }}
             className={[
-              'flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-[12.5px]',
+              'flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-sm',
               item.danger ? 'text-danger-600 hover:bg-danger-50' : 'text-n-700 hover:bg-n-50',
             ].join(' ')}
           >

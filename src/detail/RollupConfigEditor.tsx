@@ -12,7 +12,7 @@ import type { FieldDef, Schema } from '@/engine/types';
 const NONE = '__none__';
 
 const row = 'flex items-center gap-2';
-const label = 'w-[86px] flex-none text-[11.5px] text-n-500';
+const label = 'w-[86px] flex-none text-xs text-n-500';
 
 /**
  * Rollup wiring (M3.4): follow one of this type's relation fields, read a
@@ -64,7 +64,7 @@ export function RollupConfigEditor({
         />
       </div>
       {relationFields.length === 0 && (
-        <p className="m-0 pl-[94px] text-[11.5px] leading-4 text-n-400">
+        <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
           This type has no relation property yet — add one first, then point the rollup at it.
         </p>
       )}
@@ -104,7 +104,7 @@ export function RollupConfigEditor({
         </div>
       )}
       {calc.needsProperty && relationDef !== null && targetType === null && (
-        <p className="m-0 pl-[94px] text-[11.5px] leading-4 text-n-400">
+        <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
           Give <strong className="font-medium">{humanize(relationDef.name)}</strong> a target type
           and its properties will be listed here.
         </p>

@@ -130,7 +130,7 @@ export function NoteBodyEditor({
         <div
           role="alert"
           data-testid="lossy-import-banner"
-          className="mx-1 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warn-500 bg-warn-50 px-3 py-2 text-[12.5px] text-warn-700"
+          className="mx-1 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-warn-500 bg-warn-50 px-3 py-2 text-sm text-warn-700"
         >
           <span className="min-w-0 flex-1">
             {locked

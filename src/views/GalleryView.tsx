@@ -103,7 +103,7 @@ function CoverTile({
       // so it is reported here rather than silently dropped.
       data-fit={fit ? 'contain' : 'cover'}
       style={{ height }}
-      className="flex flex-col items-center justify-center gap-1 overflow-hidden rounded-t-[9px] border-b border-n-100 bg-n-50 px-2"
+      className="flex flex-col items-center justify-center gap-1 overflow-hidden rounded-t-lg border-b border-n-100 bg-n-50 px-2"
     >
       {cover === null ? (
         <Icon name={style.icon} size={20} strokeWidth={1.5} color={style.color ?? 'var(--n-300)'} />
@@ -115,7 +115,7 @@ function CoverTile({
             strokeWidth={1.5}
             color="var(--n-400)"
           />
-          <span className="max-w-full truncate text-[10.5px] text-n-400">{cover.label}</span>
+          <span className="max-w-full truncate text-2xs text-n-400">{cover.label}</span>
         </>
       )}
     </div>
@@ -203,7 +203,7 @@ function CardGrid({
   metrics: { min: number; cover: number };
 }) {
   if (entries.length === 0) {
-    return <p className="m-0 px-1 py-2 text-[11.5px] text-n-400">Nothing here yet.</p>;
+    return <p className="m-0 px-1 py-2 text-xs text-n-400">Nothing here yet.</p>;
   }
   return (
     <div
@@ -248,7 +248,7 @@ function Band({
         type="button"
         aria-expanded={!collapsed}
         onClick={() => toggle(scope, node.path)}
-        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] font-semibold text-n-800 hover:bg-n-100"
+        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-sm font-semibold text-n-800 hover:bg-n-100"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         <span

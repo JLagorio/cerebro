@@ -576,7 +576,7 @@ export function MarkdownEditor({
           >
             <div className="flex items-center gap-2">
               <Icon name="user-round-plus" size={14} color="var(--n-500)" />
-              <span className="text-[12.5px] font-semibold text-n-800">Assign task</span>
+              <span className="text-sm font-semibold text-n-800">Assign task</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="w-16 flex-none text-xs text-n-500">Assignee</span>

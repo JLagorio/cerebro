@@ -239,7 +239,7 @@ export function ViewSettingsPanel({
       data-testid="view-settings-panel"
       role="dialog"
       aria-label="View settings"
-      className="flex max-h-[min(70vh,640px)] w-[320px] flex-col overflow-hidden rounded-[12px] border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
+      className="flex max-h-[min(70vh,640px)] w-[320px] flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
     >
       <header className="flex flex-none items-center gap-1.5 border-b border-n-200 px-3 py-2.5">
         {page !== 'root' && (
@@ -393,7 +393,7 @@ export function ViewSettingsPanel({
                 bare chips; a mixed one wants to see which type each points at. */}
             {showsChips(p.type) && (
               <div className="mt-2 border-t border-n-100 pt-2">
-                <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+                <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                   Related records
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -405,7 +405,7 @@ export function ViewSettingsPanel({
                       aria-pressed={chipStyle === style.value}
                       onClick={() => setPresentation({ ...p, chips: style.value })}
                       className={[
-                        'flex items-start gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                        'flex items-start gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
                         chipStyle === style.value
                           ? 'bg-cortex-50 text-cortex-700'
                           : 'bg-transparent text-n-700 hover:bg-n-50',
@@ -432,7 +432,7 @@ export function ViewSettingsPanel({
             <div className="mt-2 border-t border-n-100 pt-2">
               {surface === 'list' && (
                 <>
-                  <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+                  <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                     This list
                   </div>
                   <Row
@@ -447,7 +447,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteView}
-                  className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-n-600 hover:bg-n-50"
+                  className="mt-1 flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-600 hover:bg-n-50"
                 >
                   <Icon name="trash-2" size={13} />
                   Delete this view
@@ -457,7 +457,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteList}
-                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-danger-600 hover:bg-danger-50"
+                  className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-danger-600 hover:bg-danger-50"
                 >
                   <Icon name="trash-2" size={13} />
                   {surface === 'type' ? 'Delete type' : 'Delete list'}
@@ -470,7 +470,7 @@ export function ViewSettingsPanel({
         {page === 'list' && (
           <div className="flex flex-col gap-2 px-1">
             <div>
-              <span className="mb-1 block text-[11.5px] font-medium text-n-600">List name</span>
+              <span className="mb-1 block text-xs font-medium text-n-600">List name</span>
               <Input
                 ariaLabel="List name"
                 placeholder="List name"
@@ -488,7 +488,7 @@ export function ViewSettingsPanel({
                 width="100%"
               />
             </div>
-            <p className="m-0 text-[11.5px] leading-[16px] text-n-500">
+            <p className="m-0 text-xs leading-[16px] text-n-500">
               Records come from{' '}
               <span className="font-medium text-n-800">
                 {list.source.type ?? 'everything in the vault'}
@@ -497,13 +497,13 @@ export function ViewSettingsPanel({
               so it is fixed once created.
             </p>
             <div className="border-t border-n-100 pt-2">
-              <div className="pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+              <div className="pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 Views
               </div>
               {list.views.map((v) => (
                 <div
                   key={v.id}
-                  className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12.5px] text-n-700"
+                  className="flex items-center gap-2 rounded-md px-1 py-1 text-sm text-n-700"
                 >
                   <Icon
                     name={
@@ -515,9 +515,7 @@ export function ViewSettingsPanel({
                     color="var(--n-500)"
                   />
                   <span className="min-w-0 flex-1 truncate">{v.name}</span>
-                  {v.id === view.id && (
-                    <span className="flex-none text-[10.5px] text-n-400">open</span>
-                  )}
+                  {v.id === view.id && <span className="flex-none text-2xs text-n-400">open</span>}
                 </div>
               ))}
             </div>
@@ -533,7 +531,7 @@ export function ViewSettingsPanel({
                 data-testid={`view-switch-${l.value}`}
                 onClick={() => setPresentation({ ...p, type: l.value })}
                 className={[
-                  'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                  'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
                   p.type === l.value
                     ? 'bg-cortex-50 text-cortex-700'
                     : 'bg-transparent text-n-700 hover:bg-n-50',
@@ -705,23 +703,19 @@ function Row({
     <>
       <Icon name={icon} size={13} color="var(--n-500)" />
       <span className={`flex-1 ${muted ? 'text-n-500' : 'text-n-800'}`}>{label}</span>
-      {value !== '' && <span className="text-[11.5px] text-n-400">{value}</span>}
+      {value !== '' && <span className="text-xs text-n-400">{value}</span>}
       {onClick !== undefined && <Icon name="chevron-right" size={12} color="var(--n-400)" />}
     </>
   );
   if (onClick === undefined) {
-    return (
-      <div className="flex items-center gap-2 rounded-[7px] px-2 py-1.5 text-[12.5px]">
-        {content}
-      </div>
-    );
+    return <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm">{content}</div>;
   }
   return (
     <button
       type="button"
       data-testid={`view-settings-${label.toLowerCase()}`}
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] hover:bg-n-50"
+      className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-n-50"
     >
       {content}
     </button>
@@ -777,7 +771,7 @@ function PropertiesPage({
     <div
       key={f.name}
       className={[
-        'group flex items-center gap-1.5 rounded-[7px] px-1 py-1 hover:bg-n-50',
+        'group flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-n-50',
         sortable.dragging === f.name ? 'opacity-60' : '',
       ].join(' ')}
       style={index !== undefined ? sortable.dropIndicator(index) : undefined}
@@ -799,14 +793,12 @@ function PropertiesPage({
           data-testid={`property-row-${f.name}`}
           title={`Edit ${humanize(f.name)}`}
           onClick={() => onEditField(f.name)}
-          className={`min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] hover:underline ${on ? 'text-n-800' : 'text-n-400'}`}
+          className={`min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm hover:underline ${on ? 'text-n-800' : 'text-n-400'}`}
         >
           {humanize(f.name)}
         </button>
       ) : (
-        <span
-          className={`min-w-0 flex-1 truncate text-[12.5px] ${on ? 'text-n-800' : 'text-n-400'}`}
-        >
+        <span className={`min-w-0 flex-1 truncate text-sm ${on ? 'text-n-800' : 'text-n-400'}`}>
           {humanize(f.name)}
         </span>
       )}
@@ -834,7 +826,7 @@ function PropertiesPage({
 
       {visible.filter(matches).length > 0 && (
         <div className="flex items-center px-2 pb-0.5">
-          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <span className="flex-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Shown in this view
           </span>
           <button
@@ -855,7 +847,7 @@ function PropertiesPage({
 
       {hidden.filter(matches).length > 0 && (
         <div className="mt-1.5 flex items-center px-2 pb-0.5">
-          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <span className="flex-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Hidden in this view
           </span>
           <button
@@ -885,7 +877,7 @@ function PropertiesPage({
           type="button"
           data-testid="new-property"
           onClick={onNewProperty}
-          className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-n-100 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-n-500 hover:bg-n-50 hover:text-n-800"
+          className="mt-1 flex w-full items-center gap-2 rounded-md border-0 border-t border-n-100 bg-transparent px-2 py-1.5 text-left text-sm text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           <Icon name="plus" size={13} />
           New property
@@ -916,7 +908,7 @@ function AxisPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Date property</span>
+        <span className="mb-1 block text-xs font-medium text-n-600">Date property</span>
         <Select
           size="sm"
           value={presentation.dateField ?? AUTO}
@@ -936,9 +928,7 @@ function AxisPage({
       {isDayGrid(presentation.type) && (
         <>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-n-600">
-              Show calendar as
-            </span>
+            <span className="mb-1 block text-xs font-medium text-n-600">Show calendar as</span>
             <Select
               size="sm"
               value={presentation.calendarSpan ?? 'month'}
@@ -956,7 +946,7 @@ function AxisPage({
             />
           </div>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-n-600">Start week on</span>
+            <span className="mb-1 block text-xs font-medium text-n-600">Start week on</span>
             <Select
               size="sm"
               value={presentation.weekStart ?? 'sunday'}
@@ -988,7 +978,7 @@ function AxisPage({
       {isZoomable(presentation.type) && (
         <>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-n-600">Zoom</span>
+            <span className="mb-1 block text-xs font-medium text-n-600">Zoom</span>
             <Select
               size="sm"
               // DEFAULT_ZOOM, not a literal: this said 'week' while GanttView
@@ -1020,7 +1010,7 @@ function AxisPage({
       )}
       {hasDependencies(presentation.type) && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-n-600">Dependencies</span>
+          <span className="mb-1 block text-xs font-medium text-n-600">Dependencies</span>
           <Select
             size="sm"
             value={presentation.dependencyField ?? AUTO}
@@ -1096,7 +1086,7 @@ function CardsPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Card size</span>
+        <span className="mb-1 block text-xs font-medium text-n-600">Card size</span>
         <Select
           size="sm"
           value={p.cardSize ?? 'medium'}
@@ -1108,7 +1098,7 @@ function CardsPage({
 
       {showsPreview(p.type) && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-n-600">Card preview</span>
+          <span className="mb-1 block text-xs font-medium text-n-600">Card preview</span>
           <Select
             size="sm"
             value={p.cardPreview ?? 'none'}
@@ -1125,7 +1115,7 @@ function CardsPage({
       {showsCovers(p.type) && (
         <>
           <div>
-            <span className="mb-1 block text-[11.5px] font-medium text-n-600">Card cover</span>
+            <span className="mb-1 block text-xs font-medium text-n-600">Card cover</span>
             <Select
               size="sm"
               value={gallery.cover ?? NONE}
@@ -1228,7 +1218,7 @@ function ChartPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Chart type</span>
+        <span className="mb-1 block text-xs font-medium text-n-600">Chart type</span>
         <Select
           size="sm"
           value={chart.kind ?? 'bar'}
@@ -1238,7 +1228,7 @@ function ChartPage({
         />
       </div>
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Measure</span>
+        <span className="mb-1 block text-xs font-medium text-n-600">Measure</span>
         <Select
           size="sm"
           value={agg}
@@ -1249,7 +1239,7 @@ function ChartPage({
       </div>
       {agg !== 'count' && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-n-600">Of property</span>
+          <span className="mb-1 block text-xs font-medium text-n-600">Of property</span>
           <Select
             size="sm"
             value={chart.value ?? NONE}
@@ -1442,7 +1432,7 @@ function BlocksPage({
         type="button"
         data-testid="add-number-block"
         onClick={addNumber}
-        className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-n-600 hover:bg-n-50"
+        className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-600 hover:bg-n-50"
       >
         <Icon name="hash" size={13} />
         Add a number
@@ -1530,7 +1520,7 @@ function SortPage({
             <Tooltip label="Drag to reorder — the first key breaks ties first">
               <span
                 {...sortable.gripProps(s.field, i)}
-                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-[3px] text-n-300 hover:text-n-600 focus-visible:text-n-600 group-hover:text-n-500"
+                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-xs text-n-300 hover:text-n-600 focus-visible:text-n-600 group-hover:text-n-500"
               >
                 <Icon name="grip-vertical" size={13} />
               </span>
@@ -1584,7 +1574,7 @@ function SortPage({
         </p>
       )}
       {sort.length === 0 && (
-        <p className="m-0 px-1 pt-1 text-[11.5px] leading-[16px] text-n-500">
+        <p className="m-0 px-1 pt-1 text-xs leading-[16px] text-n-500">
           Records appear in vault order.
         </p>
       )}
@@ -1624,7 +1614,7 @@ function LimitPage({
           aria-pressed={limit === l.value}
           onClick={() => onChange(l.value)}
           className={[
-            'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+            'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
             limit === l.value
               ? 'bg-cortex-50 text-cortex-700'
               : 'bg-transparent text-n-700 hover:bg-n-50',
@@ -1669,7 +1659,7 @@ function RowsPage({
   const height = p.rowHeight ?? 'default';
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+      <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
         Row height
       </div>
       {ROW_HEIGHTS.map((value) => (
@@ -1680,7 +1670,7 @@ function RowsPage({
           aria-pressed={height === value}
           onClick={() => onChange({ ...p, rowHeight: value })}
           className={[
-            'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+            'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
             height === value
               ? 'bg-cortex-50 text-cortex-700'
               : 'bg-transparent text-n-700 hover:bg-n-50',
@@ -1814,14 +1804,14 @@ function GroupPage({
           have to lie about a mixed state. */}
       {bandLevels(group).length > 0 && (
         <div className="mt-1 flex flex-col gap-1 border-t border-n-100 pt-2">
-          <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+          <div className="px-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Empty groups
           </div>
           {group.map((level, i) =>
             level.descend !== undefined ? null : (
               <label
                 key={`hide:${i}:${level.field}`}
-                className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-xs text-n-700"
+                className="flex items-center gap-2 rounded-md px-1 py-1 text-xs text-n-700"
               >
                 <span className="min-w-0 flex-1 truncate">
                   Hide empty {humanize(level.field).toLowerCase()} groups

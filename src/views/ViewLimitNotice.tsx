@@ -25,7 +25,7 @@ export function ViewLimitNotice({
   return (
     <div
       data-testid="view-limit-notice"
-      className="flex flex-none items-center gap-2 border-t border-n-200 px-5 py-1.5 text-[11.5px] text-n-500"
+      className="flex flex-none items-center gap-2 border-t border-n-200 px-5 py-1.5 text-xs text-n-500"
     >
       <span>
         Showing <span className="[font-family:var(--font-mono)] text-n-700">{shown}</span> of{' '}
@@ -36,7 +36,7 @@ export function ViewLimitNotice({
           type="button"
           data-testid="view-show-all"
           onClick={onShowAll}
-          className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[11.5px] text-cortex-600 hover:bg-cortex-50"
+          className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-cortex-600 hover:bg-cortex-50"
         >
           Show all
         </button>

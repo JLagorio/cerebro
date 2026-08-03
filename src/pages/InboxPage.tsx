@@ -69,7 +69,7 @@ function PeriodPills({
             ].join(' ')}
           >
             {label}
-            <span className="text-[10.5px] tabular-nums text-n-500">{counts[value]}</span>
+            <span className="text-2xs tabular-nums text-n-500">{counts[value]}</span>
           </button>
         );
       })}
@@ -110,9 +110,7 @@ function OrganizeChecklist({
         );
         const text = (
           <span className="min-w-0 text-left">
-            <span
-              className={`block text-[12.5px] ${c.done ? 'text-n-500' : 'font-medium text-n-800'}`}
-            >
+            <span className={`block text-sm ${c.done ? 'text-n-500' : 'font-medium text-n-800'}`}>
               {c.label}
             </span>
             {!c.done && (
@@ -145,9 +143,7 @@ function OrganizeChecklist({
         );
       })}
       {outstanding.length === 0 && (
-        <li className="pt-1 text-[11.5px] text-success-600">
-          Ready — this note will be findable later.
-        </li>
+        <li className="pt-1 text-xs text-success-600">Ready — this note will be findable later.</li>
       )}
     </ul>
   );
@@ -268,7 +264,7 @@ function OrganizePanel({
           </div>
           {/* Said out loud, because a list of unmet items reads as a blocker
               until something tells you it is not one. */}
-          <div className="pb-1.5 text-[10.5px] text-n-400">
+          <div className="pb-1.5 text-2xs text-n-400">
             Advisory — you can file with items outstanding.
           </div>
           <OrganizeChecklist entry={entry} schema={schema} onFix={fixCheck} />
@@ -307,7 +303,7 @@ function OrganizePanel({
           <Button variant="primary" icon="circle-check" onClick={() => onFile(entry.path)}>
             Mark organized
           </Button>
-          <span className="text-center text-[10.5px] text-n-400">
+          <span className="text-center text-2xs text-n-400">
             <kbd className="[font-family:var(--font-mono)]">⌘E</kbd> · removes it from the Inbox
           </span>
         </div>
@@ -517,7 +513,7 @@ export function InboxPage() {
         {/* h1, like every other page's chrome title — the Inbox used to be
             the one screen whose highest-ranked heading was an h2, so "jump to
             main heading" found nothing here. */}
-        <h1 className="m-0 text-[15px] font-semibold text-n-900">Inbox</h1>
+        <h1 className="m-0 text-lg font-semibold text-n-900">Inbox</h1>
         <PeriodPills active={period} counts={counts} onChange={setPeriod} />
         <span className="flex-1" />
         <input
@@ -587,7 +583,7 @@ export function InboxPage() {
         >
           <Icon name="file-down" size={22} color="var(--cortex-600)" />
           <span className="text-sm font-medium text-cortex-700">Drop to file in the Inbox</span>
-          <span className="text-[11.5px] text-n-500">
+          <span className="text-xs text-n-500">
             Transcripts and notes — {INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(' ')}
           </span>
         </div>
@@ -698,7 +694,7 @@ export function InboxPage() {
                     </span>
                   </span>
                   {e.snippet !== '' && (
-                    <span className="truncate text-[11.5px] text-n-500">{e.snippet}</span>
+                    <span className="truncate text-xs text-n-500">{e.snippet}</span>
                   )}
                   <span className="flex items-center gap-2 text-2xs text-n-400">
                     <span>{e.createdAt.slice(0, 10)}</span>
@@ -755,7 +751,7 @@ export function InboxPage() {
                 <span className="min-w-0 flex-1">
                   <span
                     title={selected.title}
-                    className={`block truncate text-[13.5px] font-semibold ${
+                    className={`block truncate text-md font-semibold ${
                       hasRealTitle(selected) ? 'text-n-900' : 'text-n-500 italic'
                     }`}
                   >
@@ -793,7 +789,7 @@ export function InboxPage() {
               <button
                 type="button"
                 onClick={() => navigate({ kind: 'doc', path: selected.path })}
-                className="mt-6 inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-[11.5px] text-n-500 hover:text-n-800"
+                className="mt-6 inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-xs text-n-500 hover:text-n-800"
               >
                 <Icon name="external-link" size={12} />
                 Open as document

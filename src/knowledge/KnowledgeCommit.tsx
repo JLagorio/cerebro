@@ -96,7 +96,7 @@ export function KnowledgeCommit({
       </div>
 
       {commit.concepts.length === 0 ? (
-        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-n-500">
+        <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">
           Nothing has been distilled from this note yet.
         </p>
       ) : (
@@ -113,9 +113,7 @@ export function KnowledgeCommit({
                 className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
               >
                 <Icon name="brain" size={12} color="var(--cortex-500)" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-n-800">
-                  {concept.title}
-                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-n-800">{concept.title}</span>
                 {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
               </button>
             </li>
@@ -124,7 +122,7 @@ export function KnowledgeCommit({
       )}
 
       {commit.state === 'behind' && (
-        <p className="m-0 mt-1.5 px-2 text-[11.5px] leading-[16px] text-n-500">
+        <p className="m-0 mt-1.5 px-2 text-xs leading-[16px] text-n-500">
           The bundle is still reading the version from {learned}.
         </p>
       )}
@@ -135,7 +133,7 @@ export function KnowledgeCommit({
       {queued && (
         <p
           data-testid="learn-queued"
-          className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-[11.5px] text-cortex-600"
+          className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-xs text-cortex-600"
         >
           {/* M15: it turns while a read is actually in flight. */}
           <span className={reading ? 'inline-flex animate-spin' : 'inline-flex'}>

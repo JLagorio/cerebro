@@ -195,9 +195,9 @@ export function PropertyEditor({
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-n-600">Name</span>
+        <span className="mb-1 block text-xs font-medium text-n-600">Name</span>
         {locked ? (
-          <div className="flex items-center gap-1.5 px-1 text-[12.5px] text-n-600">
+          <div className="flex items-center gap-1.5 px-1 text-sm text-n-600">
             <Icon name="lock" size={11} />
             {humanize(def.name)}
             <span className="text-2xs text-n-400">Built-in</span>
@@ -224,7 +224,7 @@ export function PropertyEditor({
             type="button"
             data-testid="property-editor-type"
             onClick={() => setChangingKind(!changingKind)}
-            className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-1 py-1 text-left text-[12.5px] text-n-700 hover:bg-n-50"
+            className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1 py-1 text-left text-sm text-n-700 hover:bg-n-50"
           >
             <Icon name="repeat-2" size={12} color="var(--n-500)" />
             <span className="min-w-0 flex-1">Type</span>
@@ -234,14 +234,14 @@ export function PropertyEditor({
             </span>
           </button>
           {changingKind && (
-            <div className="mt-1 max-h-[200px] overflow-y-auto rounded-[7px] bg-n-25 p-0.5">
+            <div className="mt-1 max-h-[200px] overflow-y-auto rounded-md bg-n-25 p-0.5">
               {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
                 <button
                   key={k.kind}
                   type="button"
                   data-testid={`change-type-${k.kind}`}
                   onClick={() => setPendingKind(k.kind)}
-                  className="flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-n-700 hover:bg-n-50"
+                  className="flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-1 text-left text-sm text-n-700 hover:bg-n-50"
                 >
                   <Icon name={k.icon} size={12} color="var(--n-500)" />
                   <span className="min-w-0 flex-1">{k.label}</span>
@@ -303,7 +303,7 @@ export function PropertyEditor({
           // Asks first (M16.29). This used to remove the property from the
           // type on the click, which took it off every record at once.
           onClick={() => setConfirmDelete(true)}
-          className="flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-n-100 bg-transparent px-1 py-1.5 text-left text-[12.5px] text-danger-600 hover:bg-danger-50"
+          className="flex w-full items-center gap-2 rounded-md border-0 border-t border-n-100 bg-transparent px-1 py-1.5 text-left text-sm text-danger-600 hover:bg-danger-50"
         >
           <Icon name="trash-2" size={13} />
           Delete property

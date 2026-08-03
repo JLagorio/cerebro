@@ -216,7 +216,7 @@ export function AddPropertyPanel({
         width="100%"
       />
       {duplicateNote}
-      <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+      <span className="px-1 pt-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
         {isPerson ? 'People come from' : 'Related to'}
       </span>
       <div className="max-h-[160px] overflow-y-auto">
@@ -228,7 +228,7 @@ export function AddPropertyPanel({
             data-testid="relation-target-any"
             onClick={() => setTarget(null)}
             className={[
-              'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
+              'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-sm',
               target === null
                 ? 'bg-cortex-50 text-n-900'
                 : 'bg-transparent text-n-800 hover:bg-n-50',
@@ -250,7 +250,7 @@ export function AddPropertyPanel({
               data-testid={`relation-target-${t}`}
               onClick={() => setTarget(t)}
               className={[
-                'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-[12.5px]',
+                'flex w-full items-center gap-2 rounded-md border-0 px-1.5 py-[5px] text-left text-sm',
                 target === t
                   ? 'bg-cortex-50 text-n-900'
                   : 'bg-transparent text-n-800 hover:bg-n-50',
@@ -300,7 +300,7 @@ export function AddPropertyPanel({
         // palette with `--color-*: initial` inside @theme inline, so
         // `text-white` emits no CSS at all and the label inherited --n-900
         // on the blue fill (2.34:1 — the button read as disabled).
-        className="mt-0.5 rounded-md border-0 bg-cortex-600 px-2 py-1.5 text-[12.5px] font-medium text-n-0 hover:bg-cortex-700 disabled:cursor-default disabled:opacity-40"
+        className="mt-0.5 rounded-md border-0 bg-cortex-600 px-2 py-1.5 text-sm font-medium text-n-0 hover:bg-cortex-700 disabled:cursor-default disabled:opacity-40"
       >
         {isPerson ? 'Add person' : 'Add relation'}
       </button>
@@ -331,7 +331,7 @@ export function AddPropertyPanel({
         width="100%"
       />
       {duplicateNote}
-      <span className="px-1 pt-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+      <span className="px-1 pt-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
         Type
       </span>
       <Input
@@ -361,7 +361,7 @@ export function AddPropertyPanel({
               data-testid={`property-kind-${k.kind}`}
               disabled={unsupported || duplicate}
               onClick={() => pick(k.kind, k.label)}
-              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-[12.5px] text-n-800 hover:bg-n-50 disabled:cursor-default disabled:text-n-400 disabled:hover:bg-transparent"
+              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-sm text-n-800 hover:bg-n-50 disabled:cursor-default disabled:text-n-400 disabled:hover:bg-transparent"
             >
               <Icon name={k.icon} size={13} color="var(--n-500)" />
               {k.label}

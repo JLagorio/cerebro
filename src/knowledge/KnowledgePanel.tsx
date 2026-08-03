@@ -48,9 +48,7 @@ function ActorLine({ stamp, today }: { stamp: Stamp; today: string }) {
   return (
     <div className="flex items-center gap-1.5 text-xs text-n-700">
       <Icon name={icon} size={12} color="var(--n-500)" />
-      <span className="truncate [font-family:var(--font-mono)] text-[11.5px]">
-        {stamp.by.label}
-      </span>
+      <span className="truncate [font-family:var(--font-mono)] text-xs">{stamp.by.label}</span>
       {when !== null && <span className="flex-none text-2xs text-n-400">{when}</span>}
     </div>
   );
@@ -72,7 +70,7 @@ function SourceRow({ source, index }: { source: Source; index: number }) {
 
   return (
     <li className="flex gap-2 py-1.5">
-      <span className="mt-[2px] inline-flex h-[15px] min-w-[15px] flex-none items-center justify-center rounded-full bg-cortex-50 px-1 text-[9.5px] font-semibold text-cortex-600 [font-family:var(--font-mono)]">
+      <span className="mt-[2px] inline-flex h-[15px] min-w-[15px] flex-none items-center justify-center rounded-full bg-cortex-50 px-1 text-2xs font-semibold text-cortex-600 [font-family:var(--font-mono)]">
         {index + 1}
       </span>
       <span className="min-w-0 flex-1">
@@ -201,7 +199,7 @@ function RelationsBlock({
       className="flex w-full min-w-0 items-start gap-1.5 rounded-md border-0 bg-transparent px-1 py-1 text-left hover:bg-n-50"
     >
       <span
-        className={`mt-px flex-none text-[10.5px] font-medium uppercase tracking-[0.04em] ${
+        className={`mt-px flex-none text-2xs font-medium uppercase tracking-[0.04em] ${
           tone === 'warn' ? 'text-warn-600' : 'text-n-400'
         }`}
       >
@@ -283,7 +281,7 @@ export function KnowledgePanel({
               type="button"
               data-testid="recheck-concept"
               onClick={onAskAgent}
-              className="rounded-md border border-n-200 bg-transparent px-1.5 py-0.5 text-[10.5px] text-warn-600 hover:bg-warn-50"
+              className="rounded-md border border-n-200 bg-transparent px-1.5 py-0.5 text-2xs text-warn-600 hover:bg-warn-50"
             >
               Recheck
             </button>
@@ -354,7 +352,7 @@ export function KnowledgePanel({
             href={concept.resource}
             target="_blank"
             rel="noreferrer noopener"
-            className="mt-1.5 block break-all text-[11.5px] text-cortex-600 underline decoration-cortex-200 underline-offset-2"
+            className="mt-1.5 block break-all text-xs text-cortex-600 underline decoration-cortex-200 underline-offset-2"
           >
             {concept.resource}
           </a>
@@ -376,7 +374,7 @@ export function KnowledgePanel({
         <Button variant="secondary" icon="sparkles" onClick={onAskAgent}>
           Ask the agent to revise
         </Button>
-        <span className="text-center text-[10.5px] leading-[15px] text-n-400">
+        <span className="text-center text-2xs leading-[15px] text-n-400">
           The agent writes this bundle. You confirm it.
         </span>
       </div>

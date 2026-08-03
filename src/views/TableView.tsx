@@ -78,7 +78,7 @@ const READ_ONLY = new Set(['rollup', 'created_time', 'last_edited_time']);
  */
 function ProgressCell({ display }: { display: string }) {
   const ratio = progressRatio(display);
-  if (ratio === null) return <span className="truncate text-[12.5px]">{display}</span>;
+  if (ratio === null) return <span className="truncate text-sm">{display}</span>;
   return (
     // w-full: the bar is flex-1, so without a sized parent it collapses to
     // zero inside a content-width cell.
@@ -161,7 +161,7 @@ const TableCell = memo(function TableCell({
         ) : (
           <span
             className={[
-              'text-[12.5px] text-n-600',
+              'text-sm text-n-600',
               wrap ? 'whitespace-normal [overflow-wrap:anywhere]' : 'truncate whitespace-nowrap',
             ].join(' ')}
           >
@@ -643,7 +643,7 @@ const TableRow = memo(function TableRow({
           {entry.title}
         </button>
         {childCount > 0 && (
-          <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
+          <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
             {childCount}
           </span>
         )}
@@ -864,9 +864,7 @@ function BandHeader({
         />
         <span
           className={
-            node.depth === 0
-              ? 'text-[12.5px] font-semibold text-n-800'
-              : 'text-xs font-medium text-n-700'
+            node.depth === 0 ? 'text-sm font-semibold text-n-800' : 'text-xs font-medium text-n-700'
           }
         >
           {node.label}
@@ -932,7 +930,7 @@ function CalcCell({
           data-testid={`calc-${field}`}
           aria-label={`${label} calculation`}
           onClick={() => setOpen(!open)}
-          className="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-[5px] border-0 bg-transparent px-1 py-0.5 text-[11.5px] hover:bg-n-100 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+          className="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-sm border-0 bg-transparent px-1 py-0.5 text-xs hover:bg-n-100 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
         >
           {body}
         </button>
@@ -997,7 +995,7 @@ function SortMark({ presentation, field }: { presentation: Presentation; field: 
         className="flex flex-none items-center text-cortex-600"
       >
         <Icon name={spec.dir === 'asc' ? 'arrow-up' : 'arrow-down'} size={11} />
-        {multi && <span className="[font-family:var(--font-mono)] text-[9.5px]">{at + 1}</span>}
+        {multi && <span className="[font-family:var(--font-mono)] text-2xs">{at + 1}</span>}
       </span>
     </Tooltip>
   );
@@ -1330,7 +1328,7 @@ function HeaderMenu({
         aria-label={`${name} column menu`}
         aria-haspopup="menu"
         onClick={() => setOpen(!open)}
-        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-medium text-n-600 hover:text-n-900"
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-xs font-medium text-n-600 hover:text-n-900"
       >
         {name}
       </button>
@@ -1407,7 +1405,7 @@ function HeaderMenu({
                   />
                 )}
                 {changingKind && sourceType !== null && (
-                  <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-n-25 p-0.5">
+                  <div className="mb-1 max-h-[180px] overflow-y-auto rounded-md bg-n-25 p-0.5">
                     {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
                       <MenuItem
                         key={k.kind}
@@ -1545,7 +1543,7 @@ function TitleHeaderMenu({
         aria-label="Name column menu"
         aria-haspopup="menu"
         onClick={() => setOpen(!open)}
-        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-semibold text-n-600 hover:text-n-900"
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-xs font-semibold text-n-600 hover:text-n-900"
       >
         Name
       </button>
@@ -2266,7 +2264,7 @@ export function TableView({
                     aria-colindex={d + 1}
                     className={[
                       titleFrozen ? 'z-30' : 'relative',
-                      'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-[11.5px] font-semibold text-n-600',
+                      'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-xs font-semibold text-n-600',
                       drag?.key === 'title' ? 'opacity-60' : '',
                     ].join(' ')}
                     style={{
@@ -2318,7 +2316,7 @@ export function TableView({
                   onClickCapture={swallowDraggedClick}
                   aria-colindex={d + 1}
                   className={[
-                    'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-[11.5px] font-medium text-n-600',
+                    'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-xs font-medium text-n-600',
                     d < frozenCount ? 'z-30 bg-n-25' : 'relative',
                     drag?.key === def.name ? 'opacity-60' : '',
                   ].join(' ')}
@@ -2518,7 +2516,7 @@ export function TableView({
                     }
                     className={[
                       d < frozenCount ? 'z-10 bg-n-25' : '',
-                      'flex flex-none items-center border-r border-n-100 px-2 text-[11.5px]',
+                      'flex flex-none items-center border-r border-n-100 px-2 text-xs',
                     ].join(' ')}
                     style={{
                       width: `var(${column === null ? TITLE_VAR : widthVar(i)})`,
@@ -2566,9 +2564,7 @@ export function TableView({
           aria-label={`${checked.length} selected`}
           className="absolute bottom-12 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border border-n-200 bg-n-0 px-2 py-1.5 shadow-[var(--shadow-lg)]"
         >
-          <span className="px-1 text-[12.5px] font-medium text-n-700">
-            {checked.length} selected
-          </span>
+          <span className="px-1 text-sm font-medium text-n-700">{checked.length} selected</span>
           <span className="h-4 w-px bg-n-200" />
           <Button size="sm" variant="ghost" icon="link" onClick={copyLinks}>
             Copy links

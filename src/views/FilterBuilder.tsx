@@ -148,7 +148,7 @@ function GroupEditor({
             onChange(mode === 'all' ? { all: [...children] } : { any: [...children] })
           }
         />
-        <span className="text-[11.5px] text-n-400">
+        <span className="text-xs text-n-400">
           {conjunction === 'all' ? 'every condition below' : 'at least one condition below'}
         </span>
         <span className="flex-1" />
@@ -197,7 +197,7 @@ function GroupEditor({
           // record — so the one line on screen contradicted the empty canvas.
           <span
             className={[
-              'px-1 text-[11.5px]',
+              'px-1 text-xs',
               conjunction === 'any' ? 'text-warn-600' : 'text-n-400',
             ].join(' ')}
           >

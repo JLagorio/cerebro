@@ -49,14 +49,14 @@ function ConceptRow({
     >
       <span className="min-w-0 flex-1">
         <span
-          className={`block truncate text-[12.5px] font-medium ${
+          className={`block truncate text-sm font-medium ${
             retired ? 'text-n-400 line-through' : 'text-n-800'
           }`}
         >
           {concept.title}
         </span>
         {concept.description !== null && !retired && (
-          <span className="block truncate text-[11.5px] text-n-500">{concept.description}</span>
+          <span className="block truncate text-xs text-n-500">{concept.description}</span>
         )}
       </span>
       {!retired && <TrustChip tier={concept.trust} size="sm" />}
@@ -174,7 +174,7 @@ export function EntityDossier({
       </div>
 
       {isEmptyDossier(dossier) ? (
-        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-n-500">Nothing yet about this.</p>
+        <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
       ) : (
         <>
           <ul className="m-0 mt-2 flex list-none flex-col gap-px p-0">
@@ -218,7 +218,7 @@ export function EntityDossier({
                         {source.title ?? source.resource}
                       </span>
                       {source.citedBy > 1 && (
-                        <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
+                        <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
                           ×{source.citedBy}
                         </span>
                       )}

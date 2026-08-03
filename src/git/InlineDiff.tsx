@@ -78,7 +78,7 @@ export function InlineDiff({ path }: { path: string }) {
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-4">
         {diff === null ? (
-          <p className="m-0 text-[12.5px] text-n-400">Loading…</p>
+          <p className="m-0 text-sm text-n-400">Loading…</p>
         ) : (
           <DiffView
             diff={diff}

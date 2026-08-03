@@ -160,7 +160,7 @@ export function FilterChips({
             ariaLabel="Filter this view"
           >
             <div className="w-[560px] max-w-[calc(100vw-32px)] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+              <div className="px-0.5 pb-2 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 Filter this view
               </div>
               <FilterBuilder filters={filters} fields={defs} onChange={onChange} />

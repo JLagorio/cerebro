@@ -101,7 +101,7 @@ export function ChainBuilder({
           // whitespace-nowrap: the row WRAPS at narrow widths, but a pill must
           // wrap as a unit — "Group: status" broken across two lines reads as
           // two controls (M11 responsiveness).
-          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-[12.5px]',
+          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-sm',
           active
             ? 'border-cortex-300 bg-cortex-50 text-cortex-700'
             : 'border-n-300 bg-n-0 text-n-700 hover:border-n-400',
@@ -126,13 +126,11 @@ export function ChainBuilder({
           />
           <FixedBelowAnchor>
             <div className="w-[330px] rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-400">
+              <div className="px-0.5 pb-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 {label}
               </div>
               {rows.length === 0 && emptyHint !== undefined && (
-                <p className="m-0 px-0.5 pb-2 text-[11.5px] leading-[16px] text-n-500">
-                  {emptyHint}
-                </p>
+                <p className="m-0 px-0.5 pb-2 text-xs leading-[16px] text-n-500">{emptyHint}</p>
               )}
               <div
                 ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
@@ -166,7 +164,7 @@ export function ChainBuilder({
                             // Opacity, not `hidden`: a hidden grip is out of
                             // the tab order, and arrow-key reordering is the
                             // point of the primitive underneath it.
-                            className="absolute inset-0 flex cursor-grab items-center justify-start rounded-[3px] text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
+                            className="absolute inset-0 flex cursor-grab items-center justify-start rounded-xs text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             <Icon name="grip-vertical" size={13} />
                           </span>

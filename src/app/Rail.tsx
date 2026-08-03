@@ -47,7 +47,7 @@ function RailButton({
       aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
       aria-current={!toggle && active ? 'page' : undefined}
       aria-pressed={toggle ? active : undefined}
-      className={`relative flex w-11 flex-col items-center gap-[3px] rounded-lg border-0 bg-transparent pb-[5px] pt-1.5 text-[10px] font-medium ${tone}`}
+      className={`relative flex w-11 flex-col items-center gap-[3px] rounded-lg border-0 bg-transparent pb-[5px] pt-1.5 text-2xs font-medium ${tone}`}
     >
       {/* A 1.13:1 tint was the entire active affordance. The bar is the part
           that survives a glance, a low-contrast display, and colour blindness. */}
@@ -61,7 +61,7 @@ function RailButton({
       {count !== undefined && count > 0 && (
         <span
           data-testid="rail-badge"
-          className="absolute right-1.5 top-0.5 min-w-[15px] rounded-full bg-cortex-500 px-1 text-center text-[9px] font-semibold leading-[15px] text-n-0 tabular-nums"
+          className="absolute right-1.5 top-0.5 min-w-[15px] rounded-full bg-cortex-500 px-1 text-center text-2xs font-semibold leading-[15px] text-n-0 tabular-nums"
         >
           {count > 99 ? '99+' : count}
         </span>
@@ -103,7 +103,7 @@ export function Rail() {
       // the rail read as floating inside the sidebar rather than as its peer.
       className="flex w-14 flex-none flex-col items-center gap-1 border-r border-n-200 bg-n-0 py-3"
     >
-      <div className="mb-3 flex h-8 w-8 select-none items-center justify-center rounded-lg bg-cortex-500 text-[17px] font-bold tracking-[-0.02em] text-n-0">
+      <div className="mb-3 flex h-8 w-8 select-none items-center justify-center rounded-lg bg-cortex-500 text-lg font-bold tracking-[-0.02em] text-n-0">
         c.
       </div>
       {/* M15: an explicit list, not a derivation by elimination. Home owns the

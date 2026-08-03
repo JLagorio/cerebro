@@ -93,7 +93,7 @@ export function RelationConfigEditor({
             </span>
           </span>
         ) : def.target === undefined ? (
-          <span className="text-[11.5px] text-n-400">Pick a target type first</span>
+          <span className="text-xs text-n-400">Pick a target type first</span>
         ) : (
           <>
             <Input
@@ -108,7 +108,7 @@ export function RelationConfigEditor({
               data-testid="add-reciprocal"
               disabled={reciprocalDraft.trim() === ''}
               onClick={() => onAddReciprocal(reciprocalDraft)}
-              className="flex-none rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-[11.5px] text-n-700 hover:bg-n-50 disabled:opacity-40"
+              className="flex-none rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-700 hover:bg-n-50 disabled:opacity-40"
             >
               Add on {def.target}
             </button>

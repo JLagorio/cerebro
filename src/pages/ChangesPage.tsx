@@ -162,8 +162,8 @@ export function ChangesPage() {
       <div className="flex-none px-5 pb-2 pt-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <Icon name="file-diff" size={16} color="var(--n-600)" />
-          <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">Changes</h1>
-          <span className="[font-family:var(--font-mono)] text-[11.5px] text-n-400">
+          <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">Changes</h1>
+          <span className="[font-family:var(--font-mono)] text-xs text-n-400">
             {modified.length}
           </span>
         </div>
@@ -174,7 +174,7 @@ export function ChangesPage() {
           data-testid="conflict-banner"
           className="mx-5 mb-2 flex-none rounded-lg border border-danger-200 bg-danger-50 p-3"
         >
-          <div className="mb-1.5 flex items-center gap-1.5 text-[12.5px] font-semibold text-danger-700">
+          <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-danger-700">
             <Icon name="triangle-alert" size={13} />
             {conflicts.length} file{conflicts.length === 1 ? '' : 's'} conflict
             {conflictMode !== 'none' && ` (${conflictMode} in progress)`}
@@ -241,7 +241,7 @@ export function ChangesPage() {
                       type="button"
                       onClick={() => setSelected(file.path)}
                       title={file.path}
-                      className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-n-800"
+                      className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-800"
                     >
                       {file.path}
                     </button>
@@ -288,7 +288,7 @@ export function ChangesPage() {
           </div>
           <div className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
             {selected === null ? (
-              <p className="m-0 text-[12.5px] text-n-400">Pick a file to see what changed.</p>
+              <p className="m-0 text-sm text-n-400">Pick a file to see what changed.</p>
             ) : (
               <DiffView diff={diff} />
             )}

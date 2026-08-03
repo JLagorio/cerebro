@@ -226,7 +226,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
         {/* An h2, not an h1 (M15): this names the navigator, not the page. As an
             h1 it gave Docs two level-1 headings and made Inbox/Knowledge read as
             subsections of the file tree. */}
-        <h2 className="m-0 min-w-0 truncate text-[15px] font-semibold text-n-900">
+        <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-n-900">
           {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
         </h2>
         <button

@@ -114,7 +114,7 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
   return (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-10 pt-6" data-testid="knowledge-log">
       <div className="mx-auto w-full max-w-[720px] px-6">
-        <h1 className="m-0 text-[22px] font-semibold tracking-[-0.02em] text-n-900">Update log</h1>
+        <h1 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">Update log</h1>
         <p className="mb-6 mt-1.5 text-sm leading-[19px] text-n-600">
           What the assistant has learned, and when. Every entry names the concept it touched.
         </p>
@@ -141,7 +141,7 @@ export function KnowledgeLog({ onOpenConcept }: { onOpenConcept: (path: string) 
                     <span className="min-w-0 flex-1">
                       {style.label !== '' && (
                         <span
-                          className="mr-1.5 text-[10.5px] font-semibold uppercase tracking-[0.05em]"
+                          className="mr-1.5 text-2xs font-semibold uppercase tracking-[0.05em]"
                           style={{ color: style.color }}
                         >
                           {style.label}

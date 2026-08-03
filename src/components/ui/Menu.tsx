@@ -16,7 +16,7 @@ import { Icon } from '@/components/ui/Icon';
  */
 
 const ITEM_BASE =
-  'flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-[5px] text-left text-[12.5px]';
+  'flex w-full items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-[5px] text-left text-sm';
 
 /** A disabled item is still in the DOM and still reads as a menuitem, but it
  * must not take an arrow-key stop — a keyboard user would land on something
@@ -82,7 +82,7 @@ export function MenuSurface({
       onKeyDown={onKeyDown}
       style={width === undefined ? undefined : { width }}
       className={[
-        'rounded-[9px] border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]',
+        'rounded-lg border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]',
         className ?? '',
       ].join(' ')}
     >
@@ -152,7 +152,7 @@ export function MenuSeparator() {
  * absorb an arrow-key stop on the way past. */
 export function MenuLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2 pb-0.5 pt-1 text-[10.5px] font-medium uppercase tracking-wide text-n-400">
+    <div className="px-2 pb-0.5 pt-1 text-2xs font-medium uppercase tracking-wide text-n-400">
       {children}
     </div>
   );
@@ -170,7 +170,7 @@ export function MenuBack({ title, onBack }: { title: string; onBack: () => void 
       >
         <Icon name="arrow-left" size={13} />
       </button>
-      <span className="min-w-0 truncate text-[12.5px] font-semibold text-n-900">{title}</span>
+      <span className="min-w-0 truncate text-sm font-semibold text-n-900">{title}</span>
     </div>
   );
 }

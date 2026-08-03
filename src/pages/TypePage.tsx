@@ -226,7 +226,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               onClick={() => setDialog(listing.system ? 'style' : 'rename')}
               className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
             >
-              <h1 className="m-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+              <h1 className="m-0 truncate text-lg font-semibold leading-6 tracking-[-0.005em]">
                 {listing.name}
               </h1>
             </button>
@@ -239,7 +239,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
                 thing: what is on screen. */}
             <span
               data-testid="view-count"
-              className="[font-family:var(--font-mono)] text-[11.5px] text-n-400"
+              className="[font-family:var(--font-mono)] text-xs text-n-400"
             >
               {sortedEntries.length}
             </span>

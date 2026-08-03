@@ -29,7 +29,7 @@ export function GitHistoryPanel({ path }: { path: string }) {
 
   return (
     <div data-testid="git-history" className="mt-5">
-      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-n-500">
+      <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
         <Icon name="history" size={12} />
         History
       </div>
@@ -46,7 +46,7 @@ export function GitHistoryPanel({ path }: { path: string }) {
               {' · '}
               {c.message}
             </button>
-            <div className="text-[10.5px] text-n-400">
+            <div className="text-2xs text-n-400">
               {c.author} · {relativeDate(c.date)}
             </div>
           </div>

@@ -37,9 +37,9 @@ function LinkRow({ link }: { link: DocLink }) {
         size={13}
         color={typeStyle(link.entry.type, schema).color ?? 'var(--n-500)'}
       />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] text-n-800">{link.entry.title}</span>
+      <span className="min-w-0 flex-1 truncate text-sm text-n-800">{link.entry.title}</span>
       {link.via !== 'body' && (
-        <span className="flex-none rounded-[5px] bg-n-50 px-1 py-px text-[10.5px] text-n-500">
+        <span className="flex-none rounded-sm bg-n-50 px-1 py-px text-2xs text-n-500">
           {link.via}
         </span>
       )}

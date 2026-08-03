@@ -20,7 +20,7 @@ export function Topbar() {
         >
           <Icon name="search" size={15} />
           <span className="flex-1 text-left">Search or jump to…</span>
-          <kbd className="rounded-[5px] border border-n-200 bg-n-0 px-1.5 text-2xs text-n-500 [font-family:var(--font-mono)]">
+          <kbd className="rounded-sm border border-n-200 bg-n-0 px-1.5 text-2xs text-n-500 [font-family:var(--font-mono)]">
             ⌘K
           </kbd>
         </button>

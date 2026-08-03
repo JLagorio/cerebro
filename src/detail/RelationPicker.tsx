@@ -299,7 +299,7 @@ export function RelationPicker({
               );
             })}
             {results.length === 0 && !canCreate && (
-              <p className="m-0 px-2 py-4 text-center text-[12.5px] text-n-400">
+              <p className="m-0 px-2 py-4 text-center text-sm text-n-400">
                 {candidates.length === 0
                   ? `Nothing of type ${targetType ?? 'any'} exists yet.`
                   : 'Everything that matches is already linked.'}
@@ -326,14 +326,14 @@ export function RelationPicker({
         </div>
 
         <footer className="flex flex-none items-center gap-2 border-t border-n-100 px-4 py-2.5">
-          <span className="text-[11.5px] text-n-400">
+          <span className="text-xs text-n-400">
             Links save as you make them. Order here is the order they render in.
           </span>
           <span className="flex-1" />
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-n-200 bg-transparent px-3 py-1 text-[12.5px] text-n-700 hover:bg-n-50"
+            className="rounded-md border border-n-200 bg-transparent px-3 py-1 text-sm text-n-700 hover:bg-n-50"
           >
             Done
           </button>

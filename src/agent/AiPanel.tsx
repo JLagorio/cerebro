@@ -82,7 +82,7 @@ function UserMessage({ text }: { text: string }) {
         // `whitespace-pre-wrap` (M15): a Shift+Enter multi-line question used
         // to come back as one run-on line in your own bubble.
         className={[
-          'max-w-[85%] whitespace-pre-wrap break-words rounded-[12px] rounded-br-xs bg-cortex-500 px-3 py-2 text-[12.5px] leading-[18px] text-n-0',
+          'max-w-[85%] whitespace-pre-wrap break-words rounded-xl rounded-br-xs bg-cortex-500 px-3 py-2 text-sm leading-[18px] text-n-0',
           long && !expanded ? 'max-h-[112px] overflow-hidden' : '',
         ].join(' ')}
       >
@@ -93,7 +93,7 @@ function UserMessage({ text }: { text: string }) {
           type="button"
           data-testid="prompt-toggle"
           onClick={() => setExpanded(!expanded)}
-          className="border-0 bg-transparent p-0 text-[10.5px] text-n-500 hover:text-n-800"
+          className="border-0 bg-transparent p-0 text-2xs text-n-500 hover:text-n-800"
         >
           {expanded ? 'Show less' : 'Show more'}
         </button>
@@ -135,7 +135,7 @@ function Message({
           that wrote three paragraphs and then failed used to show only the red
           box, throwing away work that was still sitting in state. */}
       {message.text !== '' && (
-        <div className="whitespace-pre-wrap break-words text-[12.5px] leading-[19px] text-n-800">
+        <div className="whitespace-pre-wrap break-words text-sm leading-[19px] text-n-800">
           <MessageText text={message.text} onOpen={onOpen} />
         </div>
       )}
@@ -155,7 +155,7 @@ function Message({
         </div>
       )}
       {message.streaming === true && message.text === '' && message.error === undefined && (
-        <span className="text-[12.5px] text-n-400">Thinking…</span>
+        <span className="text-sm text-n-400">Thinking…</span>
       )}
     </div>
   );
@@ -418,7 +418,7 @@ export function AiPanel() {
             rather than a label beside a button that erased the transcript. */}
         <ConversationSwitcher state={conversations} />
         {status !== null && !status.installed && (
-          <span className="text-[10.5px] text-warn-600">not installed</span>
+          <span className="text-2xs text-warn-600">not installed</span>
         )}
         <span className="flex-1" />
         <IconButton
@@ -442,7 +442,7 @@ export function AiPanel() {
       >
         {chat.messages.length === 0 ? (
           <div className="flex flex-col gap-2 pt-2">
-            <p className="m-0 text-[12.5px] leading-[18px] text-n-500">
+            <p className="m-0 text-sm leading-[18px] text-n-500">
               {status?.installed === false
                 ? 'Claude Code was not found on this machine. Install it and reopen cerebro.'
                 : 'I can read and write this vault through cerebro. I maintain the Knowledge bundle; you verify it.'}
@@ -453,7 +453,7 @@ export function AiPanel() {
                   key={suggestion}
                   type="button"
                   onClick={() => chat.send(suggestion)}
-                  className="rounded-[9px] border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
+                  className="rounded-lg border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
                 >
                   {suggestion}
                 </button>
@@ -491,7 +491,7 @@ export function AiPanel() {
             the agent has to go searching for. */}
         <ChatInput autoFocus value={draft} onChange={setDraft} onSubmit={submit} />
         <div className="mt-1.5 flex items-center gap-2">
-          <span className="flex-1 text-[10.5px] text-n-400">
+          <span className="flex-1 text-2xs text-n-400">
             {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}
           </span>
           {chat.streaming ? (

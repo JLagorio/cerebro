@@ -123,7 +123,7 @@ function VaultChooser() {
   return (
     <div className="flex h-screen items-center justify-center bg-n-25">
       <div className="flex w-[380px] flex-col gap-3 rounded-xl border border-n-200 bg-n-0 p-7 shadow-[var(--shadow-md)]">
-        <span className="text-[18px] font-bold tracking-[-0.02em]">
+        <span className="text-xl font-bold tracking-[-0.02em]">
           cerebro<span className="text-synapse-500">.</span>
         </span>
         <h1 className="m-0 text-lg font-semibold text-n-900">Open a vault</h1>

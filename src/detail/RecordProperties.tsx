@@ -168,7 +168,7 @@ export function RecordProperties({ entry, schema }: { entry: Entry; schema: Sche
             </span>
           }
         >
-          <span className="block pt-[3px] text-[12.5px] text-n-700 [overflow-wrap:anywhere]">
+          <span className="block pt-[3px] text-sm text-n-700 [overflow-wrap:anywhere]">
             {undeclaredDisplay(entry, name)}
           </span>
         </PropertyRow>

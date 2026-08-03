@@ -125,7 +125,7 @@ export function AiActionCard({
       data-tool={tool.name}
       data-write={write ? 'true' : 'false'}
       className={[
-        'overflow-hidden rounded-[9px] border text-[11.5px]',
+        'overflow-hidden rounded-lg border text-xs',
         tool.failed
           ? 'border-danger-200 bg-danger-50'
           : write
@@ -151,7 +151,7 @@ export function AiActionCard({
         {path !== null && (
           <span
             className={[
-              'min-w-0 truncate [font-family:var(--font-mono)] text-[10.5px]',
+              'min-w-0 truncate [font-family:var(--font-mono)] text-2xs',
               write ? 'text-cortex-700' : 'text-n-400',
             ].join(' ')}
           >
@@ -168,20 +168,20 @@ export function AiActionCard({
         <div className="border-t border-n-200 px-2 py-1.5">
           {tool.input !== null && (
             <>
-              <div className="pb-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-n-400">
+              <div className="pb-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 Input
               </div>
-              <pre className="m-0 max-h-[160px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-[10.5px] leading-[15px] text-n-600">
+              <pre className="m-0 max-h-[160px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-600">
                 {formatInput(tool.input)}
               </pre>
             </>
           )}
           {tool.output !== null && (
             <>
-              <div className="pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-n-400">
+              <div className="pb-0.5 pt-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 {tool.failed ? 'Error' : 'Result'}
               </div>
-              <pre className="m-0 max-h-[200px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-[10.5px] leading-[15px] text-n-700">
+              <pre className="m-0 max-h-[200px] overflow-auto whitespace-pre-wrap break-words [font-family:var(--font-mono)] text-2xs leading-[15px] text-n-700">
                 {tool.output}
               </pre>
             </>
@@ -191,7 +191,7 @@ export function AiActionCard({
               <button
                 type="button"
                 onClick={() => onOpenPath(path)}
-                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-[10.5px] text-n-600 hover:border-n-400"
+                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-400"
               >
                 Open
               </button>
@@ -202,7 +202,7 @@ export function AiActionCard({
                   type="button"
                   data-testid="action-view-diff"
                   onClick={() => onViewDiff(path)}
-                  className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-[10.5px] text-n-600 hover:border-n-400"
+                  className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs text-n-600 hover:border-n-400"
                 >
                   View diff
                 </button>

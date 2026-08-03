@@ -83,7 +83,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
       }}
       secondaryAction={{ label: 'Cancel', onClick: onClose }}
     >
-      <p className="m-0 mb-3 text-[12.5px] leading-relaxed text-n-500">
+      <p className="m-0 mb-3 text-sm leading-relaxed text-n-500">
         These types were found in frontmatter without a full declaration. Adopting writes a Type doc
         per type, declares the checked fields with the inferred kinds, and converts stored values
         that don&apos;t fit — or clears the ones with no honest reading. Records themselves stay
@@ -101,18 +101,18 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                 aria-selected={i === active}
                 onClick={() => setActive(i)}
                 className={[
-                  'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left',
+                  'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left',
                   i === active ? 'bg-n-50' : 'bg-transparent hover:bg-n-25',
                 ].join(' ')}
               >
                 <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-500)'} />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-n-900">{p.name}</span>
-                <span className="flex-none [font-family:var(--font-mono)] text-[10.5px] text-n-400">
+                <span className="min-w-0 flex-1 truncate text-sm text-n-900">{p.name}</span>
+                <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
                   {p.records}
                 </span>
                 <span
                   className={[
-                    'flex-none rounded-full px-1.5 py-px text-[9.5px] font-semibold uppercase tracking-[0.05em]',
+                    'flex-none rounded-full px-1.5 py-px text-2xs font-semibold uppercase tracking-[0.05em]',
                     p.docPath === null ? 'bg-cortex-50 text-cortex-700' : 'bg-n-50 text-n-500',
                   ].join(' ')}
                 >
@@ -139,7 +139,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                   aria-label={`Include ${humanize(f.name)}`}
                   onClick={() => toggle(current.name, f.name)}
                   className={[
-                    'mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-[5px] border',
+                    'mt-0.5 flex h-4 w-4 flex-none items-center justify-center rounded-sm border',
                     on
                       ? // text-inverse, never text-white: index.css resets the stock palette, so
                         // `text-white` emits no CSS and the check inherited near-black on blue (M15).
@@ -164,15 +164,15 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
                       {f.declared && ' · declared'}
                     </span>
                     <span className="flex-1" />
-                    <span className="[font-family:var(--font-mono)] text-[10.5px] text-n-400">
+                    <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
                       {Math.round(f.coverage * 100)}%
                     </span>
                   </div>
                   {f.samples.length > 0 && (
-                    <div className="truncate text-[11.5px] text-n-500">{f.samples.join(' · ')}</div>
+                    <div className="truncate text-xs text-n-500">{f.samples.join(' · ')}</div>
                   )}
                   {note !== null && (
-                    <div className="mt-0.5 inline-flex items-center gap-1 rounded-[5px] bg-warn-50 px-1.5 py-px text-[10.5px] text-warn-700">
+                    <div className="mt-0.5 inline-flex items-center gap-1 rounded-sm bg-warn-50 px-1.5 py-px text-2xs text-warn-700">
                       <Icon name="wand-sparkles" size={10} />
                       {note}
                     </div>
@@ -182,7 +182,7 @@ export function AdoptSchemaDialog({ onClose }: { onClose: () => void }) {
             );
           })}
           {current.fields.length === 0 && (
-            <p className="m-0 px-2 py-4 text-[12.5px] text-n-500">
+            <p className="m-0 px-2 py-4 text-sm text-n-500">
               No fields to declare — adopting simply writes the Type doc so “{current.name}” stops
               being a ghost.
             </p>

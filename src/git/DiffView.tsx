@@ -19,7 +19,7 @@ export function DiffView({
   const stats = useMemo(() => diffStats(diff), [diff]);
 
   if (diff.trim() === '') {
-    return <p className="m-0 px-1 py-3 text-[12.5px] text-n-400">{emptyLabel}</p>;
+    return <p className="m-0 px-1 py-3 text-sm text-n-400">{emptyLabel}</p>;
   }
 
   return (
@@ -31,7 +31,7 @@ export function DiffView({
       {/* Diffs are wide; they scroll inside their own box rather than making
           the panel scroll sideways. */}
       <div className="min-h-0 overflow-auto rounded-md border border-n-200 bg-n-25">
-        <pre className="m-0 min-w-full p-0 [font-family:var(--font-mono)] text-[11.5px] leading-[17px]">
+        <pre className="m-0 min-w-full p-0 [font-family:var(--font-mono)] text-xs leading-[17px]">
           {lines.map((line, i) => (
             <div
               key={i}

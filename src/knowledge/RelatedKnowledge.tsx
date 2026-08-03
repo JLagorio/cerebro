@@ -82,7 +82,7 @@ export function RelatedKnowledge({
       </div>
 
       {shown.length === 0 ? (
-        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-n-500">Nothing yet about this.</p>
+        <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">Nothing yet about this.</p>
       ) : (
         <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
           {shown.map((concept) => (
@@ -100,13 +100,11 @@ export function RelatedKnowledge({
                 className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[12.5px] font-medium text-n-800">
+                  <span className="block truncate text-sm font-medium text-n-800">
                     {concept.title}
                   </span>
                   {concept.description !== null && variant === 'section' && (
-                    <span className="block truncate text-[11.5px] text-n-500">
-                      {concept.description}
-                    </span>
+                    <span className="block truncate text-xs text-n-500">{concept.description}</span>
                   )}
                 </span>
                 <TrustChip tier={concept.trust} size="sm" />
@@ -117,7 +115,7 @@ export function RelatedKnowledge({
         </ul>
       )}
 
-      {rest > 0 && <p className="m-0 mt-1.5 px-2 text-[11.5px] text-n-400">and {rest} more</p>}
+      {rest > 0 && <p className="m-0 mt-1.5 px-2 text-xs text-n-400">and {rest} more</p>}
 
       {askPrompt !== undefined && (
         <div className="mt-2.5">

@@ -69,7 +69,7 @@ const CARD_METRICS: Record<
   small: {
     column: 240,
     pad: 'px-2.5 py-1.5',
-    title: 'text-[12.5px] leading-[17px]',
+    title: 'text-sm leading-[17px]',
     clamp: 'line-clamp-1',
   },
   medium: {
@@ -280,10 +280,7 @@ function BoardCard({
       className={`relative cursor-pointer rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-xs)] hover:border-n-300 hover:shadow-[var(--shadow-sm)] ${metrics.pad}`}
     >
       <div className="mb-1 flex items-center gap-1.5">
-        <span
-          data-testid="card-key"
-          className="[font-family:var(--font-mono)] text-[10px] text-n-400"
-        >
+        <span data-testid="card-key" className="[font-family:var(--font-mono)] text-2xs text-n-400">
           {key}
         </span>
       </div>
@@ -294,7 +291,7 @@ function BoardCard({
       {presentation.cardPreview === 'content' && entry.snippet !== '' && (
         <p
           data-testid="card-preview"
-          className={`m-0 mt-1 text-[11.5px] leading-[16px] text-n-500 ${metrics.clamp}`}
+          className={`m-0 mt-1 text-xs leading-[16px] text-n-500 ${metrics.clamp}`}
         >
           {entry.snippet}
         </p>
@@ -361,7 +358,7 @@ function BoardColumn({
                 }
           }
         />
-        <span className="text-[12.5px] font-semibold text-n-800">{column.label}</span>
+        <span className="text-sm font-semibold text-n-800">{column.label}</span>
         <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
           {column.entries.length}
         </span>
@@ -432,7 +429,7 @@ function Swimlane({
         type="button"
         aria-expanded={!collapsed}
         onClick={() => toggle(scope, path)}
-        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-[12.5px] font-semibold text-n-800 hover:bg-n-100"
+        className="mb-2 inline-flex items-center gap-1.5 rounded-md border-0 bg-transparent px-1 py-0.5 text-sm font-semibold text-n-800 hover:bg-n-100"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
         {label}
