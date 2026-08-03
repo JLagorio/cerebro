@@ -454,9 +454,9 @@ export function CalendarView({
 }
 
 /**
- * Create on a day. Reveals on cell hover rather than sitting in every cell:
- * forty-two always-visible plus signs is noise, and the affordance is only
- * meaningful for the cell the pointer is in.
+ * Create on a day. Reveals on cell hover — or on its own focus — rather than
+ * sitting in every cell: forty-two always-visible plus signs is noise, and the
+ * affordance is only meaningful for the cell you are in.
  */
 function DayAdd({
   day,
@@ -475,7 +475,15 @@ function DayAdd({
         type="button"
         aria-label={`New record on ${day}`}
         onClick={() => setEditing(true)}
-        className="hidden h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)] group-hover/day:flex"
+        // Reveal-on-hover-OR-FOCUS, the shape PropertyRow.ROW_ACTION and
+        // OptionListEditor already settled on. `hidden group-hover/day:flex`
+        // was display:none until a pointer arrived, which takes the button out
+        // of the tab order AND out of the accessibility tree — and this is the
+        // only affordance in the whole calendar that creates a record on a
+        // chosen day, so without a mouse there was no way to do it at all.
+        // Opacity keeps the 4x4 slot reserved, so a day does not reflow when
+        // the plus appears.
+        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] opacity-0 hover:bg-[var(--n-100)] hover:text-[var(--n-800)] focus-visible:opacity-100 group-hover/day:opacity-100"
       >
         <Icon name="plus" size={11} />
       </button>

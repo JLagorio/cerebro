@@ -24,8 +24,9 @@ export interface ChartViewProps {
   entries: Entry[];
   presentation: Presentation;
   schema: Schema;
-  /** True when the view has filters, so the empty state can say why. */
-  filtered?: boolean;
+  /** True when the view has filters, so the empty state can say why. Required,
+   * not optional — see BoardViewProps.filtered (M16.35). */
+  filtered: boolean;
 }
 
 const W = 640;

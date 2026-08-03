@@ -46,7 +46,9 @@ describe('BoardView', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
     const items = entries.filter((e) => e.path.startsWith('projects/onboarding/items/'));
-    render(<BoardView entries={items} presentation={presentation} schema={schema} />);
+    render(
+      <BoardView filtered={false} entries={items} presentation={presentation} schema={schema} />,
+    );
     expect(screen.getByText('Todo')).toBeTruthy();
     expect(screen.getByText('Doing')).toBeTruthy();
     expect(screen.getByText('Done')).toBeTruthy(); // empty column still renders
@@ -60,7 +62,7 @@ describe('BoardView', () => {
   it('renders an empty state instead of a blank canvas for an empty project', () => {
     const entries = fixtureVault();
     const schema = buildSchema(entries);
-    render(<BoardView entries={[]} presentation={presentation} schema={schema} />);
+    render(<BoardView filtered={false} entries={[]} presentation={presentation} schema={schema} />);
     expect(screen.getByTestId('board-view')).toBeTruthy();
     expect(screen.getByText('No items yet')).toBeTruthy();
   });
@@ -85,6 +87,7 @@ describe('BoardView grouping (M16.19)', () => {
     const schema = buildSchema(entries);
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{ ...presentation, group: [{ field: 'status', dir: 'desc' }] }}
         schema={schema}
@@ -98,6 +101,7 @@ describe('BoardView grouping (M16.19)', () => {
     const schema = buildSchema(entries);
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{ ...presentation, group: [{ field: 'status', hideEmpty: true }] }}
         schema={schema}
@@ -115,6 +119,7 @@ describe('BoardView grouping (M16.19)', () => {
     const schema = buildSchema(entries);
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{
           ...presentation,
@@ -137,6 +142,7 @@ describe('BoardView grouping (M16.19)', () => {
     const schema = buildSchema(entries);
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{ ...presentation, group: [{ field: 'status' }, { field: 'assignee' }] }}
         schema={schema}
@@ -173,6 +179,7 @@ describe('BoardView card properties (M16.19)', () => {
     const schema = buildSchema(entries);
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{ ...presentation, columns: [{ field: 'channel' }] }}
         schema={schema}
@@ -188,6 +195,7 @@ describe('BoardView card properties (M16.19)', () => {
     const schema = buildSchema(entries);
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{
           ...presentation,
@@ -222,7 +230,14 @@ describe('BoardView card settings (M16.20)', () => {
 
   it('shows no preview until the view asks for one', () => {
     const schema = buildSchema(fixtureVault());
-    render(<BoardView entries={withSnippet()} presentation={presentation} schema={schema} />);
+    render(
+      <BoardView
+        filtered={false}
+        entries={withSnippet()}
+        presentation={presentation}
+        schema={schema}
+      />,
+    );
     expect(screen.queryByTestId('card-preview')).toBeNull();
   });
 
@@ -230,6 +245,7 @@ describe('BoardView card settings (M16.20)', () => {
     const schema = buildSchema(fixtureVault());
     render(
       <BoardView
+        filtered={false}
         entries={withSnippet()}
         presentation={{ ...presentation, cardPreview: 'content' }}
         schema={schema}
@@ -244,6 +260,7 @@ describe('BoardView card settings (M16.20)', () => {
     const schema = buildSchema(fixtureVault());
     render(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{ ...presentation, cardPreview: 'content' }}
         schema={schema}
@@ -258,6 +275,7 @@ describe('BoardView card settings (M16.20)', () => {
       cleanup();
       render(
         <BoardView
+          filtered={false}
           entries={items()}
           presentation={{ ...presentation, cardSize }}
           schema={schema}
@@ -273,11 +291,12 @@ describe('BoardView card settings (M16.20)', () => {
   it('paints a column in its own colour only when the view says to', () => {
     const schema = buildSchema(fixtureVault());
     const { rerender } = render(
-      <BoardView entries={items()} presentation={presentation} schema={schema} />,
+      <BoardView filtered={false} entries={items()} presentation={presentation} schema={schema} />,
     );
     expect(screen.getAllByTestId('board-column')[0].querySelector('[data-tinted]')).toBeNull();
     rerender(
       <BoardView
+        filtered={false}
         entries={items()}
         presentation={{ ...presentation, colorColumns: true }}
         schema={schema}
@@ -285,9 +304,9 @@ describe('BoardView card settings (M16.20)', () => {
     );
     const body = screen.getAllByTestId('board-column')[0].querySelector('[data-tinted]');
     expect(body).not.toBeNull();
-    // The status colours in the fixture are raw `var(--…)` values, which
+    // The status colours in the fixture are raw hexes, which
     // `resolveOptionColor` mixes rather than concatenating an alpha onto —
-    // `var(--n-500)22` is a declaration the browser drops (M16.12).
+    // `#fff22` is a declaration the browser drops (M16.12).
     expect((body as HTMLElement).style.background).toContain('color-mix');
   });
 });
@@ -326,7 +345,9 @@ describe('BoardView keyboard and create (M15)', () => {
     useUiStore.setState({ detailPath: null });
     const schema = buildSchema(entries);
     const items = entries.filter((e) => e.path === 'projects/onboarding/items/fld-1.md');
-    render(<BoardView entries={items} presentation={presentation} schema={schema} />);
+    render(
+      <BoardView filtered={false} entries={items} presentation={presentation} schema={schema} />,
+    );
     const card = screen.getByTestId('board-card');
     card.focus();
     await user.keyboard('{Enter}');
@@ -343,7 +364,13 @@ describe('BoardView keyboard and create (M15)', () => {
     );
     const onCreate = vi.fn().mockResolvedValue(true);
     render(
-      <BoardView entries={items} presentation={byPerson} schema={schema} onCreate={onCreate} />,
+      <BoardView
+        filtered={false}
+        entries={items}
+        presentation={byPerson}
+        schema={schema}
+        onCreate={onCreate}
+      />,
     );
     await user.click(screen.getByRole('button', { name: 'New record in Ana Rios' }));
     await user.type(
@@ -372,6 +399,7 @@ describe('BoardView keyboard and create (M15)', () => {
     const onCreate = vi.fn().mockResolvedValue(true);
     render(
       <BoardView
+        filtered={false}
         entries={[project, fld1]}
         presentation={byPerson}
         schema={schema}

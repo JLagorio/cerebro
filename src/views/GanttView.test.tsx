@@ -42,6 +42,7 @@ function setup(records: Entry[], patch: Partial<Presentation> = {}) {
   useVaultStore.setState({ entries });
   render(
     <GanttView
+      filtered={false}
       entries={items}
       presentation={{ ...base, ...patch }}
       schema={schema}

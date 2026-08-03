@@ -50,6 +50,14 @@ export interface TimelineViewProps {
   allEntries?: Entry[];
   scope?: string;
   today?: string;
+  /**
+   * True when the view has filters, so the empty state can say why (M16.35).
+   *
+   * Required for the reason BoardView's is: the board declared this prop,
+   * branched on it, and never received it, because an optional prop dropped by
+   * a caller is a prop nothing complains about.
+   */
+  filtered: boolean;
   /** Persists a zoom change to the view's YAML. Omit for read-only surfaces. */
   onZoomChange?: (zoom: Zoom) => void;
 }
@@ -75,6 +83,7 @@ export function TimelineView({
   allEntries = entries,
   scope = 'timeline',
   today = toIsoDate(new Date()),
+  filtered,
   onZoomChange,
 }: TimelineViewProps) {
   const dateField = resolveDateField(presentation, fields);
@@ -316,10 +325,16 @@ export function TimelineView({
 
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">
+          {/* A timeline emptied by its own filters is not an empty project
+              (M16.35) — same statement the gantt makes, for the same reason. */}
           <EmptyState
             icon={viewKind('timeline').icon}
-            title="No records yet"
-            description="Dated records appear here as bars."
+            title={filtered ? 'Nothing matches these filters' : 'No records yet'}
+            description={
+              filtered
+                ? 'Adjust the filters in view settings to widen the query.'
+                : 'Dated records appear here as bars.'
+            }
           />
         </div>
       )}

@@ -76,7 +76,12 @@ describe('GalleryView', () => {
     const entries = vault();
     const schema = buildSchema(entries);
     render(
-      <GalleryView entries={records(entries)} presentation={presentation()} schema={schema} />,
+      <GalleryView
+        filtered={false}
+        entries={records(entries)}
+        presentation={presentation()}
+        schema={schema}
+      />,
     );
     expect(screen.getAllByTestId('gallery-card')).toHaveLength(3);
     expect(screen.getByText('Launch poster')).toBeTruthy();
@@ -90,7 +95,12 @@ describe('GalleryView', () => {
     const entries = vault();
     const schema = buildSchema(entries);
     render(
-      <GalleryView entries={records(entries)} presentation={presentation()} schema={schema} />,
+      <GalleryView
+        filtered={false}
+        entries={records(entries)}
+        presentation={presentation()}
+        schema={schema}
+      />,
     );
     expect(screen.queryByTestId('gallery-cover')).toBeNull();
   });
@@ -102,6 +112,7 @@ describe('GalleryView', () => {
     const schema = buildSchema(entries);
     const { container } = render(
       <GalleryView
+        filtered={false}
         entries={records(entries)}
         presentation={presentation({ gallery: { cover: 'artwork' } })}
         schema={schema}
@@ -119,6 +130,7 @@ describe('GalleryView', () => {
     const schema = buildSchema(entries);
     render(
       <GalleryView
+        filtered={false}
         entries={records(entries)}
         presentation={presentation({
           cardSize: 'large',
@@ -135,7 +147,12 @@ describe('GalleryView', () => {
     const entries = vault();
     const schema = buildSchema(entries);
     render(
-      <GalleryView entries={records(entries)} presentation={presentation()} schema={schema} />,
+      <GalleryView
+        filtered={false}
+        entries={records(entries)}
+        presentation={presentation()}
+        schema={schema}
+      />,
     );
     expect(screen.getByTestId('gallery-view').getAttribute('data-card-size')).toBe('medium');
   });
@@ -148,6 +165,7 @@ describe('GalleryView', () => {
     const schema = buildSchema(entries);
     render(
       <GalleryView
+        filtered={false}
         entries={records(entries)}
         presentation={presentation({ group: [{ field: 'status' }] })}
         schema={schema}
@@ -165,6 +183,7 @@ describe('GalleryView', () => {
     const schema = buildSchema(entries);
     render(
       <GalleryView
+        filtered={false}
         entries={records(entries)}
         presentation={presentation({ group: [{ field: 'status' }] })}
         schema={schema}
@@ -187,6 +206,7 @@ describe('GalleryView', () => {
     const schema = buildSchema(entries);
     render(
       <GalleryView
+        filtered={false}
         entries={[entries.find((e) => e.path === 'assets/poster.md')!]}
         presentation={presentation()}
         schema={schema}
@@ -212,7 +232,12 @@ describe('GalleryView', () => {
     ];
     const schema = buildSchema(entries);
     render(
-      <GalleryView entries={records(entries)} presentation={presentation()} schema={schema} />,
+      <GalleryView
+        filtered={false}
+        entries={records(entries)}
+        presentation={presentation()}
+        schema={schema}
+      />,
     );
     expect(screen.getByText('Cannot parse')).toBeTruthy();
     expect(screen.getByText('broken.md')).toBeTruthy();

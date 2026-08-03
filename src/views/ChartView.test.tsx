@@ -65,7 +65,12 @@ describe('ChartView', () => {
   it('draws one bar per band, labelled with what it measures', () => {
     const entries = vault();
     render(
-      <ChartView entries={records(entries)} presentation={view()} schema={buildSchema(entries)} />,
+      <ChartView
+        filtered={false}
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+      />,
     );
     const bars = screen.getAllByTestId('chart-bar');
     expect(bars.map((b) => b.getAttribute('data-label'))).toEqual(['Todo', 'Doing']);
@@ -77,6 +82,7 @@ describe('ChartView', () => {
     const entries = vault();
     render(
       <ChartView
+        filtered={false}
         entries={records(entries)}
         presentation={view({ chart: { kind: 'line' } })}
         schema={buildSchema(entries)}
@@ -91,6 +97,7 @@ describe('ChartView', () => {
     const entries = vault();
     render(
       <ChartView
+        filtered={false}
         entries={records(entries)}
         presentation={view({ chart: { kind: 'donut' } })}
         schema={buildSchema(entries)}
@@ -106,6 +113,7 @@ describe('ChartView', () => {
     const entries = vault();
     render(
       <ChartView
+        filtered={false}
         entries={records(entries)}
         presentation={view({ chart: { agg: 'sum', value: 'estimate' } })}
         schema={buildSchema(entries)}
@@ -126,6 +134,7 @@ describe('ChartView', () => {
     const entries = vault();
     render(
       <ChartView
+        filtered={false}
         entries={records(entries)}
         presentation={view({ group: [{ field: 'status', dir: 'desc' }] })}
         schema={buildSchema(entries)}
@@ -141,7 +150,12 @@ describe('ChartView', () => {
     const entries = vault();
     const schema = buildSchema(entries);
     const { unmount } = render(
-      <ChartView entries={records(entries)} presentation={view({ group: [] })} schema={schema} />,
+      <ChartView
+        filtered={false}
+        entries={records(entries)}
+        presentation={view({ group: [] })}
+        schema={schema}
+      />,
     );
     expect(screen.getByTestId('chart-empty').getAttribute('data-reason')).toBe('no-group');
     expect(screen.getByText(/under Group in view settings/)).toBeTruthy();
@@ -149,6 +163,7 @@ describe('ChartView', () => {
 
     render(
       <ChartView
+        filtered={false}
         entries={records(entries)}
         presentation={view({ chart: { agg: 'avg' } })}
         schema={schema}
@@ -168,7 +183,12 @@ describe('ChartView', () => {
   it('paints only in tokens — no literal hex anywhere in the svg', () => {
     const entries = vault();
     const { container } = render(
-      <ChartView entries={records(entries)} presentation={view()} schema={buildSchema(entries)} />,
+      <ChartView
+        filtered={false}
+        entries={records(entries)}
+        presentation={view()}
+        schema={buildSchema(entries)}
+      />,
     );
     expect(container.innerHTML).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });

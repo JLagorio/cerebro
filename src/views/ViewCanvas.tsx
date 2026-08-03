@@ -38,8 +38,19 @@ export interface ViewCanvasProps {
   project?: Entry | null;
   /** Type new records get. */
   createType?: string;
-  /** True when the view has filters, so empty states can say why. */
-  filtered?: boolean;
+  /**
+   * True when the view has filters, so empty states can say why.
+   *
+   * REQUIRED, and required on every per-kind view below for the same reason
+   * (M16.35). It used to be optional everywhere, and the `board` arm simply
+   * forgot to forward it: the prop was permanently `undefined`, so a board
+   * whose filters matched nothing said "No items yet — Create an item to see
+   * it here as a card." That reads as "this collection is empty" and sends
+   * people looking for the records instead of for the filter chips directly
+   * above. An optional prop that every arm is supposed to pass is a prop the
+   * compiler cannot help with; a required one cannot be dropped again.
+   */
+  filtered: boolean;
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
   /** Create dated to a calendar day. */
   onCreateOn?: (title: string, day: string) => Promise<boolean>;
@@ -140,9 +151,14 @@ export function ViewCanvas({
           presentation={presentation}
           schema={schema}
           scope={scope}
+          filtered={filtered}
           onCreate={onCreate}
         />
       );
+    // Calendar and dashboard take no `filtered`, and that is a statement
+    // rather than an omission: a calendar draws its month grid whether or not
+    // anything lands in it, so it has no records empty state to caption, and a
+    // dashboard's blocks each answer the question for their own query below.
     case 'calendar':
       return (
         <CalendarView
@@ -163,6 +179,7 @@ export function ViewCanvas({
           schema={schema}
           fields={fields}
           scope={scope}
+          filtered={filtered}
           onZoomChange={onZoomChange}
           {...(today !== undefined ? { today } : {})}
         />
@@ -176,6 +193,7 @@ export function ViewCanvas({
           schema={schema}
           fields={fields}
           scope={scope}
+          filtered={filtered}
           onZoomChange={onZoomChange}
           {...(today !== undefined ? { today } : {})}
         />

@@ -35,7 +35,11 @@ function vault(records: Entry[]): Entry[] {
   ];
 }
 
-function setup(records: Entry[], patch: Partial<Presentation> = {}) {
+function setup(
+  records: Entry[],
+  patch: Partial<Presentation> = {},
+  onCreateOn?: (title: string, day: string) => Promise<boolean>,
+) {
   const entries = vault(records);
   const schema = buildSchema(entries);
   const items = entries.filter((e) => e.type === 'Campaign');
@@ -47,6 +51,7 @@ function setup(records: Entry[], patch: Partial<Presentation> = {}) {
       schema={schema}
       fields={columnUniverse({ type: 'Campaign', project: null }, items, schema)}
       today={TODAY}
+      {...(onCreateOn !== undefined ? { onCreateOn } : {})}
     />,
   );
 }
@@ -282,5 +287,57 @@ describe('CalendarView drag to reschedule', () => {
     expect(write).toHaveBeenLastCalledWith('records/campaigns/standup.md', {
       window: { start: '2026-08-12', end: '2026-08-12' },
     });
+  });
+});
+
+/**
+ * Creating on a day, from the keyboard (M16.35).
+ *
+ * The plus was `hidden … group-hover/day:flex`. `display: none` removes an
+ * element from the tab order AND from the accessibility tree, so the one
+ * affordance in the entire calendar that creates a record on a chosen day
+ * could not be reached, focused or announced without a pointer. The sanctioned
+ * shape — already applied twice in this repo, see `PropertyRow.ROW_ACTION` and
+ * OptionListEditor — is opacity, which keeps the element real and reserves its
+ * slot so the day does not reflow when it appears.
+ *
+ * jsdom loads no stylesheet, so a `hidden` class here would still be focusable
+ * in this test. The class list is therefore asserted directly: it is the thing
+ * that was wrong, and it is the only place a browser learns the difference.
+ */
+describe('CalendarView day-add is keyboard-reachable (M16.35)', () => {
+  const addButton = (iso: string) =>
+    screen.getByRole('button', { name: `New record on ${iso}` }) as HTMLButtonElement;
+
+  it('reveals on focus as well as hover, and never sets display:none', () => {
+    setup([], {}, async () => true);
+    const add = addButton('2026-08-05');
+
+    expect(add.className).not.toContain('hidden');
+    expect(add.className).toContain('opacity-0');
+    expect(add.className).toContain('group-hover/day:opacity-100');
+    expect(add.className).toContain('focus-visible:opacity-100');
+    // The slot stays reserved, so the day's contents do not shift when the
+    // plus fades in.
+    expect(add.className).toContain('h-4');
+    expect(add.className).toContain('w-4');
+    expect(add.className).toContain('flex-none');
+  });
+
+  it('takes focus and opens the inline title field on Enter', async () => {
+    const user = userEvent.setup();
+    const onCreateOn = vi.fn(async () => true);
+    setup([], {}, onCreateOn);
+
+    const add = addButton('2026-08-05');
+    add.focus();
+    expect(document.activeElement).toBe(add);
+
+    await user.keyboard('{Enter}');
+    const field = screen.getByLabelText('New record on 2026-08-05') as HTMLInputElement;
+    expect(field.tagName).toBe('INPUT');
+
+    await user.keyboard('Retro{Enter}');
+    expect(onCreateOn).toHaveBeenCalledWith('Retro', '2026-08-05');
   });
 });

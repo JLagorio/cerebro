@@ -37,8 +37,16 @@ export interface BoardViewProps {
   schema: Schema;
   /** Collapse-state namespace for swimlanes (M9.1). */
   scope?: string;
-  /** True when the view has filters, so the empty state can say why. */
-  filtered?: boolean;
+  /**
+   * True when the view has filters, so the empty state can say why.
+   *
+   * Not optional (M16.35). It was, and ViewCanvas's `board` arm never passed
+   * it — so the branch below was dead code for the entire life of the prop and
+   * a filtered-empty board claimed the collection was empty. The compiler is
+   * the only thing that catches a dropped prop; leaving it optional means the
+   * next arm to forget also fails silently.
+   */
+  filtered: boolean;
   /** M9.6: create a card in a column, inheriting its value. */
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }
@@ -520,9 +528,9 @@ export function BoardView({
         // looking for the records instead of for the filter.
         <EmptyState
           icon="square-kanban"
-          title={filtered === true ? 'Nothing matches these filters' : 'No items yet'}
+          title={filtered ? 'Nothing matches these filters' : 'No items yet'}
           description={
-            filtered === true
+            filtered
               ? 'Adjust the filters in view settings to widen the query.'
               : 'Create an item to see it here as a card.'
           }

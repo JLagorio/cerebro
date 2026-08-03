@@ -51,6 +51,7 @@ function setup(records: Entry[], patch: Partial<Presentation> = {}) {
   useVaultStore.setState({ entries });
   render(
     <TimelineView
+      filtered={false}
       entries={items}
       presentation={{ ...base, ...patch }}
       schema={schema}

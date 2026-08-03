@@ -40,8 +40,9 @@ export interface GalleryViewProps {
   schema: Schema;
   /** Collapse-state namespace for bands — the same one the list uses. */
   scope?: string;
-  /** True when the view has filters, so the empty state can say why. */
-  filtered?: boolean;
+  /** True when the view has filters, so the empty state can say why. Required,
+   * not optional — see BoardViewProps.filtered (M16.35). */
+  filtered: boolean;
 }
 
 /** Card width and cover height per size step. The width is a grid MINIMUM —
