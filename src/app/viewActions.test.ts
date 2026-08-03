@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { seedView } from '@/app/viewActions';
-import { serializeList } from '@/engine/views';
-import type { ListDefinition, Presentation } from '@/engine/types';
+import { DEFAULT_PRESENTATION, serializeList } from '@/engine/views';
+import { VIEW_TYPES } from '@/engine/types';
+import type { FilterGroup, ListDefinition, Presentation } from '@/engine/types';
 
 /**
  * Adding a view used to clone the open tab's presentation wholesale (M16.29).
@@ -86,5 +87,46 @@ describe('seeding a new view (M16.29)', () => {
     const seeded = seedView('Grid', 'board', ['grid'], gantt);
     expect(seeded.presentation.type).toBe('board');
     expect(seeded.id).toBe('grid-2');
+  });
+});
+
+/**
+ * A filter is what the list IS (M16.34).
+ *
+ * `newView` hardcodes `filters: null` and nothing overrode it, so adding a
+ * Board to a List called "At risk" produced a board of all 45 work items with
+ * a header confidently reading 45 — the list's defining filter discarded, no
+ * error, no hint. Unlike a presentation key there is nothing to gate: no
+ * layout can fail to read a filter.
+ */
+describe('seedView filters', () => {
+  const AT_RISK: FilterGroup = {
+    all: [
+      { field: 'priority', op: 'any_of', value: ['urgent', 'high'] },
+      { any: [{ field: 'status', op: 'equals', value: 'progress' }] },
+    ],
+  };
+
+  it('carries the filter onto the new view', () => {
+    const seeded = seedView('Wall', 'board', [], DEFAULT_PRESENTATION, AT_RISK);
+    expect(seeded.filters).toEqual(AT_RISK);
+  });
+
+  it('carries it to every layout, because no layout can fail to read one', () => {
+    for (const type of VIEW_TYPES) {
+      expect(seedView('V', type, [], DEFAULT_PRESENTATION, AT_RISK).filters).toEqual(AT_RISK);
+    }
+  });
+
+  // Two tabs sharing one nested object means editing either rewrites both.
+  it('deep-clones, so the tabs cannot edit each other', () => {
+    const seeded = seedView('Wall', 'board', [], DEFAULT_PRESENTATION, AT_RISK);
+    const nested = (seeded.filters as { all: unknown[] }).all[1] as { any: unknown[] };
+    nested.any.push({ field: 'status', op: 'equals', value: 'review' });
+    expect((AT_RISK.all[1] as { any: unknown[] }).any).toHaveLength(1);
+  });
+
+  it('leaves an unfiltered list unfiltered', () => {
+    expect(seedView('V', 'table', [], DEFAULT_PRESENTATION).filters).toBeNull();
   });
 });

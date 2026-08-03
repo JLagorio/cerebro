@@ -148,6 +148,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
       type,
       savedViews.map((v) => v.id),
       presentation,
+      activeView.filters,
     );
     void (async () => {
       if (await setTypeViews(listing, [...savedViews, seeded])) openTab(seeded.id);

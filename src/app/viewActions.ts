@@ -1,6 +1,6 @@
 import { newView } from '@/engine/views';
 import { carryOver } from '@/views/viewKinds';
-import type { Presentation, ViewDefinition, ViewType } from '@/engine/types';
+import type { FilterGroup, Presentation, ViewDefinition, ViewType } from '@/engine/types';
 
 /**
  * "Add a view" — one seeding rule for every surface that offers it (M16.29).
@@ -17,6 +17,17 @@ import type { Presentation, ViewDefinition, ViewType } from '@/engine/types';
  * away the configuration they just did. What travels is now decided by
  * `carryOver`, which asks the target kind what it can read.
  *
+ * The FILTERS travel too, and unlike the presentation they travel whole
+ * (M16.34). `newView` hardcodes `filters: null`, and nothing overrode it, so
+ * adding a Board to a List called "At risk" produced a board of all 45 work
+ * items with a header confidently reading 45 — the list's entire meaning
+ * discarded, with no error and no hint. A filter is a statement about WHICH
+ * RECORDS the list is, not about how one layout draws them, so no layout can
+ * fail to read it and there is nothing for `carryOver` to gate.
+ *
+ * Deep-cloned: a `FilterGroup` is a nested tree, and two tabs sharing one
+ * object means editing either rewrites both.
+ *
  * This lives in `app/` because it is where the two halves legitimately meet:
  * `newView` is engine, the capability catalog is the view layer, and the
  * engine does not import the view layer.
@@ -26,6 +37,10 @@ export function seedView(
   type: ViewType,
   taken: Iterable<string>,
   base: Presentation,
+  filters: FilterGroup | null = null,
 ): ViewDefinition {
-  return newView(name, type, taken, carryOver(base, type));
+  const seeded = newView(name, type, taken, carryOver(base, type));
+  return filters === null
+    ? seeded
+    : { ...seeded, filters: JSON.parse(JSON.stringify(filters)) as FilterGroup };
 }

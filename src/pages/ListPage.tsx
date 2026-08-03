@@ -211,6 +211,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
         type,
         list.definition.views.map((v) => v.id),
         presentation,
+        activeView.filters,
       );
       const id = await addView(list, seeded);
       if (id !== null) openTab(id);
