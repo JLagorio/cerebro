@@ -223,12 +223,20 @@ describe('inferKindFromValue', () => {
     expect(inferKindFromValue('just words')).toBe('text');
   });
 
-  it('recognises the two string shapes that are not prose', () => {
+  it('recognises the string shapes that are not prose', () => {
     expect(inferKindFromValue('2026-08-02')).toBe('date');
     expect(inferKindFromValue('https://example.com')).toBe('url');
-    expect(inferKindFromValue('mailto:a@b.co')).toBe('url');
     // Not a date: a partial one has no honest calendar reading.
     expect(inferKindFromValue('2026-08')).toBe('text');
+  });
+
+  // M16.13: an address used to infer as `url`, because URL_SHAPE accepts
+  // `mailto:` — which was the nearest thing to an Email kind before there
+  // was one. Email is the more specific answer, so it is checked first.
+  it('prefers email over url for an address', () => {
+    expect(inferKindFromValue('ada@example.com')).toBe('email');
+    expect(inferKindFromValue('mailto:ada@example.com')).toBe('email');
+    expect(inferKindFromValue('https://example.com/a@b')).toBe('url');
   });
 
   it('calls a list multi-select rather than text', () => {

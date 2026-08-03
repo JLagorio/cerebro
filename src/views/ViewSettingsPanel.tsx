@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/Select';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
 import { moveColumnTo, toggleColumn } from '@/engine/columns';
+import { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import {
   chainTypes,
@@ -64,15 +65,6 @@ type Page =
 // plain Set<string> plus two hardcoded p.type comparisons, so a new kind
 // compiled clean and then silently had no Axis page and no chip section.
 
-const GROUPABLE_KINDS = new Set([
-  'status',
-  'select',
-  'multiselect',
-  'person',
-  'checkbox',
-  'relation',
-]);
-const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
 const META_SORTS = [
   { value: 'modifiedAt', label: 'Last modified' },
   { value: 'createdAt', label: 'Created' },

@@ -45,6 +45,8 @@ export const FIELD_KINDS = [
   'person',
   'relation',
   'url',
+  'email',
+  'phone',
   'files',
   'rollup',
   'created_time',

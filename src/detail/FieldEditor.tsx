@@ -463,6 +463,42 @@ export function FieldEditor({
     // Falls through to the text-editing branch below via `draft`.
   }
 
+  if (def.kind === 'email' || def.kind === 'phone') {
+    // The url branch's shape, with the scheme the kind implies. Nothing
+    // validates the value — see validateValue: refusing a frontmatter write
+    // is a worse failure than an address that will not linkify — so the
+    // link is offered for whatever is stored and the pencil always returns
+    // you to the text.
+    const value = typeof resolved.raw === 'string' ? resolved.raw : '';
+    if (draft === null && value !== '') {
+      const href =
+        def.kind === 'email'
+          ? value.startsWith('mailto:')
+            ? value
+            : `mailto:${value}`
+          : `tel:${value.replace(/[^\d+]/g, '')}`;
+      return (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <a
+            href={href}
+            className="truncate text-[12.5px] text-[var(--cortex-600)] hover:underline"
+          >
+            {value.replace(/^mailto:/, '')}
+          </a>
+          <button
+            type="button"
+            aria-label={`Edit ${humanize(def.name)}`}
+            onClick={() => setDraft(value)}
+            className="flex-none rounded-md border-0 bg-transparent p-1 text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+          >
+            <Icon name="pencil" size={11} />
+          </button>
+        </span>
+      );
+    }
+    // Falls through to the shared text editor below.
+  }
+
   if (def.kind === 'files') {
     const files = Array.isArray(resolved.raw)
       ? resolved.raw.map(String)
@@ -566,6 +602,10 @@ export function FieldEditor({
     return (
       <input
         autoFocus
+        // The right keyboard on touch, and the browser's own affordances
+        // (autofill, the phone keypad). The input was untyped for every kind.
+        type={def.kind === 'email' ? 'email' : def.kind === 'phone' ? 'tel' : 'text'}
+        inputMode={def.kind === 'phone' ? 'tel' : def.kind === 'email' ? 'email' : undefined}
         aria-label={humanize(def.name)}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

@@ -123,6 +123,10 @@ export interface PropertyKindMeta {
   legacy?: boolean;
   /** Holds several values at once — the pickers stay open and toggle. */
   multi?: boolean;
+  /** Values bucket meaningfully, so a view can group by this field. */
+  groupable: boolean;
+  /** Values have a total order, so a view can sort by this field. */
+  orderable: boolean;
 }
 
 /**
@@ -135,33 +139,140 @@ export interface PropertyKindMeta {
  * because object key order is insertion order for string keys.
  */
 const KIND_META = {
-  text: { label: 'Text', icon: 'type', computed: false, seed: '' },
-  number: { label: 'Number', icon: 'hash', computed: false, seed: '' },
-  select: { label: 'Select', icon: 'circle-chevron-down', computed: false, seed: '' },
+  text: {
+    label: 'Text',
+    icon: 'type',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+  },
+  number: {
+    label: 'Number',
+    icon: 'hash',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+  },
+  select: {
+    label: 'Select',
+    icon: 'circle-chevron-down',
+    computed: false,
+    seed: '',
+    groupable: true,
+    orderable: true,
+  },
   multiselect: {
     label: 'Multi-select',
     icon: 'list-checks',
     computed: false,
     seed: '',
     multi: true,
+    groupable: true,
+    orderable: false,
   },
-  status: { label: 'Status', icon: 'loader', computed: false, seed: '' },
-  date: { label: 'Date', icon: 'calendar', computed: false, seed: '' },
+  status: {
+    label: 'Status',
+    icon: 'loader',
+    computed: false,
+    seed: '',
+    groupable: true,
+    orderable: true,
+  },
+  date: {
+    label: 'Date',
+    icon: 'calendar',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+  },
   daterange: {
     label: 'Date range',
     icon: 'calendar-range',
     computed: false,
     seed: '',
     legacy: true,
+    groupable: false,
+    orderable: true,
   },
-  person: { label: 'Person', icon: 'circle-user', computed: false, seed: '', multi: true },
-  files: { label: 'Files & media', icon: 'paperclip', computed: false, seed: '', multi: true },
-  checkbox: { label: 'Checkbox', icon: 'square-check', computed: false, seed: false },
-  url: { label: 'URL', icon: 'link', computed: false, seed: '' },
-  relation: { label: 'Relation', icon: 'arrow-up-right', computed: false, seed: '', multi: true },
-  rollup: { label: 'Rollup', icon: 'sigma', computed: true, seed: null },
-  created_time: { label: 'Created time', icon: 'clock', computed: true, seed: null },
-  last_edited_time: { label: 'Last edited time', icon: 'history', computed: true, seed: null },
+  person: {
+    label: 'Person',
+    icon: 'circle-user',
+    computed: false,
+    seed: '',
+    multi: true,
+    groupable: true,
+    orderable: false,
+  },
+  files: {
+    label: 'Files & media',
+    icon: 'paperclip',
+    computed: false,
+    seed: '',
+    multi: true,
+    groupable: false,
+    orderable: false,
+  },
+  checkbox: {
+    label: 'Checkbox',
+    icon: 'square-check',
+    computed: false,
+    seed: false,
+    groupable: true,
+    orderable: true,
+  },
+  url: { label: 'URL', icon: 'link', computed: false, seed: '', groupable: false, orderable: true },
+  email: {
+    label: 'Email',
+    icon: 'mail',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+  },
+  phone: {
+    label: 'Phone',
+    icon: 'phone',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+  },
+  relation: {
+    label: 'Relation',
+    icon: 'arrow-up-right',
+    computed: false,
+    seed: '',
+    multi: true,
+    groupable: true,
+    orderable: false,
+  },
+  rollup: {
+    label: 'Rollup',
+    icon: 'sigma',
+    computed: true,
+    seed: null,
+    groupable: false,
+    orderable: true,
+  },
+  created_time: {
+    label: 'Created time',
+    icon: 'clock',
+    computed: true,
+    seed: null,
+    groupable: false,
+    orderable: true,
+  },
+  last_edited_time: {
+    label: 'Last edited time',
+    icon: 'history',
+    computed: true,
+    seed: null,
+    groupable: false,
+    orderable: true,
+  },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
 
 export const PROPERTY_KINDS: PropertyKindMeta[] = (Object.keys(KIND_META) as FieldKind[]).map(
@@ -174,6 +285,23 @@ export const CREATABLE_PROPERTY_KINDS = PROPERTY_KINDS.filter((k) => k.legacy !=
 
 export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
   PROPERTY_KINDS.find((k) => k.kind === kind) ?? PROPERTY_KINDS[0];
+
+/**
+ * Which kinds a view may group and sort by (M16.13).
+ *
+ * These were two hand-maintained `Set<string>` pairs — `ViewToolbar` exported
+ * one and `ViewSettingsPanel` kept a verbatim copy — so adding a kind meant
+ * remembering both, deleting from one produced no compile error and no
+ * failing test, and the settings panel could offer a sort on a kind the
+ * toolbar did not. They are flags on KIND_META now, which `satisfies
+ * Record<FieldKind, …>` forces every new kind to answer.
+ */
+export const GROUPABLE_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.groupable).map((k) => k.kind),
+);
+export const ORDERABLE_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.orderable).map((k) => k.kind),
+);
 
 // --- Option identity and order (M16.12) ------------------------------------
 
@@ -279,6 +407,8 @@ export function visibilityDelta(
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
+/** Only for INFERRING a kind from a loose value — never for validation. */
+const EMAIL_SHAPE = /^(mailto:)?[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 /**
  * The kind an UNDECLARED frontmatter value looks like (M16.6).
@@ -299,6 +429,9 @@ export function inferKindFromValue(value: unknown): FieldKind {
   if (Array.isArray(value)) return 'multiselect';
   if (typeof value === 'string') {
     if (ISO_DATE.test(value)) return 'date';
+    // Before the url check: `mailto:` matches URL_SHAPE too, and an address
+    // is more specific than "some link".
+    if (EMAIL_SHAPE.test(value)) return 'email';
     if (URL_SHAPE.test(value)) return 'url';
     return 'text';
   }
@@ -376,6 +509,14 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
       return isScalarString(value) && (value === '' || URL_SHAPE.test(value))
         ? null
         : `${label} must be a URL (https://…)`;
+    case 'email':
+    case 'phone':
+      // Shape only, no pattern. This module's contract (see the header) is
+      // that SHAPE is strict and semantics stay advisory, Notion does not
+      // validate either, and refusing a frontmatter write is a far worse
+      // failure than an address that will not linkify. The value these kinds
+      // add is a mailto:/tel: link and the right keyboard, not rejection.
+      return isScalarString(value) ? null : `${label} must be text`;
     case 'files':
       return isScalarString(value) || isStringArray(value)
         ? null
@@ -404,6 +545,8 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
   switch (kind) {
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return list.join(', ');
     case 'number': {
       const cleaned = String(first).replace(/[^0-9.eE+-]/g, '');
@@ -449,6 +592,16 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
     case 'last_edited_time':
       // Computed kinds ignore stored values; leave the frontmatter alone.
       return raw;
+    default: {
+      // The return type is `unknown`, and `undefined` is assignable to it —
+      // so a kind added to the union and forgotten HERE compiled clean, and
+      // `changeFieldKind` then pushed the undefined through
+      // `patchFrontmatter`, which spells undefined as "delete". Converting to
+      // a forgotten kind wiped the value on every record of the type, in
+      // silence. This is the M16.4 guard the one `unknown` return escaped.
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
 }
 

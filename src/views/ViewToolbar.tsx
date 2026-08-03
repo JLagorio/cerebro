@@ -42,18 +42,13 @@ export const ORDER_OPTIONS = [
   { value: 'priority:asc', label: 'Priority' },
 ];
 
-/** Kinds whose values bucket meaningfully (M3 fix: the dropdowns used to be
- * hardcoded to Work-item fields, so grouping on any other type was a no-op).
- * Exported for the tab-row icon cluster's quick pickers (M12.8). */
-export const GROUPABLE_KINDS = new Set([
-  'status',
-  'select',
-  'multiselect',
-  'person',
-  'checkbox',
-  'relation',
-]);
-export const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
+// Which kinds bucket and which sort are FLAGS ON THE KIND now (M16.13).
+// This file held one hand-written Set pair and ViewSettingsPanel held a
+// verbatim copy, so adding a kind meant remembering both and deleting from
+// one produced no compile error and no failing test. Re-exported here for the
+// importers that already reach for them.
+export { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
+import { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 
 /** Group options for a collection whose type declares `fields`. */
 export function groupOptionsFor(fields: FieldDef[] | undefined) {
@@ -101,7 +96,7 @@ export function slugifyListId(name: string): string {
 }
 
 /** Fields a chain can still add, excluding the ones already in it. */
-function availableFields(fields: FieldDef[], kinds: Set<string>, taken: Set<string>) {
+function availableFields(fields: FieldDef[], kinds: ReadonlySet<string>, taken: Set<string>) {
   return fields
     .filter((f) => kinds.has(f.kind) && !taken.has(f.name))
     .map((f) => ({ value: f.name, label: humanize(f.name) }));

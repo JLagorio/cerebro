@@ -125,7 +125,12 @@ export function AddPropertyPanel({
    * through a text input. Picking "Checkbox" there produced a text box
    * containing "false", so the catalog offers only what actually survives. */
   const supportedOnOwner = (kind: FieldKind) =>
-    ownerType !== null || kind === 'text' || kind === 'number' || kind === 'url';
+    ownerType !== null ||
+    kind === 'text' ||
+    kind === 'number' ||
+    kind === 'url' ||
+    kind === 'email' ||
+    kind === 'phone';
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
