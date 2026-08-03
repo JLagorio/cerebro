@@ -6,6 +6,7 @@ import type { ColumnDef } from '@/engine/columns';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import type { FilterGroup, Presentation } from '@/engine/types';
+import { seedFilterRule } from '@/engine/viewFilters';
 import { groupByField, sortBy } from '@/engine/views';
 import { countRules, GROUPABLE_KINDS, META_SORTS, ORDERABLE_KINDS } from '@/views/ViewToolbar';
 import { axesFor } from '@/views/viewKinds';
@@ -73,7 +74,12 @@ export function ViewControlIcons({
           barOpen={barOpen}
           onToggleBar={toggleBar}
           onPick={(field) => {
-            onFiltersChange({ all: [{ field, op: 'is_not_empty', value: '' }] });
+            // Seeded through the engine so the starter rule is one the FIELD'S
+            // KIND can express (M16.25). It also carried a dead `value: ''` on
+            // a valueless operator, which then round-tripped into the YAML.
+            onFiltersChange({
+              all: [seedFilterRule(field, fields.find((f) => f.name === field)?.kind ?? 'text')],
+            });
             onBarOpenChange(true);
           }}
         />

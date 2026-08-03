@@ -16,7 +16,7 @@ import type {
   ViewDefinition,
   ViewType,
 } from './types';
-import { VIEW_TYPES } from './types';
+import { FILTER_OPS, VIEW_TYPES } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
 export const DEFAULT_PRESENTATION: Presentation = {
@@ -78,18 +78,6 @@ export function groupByField(p: Presentation, field: string): Presentation {
   return { ...p, group: already ? nests : [{ field }, ...nests] };
 }
 
-const FILTER_OPS: FilterOp[] = [
-  'equals',
-  'not_equals',
-  'contains',
-  'any_of',
-  'none_of',
-  'is_empty',
-  'is_not_empty',
-  'before',
-  'after',
-];
-
 function asRecord(raw: unknown): Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -112,6 +100,15 @@ const LAYOUTS = new Set<ViewType>(VIEW_TYPES);
 const RETIRED_LAYOUTS: Record<string, ViewType> = { tree: 'table', split: 'table' };
 
 const ZOOMS = new Set(['day', 'week', 'month', 'quarter']);
+
+/**
+ * Derived, never hand-written (M16.25). This was a literal array beside the
+ * `FilterOp` union, and it is the READ-SIDE allowlist — an operator missing
+ * from it made `parseFilterNode` treat the rule as malformed and DROP it, so a
+ * saved view reopened with one fewer condition and silently showed records it
+ * had been configured to hide.
+ */
+const KNOWN_OPS = new Set<FilterOp>(FILTER_OPS);
 
 /** Beyond this a nesting chain stops being legible and starts being a cycle. */
 export const MAX_NEST_DEPTH = 6;
@@ -158,6 +155,12 @@ function parsePresentation(raw: unknown): Presentation {
       : {}),
     ...(typeof obj.dependencyField === 'string' && obj.dependencyField.trim() !== ''
       ? { dependencyField: obj.dependencyField.trim() }
+      : {}),
+    // A limit of zero or less is dropped on read rather than honoured: it can
+    // only come from a hand-edited file, and a canvas emptied by a key nothing
+    // on screen mentions has no way back (M16.26).
+    ...(typeof obj.limit === 'number' && Number.isFinite(obj.limit) && obj.limit > 0
+      ? { limit: Math.floor(obj.limit) }
       : {}),
   };
 }
@@ -326,7 +329,7 @@ function parseSource(raw: unknown): ListSource {
 function parseFilterNode(raw: unknown, path: Set<unknown>): FilterRule | FilterGroup | null {
   const obj = asRecord(raw);
   if (Array.isArray(obj.all) || Array.isArray(obj.any)) return parseGroupNode(raw, path);
-  if (typeof obj.field === 'string' && FILTER_OPS.includes(obj.op as FilterOp)) {
+  if (typeof obj.field === 'string' && KNOWN_OPS.has(obj.op as FilterOp)) {
     const rule: FilterRule = { field: obj.field, op: obj.op as FilterOp };
     if (obj.value !== undefined) rule.value = obj.value as Scalar | Scalar[];
     return rule;
@@ -563,6 +566,7 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
     ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
     ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
+    ...(p.limit !== undefined ? { limit: p.limit } : {}),
   };
 }
 

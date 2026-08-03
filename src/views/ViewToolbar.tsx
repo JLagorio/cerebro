@@ -1,9 +1,6 @@
-import { useState } from 'react';
-import { Icon } from '@/components/ui/Icon';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
-import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { ChainBuilder, type ChainRow } from '@/views/ChainBuilder';
-import { FilterBuilder } from '@/views/FilterBuilder';
+import { FilterChips } from '@/views/FilterChips';
 import type { ColumnDef } from '@/engine/columns';
 import {
   chainTypes,
@@ -49,6 +46,11 @@ export const ORDER_OPTIONS = [
 // importers that already reach for them.
 export { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
+
+// M16.25: the leaf-rule count moved to FilterChips, which is now the thing
+// that renders one chip per rule. Re-exported for the importers that had it
+// from here.
+export { countRules } from '@/views/FilterChips';
 
 /** Group options for a collection whose type declares `fields`. */
 export function groupOptionsFor(fields: FieldDef[] | undefined) {
@@ -253,9 +255,11 @@ export function ViewToolbar({
       )}
 
       {/* M11: filters are per view, so they belong beside the other per-view
-          axes rather than only inside the settings panel. */}
+          axes rather than only inside the settings panel. M16.25: one chip per
+          RULE, because a single "Filter 3" pill said how many conditions a view
+          carried and never which ones. */}
       {onFiltersChange !== undefined && (
-        <FilterControl filters={filters} fields={declared} onChange={onFiltersChange} />
+        <FilterChips filters={filters} fields={declared} onChange={onFiltersChange} />
       )}
 
       {/* M9.7: one Group control. Its options list properties AND relations,
@@ -338,74 +342,4 @@ export function ViewToolbar({
 function labelForSort(field: string): string {
   const meta = META_SORTS.find((m) => m.value === field);
   return meta?.label ?? humanize(field);
-}
-
-/** Count the leaf conditions in a filter tree — what the pill reports. */
-export function countRules(group: FilterGroup | null): number {
-  if (group === null) return 0;
-  const children = 'all' in group ? group.all : group.any;
-  return children.reduce(
-    (sum, node) => sum + ('all' in node || 'any' in node ? countRules(node) : 1),
-    0,
-  );
-}
-
-/**
- * The Filter pill (M11): same shape as the Group and Sorting pills, because it
- * is the same kind of thing — one of the axes a view is configured along.
- */
-function FilterControl({
-  filters,
-  fields,
-  onChange,
-}: {
-  filters: FilterGroup | null;
-  fields: ColumnDef[];
-  onChange: (next: FilterGroup | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const count = countRules(filters);
-  const active = count > 0;
-
-  return (
-    <span className="relative inline-flex">
-      <button
-        type="button"
-        data-testid="filter-control"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={[
-          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-[12.5px]',
-          active
-            ? 'border-[var(--cortex-300)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-            : 'border-[var(--n-300)] bg-[var(--n-0)] text-[var(--n-700)] hover:border-[var(--n-400)]',
-        ].join(' ')}
-      >
-        <Icon name="list-filter" size={13} color={active ? 'var(--cortex-600)' : 'var(--n-500)'} />
-        Filter
-        {count > 0 && (
-          <span className="[font-family:var(--font-mono)] text-[11px] opacity-70">{count}</span>
-        )}
-      </button>
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close filter"
-            onClick={() => setOpen(false)}
-            onWheel={() => setOpen(false)}
-            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
-          />
-          <FixedBelowAnchor>
-            <div className="w-[520px] max-w-[calc(100vw-32px)] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
-                Filter this view
-              </div>
-              <FilterBuilder filters={filters} fields={fields} onChange={onChange} />
-            </div>
-          </FixedBelowAnchor>
-        </>
-      )}
-    </span>
-  );
 }

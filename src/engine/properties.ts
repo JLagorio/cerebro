@@ -14,7 +14,15 @@
 
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
-import type { Entry, FieldDef, FieldFormat, FieldKind, RollupCalc, Schema } from './types';
+import type {
+  Entry,
+  FieldDef,
+  FieldFormat,
+  FieldKind,
+  FilterFamily,
+  RollupCalc,
+  Schema,
+} from './types';
 
 // --- System properties (M4) -------------------------------------------------
 
@@ -128,6 +136,9 @@ export interface PropertyKindMeta {
   groupable: boolean;
   /** Values have a total order, so a view can sort by this field. */
   orderable: boolean;
+  /** Which comparisons a filter may offer on this field (M16.25). See
+   * `FilterFamily` in types.ts, and `filterOpsFor` in viewFilters.ts. */
+  filters: FilterFamily;
 }
 
 /**
@@ -147,6 +158,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    filters: 'text',
   },
   number: {
     label: 'Number',
@@ -155,6 +167,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    filters: 'number',
   },
   select: {
     label: 'Select',
@@ -163,6 +176,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    filters: 'choice',
   },
   multiselect: {
     label: 'Multi-select',
@@ -172,6 +186,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    filters: 'multi',
   },
   status: {
     label: 'Status',
@@ -180,6 +195,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    filters: 'choice',
   },
   date: {
     label: 'Date',
@@ -188,6 +204,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    filters: 'date',
   },
   daterange: {
     label: 'Date range',
@@ -197,6 +214,7 @@ const KIND_META = {
     legacy: true,
     groupable: false,
     orderable: true,
+    filters: 'date',
   },
   person: {
     label: 'Person',
@@ -206,6 +224,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    filters: 'multi',
   },
   files: {
     label: 'Files & media',
@@ -215,6 +234,7 @@ const KIND_META = {
     multi: true,
     groupable: false,
     orderable: false,
+    filters: 'multi',
   },
   checkbox: {
     label: 'Checkbox',
@@ -223,8 +243,17 @@ const KIND_META = {
     seed: false,
     groupable: true,
     orderable: true,
+    filters: 'boolean',
   },
-  url: { label: 'URL', icon: 'link', computed: false, seed: '', groupable: false, orderable: true },
+  url: {
+    label: 'URL',
+    icon: 'link',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    filters: 'text',
+  },
   email: {
     label: 'Email',
     icon: 'mail',
@@ -232,6 +261,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    filters: 'text',
   },
   phone: {
     label: 'Phone',
@@ -240,6 +270,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    filters: 'text',
   },
   relation: {
     label: 'Relation',
@@ -249,6 +280,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    filters: 'multi',
   },
   rollup: {
     label: 'Rollup',
@@ -257,6 +289,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    filters: 'any',
   },
   created_time: {
     label: 'Created time',
@@ -265,6 +298,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    filters: 'date',
   },
   last_edited_time: {
     label: 'Last edited time',
@@ -273,6 +307,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    filters: 'date',
   },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
 

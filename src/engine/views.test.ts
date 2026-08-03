@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VIEW_TYPES } from '@/engine/types';
+import { FILTER_OPS, VIEW_TYPES } from '@/engine/types';
 import {
   layoutLabel,
   newView,
@@ -448,6 +448,84 @@ describe('serializeList', () => {
       },
     );
     expect(parseListYaml('sprint-board', serializeList(def)).definition).toEqual(def);
+  });
+
+  /**
+   * The read-side allowlist and the operator union were two hand-written
+   * lists (M16.25). An operator missing from `views.ts`'s copy made
+   * `parseFilterNode` treat the rule as MALFORMED and drop it, so the view
+   * reopened with one fewer condition and silently showed records it had been
+   * configured to hide. This asserts the two can no longer disagree.
+   */
+  it('round-trips every operator in the catalog', () => {
+    const def = oneView(
+      { name: 'Every op', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+      },
+      {
+        all: FILTER_OPS.map((op) => ({
+          field: 'due',
+          op,
+          // Whatever shape the operator takes, the value has to survive too:
+          // an `is_between` that came back as a scalar would silently become
+          // "between X and undefined".
+          ...(op === 'is_empty' || op === 'is_not_empty'
+            ? {}
+            : op === 'is_between'
+              ? { value: ['2026-01-01', '2026-12-31'] }
+              : op === 'any_of' || op === 'none_of'
+                ? { value: ['a', 'b'] }
+                : { value: '2026-06-01' }),
+        })),
+      },
+    );
+    const back = parseListYaml('every-op', serializeList(def)).definition;
+    expect(back).toEqual(def);
+    expect(back.views[0].filters).not.toBeNull();
+  });
+
+  /**
+   * A typed value editor writes real numbers and real booleans (M16.25). YAML
+   * keeps both, so a rule authored as `is 5` must not come back as `is "5"`.
+   */
+  it('round-trips a rule whose value is a number and one whose value is a boolean', () => {
+    const def = oneView(
+      { name: 'Typed', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+      },
+      {
+        all: [
+          { field: 'estimate', op: 'gte', value: 5 },
+          { field: 'done', op: 'equals', value: true },
+        ],
+      },
+    );
+    expect(parseListYaml('typed', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('round-trips a load limit, and drops a nonsense one on read (M16.26)', () => {
+    const def = oneView(
+      { name: 'Capped', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+        limit: 25,
+      },
+    );
+    expect(parseListYaml('capped', serializeList(def)).definition).toEqual(def);
+    // A limit only a hand-edit can produce. Honouring it would render an
+    // empty canvas that nothing on screen can explain or undo.
+    expect(presentationOf(parseListYaml('v', 'presentation:\n  limit: 0\n')).limit).toBeUndefined();
   });
 
   // M3.5: a view is rooted in a type, and a relation level descends it — both
