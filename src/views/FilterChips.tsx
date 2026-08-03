@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import type { ColumnDef } from '@/engine/columns';
-import { describeFilterRule, seedFilterRule } from '@/engine/viewFilters';
-import type { FilterGroup, FilterRule } from '@/engine/types';
+import { describeFilterRule, filterFieldDefs, seedFilterRule } from '@/engine/viewFilters';
+import type { FieldOption, FilterGroup, FilterRule } from '@/engine/types';
 import { FilterBuilder, FilterRuleRow, filterFieldLabel } from '@/views/FilterBuilder';
 
 /**
@@ -37,18 +37,33 @@ export function countRules(group: FilterGroup | null): number {
   return childrenOf(group).reduce((sum, node) => sum + (isGroup(node) ? countRules(node) : 1), 0);
 }
 
+/** Stable identity: a `[]` default would rebuild the defs on every render. */
+const NO_STATUSES: FieldOption[] = [];
+
 export function FilterChips({
   filters,
   fields,
+  statuses = NO_STATUSES,
   onChange,
 }: {
   filters: FilterGroup | null;
   fields: ColumnDef[];
+  /**
+   * The view's status set (M16.29). A `status` field declares no `options:`
+   * of its own, so without this the value editor has no choices to offer and
+   * falls back to a text box you have to type the slug into.
+   */
+  statuses?: FieldOption[];
   onChange: (next: FilterGroup | null) => void;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [advanced, setAdvanced] = useState(false);
   const advancedRef = useRef<HTMLButtonElement>(null);
+
+  // THE seam. Every row below — the chip's own rule editor, and the whole
+  // builder behind a group chip or "Advanced" — reads this one array, so the
+  // nested path cannot drift from the top-level one (M16.29).
+  const defs = useMemo(() => filterFieldDefs(fields, statuses), [fields, statuses]);
 
   const group: FilterGroup = filters ?? { all: [] };
   const children = childrenOf(group);
@@ -104,7 +119,7 @@ export function FilterChips({
           <Chip
             index={i}
             node={node}
-            fields={fields}
+            fields={defs}
             open={editing === i}
             onOpenChange={(open) => setEditing(open ? i : null)}
             onChange={(next) => replace(i, next)}
@@ -148,7 +163,7 @@ export function FilterChips({
               <div className="px-0.5 pb-2 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
                 Filter this view
               </div>
-              <FilterBuilder filters={filters} fields={fields} onChange={onChange} />
+              <FilterBuilder filters={filters} fields={defs} onChange={onChange} />
             </div>
           </Popover>
         )}
@@ -179,7 +194,14 @@ function Chip({
   const count = nested ? countRules(node) : 0;
   const label = nested
     ? `${count} ${count === 1 ? 'condition' : 'conditions'}`
-    : describeFilterRule(node, filterFieldLabel(node.field));
+    : // The def is what lets the chip say "Status is In progress" rather than
+      // "Status is progress" — a chip states its rule in words, and a slug is
+      // not one (M16.29).
+      describeFilterRule(
+        node,
+        filterFieldLabel(node.field),
+        fields.find((f) => f.name === node.field),
+      );
 
   return (
     <span

@@ -4,7 +4,9 @@ import {
   coerceRuleToOp,
   describeFilterRule,
   evaluateFilters,
+  filterFieldDefs,
   filterOpsFor,
+  filterStatusSet,
   limitEntries,
   searchEntries,
   seedFilterRule,
@@ -486,6 +488,92 @@ describe('describeFilterRule — what a chip says', () => {
   });
   it('omits the value entirely for a valueless operator', () => {
     expect(describeFilterRule({ field: 'due', op: 'is_empty' }, 'Due')).toBe('Due is empty');
+  });
+});
+
+/**
+ * M16.29 regression: the filter's Status conditions were plain text boxes
+ * holding the raw ids `progress` and `review`.
+ *
+ * A `status` field declares no `options:` — its option set is the TYPE's
+ * `statuses:`, which every OTHER surface resolves per record through
+ * `schema.statusSetFor`. A filter has no record, so `def.options` was empty
+ * and the typed value editor fell through to its text-box last resort. It
+ * looked like a nesting bug because the one rule that DID get a picker was
+ * `priority`, a `select` that declares its own options.
+ */
+describe('a filter offers a status field its type’s statuses (M16.29)', () => {
+  const statuses = [
+    { id: 'progress', label: 'In progress', color: '#DE8F0A', group: 'active' as const },
+    { id: 'review', label: 'Review', color: '#38BDF8', group: 'active' as const },
+  ];
+
+  it('fills in the options a status field cannot declare', () => {
+    const [status, priority] = filterFieldDefs(
+      [
+        { name: 'status', kind: 'status' },
+        { name: 'priority', kind: 'select', options: [{ id: 'high', label: 'High', color: null }] },
+      ],
+      statuses,
+    );
+    expect(status.options?.map((o) => o.label)).toEqual(['In progress', 'Review']);
+    // A field that HAS options keeps them — the status set is a fallback for
+    // the kind that cannot carry its own, not an override.
+    expect(priority.options?.map((o) => o.id)).toEqual(['high']);
+  });
+
+  it('leaves every other kind alone', () => {
+    const fields = [
+      { name: 'due', kind: 'date' as const },
+      { name: 'title', kind: 'text' as const },
+    ];
+    expect(filterFieldDefs(fields, statuses)).toEqual(fields);
+  });
+
+  it('carries the extra keys a ColumnDef adds', () => {
+    const [col] = filterFieldDefs([{ name: 'status', kind: 'status', heterogeneous: true }], []);
+    expect(col.heterogeneous).toBe(true);
+  });
+
+  /**
+   * The chain `statusSetFor` walks, minus the per-RECORD project override — a
+   * view-level filter has no record to resolve one against.
+   */
+  describe('filterStatusSet', () => {
+    const typed = makeEntry({
+      path: 'types/work-item.md',
+      filename: 'work-item.md',
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: { kind: 'status' } } as never,
+        statuses: [{ id: 'progress', group: 'active' }] as never,
+      },
+    });
+    const typeSchema = buildSchema([typed]);
+
+    it('prefers the type’s own statuses', () => {
+      expect(filterStatusSet(typeSchema, 'Work item').map((s) => s.id)).toEqual(['progress']);
+    });
+
+    it('falls back to the app defaults for a type that declares none', () => {
+      const bare = buildSchema([
+        makeEntry({
+          path: 'types/note.md',
+          filename: 'note.md',
+          title: 'Note',
+          type: 'Type',
+          properties: {},
+        }),
+      ]);
+      expect(filterStatusSet(bare, 'Note').length).toBeGreaterThan(0);
+    });
+
+    /** A typeless ("Everything") view has no one status set to offer. */
+    it('offers nothing when the view has no source type', () => {
+      expect(filterStatusSet(typeSchema, null)).toEqual([]);
+      expect(filterStatusSet(undefined, 'Work item')).toEqual([]);
+    });
   });
 });
 

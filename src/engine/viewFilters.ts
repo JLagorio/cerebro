@@ -3,7 +3,9 @@ import { kindMeta } from './properties';
 import { FILTER_OPS } from './types';
 import type {
   Entry,
+  FieldDef,
   FieldKind,
+  FieldOption,
   FilterFamily,
   FilterGroup,
   FilterOp,
@@ -105,6 +107,60 @@ export function filterOpsFor(kind: FieldKind): FilterOp[] {
   return [...FAMILY_OPS[kindMeta(kind).filters]];
 }
 
+// --- the options a value editor can offer (M16.29) ---------------------------
+
+/**
+ * The status set a filter on this view should offer.
+ *
+ * The same chain `schema.statusSetFor` walks, minus the per-RECORD project
+ * override: a view-level filter has no record to resolve one against, and
+ * `statusSetForProject(null)` is exactly the app defaults that chain ends in.
+ *
+ * A typeless ("Everything") view gets nothing, on purpose — its records may
+ * come from several types, and offering one type's statuses as though they
+ * were the vault's is the M12.2 mistake that took a milestone to undo.
+ */
+export function filterStatusSet(
+  schema: Schema | undefined,
+  sourceType: string | null,
+): FieldOption[] {
+  if (schema === undefined || sourceType === null) return NO_STATUSES;
+  const own = schema.types.get(sourceType)?.statuses ?? NO_STATUSES;
+  return own.length > 0 ? own : schema.statusSetForProject(null);
+}
+
+/** Shared so a caller can memoize on the result — every branch above returns
+ * an array the schema already owns, and this is the empty one. */
+const NO_STATUSES: FieldOption[] = [];
+
+/**
+ * The field defs a filter surface should offer, each carrying the options its
+ * value editor needs (M16.29).
+ *
+ * A `status` field declares no `options:` — the option set is the TYPE's
+ * `statuses:`, which every other surface resolves per record. A filter has no
+ * record, so `def.options` was empty and the typed editor fell through to its
+ * text-box last resort: to filter by status you had to know the slug and type
+ * it, and the rule you had written read back as `progress`.
+ *
+ * Resolved ONCE, where view context enters the filter bar, so the nested rows
+ * and the top-level ones are looking at the same array — which is what makes
+ * them behave the same without a second copy of the editor.
+ */
+export function filterFieldDefs<T extends FieldDef>(
+  fields: readonly T[],
+  statuses: readonly FieldOption[],
+): T[] {
+  if (statuses.length === 0) return [...fields];
+  return fields.map((f) =>
+    // A field that HAS options keeps them: the status set is the fallback for
+    // the kind that cannot carry its own, never an override of a declaration.
+    kindMeta(f.kind).statusSet === true && (f.options ?? []).length === 0
+      ? { ...f, options: [...statuses] }
+      : f,
+  );
+}
+
 /**
  * The kind a filter should treat `field` as.
  *
@@ -199,11 +255,24 @@ export function filterRuleIsReady(rule: FilterRule): boolean {
   return values.some(isPresent);
 }
 
+/**
+ * One value as the chip should say it (M16.29).
+ *
+ * The chip is the one place that states a rule IN WORDS, and it was stating
+ * it in slugs — "Status is progress" for an option whose label is "In
+ * progress". The def is optional so a caller with no schema context still
+ * gets the raw value rather than nothing.
+ */
+function describeFilterValue(value: Scalar, def: FieldDef | undefined): string {
+  const option = def?.options?.find((o) => o.id === String(value));
+  return option?.label ?? String(value);
+}
+
 /** One rule as a chip reads it: "Due is before 2026-08-01". */
-export function describeFilterRule(rule: FilterRule, label: string): string {
+export function describeFilterRule(rule: FilterRule, label: string, def?: FieldDef): string {
   const op = filterOpLabel(rule.op);
   if (filterOpArity(rule.op) === 'none') return `${label} ${op}`;
-  const list = valueList(rule.value);
+  const list = valueList(rule.value).map((v) => describeFilterValue(v, def));
   if (list.length === 0) return `${label} ${op}…`;
   if (filterOpArity(rule.op) === 'two') return `${label} ${op} ${list[0]} and ${list[1]}`;
   return `${label} ${op} ${list.join(', ')}`;

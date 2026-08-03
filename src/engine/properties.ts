@@ -154,6 +154,17 @@ export interface PropertyKindMeta {
   /** Which comparisons a filter may offer on this field (M16.25). See
    * `FilterFamily` in types.ts, and `filterOpsFor` in viewFilters.ts. */
   filters: FilterFamily;
+  /**
+   * This kind's option set lives on the TYPE (`statuses:`), not on the field
+   * (`options:`) — so a `FieldDef` alone cannot say what the choices are, and
+   * a surface holding one has to resolve them (M16.29).
+   *
+   * True for exactly one kind, and optional for the same reason `multi` and
+   * `legacy` are: a kind that says nothing is saying the ordinary thing. It
+   * is a flag here rather than a `kind === 'status'` test at the two call
+   * sites, which is how the filter surface came to have no answer at all.
+   */
+  statusSet?: boolean;
 }
 
 /**
@@ -221,6 +232,7 @@ const KIND_META = {
     media: false,
     numeric: false,
     filters: 'choice',
+    statusSet: true,
   },
   date: {
     label: 'Date',
