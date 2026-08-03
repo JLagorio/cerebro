@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
 import { buildSchema } from '@/engine/schema';
@@ -234,6 +234,146 @@ describe('TableView column resizing (M11)', () => {
     );
     expect(screen.queryByLabelText('Resize Status column')).toBeNull();
     expect(screen.queryByLabelText('Resize Name column')).toBeNull();
+  });
+});
+
+/**
+ * The cell cursor (M16.17).
+ *
+ * Every cell is an always-live `FieldEditor`, so there was no inert state to
+ * escape from, nothing bound Tab, and no cell carried an id or an
+ * `aria-colindex`. `useRowKeyboard` was a ROW cursor that bailed on
+ * INPUT/TEXTAREA — including on Escape, which is the one key whose whole job
+ * is getting back out of an editor.
+ */
+describe('TableView cell cursor (M16.17)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    useUiStore.setState({ detailPath: null });
+    useNavStore.setState({
+      selection: { kind: 'list', id: 'at-risk-work' },
+      history: [{ kind: 'list', id: 'at-risk-work' }],
+      historyIndex: 0,
+    });
+  });
+
+  const cursorCell = () => document.querySelector('[data-cursor="true"]');
+
+  /** A table whose third display slot is a plain text cell, so Enter lands on
+   * a text field rather than on a chip that opens a popover. */
+  function textGrid() {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, columns: [{ field: 'status' }, { field: 'notes' }] }}
+        schema={schema}
+        fields={[...(schema.types.get('Work item')?.fields ?? []), { name: 'notes', kind: 'text' }]}
+      />,
+    );
+    return screen.getByTestId('table-view');
+  }
+
+  it('numbers its columns, so a screen reader can say where the cursor is', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    // Name + the two data columns.
+    expect(grid.getAttribute('aria-colcount')).toBe('3');
+    const cells = screen.getAllByRole('gridcell');
+    expect(cells.some((c) => c.getAttribute('aria-colindex') === '1')).toBe(true);
+  });
+
+  it('the row cursor stays column-less until you arrow sideways', () => {
+    const { items } = setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    expect(cursorCell()).toBeNull();
+    // Enter still opens the record while no cell is picked out — the M15
+    // contract this must not break.
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(useUiStore.getState().detailPath).toBe(items[0].path);
+  });
+
+  it('arrows and Tab walk a ring across the cells', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    // ArrowLeft off the first cell hands the ROW back rather than wrapping
+    // onto the row above: the row cursor is where Enter opens the record.
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' });
+    expect(cursorCell()).toBeNull();
+  });
+
+  it('Tab is only bound once a cell is picked out', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    // A grid that swallowed Tab unconditionally would trap every keyboard
+    // user who merely tabbed onto it on their way somewhere else.
+    expect(cursorCell()).toBeNull();
+  });
+
+  it('Tab wraps onto the next row instead of stopping at the last cell', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    const rows = screen.getAllByTestId('table-row');
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(rows[0].contains(cursorCell())).toBe(true);
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('3');
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(rows[1].contains(cursorCell())).toBe(true);
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+  });
+
+  it('points aria-activedescendant at the CELL once one is picked out', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    const rows = screen.getAllByTestId('table-row');
+    expect(grid.getAttribute('aria-activedescendant')).toBe(rows[0].id);
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    expect(grid.getAttribute('aria-activedescendant')).toBe(cursorCell()?.id);
+  });
+
+  it('Enter hands the cell to its control, and Escape takes it back', async () => {
+    const grid = textGrid();
+    fireEvent.focus(grid, { target: grid });
+    // Third display slot: the text column. The name column is first and its
+    // control opens the record rather than editing a value.
+    for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    const cell = cursorCell();
+    expect(cell?.getAttribute('aria-colindex')).toBe('3');
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(cell?.contains(document.activeElement)).toBe(true);
+    // FieldEditor's own Escape stops propagation and unmounts the input, and
+    // removing a focused element fires no blur — so focus used to land on
+    // the body with the cursor still on the cell, and the grid answered
+    // nothing at all.
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(grid));
+    expect(cursorCell()).toBe(cell);
+  });
+
+  it('leaves the arrows alone while an editor has focus', () => {
+    const grid = textGrid();
+    fireEvent.focus(grid, { target: grid });
+    for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    const before = cursorCell();
+    // Moving the caret is what an arrow means inside a text field.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    expect(cursorCell()).toBe(before);
   });
 });
 

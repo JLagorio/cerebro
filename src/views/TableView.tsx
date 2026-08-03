@@ -48,7 +48,11 @@ import {
 import { useOpenPath } from '@/app/useOpenPath';
 import { ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
 import { QuickAddInline } from '@/views/QuickAdd';
-import { useRowKeyboard, type RowKeyboardRowProps } from '@/views/useRowKeyboard';
+import {
+  useRowKeyboard,
+  type RowKeyboardCellProps,
+  type RowKeyboardRowProps,
+} from '@/views/useRowKeyboard';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -105,6 +109,8 @@ const TableCell = memo(function TableCell({
   index,
   chips,
   wrap = false,
+  colIndex,
+  cellProps,
 }: {
   entry: Entry;
   def: ColumnDef;
@@ -114,6 +120,10 @@ const TableCell = memo(function TableCell({
   /** M12.4b: the column's Wrap content setting — values flow onto extra
    * lines instead of clipping, and the row grows to hold them. */
   wrap?: boolean;
+  /** M16.17: this cell's slot in DISPLAY order, which is what the cell
+   * cursor traverses — not `index`, which addresses the width variable. */
+  colIndex: number;
+  cellProps: RowKeyboardCellProps;
 }) {
   const resolved = schema.resolveField(entry, def.name);
   const readOnly = READ_ONLY.has(def.kind);
@@ -122,9 +132,14 @@ const TableCell = memo(function TableCell({
   return (
     <div
       role="gridcell"
+      {...cellProps}
+      aria-colindex={colIndex + 1}
       className={[
         'flex flex-none overflow-hidden border-r border-[var(--n-100)] px-2',
         wrap ? 'items-start py-1.5' : 'items-center',
+        // The ring is inset, not a border: a border would add a pixel to a
+        // cell whose width is a shared CSS variable and shear the column.
+        'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
       ].join(' ')}
       style={{ width: `var(${widthVar(index)})` }}
     >
@@ -409,6 +424,7 @@ const TableRow = memo(function TableRow({
   onCheck,
   onInsert,
   onAction,
+  cellProps,
 }: {
   entry: Entry;
   cells: { def: ColumnDef; wrap: boolean }[];
@@ -437,6 +453,9 @@ const TableRow = memo(function TableRow({
   onCheck: (range: boolean) => void;
   onInsert?: () => void;
   onAction: (action: RowAction, entry: Entry) => void;
+  /** M16.17: the cursor's bookkeeping for one cell of THIS row, by display
+   * slot. Bound to the row so the cells never have to know their row index. */
+  cellProps: (col: number) => RowKeyboardCellProps;
 }) {
   // M3.5: route by kind — a Project record opens its page, everything else
   // opens the detail panel. No sidebar special-casing needed.
@@ -490,12 +509,17 @@ const TableRow = memo(function TableRow({
           index={i}
           chips={chips}
           wrap={wrap}
+          colIndex={i}
+          cellProps={cellProps(i)}
         />
       ))}
       <div
         role="gridcell"
+        {...cellProps(titlePos)}
+        aria-colindex={titlePos + 1}
         className={[
           titleFrozen ? 'sticky z-10' : '',
+          'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
           'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
           // The name cell is opaque because it is sticky — it has to hide the
           // columns sliding under it, so it repeats the row's own fill.
@@ -567,6 +591,10 @@ const TableRow = memo(function TableRow({
           index={titlePos + i}
           chips={chips}
           wrap={wrap}
+          // One past the width index: the name column sits between the two
+          // runs in DISPLAY order but owns no width variable.
+          colIndex={titlePos + 1 + i}
+          cellProps={cellProps(titlePos + 1 + i)}
         />
       ))}
     </div>
@@ -1489,6 +1517,9 @@ export function TableView({
     onToggle: (i) => {
       if (flatRows[i].childCount > 0) toggleCollapsed(scope, flatRows[i].key);
     },
+    // M16.17: +1 for the name column, which is a display slot with no
+    // ColumnSpec behind it.
+    colCount: resolved.length + 1,
   });
 
   // --- M16.16: bulk selection -------------------------------------------
@@ -1862,6 +1893,9 @@ export function TableView({
         // changed nothing on screen at all.
         aria-label={sourceType === null ? 'Records' : `${sourceType} records`}
         aria-rowcount={flatRows.length}
+        // M16.17: a grid whose cells carry aria-colindex has to say how many
+        // there are, or a screen reader reports "column 3 of ?".
+        aria-colcount={displayKeys.length}
         className="min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
         {...keyboard.containerProps}
       >
@@ -2092,6 +2126,7 @@ export function TableView({
                           })
                   }
                   onAction={onRowAction}
+                  cellProps={(c) => keyboard.cellProps(index, c)}
                 />
                 {inserting?.key === row.key && onCreate !== undefined && (
                   <InsertRow
