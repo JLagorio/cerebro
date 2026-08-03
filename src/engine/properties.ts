@@ -519,7 +519,28 @@ export function visibilityDelta(
   return at - from;
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * A stored date endpoint: the ISO day, optionally followed by a 24h time
+ * (M16.14). Validation had only `ISO_DATE`, so the first date given a time of
+ * day was rejected by the very write that set it.
+ */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}(?:[ T](?:[01]\d|2[0-3]):[0-5]\d)?$/;
+/**
+ * One stored endpoint out of arbitrary text, normalized to `YYYY-MM-DD` or
+ * `YYYY-MM-DD HH:MM`.
+ *
+ * The time is kept only when the WHOLE value is one of those two shapes.
+ * `2026-07-30T10:00:00Z` is a UTC instant, and lifting `10:00` out of it and
+ * storing it as a local wall-clock time would shift the value by the user's
+ * offset — the exact mistake schedule.ts is written to avoid ("a task due the
+ * 3rd is due the 3rd in the user's timezone"). Those degrade to the date.
+ */
+function readEndpoint(text: string): string | null {
+  const v = text.trim();
+  if (ISO_DATETIME.test(v)) return v.replace('T', ' ');
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(v);
+  return m === null ? null : m[1];
+}
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
 /** Only for INFERRING a kind from a loose value — never for validation. */
 const EMAIL_SHAPE = /^(mailto:)?[^\s@]+@[^\s@]+\.[^\s@]+$/i;
@@ -542,7 +563,7 @@ export function inferKindFromValue(value: unknown): FieldKind {
   if (typeof value === 'number') return 'number';
   if (Array.isArray(value)) return 'multiselect';
   if (typeof value === 'string') {
-    if (ISO_DATE.test(value)) return 'date';
+    if (ISO_DATETIME.test(value)) return 'date';
     // Before the url check: `mailto:` matches URL_SHAPE too, and an address
     // is more specific than "some link".
     if (EMAIL_SHAPE.test(value)) return 'email';
@@ -579,17 +600,21 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
     case 'checkbox':
       return typeof value === 'boolean' ? null : `${label} must be on or off`;
     case 'date':
-      return isScalarString(value) && ISO_DATE.test(value)
+      return isScalarString(value) && ISO_DATETIME.test(value)
         ? null
-        : `${label} must be a date (YYYY-MM-DD)`;
+        : `${label} must be a date (YYYY-MM-DD, optionally HH:MM)`;
     case 'daterange': {
       if (typeof value !== 'object' || Array.isArray(value)) {
         return `${label} must be a start/end range`;
       }
       const r = value as { start?: unknown; end?: unknown };
       for (const part of [r.start, r.end]) {
-        if (part !== null && part !== undefined && !(isScalarString(part) && ISO_DATE.test(part))) {
-          return `${label} dates must be YYYY-MM-DD`;
+        if (
+          part !== null &&
+          part !== undefined &&
+          !(isScalarString(part) && ISO_DATETIME.test(part))
+        ) {
+          return `${label} dates must be YYYY-MM-DD (optionally HH:MM)`;
         }
       }
       return null;
@@ -643,6 +668,21 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
 }
 
 /**
+ * A `{start, end}` daterange as its non-empty endpoints, or null when the
+ * value is not one. The only reader of a daterange's shape outside the date
+ * engine, and the reason a conversion out of one no longer sees
+ * "[object Object]".
+ */
+function rangeParts(raw: unknown): string[] | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as { start?: unknown; end?: unknown };
+  if (!('start' in r) && !('end' in r)) return null;
+  return [r.start, r.end]
+    .filter((v): v is string => typeof v === 'string' && v !== '')
+    .map((v) => v.trim());
+}
+
+/**
  * Best-effort value conversion when a field changes kind (M12.4b — the
  * header menu's Change type). Returns the value to store, or null when the
  * old value has no honest representation in the new kind (the key is then
@@ -654,7 +694,14 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
  */
 export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
   if (raw === null || raw === undefined || raw === '') return null;
-  const list = (Array.isArray(raw) ? raw : [raw]).map(String).filter((v) => v !== '');
+  // A daterange is a {start, end} MAPPING, and `String(…)` on it produced the
+  // literal "[object Object]" (M16.14). Every conversion out of a daterange
+  // was therefore either that string or a null — a date range converted to
+  // text wrote garbage into every record of the type, and converted to a date
+  // it silently cleared them.
+  const range = rangeParts(raw);
+  const list =
+    range !== null ? range : (Array.isArray(raw) ? raw : [raw]).map(String).filter((v) => v !== '');
   const first = list[0] ?? '';
   switch (kind) {
     case 'text':
@@ -677,12 +724,21 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
       return null;
     }
     case 'date': {
-      const m = /^(\d{4}-\d{2}-\d{2})/.exec(first);
-      return m !== null ? m[1] : null;
+      // Keeps the time when there is one: a `daterange` collapsing to a
+      // `date` loses its end, which is unavoidable, but losing 14:30 as well
+      // is not.
+      return readEndpoint(first);
     }
     case 'daterange': {
-      const m = /^(\d{4}-\d{2}-\d{2})/.exec(first);
-      return m !== null ? { start: m[1], end: null } : null;
+      // Splitting the text too, so a range that went out through `text`
+      // ("2026-08-02, 2026-08-09") comes back as a range rather than as its
+      // start date with the end quietly dropped.
+      const parts = list
+        .flatMap((v) => v.split(/\s*(?:→|->|,|\.\.)\s*/))
+        .map(readEndpoint)
+        .filter((v): v is string => v !== null);
+      if (parts.length === 0) return null;
+      return { start: parts[0], end: parts[1] ?? null };
     }
     case 'select':
     case 'status':

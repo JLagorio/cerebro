@@ -199,8 +199,14 @@ describe('coerceValueToKind', () => {
   });
 
   it('to date keeps only real dates', () => {
+    // A UTC instant degrades to its date: lifting 10:00 out of it and storing
+    // it as a local wall-clock time would shift the value by the reader's
+    // offset, which is the mistake schedule.ts exists to avoid (M16.14).
     expect(coerceValueToKind('2026-07-30T10:00:00Z', 'date')).toBe('2026-07-30');
     expect(coerceValueToKind('next week', 'date')).toBeNull();
+    // A bare wall-clock time is unambiguous, so it survives.
+    expect(coerceValueToKind('2026-07-30 14:30', 'date')).toBe('2026-07-30 14:30');
+    expect(coerceValueToKind('2026-07-30T14:30', 'date')).toBe('2026-07-30 14:30');
   });
 
   it('select vs multiselect: scalar vs list', () => {

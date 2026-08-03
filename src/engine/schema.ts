@@ -10,6 +10,14 @@ import type {
   TypeDef,
 } from './types';
 import { FIELD_KINDS, FIELD_VISIBILITIES } from './types';
+import {
+  DATE_DISPLAY_FORMATS,
+  DEFAULT_TIME_FORMAT,
+  TIME_DISPLAY_FORMATS,
+  formatDateValue,
+  parseDateProperty,
+  toIsoDate,
+} from './dates';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
 import { parseViewList } from './views';
@@ -97,6 +105,21 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   }
   if (typeof s.precision === 'number' && Number.isFinite(s.precision)) {
     def.precision = Math.max(0, Math.min(6, Math.trunc(s.precision)));
+  }
+  // M16.14. `dateFormat`, not `format` — numbers already own that key, and a
+  // single key holding two unrelated enums would survive a kind change into a
+  // field that cannot read it.
+  if (
+    typeof s.dateFormat === 'string' &&
+    (DATE_DISPLAY_FORMATS as readonly string[]).includes(s.dateFormat)
+  ) {
+    def.dateFormat = s.dateFormat as FieldDef['dateFormat'];
+  }
+  if (
+    typeof s.timeFormat === 'string' &&
+    (TIME_DISPLAY_FORMATS as readonly string[]).includes(s.timeFormat)
+  ) {
+    def.timeFormat = s.timeFormat as FieldDef['timeFormat'];
   }
   // M16.10. An unrecognised value is dropped rather than guessed at: a
   // property nobody can find is worse than one shown when it need not be.
@@ -324,7 +347,33 @@ export function buildSchema(entries: Entry[]): Schema {
       return { def, raw, display: formatNumber(raw, def), color: null, ghost: false };
     }
 
-    // text / date / daterange and undeclared fields
+    // A declared date renders in the format its property carries (M16.14).
+    // Before this, every date everywhere printed its raw ISO string and the
+    // picker's format menu was thrown away the moment the popover closed —
+    // and `String(raw)` on a daterange printed "[object Object]".
+    if (kind === 'date' || kind === 'daterange') {
+      const value = parseDateProperty(raw);
+      if (value !== null) {
+        return {
+          def,
+          raw,
+          display: formatDateValue(
+            {
+              ...value,
+              format: def?.dateFormat ?? 'short',
+              timeFormat: def?.timeFormat ?? DEFAULT_TIME_FORMAT,
+            },
+            toIsoDate(new Date()),
+          ),
+          color: null,
+          ghost: false,
+        };
+      }
+      // Not a date at all: an undeclared key or a value the schema doctor has
+      // yet to adopt. Fall through to the raw reading rather than blanking it.
+    }
+
+    // text and undeclared fields
     const display = Array.isArray(raw) ? raw.map(String).join(', ') : String(raw);
     return { def, raw, display, color: null, ghost: false };
   }

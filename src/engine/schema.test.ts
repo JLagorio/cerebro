@@ -302,8 +302,11 @@ describe('resolveField', () => {
     );
   });
 
-  it('date values pass through as strings', () => {
-    expect(schema.resolveField(item, 'due').display).toBe('2026-08-01');
+  // M16.14: a declared date renders in the format its PROPERTY carries.
+  // Before that, every date everywhere printed its raw ISO string and the
+  // picker's format menu was discarded the moment the popover closed.
+  it('date values render in the property’s format, defaulting to short', () => {
+    expect(schema.resolveField(item, 'due').display).toBe('Aug 1, 2026');
   });
 
   it('checkbox true displays as Yes', () => {

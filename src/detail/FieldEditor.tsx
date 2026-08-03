@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
-import { setFieldOptions, setTypeStatuses } from '@/app/typeActions';
+import { setFieldConfig, setFieldOptions, setTypeStatuses } from '@/app/typeActions';
 import { Avatar } from '@/components/ui/Avatar';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
@@ -10,7 +10,14 @@ import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import { findOptionByLabel, optionId, personCandidates } from '@/engine/properties';
 import { RelationPicker } from '@/detail/RelationPicker';
-import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
+import {
+  DEFAULT_TIME_FORMAT,
+  makeDateValue,
+  parseDateProperty,
+  serializeDateProperty,
+  toIsoDate,
+  type DateValue,
+} from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
 import { formatWikilink, resolveTarget } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
@@ -378,16 +385,20 @@ export function FieldEditor({
 
   if (def.kind === 'date' || def.kind === 'daterange') {
     // The shared DatePicker (M2.x): frontmatter carries only what the field
-    // kind can store — a bare date, or a {start, end} range.
+    // kind can store — a bare date, or a {start, end} range, either endpoint
+    // optionally carrying a time (M16.14).
     const today = toIsoDate(new Date());
-    let value: DateValue;
-    if (def.kind === 'date') {
-      const raw = typeof resolved.raw === 'string' ? resolved.raw : '';
-      value = makeDateValue(raw === '' ? today : raw);
-    } else {
-      const raw = (resolved.raw ?? {}) as { start?: string | null; end?: string | null };
-      value = { ...makeDateValue(raw.start ?? today), end: raw.end ?? null };
-    }
+    const kind = def.kind;
+    const stored = parseDateProperty(resolved.raw);
+    // Display config lives on the PROPERTY, not in the value, so every record
+    // of the type renders the same way — which is what a format setting means.
+    // Before M16.14 the picker's format menu was discarded the moment the
+    // popover closed.
+    const value: DateValue = {
+      ...(stored ?? makeDateValue(today)),
+      format: def.dateFormat ?? 'short',
+      timeFormat: def.timeFormat ?? DEFAULT_TIME_FORMAT,
+    };
     const empty = resolved.display === '';
     return (
       <span className="relative inline-flex min-w-0 max-w-full">
@@ -401,11 +412,7 @@ export function FieldEditor({
           className="inline-flex min-w-0 max-w-full items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
         >
           <Icon name="calendar" size={12} color="var(--n-500)" />
-          {empty ? (
-            <span className="text-[var(--n-400)]">Empty</span>
-          ) : (
-            formatDateValue({ ...value, format: 'short' }, today)
-          )}
+          {empty ? <span className="text-[var(--n-400)]">Empty</span> : resolved.display}
         </button>
         {open && (
           <>
@@ -422,15 +429,27 @@ export function FieldEditor({
             <FixedBelowAnchor>
               <DatePicker
                 value={value}
-                onChange={(v) =>
-                  patch(def.kind === 'date' ? v.start : { start: v.start, end: v.end })
-                }
+                onChange={(v) => {
+                  // The value and its display config go to different files: the
+                  // dates to this record, the format to the TYPE, so every
+                  // record of it renders alike. Splitting them here is what
+                  // makes the format menu persist at all (M16.14).
+                  if (v.format !== value.format || v.timeFormat !== value.timeFormat) {
+                    if (entry.type !== null) {
+                      void setFieldConfig(entry.type, def.name, {
+                        dateFormat: v.format === 'short' ? null : v.format,
+                        timeFormat: v.timeFormat === DEFAULT_TIME_FORMAT ? null : v.timeFormat,
+                      });
+                    }
+                    return;
+                  }
+                  patch(serializeDateProperty(v, kind));
+                }}
                 onClear={() => {
                   patch(null);
                   setOpen(false);
                 }}
-                showEndToggle={def.kind === 'daterange'}
-                showTime={false}
+                showEndToggle={kind === 'daterange'}
                 showRemind={false}
               />
             </FixedBelowAnchor>

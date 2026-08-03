@@ -1,3 +1,4 @@
+import type { DateDisplayFormat, TimeDisplayFormat } from './dates';
 import type { RelationIndex } from './relations';
 
 export type Scalar = string | number | boolean | null;
@@ -93,6 +94,18 @@ export interface FieldDef {
   format?: FieldFormat;
   /** decimal places for numeric formats; defaults to 2 (trailing zeros trimmed). */
   precision?: number;
+  /**
+   * How a date/daterange renders (M16.14). A SEPARATE key from `format`,
+   * which numbers already own — one key holding two unrelated enums would
+   * make `changeFieldKind` between number and date silently carry a value
+   * neither side understands.
+   *
+   * Absent means 'short', which is what every date rendered as before this
+   * was persistable at all.
+   */
+  dateFormat?: DateDisplayFormat;
+  /** 12h / 24h / hidden for the time half of a date value; absent = '12'. */
+  timeFormat?: TimeDisplayFormat;
   /**
    * Whether the detail panel shows this property (M16.10). PER-PROPERTY, on
    * the type — not per view. `ColumnSpec.hidden` answers a different

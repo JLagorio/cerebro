@@ -159,6 +159,8 @@ const KIND_KEYS: Record<string, string[]> = {
   person: ['target', 'limit', 'from'],
   rollup: ['relation', 'property', 'calculate', 'from', 'format', 'precision'],
   number: ['format', 'precision'],
+  date: ['dateFormat', 'timeFormat'],
+  daterange: ['dateFormat', 'timeFormat'],
 };
 
 /**
@@ -468,6 +470,11 @@ export async function setFieldConfig(
       | 'target'
       | 'limit'
       | 'from'
+      // M16.14. A date's display format is a PROPERTY setting, not a per-value
+      // one — the picker's format menu used to be discarded when the popover
+      // closed. `dateFormat`, never `format`: numbers own that key.
+      | 'dateFormat'
+      | 'timeFormat'
       // M16.10. Pass null for the default ('show') so the key is deleted
       // rather than written — a Type doc should not carry the absence of an
       // opinion.
