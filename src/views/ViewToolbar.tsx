@@ -19,6 +19,7 @@ import type {
   SortSpec,
   ViewType,
 } from '@/engine/types';
+import { filterStatusSet } from '@/engine/viewFilters';
 import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, MAX_SORT_KEYS, moveSortKey } from '@/engine/views';
 import { VIEW_SEGMENTS } from '@/views/viewKinds';
 
@@ -259,7 +260,15 @@ export function ViewToolbar({
           RULE, because a single "Filter 3" pill said how many conditions a view
           carried and never which ones. */}
       {onFiltersChange !== undefined && (
-        <FilterChips filters={filters} fields={declared} onChange={onFiltersChange} />
+        <FilterChips
+          filters={filters}
+          fields={declared}
+          // A `status` field declares no `options:` — its option set is the
+          // TYPE's `statuses:`, and this is the highest place that knows both
+          // the source type and the schema (M16.29).
+          statuses={filterStatusSet(schema, sourceType)}
+          onChange={onFiltersChange}
+        />
       )}
 
       {/* M9.7: one Group control. Its options list properties AND relations,

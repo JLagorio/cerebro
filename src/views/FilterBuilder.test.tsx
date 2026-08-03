@@ -202,9 +202,13 @@ describe('the value editor is typed to the field (M16.25)', () => {
     expect(next.all[0].value).toBe(true);
   });
 
+  // The box shows the DISPLAY spelling, not the storage one, from M16.29 on:
+  // `2026-08-01` is what the rule stores, and this field declares no
+  // `dateFormat`, so it renders in the short form every unconfigured date
+  // renders in — the same one the grid beside it uses.
   it('a date is picked, not typed', () => {
     show({ field: 'due', op: 'before', value: '2026-08-01' });
-    expect(screen.getByLabelText('Filter value').textContent).toContain('2026-08-01');
+    expect(screen.getByLabelText('Filter value').textContent).toContain('Aug 1, 2026');
   });
 
   /**

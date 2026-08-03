@@ -34,16 +34,20 @@ const twoRules: FilterGroup = {
  * filtered in ways it took a click to discover.
  */
 describe('FilterChips shows one chip per rule (M16.25)', () => {
+  // "Doing", not "doing", and "Sep 1, 2026", not "2026-09-01": M16.29 made the
+  // chip read the option's LABEL and the field's date format. Stating the rule
+  // in words is the whole job of a chip, and neither a slug nor a storage
+  // spelling is one.
   it('states each rule in words', () => {
     render(<FilterChips filters={twoRules} fields={fields} onChange={vi.fn()} />);
-    expect(screen.getByTestId('filter-chip-0').textContent).toContain('Status is doing');
-    expect(screen.getByTestId('filter-chip-1').textContent).toContain('Due is before 2026-09-01');
+    expect(screen.getByTestId('filter-chip-0').textContent).toContain('Status is Doing');
+    expect(screen.getByTestId('filter-chip-1').textContent).toContain('Due is before Sep 1, 2026');
   });
 
   it('removes exactly the rule whose X was pressed', () => {
     const onChange = vi.fn();
     render(<FilterChips filters={twoRules} fields={fields} onChange={onChange} />);
-    fireEvent.click(screen.getByLabelText('Remove filter: Status is doing'));
+    fireEvent.click(screen.getByLabelText('Remove filter: Status is Doing'));
     const next = onChange.mock.calls[0][0] as FilterGroup;
     expect((next as { all: FilterRule[] }).all).toEqual([
       { field: 'due', op: 'before', value: '2026-09-01' },
@@ -134,6 +138,117 @@ describe('FilterChips shows one chip per rule (M16.25)', () => {
       />,
     );
     expect(screen.getByTestId('filter-chip-1').textContent).toContain('2 conditions');
+  });
+});
+
+/**
+ * M16.29, reproduced live on the demo vault's "At risk" list: the top-level
+ * chip "Priority is any of" opened a proper multi-select showing Urgent /
+ * High, while the `2 conditions` group beside it rendered its two Status
+ * conditions as plain text inputs holding the raw ids `progress` and `review`.
+ *
+ * It read as a nesting bug and is not one — both paths render the same
+ * `FilterRuleRow` from the same `fields` array. The difference was the KIND:
+ * `priority` is a `select` that declares its own `options:`, while `status`
+ * declares none, because a status field's option set is the TYPE's
+ * `statuses:`. The seam is where view context enters the chip bar, so the
+ * resolution happens there, once, for every row below it.
+ */
+describe('a status condition gets the same picker at any depth (M16.29)', () => {
+  // Exactly the demo vault's shape: `status` carries no options of its own.
+  const atRisk: ColumnDef[] = [
+    {
+      name: 'priority',
+      kind: 'select',
+      options: [
+        { id: 'urgent', label: 'Urgent', color: '#DE3B4E' },
+        { id: 'high', label: 'High', color: '#DE8F0A' },
+      ],
+    },
+    { name: 'status', kind: 'status' },
+  ];
+  const statuses = [
+    { id: 'progress', label: 'In progress', color: '#DE8F0A', group: 'active' as const },
+    { id: 'review', label: 'Review', color: '#38BDF8', group: 'active' as const },
+  ];
+  const nested: FilterGroup = {
+    all: [
+      { field: 'priority', op: 'any_of', value: ['urgent', 'high'] },
+      {
+        any: [
+          { field: 'status', op: 'equals', value: 'progress' },
+          { field: 'status', op: 'equals', value: 'review' },
+        ],
+      },
+    ],
+  };
+
+  /** The picker is a listbox trigger whose text is the LABEL; the text box it
+   * replaced had no text content at all, only a raw-id `value`. */
+  const valueControls = () => screen.getAllByLabelText('Filter value');
+
+  it('renders a picker showing the option label inside a nested group', () => {
+    render(<FilterChips filters={nested} fields={atRisk} statuses={statuses} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('filter-chip-1'));
+    const [first, second] = valueControls();
+    expect(first.getAttribute('aria-haspopup')).toBe('listbox');
+    expect(first.textContent).toContain('In progress');
+    expect(second.textContent).toContain('Review');
+  });
+
+  it('renders the identical control at the top level', () => {
+    render(
+      <FilterChips
+        filters={{ all: [{ field: 'status', op: 'equals', value: 'review' }] }}
+        fields={atRisk}
+        statuses={statuses}
+        onChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('filter-chip-0'));
+    expect(valueControls()[0].getAttribute('aria-haspopup')).toBe('listbox');
+    expect(valueControls()[0].textContent).toContain('Review');
+  });
+
+  /** The chip said "Status is progress" — the slug, in the one place meant to
+   * state the rule in words. */
+  it('states the rule with option labels, not slugs', () => {
+    render(<FilterChips filters={nested} fields={atRisk} statuses={statuses} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('filter-chip-1'));
+    const rows = screen.getAllByTestId('filter-rule');
+    expect(rows).toHaveLength(2);
+    render(
+      <FilterChips
+        filters={{ all: [{ field: 'status', op: 'equals', value: 'progress' }] }}
+        fields={atRisk}
+        statuses={statuses}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByTestId('filter-chip-0')[1].textContent).toContain(
+      'Status is In progress',
+    );
+  });
+
+  it('names the chosen options on a multi-value chip', () => {
+    render(<FilterChips filters={nested} fields={atRisk} statuses={statuses} onChange={vi.fn()} />);
+    expect(screen.getByTestId('filter-chip-0').textContent).toContain(
+      'Priority is any of Urgent, High',
+    );
+  });
+
+  /** A view with no source type has no one status set; the text box stays,
+   * rather than a picker offering another type's statuses. */
+  it('falls back to the text box when no status set is available', () => {
+    render(
+      <FilterChips
+        filters={{ all: [{ field: 'status', op: 'equals', value: 'progress' }] }}
+        fields={atRisk}
+        onChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId('filter-chip-0'));
+    expect(screen.getByLabelText('Filter value').getAttribute('aria-haspopup')).toBeNull();
   });
 });
 

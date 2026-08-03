@@ -4,7 +4,9 @@ import {
   coerceRuleToOp,
   describeFilterRule,
   evaluateFilters,
+  filterFieldDefs,
   filterOpsFor,
+  filterStatusSet,
   limitEntries,
   searchEntries,
   seedFilterRule,
@@ -486,6 +488,158 @@ describe('describeFilterRule — what a chip says', () => {
   });
   it('omits the value entirely for a valueless operator', () => {
     expect(describeFilterRule({ field: 'due', op: 'is_empty' }, 'Due')).toBe('Due is empty');
+  });
+});
+
+/**
+ * M16.29 regression: one date rendered three ways on one screen.
+ *
+ * `due` carries a persisted `dateFormat: dmy` (M16.14) and the grid honoured
+ * it — `18/08/2026`. The filter did not: the chip read `Due is before
+ * 2026-08-03`, the value box read `2026-08-03`, and the picker inside read
+ * `Aug 3, 2026`. A format setting that every surface but one obeys is not a
+ * setting, and a filter that spells a date differently from the column it
+ * filters reads as being about something else.
+ */
+describe('a filter renders a date in the FIELD’s format (M16.29)', () => {
+  const due = { name: 'due', kind: 'date' as const, dateFormat: 'dmy' as const };
+
+  it('spells the bound the way the column does', () => {
+    expect(
+      describeFilterRule({ field: 'due', op: 'before', value: '2026-08-03' }, 'Due', due),
+    ).toBe('Due is before 03/08/2026');
+  });
+
+  it('formats both ends of a range', () => {
+    expect(
+      describeFilterRule(
+        { field: 'due', op: 'is_between', value: ['2026-08-03', '2026-08-18'] },
+        'Due',
+        due,
+      ),
+    ).toBe('Due is between 03/08/2026 and 18/08/2026');
+  });
+
+  it('honours the field’s clock for a bound that names a time', () => {
+    expect(
+      describeFilterRule({ field: 'due', op: 'after', value: '2026-08-03 14:30' }, 'Due', {
+        ...due,
+        timeFormat: '24',
+      }),
+    ).toBe('Due is after 03/08/2026 14:30');
+  });
+
+  /** M16.14: a date field with no `dateFormat:` renders short, everywhere. */
+  it('falls back to short for a field that has configured nothing', () => {
+    expect(
+      describeFilterRule({ field: 'due', op: 'before', value: '2026-08-03' }, 'Due', {
+        name: 'due',
+        kind: 'date',
+      }),
+    ).toBe('Due is before Aug 3, 2026');
+  });
+
+  /** Only the date family reformats. A text field holding something that
+   * parses as a date is still text, and its rule must read back verbatim. */
+  it('leaves a text field’s value exactly as written', () => {
+    expect(
+      describeFilterRule({ field: 'ref', op: 'equals', value: '2026-08-03' }, 'Ref', {
+        name: 'ref',
+        kind: 'text',
+      }),
+    ).toBe('Ref is 2026-08-03');
+  });
+
+  it('still reads the raw value when there is no field def to consult', () => {
+    expect(describeFilterRule({ field: 'due', op: 'before', value: '2026-08-03' }, 'Due')).toBe(
+      'Due is before 2026-08-03',
+    );
+  });
+});
+
+/**
+ * M16.29 regression: the filter's Status conditions were plain text boxes
+ * holding the raw ids `progress` and `review`.
+ *
+ * A `status` field declares no `options:` — its option set is the TYPE's
+ * `statuses:`, which every OTHER surface resolves per record through
+ * `schema.statusSetFor`. A filter has no record, so `def.options` was empty
+ * and the typed value editor fell through to its text-box last resort. It
+ * looked like a nesting bug because the one rule that DID get a picker was
+ * `priority`, a `select` that declares its own options.
+ */
+describe('a filter offers a status field its type’s statuses (M16.29)', () => {
+  const statuses = [
+    { id: 'progress', label: 'In progress', color: '#DE8F0A', group: 'active' as const },
+    { id: 'review', label: 'Review', color: '#38BDF8', group: 'active' as const },
+  ];
+
+  it('fills in the options a status field cannot declare', () => {
+    const [status, priority] = filterFieldDefs(
+      [
+        { name: 'status', kind: 'status' },
+        { name: 'priority', kind: 'select', options: [{ id: 'high', label: 'High', color: null }] },
+      ],
+      statuses,
+    );
+    expect(status.options?.map((o) => o.label)).toEqual(['In progress', 'Review']);
+    // A field that HAS options keeps them — the status set is a fallback for
+    // the kind that cannot carry its own, not an override.
+    expect(priority.options?.map((o) => o.id)).toEqual(['high']);
+  });
+
+  it('leaves every other kind alone', () => {
+    const fields = [
+      { name: 'due', kind: 'date' as const },
+      { name: 'title', kind: 'text' as const },
+    ];
+    expect(filterFieldDefs(fields, statuses)).toEqual(fields);
+  });
+
+  it('carries the extra keys a ColumnDef adds', () => {
+    const [col] = filterFieldDefs([{ name: 'status', kind: 'status', heterogeneous: true }], []);
+    expect(col.heterogeneous).toBe(true);
+  });
+
+  /**
+   * The chain `statusSetFor` walks, minus the per-RECORD project override — a
+   * view-level filter has no record to resolve one against.
+   */
+  describe('filterStatusSet', () => {
+    const typed = makeEntry({
+      path: 'types/work-item.md',
+      filename: 'work-item.md',
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: { kind: 'status' } } as never,
+        statuses: [{ id: 'progress', group: 'active' }] as never,
+      },
+    });
+    const typeSchema = buildSchema([typed]);
+
+    it('prefers the type’s own statuses', () => {
+      expect(filterStatusSet(typeSchema, 'Work item').map((s) => s.id)).toEqual(['progress']);
+    });
+
+    it('falls back to the app defaults for a type that declares none', () => {
+      const bare = buildSchema([
+        makeEntry({
+          path: 'types/note.md',
+          filename: 'note.md',
+          title: 'Note',
+          type: 'Type',
+          properties: {},
+        }),
+      ]);
+      expect(filterStatusSet(bare, 'Note').length).toBeGreaterThan(0);
+    });
+
+    /** A typeless ("Everything") view has no one status set to offer. */
+    it('offers nothing when the view has no source type', () => {
+      expect(filterStatusSet(typeSchema, null)).toEqual([]);
+      expect(filterStatusSet(undefined, 'Work item')).toEqual([]);
+    });
   });
 });
 
