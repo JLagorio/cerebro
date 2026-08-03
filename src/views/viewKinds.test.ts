@@ -7,6 +7,7 @@ import {
   hasDependencies,
   isZoomable,
   needsDate,
+  showsCards,
   showsChips,
   viewKind,
 } from '@/views/viewKinds';
@@ -57,6 +58,7 @@ describe('view kind registration', () => {
       expect(isZoomable(kind.value)).toBe(kind.zoomable === true);
       expect(hasDependencies(kind.value)).toBe(kind.dependencies === true);
       expect(showsChips(kind.value)).toBe(kind.chips === true);
+      expect(showsCards(kind.value)).toBe(kind.cards === true);
       expect(axesFor(kind.value).group).toBe(kind.groupable === true);
     }
   });

@@ -28,6 +28,8 @@ export interface ViewKind {
   zoomable?: boolean;
   /** Draws dependency arrows between bars. */
   dependencies?: boolean;
+  /** Draws records as cards, so it gets the Cards settings page (M16.22). */
+  cards?: boolean;
 }
 
 /**
@@ -57,6 +59,13 @@ const CAPABILITIES = {
     dated: true,
     groupable: true,
     zoomable: true,
+  },
+  gallery: {
+    label: 'Gallery',
+    icon: 'layout-grid',
+    groupable: true,
+    chips: true,
+    cards: true,
   },
 } satisfies Record<ViewType, Omit<ViewKind, 'value'>>;
 
@@ -93,6 +102,11 @@ export function hasDependencies(type: ViewType): boolean {
 
 export function showsChips(type: ViewType): boolean {
   return viewKind(type).chips === true;
+}
+
+/** True for the layouts that draw records as cards (M16.22). */
+export function showsCards(type: ViewType): boolean {
+  return viewKind(type).cards === true;
 }
 
 /**

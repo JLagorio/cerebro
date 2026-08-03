@@ -245,15 +245,18 @@ export interface ColumnSpec {
 }
 
 /**
- * The six record views (M10). Mutually exclusive — a collection shows one at a
- * time, chosen from the toolbar.
+ * The record views (M10, extended M16.22/.27/.28). Mutually exclusive — a
+ * collection shows one at a time, chosen from the open tab's layout picker.
  *
- * - `table`    — spreadsheet grid with inline-editable cells (M3.4)
- * - `list`     — banded rows
- * - `board`    — kanban columns from the first band level
- * - `calendar` — month grid, records on their date
- * - `timeline` — records as bars on a horizontal date axis
- * - `gantt`    — timeline plus scheduling: nested WBS rows, dependency arrows
+ * - `table`     — spreadsheet grid with inline-editable cells (M3.4)
+ * - `list`      — banded rows
+ * - `board`     — kanban columns from the first band level
+ * - `calendar`  — month grid, records on their date
+ * - `timeline`  — records as bars on a horizontal date axis
+ * - `gantt`     — timeline plus scheduling: nested WBS rows, dependency arrows
+ * - `gallery`   — a card grid, cards optionally covered by a files property
+ * - `chart`     — bar/line/donut over an aggregation of the same rows
+ * - `dashboard` — a grid of blocks: saved views and single numbers
  *
  * Two kinds were REMOVED here, and both for the same reason — they were views
  * whose only job was something another axis already does:
@@ -272,7 +275,15 @@ export interface ColumnSpec {
  * `parseViewType` silently downgrade every saved file of the new kind to
  * `list`, losing the layout with no error anywhere.
  */
-export const VIEW_TYPES = ['table', 'list', 'board', 'calendar', 'gantt', 'timeline'] as const;
+export const VIEW_TYPES = [
+  'table',
+  'list',
+  'board',
+  'calendar',
+  'gantt',
+  'timeline',
+  'gallery',
+] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
 
@@ -287,6 +298,33 @@ export type ViewType = (typeof VIEW_TYPES)[number];
  * when a field can point at more than one type.
  */
 export type ChipStyle = 'plain' | 'type-icon';
+
+/** How wide a gallery card is — a named step, not a pixel count, so the grid
+ * stays responsive and two vaults agree on what "medium" looks like. */
+export const CARD_SIZES = ['small', 'medium', 'large'] as const;
+export type CardSize = (typeof CARD_SIZES)[number];
+
+/**
+ * The gallery's card settings (M16.22).
+ *
+ * Which PROPERTIES a card shows is not here: that is `columns`, the same list
+ * every other layout reads and the same Properties page configures. A second
+ * per-card visibility list would be a second answer to one question, and
+ * switching a view from Table to Gallery would lose the columns you chose.
+ */
+export interface GallerySpec {
+  /**
+   * Files property whose first value covers the card. Absent = no cover, which
+   * is the default: a cover is a choice, and guessing one would silently
+   * promote whatever attachment happened to be first.
+   */
+  cover?: string;
+  /** Absent = 'medium'. */
+  size?: CardSize;
+  /** True = the cover is fitted whole inside the tile; absent/false = cropped
+   * to fill it. Notion's "Fit media", same default (off). */
+  fit?: boolean;
+}
 
 export interface Presentation {
   type: ViewType;
@@ -320,6 +358,8 @@ export interface Presentation {
    * guess here draws a schedule that isn't the one the data states.
    */
   dependencyField?: string;
+  /** Gallery card settings (M16.22). Absent = every default. */
+  gallery?: GallerySpec;
 }
 
 /**

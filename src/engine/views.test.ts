@@ -599,6 +599,62 @@ describe('serializeList', () => {
     });
   });
 
+  /**
+   * The gallery's card settings (M16.22). Same contract the date-axis keys
+   * have: a saved gallery reopens as a gallery with its settings intact, and
+   * a layout that never configured cards writes no `gallery:` key at all.
+   */
+  describe('gallery card settings', () => {
+    const parse = (yaml: string) => presentationOf(parseListYaml('v', yaml));
+
+    it('round-trips cover, size and fit', () => {
+      const def = oneView(
+        {
+          name: 'Assets',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'gallery',
+          group: [],
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [{ field: 'status' }],
+          gallery: { cover: 'artwork', size: 'large', fit: true },
+        },
+      );
+      expect(parseListYaml('g', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('omits the block entirely when the gallery was never configured', () => {
+      const yaml = serializeList(
+        oneView(
+          { name: 'Cards', icon: null, color: null, order: null, source: NO_SOURCE },
+          { type: 'gallery', group: [], sort: [], columns: [] },
+        ),
+      );
+      // The word appears as the LAYOUT (`type: gallery`); what must not be
+      // there is a settings block nobody configured.
+      expect(yaml).not.toMatch(/^\s+gallery:/m);
+    });
+
+    // A hand-edited size that no layout implements would otherwise reach the
+    // grid as an unknown key and index METRICS to undefined.
+    it('drops a card size it does not recognize', () => {
+      expect(
+        parse('presentation:\n  type: gallery\n  gallery:\n    size: enormous\n').gallery,
+      ).toBeUndefined();
+    });
+
+    it('keeps a cover even when the rest of the block is junk', () => {
+      const p = parse(
+        'presentation:\n  type: gallery\n  gallery:\n    cover: artwork\n    size: 7\n    fit: yes please\n',
+      );
+      expect(p.gallery).toEqual({ cover: 'artwork' });
+    });
+  });
+
   describe('v1 → v2 presentation migration', () => {
     it('lifts groupBy, orderBy, visibleFields, and childrenVia into chains', () => {
       const view = parseListYaml(

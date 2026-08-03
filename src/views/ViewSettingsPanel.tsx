@@ -3,10 +3,11 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
 import { moveColumnTo, toggleColumn } from '@/engine/columns';
-import { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
+import { GROUPABLE_KINDS, MEDIA_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import {
   chainTypes,
@@ -17,11 +18,13 @@ import {
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { PropertyEditor } from '@/views/PropertyEditor';
-import { bandLevels, nestLevels } from '@/engine/types';
+import { CARD_SIZES, bandLevels, nestLevels } from '@/engine/types';
 import type {
+  CardSize,
   ChipStyle,
   ColumnSpec,
   FieldDef,
+  GallerySpec,
   GroupSpec,
   Presentation,
   Schema,
@@ -37,6 +40,7 @@ import {
   hasDependencies,
   isZoomable,
   needsDate,
+  showsCards,
   showsChips,
 } from '@/views/viewKinds';
 
@@ -57,6 +61,7 @@ type Page =
   | 'sort'
   | 'group'
   | 'axis'
+  | 'cards'
   | 'list'
   | 'newProperty'
   | 'field';
@@ -64,6 +69,12 @@ type Page =
 // Layout capabilities are declared on the kind now (M16.3). These were two
 // plain Set<string> plus two hardcoded p.type comparisons, so a new kind
 // compiled clean and then silently had no Axis page and no chip section.
+
+const CARD_SIZE_LABEL: Record<CardSize, string> = {
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
+};
 
 const META_SORTS = [
   { value: 'modifiedAt', label: 'Last modified' },
@@ -251,6 +262,18 @@ export function ViewSettingsPanel({
                 label="Date axis"
                 value={p.dateField === undefined ? 'Auto' : humanize(p.dateField)}
                 onClick={() => setPage('axis')}
+              />
+            )}
+
+            {/* M16.22: the gallery's cards — cover, size, fit. Declared on the
+                kind (`cards`), so a future card layout gets this page by
+                saying so rather than by being added to a string set. */}
+            {showsCards(p.type) && (
+              <Row
+                icon="layout-grid"
+                label="Cards"
+                value={CARD_SIZE_LABEL[p.gallery?.size ?? 'medium']}
+                onClick={() => setPage('cards')}
               />
             )}
 
@@ -472,6 +495,10 @@ export function ViewSettingsPanel({
           <AxisPage presentation={p} fields={fields} onChange={setPresentation} />
         )}
 
+        {page === 'cards' && (
+          <CardsPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
         {page === 'filter' && (
           <FilterBuilder
             filters={view.filters}
@@ -516,6 +543,8 @@ function titleFor(page: Page): string {
       return 'Group';
     case 'axis':
       return 'Date axis';
+    case 'cards':
+      return 'Cards';
     case 'list':
       return 'This list';
     case 'newProperty':
@@ -825,6 +854,89 @@ function AxisPage({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The gallery's cards (M16.22): what covers one, how wide it is, and whether
+ * a cover is fitted whole or cropped to fill.
+ *
+ * WHICH properties a card shows is not here — that is the Properties page, the
+ * same one the table uses. A gallery-only visibility list would be a second
+ * answer to one question, and switching a view between Table and Gallery would
+ * quietly lose the choice made on the other side.
+ *
+ * Cover candidates come from the kind's `media` flag rather than a
+ * `kind === 'files'` compare, so the day a second file-bearing kind exists it
+ * is offered here without anyone remembering to come back (M16.4's rule).
+ */
+function CardsPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const NONE = '__none__';
+  const gallery = presentation.gallery ?? {};
+  const covers = fields.filter((f) => MEDIA_KINDS.has(f.kind));
+  // Only stored off its default, so an untouched gallery writes no key at all.
+  const patch = (next: GallerySpec) => {
+    const cleaned: GallerySpec = {
+      ...(next.cover !== undefined && next.cover !== '' ? { cover: next.cover } : {}),
+      ...(next.size !== undefined && next.size !== 'medium' ? { size: next.size } : {}),
+      ...(next.fit === true ? { fit: true } : {}),
+    };
+    const { gallery: _drop, ...rest } = presentation;
+    onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, gallery: cleaned });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-1">
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card cover</span>
+        <Select
+          size="sm"
+          value={gallery.cover ?? NONE}
+          options={[
+            { value: NONE, label: 'None' },
+            ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
+          ]}
+          onChange={(e) =>
+            patch({ ...gallery, cover: e.target.value === NONE ? undefined : e.target.value })
+          }
+          width="100%"
+        />
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          {covers.length === 0
+            ? 'No files property on this type yet — add one and it becomes a cover.'
+            : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
+        </p>
+      </div>
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card size</span>
+        <Select
+          size="sm"
+          value={gallery.size ?? 'medium'}
+          options={CARD_SIZES.map((s) => ({ value: s, label: CARD_SIZE_LABEL[s] }))}
+          onChange={(e) => patch({ ...gallery, size: e.target.value as CardSize })}
+          width="100%"
+        />
+      </div>
+      <div className="border-t border-[var(--n-100)] pt-2">
+        <Switch
+          checked={gallery.fit === true}
+          onChange={(fit) => patch({ ...gallery, fit })}
+          label="Fit media"
+          ariaLabel="Fit media"
+        />
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          Fit the whole cover inside the tile instead of cropping it to fill.
+        </p>
+      </div>
     </div>
   );
 }

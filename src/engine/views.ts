@@ -1,11 +1,13 @@
 import { parse, stringify } from 'yaml';
 import type {
+  CardSize,
   ChildrenSpec,
   ChipStyle,
   ColumnSpec,
   FilterGroup,
   FilterOp,
   FilterRule,
+  GallerySpec,
   GroupSpec,
   Presentation,
   Scalar,
@@ -16,7 +18,7 @@ import type {
   ViewDefinition,
   ViewType,
 } from './types';
-import { VIEW_TYPES } from './types';
+import { CARD_SIZES, VIEW_TYPES } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
 export const DEFAULT_PRESENTATION: Presentation = {
@@ -41,6 +43,10 @@ export function clonePresentation(p: Presentation): Presentation {
     group: p.group.map((g) => ({ ...g, ...(g.descend ? { descend: { ...g.descend } } : {}) })),
     sort: p.sort.map((s) => ({ ...s })),
     columns: p.columns.map((c) => ({ ...c })),
+    // The layout-specific settings are objects too, and a shallow copy would
+    // hand two views the same one — editing the gallery's card size in a
+    // duplicated tab would change it in the tab it was duplicated from.
+    ...(p.gallery !== undefined ? { gallery: { ...p.gallery } } : {}),
   };
 }
 
@@ -128,6 +134,7 @@ export const MAX_GROUP_DEPTH = 3;
  */
 function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
+  const gallery = parseGallery(obj.gallery);
   return {
     type: parseViewType(obj.type),
     group: parseGroupChain(obj),
@@ -159,7 +166,25 @@ function parsePresentation(raw: unknown): Presentation {
     ...(typeof obj.dependencyField === 'string' && obj.dependencyField.trim() !== ''
       ? { dependencyField: obj.dependencyField.trim() }
       : {}),
+    ...(gallery !== undefined ? { gallery } : {}),
   };
+}
+
+const SIZES = new Set<string>(CARD_SIZES);
+
+/**
+ * Gallery card settings (M16.22). Every member is optional and only stored
+ * off its default, so a gallery nobody configured writes no `gallery:` key at
+ * all — the same rule the date-axis keys follow.
+ */
+function parseGallery(raw: unknown): GallerySpec | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = asRecord(raw);
+  const spec: GallerySpec = {};
+  if (typeof obj.cover === 'string' && obj.cover.trim() !== '') spec.cover = obj.cover.trim();
+  if (typeof obj.size === 'string' && SIZES.has(obj.size)) spec.size = obj.size as CardSize;
+  if (obj.fit === true) spec.fit = true;
+  return Object.keys(spec).length === 0 ? undefined : spec;
 }
 
 /**
@@ -386,6 +411,7 @@ const LAYOUT_LABEL: Record<ViewType, string> = {
   calendar: 'Calendar',
   gantt: 'Gantt',
   timeline: 'Timeline',
+  gallery: 'Gallery',
 };
 
 export function layoutLabel(type: ViewType): string {
@@ -563,6 +589,9 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
     ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
     ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
+    // Same rule for the layout-specific blocks (M16.22): written only when the
+    // layout that reads them has been configured.
+    ...(p.gallery !== undefined ? { gallery: p.gallery } : {}),
   };
 }
 

@@ -4,6 +4,7 @@ import type { Zoom } from '@/engine/schedule';
 import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
 import { BoardView } from '@/views/BoardView';
 import { CalendarView } from '@/views/CalendarView';
+import { GalleryView } from '@/views/GalleryView';
 import { GanttView } from '@/views/GanttView';
 import { ListView } from '@/views/ListView';
 import { TableView } from '@/views/TableView';
@@ -12,7 +13,7 @@ import { buildRows, entryRows } from '@/engine/rows';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
- * The canvas: renders whichever of the six views a presentation names (M10).
+ * The canvas: renders whichever view kind a presentation names (M10).
  *
  * This switch existed three times — CollectionPage, ProjectPage, and TypePage
  * each had their own copy — and they had already diverged: only CollectionPage
@@ -71,7 +72,7 @@ export function ViewCanvas({
   today,
 }: ViewCanvasProps): React.ReactElement {
   // M16.11: the detail panel steps through the records THIS canvas is
-  // showing, in the order it shows them. One registration for all six views.
+  // showing, in the order it shows them. One registration for every kind.
   //
   // `entries` is filtered and sorted but NOT grouped or nested, and reading
   // it directly numbered a record "6 of 45" while it sat third on screen.
@@ -159,6 +160,16 @@ export function ViewCanvas({
           scope={scope}
           onZoomChange={onZoomChange}
           {...(today !== undefined ? { today } : {})}
+        />
+      );
+    case 'gallery':
+      return (
+        <GalleryView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          scope={scope}
+          filtered={filtered}
         />
       );
     case 'list':

@@ -128,6 +128,10 @@ export interface PropertyKindMeta {
   groupable: boolean;
   /** Values have a total order, so a view can sort by this field. */
   orderable: boolean;
+  /** Values are file references, so a card layout can draw one as a cover
+   * (M16.22). Required, not optional, for the same reason `groupable` is: a
+   * kind that forgets to answer would silently never be offered. */
+  media: boolean;
 }
 
 /**
@@ -147,6 +151,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
   },
   number: {
     label: 'Number',
@@ -155,6 +160,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
   },
   select: {
     label: 'Select',
@@ -163,6 +169,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    media: false,
   },
   multiselect: {
     label: 'Multi-select',
@@ -172,6 +179,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    media: false,
   },
   status: {
     label: 'Status',
@@ -180,6 +188,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    media: false,
   },
   date: {
     label: 'Date',
@@ -188,6 +197,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
   },
   daterange: {
     label: 'Date range',
@@ -197,6 +207,7 @@ const KIND_META = {
     legacy: true,
     groupable: false,
     orderable: true,
+    media: false,
   },
   person: {
     label: 'Person',
@@ -206,6 +217,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    media: false,
   },
   files: {
     label: 'Files & media',
@@ -215,6 +227,7 @@ const KIND_META = {
     multi: true,
     groupable: false,
     orderable: false,
+    media: true,
   },
   checkbox: {
     label: 'Checkbox',
@@ -223,8 +236,17 @@ const KIND_META = {
     seed: false,
     groupable: true,
     orderable: true,
+    media: false,
   },
-  url: { label: 'URL', icon: 'link', computed: false, seed: '', groupable: false, orderable: true },
+  url: {
+    label: 'URL',
+    icon: 'link',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+  },
   email: {
     label: 'Email',
     icon: 'mail',
@@ -232,6 +254,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
   },
   phone: {
     label: 'Phone',
@@ -240,6 +263,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
   },
   relation: {
     label: 'Relation',
@@ -249,6 +273,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    media: false,
   },
   rollup: {
     label: 'Rollup',
@@ -257,6 +282,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    media: false,
   },
   created_time: {
     label: 'Created time',
@@ -265,6 +291,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    media: false,
   },
   last_edited_time: {
     label: 'Last edited time',
@@ -273,6 +300,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    media: false,
   },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
 
@@ -302,6 +330,10 @@ export const GROUPABLE_KINDS: ReadonlySet<FieldKind> = new Set(
 );
 export const ORDERABLE_KINDS: ReadonlySet<FieldKind> = new Set(
   PROPERTY_KINDS.filter((k) => k.orderable).map((k) => k.kind),
+);
+/** Which kinds can supply a gallery card's cover (M16.22). */
+export const MEDIA_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.media).map((k) => k.kind),
 );
 
 // --- Relation and person targets (M16.13b) ---------------------------------
