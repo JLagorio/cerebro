@@ -19,6 +19,19 @@ interface UiState {
   openDetail(path: string): void;
   closeDetail(): void;
   /**
+   * The records the open canvas is showing, in its order (M16.11) — what the
+   * panel's previous/next step through.
+   *
+   * It lives here rather than being threaded through `openDetail` because a
+   * row does not know its neighbours: every surface opens a record through
+   * one `useOpenPath(path)` call, and only the canvas knows the filtered,
+   * sorted list that call came out of.
+   */
+  detailSiblings: string[];
+  setDetailSiblings(paths: string[]): void;
+  /** Move the open record along `detailSiblings`. No-op at either end. */
+  stepDetail(delta: number): void;
+  /**
    * Width of the record side panel, in px (M11). Persisted.
    *
    * It is a stored preference rather than a constant because the panel is now
@@ -402,6 +415,24 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ detailPath: path, aiPanelOpen: false });
   },
   closeDetail: () => set({ detailPath: null }),
+
+  detailSiblings: [],
+  setDetailSiblings: (paths) => {
+    // Reference-stable when nothing changed: this is set from a render-time
+    // effect on every canvas render, and a fresh array each time would
+    // re-render the panel continuously.
+    const current = get().detailSiblings;
+    if (current.length === paths.length && current.every((p, i) => p === paths[i])) return;
+    set({ detailSiblings: paths });
+  },
+  stepDetail: (delta) => {
+    const { detailPath, detailSiblings } = get();
+    if (detailPath === null) return;
+    const at = detailSiblings.indexOf(detailPath);
+    const next = detailSiblings[at + delta];
+    if (at === -1 || next === undefined) return;
+    get().openDetail(next);
+  },
 
   detailWidth: loadNumber(
     DETAIL_WIDTH_KEY,

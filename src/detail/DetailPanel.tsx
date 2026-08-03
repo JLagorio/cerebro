@@ -3,6 +3,7 @@ import type { CerebroEditor } from '@/editor/MarkdownEditor';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { ResizeHandle } from '@/components/ui/ResizeHandle';
+import { DetailHeaderActions } from '@/detail/DetailHeaderActions';
 import { RecordProperties } from '@/detail/RecordProperties';
 import { NoteBodyEditor } from '@/editor/NoteBodyEditor';
 import { GitHistoryPanel } from '@/git/GitHistoryPanel';
@@ -231,6 +232,10 @@ export function DetailPanel() {
           </>
         )}
         <span className="flex-1" />
+        {/* M16.11: everything Notion's peek header offers that means anything
+            in a files-first app — see the docblock for the three that do
+            not. */}
+        <DetailHeaderActions entry={entry} />
         <IconButton icon="x" label="Close" size="sm" onClick={closeDetail} />
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5 pt-3.5">

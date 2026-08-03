@@ -35,6 +35,9 @@ export interface IconButtonProps {
   onClick?: () => void;
   style?: React.CSSProperties;
   className?: string;
+  /** For anchoring a Popover to this button (M16.11). A ref is an ordinary
+   * prop in React 19, so no forwardRef wrapper is needed. */
+  ref?: React.Ref<HTMLButtonElement>;
 }
 
 export function IconButton({
@@ -47,6 +50,7 @@ export function IconButton({
   onClick,
   style,
   className = '',
+  ref,
 }: IconButtonProps) {
   const px = size === 'sm' ? 24 : size === 'lg' ? 32 : 28;
   const ic = size === 'sm' ? 14 : 16;
@@ -56,6 +60,7 @@ export function IconButton({
   return (
     <Tooltip label={label}>
       <button
+        ref={ref}
         type="button"
         aria-label={label}
         disabled={disabled}

@@ -1,4 +1,4 @@
-import type React from 'react';
+import React, { useEffect, useMemo } from 'react';
 import type { ColumnDef } from '@/engine/columns';
 import type { Zoom } from '@/engine/schedule';
 import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
@@ -8,6 +8,8 @@ import { GanttView } from '@/views/GanttView';
 import { ListView } from '@/views/ListView';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
+import { buildRows, entryRows } from '@/engine/rows';
+import { useUiStore } from '@/stores/uiStore';
 
 /**
  * The canvas: renders whichever of the six views a presentation names (M10).
@@ -68,6 +70,26 @@ export function ViewCanvas({
   onFilterField,
   today,
 }: ViewCanvasProps): React.ReactElement {
+  // M16.11: the detail panel steps through the records THIS canvas is
+  // showing, in the order it shows them. One registration for all six views.
+  //
+  // `entries` is filtered and sorted but NOT grouped or nested, and reading
+  // it directly numbered a record "6 of 45" while it sat third on screen.
+  // `buildRows` is the same pure function the table, list, timeline and gantt
+  // each call to lay themselves out, so this is the display order rather than
+  // an approximation of it.
+  const setDetailSiblings = useUiStore((s) => s.setDetailSiblings);
+  const key = useMemo(
+    () =>
+      entryRows(buildRows({ entries, group: presentation.group, schema, allEntries }))
+        .map((r) => r.entry.path)
+        .join('\n'),
+    [entries, presentation.group, schema, allEntries],
+  );
+  useEffect(() => {
+    setDetailSiblings(key === '' ? [] : key.split('\n'));
+  }, [key, setDetailSiblings]);
+
   // The return type is the exhaustiveness check (M16.3). Without it, and with
   // no `default` below and no `noImplicitReturns` in tsconfig, adding a
   // ViewType member compiled clean and rendered `undefined` at runtime.
