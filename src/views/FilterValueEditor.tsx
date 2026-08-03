@@ -5,9 +5,14 @@ import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
 import { useDismiss } from '@/components/ui/Popover';
-import { makeDateValue, parseEndpoint, serializeEndpoint } from '@/engine/dates';
+import {
+  DEFAULT_TIME_FORMAT,
+  makeDateValue,
+  parseEndpoint,
+  serializeEndpoint,
+} from '@/engine/dates';
 import { kindMeta } from '@/engine/properties';
-import { filterOpArity } from '@/engine/viewFilters';
+import { filterDateLabel, filterOpArity } from '@/engine/viewFilters';
 import type { FieldDef, FieldKind, FilterOp, FilterRule, Scalar } from '@/engine/types';
 
 /**
@@ -59,6 +64,7 @@ export function FilterValueEditor({
     return (
       <span className="inline-flex items-center gap-1">
         <SingleValue
+          def={def}
           family={family}
           options={options}
           value={lo}
@@ -68,6 +74,7 @@ export function FilterValueEditor({
         />
         <span className="flex-none text-[11px] text-[var(--n-400)]">and</span>
         <SingleValue
+          def={def}
           family={family}
           options={options}
           value={hi}
@@ -111,6 +118,7 @@ export function FilterValueEditor({
 
   return (
     <SingleValue
+      def={def}
       family={family}
       options={options}
       value={asList(value)[0]}
@@ -122,6 +130,7 @@ export function FilterValueEditor({
 }
 
 function SingleValue({
+  def,
   family,
   options,
   value,
@@ -129,6 +138,7 @@ function SingleValue({
   width,
   ariaLabel,
 }: {
+  def: FieldDef | undefined;
   family: ReturnType<typeof kindMeta>['filters'];
   options: NonNullable<FieldDef['options']>;
   value: Scalar | undefined;
@@ -155,7 +165,9 @@ function SingleValue({
   }
 
   if (family === 'date') {
-    return <DateValue value={value} onChange={onChange} width={width} ariaLabel={ariaLabel} />;
+    return (
+      <DateValue def={def} value={value} onChange={onChange} width={width} ariaLabel={ariaLabel} />
+    );
   }
 
   if (family === 'choice' && options.length > 0) {
@@ -203,13 +215,20 @@ function SingleValue({
  * Writes the M16.14 storage shape through `serializeEndpoint`, so a bound with
  * a time reads `2026-08-01 14:30` — the same spelling a date PROPERTY uses,
  * which is what makes the comparison in `viewFilters` meaningful.
+ *
+ * READS in the field's persisted format (M16.29). Storage spelling and display
+ * spelling are different questions, and answering both with the stored string
+ * is how one date came to render three ways on one screen: `18/08/2026` in the
+ * grid, `2026-08-03` here, `Aug 3, 2026` in the picker.
  */
 function DateValue({
+  def,
   value,
   onChange,
   width,
   ariaLabel,
 }: {
+  def: FieldDef | undefined;
   value: Scalar | undefined;
   onChange: (next: Scalar) => void;
   width: number;
@@ -217,7 +236,13 @@ function DateValue({
 }) {
   const [open, setOpen] = useState(false);
   const parsed = parseEndpoint(value);
-  const label = parsed === null ? 'Pick a date…' : serializeEndpoint(parsed.date, parsed.time);
+  const format = def?.dateFormat ?? 'short';
+  const timeFormat = def?.timeFormat ?? DEFAULT_TIME_FORMAT;
+  const label =
+    parsed === null
+      ? 'Pick a date…'
+      : ((def !== undefined && value !== undefined ? filterDateLabel(value, def) : null) ??
+        serializeEndpoint(parsed.date, parsed.time));
 
   return (
     <InlineSurface
@@ -239,12 +264,19 @@ function DateValue({
         value={{
           ...makeDateValue(parsed?.date ?? new Date().toISOString().slice(0, 10)),
           startTime: parsed?.time ?? null,
+          format,
+          timeFormat,
         }}
         // A filter bound is one endpoint, never a range: a range bound would
         // need the rule to say which end it meant, and `is between` already
         // says it with two bounds.
         showEndToggle={false}
         showRemind={false}
+        // Date format and Time format configure the PROPERTY — the detail
+        // panel writes them to the type note. There is no type note behind a
+        // filter bound, so they were two controls that changed nothing; the
+        // format they display now comes from the field instead (M16.29).
+        showFormat={false}
         onChange={(v) => onChange(serializeEndpoint(v.start, v.startTime))}
         onClear={() => {
           onChange('');

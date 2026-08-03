@@ -126,6 +126,16 @@ export interface DatePickerProps {
   showEndToggle?: boolean;
   showTime?: boolean;
   showRemind?: boolean;
+  /**
+   * The display-format rows — "Date format" and "Time format" (M16.29).
+   *
+   * They configure the PROPERTY, not the value: the detail panel writes them
+   * to the type note so every record renders alike. A surface with no type
+   * note to write to (a filter bound) must hide them rather than show two
+   * controls that change nothing — the verifier flipped one and confirmed
+   * `types/work-item.md` was never touched.
+   */
+  showFormat?: boolean;
 }
 
 /**
@@ -142,6 +152,7 @@ export function DatePicker({
   showEndToggle = true,
   showTime = true,
   showRemind = true,
+  showFormat = true,
 }: DatePickerProps) {
   const todayIso = today ?? toIsoDate(new Date());
   const [month, setMonth] = useState((value.end ?? value.start).slice(0, 7));
@@ -208,7 +219,11 @@ export function DatePicker({
           }}
           className={boxClass(active)}
         >
-          <span className="truncate">{formatDate(date, 'short', todayIso)}</span>
+          {/* The box obeys `value.format` (M16.29). It was hardcoded to
+              'short', directly beneath a row announcing "Date format: Full
+              date" — so the picker contradicted itself, and a field with a
+              persisted format saw a third spelling of its own date. */}
+          <span className="truncate">{formatDate(date, value.format, todayIso)}</span>
         </button>
         {hasTime && time !== null && (
           <input
@@ -256,27 +271,29 @@ export function DatePicker({
             }
           />
         )}
-        <SettingRow
-          label="Date format"
-          onClick={() => setFlyout(flyout === 'format' ? null : 'format')}
-          value={
-            <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
-              {FORMAT_OPTIONS.find((o) => o.id === value.format)?.label}
-              <Icon name="chevron-right" size={13} color="var(--n-400)" />
-            </span>
-          }
-        >
-          {flyout === 'format' && (
-            <FlyoutMenu
-              options={FORMAT_OPTIONS}
-              activeId={value.format}
-              onPick={(id) => {
-                onChange({ ...value, format: id });
-                closeFlyouts();
-              }}
-            />
-          )}
-        </SettingRow>
+        {showFormat && (
+          <SettingRow
+            label="Date format"
+            onClick={() => setFlyout(flyout === 'format' ? null : 'format')}
+            value={
+              <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
+                {FORMAT_OPTIONS.find((o) => o.id === value.format)?.label}
+                <Icon name="chevron-right" size={13} color="var(--n-400)" />
+              </span>
+            }
+          >
+            {flyout === 'format' && (
+              <FlyoutMenu
+                options={FORMAT_OPTIONS}
+                activeId={value.format}
+                onPick={(id) => {
+                  onChange({ ...value, format: id });
+                  closeFlyouts();
+                }}
+              />
+            )}
+          </SettingRow>
+        )}
         {showTime && (
           <SettingRow
             label="Include time"
@@ -285,27 +302,29 @@ export function DatePicker({
         )}
         {showTime && hasTime && (
           <>
-            <SettingRow
-              label="Time format"
-              onClick={() => setFlyout(flyout === 'timeformat' ? null : 'timeformat')}
-              value={
-                <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
-                  {TIME_FORMAT_OPTIONS.find((o) => o.id === value.timeFormat)?.label}
-                  <Icon name="chevron-right" size={13} color="var(--n-400)" />
-                </span>
-              }
-            >
-              {flyout === 'timeformat' && (
-                <FlyoutMenu
-                  options={TIME_FORMAT_OPTIONS}
-                  activeId={value.timeFormat}
-                  onPick={(id) => {
-                    onChange({ ...value, timeFormat: id });
-                    closeFlyouts();
-                  }}
-                />
-              )}
-            </SettingRow>
+            {showFormat && (
+              <SettingRow
+                label="Time format"
+                onClick={() => setFlyout(flyout === 'timeformat' ? null : 'timeformat')}
+                value={
+                  <span className="flex items-center gap-1 text-[12.5px] text-[var(--n-500)]">
+                    {TIME_FORMAT_OPTIONS.find((o) => o.id === value.timeFormat)?.label}
+                    <Icon name="chevron-right" size={13} color="var(--n-400)" />
+                  </span>
+                }
+              >
+                {flyout === 'timeformat' && (
+                  <FlyoutMenu
+                    options={TIME_FORMAT_OPTIONS}
+                    activeId={value.timeFormat}
+                    onPick={(id) => {
+                      onChange({ ...value, timeFormat: id });
+                      closeFlyouts();
+                    }}
+                  />
+                )}
+              </SettingRow>
+            )}
             <SettingRow
               label="Timezone"
               value={

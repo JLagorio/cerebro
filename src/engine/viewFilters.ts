@@ -1,4 +1,11 @@
-import { parseDateProperty, parseEndpoint } from './dates';
+import {
+  DEFAULT_TIME_FORMAT,
+  formatDateValue,
+  makeDateValue,
+  parseDateProperty,
+  parseEndpoint,
+  toIsoDate,
+} from './dates';
 import { kindMeta } from './properties';
 import { FILTER_OPS } from './types';
 import type {
@@ -256,16 +263,50 @@ export function filterRuleIsReady(rule: FilterRule): boolean {
 }
 
 /**
+ * A date bound in the FIELD's persisted format, or null if it is not one
+ * (M16.29).
+ *
+ * `due` carried `dateFormat: dmy` and the grid rendered `18/08/2026`, while
+ * every filter surface printed the raw stored `2026-08-03` — three spellings
+ * of one date on one screen. A format setting that the column obeys and the
+ * filter on that column ignores is not a setting.
+ *
+ * Gated on the KIND's filter family, so a text field that happens to hold
+ * something date-shaped still reads back exactly as it was written. Defaults
+ * match M16.14: absent `dateFormat` means short, absent `timeFormat` means
+ * a 12-hour clock.
+ */
+export function filterDateLabel(
+  value: Scalar,
+  def: FieldDef,
+  today: string = toIsoDate(new Date()),
+): string | null {
+  if (kindMeta(def.kind).filters !== 'date') return null;
+  const parsed = parseEndpoint(value);
+  if (parsed === null) return null;
+  return formatDateValue(
+    {
+      ...makeDateValue(parsed.date),
+      startTime: parsed.time,
+      format: def.dateFormat ?? 'short',
+      timeFormat: def.timeFormat ?? DEFAULT_TIME_FORMAT,
+    },
+    today,
+  );
+}
+
+/**
  * One value as the chip should say it (M16.29).
  *
  * The chip is the one place that states a rule IN WORDS, and it was stating
  * it in slugs — "Status is progress" for an option whose label is "In
- * progress". The def is optional so a caller with no schema context still
- * gets the raw value rather than nothing.
+ * progress" — and in storage spellings, for dates. The def is optional so a
+ * caller with no schema context still gets the raw value rather than nothing.
  */
 function describeFilterValue(value: Scalar, def: FieldDef | undefined): string {
-  const option = def?.options?.find((o) => o.id === String(value));
-  return option?.label ?? String(value);
+  if (def === undefined) return String(value);
+  const option = def.options?.find((o) => o.id === String(value));
+  return option?.label ?? filterDateLabel(value, def) ?? String(value);
 }
 
 /** One rule as a chip reads it: "Due is before 2026-08-01". */

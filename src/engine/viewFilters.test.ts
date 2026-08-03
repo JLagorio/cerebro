@@ -492,6 +492,72 @@ describe('describeFilterRule — what a chip says', () => {
 });
 
 /**
+ * M16.29 regression: one date rendered three ways on one screen.
+ *
+ * `due` carries a persisted `dateFormat: dmy` (M16.14) and the grid honoured
+ * it — `18/08/2026`. The filter did not: the chip read `Due is before
+ * 2026-08-03`, the value box read `2026-08-03`, and the picker inside read
+ * `Aug 3, 2026`. A format setting that every surface but one obeys is not a
+ * setting, and a filter that spells a date differently from the column it
+ * filters reads as being about something else.
+ */
+describe('a filter renders a date in the FIELD’s format (M16.29)', () => {
+  const due = { name: 'due', kind: 'date' as const, dateFormat: 'dmy' as const };
+
+  it('spells the bound the way the column does', () => {
+    expect(
+      describeFilterRule({ field: 'due', op: 'before', value: '2026-08-03' }, 'Due', due),
+    ).toBe('Due is before 03/08/2026');
+  });
+
+  it('formats both ends of a range', () => {
+    expect(
+      describeFilterRule(
+        { field: 'due', op: 'is_between', value: ['2026-08-03', '2026-08-18'] },
+        'Due',
+        due,
+      ),
+    ).toBe('Due is between 03/08/2026 and 18/08/2026');
+  });
+
+  it('honours the field’s clock for a bound that names a time', () => {
+    expect(
+      describeFilterRule({ field: 'due', op: 'after', value: '2026-08-03 14:30' }, 'Due', {
+        ...due,
+        timeFormat: '24',
+      }),
+    ).toBe('Due is after 03/08/2026 14:30');
+  });
+
+  /** M16.14: a date field with no `dateFormat:` renders short, everywhere. */
+  it('falls back to short for a field that has configured nothing', () => {
+    expect(
+      describeFilterRule({ field: 'due', op: 'before', value: '2026-08-03' }, 'Due', {
+        name: 'due',
+        kind: 'date',
+      }),
+    ).toBe('Due is before Aug 3, 2026');
+  });
+
+  /** Only the date family reformats. A text field holding something that
+   * parses as a date is still text, and its rule must read back verbatim. */
+  it('leaves a text field’s value exactly as written', () => {
+    expect(
+      describeFilterRule({ field: 'ref', op: 'equals', value: '2026-08-03' }, 'Ref', {
+        name: 'ref',
+        kind: 'text',
+      }),
+    ).toBe('Ref is 2026-08-03');
+  });
+
+  it('still reads the raw value when there is no field def to consult', () => {
+    expect(describeFilterRule({ field: 'due', op: 'before', value: '2026-08-03' }, 'Due')).toBe(
+      'Due is before 2026-08-03',
+    );
+  });
+});
+
+/**
  * M16.29 regression: the filter's Status conditions were plain text boxes
  * holding the raw ids `progress` and `review`.
  *

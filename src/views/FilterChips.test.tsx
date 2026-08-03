@@ -34,12 +34,14 @@ const twoRules: FilterGroup = {
  * filtered in ways it took a click to discover.
  */
 describe('FilterChips shows one chip per rule (M16.25)', () => {
-  // "Doing", not "doing": M16.29 made the chip read the option's LABEL, since
-  // stating the rule in words is the whole job of a chip and `doing` is a slug.
+  // "Doing", not "doing", and "Sep 1, 2026", not "2026-09-01": M16.29 made the
+  // chip read the option's LABEL and the field's date format. Stating the rule
+  // in words is the whole job of a chip, and neither a slug nor a storage
+  // spelling is one.
   it('states each rule in words', () => {
     render(<FilterChips filters={twoRules} fields={fields} onChange={vi.fn()} />);
     expect(screen.getByTestId('filter-chip-0').textContent).toContain('Status is Doing');
-    expect(screen.getByTestId('filter-chip-1').textContent).toContain('Due is before 2026-09-01');
+    expect(screen.getByTestId('filter-chip-1').textContent).toContain('Due is before Sep 1, 2026');
   });
 
   it('removes exactly the rule whose X was pressed', () => {
