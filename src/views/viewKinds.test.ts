@@ -6,11 +6,16 @@ import {
   axesFor,
   hasBlocks,
   hasDependencies,
+  hasGroupColumns,
   isCharted,
+  isDayGrid,
+  isTabular,
   isZoomable,
   needsDate,
   showsCards,
   showsChips,
+  showsCovers,
+  showsPreview,
   viewKind,
 } from '@/views/viewKinds';
 import { parseListYaml } from '@/engine/views';
@@ -64,6 +69,46 @@ describe('view kind registration', () => {
       expect(isCharted(kind.value)).toBe(kind.charted === true);
       expect(hasBlocks(kind.value)).toBe(kind.blocks === true);
       expect(axesFor(kind.value).group).toBe(kind.groupable === true);
+      expect(showsPreview(kind.value)).toBe(kind.preview === true);
+      expect(showsCovers(kind.value)).toBe(kind.covers === true);
+      expect(hasGroupColumns(kind.value)).toBe(kind.groupColumns === true);
+      expect(isDayGrid(kind.value)).toBe(kind.dayGrid === true);
+      expect(isTabular(kind.value)).toBe(kind.tabular === true);
+    }
+  });
+
+  /**
+   * `cards` was too coarse a gate for the card settings (M16.29). The gallery
+   * drew cards, so it was offered "Color columns" — which needs COLUMNS, not
+   * cards — and wrote `colorColumns: true` to its view file for nothing. The
+   * three narrower flags only make sense on a kind that draws cards at all.
+   */
+  it('only lets a card-drawing kind declare a card detail', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.preview === true || kind.covers === true) expect(kind.cards).toBe(true);
+    }
+  });
+
+  /** A tinted column is a GROUP drawn as a column, so the kind must group. */
+  it('only lets a grouping kind draw its groups as columns', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.groupColumns === true) expect(kind.groupable).toBe(true);
+    }
+  });
+
+  /** A day grid is one way of placing records on a date; a kind with no date
+   * axis has no days to grid. */
+  it('only lets a dated kind draw a day grid', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.dayGrid === true) expect(kind.dated).toBe(true);
+    }
+  });
+
+  /** Row height, freezing and the footer calc all live on the name column's
+   * row, so a tabular kind necessarily has one. */
+  it('only lets a tabular kind exist if it has a name column', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.tabular === true) expect(kind.nameColumn).toBe(true);
     }
   });
 

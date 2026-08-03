@@ -120,7 +120,10 @@ describe('GalleryView', () => {
     render(
       <GalleryView
         entries={records(entries)}
-        presentation={presentation({ gallery: { cover: 'artwork', size: 'large', fit: true } })}
+        presentation={presentation({
+          cardSize: 'large',
+          gallery: { cover: 'artwork', fit: true },
+        })}
         schema={schema}
       />,
     );

@@ -39,13 +39,13 @@ const listWith = (presentation: Partial<Presentation>): ListDefinition => ({
   ],
 });
 
-function setup(presentation: Partial<Presentation> = {}) {
+function setup(presentation: Partial<Presentation> = {}, extraFields: ColumnDef[] = []) {
   const onChange = vi.fn();
   render(
     <ViewSettingsPanel
       list={listWith(presentation)}
       viewId="grid"
-      fields={fields}
+      fields={[...fields, ...extraFields]}
       schema={buildSchema([])}
       onChange={onChange}
       onClose={vi.fn()}
@@ -135,6 +135,82 @@ describe('hide empty groups (M16.26)', () => {
     });
     fireEvent.click(screen.getByTestId('view-settings-group'));
     expect(screen.queryByLabelText(/^Hide empty/)).toBeNull();
+  });
+});
+
+/**
+ * Card settings, gated on the capability each one actually needs (M16.29).
+ *
+ * The whole card section hung off `showsCards`, which is true for the board
+ * AND the gallery — so a gallery offered "Color columns", wrote
+ * `colorColumns: true` into its view file, and changed nothing on screen: a
+ * gallery has no columns to colour. "Card preview" was the same shape, read
+ * only by the board's card. And "Card size" appeared TWICE for both kinds,
+ * once in the root panel and once inside Cards, writing two different keys.
+ */
+describe('card settings (M16.29)', () => {
+  const openCards = () => fireEvent.click(screen.getByTestId('view-settings-cards'));
+
+  it('offers Color columns on the board, whose groups ARE columns', () => {
+    setup({ type: 'board' });
+    openCards();
+    expect(screen.getByLabelText('Color columns')).toBeTruthy();
+  });
+
+  /** Anywhere in the panel: the dead controls used to sit on the ROOT page,
+   * beside the Cards row rather than inside it. */
+  const absent = (query: () => unknown) => {
+    expect(query()).toBeNull();
+    openCards();
+    expect(query()).toBeNull();
+  };
+
+  it('does not offer Color columns on a gallery, which has no columns', () => {
+    setup({ type: 'gallery' });
+    absent(() => screen.queryByLabelText('Color columns'));
+  });
+
+  it('does not offer Card preview on a gallery, whose card draws no snippet', () => {
+    setup({ type: 'gallery' });
+    absent(() => screen.queryByText('Card preview'));
+  });
+
+  it('does not offer a cover on the board, whose card draws none', () => {
+    setup({ type: 'board' }, [{ name: 'artwork', kind: 'files' }]);
+    absent(() => screen.queryByText('Card cover'));
+    expect(screen.queryByLabelText('Fit media')).toBeNull();
+  });
+
+  /** Card size lived in the root panel AND in Cards, writing `cardSize` in one
+   * place and `gallery.size` in the other — two controls, two keys, one
+   * setting, and only one of them was read by any given layout. */
+  it('states card size exactly once, on the Cards page', () => {
+    setup({ type: 'gallery' });
+    expect(screen.queryByText('Card size')).toBeNull();
+    openCards();
+    expect(screen.getAllByText('Card size')).toHaveLength(1);
+  });
+
+  it('writes one card-size key, whichever card layout set it', () => {
+    const { nextPresentation } = setup({ type: 'gallery' });
+    openCards();
+    fireEvent.change(screen.getByDisplayValue('Medium'), { target: { value: 'large' } });
+    expect(nextPresentation().cardSize).toBe('large');
+    expect(nextPresentation().gallery).toBeUndefined();
+  });
+
+  /** Off is the default, so it is an ABSENT key rather than `false` — the rule
+   * every optional presentation key follows. */
+  it('deletes colorColumns rather than storing a false when switched back off', () => {
+    const { nextPresentation } = setup({ type: 'board', colorColumns: true });
+    openCards();
+    fireEvent.click(screen.getByLabelText('Color columns'));
+    expect(nextPresentation()).not.toHaveProperty('colorColumns');
+  });
+
+  it('has no Cards row at all on a layout that draws no cards', () => {
+    setup({ type: 'table' });
+    expect(screen.queryByTestId('view-settings-cards')).toBeNull();
   });
 });
 

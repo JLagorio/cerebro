@@ -334,8 +334,10 @@ export interface GallerySpec {
    * promote whatever attachment happened to be first.
    */
   cover?: string;
-  /** Absent = 'medium'. */
-  size?: CardSize;
+  /* Card SIZE is deliberately not here. It lived here as `size` while the
+   * board kept the same setting as a top-level `cardSize`, so one control
+   * appeared twice in the settings panel writing two different keys — and
+   * whichever one you found, only one of the two layouts read it (M16.29). */
   /** True = the cover is fitted whole inside the tile; absent/false = cropped
    * to fill it. Notion's "Fit media", same default (off). */
   fit?: boolean;
@@ -461,7 +463,8 @@ export interface Presentation {
   titleCalc?: AggregateCalc;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
-  /** Board card density; omitted = 'medium'. */
+  /** Card density for every layout that draws cards; omitted = 'medium'. A
+   * pre-M16.29 gallery stored this as `gallery.size` and is migrated on read. */
   cardSize?: CardSize;
   /** Board card preview block; omitted = 'none'. */
   cardPreview?: CardPreview;
