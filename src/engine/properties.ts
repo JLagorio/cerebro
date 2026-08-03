@@ -128,8 +128,20 @@ export interface PropertyKindMeta {
   groupable: boolean;
   /** Values have a total order, so a view can sort by this field. */
   orderable: boolean;
-  /** Values are numbers, so a column of them can be summed and averaged
-   * (M16.15 — the table's calculation footer). */
+  /** Values are file references, so a card layout can draw one as a cover
+   * (M16.22). Required, not optional, for the same reason `groupable` is: a
+   * kind that forgets to answer would silently never be offered. */
+  media: boolean;
+  /**
+   * Values are numbers, so they can be summed and averaged — the table's
+   * calculation footer (M16.15) and the chart's aggregation (M16.27), which
+   * arrived on separate branches and independently asked for this same flag
+   * rather than each keeping a `Set<FieldKind>`.
+   *
+   * A rollup counts because its own calc decides: a `show` rollup aggregates
+   * to nothing numeric, and the aggregators report that honestly rather than
+   * being prevented from trying.
+   */
   numeric: boolean;
 }
 
@@ -150,6 +162,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   number: {
@@ -159,6 +172,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
     numeric: true,
   },
   select: {
@@ -168,6 +182,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    media: false,
     numeric: false,
   },
   multiselect: {
@@ -178,6 +193,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    media: false,
     numeric: false,
   },
   status: {
@@ -187,6 +203,7 @@ const KIND_META = {
     seed: '',
     groupable: true,
     orderable: true,
+    media: false,
     numeric: false,
   },
   date: {
@@ -196,6 +213,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   daterange: {
@@ -206,6 +224,7 @@ const KIND_META = {
     legacy: true,
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   person: {
@@ -216,6 +235,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    media: false,
     numeric: false,
   },
   files: {
@@ -226,6 +246,7 @@ const KIND_META = {
     multi: true,
     groupable: false,
     orderable: false,
+    media: true,
     numeric: false,
   },
   checkbox: {
@@ -235,6 +256,7 @@ const KIND_META = {
     seed: false,
     groupable: true,
     orderable: true,
+    media: false,
     numeric: false,
   },
   url: {
@@ -244,6 +266,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   email: {
@@ -253,6 +276,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   phone: {
@@ -262,6 +286,7 @@ const KIND_META = {
     seed: '',
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   relation: {
@@ -272,6 +297,7 @@ const KIND_META = {
     multi: true,
     groupable: true,
     orderable: false,
+    media: false,
     numeric: false,
   },
   rollup: {
@@ -285,6 +311,7 @@ const KIND_META = {
     // rollup asked for a Sum answers with nothing — which is the truth about
     // a column holding no numbers, and cheaper than a second registry of
     // which calculations return which shape.
+    media: false,
     numeric: true,
   },
   created_time: {
@@ -294,6 +321,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
   last_edited_time: {
@@ -303,6 +331,7 @@ const KIND_META = {
     seed: null,
     groupable: false,
     orderable: true,
+    media: false,
     numeric: false,
   },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
@@ -333,6 +362,14 @@ export const GROUPABLE_KINDS: ReadonlySet<FieldKind> = new Set(
 );
 export const ORDERABLE_KINDS: ReadonlySet<FieldKind> = new Set(
   PROPERTY_KINDS.filter((k) => k.orderable).map((k) => k.kind),
+);
+/** Which kinds can supply a gallery card's cover (M16.22). */
+export const MEDIA_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.media).map((k) => k.kind),
+);
+/** Which kinds a chart can sum or average (M16.27). */
+export const NUMERIC_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.numeric).map((k) => k.kind),
 );
 
 // --- Relation and person targets (M16.13b) ---------------------------------
@@ -832,6 +869,37 @@ export function validatePatch(
 const asNumbers = (values: unknown[]): number[] =>
   values.map((v) => (typeof v === 'number' ? v : Number(v))).filter((n) => Number.isFinite(n));
 
+/** The calcs that reduce a list of values to one number. */
+export type NumericCalc = Extract<RollupCalc, 'sum' | 'avg' | 'min' | 'max'>;
+
+/**
+ * Reduce raw property values to one number, or null when none of them is one
+ * (M16.27).
+ *
+ * Extracted from `computeRollup` rather than written a second time for the
+ * chart. A chart that summed its own way would disagree with the rollup column
+ * beside it the first time a value arrived as the string "3" — which is what
+ * frontmatter does with a quoted number — and the two answers would both look
+ * plausible.
+ *
+ * `count` is deliberately absent: it counts RECORDS, not values, and only the
+ * caller knows how many records a bucket holds.
+ */
+export function aggregateNumbers(values: unknown[], calc: NumericCalc): number | null {
+  const nums = asNumbers(values);
+  if (nums.length === 0) return null;
+  switch (calc) {
+    case 'sum':
+      return nums.reduce((a, b) => a + b, 0);
+    case 'avg':
+      return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100;
+    case 'min':
+      return Math.min(...nums);
+    case 'max':
+      return Math.max(...nums);
+  }
+}
+
 /**
  * Aggregate `def.property` across the entries referenced by this entry's
  * `def.relation` field. Returns a display string ('' when unresolvable).
@@ -856,20 +924,17 @@ export function computeRollup(
   switch (calc) {
     case 'show':
       return values.map(String).join(', ');
+    // Sum of nothing-numeric has always reported 0 where the other three
+    // report ''. Preserved verbatim through the extraction rather than
+    // quietly changed — that is a decision about what a rollup says, not a
+    // side effect of sharing the arithmetic with a chart (M16.27).
     case 'sum':
-      return String(asNumbers(values).reduce((a, b) => a + b, 0));
-    case 'avg': {
-      const nums = asNumbers(values);
-      if (nums.length === 0) return '';
-      return String(Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100);
-    }
-    case 'min': {
-      const nums = asNumbers(values);
-      return nums.length === 0 ? '' : String(Math.min(...nums));
-    }
+      return String(aggregateNumbers(values, 'sum') ?? 0);
+    case 'avg':
+    case 'min':
     case 'max': {
-      const nums = asNumbers(values);
-      return nums.length === 0 ? '' : String(Math.max(...nums));
+      const n = aggregateNumbers(values, calc);
+      return n === null ? '' : String(n);
     }
     case 'earliest':
       return values.map(String).sort()[0] ?? '';

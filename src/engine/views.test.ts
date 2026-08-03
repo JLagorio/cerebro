@@ -657,6 +657,163 @@ describe('serializeList', () => {
     });
   });
 
+  /**
+   * The layout-specific settings blocks (M16.22, M16.27). Same contract the
+   * date-axis keys have: a saved gallery or chart reopens as one with its
+   * settings intact, and a layout that configured nothing writes no block at
+   * all — `parseViewType` silently downgrading an unknown kind was this
+   * milestone's bug, and a settings block nobody can read back is the same
+   * failure one level down.
+   */
+  describe('layout settings blocks', () => {
+    const parse = (yaml: string) => presentationOf(parseListYaml('v', yaml));
+
+    it('round-trips cover, size and fit', () => {
+      const def = oneView(
+        {
+          name: 'Assets',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'gallery',
+          group: [],
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [{ field: 'status' }],
+          gallery: { cover: 'artwork', size: 'large', fit: true },
+        },
+      );
+      expect(parseListYaml('g', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('omits the block entirely when the gallery was never configured', () => {
+      const yaml = serializeList(
+        oneView(
+          { name: 'Cards', icon: null, color: null, order: null, source: NO_SOURCE },
+          { type: 'gallery', group: [], sort: [], columns: [] },
+        ),
+      );
+      // The word appears as the LAYOUT (`type: gallery`); what must not be
+      // there is a settings block nobody configured.
+      expect(yaml).not.toMatch(/^\s+gallery:/m);
+    });
+
+    // A hand-edited size that no layout implements would otherwise reach the
+    // grid as an unknown key and index METRICS to undefined.
+    it('drops a card size it does not recognize', () => {
+      expect(
+        parse('presentation:\n  type: gallery\n  gallery:\n    size: enormous\n').gallery,
+      ).toBeUndefined();
+    });
+
+    /**
+     * The chart's settings (M16.27). Note what is NOT here: the X axis, which
+     * is the grouping chain and round-trips as `group` like every other
+     * layout's.
+     */
+    it('round-trips the chart block', () => {
+      const def = oneView(
+        {
+          name: 'Burndown',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'chart',
+          group: [{ field: 'status' }],
+          // Non-empty on purpose: an empty chain is not representable —
+          // parseSortChain restores the default, which predates this and is
+          // not what the chart block is being tested for.
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [],
+          chart: { kind: 'donut', agg: 'sum', value: 'estimate', omitZero: true },
+        },
+      );
+      expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a chart type nothing draws', () => {
+      expect(
+        parse('presentation:\n  type: chart\n  chart:\n    kind: sankey\n').chart,
+      ).toBeUndefined();
+    });
+
+    it('omits the chart block when the view never configured one', () => {
+      const yaml = serializeList(
+        oneView(
+          { name: 'Bars', icon: null, color: null, order: null, source: NO_SOURCE },
+          { type: 'chart', group: [], sort: [], columns: [] },
+        ),
+      );
+      expect(yaml).not.toMatch(/^\s+chart:/m);
+    });
+
+    /**
+     * The dashboard's blocks (M16.28) — a LIST, unlike the other two, so a
+     * malformed member is dropped alone rather than taking the others with it.
+     */
+    it('round-trips a dashboard’s blocks in order', () => {
+      const def = oneView(
+        { name: 'Ops', icon: null, color: null, order: null, source: NO_SOURCE },
+        {
+          type: 'dashboard',
+          group: [],
+          sort: [{ field: 'modifiedAt', dir: 'desc' }],
+          columns: [],
+          dashboard: {
+            blocks: [
+              { id: 'total', kind: 'number', agg: 'sum', value: 'estimate', title: 'Points' },
+              { id: 'grid', kind: 'view', list: 'delivery', collection: 'ops', wide: true },
+              { id: 'count', kind: 'number', agg: 'count' },
+            ],
+          },
+        },
+      );
+      expect(parseListYaml('d', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a view block with no list to point at, keeping its siblings', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: a, kind: view }\n      - { id: b, kind: number, agg: count }\n',
+      );
+      expect(p.dashboard?.blocks).toEqual([{ id: 'b', kind: 'number', agg: 'count' }]);
+    });
+
+    it('makes block ids unique, because a delete addresses one', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: x, kind: number, agg: count }\n      - { id: x, kind: number, agg: count }\n',
+      );
+      expect(p.dashboard?.blocks.map((b) => b.id)).toEqual(['x', 'block-2']);
+    });
+
+    it('forgets a value property the measure cannot use', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: n, kind: number, agg: count, value: estimate }\n',
+      );
+      expect(p.dashboard?.blocks[0]).toEqual({ id: 'n', kind: 'number', agg: 'count' });
+    });
+
+    it('reads an empty dashboard as empty, not as unconfigured', () => {
+      // `blocks: []` is a dashboard someone emptied; absent is one nobody has
+      // touched. Both render the same, but only the first survives a rewrite.
+      expect(
+        parse('presentation:\n  type: dashboard\n  dashboard:\n    blocks: []\n').dashboard,
+      ).toEqual({ blocks: [] });
+      expect(parse('presentation:\n  type: dashboard\n').dashboard).toBeUndefined();
+    });
+
+    it('keeps a cover even when the rest of the block is junk', () => {
+      const p = parse(
+        'presentation:\n  type: gallery\n  gallery:\n    cover: artwork\n    size: 7\n    fit: yes please\n',
+      );
+      expect(p.gallery).toEqual({ cover: 'artwork' });
+    });
+  });
+
   describe('v1 → v2 presentation migration', () => {
     it('lifts groupBy, orderBy, visibleFields, and childrenVia into chains', () => {
       const view = parseListYaml(

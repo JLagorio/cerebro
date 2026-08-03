@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
 import { moveColumnTo, toggleColumn } from '@/engine/columns';
-import { GROUPABLE_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
+import { GROUPABLE_KINDS, MEDIA_KINDS, NUMERIC_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import {
   chainTypes,
@@ -17,11 +18,18 @@ import {
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { PropertyEditor } from '@/views/PropertyEditor';
-import { bandLevels, nestLevels } from '@/engine/types';
+import { measureLabel } from '@/engine/chart';
+import { CARD_SIZES, CHART_AGGS, CHART_KINDS, bandLevels, nestLevels } from '@/engine/types';
 import type {
+  CardSize,
+  ChartAgg,
+  ChartKind,
+  ChartSpec,
   ChipStyle,
   ColumnSpec,
+  DashboardBlock,
   FieldDef,
+  GallerySpec,
   GroupSpec,
   Presentation,
   Schema,
@@ -29,14 +37,18 @@ import type {
   ListDefinition,
   ViewDefinition,
 } from '@/engine/types';
-import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, nextDashboardBlockId } from '@/engine/views';
+import { useVaultStore } from '@/stores/vaultStore';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import {
   VIEW_KINDS,
   axesFor,
   hasDependencies,
   isZoomable,
+  hasBlocks,
+  isCharted,
   needsDate,
+  showsCards,
   showsChips,
 } from '@/views/viewKinds';
 
@@ -57,6 +69,9 @@ type Page =
   | 'sort'
   | 'group'
   | 'axis'
+  | 'cards'
+  | 'chart'
+  | 'blocks'
   | 'list'
   | 'newProperty'
   | 'field';
@@ -64,6 +79,24 @@ type Page =
 // Layout capabilities are declared on the kind now (M16.3). These were two
 // plain Set<string> plus two hardcoded p.type comparisons, so a new kind
 // compiled clean and then silently had no Axis page and no chip section.
+
+const CARD_SIZE_LABEL: Record<CardSize, string> = {
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
+};
+
+const CHART_KIND_LABEL: Record<ChartKind, string> = {
+  bar: 'Bar',
+  line: 'Line',
+  donut: 'Donut',
+};
+
+const CHART_AGG_LABEL: Record<ChartAgg, string> = {
+  count: 'Count of records',
+  sum: 'Sum',
+  avg: 'Average',
+};
 
 const META_SORTS = [
   { value: 'modifiedAt', label: 'Last modified' },
@@ -251,6 +284,39 @@ export function ViewSettingsPanel({
                 label="Date axis"
                 value={p.dateField === undefined ? 'Auto' : humanize(p.dateField)}
                 onClick={() => setPage('axis')}
+              />
+            )}
+
+            {/* M16.22: the gallery's cards — cover, size, fit. Declared on the
+                kind (`cards`), so a future card layout gets this page by
+                saying so rather than by being added to a string set. */}
+            {showsCards(p.type) && (
+              <Row
+                icon="layout-grid"
+                label="Cards"
+                value={CARD_SIZE_LABEL[p.gallery?.size ?? 'medium']}
+                onClick={() => setPage('cards')}
+              />
+            )}
+
+            {/* M16.27: the chart's shape and measure. Its X axis is NOT here —
+                that is the Group row above, which every layout shares. */}
+            {isCharted(p.type) && (
+              <Row
+                icon="chart-column"
+                label="Chart"
+                value={measureLabel(p.chart)}
+                onClick={() => setPage('chart')}
+              />
+            )}
+
+            {/* M16.28: the dashboard's blocks. */}
+            {hasBlocks(p.type) && (
+              <Row
+                icon="layout-dashboard"
+                label="Blocks"
+                value={String(p.dashboard?.blocks.length ?? 0)}
+                onClick={() => setPage('blocks')}
               />
             )}
 
@@ -472,6 +538,18 @@ export function ViewSettingsPanel({
           <AxisPage presentation={p} fields={fields} onChange={setPresentation} />
         )}
 
+        {page === 'cards' && (
+          <CardsPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
+        {page === 'chart' && (
+          <ChartPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
+        {page === 'blocks' && (
+          <BlocksPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
         {page === 'filter' && (
           <FilterBuilder
             filters={view.filters}
@@ -516,6 +594,12 @@ function titleFor(page: Page): string {
       return 'Group';
     case 'axis':
       return 'Date axis';
+    case 'cards':
+      return 'Cards';
+    case 'chart':
+      return 'Chart';
+    case 'blocks':
+      return 'Blocks';
     case 'list':
       return 'This list';
     case 'newProperty':
@@ -825,6 +909,381 @@ function AxisPage({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The gallery's cards (M16.22): what covers one, how wide it is, and whether
+ * a cover is fitted whole or cropped to fill.
+ *
+ * WHICH properties a card shows is not here — that is the Properties page, the
+ * same one the table uses. A gallery-only visibility list would be a second
+ * answer to one question, and switching a view between Table and Gallery would
+ * quietly lose the choice made on the other side.
+ *
+ * Cover candidates come from the kind's `media` flag rather than a
+ * `kind === 'files'` compare, so the day a second file-bearing kind exists it
+ * is offered here without anyone remembering to come back (M16.4's rule).
+ */
+function CardsPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const NONE = '__none__';
+  const gallery = presentation.gallery ?? {};
+  const covers = fields.filter((f) => MEDIA_KINDS.has(f.kind));
+  // Only stored off its default, so an untouched gallery writes no key at all.
+  const patch = (next: GallerySpec) => {
+    const cleaned: GallerySpec = {
+      ...(next.cover !== undefined && next.cover !== '' ? { cover: next.cover } : {}),
+      ...(next.size !== undefined && next.size !== 'medium' ? { size: next.size } : {}),
+      ...(next.fit === true ? { fit: true } : {}),
+    };
+    const { gallery: _drop, ...rest } = presentation;
+    onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, gallery: cleaned });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-1">
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card cover</span>
+        <Select
+          size="sm"
+          value={gallery.cover ?? NONE}
+          options={[
+            { value: NONE, label: 'None' },
+            ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
+          ]}
+          onChange={(e) =>
+            patch({ ...gallery, cover: e.target.value === NONE ? undefined : e.target.value })
+          }
+          width="100%"
+        />
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          {covers.length === 0
+            ? 'No files property on this type yet — add one and it becomes a cover.'
+            : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
+        </p>
+      </div>
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Card size</span>
+        <Select
+          size="sm"
+          value={gallery.size ?? 'medium'}
+          options={CARD_SIZES.map((s) => ({ value: s, label: CARD_SIZE_LABEL[s] }))}
+          onChange={(e) => patch({ ...gallery, size: e.target.value as CardSize })}
+          width="100%"
+        />
+      </div>
+      <div className="border-t border-[var(--n-100)] pt-2">
+        <Switch
+          checked={gallery.fit === true}
+          onChange={(fit) => patch({ ...gallery, fit })}
+          label="Fit media"
+          ariaLabel="Fit media"
+        />
+        <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          Fit the whole cover inside the tile instead of cropping it to fill.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The chart's shape and measure (M16.27).
+ *
+ * Its X AXIS IS ABSENT ON PURPOSE — that is the Group row, the same control
+ * every other layout uses, and duplicating it here would give a chart two
+ * grouping settings that could disagree. The panel says so rather than leaving
+ * the reader hunting for it.
+ *
+ * The properties offered for sum/average come from the `numeric` flag on
+ * KIND_META, not a `kind === 'number'` compare — the rule M16.4 established
+ * and M16.13 applied to grouping and sorting.
+ */
+function ChartPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const NONE = '__none__';
+  const chart = presentation.chart ?? {};
+  const agg: ChartAgg = chart.agg ?? 'count';
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+  const band = bandLevels(presentation.group)[0];
+
+  const patch = (next: ChartSpec) => {
+    const cleaned: ChartSpec = {
+      ...(next.kind !== undefined && next.kind !== 'bar' ? { kind: next.kind } : {}),
+      ...(next.agg !== undefined && next.agg !== 'count' ? { agg: next.agg } : {}),
+      // A value property is meaningless under Count, and keeping it would make
+      // the YAML claim a measure the view does not use.
+      ...(next.agg !== undefined && next.agg !== 'count' && next.value !== undefined
+        ? { value: next.value }
+        : {}),
+      ...(next.omitZero === true ? { omitZero: true } : {}),
+    };
+    const { chart: _drop, ...rest } = presentation;
+    onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, chart: cleaned });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-1">
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Chart type</span>
+        <Select
+          size="sm"
+          value={chart.kind ?? 'bar'}
+          options={CHART_KINDS.map((k) => ({ value: k, label: CHART_KIND_LABEL[k] }))}
+          onChange={(e) => patch({ ...chart, kind: e.target.value as ChartKind })}
+          width="100%"
+        />
+      </div>
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Measure</span>
+        <Select
+          size="sm"
+          value={agg}
+          options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+          onChange={(e) => patch({ ...chart, agg: e.target.value as ChartAgg })}
+          width="100%"
+        />
+      </div>
+      {agg !== 'count' && (
+        <div>
+          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
+            Of property
+          </span>
+          <Select
+            size="sm"
+            value={chart.value ?? NONE}
+            options={[
+              { value: NONE, label: 'Choose a number property…' },
+              ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, value: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+          {numeric.length === 0 && (
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+              This view has no number property to add up.
+            </p>
+          )}
+        </div>
+      )}
+      <div className="border-t border-[var(--n-100)] pt-2">
+        <Switch
+          checked={chart.omitZero === true}
+          onChange={(omitZero) => patch({ ...chart, omitZero })}
+          label="Omit zero values"
+          ariaLabel="Omit zero values"
+        />
+      </div>
+      <p className="m-0 border-t border-[var(--n-100)] pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+        {band === undefined
+          ? 'The bars come from the view’s grouping, and this view has none yet — pick a property under Group.'
+          : `The bars come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The dashboard's blocks (M16.28): add, name, widen, reorder, remove.
+ *
+ * A view block stores a REFERENCE to a saved view — the List's id and folder,
+ * addressed exactly as a selection addresses one — rather than a copy of its
+ * configuration. Editing that List updates every dashboard showing it, which
+ * is the whole reason to point at one instead of building a second view.
+ *
+ * Reordering goes through `useSortableList`, the one drag implementation, so a
+ * block moves from the keyboard like a property row does.
+ */
+function BlocksPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const lists = useVaultStore((s) => s.views);
+  const blocks = presentation.dashboard?.blocks ?? [];
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+
+  const write = (next: DashboardBlock[]) =>
+    onChange(
+      next.length === 0
+        ? ((): Presentation => {
+            const { dashboard: _drop, ...rest } = presentation;
+            return rest;
+          })()
+        : { ...presentation, dashboard: { blocks: next } },
+    );
+  const patch = (id: string, next: Partial<DashboardBlock>) =>
+    write(blocks.map((b) => (b.id === id ? ({ ...b, ...next } as DashboardBlock) : b)));
+
+  const sortable = useSortableList({
+    ids: blocks.map((b) => b.id),
+    onReorder: (id, to) => {
+      const from = blocks.findIndex((b) => b.id === id);
+      if (from === -1) return;
+      const next = blocks.filter((b) => b.id !== id);
+      next.splice(to, 0, blocks[from]);
+      write(next);
+    },
+    labelFor: (id) => blocks.find((b) => b.id === id)?.title ?? id,
+  });
+
+  const addNumber = () =>
+    write([
+      ...blocks,
+      { id: nextDashboardBlockId(blocks), kind: 'number', agg: 'count' } as DashboardBlock,
+    ]);
+  const addView = (value: string) => {
+    const hit = lists.find((l) => `${l.collection ?? ''}::${l.id}` === value);
+    if (hit === undefined) return;
+    write([
+      ...blocks,
+      {
+        id: nextDashboardBlockId(blocks),
+        kind: 'view',
+        list: hit.id,
+        ...(hit.collection !== null ? { collection: hit.collection } : {}),
+      } as DashboardBlock,
+    ]);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>}>
+        {blocks.map((block, i) => (
+          <div
+            key={block.id}
+            data-testid={`block-row-${block.id}`}
+            className={[
+              'mb-1.5 rounded-[8px] border border-[var(--n-200)] p-1.5',
+              sortable.dragging === block.id ? 'opacity-60' : '',
+            ].join(' ')}
+            style={sortable.dropIndicator(i)}
+          >
+            <div className="flex items-center gap-1">
+              <span
+                {...sortable.gripProps(block.id, i)}
+                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)] focus-visible:text-[var(--cortex-600)] focus-visible:outline-none"
+              >
+                <Icon name="grip-vertical" size={12} />
+              </span>
+              <Icon
+                name={block.kind === 'number' ? 'hash' : 'table-2'}
+                size={12}
+                color="var(--n-400)"
+              />
+              <Input
+                size="sm"
+                ariaLabel={`Block ${i + 1} title`}
+                placeholder={block.kind === 'number' ? 'Number' : block.list}
+                value={block.title ?? ''}
+                onChange={(e) =>
+                  patch(block.id, { title: e.target.value === '' ? undefined : e.target.value })
+                }
+                width="100%"
+              />
+              <IconButton
+                icon="trash-2"
+                label={`Remove block ${i + 1}`}
+                size="sm"
+                onClick={() => write(blocks.filter((b) => b.id !== block.id))}
+              />
+            </div>
+            {block.kind === 'number' && (
+              <div className="mt-1.5 flex items-center gap-1.5 pl-5">
+                <Select
+                  size="sm"
+                  value={block.agg}
+                  options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+                  onChange={(e) => patch(block.id, { agg: e.target.value as ChartAgg })}
+                  width="100%"
+                />
+                {block.agg !== 'count' && (
+                  <Select
+                    size="sm"
+                    value={block.value ?? ''}
+                    options={[
+                      { value: '', label: 'Property…' },
+                      ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
+                    ]}
+                    onChange={(e) =>
+                      patch(block.id, {
+                        value: e.target.value === '' ? undefined : e.target.value,
+                      })
+                    }
+                    width="100%"
+                  />
+                )}
+              </div>
+            )}
+            <div className="mt-1.5 pl-5">
+              <Switch
+                checked={block.wide === true}
+                onChange={(wide) => patch(block.id, { wide: wide ? true : undefined })}
+                label="Full width"
+                ariaLabel={`Block ${i + 1} full width`}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        data-testid="add-number-block"
+        onClick={addNumber}
+        className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-600)] hover:bg-[var(--n-50)]"
+      >
+        <Icon name="hash" size={13} />
+        Add a number
+      </button>
+      {lists.length > 0 ? (
+        <Select
+          size="sm"
+          value={ADD}
+          options={[
+            { value: ADD, label: 'Add a saved view…' },
+            ...lists.map((l) => ({
+              value: `${l.collection ?? ''}::${l.id}`,
+              label: l.definition.name,
+            })),
+          ]}
+          onChange={(e) => {
+            if (e.target.value !== ADD) addView(e.target.value);
+          }}
+          width="100%"
+        />
+      ) : (
+        <p className="m-0 px-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+          There are no saved lists in the vault to embed yet.
+        </p>
+      )}
+
+      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+        A number measures this view’s own records, so its filters apply. A saved view is shown as it
+        is configured where it lives.
+      </p>
     </div>
   );
 }

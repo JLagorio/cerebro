@@ -4,15 +4,19 @@ import type { Zoom } from '@/engine/schedule';
 import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
 import { BoardView } from '@/views/BoardView';
 import { CalendarView } from '@/views/CalendarView';
+import { ChartView } from '@/views/ChartView';
+import { DashboardView } from '@/views/DashboardView';
+import { GalleryView } from '@/views/GalleryView';
 import { GanttView } from '@/views/GanttView';
 import { ListView } from '@/views/ListView';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
 import { buildRows, entryRows } from '@/engine/rows';
+import { hasBlocks } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
- * The canvas: renders whichever of the six views a presentation names (M10).
+ * The canvas: renders whichever view kind a presentation names (M10).
  *
  * This switch existed three times — CollectionPage, ProjectPage, and TypePage
  * each had their own copy — and they had already diverged: only CollectionPage
@@ -49,6 +53,15 @@ export interface ViewCanvasProps {
   onFilterField?: (field: string) => void;
   /** Overridable "today" for deterministic tests. */
   today?: string;
+  /**
+   * This canvas is a dashboard BLOCK, not the page (M16.28).
+   *
+   * The only thing it changes is the detail-panel sibling registration: four
+   * blocks each announcing "these are the records on screen" would fight over
+   * one global, and the last one mounted would win. The page-level canvas
+   * keeps owning that; a block renders its rows and stays quiet.
+   */
+  embedded?: boolean;
 }
 
 export function ViewCanvas({
@@ -69,9 +82,10 @@ export function ViewCanvas({
   onZoomChange,
   onFilterField,
   today,
+  embedded = false,
 }: ViewCanvasProps): React.ReactElement {
   // M16.11: the detail panel steps through the records THIS canvas is
-  // showing, in the order it shows them. One registration for all six views.
+  // showing, in the order it shows them. One registration for every kind.
   //
   // `entries` is filtered and sorted but NOT grouped or nested, and reading
   // it directly numbered a record "6 of 45" while it sat third on screen.
@@ -86,9 +100,14 @@ export function ViewCanvas({
         .join('\n'),
     [entries, presentation.group, schema, allEntries],
   );
+  // A dashboard shows no records of ITS OWN — each block shows a different
+  // set — so "the records on screen" has no single answer and the panel gets
+  // none rather than a plausible wrong one (M16.28).
+  const composed = hasBlocks(presentation.type);
   useEffect(() => {
-    setDetailSiblings(key === '' ? [] : key.split('\n'));
-  }, [key, setDetailSiblings]);
+    if (embedded) return;
+    setDetailSiblings(key === '' || composed ? [] : key.split('\n'));
+  }, [key, setDetailSiblings, embedded, composed]);
 
   // The return type is the exhaustiveness check (M16.3). Without it, and with
   // no `default` below and no `noImplicitReturns` in tsconfig, adding a
@@ -159,6 +178,27 @@ export function ViewCanvas({
           scope={scope}
           onZoomChange={onZoomChange}
           {...(today !== undefined ? { today } : {})}
+        />
+      );
+    case 'dashboard':
+      return <DashboardView entries={entries} presentation={presentation} schema={schema} />;
+    case 'chart':
+      return (
+        <ChartView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          filtered={filtered}
+        />
+      );
+    case 'gallery':
+      return (
+        <GalleryView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          scope={scope}
+          filtered={filtered}
         />
       );
     case 'list':

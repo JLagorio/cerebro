@@ -4,9 +4,12 @@ import {
   VIEW_KINDS,
   VIEW_SEGMENTS,
   axesFor,
+  hasBlocks,
   hasDependencies,
+  isCharted,
   isZoomable,
   needsDate,
+  showsCards,
   showsChips,
   viewKind,
 } from '@/views/viewKinds';
@@ -57,7 +60,32 @@ describe('view kind registration', () => {
       expect(isZoomable(kind.value)).toBe(kind.zoomable === true);
       expect(hasDependencies(kind.value)).toBe(kind.dependencies === true);
       expect(showsChips(kind.value)).toBe(kind.chips === true);
+      expect(showsCards(kind.value)).toBe(kind.cards === true);
+      expect(isCharted(kind.value)).toBe(kind.charted === true);
+      expect(hasBlocks(kind.value)).toBe(kind.blocks === true);
       expect(axesFor(kind.value).group).toBe(kind.groupable === true);
+    }
+  });
+
+  // The dashboard embeds saved views (M16.28), and `hasBlocks` is what stops
+  // one embedding another. A kind that is both composed of blocks AND
+  // something a block can show is an infinite nest.
+  it('keeps a block-composed kind out of the settings a record layout owns', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.blocks !== true) continue;
+      expect(kind.groupable).toBeUndefined();
+      expect(kind.dated).toBeUndefined();
+      expect(kind.cards).toBeUndefined();
+      expect(kind.charted).toBeUndefined();
+    }
+  });
+
+  // A chart's X axis IS its grouping chain (M16.27) — a charted kind that
+  // could not group would have no axis and would render an empty state
+  // nobody could clear.
+  it('only lets a charted kind exist if it can group', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.charted === true) expect(kind.groupable).toBe(true);
     }
   });
 

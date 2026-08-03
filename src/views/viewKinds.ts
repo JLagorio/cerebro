@@ -28,6 +28,14 @@ export interface ViewKind {
   zoomable?: boolean;
   /** Draws dependency arrows between bars. */
   dependencies?: boolean;
+  /** Draws records as cards, so it gets the Cards settings page (M16.22). */
+  cards?: boolean;
+  /** Draws an aggregation rather than records, so it gets the Chart page
+   * (M16.27). Its X axis is the grouping chain, hence `groupable` too. */
+  charted?: boolean;
+  /** Composed of blocks rather than records, so it gets the Blocks page
+   * (M16.28). It renders other views, so it cannot itself be one of them. */
+  blocks?: boolean;
 }
 
 /**
@@ -57,6 +65,29 @@ const CAPABILITIES = {
     dated: true,
     groupable: true,
     zoomable: true,
+  },
+  gallery: {
+    label: 'Gallery',
+    icon: 'layout-grid',
+    groupable: true,
+    chips: true,
+    cards: true,
+  },
+  chart: {
+    label: 'Chart',
+    icon: 'chart-column',
+    // The grouping chain IS the X axis, so the Group control configures the
+    // chart and there is no second "group by" to drift from it.
+    groupable: true,
+    charted: true,
+  },
+  dashboard: {
+    label: 'Dashboard',
+    icon: 'layout-dashboard',
+    // Deliberately not groupable: a dashboard shows blocks, and each block
+    // brings its own view with its own grouping. A Group control here would
+    // be a control that changes nothing — the calendar's bug (M16.3).
+    blocks: true,
   },
 } satisfies Record<ViewType, Omit<ViewKind, 'value'>>;
 
@@ -93,6 +124,29 @@ export function hasDependencies(type: ViewType): boolean {
 
 export function showsChips(type: ViewType): boolean {
   return viewKind(type).chips === true;
+}
+
+/** True for the layouts that draw records as cards (M16.22). */
+export function showsCards(type: ViewType): boolean {
+  return viewKind(type).cards === true;
+}
+
+/** True for the layouts that draw an aggregation rather than records (M16.27). */
+export function isCharted(type: ViewType): boolean {
+  return viewKind(type).charted === true;
+}
+
+/**
+ * True for the layouts composed of blocks (M16.28).
+ *
+ * Also the recursion guard: a dashboard embeds saved views, and a block
+ * pointing at another dashboard would nest until the stack ran out. Asking the
+ * kind — rather than comparing to the string 'dashboard' at the one call site
+ * that noticed — means a second block-composed kind is caught by the same
+ * check on the day it exists.
+ */
+export function hasBlocks(type: ViewType): boolean {
+  return viewKind(type).blocks === true;
 }
 
 /**

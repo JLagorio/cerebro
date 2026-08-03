@@ -250,15 +250,18 @@ export interface ColumnSpec {
 }
 
 /**
- * The six record views (M10). Mutually exclusive — a collection shows one at a
- * time, chosen from the toolbar.
+ * The record views (M10, extended M16.22/.27/.28). Mutually exclusive — a
+ * collection shows one at a time, chosen from the open tab's layout picker.
  *
- * - `table`    — spreadsheet grid with inline-editable cells (M3.4)
- * - `list`     — banded rows
- * - `board`    — kanban columns from the first band level
- * - `calendar` — month grid, records on their date
- * - `timeline` — records as bars on a horizontal date axis
- * - `gantt`    — timeline plus scheduling: nested WBS rows, dependency arrows
+ * - `table`     — spreadsheet grid with inline-editable cells (M3.4)
+ * - `list`      — banded rows
+ * - `board`     — kanban columns from the first band level
+ * - `calendar`  — month grid, records on their date
+ * - `timeline`  — records as bars on a horizontal date axis
+ * - `gantt`     — timeline plus scheduling: nested WBS rows, dependency arrows
+ * - `gallery`   — a card grid, cards optionally covered by a files property
+ * - `chart`     — bar/line/donut over an aggregation of the same rows
+ * - `dashboard` — a grid of blocks: saved views and single numbers
  *
  * Two kinds were REMOVED here, and both for the same reason — they were views
  * whose only job was something another axis already does:
@@ -277,7 +280,17 @@ export interface ColumnSpec {
  * `parseViewType` silently downgrade every saved file of the new kind to
  * `list`, losing the layout with no error anywhere.
  */
-export const VIEW_TYPES = ['table', 'list', 'board', 'calendar', 'gantt', 'timeline'] as const;
+export const VIEW_TYPES = [
+  'table',
+  'list',
+  'board',
+  'calendar',
+  'gantt',
+  'timeline',
+  'gallery',
+  'chart',
+  'dashboard',
+] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
 
@@ -292,6 +305,108 @@ export type ViewType = (typeof VIEW_TYPES)[number];
  * when a field can point at more than one type.
  */
 export type ChipStyle = 'plain' | 'type-icon';
+
+/** How wide a gallery card is — a named step, not a pixel count, so the grid
+ * stays responsive and two vaults agree on what "medium" looks like. */
+export const CARD_SIZES = ['small', 'medium', 'large'] as const;
+export type CardSize = (typeof CARD_SIZES)[number];
+
+/**
+ * The gallery's card settings (M16.22).
+ *
+ * Which PROPERTIES a card shows is not here: that is `columns`, the same list
+ * every other layout reads and the same Properties page configures. A second
+ * per-card visibility list would be a second answer to one question, and
+ * switching a view from Table to Gallery would lose the columns you chose.
+ */
+export interface GallerySpec {
+  /**
+   * Files property whose first value covers the card. Absent = no cover, which
+   * is the default: a cover is a choice, and guessing one would silently
+   * promote whatever attachment happened to be first.
+   */
+  cover?: string;
+  /** Absent = 'medium'. */
+  size?: CardSize;
+  /** True = the cover is fitted whole inside the tile; absent/false = cropped
+   * to fill it. Notion's "Fit media", same default (off). */
+  fit?: boolean;
+}
+
+export const CHART_KINDS = ['bar', 'line', 'donut'] as const;
+export type ChartKind = (typeof CHART_KINDS)[number];
+
+/**
+ * What a chart's Y axis measures. A SUBSET of RollupCalc, not a new
+ * vocabulary: the rollup column and the chart run the same arithmetic
+ * (`aggregateNumbers`), so they must not disagree about what "average" means.
+ */
+export const CHART_AGGS = ['count', 'sum', 'avg'] as const;
+export type ChartAgg = Extract<RollupCalc, (typeof CHART_AGGS)[number]>;
+
+/**
+ * The chart's own settings (M16.27).
+ *
+ * Its X AXIS IS NOT HERE — that is `group`, the same grouping chain every
+ * other layout reads, and its first band level is the axis. The chart is
+ * therefore configured by the Group control the toolbar already has, a saved
+ * board re-opened as a chart charts what the board was banded by, and there is
+ * no second "group by" for the two to drift apart on.
+ */
+export interface ChartSpec {
+  /** Absent = 'bar'. */
+  kind?: ChartKind;
+  /** Absent = 'count' — the one measure that needs no property configured. */
+  agg?: ChartAgg;
+  /** The property summed or averaged. Unread when the measure is count. */
+  value?: string;
+  /** Drop bands that measure zero. Notion's "Omit zero values". */
+  omitZero?: boolean;
+}
+
+/**
+ * One block of a dashboard (M16.28).
+ *
+ * Two kinds, and they read different data on purpose:
+ *
+ * - `view` embeds a SAVED VIEW from the vault — a List and one of its tabs,
+ *   addressed the way a selection addresses one. That is what makes a
+ *   dashboard worth having: widgets spanning several sources, which is
+ *   Notion's model too. It carries the reference, never a copy of the view's
+ *   configuration; editing the List updates every dashboard showing it.
+ * - `number` measures the DASHBOARD'S OWN rows, so the dashboard's filters
+ *   scope it. A number block that ignored them would be a constant.
+ */
+export type DashboardBlock =
+  | {
+      /** Unique within the dashboard; what a reorder and a delete address. */
+      id: string;
+      kind: 'view';
+      /** List id. Ids are unique per folder, hence `collection` beside it. */
+      list: string;
+      collection?: string | null;
+      /** Which of the List's tabs; absent = its first. */
+      view?: string;
+      /** Overrides the List's own name in the block header. */
+      title?: string;
+      /** Spans both columns. Absent = one. */
+      wide?: boolean;
+    }
+  | {
+      id: string;
+      kind: 'number';
+      agg: ChartAgg;
+      /** Property summed or averaged. Unread when the measure is count. */
+      value?: string;
+      title?: string;
+      wide?: boolean;
+    };
+
+export interface DashboardSpec {
+  /** In render order. Never absent — a dashboard with no blocks is [] and
+   * says so, rather than being indistinguishable from an unparsed one. */
+  blocks: DashboardBlock[];
+}
 
 export interface Presentation {
   type: ViewType;
@@ -337,6 +452,12 @@ export interface Presentation {
    * guess here draws a schedule that isn't the one the data states.
    */
   dependencyField?: string;
+  /** Gallery card settings (M16.22). Absent = every default. */
+  gallery?: GallerySpec;
+  /** Chart settings (M16.27). Absent = a bar chart counting records. */
+  chart?: ChartSpec;
+  /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
+  dashboard?: DashboardSpec;
 }
 
 /**
