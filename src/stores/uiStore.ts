@@ -242,6 +242,7 @@ const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
 const SIDEBAR_COLLAPSED_KEY = 'cerebro.sidebarCollapsed';
+const COLLAPSED_KEY = 'cerebro.collapsed';
 
 /**
  * Panel sizing (M11).
@@ -285,6 +286,36 @@ function loadExpanded(): Record<string, boolean> {
     const raw = window.localStorage.getItem(EXPANDED_KEY);
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
     return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Collapsed bands and tree rows, scope → key → true (M16.21).
+ *
+ * Only COLLAPSED entries are stored — `toggleCollapsed` deletes the key on
+ * the way back open rather than writing `false`. Absent already means
+ * expanded everywhere that reads this, and a map that accumulated a `false`
+ * for every band anyone ever touched would grow without bound in
+ * localStorage while meaning nothing.
+ */
+function loadCollapsed(): Record<string, Record<string, boolean>> {
+  try {
+    // window.localStorage explicitly, for the same reason loadExpanded does.
+    const raw = window.localStorage.getItem(COLLAPSED_KEY);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, Record<string, boolean>> = {};
+    for (const [scope, band] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof band !== 'object' || band === null || Array.isArray(band)) continue;
+      out[scope] = Object.fromEntries(
+        Object.entries(band as Record<string, unknown>).filter(
+          (pair): pair is [string, boolean] => pair[1] === true,
+        ),
+      );
+    }
+    return out;
   } catch {
     return {};
   }
@@ -476,11 +507,21 @@ export const useUiStore = create<UiState>((set, get) => ({
   openDiff: (path, commit = null) => set({ diffView: { path, commit } }),
   closeDiff: () => set({ diffView: null }),
 
-  collapsed: {},
+  // M16.21: persisted. It was the one member of this store's collapse family
+  // that was not — `expandedFolders`, `docPagesOpen`, `typesOpen` and the
+  // sidebar all write themselves back — so a list's bands sprang open on every
+  // reload and a deep nesting had to be re-collapsed each session.
+  collapsed: loadCollapsed(),
   toggleCollapsed: (scope, key) =>
     set((s) => {
-      const band = s.collapsed[scope] ?? {};
-      return { collapsed: { ...s.collapsed, [scope]: { ...band, [key]: band[key] !== true } } };
+      const band = { ...(s.collapsed[scope] ?? {}) };
+      // Delete rather than store false: absent already means expanded, and a
+      // false per band ever touched would grow this map for no information.
+      if (band[key] === true) delete band[key];
+      else band[key] = true;
+      const next = { ...s.collapsed, [scope]: band };
+      storeString(COLLAPSED_KEY, JSON.stringify(next));
+      return { collapsed: next };
     }),
   isCollapsed: (scope, key) => get().collapsed[scope]?.[key] === true,
 
