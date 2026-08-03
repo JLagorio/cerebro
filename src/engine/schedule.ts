@@ -7,7 +7,7 @@ import {
   toIsoDate,
 } from './dates';
 import { resolveTarget } from './wikilink';
-import type { Entry, FieldKind, Presentation } from './types';
+import type { Entry, FieldKind, Presentation, Schema } from './types';
 
 /**
  * Placing records on a date axis (M10) — the one engine behind Calendar,
@@ -373,6 +373,16 @@ export const ZOOM_LABELS: { value: Zoom; label: string }[] = [
   { value: 'quarter', label: 'Quarter' },
 ];
 
+/**
+ * What an unconfigured timeline or gantt opens at.
+ *
+ * ONE default, because there were three disagreeing (M16.24): TimelineView
+ * defaulted to `week`, GanttView to `month`, and the settings panel rendered
+ * `?? 'week'` for both — so a gantt nobody had configured showed a scale its
+ * own Zoom control denied it was on.
+ */
+export const DEFAULT_ZOOM: Zoom = 'week';
+
 export interface AxisTick {
   iso: string;
   label: string;
@@ -388,6 +398,21 @@ export interface AxisTick {
  */
 const PAD_DAYS: Record<Zoom, number> = { day: 3, week: 7, month: 21, quarter: 60 };
 
+/** First day of the calendar quarter `iso` falls in. */
+export function quarterStart(iso: string): string {
+  const month = fromIsoDate(iso).getMonth();
+  return addMonths(iso, -(month % 3));
+}
+
+export function quarterEnd(iso: string): string {
+  return monthEnd(addMonths(quarterStart(iso), 2));
+}
+
+/** e.g. "Q3 2026". */
+export function quarterLabel(iso: string): string {
+  return `Q${Math.floor(fromIsoDate(iso).getMonth() / 3) + 1} ${iso.slice(0, 4)}`;
+}
+
 /** The axis span for a data range: padded, and snapped outward to whole units. */
 export function axisSpan(data: Span | null, zoom: Zoom, today: string): Span {
   // Nothing dated yet — still draw an axis, centred on today, so the view
@@ -397,6 +422,10 @@ export function axisSpan(data: Span | null, zoom: Zoom, today: string): Span {
   const start = addDays(base.start, -pad);
   const end = addDays(base.end, pad);
   if (zoom === 'day' || zoom === 'week') return { start, end };
+  // Quarter zoom snaps to whole QUARTERS, not whole months: its ticks are
+  // quarters, and an axis beginning mid-quarter opens on a stub cell labelled
+  // for three months that are not all on it.
+  if (zoom === 'quarter') return { start: quarterStart(start), end: quarterEnd(end) };
   return { start: monthStart(start), end: monthEnd(end) };
 }
 
@@ -417,39 +446,110 @@ export function axisTicks(span: Span, zoom: Zoom): AxisTick[] {
     return ticks;
   }
 
+  // Days of a unit that are actually ON the axis. Both ends have to clamp: a
+  // `Math.min` of the two one-sided counts (the pre-M16.24 version) over-counts
+  // a unit clipped at BOTH ends, and the header then draws wider than the axis
+  // it heads.
+  const visibleDayCount = (from: string, to: string) => {
+    const start = from < span.start ? span.start : from;
+    const end = to > span.end ? span.end : to;
+    return end < start ? 0 : dayCount({ start, end });
+  };
+
   if (zoom === 'week') {
     // Start on the Monday at or before the span start so weeks line up.
     const first = fromIsoDate(span.start);
     let cursor = addDays(span.start, -((first.getDay() + 6) % 7));
     while (cursor <= span.end) {
       const next = addDays(cursor, 7);
-      const visible = { start: cursor < span.start ? span.start : cursor, end: addDays(next, -1) };
       ticks.push({
         iso: cursor,
         label: `${MONTHS[fromIsoDate(cursor).getMonth()].slice(0, 3)} ${fromIsoDate(cursor).getDate()}`,
         major: fromIsoDate(cursor).getDate() <= 7,
-        days: Math.min(dayCount(visible), dayCount({ start: cursor, end: span.end })),
+        days: visibleDayCount(cursor, addDays(next, -1)),
       });
       cursor = next;
     }
     return ticks;
   }
 
-  // month and quarter both tick monthly; they differ in what reads as major
-  // and in how much room a month gets.
+  // Quarter zoom ticks QUARTERLY. It used to tick monthly and blank the label
+  // on two months in three, so two thirds of the header was empty cells and
+  // the third that was labelled said "Jul" over a column three months wide.
+  if (zoom === 'quarter') {
+    let cursor = quarterStart(span.start);
+    while (cursor <= span.end) {
+      ticks.push({
+        iso: cursor,
+        label: quarterLabel(cursor),
+        major: fromIsoDate(cursor).getMonth() === 0,
+        days: visibleDayCount(cursor, quarterEnd(cursor)),
+      });
+      cursor = addMonths(cursor, 3);
+    }
+    return ticks;
+  }
+
   let cursor = monthStart(span.start);
   while (cursor <= span.end) {
-    const monthLast = monthEnd(cursor);
-    const label = MONTHS[fromIsoDate(cursor).getMonth()].slice(0, 3);
     ticks.push({
       iso: cursor,
-      label: zoom === 'quarter' && fromIsoDate(cursor).getMonth() % 3 !== 0 ? '' : label,
-      major: fromIsoDate(cursor).getMonth() % (zoom === 'quarter' ? 3 : 12) === 0,
-      days: dayCount({ start: cursor, end: monthLast < span.end ? monthLast : span.end }),
+      label: MONTHS[fromIsoDate(cursor).getMonth()].slice(0, 3),
+      major: fromIsoDate(cursor).getMonth() === 0,
+      days: visibleDayCount(cursor, monthEnd(cursor)),
     });
     cursor = addMonths(cursor, 1);
   }
   return ticks;
+}
+
+/**
+ * The date at the middle of the scrolled viewport, and the scroll offset that
+ * puts a date back there.
+ *
+ * Zoom used to leave `scrollLeft` alone, so changing the scale teleported you:
+ * the same pixel offset means a different date at every zoom, and coming out
+ * of Quarter you landed years away from what you were reading. `gutter` is the
+ * table half, which is sticky and does not scroll with the axis.
+ */
+export function dateAtCentre(
+  axis: Span,
+  zoom: Zoom,
+  scrollLeft: number,
+  viewport: number,
+  gutter: number,
+): string {
+  const px = scrollLeft + viewport / 2 - gutter;
+  const day = Math.round(px / PX_PER_DAY[zoom]);
+  const clamped = Math.min(Math.max(day, 0), dayCount(axis) - 1);
+  return addDays(axis.start, clamped);
+}
+
+export function scrollToCentre(
+  axis: Span,
+  zoom: Zoom,
+  iso: string,
+  viewport: number,
+  gutter: number,
+): number {
+  const left = gutter + dayOffset(axis, iso) * PX_PER_DAY[zoom] - viewport / 2;
+  return Math.max(0, Math.round(left));
+}
+
+/**
+ * Which shape a reschedule writes back into.
+ *
+ * The declared kind decides, because the schema is what the next read
+ * validates against. An UNDECLARED field keeps whatever shape is already on
+ * disk instead of being normalised to a scalar — a hand-written `{start, end}`
+ * that nothing declares is still a range, and flattening it on a drag would
+ * delete the end date as a side effect of moving the record by a day.
+ */
+export function dateKindOf(entry: Entry, field: string, schema: Schema): 'date' | 'daterange' {
+  const declared = schema.resolveField(entry, field).def?.kind;
+  if (declared === 'date' || declared === 'daterange') return declared;
+  const raw: unknown = entry.properties[field];
+  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? 'daterange' : 'date';
 }
 
 /** Left offset and width in px for a record's bar on the axis. */

@@ -648,6 +648,31 @@ describe('serializeList', () => {
       expect(yaml).not.toContain('weekStart');
     });
 
+    it('round-trips showTable BOTH ways', () => {
+      // Unlike the rest it has no single default — a gantt shows its table and
+      // a timeline does not — so `false` has to survive as `false` rather than
+      // being written off as "the default, omit it".
+      for (const showTable of [true, false]) {
+        const def = oneView(
+          {
+            name: 'Schedule',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: 'Work item', project: null },
+          },
+          {
+            type: 'timeline',
+            group: [],
+            sort: [{ field: 'due', dir: 'asc' }],
+            columns: [],
+            showTable,
+          },
+        );
+        expect(parseListYaml('s', serializeList(def)).definition).toEqual(def);
+      }
+    });
+
     it('ignores grid settings it does not recognize', () => {
       const p = parse(
         'presentation:\n  type: calendar\n  calendarSpan: fortnight\n  weekStart: tuesday\n',

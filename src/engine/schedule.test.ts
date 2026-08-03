@@ -4,7 +4,9 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  dateAtCentre,
   dateFieldOptions,
+  dateKindOf,
   dayCount,
   dayOffset,
   dependenciesOf,
@@ -18,10 +20,14 @@ import {
   onDay,
   overlaps,
   packWeek,
+  quarterEnd,
+  quarterLabel,
+  quarterStart,
   PX_PER_DAY,
   rescheduleValue,
   resizeSpan,
   resolveDateField,
+  scrollToCentre,
   shiftSpan,
   spanBounds,
   spanOf,
@@ -32,8 +38,9 @@ import {
   weekStartIndex,
   weekdayLabels,
 } from './schedule';
+import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
-import type { FieldKind, Presentation } from './types';
+import type { Entry, FieldKind, Presentation } from './types';
 
 /** Minimal presentation — only the axis keys matter here. */
 const pres = (patch: Partial<Presentation> = {}): Presentation => ({
@@ -423,6 +430,68 @@ describe('reschedule', () => {
       '2026-08-12',
     );
   });
+
+  it('takes the write shape from the schema, not from the value it finds', () => {
+    const schema = buildSchema([
+      makeEntry({
+        path: 'types/campaign.md',
+        title: 'Campaign',
+        type: 'Type',
+        properties: {
+          fields: { due: { kind: 'date' }, window: { kind: 'daterange' } },
+        } as unknown as Entry['properties'],
+      }),
+    ]);
+    const e = makeEntry({ type: 'Campaign', properties: { due: '2026-08-01' } });
+    expect(dateKindOf(e, 'due', schema)).toBe('date');
+    expect(dateKindOf(e, 'window', schema)).toBe('daterange');
+  });
+
+  it('keeps an UNDECLARED field in the shape already on disk', () => {
+    // Flattening a hand-written `{start, end}` nothing declares would delete
+    // the end date as a side effect of moving the record by a day.
+    const schema = buildSchema([]);
+    const ranged = makeEntry({ properties: { w: { start: '2026-08-01', end: '2026-08-04' } } });
+    const scalar = makeEntry({ properties: { w: '2026-08-01' } });
+    expect(dateKindOf(ranged, 'w', schema)).toBe('daterange');
+    expect(dateKindOf(scalar, 'w', schema)).toBe('date');
+  });
+});
+
+/**
+ * Zoom scroll anchoring (M16.24). Changing the scale used to leave scrollLeft
+ * alone, and the same pixel offset is a different date at every zoom — so
+ * coming out of Quarter dropped you years from what you were reading.
+ */
+describe('zoom anchoring', () => {
+  const axis = { start: '2026-01-01', end: '2026-12-31' };
+
+  it('reads the date at the middle of the viewport, past the sticky table', () => {
+    // 300px of table, a 1000px viewport, scrolled 0: the middle of the CHART
+    // is 200px in, which at 34px a day is day 6.
+    expect(dateAtCentre(axis, 'day', 0, 1000, 300)).toBe('2026-01-07');
+    expect(dateAtCentre(axis, 'day', 34 * 10, 1000, 300)).toBe('2026-01-17');
+  });
+
+  it('clamps to the axis instead of naming a date that is not on it', () => {
+    expect(dateAtCentre(axis, 'day', 0, 100, 300)).toBe('2026-01-01');
+    expect(dateAtCentre(axis, 'day', 999_999, 100, 0)).toBe('2026-12-31');
+  });
+
+  it('round-trips a date through a zoom change', () => {
+    // The whole contract: what was in the middle at Day is in the middle at
+    // Quarter. 34px/day out to day 200, so nothing is up against either end.
+    const iso = dateAtCentre(axis, 'day', 34 * 200, 1000, 300);
+    const back = scrollToCentre(axis, 'quarter', iso, 1000, 300);
+    expect(dateAtCentre(axis, 'quarter', back, 1000, 300)).toBe(iso);
+  });
+
+  it('never scrolls to a negative offset', () => {
+    // Zooming out near the start of the axis cannot centre the date — there
+    // is no scroll left of zero — so it settles at the beginning.
+    expect(scrollToCentre(axis, 'day', '2026-01-01', 1000, 0)).toBe(0);
+    expect(scrollToCentre(axis, 'quarter', '2026-02-16', 1000, 300)).toBe(0);
+  });
 });
 
 describe('horizontal axis', () => {
@@ -467,14 +536,36 @@ describe('horizontal axis', () => {
 
   it('clips the first and last tick to the axis rather than overhanging it', () => {
     const ticks = axisTicks({ start: '2026-07-15', end: '2026-08-10' }, 'month');
-    expect(ticks[0].days).toBe(31); // Jul 1 → Jul 31, the month's own width
+    // Both ends clamp (M16.24). The first tick used to claim the month's full
+    // 31 days on an axis that starts on the 15th, and a header cell wider than
+    // the days under it pushes every later tick off the grid lines it heads.
+    expect(ticks[0].days).toBe(17); // Jul 15 → Jul 31, the part that is on
     expect(ticks[1].days).toBe(10); // Aug 1 → Aug 10, clipped at the axis end
   });
 
-  it('labels only quarter starts at quarter zoom, where months would collide', () => {
+  it('clamps a unit clipped at BOTH ends to the days actually on the axis', () => {
+    // Wed → Thu inside one week. The old `Math.min` of two one-sided counts
+    // gave 4 (Mon → Thu) for a two-day axis.
+    const ticks = axisTicks({ start: '2026-08-12', end: '2026-08-13' }, 'week');
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0].days).toBe(2);
+  });
+
+  it('ticks by quarter at quarter zoom, not by month with the labels blanked', () => {
     const ticks = axisTicks({ start: '2026-01-01', end: '2026-06-30' }, 'quarter');
-    expect(ticks.map((t) => t.label)).toEqual(['Jan', '', '', 'Apr', '', '']);
-    expect(ticks.filter((t) => t.major).map((t) => t.iso)).toEqual(['2026-01-01', '2026-04-01']);
+    expect(ticks.map((t) => t.label)).toEqual(['Q1 2026', 'Q2 2026']);
+    expect(ticks.map((t) => t.days)).toEqual([90, 91]);
+    // The year boundary is the major rule at this scale; every quarter being
+    // major is the same as none of them being.
+    expect(ticks.filter((t) => t.major).map((t) => t.iso)).toEqual(['2026-01-01']);
+  });
+
+  it('snaps a quarter axis to whole quarters so it never opens on a stub', () => {
+    const span = axisSpan({ start: '2026-05-10', end: '2026-05-20' }, 'quarter', '2026-05-15');
+    expect(span).toEqual({ start: '2026-01-01', end: '2026-09-30' });
+    expect(quarterStart('2026-05-10')).toBe('2026-04-01');
+    expect(quarterEnd('2026-05-10')).toBe('2026-06-30');
+    expect(quarterLabel('2026-11-02')).toBe('Q4 2026');
   });
 
   it('positions a bar by day offset and inclusive width', () => {

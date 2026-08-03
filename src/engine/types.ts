@@ -329,6 +329,12 @@ export interface Presentation {
    * by hand, and `weekStart: 1` is a number you have to know the convention for.
    */
   weekStart?: 'sunday' | 'monday';
+  /**
+   * Whether a timeline/gantt draws its rows as a table beside the axis
+   * (M16.24). Omitted takes the layout's own default — a work breakdown is the
+   * point of a gantt, and optional chrome on a timeline.
+   */
+  showTable?: boolean;
 }
 
 /**

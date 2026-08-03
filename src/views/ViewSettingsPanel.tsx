@@ -16,6 +16,7 @@ import {
   parseDescentValue,
 } from '@/engine/hierarchyOptions';
 import { kindMeta } from '@/engine/properties';
+import { DEFAULT_ZOOM, ZOOM_LABELS } from '@/engine/schedule';
 import { humanize } from '@/engine/schema';
 import { PropertyEditor } from '@/views/PropertyEditor';
 import { bandLevels, nestLevels } from '@/engine/types';
@@ -849,26 +850,37 @@ function AxisPage({
         </>
       )}
       {isZoomable(presentation.type) && (
-        <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Zoom</span>
-          <Select
-            size="sm"
-            value={presentation.zoom ?? 'week'}
-            options={[
-              { value: 'day', label: 'Day' },
-              { value: 'week', label: 'Week' },
-              { value: 'month', label: 'Month' },
-              { value: 'quarter', label: 'Quarter' },
-            ]}
-            onChange={(e) =>
-              onChange({
-                ...presentation,
-                zoom: e.target.value as NonNullable<Presentation['zoom']>,
-              })
-            }
-            width="100%"
-          />
-        </div>
+        <>
+          <div>
+            <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Zoom</span>
+            <Select
+              size="sm"
+              // DEFAULT_ZOOM, not a literal: this said 'week' while GanttView
+              // opened at 'month', so an unconfigured gantt showed a scale its
+              // own settings denied. The options come from the engine's list
+              // for the same reason — one place decides what the zooms are.
+              value={presentation.zoom ?? DEFAULT_ZOOM}
+              options={ZOOM_LABELS.map((z) => ({ value: z.value, label: z.label }))}
+              onChange={(e) =>
+                onChange({
+                  ...presentation,
+                  zoom: e.target.value as NonNullable<Presentation['zoom']>,
+                })
+              }
+              width="100%"
+            />
+          </div>
+          <div className="pt-0.5">
+            <Switch
+              checked={presentation.showTable !== false}
+              onChange={(on) => onChange({ ...presentation, showTable: on })}
+              label="Show table"
+            />
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+              The rows beside the axis, carrying this view&rsquo;s properties.
+            </p>
+          </div>
+        </>
       )}
       {hasDependencies(presentation.type) && (
         <div>

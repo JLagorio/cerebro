@@ -7,6 +7,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { addDays, toIsoDate } from '@/engine/dates';
 import {
   addMonths,
+  dateKindOf,
   dayOffset,
   isSameMonth,
   monthGrid,
@@ -450,22 +451,6 @@ export function CalendarView({
       )}
     </div>
   );
-}
-
-/**
- * Which shape a reschedule writes back into.
- *
- * The declared kind decides, because the schema is what the next read
- * validates against. An UNDECLARED field keeps whatever shape is already on
- * disk instead of being normalised to a scalar — a hand-written `{start, end}`
- * that nothing declares is still a range, and flattening it on a drag would
- * delete the end date as a side effect of moving the record by a day.
- */
-export function dateKindOf(entry: Entry, field: string, schema: Schema): 'date' | 'daterange' {
-  const declared = schema.resolveField(entry, field).def?.kind;
-  if (declared === 'date' || declared === 'daterange') return declared;
-  const raw: unknown = entry.properties[field];
-  return raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? 'daterange' : 'date';
 }
 
 /**
