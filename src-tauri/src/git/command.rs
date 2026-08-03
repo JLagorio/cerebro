@@ -35,6 +35,34 @@ impl std::fmt::Display for GitFailure {
     }
 }
 
+/// Repository-selecting variables that must never be inherited.
+///
+/// `GIT_DIR` and friends OUTRANK the working directory: with `GIT_DIR` set,
+/// `Command::current_dir()` decides nothing, and a command aimed at one
+/// directory operates on whatever repository the environment names. Git
+/// exports exactly these when it runs a hook, so anything spawned from a hook
+/// inherits them — which is how the "old state" wipes happened. A test
+/// building a throwaway repo in `temp_dir()` had its `git add -A` and
+/// `git commit` land in the cerebro checkout instead, three times, deleting
+/// every tracked file; and no cwd-based guard could see it, because
+/// `rev-parse --show-toplevel` honours `GIT_DIR` too and cheerfully agrees
+/// with the wrong answer.
+///
+/// This matters beyond the tests. The app spawns git, and the Claude Code CLI
+/// spawns processes that may inherit our environment; a vault operation must
+/// act on the vault it was given, never on a repository some ancestor process
+/// happened to name.
+const REPO_SELECTING_VARS: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
 /// A `git` command with prompting disabled.
 ///
 /// This is the whole of `credentials.rs`, and it prevents a hang rather than
@@ -45,8 +73,14 @@ impl std::fmt::Display for GitFailure {
 ///
 /// Suppression without classification would only turn a hang into an
 /// unexplained failure, so the two always ship together.
+///
+/// It also scrubs `REPO_SELECTING_VARS`, so the directory a caller names is
+/// the repository git acts on.
 pub fn git_command() -> Command {
     let mut cmd = Command::new("git");
+    for var in REPO_SELECTING_VARS {
+        cmd.env_remove(var);
+    }
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_ASKPASS", "");
     cmd.env("SSH_ASKPASS", "");
@@ -123,4 +157,44 @@ pub fn safe_relative(path: &str) -> Result<String, String> {
         return Err(format!("refusing path that escapes the vault: {path}"));
     }
     Ok(path.to_string())
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    /// A git subprocess must obey the directory it was given, not a `GIT_DIR`
+    /// it inherited.
+    ///
+    /// Git exports `GIT_DIR` to its hooks, so everything `.husky/pre-push`
+    /// spawns inherits it. Three times that turned a test's throwaway repo
+    /// into the cerebro checkout and deleted every tracked file. The bug is
+    /// invisible to any check that asks git where it is, because that question
+    /// is answered through the same variable.
+    #[test]
+    fn an_inherited_git_dir_cannot_redirect_a_command() {
+        let scratch = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!("cerebro-envguard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&scratch).unwrap();
+        run_str(&scratch, &["init"]).unwrap();
+
+        // Point the environment at a DIFFERENT repository, the way a hook does.
+        let decoy = scratch.join("decoy");
+        std::fs::create_dir_all(&decoy).unwrap();
+        run_str(&decoy, &["init"]).unwrap();
+        std::env::set_var("GIT_DIR", decoy.join(".git"));
+
+        let top = run_str(&scratch, &["rev-parse", "--show-toplevel"]).unwrap();
+        std::env::remove_var("GIT_DIR");
+
+        assert_eq!(
+            std::fs::canonicalize(top.trim()).unwrap(),
+            scratch,
+            "GIT_DIR outranked the working directory — a command aimed at one \
+             repository would operate on another"
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
+    }
 }
