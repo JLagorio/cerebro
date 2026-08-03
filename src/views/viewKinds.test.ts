@@ -4,6 +4,7 @@ import {
   VIEW_KINDS,
   VIEW_SEGMENTS,
   axesFor,
+  hasBlocks,
   hasDependencies,
   isCharted,
   isZoomable,
@@ -61,7 +62,21 @@ describe('view kind registration', () => {
       expect(showsChips(kind.value)).toBe(kind.chips === true);
       expect(showsCards(kind.value)).toBe(kind.cards === true);
       expect(isCharted(kind.value)).toBe(kind.charted === true);
+      expect(hasBlocks(kind.value)).toBe(kind.blocks === true);
       expect(axesFor(kind.value).group).toBe(kind.groupable === true);
+    }
+  });
+
+  // The dashboard embeds saved views (M16.28), and `hasBlocks` is what stops
+  // one embedding another. A kind that is both composed of blocks AND
+  // something a block can show is an infinite nest.
+  it('keeps a block-composed kind out of the settings a record layout owns', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.blocks !== true) continue;
+      expect(kind.groupable).toBeUndefined();
+      expect(kind.dated).toBeUndefined();
+      expect(kind.cards).toBeUndefined();
+      expect(kind.charted).toBeUndefined();
     }
   });
 

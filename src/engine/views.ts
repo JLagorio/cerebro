@@ -5,6 +5,8 @@ import type {
   ChartKind,
   ChartSpec,
   ChildrenSpec,
+  DashboardBlock,
+  DashboardSpec,
   ChipStyle,
   ColumnSpec,
   FilterGroup,
@@ -51,6 +53,9 @@ export function clonePresentation(p: Presentation): Presentation {
     // duplicated tab would change it in the tab it was duplicated from.
     ...(p.gallery !== undefined ? { gallery: { ...p.gallery } } : {}),
     ...(p.chart !== undefined ? { chart: { ...p.chart } } : {}),
+    ...(p.dashboard !== undefined
+      ? { dashboard: { blocks: p.dashboard.blocks.map((b) => ({ ...b })) } }
+      : {}),
   };
 }
 
@@ -140,6 +145,7 @@ function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
   const gallery = parseGallery(obj.gallery);
   const chart = parseChart(obj.chart);
+  const dashboard = parseDashboard(obj.dashboard);
   return {
     type: parseViewType(obj.type),
     group: parseGroupChain(obj),
@@ -173,6 +179,7 @@ function parsePresentation(raw: unknown): Presentation {
       : {}),
     ...(gallery !== undefined ? { gallery } : {}),
     ...(chart !== undefined ? { chart } : {}),
+    ...(dashboard !== undefined ? { dashboard } : {}),
   };
 }
 
@@ -210,6 +217,79 @@ function parseChart(raw: unknown): ChartSpec | undefined {
   if (typeof obj.value === 'string' && obj.value.trim() !== '') spec.value = obj.value.trim();
   if (obj.omitZero === true) spec.omitZero = true;
   return Object.keys(spec).length === 0 ? undefined : spec;
+}
+
+/**
+ * Dashboard blocks (M16.28).
+ *
+ * Unlike the gallery and chart blocks this one is a LIST, so a malformed
+ * member is dropped individually — one hand-edited block must not take the
+ * other five down with it. Ids are made unique here for the same reason view
+ * ids are: they address a reorder and a delete, and two blocks answering to
+ * one name means deleting either one deletes whichever sorted first.
+ */
+function parseDashboard(raw: unknown): DashboardSpec | undefined {
+  if (!Array.isArray(raw) && asRecord(raw).blocks === undefined) return undefined;
+  const list = Array.isArray(raw) ? raw : (asRecord(raw).blocks as unknown);
+  if (!Array.isArray(list)) return { blocks: [] };
+  const taken = new Set<string>();
+  const blocks: DashboardBlock[] = [];
+  for (const entry of list) {
+    const block = parseBlock(entry, taken, blocks.length);
+    if (block !== null) blocks.push(block);
+  }
+  return { blocks };
+}
+
+function parseBlock(raw: unknown, taken: Set<string>, index: number): DashboardBlock | null {
+  const obj = asRecord(raw);
+  const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
+  const id = declared !== '' && !taken.has(declared) ? declared : nextBlockId(taken, index);
+  const shared = {
+    id,
+    ...(typeof obj.title === 'string' && obj.title.trim() !== ''
+      ? { title: obj.title.trim() }
+      : {}),
+    ...(obj.wide === true ? { wide: true } : {}),
+  };
+  if (obj.kind === 'number') {
+    taken.add(id);
+    const agg: ChartAgg =
+      typeof obj.agg === 'string' && AGGS.has(obj.agg) ? (obj.agg as ChartAgg) : 'count';
+    return {
+      ...shared,
+      kind: 'number',
+      agg,
+      ...(agg !== 'count' && typeof obj.value === 'string' && obj.value.trim() !== ''
+        ? { value: obj.value.trim() }
+        : {}),
+    };
+  }
+  // A view block with no List to point at is not a block — it would render as
+  // a permanent "that view is gone" tile nobody deliberately made.
+  if (typeof obj.list !== 'string' || obj.list.trim() === '') return null;
+  taken.add(id);
+  return {
+    ...shared,
+    kind: 'view',
+    list: obj.list.trim(),
+    ...(typeof obj.collection === 'string' && obj.collection.trim() !== ''
+      ? { collection: obj.collection.trim() }
+      : {}),
+    ...(typeof obj.view === 'string' && obj.view.trim() !== '' ? { view: obj.view.trim() } : {}),
+  };
+}
+
+function nextBlockId(taken: Set<string>, index: number): string {
+  for (let n = index + 1; ; n += 1) {
+    const candidate = `block-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** An id no sibling block holds — what "add a block" needs. */
+export function nextDashboardBlockId(blocks: DashboardBlock[]): string {
+  return nextBlockId(new Set(blocks.map((b) => b.id)), blocks.length);
 }
 
 /**
@@ -438,6 +518,7 @@ const LAYOUT_LABEL: Record<ViewType, string> = {
   timeline: 'Timeline',
   gallery: 'Gallery',
   chart: 'Chart',
+  dashboard: 'Dashboard',
 };
 
 export function layoutLabel(type: ViewType): string {
@@ -619,6 +700,7 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     // layout that reads them has been configured.
     ...(p.gallery !== undefined ? { gallery: p.gallery } : {}),
     ...(p.chart !== undefined ? { chart: p.chart } : {}),
+    ...(p.dashboard !== undefined ? { dashboard: p.dashboard } : {}),
   };
 }
 

@@ -694,6 +694,60 @@ describe('serializeList', () => {
       expect(yaml).not.toMatch(/^\s+chart:/m);
     });
 
+    /**
+     * The dashboard's blocks (M16.28) — a LIST, unlike the other two, so a
+     * malformed member is dropped alone rather than taking the others with it.
+     */
+    it('round-trips a dashboard’s blocks in order', () => {
+      const def = oneView(
+        { name: 'Ops', icon: null, color: null, order: null, source: NO_SOURCE },
+        {
+          type: 'dashboard',
+          group: [],
+          sort: [{ field: 'modifiedAt', dir: 'desc' }],
+          columns: [],
+          dashboard: {
+            blocks: [
+              { id: 'total', kind: 'number', agg: 'sum', value: 'estimate', title: 'Points' },
+              { id: 'grid', kind: 'view', list: 'delivery', collection: 'ops', wide: true },
+              { id: 'count', kind: 'number', agg: 'count' },
+            ],
+          },
+        },
+      );
+      expect(parseListYaml('d', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a view block with no list to point at, keeping its siblings', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: a, kind: view }\n      - { id: b, kind: number, agg: count }\n',
+      );
+      expect(p.dashboard?.blocks).toEqual([{ id: 'b', kind: 'number', agg: 'count' }]);
+    });
+
+    it('makes block ids unique, because a delete addresses one', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: x, kind: number, agg: count }\n      - { id: x, kind: number, agg: count }\n',
+      );
+      expect(p.dashboard?.blocks.map((b) => b.id)).toEqual(['x', 'block-2']);
+    });
+
+    it('forgets a value property the measure cannot use', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: n, kind: number, agg: count, value: estimate }\n',
+      );
+      expect(p.dashboard?.blocks[0]).toEqual({ id: 'n', kind: 'number', agg: 'count' });
+    });
+
+    it('reads an empty dashboard as empty, not as unconfigured', () => {
+      // `blocks: []` is a dashboard someone emptied; absent is one nobody has
+      // touched. Both render the same, but only the first survives a rewrite.
+      expect(
+        parse('presentation:\n  type: dashboard\n  dashboard:\n    blocks: []\n').dashboard,
+      ).toEqual({ blocks: [] });
+      expect(parse('presentation:\n  type: dashboard\n').dashboard).toBeUndefined();
+    });
+
     it('keeps a cover even when the rest of the block is junk', () => {
       const p = parse(
         'presentation:\n  type: gallery\n  gallery:\n    cover: artwork\n    size: 7\n    fit: yes please\n',

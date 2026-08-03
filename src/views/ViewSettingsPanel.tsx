@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
@@ -27,6 +27,7 @@ import type {
   ChartSpec,
   ChipStyle,
   ColumnSpec,
+  DashboardBlock,
   FieldDef,
   GallerySpec,
   GroupSpec,
@@ -36,13 +37,15 @@ import type {
   ListDefinition,
   ViewDefinition,
 } from '@/engine/types';
-import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, nextDashboardBlockId } from '@/engine/views';
+import { useVaultStore } from '@/stores/vaultStore';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import {
   VIEW_KINDS,
   axesFor,
   hasDependencies,
   isZoomable,
+  hasBlocks,
   isCharted,
   needsDate,
   showsCards,
@@ -68,6 +71,7 @@ type Page =
   | 'axis'
   | 'cards'
   | 'chart'
+  | 'blocks'
   | 'list'
   | 'newProperty'
   | 'field';
@@ -306,6 +310,16 @@ export function ViewSettingsPanel({
               />
             )}
 
+            {/* M16.28: the dashboard's blocks. */}
+            {hasBlocks(p.type) && (
+              <Row
+                icon="layout-dashboard"
+                label="Blocks"
+                value={String(p.dashboard?.blocks.length ?? 0)}
+                onClick={() => setPage('blocks')}
+              />
+            )}
+
             {/* M11: how related records draw, per view. A dense table wants
                 bare chips; a mixed one wants to see which type each points at. */}
             {showsChips(p.type) && (
@@ -532,6 +546,10 @@ export function ViewSettingsPanel({
           <ChartPage presentation={p} fields={fields} onChange={setPresentation} />
         )}
 
+        {page === 'blocks' && (
+          <BlocksPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
         {page === 'filter' && (
           <FilterBuilder
             filters={view.filters}
@@ -580,6 +598,8 @@ function titleFor(page: Page): string {
       return 'Cards';
     case 'chart':
       return 'Chart';
+    case 'blocks':
+      return 'Blocks';
     case 'list':
       return 'This list';
     case 'newProperty':
@@ -1076,6 +1096,193 @@ function ChartPage({
         {band === undefined
           ? 'The bars come from the view’s grouping, and this view has none yet — pick a property under Group.'
           : `The bars come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The dashboard's blocks (M16.28): add, name, widen, reorder, remove.
+ *
+ * A view block stores a REFERENCE to a saved view — the List's id and folder,
+ * addressed exactly as a selection addresses one — rather than a copy of its
+ * configuration. Editing that List updates every dashboard showing it, which
+ * is the whole reason to point at one instead of building a second view.
+ *
+ * Reordering goes through `useSortableList`, the one drag implementation, so a
+ * block moves from the keyboard like a property row does.
+ */
+function BlocksPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const lists = useVaultStore((s) => s.views);
+  const blocks = presentation.dashboard?.blocks ?? [];
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+
+  const write = (next: DashboardBlock[]) =>
+    onChange(
+      next.length === 0
+        ? ((): Presentation => {
+            const { dashboard: _drop, ...rest } = presentation;
+            return rest;
+          })()
+        : { ...presentation, dashboard: { blocks: next } },
+    );
+  const patch = (id: string, next: Partial<DashboardBlock>) =>
+    write(blocks.map((b) => (b.id === id ? ({ ...b, ...next } as DashboardBlock) : b)));
+
+  const sortable = useSortableList({
+    ids: blocks.map((b) => b.id),
+    onReorder: (id, to) => {
+      const from = blocks.findIndex((b) => b.id === id);
+      if (from === -1) return;
+      const next = blocks.filter((b) => b.id !== id);
+      next.splice(to, 0, blocks[from]);
+      write(next);
+    },
+    labelFor: (id) => blocks.find((b) => b.id === id)?.title ?? id,
+  });
+
+  const addNumber = () =>
+    write([
+      ...blocks,
+      { id: nextDashboardBlockId(blocks), kind: 'number', agg: 'count' } as DashboardBlock,
+    ]);
+  const addView = (value: string) => {
+    const hit = lists.find((l) => `${l.collection ?? ''}::${l.id}` === value);
+    if (hit === undefined) return;
+    write([
+      ...blocks,
+      {
+        id: nextDashboardBlockId(blocks),
+        kind: 'view',
+        list: hit.id,
+        ...(hit.collection !== null ? { collection: hit.collection } : {}),
+      } as DashboardBlock,
+    ]);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>}>
+        {blocks.map((block, i) => (
+          <div
+            key={block.id}
+            data-testid={`block-row-${block.id}`}
+            className={[
+              'mb-1.5 rounded-[8px] border border-[var(--n-200)] p-1.5',
+              sortable.dragging === block.id ? 'opacity-60' : '',
+            ].join(' ')}
+            style={sortable.dropIndicator(i)}
+          >
+            <div className="flex items-center gap-1">
+              <span
+                {...sortable.gripProps(block.id, i)}
+                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)] focus-visible:text-[var(--cortex-600)] focus-visible:outline-none"
+              >
+                <Icon name="grip-vertical" size={12} />
+              </span>
+              <Icon
+                name={block.kind === 'number' ? 'hash' : 'table-2'}
+                size={12}
+                color="var(--n-400)"
+              />
+              <Input
+                size="sm"
+                ariaLabel={`Block ${i + 1} title`}
+                placeholder={block.kind === 'number' ? 'Number' : block.list}
+                value={block.title ?? ''}
+                onChange={(e) =>
+                  patch(block.id, { title: e.target.value === '' ? undefined : e.target.value })
+                }
+                width="100%"
+              />
+              <IconButton
+                icon="trash-2"
+                label={`Remove block ${i + 1}`}
+                size="sm"
+                onClick={() => write(blocks.filter((b) => b.id !== block.id))}
+              />
+            </div>
+            {block.kind === 'number' && (
+              <div className="mt-1.5 flex items-center gap-1.5 pl-5">
+                <Select
+                  size="sm"
+                  value={block.agg}
+                  options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+                  onChange={(e) => patch(block.id, { agg: e.target.value as ChartAgg })}
+                  width="100%"
+                />
+                {block.agg !== 'count' && (
+                  <Select
+                    size="sm"
+                    value={block.value ?? ''}
+                    options={[
+                      { value: '', label: 'Property…' },
+                      ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
+                    ]}
+                    onChange={(e) =>
+                      patch(block.id, {
+                        value: e.target.value === '' ? undefined : e.target.value,
+                      })
+                    }
+                    width="100%"
+                  />
+                )}
+              </div>
+            )}
+            <div className="mt-1.5 pl-5">
+              <Switch
+                checked={block.wide === true}
+                onChange={(wide) => patch(block.id, { wide: wide ? true : undefined })}
+                label="Full width"
+                ariaLabel={`Block ${i + 1} full width`}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        data-testid="add-number-block"
+        onClick={addNumber}
+        className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-600)] hover:bg-[var(--n-50)]"
+      >
+        <Icon name="hash" size={13} />
+        Add a number
+      </button>
+      {lists.length > 0 ? (
+        <Select
+          size="sm"
+          value={ADD}
+          options={[
+            { value: ADD, label: 'Add a saved view…' },
+            ...lists.map((l) => ({
+              value: `${l.collection ?? ''}::${l.id}`,
+              label: l.definition.name,
+            })),
+          ]}
+          onChange={(e) => {
+            if (e.target.value !== ADD) addView(e.target.value);
+          }}
+          width="100%"
+        />
+      ) : (
+        <p className="m-0 px-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+          There are no saved lists in the vault to embed yet.
+        </p>
+      )}
+
+      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+        A number measures this view’s own records, so its filters apply. A saved view is shown as it
+        is configured where it lives.
       </p>
     </div>
   );

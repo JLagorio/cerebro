@@ -284,6 +284,7 @@ export const VIEW_TYPES = [
   'timeline',
   'gallery',
   'chart',
+  'dashboard',
 ] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
@@ -358,6 +359,50 @@ export interface ChartSpec {
   omitZero?: boolean;
 }
 
+/**
+ * One block of a dashboard (M16.28).
+ *
+ * Two kinds, and they read different data on purpose:
+ *
+ * - `view` embeds a SAVED VIEW from the vault — a List and one of its tabs,
+ *   addressed the way a selection addresses one. That is what makes a
+ *   dashboard worth having: widgets spanning several sources, which is
+ *   Notion's model too. It carries the reference, never a copy of the view's
+ *   configuration; editing the List updates every dashboard showing it.
+ * - `number` measures the DASHBOARD'S OWN rows, so the dashboard's filters
+ *   scope it. A number block that ignored them would be a constant.
+ */
+export type DashboardBlock =
+  | {
+      /** Unique within the dashboard; what a reorder and a delete address. */
+      id: string;
+      kind: 'view';
+      /** List id. Ids are unique per folder, hence `collection` beside it. */
+      list: string;
+      collection?: string | null;
+      /** Which of the List's tabs; absent = its first. */
+      view?: string;
+      /** Overrides the List's own name in the block header. */
+      title?: string;
+      /** Spans both columns. Absent = one. */
+      wide?: boolean;
+    }
+  | {
+      id: string;
+      kind: 'number';
+      agg: ChartAgg;
+      /** Property summed or averaged. Unread when the measure is count. */
+      value?: string;
+      title?: string;
+      wide?: boolean;
+    };
+
+export interface DashboardSpec {
+  /** In render order. Never absent — a dashboard with no blocks is [] and
+   * says so, rather than being indistinguishable from an unparsed one. */
+  blocks: DashboardBlock[];
+}
+
 export interface Presentation {
   type: ViewType;
   /** Ordered grouping chain; empty = flat. */
@@ -394,6 +439,8 @@ export interface Presentation {
   gallery?: GallerySpec;
   /** Chart settings (M16.27). Absent = a bar chart counting records. */
   chart?: ChartSpec;
+  /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
+  dashboard?: DashboardSpec;
 }
 
 /**
