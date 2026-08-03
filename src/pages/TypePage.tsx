@@ -9,14 +9,8 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
-import {
-  clonePresentation,
-  layoutLabel,
-  moveView,
-  newView,
-  nextViewId,
-  toggleSort,
-} from '@/engine/views';
+import { clonePresentation, layoutLabel, moveView, nextViewId, toggleSort } from '@/engine/views';
+import { seedView } from '@/app/viewActions';
 import { listTypes, typeViews, type TypeListing } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ViewDefinition, ViewType } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
@@ -146,7 +140,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const createView = (name: string, type: ViewType) => {
     // Seeded from the tab you are on, and written together with the current
     // tabs — which also materializes the default view the first time.
-    const seeded = newView(
+    // `seedView` decides what may travel: this handed the whole presentation
+    // over and swapped `type`, so a table born on the gantt kept the gantt's
+    // axis keys in the Type doc forever (M16.29).
+    const seeded = seedView(
       name,
       type,
       savedViews.map((v) => v.id),

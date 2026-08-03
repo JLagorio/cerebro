@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { VIEW_TYPES } from '@/engine/types';
+import { VIEW_TYPES, type Presentation } from '@/engine/types';
 import {
   VIEW_KINDS,
   VIEW_SEGMENTS,
   axesFor,
+  carryOver,
   hasBlocks,
   hasDependencies,
   hasGroupColumns,
@@ -18,7 +19,7 @@ import {
   showsPreview,
   viewKind,
 } from '@/views/viewKinds';
-import { parseListYaml } from '@/engine/views';
+import { parseListYaml, serializeList } from '@/engine/views';
 
 /**
  * The registration contract for a view kind (M16.3).
@@ -144,5 +145,125 @@ describe('view kind registration', () => {
 
   it('falls back to the first kind for an unknown type', () => {
     expect(viewKind('nope' as never)).toBe(VIEW_KINDS[0]);
+  });
+});
+
+/**
+ * What a NEW view inherits from the tab you created it on (M16.29).
+ *
+ * "Add a view" seeds from the open tab, which is right — but it copied the
+ * whole presentation and only swapped `type`. A Table created while standing
+ * on the Gallery inherited `colorColumns`; one created off the Gantt inherited
+ * `dateField`, `zoom` and `dependencyField`. Nothing on screen mentions those
+ * again, no control in the new view can clear them, and the first save writes
+ * them to the user's YAML permanently.
+ */
+describe('carrying a presentation to a new kind (M16.29)', () => {
+  /** Every layout-specific key set at once, so a carry-over that forgets to
+   * drop one is caught whichever kind is asked for. */
+  const everything: Presentation = {
+    type: 'gantt',
+    group: [{ field: 'status' }],
+    sort: [{ field: 'due', dir: 'asc' }],
+    columns: [{ field: 'status' }, { field: 'due' }],
+    limit: 25,
+    rowHeight: 'tall',
+    titleWidth: 320,
+    frozenColumns: 2,
+    titlePosition: 1,
+    titleCalc: 'count_all',
+    chips: 'type-icon',
+    cardSize: 'large',
+    cardPreview: 'content',
+    colorColumns: true,
+    dateField: 'due',
+    zoom: 'week',
+    showTable: false,
+    dependencyField: 'blocked_by',
+    gallery: { cover: 'artwork', fit: true },
+    chart: { kind: 'donut' },
+    dashboard: { blocks: [{ id: 'b1', kind: 'number', agg: 'count' }] },
+    calendarSpan: 'week',
+    showWeekends: false,
+    weekStart: 'monday',
+  };
+
+  it('keeps the query — the reason you asked for another view of this data', () => {
+    for (const type of VIEW_TYPES) {
+      const next = carryOver(everything, type);
+      expect(next.type).toBe(type);
+      expect(next.group).toEqual(everything.group);
+      expect(next.sort).toEqual(everything.sort);
+      expect(next.columns).toEqual(everything.columns);
+      expect(next.limit).toBe(25);
+    }
+  });
+
+  /**
+   * The invariant, stated over every kind: a view must round-trip through
+   * YAML carrying no key its own layout cannot read. `serializePresentation`
+   * is what actually reaches disk, so the assertion is made against that
+   * rather than against the object.
+   */
+  it('writes no key the new kind cannot read', () => {
+    for (const type of VIEW_TYPES) {
+      const yaml = serializeList({
+        name: 'T',
+        icon: null,
+        color: null,
+        order: null,
+        source: { type: 'Work item', project: null },
+        views: [
+          {
+            id: 'v',
+            name: 'V',
+            icon: null,
+            filters: null,
+            presentation: carryOver(everything, type),
+          },
+        ],
+      });
+      const kind = viewKind(type);
+      const forbidden: [string, boolean][] = [
+        ['rowHeight', kind.tabular === true],
+        ['frozenColumns', kind.tabular === true],
+        ['titlePosition', kind.tabular === true],
+        ['titleCalc', kind.tabular === true],
+        ['titleWidth', kind.nameColumn === true],
+        ['chips', kind.chips === true],
+        ['cardSize', kind.cards === true],
+        ['cardPreview', kind.preview === true],
+        ['colorColumns', kind.groupColumns === true],
+        ['gallery', kind.covers === true],
+        ['dateField', kind.dated === true],
+        ['calendarSpan', kind.dayGrid === true],
+        ['showWeekends', kind.dayGrid === true],
+        ['weekStart', kind.dayGrid === true],
+        ['zoom', kind.zoomable === true],
+        ['showTable', kind.zoomable === true],
+        ['dependencyField', kind.dependencies === true],
+        ['chart', kind.charted === true],
+        ['dashboard', kind.blocks === true],
+      ];
+      for (const [key, allowed] of forbidden) {
+        // `^\s+key:` and not a bare substring — `chart` is also a `type:`
+        // value, and `zoom` appears inside no other word but might one day.
+        const present = new RegExp(`^\\s+${key}:`, 'm').test(yaml);
+        expect({ type, key, present }).toEqual({ type, key, present: allowed });
+      }
+    }
+  });
+
+  /** The three reported by the live pass, named explicitly so the commit and
+   * the test say the same thing. */
+  it('a table born on the gantt inherits no date axis, zoom or dependencies', () => {
+    const table = carryOver(everything, 'table');
+    expect(table.dateField).toBeUndefined();
+    expect(table.zoom).toBeUndefined();
+    expect(table.dependencyField).toBeUndefined();
+  });
+
+  it('a table born on the gallery inherits no colorColumns', () => {
+    expect(carryOver(everything, 'table').colorColumns).toBeUndefined();
   });
 });

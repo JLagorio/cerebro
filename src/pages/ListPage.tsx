@@ -15,14 +15,8 @@ import type {
   ViewType,
 } from '@/engine/types';
 import { addFieldToType, addRelationProperty, normalizeFieldName } from '@/app/typeActions';
-import {
-  clonePresentation,
-  layoutLabel,
-  moveView,
-  newView,
-  resolveView,
-  toggleSort,
-} from '@/engine/views';
+import { clonePresentation, layoutLabel, moveView, resolveView, toggleSort } from '@/engine/views';
+import { seedView } from '@/app/viewActions';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
@@ -209,8 +203,10 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     void (async () => {
       // Seeded from the tab you are on: "same columns, drawn as a board" is
       // what people mean by adding a view, and starting blank throws away the
-      // configuration they just did.
-      const seeded = newView(
+      // configuration they just did. `seedView` decides what may travel —
+      // this used to hand the whole presentation over and swap `type`, so a
+      // table born on the gantt kept `zoom` forever (M16.29).
+      const seeded = seedView(
         name,
         type,
         list.definition.views.map((v) => v.id),
