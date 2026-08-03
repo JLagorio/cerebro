@@ -1,5 +1,25 @@
 import React, { useId, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useEscapeLayer } from '@/components/ui/Popover';
+
+/**
+ * Puts the open listbox on the layer stack (M16.34).
+ *
+ * The Escape branch in `onKeyDown` below is a React BUBBLE handler, and its
+ * comment promised that "an open dropdown must swallow Escape before global
+ * listeners". That was true when the global listeners bubbled too. M16.1
+ * moved them to `window` in the CAPTURE phase, which runs before any React
+ * handler — so the promise quietly inverted, and a Dropdown open inside a
+ * Popover let Escape close the POPOVER out from under it. The listbox
+ * appeared to close as well, but only because its parent had unmounted.
+ *
+ * A child component, so the layer exists exactly as long as the listbox does:
+ * a hook in the parent would hold one open for a closed menu.
+ */
+function DropdownEscapeLayer({ onClose }: { onClose: () => void }) {
+  useEscapeLayer(onClose);
+  return null;
+}
 
 /**
  * DS dropdown (M2 Task 2): a custom listbox-button replacing native selects
@@ -62,8 +82,10 @@ export function Dropdown({
       return;
     }
     if (e.key === 'Escape') {
-      // stopPropagation: an open dropdown must swallow Escape before global
-      // listeners (DetailPanel close, dialogs) act on it.
+      // Belt only. `DropdownEscapeLayer` handles this from the layer stack
+      // before the key ever reaches React, and is what makes the dropdown win
+      // against an enclosing popover; this branch survives for the case where
+      // the event is dispatched at the element rather than at the window.
       e.stopPropagation();
       setOpen(false);
     } else if (e.key === 'ArrowDown') {
@@ -89,6 +111,7 @@ export function Dropdown({
 
   return (
     <span className="relative inline-flex" style={{ width }} onKeyDown={onKeyDown}>
+      {open && <DropdownEscapeLayer onClose={() => setOpen(false)} />}
       <button
         type="button"
         aria-label={label}

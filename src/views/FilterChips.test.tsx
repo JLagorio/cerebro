@@ -312,3 +312,56 @@ describe('a value picker opened from a chip does not dismiss the chip (M16.25)',
     expect(screen.getAllByTestId('filter-rule')).toHaveLength(1);
   });
 });
+
+/**
+ * Escape closes ONE surface (M16.34).
+ *
+ * A live pass found that inside a nested group, one Escape closed both the
+ * value listbox and the group popover holding it — while the top-level chip,
+ * whose structure looks identical, behaved correctly. The layer stack exists
+ * precisely so a keystroke cannot reach past the surface on top of it.
+ */
+describe('Escape unwinds one layer at a time', () => {
+  const fields: ColumnDef[] = [
+    { name: 'status', kind: 'status' },
+    { name: 'priority', kind: 'select', options: [{ id: 'high', label: 'High', color: null }] },
+  ];
+  const statuses = [
+    { id: 'progress', label: 'In progress', color: '#DE8F0A', group: 'active' as const },
+  ];
+  const nested: FilterGroup = {
+    all: [
+      { field: 'priority', op: 'any_of', value: ['high'] },
+      { any: [{ field: 'status', op: 'equals', value: 'progress' }] },
+    ],
+  };
+
+  const escape = () =>
+    fireEvent.keyDown(window, { key: 'Escape', bubbles: true, cancelable: true });
+
+  it('leaves a nested group open when its value picker takes the key', () => {
+    render(<FilterChips filters={nested} fields={fields} statuses={statuses} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('filter-chip-1'));
+    expect(screen.getByRole('dialog', { name: 'Edit filter' })).toBeTruthy();
+
+    fireEvent.click(screen.getAllByLabelText('Filter value')[0]);
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    escape();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    // The group must survive: it is the layer underneath, not the one on top.
+    expect(screen.queryByRole('dialog', { name: 'Edit filter' })).toBeTruthy();
+  });
+
+  it('does the same at the top level', () => {
+    const flat: FilterGroup = { all: [{ field: 'status', op: 'equals', value: 'progress' }] };
+    render(<FilterChips filters={flat} fields={fields} statuses={statuses} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('filter-chip-0'));
+    fireEvent.click(screen.getAllByLabelText('Filter value')[0]);
+    expect(screen.getByRole('listbox')).toBeTruthy();
+
+    escape();
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Edit filter' })).toBeTruthy();
+  });
+});
