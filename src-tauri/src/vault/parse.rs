@@ -464,4 +464,3 @@ mod tests {
         assert_eq!(json["options"][0]["color"], "#DE3B4E");
     }
 }
-
