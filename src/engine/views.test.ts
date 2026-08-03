@@ -372,6 +372,42 @@ describe('views', () => {
     expect(parseListYaml('totals', serializeList(def)).definition).toEqual(def);
   });
 
+  it('round-trips the frozen-column count', () => {
+    const def = parseListYaml(
+      'pinned',
+      'views:\n  - { id: v, presentation: { type: table, frozenColumns: 3 } }\n',
+    ).definition;
+    expect(def.views[0].presentation.frozenColumns).toBe(3);
+    expect(parseListYaml('pinned', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('migrates the old titleFrozen flag rather than dropping the setting', () => {
+    // `titleFrozen: false` said "the name column scrolls", which is the same
+    // statement as "nothing is frozen". A view saved before M16.18 must not
+    // silently re-pin its first column.
+    const def = parseListYaml(
+      'legacy',
+      'views:\n  - { id: v, presentation: { type: table, titleFrozen: false } }\n',
+    ).definition;
+    expect(def.views[0].presentation.frozenColumns).toBe(0);
+    // `titleFrozen: true` was the default and carried no information.
+    const on = parseListYaml(
+      'legacy-on',
+      'views:\n  - { id: v, presentation: { type: table, titleFrozen: true } }\n',
+    ).definition;
+    expect(on.views[0].presentation.frozenColumns).toBeUndefined();
+    // Written back in the new spelling only, so a file converges on one shape.
+    expect(serializeList(def)).not.toContain('titleFrozen');
+  });
+
+  it('drops a nonsense frozen count rather than pinning by a fraction', () => {
+    const def = parseListYaml(
+      'bad',
+      'views:\n  - { id: v, presentation: { frozenColumns: -2 } }\n',
+    ).definition;
+    expect(def.views[0].presentation.frozenColumns).toBeUndefined();
+  });
+
   it('drops a calculation it cannot compute rather than storing it', () => {
     // A hand-edited view file naming `median` must degrade to "no
     // calculation"; letting it through would reach `aggregate`'s exhaustive

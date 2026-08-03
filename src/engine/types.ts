@@ -303,9 +303,18 @@ export interface Presentation {
   rowHeight?: 'compact' | 'default' | 'tall';
   /** Width of the sticky name column. Omitted = the layout's default. */
   titleWidth?: number;
-  /** False = the name column scrolls with the grid instead of pinning left.
-   * Only meaningful while the name column is first (M12.8). */
-  titleFrozen?: boolean;
+  /**
+   * How many columns pin to the left edge, counted in DISPLAY slots (M16.18).
+   *
+   * Replaces `titleFrozen`, which could only ever answer for the name column
+   * and only while it was first — Notion freezes UP TO a column, and a table
+   * whose first three columns are identity ought to be able to say so. A
+   * saved `titleFrozen: false` migrates to 0 on read.
+   *
+   * Omitted means "the name column, if it leads": the M12.8 default, stated
+   * once rather than recomputed at each reader.
+   */
+  frozenColumns?: number;
   /** The name column's index among the visible columns. Omitted = first. */
   titlePosition?: number;
   /** The name column's footer calculation (M16.15). It is a column like any

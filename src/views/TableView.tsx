@@ -6,14 +6,16 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
-import { MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
+import { MenuBack, MenuItem, MenuLabel, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { AddPropertyPanel, type RelationConfig } from '@/detail/AddPropertyPanel';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
   MIN_COL_W,
+  hiddenColumns,
   insertColumn,
   moveColumn,
   resolveColumns,
@@ -38,6 +40,8 @@ import type {
   Schema,
 } from '@/engine/types';
 import {
+  addFieldToType,
+  addRelationProperty,
   changeFieldKind,
   duplicateFieldOnType,
   insertFieldOnType,
@@ -111,6 +115,8 @@ const TableCell = memo(function TableCell({
   wrap = false,
   colIndex,
   cellProps,
+  freeze,
+  fill,
 }: {
   entry: Entry;
   def: ColumnDef;
@@ -124,6 +130,10 @@ const TableCell = memo(function TableCell({
    * cursor traverses — not `index`, which addresses the width variable. */
   colIndex: number;
   cellProps: RowKeyboardCellProps;
+  /** M16.18: sticky placement when this slot is inside the frozen run. */
+  freeze?: React.CSSProperties;
+  /** The row's fill, repeated because a frozen cell has to be opaque. */
+  fill: string;
 }) {
   const resolved = schema.resolveField(entry, def.name);
   const readOnly = READ_ONLY.has(def.kind);
@@ -137,11 +147,12 @@ const TableCell = memo(function TableCell({
       className={[
         'flex flex-none overflow-hidden border-r border-[var(--n-100)] px-2',
         wrap ? 'items-start py-1.5' : 'items-center',
+        freeze === undefined ? '' : `z-10 ${fill}`,
         // The ring is inset, not a border: a border would add a pixel to a
         // cell whose width is a shared CSS variable and shear the column.
         'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
       ].join(' ')}
-      style={{ width: `var(${widthVar(index)})` }}
+      style={{ width: `var(${widthVar(index)})`, ...freeze }}
     >
       {readOnly || isProgress ? (
         isProgress ? (
@@ -183,6 +194,34 @@ const INDENT = 16;
  * one that was always there and only faded in.
  */
 const GUTTER = 46;
+
+/**
+ * Row heights (M16.18). `presentation.rowHeight` has been parsed since M9.1
+ * and serialized since M11 and was read by NOTHING — a saved view carried the
+ * setting round-trip and the table ignored it. Tailwind classes rather than
+ * numbers because the row is also `min-h-` when a column wraps, and one map
+ * per spelling is one map too many.
+ */
+const ROW_HEIGHT = { compact: 'h-8', default: 'h-9', tall: 'h-12' } as const;
+const ROW_MIN_HEIGHT = { compact: 'min-h-8', default: 'min-h-9', tall: 'min-h-12' } as const;
+
+type RowHeight = NonNullable<Presentation['rowHeight']>;
+
+/** Derived from the class map, so the menu cannot offer a height the rows
+ * cannot render. */
+const ROW_HEIGHT_CHOICES: { value: RowHeight; label: string }[] = (
+  Object.keys(ROW_HEIGHT) as RowHeight[]
+).map((value) => ({ value, label: `${value[0].toUpperCase()}${value.slice(1)}` }));
+
+const rowHeightLabel = (h: RowHeight): string =>
+  ROW_HEIGHT_CHOICES.find((c) => c.value === h)?.label ?? 'Default';
+
+/** Widest a fit-to-content column may become. Past this the column stops
+ * being a column and becomes the table. */
+const FIT_MAX_W = 520;
+
+/** The header's trailing "+" slot. Part of the content width, like GUTTER. */
+const ADD_W = 34;
 
 /** What a row's own menu can do. Per-row, so the handlers stay in the table
  * where the vault and the confirm dialog already live. */
@@ -409,6 +448,8 @@ const TableRow = memo(function TableRow({
   cells,
   titlePos,
   titleFrozen,
+  freezeStyle,
+  rowHeight,
   autoHeight,
   schema,
   depth,
@@ -432,6 +473,10 @@ const TableRow = memo(function TableRow({
   titlePos: number;
   /** M12.8: false lets the name column scroll with the grid. */
   titleFrozen: boolean;
+  /** M16.18: sticky placement for a display slot, or nothing when it scrolls. */
+  freezeStyle: (displayIndex: number) => React.CSSProperties | undefined;
+  /** M16.18: the view's row height, at last consumed by something. */
+  rowHeight: NonNullable<Presentation['rowHeight']>;
   /** True when any column wraps — rows grow instead of clipping (M12.4b). */
   autoHeight: boolean;
   schema: Schema;
@@ -480,7 +525,7 @@ const TableRow = memo(function TableRow({
       // over the name cell.
       className={[
         'group flex border-b border-[var(--n-100)]',
-        autoHeight ? 'min-h-9' : 'h-9',
+        autoHeight ? ROW_MIN_HEIGHT[rowHeight] : ROW_HEIGHT[rowHeight],
         // The cursor row needs to survive a bright screen: the --cortex-50
         // fill alone was 1.13:1 against white, so a left rule carries it.
         selected
@@ -494,7 +539,9 @@ const TableRow = memo(function TableRow({
         entry={entry}
         checked={checked}
         selecting={selecting}
-        frozen={titleFrozen}
+        // The gutter pins whenever anything does: a gutter that scrolls out
+        // from under a frozen column leaves the row with no way to select it.
+        frozen={freezeStyle(0) !== undefined}
         fill={fill}
         onCheck={onCheck}
         onInsert={onInsert}
@@ -511,6 +558,8 @@ const TableRow = memo(function TableRow({
           wrap={wrap}
           colIndex={i}
           cellProps={cellProps(i)}
+          freeze={freezeStyle(i)}
+          fill={fill}
         />
       ))}
       <div
@@ -518,7 +567,7 @@ const TableRow = memo(function TableRow({
         {...cellProps(titlePos)}
         aria-colindex={titlePos + 1}
         className={[
-          titleFrozen ? 'sticky z-10' : '',
+          titleFrozen ? 'z-10' : '',
           'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
           'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] pr-3',
           // The name cell is opaque because it is sticky — it has to hide the
@@ -528,8 +577,7 @@ const TableRow = memo(function TableRow({
         style={{
           width: `var(${TITLE_VAR})`,
           paddingLeft: 12 + depth * INDENT,
-          // Pinned BESIDE the gutter, not over it (M16.16).
-          ...(titleFrozen ? { left: GUTTER } : {}),
+          ...freezeStyle(titlePos),
         }}
       >
         {/* M10: a table nests when the chain has a relation level, so the
@@ -595,8 +643,13 @@ const TableRow = memo(function TableRow({
           // runs in DISPLAY order but owns no width variable.
           colIndex={titlePos + 1 + i}
           cellProps={cellProps(titlePos + 1 + i)}
+          freeze={freezeStyle(titlePos + 1 + i)}
+          fill={fill}
         />
       ))}
+      {/* Absorbs the header's "+" slot, so the row's hover fill reaches the
+          right edge instead of stopping 34px short of it. */}
+      <span aria-hidden className="flex-1" />
     </div>
   );
 });
@@ -619,6 +672,7 @@ function ColumnResizer({
   onCommit,
   width,
   min,
+  onFit,
 }: {
   label: string;
   /** Called with each intermediate width — paints, never persists. */
@@ -626,6 +680,8 @@ function ColumnResizer({
   onCommit: (width: number) => void;
   width: number;
   min: number;
+  /** M16.18: fit to content — double-click, or Enter on the focused handle. */
+  onFit?: () => void;
 }) {
   const start = useRef({ x: 0, w: 0 });
   const [active, setActive] = useState(false);
@@ -662,6 +718,13 @@ function ColumnResizer({
         e.stopPropagation();
         begin(e.clientX);
       }}
+      onDoubleClick={(e) => {
+        // Notion's gesture, and the only one that needs no menu: the divider
+        // that sets a width by hand also computes the right one.
+        e.preventDefault();
+        e.stopPropagation();
+        onFit?.();
+      }}
       onKeyDown={(e) => {
         // Keyboard resize: a pointer-only affordance is unreachable without one.
         const step = e.shiftKey ? 40 : 8;
@@ -672,6 +735,10 @@ function ColumnResizer({
         if (e.key === 'ArrowRight') {
           e.preventDefault();
           onCommit(width + step);
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onFit?.();
         }
       }}
       // A 1px target was most of the problem: the pointer had to land on a
@@ -884,6 +951,153 @@ function CalcCell({
   );
 }
 
+/**
+ * The sort indicator (M16.18).
+ *
+ * It used to read `presentation.sort[0]` only, so a two-key sort marked one
+ * column and left the other looking unsorted — with no way to tell from the
+ * grid that it was participating at all.
+ */
+function SortMark({ presentation, field }: { presentation: Presentation; field: string }) {
+  const at = presentation.sort.findIndex((s) => s.field === field);
+  if (at === -1) return null;
+  const spec = presentation.sort[at];
+  const multi = presentation.sort.length > 1;
+  return (
+    <Tooltip
+      label={`Sorted ${spec.dir === 'asc' ? 'ascending' : 'descending'}${multi ? `, key ${at + 1} of ${presentation.sort.length}` : ''}`}
+    >
+      <span
+        data-testid={`sort-mark-${field}`}
+        className="flex flex-none items-center text-[var(--cortex-600)]"
+      >
+        <Icon name={spec.dir === 'asc' ? 'arrow-up' : 'arrow-down'} size={11} />
+        {multi && <span className="[font-family:var(--font-mono)] text-[9.5px]">{at + 1}</span>}
+      </span>
+    </Tooltip>
+  );
+}
+
+/**
+ * The header's trailing "+" (M16.18).
+ *
+ * The header simply stopped after the last column. `hiddenColumns` has been
+ * exported from `engine/columns.ts` since M9.2 with no call site in the app —
+ * so a column hidden from the table could only be brought back through the
+ * view settings panel, three clicks away from the header it belongs to.
+ */
+function AddColumnButton({
+  columns,
+  fields,
+  sourceType,
+  onColumnsChange,
+}: {
+  columns: ColumnSpec[];
+  fields: ColumnDef[];
+  sourceType: string | null;
+  onColumnsChange: (next: ColumnSpec[]) => void;
+}) {
+  const [step, setStep] = useState<'closed' | 'menu' | 'new'>('closed');
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const hidden = useMemo(() => hiddenColumns(columns, fields), [columns, fields]);
+
+  const declare = (name: string, kind: FieldKind, relation?: RelationConfig) => {
+    setStep('closed');
+    if (sourceType === null) return;
+    void (async () => {
+      const ok =
+        relation === undefined
+          ? await addFieldToType(sourceType, name, kind)
+          : await addRelationProperty(
+              sourceType,
+              name,
+              relation,
+              kind === 'person' ? 'person' : 'relation',
+            );
+      // The actions toast their own failures and return false (store-layer
+      // invariant); a column for a property that was not created would name
+      // nothing.
+      if (ok) onColumnsChange([...columns, { field: normalizeFieldName(name) }]);
+    })();
+  };
+
+  return (
+    <div
+      className="relative flex flex-none items-center justify-center border-r border-[var(--n-100)]"
+      style={{ width: ADD_W }}
+    >
+      <button
+        ref={ref}
+        type="button"
+        data-testid="add-column"
+        aria-label="Add a column"
+        aria-haspopup="menu"
+        onClick={() => setStep(step === 'closed' ? 'menu' : 'closed')}
+        className="flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+      >
+        <Icon name="plus" size={13} />
+      </button>
+      {step === 'menu' && (
+        <Popover
+          anchorRef={ref}
+          onClose={() => setStep('closed')}
+          role="menu"
+          ariaLabel="Add a column"
+          trapFocus
+        >
+          <MenuSurface width={232}>
+            {sourceType !== null && (
+              <MenuItem
+                icon="plus"
+                label="New property"
+                testId="add-column-new"
+                onSelect={() => setStep('new')}
+              />
+            )}
+            {hidden.length > 0 && (
+              <>
+                {sourceType !== null && <MenuSeparator />}
+                <MenuLabel>Hidden</MenuLabel>
+                {hidden.map((f) => (
+                  <MenuItem
+                    key={f.name}
+                    icon={kindMeta(f.kind).icon}
+                    label={humanize(f.name)}
+                    testId={`show-column-${f.name}`}
+                    onSelect={() => {
+                      setStep('closed');
+                      // toggleColumn re-shows in place when the view already
+                      // holds a hidden spec, and appends when it does not.
+                      onColumnsChange(toggleColumn(columns, f.name));
+                    }}
+                  />
+                ))}
+              </>
+            )}
+            {hidden.length === 0 && sourceType === null && (
+              <MenuItem
+                icon="info"
+                label="No properties left to show"
+                disabled
+                onSelect={() => undefined}
+              />
+            )}
+          </MenuSurface>
+        </Popover>
+      )}
+      {step === 'new' && sourceType !== null && (
+        <AddPropertyPanel
+          anchorRef={ref}
+          existingNames={fields.map((f) => f.name)}
+          ownerType={sourceType}
+          onAdd={declare}
+          onCancel={() => setStep('closed')}
+        />
+      )}
+    </div>
+  );
+}
+
 interface HeaderItem {
   label: string;
   icon: string;
@@ -916,6 +1130,9 @@ function HeaderMenu({
   onPresentationChange,
   onFilterField,
   onMove,
+  frozen,
+  onFreeze,
+  onFit,
 }: {
   def: ColumnDef;
   wrap: boolean;
@@ -928,8 +1145,13 @@ function HeaderMenu({
   onFilterField?: (field: string) => void;
   /** M12.8: display-aware move — steps across the name column too. */
   onMove?: (field: string, delta: -1 | 1) => void;
+  /** M16.18: this column is inside the frozen run. */
+  frozen: boolean;
+  onFreeze?: () => void;
+  onFit: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [changingKind, setChangingKind] = useState(false);
   const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
   // M12.8: the full property editor, flown out IN this popover next to the
@@ -990,13 +1212,26 @@ function HeaderMenu({
       },
     );
   }
+  if (onFreeze !== undefined) {
+    items.push({
+      label: frozen ? 'Unfreeze up to here' : 'Freeze up to this column',
+      icon: frozen ? 'pin-off' : 'pin',
+      section: true,
+      run: onFreeze,
+    });
+  }
   if (onColumnsChange !== undefined) {
     items.push(
+      {
+        label: 'Fit to content',
+        icon: 'move-horizontal',
+        section: onFreeze === undefined,
+        run: onFit,
+      },
       {
         label: 'Wrap content',
         icon: 'wrap-text',
         active: wrap,
-        section: true,
         run: () => onColumnsChange(setColumnWrap(columns, def.name)),
       },
       {
@@ -1065,45 +1300,38 @@ function HeaderMenu({
   return (
     <span className="relative inline-flex min-w-0 flex-1">
       <button
+        ref={triggerRef}
         type="button"
         aria-label={`${name} column menu`}
+        aria-haspopup="menu"
         onClick={() => setOpen(!open)}
         className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-medium text-[var(--n-600)] hover:text-[var(--n-900)]"
       >
         {name}
       </button>
       {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close column menu"
-            onClick={close}
-            onWheel={close}
-            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
-          />
-          <div
-            className={[
-              'cb-menu-in absolute left-0 top-6 z-50 rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]',
-              editing ? 'w-[300px] p-2' : 'w-[224px]',
-            ].join(' ')}
+        // M16.18: the one anchored-surface primitive. This was a hand-rolled
+        // `fixed inset-0` scrim plus an `absolute top-6` card — one of the
+        // two inside this file that M16.1 was written to replace, and the
+        // reason a 15-item menu had no keyboard navigation at all.
+        <Popover
+          anchorRef={triggerRef}
+          onClose={close}
+          onEscape={editing ? () => setEditing(false) : close}
+          role="menu"
+          ariaLabel={`${name} column menu`}
+          trapFocus
+        >
+          <MenuSurface
+            width={editing ? 300 : 224}
+            autoFocus={!editing}
+            className={editing ? 'p-2' : ''}
           >
             {editing && canEditSchema && sourceType !== null && onColumnsChange !== undefined ? (
               // The Notion flyout: the menu becomes the property editor,
               // anchored where the column is (M12.8).
               <div className="cb-panel-in">
-                <div className="mb-1.5 flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    aria-label="Back to column menu"
-                    onClick={() => setEditing(false)}
-                    className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)]"
-                  >
-                    <Icon name="arrow-left" size={13} />
-                  </button>
-                  <span className="text-[12.5px] font-semibold text-[var(--n-900)]">
-                    Edit property
-                  </span>
-                </div>
+                <MenuBack title="Edit property" onBack={() => setEditing(false)} />
                 <PropertyEditor
                   key={def.name}
                   def={def}
@@ -1137,80 +1365,57 @@ function HeaderMenu({
                   </div>
                 )}
                 {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
-                  <button
-                    type="button"
-                    data-testid="edit-property"
-                    onClick={() => setEditing(true)}
-                    className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
-                  >
-                    <Icon name="settings-2" size={12} color="var(--n-500)" />
-                    <span className="min-w-0 flex-1">Edit property</span>
-                    <Icon name="chevron-right" size={11} color="var(--n-400)" />
-                  </button>
+                  <MenuItem
+                    icon="settings-2"
+                    label="Edit property"
+                    submenu
+                    testId="edit-property"
+                    onSelect={() => setEditing(true)}
+                  />
                 )}
                 {canEditSchema && sourceType !== null && (
-                  <button
-                    type="button"
-                    data-testid="change-type"
-                    onClick={() => setChangingKind(!changingKind)}
-                    className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
-                  >
-                    <Icon name="repeat-2" size={12} color="var(--n-500)" />
-                    <span className="min-w-0 flex-1">Change type</span>
-                    <span className="flex items-center gap-1 text-[11px] text-[var(--n-400)]">
-                      {kindMeta(def.kind).label}
-                      <Icon name={changingKind ? 'chevron-down' : 'chevron-right'} size={11} />
-                    </span>
-                  </button>
+                  <MenuItem
+                    icon="repeat-2"
+                    label="Change type"
+                    hint={kindMeta(def.kind).label}
+                    submenu
+                    testId="change-type"
+                    onSelect={() => setChangingKind(!changingKind)}
+                  />
                 )}
                 {changingKind && sourceType !== null && (
                   <div className="mb-1 max-h-[180px] overflow-y-auto rounded-[7px] bg-[var(--n-25)] p-0.5">
                     {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
-                      <button
+                      <MenuItem
                         key={k.kind}
-                        type="button"
-                        data-testid={`change-type-${k.kind}`}
-                        onClick={() => setPendingKind(k.kind)}
-                        className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
-                      >
-                        <Icon name={k.icon} size={12} color="var(--n-500)" />
-                        <span className="min-w-0 flex-1">{k.label}</span>
-                        {k.kind === def.kind && (
-                          <Icon name="check" size={12} color="var(--cortex-600)" />
-                        )}
-                      </button>
+                        icon={k.icon}
+                        label={k.label}
+                        checked={k.kind === def.kind}
+                        testId={`change-type-${k.kind}`}
+                        onSelect={() => setPendingKind(k.kind)}
+                      />
                     ))}
                   </div>
                 )}
                 {items.map((item) => (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => {
-                      item.run();
-                      close();
-                    }}
-                    className={[
-                      'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] hover:bg-[var(--n-50)]',
-                      item.danger === true ? 'text-[var(--danger-600)]' : 'text-[var(--n-700)]',
-                      item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
-                    ].join(' ')}
-                  >
-                    <Icon
-                      name={item.icon}
-                      size={12}
-                      color={item.danger === true ? 'var(--danger-600)' : 'var(--n-500)'}
+                  <Fragment key={item.label}>
+                    {item.section === true && <MenuSeparator />}
+                    <MenuItem
+                      icon={item.icon}
+                      label={item.label}
+                      danger={item.danger}
+                      checked={item.active}
+                      onSelect={() => {
+                        item.run();
+                        close();
+                      }}
                     />
-                    <span className="min-w-0 flex-1">{item.label}</span>
-                    {item.active === true && (
-                      <Icon name="check" size={12} color="var(--cortex-600)" />
-                    )}
-                  </button>
+                  </Fragment>
                 ))}
               </>
             )}
-          </div>
-        </>
+          </MenuSurface>
+        </Popover>
       )}
       {pendingKind !== null && sourceType !== null && (
         <ConfirmKindChange
@@ -1239,25 +1444,40 @@ function HeaderMenu({
 function TitleHeaderMenu({
   presentation,
   frozen,
-  canFreeze,
   atStart,
   atEnd,
+  rowHeight,
+  allWrapped,
   onPresentationChange,
   onFilterField,
   onMove,
+  onFreeze,
+  onWrapAll,
 }: {
   presentation: Presentation;
   frozen: boolean;
-  /** Freezing only means anything while the name column is first. */
-  canFreeze: boolean;
   atStart: boolean;
   atEnd: boolean;
+  /** M16.18: the two settings that are about the WHOLE table rather than one
+   * column, hosted on the name column's menu — the table's own settings
+   * surface since M12.8, and the only one that needs no capability flag to
+   * say "this is a table". */
+  rowHeight: NonNullable<Presentation['rowHeight']>;
+  allWrapped: boolean;
   onPresentationChange?: (next: Presentation) => void;
   onFilterField?: (field: string) => void;
   onMove: (delta: -1 | 1) => void;
+  onFreeze: () => void;
+  onWrapAll?: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [heights, setHeights] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const close = () => setOpen(false);
+
+  useEffect(() => {
+    if (open) setHeights(false);
+  }, [open]);
 
   const items: HeaderItem[] = [];
   if (onFilterField !== undefined) {
@@ -1275,72 +1495,107 @@ function TitleHeaderMenu({
         icon: 'arrow-down',
         run: () => onPresentationChange(sortBy(presentation, 'title', 'desc')),
       },
-    );
-    if (canFreeze) {
-      items.push({
-        label: frozen ? 'Unfreeze column' : 'Freeze column',
+      {
+        // Freezing means "up to here" now, so it is offered wherever the name
+        // column sits rather than only while it leads (M16.18).
+        label: frozen ? 'Unfreeze up to here' : 'Freeze up to this column',
         icon: frozen ? 'pin-off' : 'pin',
         section: true,
-        run: () => onPresentationChange({ ...presentation, titleFrozen: !frozen }),
-      });
-    }
-    if (!atStart) {
-      items.push({
-        label: 'Move left',
-        icon: 'arrow-left',
-        section: atStart || canFreeze ? undefined : true,
-        run: () => onMove(-1),
-      });
-    }
-    if (!atEnd) {
-      items.push({ label: 'Move right', icon: 'arrow-right', run: () => onMove(1) });
-    }
+        run: onFreeze,
+      },
+    );
+    if (!atStart) items.push({ label: 'Move left', icon: 'arrow-left', run: () => onMove(-1) });
+    if (!atEnd) items.push({ label: 'Move right', icon: 'arrow-right', run: () => onMove(1) });
   }
 
-  if (items.length === 0) {
+  if (items.length === 0 && onWrapAll === undefined) {
     return <span className="min-w-0 flex-1 truncate">Name</span>;
   }
 
   return (
     <span className="relative inline-flex min-w-0 flex-1">
       <button
+        ref={triggerRef}
         type="button"
         aria-label="Name column menu"
+        aria-haspopup="menu"
         onClick={() => setOpen(!open)}
         className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[11.5px] font-semibold text-[var(--n-600)] hover:text-[var(--n-900)]"
       >
         Name
       </button>
       {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close column menu"
-            onClick={close}
-            onWheel={close}
-            className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
-          />
-          <div className="cb-menu-in absolute left-0 top-6 z-50 w-[224px] rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]">
-            <div className="px-2 pb-1 pt-1 text-[12px] font-medium text-[var(--n-800)]">Name</div>
-            {items.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => {
-                  item.run();
-                  close();
-                }}
-                className={[
-                  'flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]',
-                  item.section === true ? 'mt-1 border-t border-[var(--n-100)] pt-1.5' : '',
-                ].join(' ')}
-              >
-                <Icon name={item.icon} size={12} color="var(--n-500)" />
-                <span className="min-w-0 flex-1">{item.label}</span>
-              </button>
-            ))}
-          </div>
-        </>
+        <Popover
+          anchorRef={triggerRef}
+          onClose={close}
+          onEscape={heights ? () => setHeights(false) : close}
+          role="menu"
+          ariaLabel="Name column menu"
+          trapFocus
+        >
+          <MenuSurface width={224}>
+            {heights ? (
+              <>
+                <MenuBack title="Row height" onBack={() => setHeights(false)} />
+                {ROW_HEIGHT_CHOICES.map((choice) => (
+                  <MenuItem
+                    key={choice.value}
+                    label={choice.label}
+                    checked={rowHeight === choice.value}
+                    testId={`row-height-${choice.value}`}
+                    onSelect={() => {
+                      close();
+                      onPresentationChange?.({ ...presentation, rowHeight: choice.value });
+                    }}
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                <MenuLabel>Name</MenuLabel>
+                {items.map((item) => (
+                  <Fragment key={item.label}>
+                    {item.section === true && <MenuSeparator />}
+                    <MenuItem
+                      icon={item.icon}
+                      label={item.label}
+                      checked={item.active}
+                      onSelect={() => {
+                        item.run();
+                        close();
+                      }}
+                    />
+                  </Fragment>
+                ))}
+                {(onPresentationChange !== undefined || onWrapAll !== undefined) && (
+                  <MenuSeparator />
+                )}
+                {onPresentationChange !== undefined && (
+                  <MenuItem
+                    icon="rows-2"
+                    label="Row height"
+                    hint={rowHeightLabel(rowHeight)}
+                    submenu
+                    testId="row-height"
+                    onSelect={() => setHeights(true)}
+                  />
+                )}
+                {onWrapAll !== undefined && (
+                  <MenuItem
+                    icon="wrap-text"
+                    label="Wrap all columns"
+                    checked={allWrapped}
+                    testId="wrap-all"
+                    onSelect={() => {
+                      close();
+                      onWrapAll();
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </MenuSurface>
+        </Popover>
       )}
     </span>
   );
@@ -1465,10 +1720,11 @@ export function TableView({
    */
   const layout = useMemo(() => {
     const base = resolved.map((c) => c.width);
-    // GUTTER is part of the content width (M16.16): leave it out and the
-    // slack calculation hands the columns 46px that the row gutter is
-    // already occupying, so the last column runs off the right edge.
-    const content = GUTTER + titleWidth + base.reduce((sum, w) => sum + w, 0);
+    // GUTTER is part of the content width (M16.16), and so is the header's
+    // trailing "+" (M16.18): leave either out and the slack calculation hands
+    // the columns pixels that are already spoken for, so the last column runs
+    // off the right edge.
+    const content = GUTTER + ADD_W + titleWidth + base.reduce((sum, w) => sum + w, 0);
     const slack = available - content;
     if (slack <= 0 || base.length === 0) {
       return { title: titleWidth, columns: base, total: content };
@@ -1506,6 +1762,35 @@ export function TableView({
       onPresentationChange?.({ ...presentation, titleWidth: Math.max(MIN_TITLE_W, width) });
     },
     [onPresentationChange, presentation],
+  );
+
+  /**
+   * Fit a column to its widest content (M16.18).
+   *
+   * Measured off the DOM rather than estimated from the values: the cells
+   * hold chips, avatars and progress bars, and a character count would be
+   * wrong for all three. `aria-colindex` is what makes one query enough —
+   * the header, every cell, and the footer of one column all carry it, so a
+   * fit never clips the header label.
+   */
+  const fitColumn = useCallback(
+    (field: string, displayIndex: number) => {
+      const node = gridRef.current;
+      if (node === null) return;
+      let widest = 0;
+      for (const cell of node.querySelectorAll<HTMLElement>(
+        `[aria-colindex="${displayIndex + 1}"]`,
+      )) {
+        widest = Math.max(widest, cell.scrollWidth);
+      }
+      // Nothing measurable (an unlaid-out grid) is not a reason to slam the
+      // column to its minimum.
+      if (widest === 0) return;
+      const next = Math.min(Math.round(widest) + 4, FIT_MAX_W);
+      if (field === 'title') commitTitle(Math.max(MIN_TITLE_W, next));
+      else commitColumn(field, Math.max(MIN_COL_W, next));
+    },
+    [commitColumn, commitTitle],
   );
 
   // Keyboard traverses the record rows only — bands and the create row are not
@@ -1667,7 +1952,6 @@ export function TableView({
     band: { groupBy: string; groupValue: string };
   } | null>(null);
 
-  const primarySort = presentation.sort[0];
   // M12.4b: wrap rides with each cell; any wrapped column releases the rows
   // from their fixed height.
   const cells = useMemo(
@@ -1679,7 +1963,6 @@ export function TableView({
 
   // --- M12.8: the name column is a peer of the data columns --------------
   const titlePos = Math.max(0, Math.min(presentation.titlePosition ?? 0, resolved.length));
-  const titleFrozen = (presentation.titleFrozen ?? true) && titlePos === 0;
 
   /** Header keys in display order — the data fields with 'title' interleaved. */
   const displayKeys = useMemo(() => {
@@ -1687,6 +1970,66 @@ export function TableView({
     keys.splice(titlePos, 0, 'title');
     return keys;
   }, [resolved, titlePos]);
+
+  /**
+   * How many leading display slots pin to the left edge (M16.18). The default
+   * is the M12.8 one — the name column, if it leads — stated once here rather
+   * than recomputed by every reader.
+   */
+  const frozenCount = Math.max(
+    0,
+    Math.min(presentation.frozenColumns ?? (titlePos === 0 ? 1 : 0), displayKeys.length),
+  );
+  const titleFrozen = titlePos < frozenCount;
+
+  /**
+   * The `left` a frozen slot pins at: the gutter, plus every frozen slot
+   * before it. Widths are CSS variables, so this is a `calc` rather than a
+   * number — which is also what lets a resize drag repaint the frozen run
+   * without a single re-render.
+   */
+  const stickyLeft = useCallback(
+    (d: number): string => {
+      const parts = [`${GUTTER}px`];
+      for (let k = 0; k < d; k += 1) {
+        parts.push(
+          k === titlePos ? `var(${TITLE_VAR})` : `var(${widthVar(k < titlePos ? k : k - 1)})`,
+        );
+      }
+      return parts.length === 1 ? `${GUTTER}px` : `calc(${parts.join(' + ')})`;
+    },
+    [titlePos],
+  );
+
+  /** Sticky style for display slot `d`, or nothing when it scrolls. */
+  const freezeStyle = useCallback(
+    (d: number): React.CSSProperties | undefined =>
+      d < frozenCount ? { position: 'sticky', left: stickyLeft(d) } : undefined,
+    [frozenCount, stickyLeft],
+  );
+
+  /** Freeze through slot `d`, or back to it when it is already frozen. */
+  const freezeThrough = useCallback(
+    (d: number) => {
+      onPresentationChange?.({ ...presentation, frozenColumns: d < frozenCount ? d : d + 1 });
+    },
+    [frozenCount, onPresentationChange, presentation],
+  );
+
+  const rowHeight = presentation.rowHeight ?? 'default';
+  const allWrapped = resolved.length > 0 && resolved.every((c) => c.spec.wrap === true);
+
+  /** Wrap every column, or unwrap them all when they already are. */
+  const wrapAll = useCallback(() => {
+    if (onColumnsChange === undefined) return;
+    onColumnsChange(
+      presentation.columns.map((c) => {
+        if (!allWrapped) return { ...c, wrap: true };
+        const { wrap: _drop, ...rest } = c;
+        return rest;
+      }),
+    );
+  }, [allWrapped, onColumnsChange, presentation.columns]);
 
   /**
    * Reorder by display slot: remove `key`, re-insert at `slot` (an index into
@@ -1913,7 +2256,7 @@ export function TableView({
                 measures slots by that role. */}
             <div
               className={[
-                titleFrozen ? 'sticky left-0 z-30 bg-[var(--n-25)]' : '',
+                frozenCount > 0 ? 'sticky left-0 z-30 bg-[var(--n-25)]' : '',
                 'flex flex-none items-center justify-end pl-1 pr-1',
               ].join(' ')}
               style={{ width: GUTTER }}
@@ -1946,14 +2289,15 @@ export function TableView({
                     role="columnheader"
                     onPointerDown={startHeaderDrag('title')}
                     onClickCapture={swallowDraggedClick}
+                    aria-colindex={d + 1}
                     className={[
-                      titleFrozen ? 'sticky z-30' : 'relative',
-                      'flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
+                      titleFrozen ? 'z-30' : 'relative',
+                      'group/header flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]',
                       drag?.key === 'title' ? 'opacity-60' : '',
                     ].join(' ')}
                     style={{
                       width: `var(${TITLE_VAR})`,
-                      ...(titleFrozen ? { left: GUTTER } : {}),
+                      ...freezeStyle(d),
                       ...dropStyle(d),
                     }}
                   >
@@ -1961,20 +2305,23 @@ export function TableView({
                     <TitleHeaderMenu
                       presentation={presentation}
                       frozen={titleFrozen}
-                      canFreeze={titlePos === 0}
                       atStart={titlePos === 0}
                       atEnd={titlePos === resolved.length}
+                      rowHeight={rowHeight}
+                      allWrapped={allWrapped}
                       onPresentationChange={onPresentationChange}
                       onFilterField={onFilterField}
                       onMove={(delta) => moveDisplay('title', delta)}
+                      onFreeze={() => freezeThrough(d)}
+                      onWrapAll={onColumnsChange === undefined ? undefined : wrapAll}
                     />
-                    {primarySort?.field === 'title' && (
-                      <Icon
-                        name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
-                        size={11}
-                        color="var(--cortex-600)"
-                      />
-                    )}
+                    <SortMark presentation={presentation} field="title" />
+                    <Icon
+                      name="chevron-down"
+                      size={11}
+                      color="var(--n-400)"
+                      className="flex-none opacity-0 group-hover/header:opacity-100"
+                    />
                     {/* M11: the name column resizes too. It is the widest thing
                       on the row and was the one width nobody could change. */}
                     {onPresentationChange !== undefined && (
@@ -1984,6 +2331,7 @@ export function TableView({
                         min={MIN_TITLE_W}
                         onDrag={(w) => paint(TITLE_VAR, w, w - layout.title)}
                         onCommit={commitTitle}
+                        onFit={() => fitColumn('title', d)}
                       />
                     )}
                   </div>
@@ -1997,11 +2345,13 @@ export function TableView({
                   role="columnheader"
                   onPointerDown={startHeaderDrag(def.name)}
                   onClickCapture={swallowDraggedClick}
+                  aria-colindex={d + 1}
                   className={[
-                    'group/header relative flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]',
+                    'group/header flex flex-none items-center gap-1.5 border-r border-[var(--n-100)] px-2 text-[11.5px] font-medium text-[var(--n-600)]',
+                    d < frozenCount ? 'z-30 bg-[var(--n-25)]' : 'relative',
                     drag?.key === def.name ? 'opacity-60' : '',
                   ].join(' ')}
-                  style={{ width: `var(${widthVar(i)})`, ...dropStyle(d) }}
+                  style={{ width: `var(${widthVar(i)})`, ...freezeStyle(d), ...dropStyle(d) }}
                 >
                   <Icon name={kindMeta(def.kind).icon} size={12} color="var(--n-400)" />
                   {/* M12.4b: the label opens the column menu (Notion's header).
@@ -2017,22 +2367,26 @@ export function TableView({
                     onPresentationChange={onPresentationChange}
                     onFilterField={onFilterField}
                     onMove={onPresentationChange !== undefined ? moveDisplay : undefined}
+                    frozen={d < frozenCount}
+                    onFreeze={
+                      onPresentationChange === undefined ? undefined : () => freezeThrough(d)
+                    }
+                    onFit={() => fitColumn(def.name, d)}
                   />
                   {def.heterogeneous === true && (
-                    <span
-                      title="Declared with different kinds across the types in this view"
-                      className="flex-none text-[var(--warn-500)]"
-                    >
-                      <Icon name="triangle-alert" size={10} />
-                    </span>
+                    <Tooltip label="Declared with different kinds across the types in this view">
+                      <span className="flex-none text-[var(--warn-500)]">
+                        <Icon name="triangle-alert" size={10} />
+                      </span>
+                    </Tooltip>
                   )}
-                  {primarySort?.field === def.name && (
-                    <Icon
-                      name={primarySort.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
-                      size={11}
-                      color="var(--cortex-600)"
-                    />
-                  )}
+                  <SortMark presentation={presentation} field={def.name} />
+                  <Icon
+                    name="chevron-down"
+                    size={11}
+                    color="var(--n-400)"
+                    className="flex-none opacity-0 group-hover/header:opacity-100"
+                  />
                   {onColumnsChange !== undefined && (
                     <ColumnResizer
                       label={humanize(def.name)}
@@ -2040,11 +2394,23 @@ export function TableView({
                       min={MIN_COL_W}
                       onDrag={(w) => paint(widthVar(i), w, w - layout.columns[i])}
                       onCommit={(w) => commitColumn(def.name, w)}
+                      onFit={() => fitColumn(def.name, d)}
                     />
                   )}
                 </div>
               );
             })}
+            {/* M16.18: the header used to simply stop after the last column.
+                `hiddenColumns` has been exported since M9.2 with no call
+                site — this is it. */}
+            {onColumnsChange !== undefined && (
+              <AddColumnButton
+                columns={presentation.columns}
+                fields={fields}
+                sourceType={sourceType ?? null}
+                onColumnsChange={onColumnsChange}
+              />
+            )}
           </div>
 
           {rows.map((row) => {
@@ -2097,6 +2463,8 @@ export function TableView({
                   cells={cells}
                   titlePos={titlePos}
                   titleFrozen={titleFrozen}
+                  freezeStyle={freezeStyle}
+                  rowHeight={rowHeight}
                   autoHeight={anyWrap}
                   schema={schema}
                   depth={row.depth}
@@ -2156,7 +2524,7 @@ export function TableView({
             >
               <span
                 className={[
-                  titleFrozen ? 'sticky left-0 z-10 bg-[var(--n-25)]' : '',
+                  frozenCount > 0 ? 'sticky left-0 z-10 bg-[var(--n-25)]' : '',
                   'flex-none',
                 ].join(' ')}
                 style={{ width: GUTTER }}
@@ -2179,16 +2547,17 @@ export function TableView({
                       persists === undefined ? undefined : (next) => setColumnCalc(key, next)
                     }
                     className={[
-                      column === null && titleFrozen ? 'sticky z-10 bg-[var(--n-25)]' : '',
+                      d < frozenCount ? 'z-10 bg-[var(--n-25)]' : '',
                       'flex flex-none items-center border-r border-[var(--n-100)] px-2 text-[11.5px]',
                     ].join(' ')}
                     style={{
                       width: `var(${column === null ? TITLE_VAR : widthVar(i)})`,
-                      ...(column === null && titleFrozen ? { left: GUTTER } : {}),
+                      ...freezeStyle(d),
                     }}
                   />
                 );
               })}
+              <span aria-hidden className="flex-1" />
             </div>
           )}
 

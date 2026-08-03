@@ -142,8 +142,17 @@ function parsePresentation(raw: unknown): Presentation {
     ...(typeof obj.titleWidth === 'number' && Number.isFinite(obj.titleWidth)
       ? { titleWidth: obj.titleWidth }
       : {}),
-    // Both stored only off their defaults, so existing files stay untouched.
-    ...(obj.titleFrozen === false ? { titleFrozen: false } : {}),
+    // Stored only off the default, so existing files stay untouched. The
+    // pre-M16.18 `titleFrozen: false` means the same thing as "no frozen
+    // columns" and migrates to it; `titleFrozen: true` was the default and
+    // carries no information.
+    ...(typeof obj.frozenColumns === 'number' &&
+    Number.isInteger(obj.frozenColumns) &&
+    obj.frozenColumns >= 0
+      ? { frozenColumns: obj.frozenColumns }
+      : obj.titleFrozen === false
+        ? { frozenColumns: 0 }
+        : {}),
     ...(typeof obj.titlePosition === 'number' &&
     Number.isInteger(obj.titlePosition) &&
     obj.titlePosition > 0
@@ -558,7 +567,7 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     columns: p.columns,
     ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
     ...(p.titleWidth !== undefined ? { titleWidth: p.titleWidth } : {}),
-    ...(p.titleFrozen === false ? { titleFrozen: false } : {}),
+    ...(p.frozenColumns !== undefined ? { frozenColumns: p.frozenColumns } : {}),
     ...(p.titlePosition !== undefined && p.titlePosition > 0
       ? { titlePosition: p.titlePosition }
       : {}),

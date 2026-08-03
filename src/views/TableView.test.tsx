@@ -7,6 +7,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
+import type { ColumnDef } from '@/engine/columns';
 import type { Entry, Presentation } from '@/engine/types';
 
 const presentation: Presentation = {
@@ -614,6 +615,133 @@ describe('TableView calculation footer (M16.15)', () => {
       />,
     );
     expect(screen.queryByTestId('table-footer')).toBeNull();
+  });
+});
+
+/**
+ * Header and column settings (M16.18).
+ *
+ * The 15-item header menu had zero UI coverage in any unit or e2e test, and
+ * four of Notion's column controls had no equivalent at all: freeze past the
+ * name column, fit to content, an inline "+", and a row height — the last of
+ * which was parsed and serialized and consumed by NOTHING.
+ */
+describe('TableView header settings (M16.18)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+  });
+
+  function grid(over: Partial<Presentation> = {}, extraFields: ColumnDef[] = []) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const onColumnsChange = vi.fn();
+    const onPresentationChange = vi.fn();
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, ...over }}
+        schema={schema}
+        fields={[...(schema.types.get('Work item')?.fields ?? []), ...extraFields]}
+        sourceType="Work item"
+        onColumnsChange={onColumnsChange}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    return { onColumnsChange, onPresentationChange };
+  }
+
+  it('freezes up to a column, not just the name one', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid();
+    await user.click(screen.getByLabelText('Priority column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Freeze up to this column/ }));
+    // Priority is display slot 3 (name, status, priority), so freezing
+    // through it pins three columns.
+    expect(onPresentationChange.mock.calls[0][0].frozenColumns).toBe(3);
+  });
+
+  it('unfreezing a frozen column leaves the ones before it pinned', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid({ frozenColumns: 3 });
+    await user.click(screen.getByLabelText('Priority column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Unfreeze up to here/ }));
+    expect(onPresentationChange.mock.calls[0][0].frozenColumns).toBe(2);
+  });
+
+  it('the name column can be unfrozen from its own menu', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid();
+    await user.click(screen.getByLabelText('Name column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Unfreeze up to here/ }));
+    expect(onPresentationChange.mock.calls[0][0].frozenColumns).toBe(0);
+  });
+
+  it('offers the hidden columns behind the header "+"', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid({
+      columns: [{ field: 'status' }, { field: 'priority', hidden: true }],
+    });
+    await user.click(screen.getByTestId('add-column'));
+    await user.click(screen.getByTestId('show-column-priority'));
+    // `hiddenColumns` has been exported since M9.2 with no call site; this is
+    // it, and re-showing keeps the column's slot rather than appending it.
+    expect(onColumnsChange.mock.calls[0][0]).toEqual([
+      { field: 'status' },
+      { field: 'priority', hidden: false },
+    ]);
+  });
+
+  it('row height is a setting the rows finally read', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid();
+    expect(screen.getAllByTestId('table-row')[0].className).toContain('h-9');
+    await user.click(screen.getByLabelText('Name column menu'));
+    await user.click(screen.getByTestId('row-height'));
+    await user.click(screen.getByTestId('row-height-tall'));
+    expect(onPresentationChange.mock.calls[0][0].rowHeight).toBe('tall');
+  });
+
+  it('renders the stored row height instead of ignoring it', () => {
+    grid({ rowHeight: 'compact' });
+    expect(screen.getAllByTestId('table-row')[0].className).toContain('h-8');
+  });
+
+  it('wraps every column at once, and unwraps them the same way', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid({
+      columns: [{ field: 'status' }, { field: 'priority' }],
+    });
+    await user.click(screen.getByLabelText('Name column menu'));
+    await user.click(screen.getByTestId('wrap-all'));
+    expect(onColumnsChange.mock.calls[0][0]).toEqual([
+      { field: 'status', wrap: true },
+      { field: 'priority', wrap: true },
+    ]);
+  });
+
+  it('marks every sort key, not only the first', () => {
+    grid({
+      sort: [
+        { field: 'status', dir: 'asc' },
+        { field: 'priority', dir: 'desc' },
+      ],
+    });
+    // The second key used to render nothing at all, so a two-key sort looked
+    // like a one-key sort with a mysterious order.
+    expect(screen.getByTestId('sort-mark-status').textContent).toBe('1');
+    expect(screen.getByTestId('sort-mark-priority').textContent).toBe('2');
+  });
+
+  it('offers fit-to-content from the column menu and the divider', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: 'Fit to content' }));
+    // jsdom reports every scrollWidth as 0, and an unmeasurable grid is not a
+    // reason to slam the column to its minimum — so this writes nothing.
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    fireEvent.doubleClick(screen.getByLabelText('Resize Status column'));
+    expect(onColumnsChange).not.toHaveBeenCalled();
   });
 });
 
