@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
+import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
+import { useSortableList } from '@/hooks/useSortableList';
 import type { ViewDefinition, ViewType } from '@/engine/types';
 import { layoutLabel } from '@/engine/views';
 import { VIEW_KINDS, viewKind } from '@/views/viewKinds';
@@ -31,6 +34,10 @@ export interface ViewTabsProps {
   onChangeLayout: (id: string, type: ViewType) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Move a tab to a new position (M16.26). Omitted leaves the strip fixed. */
+  onReorder?: (id: string, toIndex: number) => void;
+  /** Set or clear a tab's own icon (M16.26). Omitted hides the menu item. */
+  onChangeIcon?: (id: string, icon: string | null) => void;
   /** Opens the full settings panel for a view. Absent on surfaces that have
    * no settings aside (M12.3: the type screen) — the menu item is omitted. */
   onConfigure?: (id: string) => void;
@@ -48,11 +55,14 @@ export function ViewTabs({
   onChangeLayout,
   onDuplicate,
   onDelete,
+  onReorder,
+  onChangeIcon,
   onConfigure,
   trailing,
 }: ViewTabsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [layoutFor, setLayoutFor] = useState<string | null>(null);
+  const [iconFor, setIconFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   // A ViewDefinition carries the tab's filters, its column set with widths and
@@ -61,9 +71,29 @@ export function ViewTabs({
   // unrecoverable — the app has no undo.
   const [deleting, setDeleting] = useState<ViewDefinition | null>(null);
 
+  // Horizontal, because the tabs are. The primitive's arrow keys follow the
+  // axis, so a keyboard user moves a tab with Left/Right rather than being
+  // told to use Up/Down on a row.
+  const sortable = useSortableList({
+    ids: views.map((v) => v.id),
+    axis: 'x',
+    disabled: onReorder === undefined,
+    labelFor: (id) => views.find((v) => v.id === id)?.name ?? id,
+    onReorder: (id, to) => onReorder?.(id, to),
+  });
+
   const menuItems = (view: ViewDefinition): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
       { icon: 'pencil', label: 'Rename', onSelect: () => setRenaming(view.id) },
+      ...(onChangeIcon !== undefined
+        ? [
+            {
+              icon: view.icon ?? viewKind(view.presentation.type).icon,
+              label: 'Change icon…',
+              onSelect: () => setIconFor(view.id),
+            },
+          ]
+        : []),
       {
         icon: viewKind(view.presentation.type).icon,
         label: 'Change layout…',
@@ -121,71 +151,117 @@ export function ViewTabs({
         // trailing icons sit OUTSIDE this strip so they cannot scroll away.
         className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {views.map((view) => {
-          const active = view.id === activeId;
-          const kind = viewKind(view.presentation.type);
-          if (renaming === view.id) {
+        {/* `display: contents` so the tabs stay direct flex children of the
+            strip while the sortable measures ONLY them. Its slot maths reads
+            `container.children`, and the "+ View" button below would otherwise
+            count as a drop slot you could never mean. */}
+        <div
+          ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+          style={{ display: 'contents' }}
+        >
+          {views.map((view, index) => {
+            const active = view.id === activeId;
+            const kind = viewKind(view.presentation.type);
+            if (renaming === view.id) {
+              return (
+                <RenameTab
+                  key={view.id}
+                  name={view.name}
+                  icon={view.icon ?? kind.icon}
+                  onCommit={(name) => {
+                    setRenaming(null);
+                    if (name !== '' && name !== view.name) onRename(view.id, name);
+                  }}
+                />
+              );
+            }
             return (
-              <RenameTab
+              <div
                 key={view.id}
-                name={view.name}
-                icon={view.icon ?? kind.icon}
-                onCommit={(name) => {
-                  setRenaming(null);
-                  if (name !== '' && name !== view.name) onRename(view.id, name);
-                }}
-              />
-            );
-          }
-          return (
-            <div key={view.id} className="relative flex-none">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={active}
-                data-testid={`view-tab-${view.id}`}
-                onClick={(e) => {
-                  if (!active) {
-                    onSelect(view.id);
-                    return;
-                  }
-                  // Anchor the menu to the tab that was pressed, taken from the
-                  // event rather than looked up — the tab IS the event target.
-                  const box = e.currentTarget.getBoundingClientRect();
-                  setMenu({ x: box.left, y: box.bottom, id: view.id });
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setMenu({ x: e.clientX, y: e.clientY, id: view.id });
-                }}
                 className={[
-                  'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-[13px]',
-                  active
-                    ? 'border-[var(--cortex-500)] font-semibold text-[var(--n-900)]'
-                    : 'border-transparent font-normal text-[var(--n-500)] hover:text-[var(--n-800)]',
+                  'group relative flex-none',
+                  sortable.dragging === view.id ? 'opacity-40' : '',
                 ].join(' ')}
-                style={{ borderBottomStyle: 'solid' }}
+                style={sortable.dropIndicator(index)}
               >
-                <Icon name={view.icon ?? kind.icon} size={13} />
-                <span className="min-w-0 truncate">{view.name}</span>
-                {/* The caret appears on the tab you are standing on, because
+                {/* The grip sits in the tab's own left padding, which is dead
+                  space — an appended handle would shove every tab sideways
+                  the moment the pointer arrived, and one overlaying the icon
+                  would have to be aligned by hand against a button whose
+                  vertical padding is asymmetric. */}
+                {onReorder !== undefined && (
+                  <Tooltip label="Drag to reorder">
+                    <span
+                      {...sortable.gripProps(view.id, index)}
+                      // Opacity, not `hidden`: a hidden grip is out of the tab
+                      // order, and Left/Right reordering is the point of the
+                      // primitive underneath it.
+                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-[3px] text-[var(--n-400)] opacity-0 hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Icon name="grip-vertical" size={11} />
+                    </span>
+                  </Tooltip>
+                )}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  data-testid={`view-tab-${view.id}`}
+                  onClick={(e) => {
+                    if (!active) {
+                      onSelect(view.id);
+                      return;
+                    }
+                    // Anchor the menu to the tab that was pressed, taken from the
+                    // event rather than looked up — the tab IS the event target.
+                    const box = e.currentTarget.getBoundingClientRect();
+                    setMenu({ x: box.left, y: box.bottom, id: view.id });
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, id: view.id });
+                  }}
+                  className={[
+                    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-[13px]',
+                    active
+                      ? 'border-[var(--cortex-500)] font-semibold text-[var(--n-900)]'
+                      : 'border-transparent font-normal text-[var(--n-500)] hover:text-[var(--n-800)]',
+                  ].join(' ')}
+                  style={{ borderBottomStyle: 'solid' }}
+                >
+                  <Icon name={view.icon ?? kind.icon} size={13} />
+                  <span className="min-w-0 truncate">{view.name}</span>
+                  {/* The caret appears on the tab you are standing on, because
                   that is the only one whose settings you can act on without
                   first leaving where you are. */}
-                {active && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
-              </button>
-              {layoutFor === view.id && (
-                <LayoutPicker
-                  current={view.presentation.type}
-                  onPick={(type) => {
-                    setLayoutFor(null);
-                    if (type !== view.presentation.type) onChangeLayout(view.id, type);
-                  }}
-                  onClose={() => setLayoutFor(null)}
-                />
-              )}
-            </div>
-          );
-        })}
+                  {active && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
+                </button>
+                {layoutFor === view.id && (
+                  <LayoutPicker
+                    current={view.presentation.type}
+                    onPick={(type) => {
+                      setLayoutFor(null);
+                      if (type !== view.presentation.type) onChangeLayout(view.id, type);
+                    }}
+                    onClose={() => setLayoutFor(null)}
+                  />
+                )}
+                {iconFor === view.id && onChangeIcon !== undefined && (
+                  <ViewIconPicker
+                    current={view.icon}
+                    layoutIcon={kind.icon}
+                    layoutLabel={kind.label}
+                    onPick={(icon) => {
+                      setIconFor(null);
+                      onChangeIcon(view.id, icon);
+                    }}
+                    onClose={() => setIconFor(null)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         <div className="relative flex-none">
           <button
@@ -307,6 +383,64 @@ function LayoutPicker({
               {k.value === current && <Icon name="check" size={12} />}
             </button>
           ))}
+        </div>
+      </FixedBelowAnchor>
+    </>
+  );
+}
+
+/**
+ * A tab's own icon (M16.26).
+ *
+ * `ViewDefinition.icon` has been parsed, serialized and RENDERED since M11 —
+ * `ViewTabs` reads `view.icon ?? kind.icon` — but `newView` hardcodes `null`
+ * and nothing in the app could write one, so every tab of the same layout wore
+ * the same glyph and the key was dead weight in the YAML.
+ *
+ * Clearing it is a real choice, not an absence: the tab falls back to its
+ * LAYOUT's icon, which is what the first tile says.
+ */
+function ViewIconPicker({
+  current,
+  layoutIcon,
+  layoutLabel: layoutName,
+  onPick,
+  onClose,
+}: {
+  current: string | null;
+  layoutIcon: string;
+  layoutLabel: string;
+  onPick: (icon: string | null) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close icon picker"
+        onClick={onClose}
+        onWheel={onClose}
+        className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+      />
+      {/* Fixed for the same reason the layout picker is: the tab strip is a
+          horizontal scroll container and clips its absolute descendants. */}
+      <FixedBelowAnchor>
+        <div
+          data-testid="view-icon-picker"
+          className="z-50 w-[300px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]"
+        >
+          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            Tab icon
+          </div>
+          <IconPicker
+            value={current}
+            onChange={onPick}
+            clear={{
+              label: `Use the ${layoutName.toLowerCase()} icon`,
+              icon: layoutIcon,
+              onClear: () => onPick(null),
+            }}
+          />
         </div>
       </FixedBelowAnchor>
     </>

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { VIEW_TYPES } from '@/engine/types';
+import { FILTER_OPS, VIEW_TYPES } from '@/engine/types';
 import {
   layoutLabel,
+  moveSortKey,
+  moveView,
   newView,
   nextViewId,
   parseListYaml,
@@ -9,7 +11,7 @@ import {
   resolveView,
   serializeList,
 } from './views';
-import type { FilterGroup, ListDefinition, ListFile, Presentation } from './types';
+import type { FilterGroup, ListDefinition, ListFile, Presentation, SortSpec } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
@@ -506,6 +508,84 @@ describe('serializeList', () => {
       },
     );
     expect(parseListYaml('sprint-board', serializeList(def)).definition).toEqual(def);
+  });
+
+  /**
+   * The read-side allowlist and the operator union were two hand-written
+   * lists (M16.25). An operator missing from `views.ts`'s copy made
+   * `parseFilterNode` treat the rule as MALFORMED and drop it, so the view
+   * reopened with one fewer condition and silently showed records it had been
+   * configured to hide. This asserts the two can no longer disagree.
+   */
+  it('round-trips every operator in the catalog', () => {
+    const def = oneView(
+      { name: 'Every op', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+      },
+      {
+        all: FILTER_OPS.map((op) => ({
+          field: 'due',
+          op,
+          // Whatever shape the operator takes, the value has to survive too:
+          // an `is_between` that came back as a scalar would silently become
+          // "between X and undefined".
+          ...(op === 'is_empty' || op === 'is_not_empty'
+            ? {}
+            : op === 'is_between'
+              ? { value: ['2026-01-01', '2026-12-31'] }
+              : op === 'any_of' || op === 'none_of'
+                ? { value: ['a', 'b'] }
+                : { value: '2026-06-01' }),
+        })),
+      },
+    );
+    const back = parseListYaml('every-op', serializeList(def)).definition;
+    expect(back).toEqual(def);
+    expect(back.views[0].filters).not.toBeNull();
+  });
+
+  /**
+   * A typed value editor writes real numbers and real booleans (M16.25). YAML
+   * keeps both, so a rule authored as `is 5` must not come back as `is "5"`.
+   */
+  it('round-trips a rule whose value is a number and one whose value is a boolean', () => {
+    const def = oneView(
+      { name: 'Typed', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+      },
+      {
+        all: [
+          { field: 'estimate', op: 'gte', value: 5 },
+          { field: 'done', op: 'equals', value: true },
+        ],
+      },
+    );
+    expect(parseListYaml('typed', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('round-trips a load limit, and drops a nonsense one on read (M16.26)', () => {
+    const def = oneView(
+      { name: 'Capped', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+        limit: 25,
+      },
+    );
+    expect(parseListYaml('capped', serializeList(def)).definition).toEqual(def);
+    // A limit only a hand-edit can produce. Honouring it would render an
+    // empty canvas that nothing on screen can explain or undo.
+    expect(presentationOf(parseListYaml('v', 'presentation:\n  limit: 0\n')).limit).toBeUndefined();
   });
 
   // M3.5: a view is rooted in a type, and a relation level descends it — both
@@ -1060,5 +1140,66 @@ describe('serializeList', () => {
       expect(p.group.filter((g) => g.descend !== undefined)).toHaveLength(6);
       expect(p.group.filter((g) => g.descend === undefined)).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * A sort chain is ORDERED — the first key decides and later ones break its
+ * ties — and there was no grip anywhere (`ChainBuilder.tsx:110-141`). The only
+ * way to demote the leading key was to delete every row and re-add them in the
+ * order you wanted (M16.26).
+ */
+describe('moveSortKey', () => {
+  const chain: SortSpec[] = [
+    { field: 'status', dir: 'asc' },
+    { field: 'due', dir: 'desc' },
+    { field: 'title', dir: 'asc' },
+  ];
+
+  it('promotes a key to the front', () => {
+    expect(moveSortKey(chain, 2, 0).map((s) => s.field)).toEqual(['title', 'status', 'due']);
+  });
+  it('demotes a key to the back', () => {
+    expect(moveSortKey(chain, 0, 2).map((s) => s.field)).toEqual(['due', 'title', 'status']);
+  });
+  it('a move to the same slot is not a new array to persist', () => {
+    expect(moveSortKey(chain, 1, 1)).toBe(chain);
+  });
+  /**
+   * Called from a pointer drag whose slot maths was measured against a DOM
+   * that may have re-rendered mid-gesture, so a stale index must be a no-op
+   * rather than a splice that duplicates or drops a key.
+   */
+  it('an out-of-range index leaves the chain untouched', () => {
+    expect(moveSortKey(chain, 5, 0)).toBe(chain);
+    expect(moveSortKey(chain, 0, -1)).toBe(chain);
+    expect(moveSortKey(chain, 0, 9)).toBe(chain);
+  });
+});
+
+/**
+ * Tab order is the order of the `views:` array on disk, and nothing could
+ * write a different one: no drag handler, no Move left/right item, and no
+ * action anywhere in the app (M16.26).
+ */
+describe('moveView', () => {
+  const views = [
+    newView('One', 'table', []),
+    newView('Two', 'board', ['one']),
+    newView('Three', 'list', ['one', 'two']),
+  ];
+
+  it('moves a tab by id, not by index', () => {
+    expect(moveView(views, 'three', 0).map((v) => v.id)).toEqual(['three', 'one', 'two']);
+  });
+  it('an unknown id changes nothing', () => {
+    expect(moveView(views, 'nope', 0)).toBe(views);
+  });
+  it('a target outside the strip changes nothing', () => {
+    expect(moveView(views, 'one', 3)).toBe(views);
+  });
+  it('the moved tab keeps its whole definition, not just its name', () => {
+    const moved = moveView(views, 'two', 0);
+    expect(moved[0]).toBe(views[1]);
   });
 });

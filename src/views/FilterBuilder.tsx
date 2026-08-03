@@ -1,21 +1,37 @@
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
-import { Input } from '@/components/ui/Input';
 import { humanize } from '@/engine/schema';
+import {
+  coerceOpForKind,
+  coerceRuleToOp,
+  filterKindFor,
+  filterOpLabel,
+  filterOpsFor,
+  seedFilterRule,
+} from '@/engine/viewFilters';
 import type { FieldDef, FilterGroup, FilterOp, FilterRule } from '@/engine/types';
+import { FilterValueEditor } from '@/views/FilterValueEditor';
 
-/** Operators, with whether they take a value input. */
-const OPS: { op: FilterOp; label: string; valueless?: boolean }[] = [
-  { op: 'equals', label: 'is' },
-  { op: 'not_equals', label: 'is not' },
-  { op: 'contains', label: 'contains' },
-  { op: 'any_of', label: 'is any of' },
-  { op: 'none_of', label: 'is none of' },
-  { op: 'is_empty', label: 'is empty', valueless: true },
-  { op: 'is_not_empty', label: 'is not empty', valueless: true },
-  { op: 'before', label: 'is before' },
-  { op: 'after', label: 'is after' },
+/**
+ * `type` and `title` are filterable but undeclared — the engine's `fieldValue`
+ * resolves them off the entry itself. They are text, and saying so here is
+ * what stops the operator menu offering "is before" on a record's name.
+ */
+const PSEUDO_FIELDS: FieldDef[] = [
+  { name: 'type', kind: 'text' },
+  { name: 'title', kind: 'text' },
+];
+
+const LABELS: Record<string, string> = { type: 'Type', title: 'Title' };
+
+/** What a rule's field is called on screen — shared with the chip bar. */
+export const filterFieldLabel = (name: string): string => LABELS[name] ?? humanize(name);
+
+/** Declared fields plus the two undeclared ones, in picker order. */
+export const filterFieldsWithPseudo = (fields: FieldDef[]): FieldDef[] => [
+  ...PSEUDO_FIELDS,
+  ...fields,
 ];
 
 const isGroup = (node: FilterRule | FilterGroup): node is FilterGroup =>
@@ -27,25 +43,12 @@ const childrenOfGroup = (group: FilterGroup): (FilterRule | FilterGroup)[] =>
 const withChildren = (group: FilterGroup, next: (FilterRule | FilterGroup)[]): FilterGroup =>
   'all' in group ? { all: next } : { any: next };
 
-/** Comma-separated text ⇄ the list value the any_of/none_of ops expect. */
-const valueToText = (value: FilterRule['value']): string =>
-  Array.isArray(value)
-    ? value.join(', ')
-    : value === undefined || value === null
-      ? ''
-      : String(value);
-
-function textToValue(text: string, op: FilterOp): FilterRule['value'] {
-  if (op === 'any_of' || op === 'none_of') {
-    return text
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s !== '');
-  }
-  return text;
-}
-
-function RuleRow({
+/**
+ * One `Where <field> <op> <value>` line. Exported because the chip bar edits
+ * exactly one rule at a time and must edit it the same way this does — two
+ * spellings of the same row is how the two surfaces drift apart.
+ */
+export function FilterRuleRow({
   rule,
   fields,
   onChange,
@@ -56,14 +59,10 @@ function RuleRow({
   onChange: (next: FilterRule) => void;
   onRemove: () => void;
 }) {
-  const meta = OPS.find((o) => o.op === rule.op) ?? OPS[0];
-  // `type` and `title` aren't declared properties but are filterable — the
-  // engine's fieldValue() resolves them off the entry itself.
-  const fieldOptions = [
-    { value: 'type', label: 'Type' },
-    { value: 'title', label: 'Title' },
-    ...fields.map((f) => ({ value: f.name, label: humanize(f.name) })),
-  ];
+  const all = filterFieldsWithPseudo(fields);
+  const def = fields.find((f) => f.name === rule.field);
+  const kind = filterKindFor(rule.field, all);
+  const ops = filterOpsFor(kind);
 
   return (
     <div className="flex items-center gap-1.5" data-testid="filter-rule">
@@ -71,33 +70,32 @@ function RuleRow({
         size="sm"
         label="Filter property"
         width={148}
-        options={fieldOptions}
+        options={all.map((f) => ({ value: f.name, label: filterFieldLabel(f.name) }))}
         value={rule.field}
-        onChange={(field) => onChange({ ...rule, field })}
+        onChange={(field) => {
+          // The operator is re-resolved against the NEW field's kind. Without
+          // it, switching a rule from Due to Status left "is before" selected
+          // on a menu that no longer offers it, so the dropdown rendered its
+          // first entry while the rule on disk said something else.
+          const nextKind = filterKindFor(field, all);
+          onChange(coerceRuleToOp({ ...rule, field }, coerceOpForKind(rule.op, nextKind)));
+        }}
       />
       <Dropdown
         size="sm"
         label="Filter operator"
-        width={128}
-        options={OPS.map((o) => ({ value: o.op, label: o.label }))}
+        width={140}
+        options={ops.map((op) => ({ value: op, label: filterOpLabel(op) }))}
         value={rule.op}
-        onChange={(op) => {
-          const next: FilterRule = { ...rule, op: op as FilterOp };
-          const nextMeta = OPS.find((o) => o.op === op);
-          if (nextMeta?.valueless === true) delete next.value;
-          onChange(next);
-        }}
+        onChange={(op) => onChange(coerceRuleToOp(rule, op as FilterOp))}
       />
-      {meta.valueless !== true && (
-        <Input
-          size="sm"
-          ariaLabel="Filter value"
-          placeholder={rule.op === 'any_of' || rule.op === 'none_of' ? 'a, b, c' : 'value'}
-          value={valueToText(rule.value)}
-          onChange={(e) => onChange({ ...rule, value: textToValue(e.target.value, rule.op) })}
-          width={150}
-        />
-      )}
+      <FilterValueEditor
+        def={def}
+        kind={kind}
+        op={rule.op}
+        value={rule.value}
+        onChange={(value) => onChange({ ...rule, value })}
+      />
       <IconButton icon="x" label="Remove filter" size="sm" onClick={onRemove} />
     </div>
   );
@@ -177,7 +175,7 @@ function GroupEditor({
               }
             />
           ) : (
-            <RuleRow
+            <FilterRuleRow
               key={i}
               rule={child}
               fields={fields}
@@ -223,7 +221,7 @@ function GroupEditor({
                 // user had chosen a field or a value — and the only text on
                 // screen still said the filter showed everything. `is_not_empty`
                 // is the same rule the column-header path seeds.
-                { field: fields[0]?.name ?? 'type', op: 'is_not_empty' },
+                seedFilterRule(fields[0]?.name ?? 'type', fields[0]?.kind ?? 'text'),
               ]),
             )
           }

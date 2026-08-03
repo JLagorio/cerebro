@@ -1,7 +1,10 @@
+import type React from 'react';
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
+import { useSortableList } from '@/hooks/useSortableList';
 
 /**
  * The shared editor for an ordered chain — grouping levels, sort keys, or
@@ -34,6 +37,14 @@ export interface ChainBuilderProps {
   onToggleDir?(index: number): void;
   onRemove(index: number): void;
   onAdd(value: string): void;
+  /**
+   * Move the level at `from` so it sits at `to` (M16.26). Omitted leaves the
+   * chain unorderable, which is where the GROUPING chain stays for now: a
+   * relation level re-types every level below it, so a permutation there is
+   * not the no-op it is on a sort chain — the tail's fields would belong to
+   * the wrong type. Reordering it has to rebuild the tail, not swap two rows.
+   */
+  onMove?(from: number, to: number): void;
   max?: number;
   emptyHint?: string;
   /** Shown instead of the add row when the chain cannot be extended. */
@@ -54,6 +65,7 @@ export function ChainBuilder({
   onToggleDir,
   onRemove,
   onAdd,
+  onMove,
   max = 3,
   emptyHint,
   blockedHint,
@@ -61,6 +73,22 @@ export function ChainBuilder({
   const [open, setOpen] = useState(false);
   const atCap = rows.length >= max;
   const active = rows.length > 0;
+
+  // A chain is ORDERED — first key wins, and the only way to demote the
+  // leading sort was to delete every row and re-add them in the order you
+  // wanted. Row identity is the level's value, which is unique within a chain
+  // because every caller excludes the fields already taken.
+  const labelOf = (value: string) =>
+    rows.find((r) => r.value === value)?.options.find((o) => o.value === value)?.label ?? value;
+  const sortable = useSortableList({
+    ids: rows.map((r) => r.value),
+    disabled: onMove === undefined,
+    labelFor: labelOf,
+    onReorder: (value, to) => {
+      const from = rows.findIndex((r) => r.value === value);
+      if (from !== -1 && from !== to) onMove?.(from, to);
+    },
+  });
 
   return (
     <span className="relative inline-flex">
@@ -106,11 +134,44 @@ export function ChainBuilder({
                   {emptyHint}
                 </p>
               )}
-              <div className="flex flex-col gap-1.5">
+              <div
+                ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+                className="flex flex-col gap-1.5"
+              >
                 {rows.map((row, i) => (
-                  <div key={`${i}:${row.value}`} className="flex items-center gap-1.5">
-                    <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
-                      {i === 0 ? 'By' : 'then'}
+                  <div
+                    key={`${i}:${row.value}`}
+                    className={[
+                      'group flex items-center gap-1.5',
+                      sortable.dragging === row.value ? 'opacity-40' : '',
+                    ].join(' ')}
+                    style={sortable.dropIndicator(i)}
+                  >
+                    {/* The grip shares the By/then cell rather than appending
+                        itself, so the arrival of a pointer does not shove
+                        every row's control a glyph to the right (M16.8). */}
+                    <span className="relative flex w-8 flex-none items-center">
+                      <span
+                        className={[
+                          'text-[11px] text-[var(--n-400)]',
+                          onMove === undefined ? '' : 'group-hover:opacity-0',
+                        ].join(' ')}
+                      >
+                        {i === 0 ? 'By' : 'then'}
+                      </span>
+                      {onMove !== undefined && (
+                        <Tooltip label="Drag to reorder — the first key breaks ties first">
+                          <span
+                            {...sortable.gripProps(row.value, i)}
+                            // Opacity, not `hidden`: a hidden grip is out of
+                            // the tab order, and arrow-key reordering is the
+                            // point of the primitive underneath it.
+                            className="absolute inset-0 flex cursor-grab items-center justify-start rounded-[3px] text-[var(--n-400)] opacity-0 hover:text-[var(--n-600)] focus-visible:opacity-100 group-hover:opacity-100"
+                          >
+                            <Icon name="grip-vertical" size={13} />
+                          </span>
+                        </Tooltip>
+                      )}
                     </span>
                     <Select
                       size="sm"

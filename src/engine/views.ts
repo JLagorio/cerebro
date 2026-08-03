@@ -25,7 +25,14 @@ import type {
   ViewDefinition,
   ViewType,
 } from './types';
-import { CARD_PREVIEWS, CARD_SIZES, CHART_AGGS, CHART_KINDS, VIEW_TYPES } from './types';
+import {
+  CARD_PREVIEWS,
+  CARD_SIZES,
+  CHART_AGGS,
+  CHART_KINDS,
+  FILTER_OPS,
+  VIEW_TYPES,
+} from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
 export const DEFAULT_PRESENTATION: Presentation = {
@@ -95,18 +102,6 @@ export function groupByField(p: Presentation, field: string): Presentation {
   return { ...p, group: already ? nests : [{ field }, ...nests] };
 }
 
-const FILTER_OPS: FilterOp[] = [
-  'equals',
-  'not_equals',
-  'contains',
-  'any_of',
-  'none_of',
-  'is_empty',
-  'is_not_empty',
-  'before',
-  'after',
-];
-
 function asRecord(raw: unknown): Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -134,11 +129,58 @@ const ZOOMS = new Set(['day', 'week', 'month', 'quarter']);
 // second copy is a value the parser silently drops the day someone adds one.
 const CARD_SIZE_SET = new Set<string>(CARD_SIZES);
 const CARD_PREVIEW_SET = new Set<string>(CARD_PREVIEWS);
+/**
+ * Derived, never hand-written (M16.25). This was a literal array beside the
+ * `FilterOp` union, and it is the READ-SIDE allowlist — an operator missing
+ * from it made `parseFilterNode` treat the rule as malformed and DROP it, so a
+ * saved view reopened with one fewer condition and silently showed records it
+ * had been configured to hide.
+ */
+const KNOWN_OPS = new Set<FilterOp>(FILTER_OPS);
 
 /** Beyond this a nesting chain stops being legible and starts being a cycle. */
 export const MAX_NEST_DEPTH = 6;
 /** Notion caps sub-grouping here for the same reason: nesting stops reading. */
 export const MAX_GROUP_DEPTH = 3;
+/**
+ * The sort chain's cap (M16.26). The toolbar's chain builder passed `max={4}`
+ * and the settings panel's SortPage enforced none, so the same view accepted a
+ * fifth sort key from one surface and refused it from the other.
+ */
+export const MAX_SORT_KEYS = 4;
+
+/**
+ * Move one sort key to a new position (M16.26).
+ *
+ * A sort chain is ORDERED — the first key decides, later ones break its ties —
+ * and the only way to demote the leading key was to delete every row and
+ * re-add them in the order you wanted. Out-of-range indices return the chain
+ * untouched rather than throwing: this is called from a pointer drag, whose
+ * slot maths is measured against a DOM that may have re-rendered mid-gesture.
+ */
+export function moveSortKey(sort: SortSpec[], from: number, to: number): SortSpec[] {
+  if (from === to || from < 0 || from >= sort.length || to < 0 || to >= sort.length) return sort;
+  const next = [...sort];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/**
+ * Move one view tab to a new position (M16.26).
+ *
+ * Tab order is the order of the `views:` array on disk, and nothing could
+ * write a different one: there was no drag handler, no Move left/right item,
+ * and no action. A List that grew a fifth view had it pinned last forever.
+ */
+export function moveView(views: ViewDefinition[], id: string, to: number): ViewDefinition[] {
+  const from = views.findIndex((v) => v.id === id);
+  if (from === -1 || from === to || to < 0 || to >= views.length) return views;
+  const next = [...views];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
 
 /**
  * Presentation parse (M9.1) — accepts both the v1 keys (`groupBy`, `orderBy`,
@@ -215,6 +257,12 @@ function parsePresentation(raw: unknown): Presentation {
     // showTable has no single default — it is per layout — so unlike the rest
     // it is stored whenever it was decided, either way.
     ...(typeof obj.showTable === 'boolean' ? { showTable: obj.showTable } : {}),
+    // A limit of zero or less is dropped on read rather than honoured: it can
+    // only come from a hand-edited file, and a canvas emptied by a key nothing
+    // on screen mentions has no way back (M16.26).
+    ...(typeof obj.limit === 'number' && Number.isFinite(obj.limit) && obj.limit > 0
+      ? { limit: Math.floor(obj.limit) }
+      : {}),
   };
 }
 
@@ -493,7 +541,7 @@ function parseSource(raw: unknown): ListSource {
 function parseFilterNode(raw: unknown, path: Set<unknown>): FilterRule | FilterGroup | null {
   const obj = asRecord(raw);
   if (Array.isArray(obj.all) || Array.isArray(obj.any)) return parseGroupNode(raw, path);
-  if (typeof obj.field === 'string' && FILTER_OPS.includes(obj.op as FilterOp)) {
+  if (typeof obj.field === 'string' && KNOWN_OPS.has(obj.op as FilterOp)) {
     const rule: FilterRule = { field: obj.field, op: obj.op as FilterOp };
     if (obj.value !== undefined) rule.value = obj.value as Scalar | Scalar[];
     return rule;
@@ -746,6 +794,7 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.showWeekends === false ? { showWeekends: false } : {}),
     ...(p.weekStart === 'monday' ? { weekStart: p.weekStart } : {}),
     ...(p.showTable !== undefined ? { showTable: p.showTable } : {}),
+    ...(p.limit !== undefined ? { limit: p.limit } : {}),
   };
 }
 

@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
+import { IconButton } from '@/components/ui/IconButton';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { ColumnDef } from '@/engine/columns';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import type { FilterGroup, Presentation } from '@/engine/types';
+import { seedFilterRule } from '@/engine/viewFilters';
 import { groupByField, sortBy } from '@/engine/views';
 import { countRules, GROUPABLE_KINDS, META_SORTS, ORDERABLE_KINDS } from '@/views/ViewToolbar';
 import { axesFor } from '@/views/viewKinds';
@@ -32,6 +35,8 @@ export function ViewControlIcons({
   settingsOpen = false,
   onSettingsOpenChange,
   settingsPanel,
+  search,
+  onSearchChange,
   onNew,
 }: {
   presentation: Presentation;
@@ -47,6 +52,13 @@ export function ViewControlIcons({
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
   settingsPanel?: React.ReactNode;
+  /**
+   * Free-text search within the open view (M16.26). Ephemeral, unlike a
+   * filter: it is where you are looking right now, not part of what the saved
+   * view IS, so it never reaches the YAML. Absent hides the control.
+   */
+  search?: string;
+  onSearchChange?: (query: string) => void;
   /** Creates an untitled record and opens it. Absent on typeless views. */
   onNew?: () => void;
 }) {
@@ -73,7 +85,12 @@ export function ViewControlIcons({
           barOpen={barOpen}
           onToggleBar={toggleBar}
           onPick={(field) => {
-            onFiltersChange({ all: [{ field, op: 'is_not_empty', value: '' }] });
+            // Seeded through the engine so the starter rule is one the FIELD'S
+            // KIND can express (M16.25). It also carried a dead `value: ''` on
+            // a valueless operator, which then round-tripped into the YAML.
+            onFiltersChange({
+              all: [seedFilterRule(field, fields.find((f) => f.name === field)?.kind ?? 'text')],
+            });
             onBarOpenChange(true);
           }}
         />
@@ -109,6 +126,7 @@ export function ViewControlIcons({
           }}
         />
       )}
+      {onSearchChange !== undefined && <SearchBox query={search ?? ''} onChange={onSearchChange} />}
       {onSettingsOpenChange !== undefined && (
         <span className="relative inline-flex">
           <button
@@ -148,6 +166,77 @@ export function ViewControlIcons({
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * Search within the view (M16.26).
+ *
+ * Collapsed to a glyph until pressed, the way Notion's is: a permanent input
+ * in a row of 28px icons is the widest thing in the row and earns that width
+ * on the minority of visits where anyone types in it. It stays open while it
+ * holds a query, because a control that hides a narrowed result set is how a
+ * view ends up looking broken.
+ */
+function SearchBox({ query, onChange }: { query: string; onChange: (q: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) input.current?.focus();
+  }, [open]);
+
+  if (!open && query === '') {
+    return (
+      <Tooltip label="Search this view">
+        <button
+          type="button"
+          data-testid="view-control-search"
+          aria-label="Search this view"
+          onClick={() => setOpen(true)}
+          className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+        >
+          <Icon name="search" size={14} />
+        </button>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <span className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--n-300)] bg-[var(--n-0)] pl-1.5 pr-0.5">
+      <Icon name="search" size={12} color="var(--n-400)" />
+      <input
+        ref={input}
+        data-testid="view-search-input"
+        aria-label="Search this view"
+        placeholder="Search…"
+        value={query}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => {
+          // Collapses only when it is empty. Collapsing with a live query
+          // would leave the canvas narrowed by something no longer on screen.
+          if (query === '') setOpen(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Escape') return;
+          e.stopPropagation();
+          onChange('');
+          setOpen(false);
+        }}
+        className="h-6 w-[124px] border-0 bg-transparent text-[12.5px] text-[var(--n-800)] outline-none placeholder:text-[var(--n-400)]"
+      />
+      {query !== '' && (
+        <IconButton
+          icon="x"
+          label="Clear search"
+          size="sm"
+          onClick={() => {
+            onChange('');
+            setOpen(false);
+          }}
+        />
+      )}
+    </span>
   );
 }
 

@@ -508,6 +508,15 @@ export interface Presentation {
    * point of a gantt, and optional chrome on a timeline.
    */
   showTable?: boolean;
+  /**
+   * How many records the view draws before it stops (M16.26). Omitted means
+   * all of them, which is what every view did — Notion's default is 25.
+   *
+   * Truncation is never silent: the surfaces that apply this render a footer
+   * saying how many of how many are shown, because a view that hides records
+   * without saying so is indistinguishable from a filter that is wrong.
+   */
+  limit?: number;
 }
 
 /**
@@ -518,19 +527,72 @@ export interface Presentation {
 export type ChildrenSpec =
   { direction: 'forward'; field: string } | { direction: 'reverse'; type: string; field: string };
 
-export type FilterOp =
-  | 'equals'
-  | 'not_equals'
-  | 'contains'
-  | 'any_of'
-  | 'none_of'
-  | 'is_empty'
-  | 'is_not_empty'
-  | 'before'
-  | 'after';
+/**
+ * Every filter operator, as an array with the union derived from it (M16.25).
+ *
+ * The union was hand-written here and `views.ts` kept a hand-written
+ * `FILTER_OPS: FilterOp[]` beside it — and that array is the READ-SIDE
+ * allowlist: `parseFilterNode` returns null for any op not in it. An operator
+ * added to the union and forgotten there therefore parsed as a malformed node
+ * and was DROPPED on load, so a saved view came back missing a condition and
+ * quietly showed records it had been configured to hide. Same shape as
+ * `FIELD_KINDS` and `VIEW_TYPES`, for the same reason.
+ *
+ * Order here is menu order.
+ */
+export const FILTER_OPS = [
+  'equals',
+  'not_equals',
+  'contains',
+  'does_not_contain',
+  'starts_with',
+  'ends_with',
+  'any_of',
+  'none_of',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'before',
+  'after',
+  'on_or_before',
+  'on_or_after',
+  'is_between',
+  'is_empty',
+  'is_not_empty',
+] as const;
+
+export type FilterOp = (typeof FILTER_OPS)[number];
+
+/**
+ * Which comparisons a property kind admits (M16.25).
+ *
+ * A date wants before/after, a number wants >/</between, prose wants
+ * starts-with — and offering all nineteen operators on every kind, which is
+ * what the builder did, meant "Status is before High" was one click away and
+ * evaluated to a string comparison nobody asked for.
+ *
+ * The kind→family answer is a flag on `KIND_META` (properties.ts) so
+ * `satisfies Record<FieldKind, …>` forces every new kind to answer it; the
+ * family→operators answer lives in `viewFilters.ts` beside the evaluator that
+ * implements them. `any` is the rollup's honest answer: what a rollup holds
+ * depends on its `calculate`, which is not knowable from the kind alone.
+ */
+export const FILTER_FAMILIES = [
+  'text',
+  'number',
+  'date',
+  'choice',
+  'multi',
+  'boolean',
+  'any',
+] as const;
+export type FilterFamily = (typeof FILTER_FAMILIES)[number];
+
 export interface FilterRule {
   field: string;
   op: FilterOp;
+  /** `is_between` stores its two bounds as a two-element list. */
   value?: Scalar | Scalar[];
 }
 export type FilterGroup =

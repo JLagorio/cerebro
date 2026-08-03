@@ -1,4 +1,184 @@
-import type { Entry, FilterGroup, FilterRule, Scalar, Schema } from './types';
+import { parseDateProperty, parseEndpoint } from './dates';
+import { kindMeta } from './properties';
+import { FILTER_OPS } from './types';
+import type {
+  Entry,
+  FieldKind,
+  FilterFamily,
+  FilterGroup,
+  FilterOp,
+  FilterRule,
+  Scalar,
+  Schema,
+} from './types';
+
+/**
+ * How many values an operator takes (M16.25).
+ *
+ * The builder rendered a bare text `Input` for every operator, so `is_between`
+ * had nowhere to put its second bound and `is_empty` showed a box that did
+ * nothing. Arity is what the value editor switches on.
+ */
+export type FilterArity = 'none' | 'one' | 'two' | 'list';
+
+export interface FilterOpMeta {
+  label: string;
+  arity: FilterArity;
+}
+
+/**
+ * Every operator's label and arity. `satisfies Record<FilterOp, …>` so an
+ * operator added to the union without a label is a build error rather than a
+ * blank line in the menu.
+ *
+ * Labels are Notion's, verbatim where Notion has one.
+ */
+const OP_META = {
+  equals: { label: 'is', arity: 'one' },
+  not_equals: { label: 'is not', arity: 'one' },
+  contains: { label: 'contains', arity: 'one' },
+  does_not_contain: { label: 'does not contain', arity: 'one' },
+  starts_with: { label: 'starts with', arity: 'one' },
+  ends_with: { label: 'ends with', arity: 'one' },
+  any_of: { label: 'is any of', arity: 'list' },
+  none_of: { label: 'is none of', arity: 'list' },
+  gt: { label: 'is greater than', arity: 'one' },
+  gte: { label: 'is at least', arity: 'one' },
+  lt: { label: 'is less than', arity: 'one' },
+  lte: { label: 'is at most', arity: 'one' },
+  before: { label: 'is before', arity: 'one' },
+  after: { label: 'is after', arity: 'one' },
+  on_or_before: { label: 'is on or before', arity: 'one' },
+  on_or_after: { label: 'is on or after', arity: 'one' },
+  is_between: { label: 'is between', arity: 'two' },
+  is_empty: { label: 'is empty', arity: 'none' },
+  is_not_empty: { label: 'is not empty', arity: 'none' },
+} satisfies Record<FilterOp, FilterOpMeta>;
+
+export const filterOpMeta = (op: FilterOp): FilterOpMeta => OP_META[op];
+export const filterOpLabel = (op: FilterOp): string => OP_META[op].label;
+export const filterOpArity = (op: FilterOp): FilterArity => OP_META[op].arity;
+
+/**
+ * Every kind offers these two, including `checkbox`.
+ *
+ * Notion's checkbox filter is is/is-not only, but a frontmatter key can be
+ * genuinely ABSENT, which is a state neither of those describes — and every
+ * surface that seeds a rule seeds `is_not_empty` on purpose, because it is the
+ * one operator that excludes nothing (M15: `equals ''` blanked the canvas the
+ * instant "Add filter" was pressed). A kind that cannot express it would need
+ * a seed that hides records before the user has chosen anything.
+ */
+const UNIVERSAL: FilterOp[] = ['is_empty', 'is_not_empty'];
+
+/**
+ * Which operators each family offers, in menu order.
+ *
+ * The family→operators half of the answer; the kind→family half is a flag on
+ * `KIND_META` so `satisfies Record<FieldKind, …>` forces every new kind to
+ * declare one. Neither half restates the other, and neither is a second copy
+ * of the kind list.
+ */
+const FAMILY_OPS = {
+  text: [
+    'contains',
+    'does_not_contain',
+    'equals',
+    'not_equals',
+    'starts_with',
+    'ends_with',
+    ...UNIVERSAL,
+  ],
+  number: ['equals', 'not_equals', 'gt', 'gte', 'lt', 'lte', 'is_between', ...UNIVERSAL],
+  date: ['equals', 'before', 'after', 'on_or_before', 'on_or_after', 'is_between', ...UNIVERSAL],
+  choice: ['equals', 'not_equals', 'any_of', 'none_of', ...UNIVERSAL],
+  multi: ['contains', 'does_not_contain', 'any_of', 'none_of', ...UNIVERSAL],
+  boolean: ['equals', 'not_equals', ...UNIVERSAL],
+  // A rollup's values are whatever its `calculate` produces — a count is a
+  // number, `earliest` is a date, `show` is prose. The kind alone cannot say,
+  // so it offers everything rather than guessing wrong in one direction.
+  any: [...FILTER_OPS],
+} satisfies Record<FilterFamily, FilterOp[]>;
+
+/** The operators a filter may offer on a field of this kind (M16.25). */
+export function filterOpsFor(kind: FieldKind): FilterOp[] {
+  return [...FAMILY_OPS[kindMeta(kind).filters]];
+}
+
+/**
+ * The kind a filter should treat `field` as.
+ *
+ * `type` and `title` are filterable — `fieldValue` resolves them off the entry
+ * itself — but no `FieldDef` declares them, and neither does an undeclared
+ * frontmatter key. All of them are prose, which is also the safest default: a
+ * text field offers the operators that read a string, and reading a number as
+ * a string still orders it correctly for the digits it holds.
+ */
+export function filterKindFor(
+  field: string,
+  fields: readonly { name: string; kind: FieldKind }[],
+): FieldKind {
+  return fields.find((f) => f.name === field)?.kind ?? 'text';
+}
+
+/**
+ * Keep a rule coherent when its operator changes.
+ *
+ * Switching `is any of ["a","b"]` to `is` used to leave the array in place, so
+ * the rule read "Status is a, b" and matched nothing; switching away from
+ * `is empty` left a dead `value` in the YAML. Reshaping here means the value
+ * on disk always has the shape its operator reads.
+ */
+export function coerceRuleToOp(rule: FilterRule, op: FilterOp): FilterRule {
+  const next: FilterRule = { field: rule.field, op };
+  const list = valueList(rule.value);
+  switch (filterOpArity(op)) {
+    case 'none':
+      return next;
+    case 'list':
+      next.value = list;
+      return next;
+    case 'two':
+      next.value = [list[0] ?? '', list[1] ?? ''];
+      return next;
+    default:
+      next.value = list[0] ?? '';
+      return next;
+  }
+}
+
+/** An operator this kind supports, preferring the one already chosen. */
+export function coerceOpForKind(op: FilterOp, kind: FieldKind): FilterOp {
+  const ops = filterOpsFor(kind);
+  return ops.includes(op) ? op : (ops.find((o) => o === 'is_not_empty') ?? ops[0]);
+}
+
+/**
+ * A starter rule for `field` that hides nothing (M15's invariant, generalised
+ * to every kind by M16.25 — three call sites hardcoded `is_not_empty`, which
+ * is not an operator every family had to offer until this made it one).
+ */
+export function seedFilterRule(field: string, kind: FieldKind = 'text'): FilterRule {
+  return { field, op: coerceOpForKind('is_not_empty', kind) };
+}
+
+function valueList(value: FilterRule['value']): Scalar[] {
+  if (value === undefined || value === null) return [];
+  if (Array.isArray(value)) return value;
+  return value === '' ? [] : [value];
+}
+
+/** One rule as a chip reads it: "Due is before 2026-08-01". */
+export function describeFilterRule(rule: FilterRule, label: string): string {
+  const op = filterOpLabel(rule.op);
+  if (filterOpArity(rule.op) === 'none') return `${label} ${op}`;
+  const list = valueList(rule.value);
+  if (list.length === 0) return `${label} ${op}…`;
+  if (filterOpArity(rule.op) === 'two') return `${label} ${op} ${list[0]} and ${list[1]}`;
+  return `${label} ${op} ${list.join(', ')}`;
+}
+
+// --- evaluation -------------------------------------------------------------
 
 function fieldValue(entry: Entry, field: string): unknown {
   if (field in entry.relationships) return entry.relationships[field];
@@ -21,12 +201,16 @@ function matchesEquals(v: unknown, target: unknown): boolean {
   return asList(v).some((x) => x !== undefined && x !== null && x === target);
 }
 
-/** Case-insensitive substring; any element for arrays. */
-function matchesContains(v: unknown, target: unknown): boolean {
-  if (target === undefined || target === null) return false;
+/** Case-insensitive text predicate applied to any element of the value. */
+function matchesText(
+  v: unknown,
+  target: unknown,
+  test: (haystack: string, needle: string) => boolean,
+): boolean {
+  if (target === undefined || target === null || target === '') return false;
   const needle = String(target).toLowerCase();
   return asList(v).some(
-    (x) => x !== undefined && x !== null && String(x).toLowerCase().includes(needle),
+    (x) => x !== undefined && x !== null && test(String(x).toLowerCase(), needle),
   );
 }
 
@@ -40,31 +224,122 @@ function firstScalar(v: unknown): unknown {
   return Array.isArray(v) ? (v.length > 0 ? v[0] : undefined) : v;
 }
 
+const asNumber = (v: unknown): number | null => {
+  if (typeof v === 'boolean' || v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * The comparable form of a date, at the rule's granularity (M16.14).
+ *
+ * A `date` property may store `YYYY-MM-DD HH:MM`, and the ordered operators
+ * compared raw strings — so "due is after 2026-08-01" matched a record due
+ * `2026-08-01 14:30`, because that string sorts after the bare day. A rule
+ * that names no time means the DAY, and only a rule that names one compares
+ * times. `parseDateProperty` reads a `{start, end}` range too, and takes its
+ * start: "before" a range means before it begins.
+ */
+function dateKey(raw: unknown, withTime: boolean): string | null {
+  const value = parseDateProperty(raw);
+  if (value === null) return null;
+  return withTime ? `${value.start} ${value.startTime ?? '00:00'}` : value.start;
+}
+
+/**
+ * Order two values, or null when they are not comparable.
+ *
+ * One comparator behind every ordered operator, chosen from the VALUES rather
+ * than from the field's declared kind: a rollup has no static type, and an
+ * undeclared frontmatter key has no declaration at all.
+ */
+function compareValues(raw: unknown, target: unknown): number | null {
+  const a = firstScalar(raw);
+  if (a === undefined || a === null || a === '') return null;
+  if (target === undefined || target === null || target === '') return null;
+
+  const an = asNumber(a);
+  const bn = asNumber(target);
+  if (an !== null && bn !== null) return an === bn ? 0 : an < bn ? -1 : 1;
+
+  const bounds = parseEndpoint(target);
+  if (bounds !== null) {
+    const ak = dateKey(a, bounds.time !== null);
+    if (ak === null) return null;
+    const bk = bounds.time === null ? bounds.date : `${bounds.date} ${bounds.time}`;
+    return ak === bk ? 0 : ak < bk ? -1 : 1;
+  }
+
+  const as = String(a);
+  const bs = String(target);
+  return as === bs ? 0 : as < bs ? -1 : 1;
+}
+
+const ordered = (raw: unknown, target: unknown, keep: (cmp: number) => boolean): boolean => {
+  const cmp = compareValues(raw, target);
+  return cmp !== null && keep(cmp);
+};
+
+/**
+ * `is` / `is not`: strict membership first, then the comparator (M16.25).
+ *
+ * Strict `===` alone was wrong in two ways the new operator set makes
+ * unavoidable. A date property may store `2026-08-01 14:30` (M16.14), so
+ * "Due is 2026-08-01" never matched the day it named; and every value editor
+ * that is a text box hands the engine a STRING, so "Estimate is 5" never
+ * matched the number `5` sitting in the frontmatter. The comparator answers
+ * both without loosening anything else — it returns null, not 0, for values
+ * that are not comparable at all.
+ */
+function matchesLoose(v: unknown, target: unknown): boolean {
+  if (matchesEquals(v, target)) return true;
+  return asList(v).some((x) => compareValues(x, target) === 0);
+}
+
 function evalRule(entry: Entry, rule: FilterRule): boolean {
   const v = fieldValue(entry, rule.field);
+  const bounds = Array.isArray(rule.value) ? rule.value : [rule.value];
   switch (rule.op) {
     case 'is_empty':
       return isEmptyValue(v);
     case 'is_not_empty':
       return !isEmptyValue(v);
     case 'equals':
-      return matchesEquals(v, rule.value);
+      return matchesLoose(v, rule.value);
     case 'not_equals':
-      return !matchesEquals(v, rule.value);
+      return !matchesLoose(v, rule.value);
     case 'contains':
-      return matchesContains(v, rule.value);
+      return matchesText(v, rule.value, (h, n) => h.includes(n));
+    case 'does_not_contain':
+      // A record with no value does not contain the needle, so it PASSES.
+      // Notion agrees, and the alternative — an exclusion that also drops
+      // every blank — is the surprise that makes people distrust filters.
+      return !matchesText(v, rule.value, (h, n) => h.includes(n));
+    case 'starts_with':
+      return matchesText(v, rule.value, (h, n) => h.startsWith(n));
+    case 'ends_with':
+      return matchesText(v, rule.value, (h, n) => h.endsWith(n));
     case 'any_of':
       return matchesAnyOf(v, rule.value);
     case 'none_of':
       return !matchesAnyOf(v, rule.value);
-    case 'before': {
-      const s = firstScalar(v);
-      return typeof s === 'string' && typeof rule.value === 'string' && s < rule.value;
-    }
-    case 'after': {
-      const s = firstScalar(v);
-      return typeof s === 'string' && typeof rule.value === 'string' && s > rule.value;
-    }
+    case 'gt':
+    case 'after':
+      return ordered(v, rule.value, (c) => c > 0);
+    case 'gte':
+    case 'on_or_after':
+      return ordered(v, rule.value, (c) => c >= 0);
+    case 'lt':
+    case 'before':
+      return ordered(v, rule.value, (c) => c < 0);
+    case 'lte':
+    case 'on_or_before':
+      return ordered(v, rule.value, (c) => c <= 0);
+    case 'is_between':
+      // Inclusive at both ends. An exclusive range cannot express "this week"
+      // without naming a day outside it, which is how off-by-one bugs get
+      // authored into saved views.
+      return ordered(v, bounds[0], (c) => c >= 0) && ordered(v, bounds[1], (c) => c <= 0);
   }
 }
 
@@ -77,4 +352,48 @@ export function evaluateFilters(entry: Entry, group: FilterGroup, schema: Schema
     isGroup(node) ? evaluateFilters(entry, node, schema) : evalRule(entry, node);
   if ('all' in group) return group.all.every(evalNode);
   return group.any.some(evalNode);
+}
+
+// --- search and limit (M16.26) ----------------------------------------------
+
+/**
+ * Free-text search WITHIN a view (M16.26).
+ *
+ * Deliberately not a filter rule: a filter is part of what the saved view IS
+ * and persists to YAML, while search is where you are looking right now. It is
+ * ephemeral state on the surface, cleared when the tab changes.
+ *
+ * Every term must match somewhere — title, type, any property value, any
+ * relationship target, or the path. Terms are ANDed because a two-word query
+ * that ORs its terms returns more rows than either word alone, which reads as
+ * the search being broken.
+ */
+export function searchEntries(entries: Entry[], query: string): Entry[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return entries;
+  return entries.filter((e) => {
+    const haystack = [
+      e.title,
+      e.type ?? '',
+      e.path,
+      ...Object.values(e.properties).flatMap((v) => (Array.isArray(v) ? v : [v])),
+      ...Object.values(e.relationships).flat(),
+    ]
+      .filter((v) => v !== null && v !== undefined)
+      .join(' ')
+      .toLowerCase();
+    return terms.every((t) => haystack.includes(t));
+  });
+}
+
+/**
+ * The first `limit` records, or all of them (M16.26).
+ *
+ * A zero or negative limit means "no limit" rather than "show nothing": the
+ * only way to reach one is a hand-edited YAML, and honouring it literally
+ * would render an empty canvas with no control on screen able to explain it.
+ */
+export function limitEntries<T>(entries: T[], limit: number | undefined): T[] {
+  if (limit === undefined || !Number.isFinite(limit) || limit <= 0) return entries;
+  return entries.slice(0, Math.floor(limit));
 }

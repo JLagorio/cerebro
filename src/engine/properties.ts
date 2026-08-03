@@ -14,7 +14,15 @@
 
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
 import { resolveTarget } from './wikilink';
-import type { Entry, FieldDef, FieldFormat, FieldKind, RollupCalc, Schema } from './types';
+import type {
+  Entry,
+  FieldDef,
+  FieldFormat,
+  FieldKind,
+  FilterFamily,
+  RollupCalc,
+  Schema,
+} from './types';
 
 // --- System properties (M4) -------------------------------------------------
 
@@ -143,6 +151,9 @@ export interface PropertyKindMeta {
    * being prevented from trying.
    */
   numeric: boolean;
+  /** Which comparisons a filter may offer on this field (M16.25). See
+   * `FilterFamily` in types.ts, and `filterOpsFor` in viewFilters.ts. */
+  filters: FilterFamily;
 }
 
 /**
@@ -164,6 +175,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'text',
   },
   number: {
     label: 'Number',
@@ -174,6 +186,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: true,
+    filters: 'number',
   },
   select: {
     label: 'Select',
@@ -184,6 +197,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'choice',
   },
   multiselect: {
     label: 'Multi-select',
@@ -195,6 +209,7 @@ const KIND_META = {
     orderable: false,
     media: false,
     numeric: false,
+    filters: 'multi',
   },
   status: {
     label: 'Status',
@@ -205,6 +220,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'choice',
   },
   date: {
     label: 'Date',
@@ -215,6 +231,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'date',
   },
   daterange: {
     label: 'Date range',
@@ -226,6 +243,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'date',
   },
   person: {
     label: 'Person',
@@ -237,6 +255,7 @@ const KIND_META = {
     orderable: false,
     media: false,
     numeric: false,
+    filters: 'multi',
   },
   files: {
     label: 'Files & media',
@@ -248,6 +267,7 @@ const KIND_META = {
     orderable: false,
     media: true,
     numeric: false,
+    filters: 'multi',
   },
   checkbox: {
     label: 'Checkbox',
@@ -258,6 +278,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'boolean',
   },
   url: {
     label: 'URL',
@@ -268,6 +289,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'text',
   },
   email: {
     label: 'Email',
@@ -278,6 +300,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'text',
   },
   phone: {
     label: 'Phone',
@@ -288,6 +311,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'text',
   },
   relation: {
     label: 'Relation',
@@ -299,6 +323,7 @@ const KIND_META = {
     orderable: false,
     media: false,
     numeric: false,
+    filters: 'multi',
   },
   rollup: {
     label: 'Rollup',
@@ -313,6 +338,7 @@ const KIND_META = {
     // which calculations return which shape.
     media: false,
     numeric: true,
+    filters: 'any',
   },
   created_time: {
     label: 'Created time',
@@ -323,6 +349,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'date',
   },
   last_edited_time: {
     label: 'Last edited time',
@@ -333,6 +360,7 @@ const KIND_META = {
     orderable: true,
     media: false,
     numeric: false,
+    filters: 'date',
   },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
 
