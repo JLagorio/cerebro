@@ -9,7 +9,14 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
-import { clonePresentation, layoutLabel, newView, nextViewId, toggleSort } from '@/engine/views';
+import {
+  clonePresentation,
+  layoutLabel,
+  moveView,
+  newView,
+  nextViewId,
+  toggleSort,
+} from '@/engine/views';
 import { listTypes, typeViews, type TypeListing } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ViewDefinition, ViewType } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
@@ -21,6 +28,8 @@ import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
+import { ViewLimitNotice } from '@/views/ViewLimitNotice';
+import { limitEntries, searchEntries } from '@/engine/viewFilters';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
 
@@ -79,10 +88,14 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   // M12.8: the view-settings menu, floating from the tab row's sliders icon.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
+  // M16.26: ephemeral, unlike a filter — it is where you are looking right
+  // now, so it never reaches the Type doc and clears with the tab.
+  const [search, setSearch] = useState('');
   // Re-seed when the TYPE or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
     setPresentation(clonePresentation(collection.presentation));
+    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name, activeId]);
 
@@ -176,9 +189,12 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   };
 
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.sort, schema),
-    [collection.entries, presentation.sort, schema],
+    () => searchEntries(sortEntries(collection.entries, presentation.sort, schema), search),
+    [collection.entries, presentation.sort, schema, search],
   );
+  // After the sort: "the first 25" has to mean the first 25 of the order on
+  // screen, not 25 arbitrary records that are then sorted among themselves.
+  const shownEntries = limitEntries(sortedEntries, presentation.limit);
 
   // The calendar creates WITH a date, which the band mechanism cannot carry:
   // a band sets a grouping value, not an arbitrary property.
@@ -256,6 +272,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           }
           onDuplicate={duplicateTab}
           onDelete={removeView}
+          onReorder={(id, to) => changeViews(moveView(savedViews, id, to))}
+          onChangeIcon={(id, icon) =>
+            changeViews(savedViews.map((v) => (v.id === id ? { ...v, icon } : v)))
+          }
           // M12.8: the view controls live in the tab row (Notion's toolbar).
           trailing={
             <ViewControlIcons
@@ -266,6 +286,8 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               onFiltersChange={(filters) => changeView({ ...activeView, filters })}
               barOpen={controlsOpen}
               onBarOpenChange={setControlsOpen}
+              search={search}
+              onSearchChange={setSearch}
               settingsOpen={settingsOpen}
               onSettingsOpenChange={setSettingsOpen}
               settingsPanel={
@@ -316,14 +338,16 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           />
         )}
         <ViewCanvas
-          entries={sortedEntries}
+          entries={shownEntries}
           allEntries={entries}
           presentation={presentation}
           schema={schema}
           fields={typeFields}
           scope={scope}
           createType={listing.name}
-          filtered={activeView.filters !== null}
+          // Search narrows too, so an empty canvas must read as "nothing
+          // matches" rather than as "this type has no records".
+          filtered={activeView.filters !== null || search !== ''}
           onCreate={quickAdd}
           onCreateOn={onCreateOn}
           onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
@@ -346,6 +370,11 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               },
             })
           }
+        />
+        <ViewLimitNotice
+          shown={shownEntries.length}
+          total={sortedEntries.length}
+          onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
         />
       </div>
       {dialog === 'style' && <TypeStyleDialog listing={listing} onClose={() => setDialog(null)} />}

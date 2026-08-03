@@ -5,6 +5,7 @@ import { buildSchema } from '@/engine/schema';
 import type { Presentation } from '@/engine/types';
 import { orderToValue, slugifyListId, valueToOrder, ViewToolbar } from './ViewToolbar';
 import { VIEW_KINDS } from './viewKinds';
+import { MAX_SORT_KEYS } from '@/engine/views';
 
 const emptySchema = () => buildSchema([]);
 
@@ -130,5 +131,57 @@ describe('ViewToolbar', () => {
   it('has no save-view affordance', () => {
     render(<ViewToolbar presentation={presentation} onChange={vi.fn()} />);
     expect(screen.queryByRole('button', { name: 'Save view' })).toBeNull();
+  });
+});
+
+/**
+ * The sort chain had no grip (`ChainBuilder.tsx:110-141`), and the two
+ * surfaces that edit it disagreed on the cap: this bar passed `max={4}`, the
+ * settings panel's SortPage enforced none (M16.26).
+ */
+describe('reordering the sort chain (M16.26)', () => {
+  const twoKeys: Presentation = {
+    ...presentation,
+    sort: [
+      { field: 'modifiedAt', dir: 'desc' },
+      { field: 'title', dir: 'asc' },
+    ],
+  };
+
+  const openSort = () => fireEvent.click(screen.getByTestId('sort-chain'));
+
+  it('Down demotes the leading key, from the keyboard', () => {
+    const onChange = vi.fn();
+    render(<ViewToolbar presentation={twoKeys} onChange={onChange} />);
+    openSort();
+    fireEvent.keyDown(screen.getByLabelText(/^Reorder Last modified/), { key: 'ArrowDown' });
+    expect(onChange.mock.calls[0][0].sort.map((s: { field: string }) => s.field)).toEqual([
+      'title',
+      'modifiedAt',
+    ]);
+  });
+
+  /**
+   * The GROUPING chain deliberately has none: a relation level re-types every
+   * level below it, so swapping two rows leaves the tail naming fields of the
+   * wrong type. Reordering it has to rebuild the tail, which is not this.
+   */
+  it('the grouping chain has no grip, because a permutation there is not safe', () => {
+    render(<ViewToolbar presentation={twoKeys} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByTestId('group-chain'));
+    expect(screen.queryByLabelText(/^Reorder/)).toBeNull();
+  });
+
+  it('both surfaces cap the chain at the same number of keys', () => {
+    const full: Presentation = {
+      ...presentation,
+      sort: Array.from({ length: MAX_SORT_KEYS }, (_, i) => ({
+        field: `f${i}`,
+        dir: 'asc' as const,
+      })),
+    };
+    render(<ViewToolbar presentation={full} onChange={vi.fn()} />);
+    openSort();
+    expect(screen.getByText(new RegExp(`${MAX_SORT_KEYS} levels is the maximum`))).toBeTruthy();
   });
 });

@@ -19,7 +19,7 @@ import type {
   SortSpec,
   ViewType,
 } from '@/engine/types';
-import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, MAX_SORT_KEYS, moveSortKey } from '@/engine/views';
 import { VIEW_SEGMENTS } from '@/views/viewKinds';
 
 // Fallback options for surfaces that don't pass declared fields — common
@@ -315,7 +315,7 @@ export function ViewToolbar({
         rows={sortRows}
         addOptions={sortable}
         addLabel="Add a sort key…"
-        max={4}
+        max={MAX_SORT_KEYS}
         emptyHint="Records appear in vault order."
         blockedHint="Every sortable property is already in the chain."
         onChange={(i, v) =>
@@ -330,6 +330,7 @@ export function ViewToolbar({
         }
         onRemove={(i) => setSort(presentation.sort.filter((_, j) => j !== i))}
         onAdd={(v) => setSort([...presentation.sort, { field: v, dir: 'asc' }])}
+        onMove={(from, to) => setSort(moveSortKey(presentation.sort, from, to))}
       />
 
       {/* M12.8: Properties moved to the tab row's icon cluster, beside the

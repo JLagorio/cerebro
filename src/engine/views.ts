@@ -114,6 +114,45 @@ const KNOWN_OPS = new Set<FilterOp>(FILTER_OPS);
 export const MAX_NEST_DEPTH = 6;
 /** Notion caps sub-grouping here for the same reason: nesting stops reading. */
 export const MAX_GROUP_DEPTH = 3;
+/**
+ * The sort chain's cap (M16.26). The toolbar's chain builder passed `max={4}`
+ * and the settings panel's SortPage enforced none, so the same view accepted a
+ * fifth sort key from one surface and refused it from the other.
+ */
+export const MAX_SORT_KEYS = 4;
+
+/**
+ * Move one sort key to a new position (M16.26).
+ *
+ * A sort chain is ORDERED — the first key decides, later ones break its ties —
+ * and the only way to demote the leading key was to delete every row and
+ * re-add them in the order you wanted. Out-of-range indices return the chain
+ * untouched rather than throwing: this is called from a pointer drag, whose
+ * slot maths is measured against a DOM that may have re-rendered mid-gesture.
+ */
+export function moveSortKey(sort: SortSpec[], from: number, to: number): SortSpec[] {
+  if (from === to || from < 0 || from >= sort.length || to < 0 || to >= sort.length) return sort;
+  const next = [...sort];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/**
+ * Move one view tab to a new position (M16.26).
+ *
+ * Tab order is the order of the `views:` array on disk, and nothing could
+ * write a different one: there was no drag handler, no Move left/right item,
+ * and no action. A List that grew a fifth view had it pinned last forever.
+ */
+export function moveView(views: ViewDefinition[], id: string, to: number): ViewDefinition[] {
+  const from = views.findIndex((v) => v.id === id);
+  if (from === -1 || from === to || to < 0 || to >= views.length) return views;
+  const next = [...views];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
 
 /**
  * Presentation parse (M9.1) — accepts both the v1 keys (`groupBy`, `orderBy`,

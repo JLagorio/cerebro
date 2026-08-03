@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { FILTER_OPS, VIEW_TYPES } from '@/engine/types';
 import {
   layoutLabel,
+  moveSortKey,
+  moveView,
   newView,
   nextViewId,
   parseListYaml,
@@ -9,7 +11,7 @@ import {
   resolveView,
   serializeList,
 } from './views';
-import type { FilterGroup, ListDefinition, ListFile, Presentation } from './types';
+import type { FilterGroup, ListDefinition, ListFile, Presentation, SortSpec } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
@@ -769,5 +771,66 @@ describe('serializeList', () => {
       expect(p.group.filter((g) => g.descend !== undefined)).toHaveLength(6);
       expect(p.group.filter((g) => g.descend === undefined)).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * A sort chain is ORDERED — the first key decides and later ones break its
+ * ties — and there was no grip anywhere (`ChainBuilder.tsx:110-141`). The only
+ * way to demote the leading key was to delete every row and re-add them in the
+ * order you wanted (M16.26).
+ */
+describe('moveSortKey', () => {
+  const chain: SortSpec[] = [
+    { field: 'status', dir: 'asc' },
+    { field: 'due', dir: 'desc' },
+    { field: 'title', dir: 'asc' },
+  ];
+
+  it('promotes a key to the front', () => {
+    expect(moveSortKey(chain, 2, 0).map((s) => s.field)).toEqual(['title', 'status', 'due']);
+  });
+  it('demotes a key to the back', () => {
+    expect(moveSortKey(chain, 0, 2).map((s) => s.field)).toEqual(['due', 'title', 'status']);
+  });
+  it('a move to the same slot is not a new array to persist', () => {
+    expect(moveSortKey(chain, 1, 1)).toBe(chain);
+  });
+  /**
+   * Called from a pointer drag whose slot maths was measured against a DOM
+   * that may have re-rendered mid-gesture, so a stale index must be a no-op
+   * rather than a splice that duplicates or drops a key.
+   */
+  it('an out-of-range index leaves the chain untouched', () => {
+    expect(moveSortKey(chain, 5, 0)).toBe(chain);
+    expect(moveSortKey(chain, 0, -1)).toBe(chain);
+    expect(moveSortKey(chain, 0, 9)).toBe(chain);
+  });
+});
+
+/**
+ * Tab order is the order of the `views:` array on disk, and nothing could
+ * write a different one: no drag handler, no Move left/right item, and no
+ * action anywhere in the app (M16.26).
+ */
+describe('moveView', () => {
+  const views = [
+    newView('One', 'table', []),
+    newView('Two', 'board', ['one']),
+    newView('Three', 'list', ['one', 'two']),
+  ];
+
+  it('moves a tab by id, not by index', () => {
+    expect(moveView(views, 'three', 0).map((v) => v.id)).toEqual(['three', 'one', 'two']);
+  });
+  it('an unknown id changes nothing', () => {
+    expect(moveView(views, 'nope', 0)).toBe(views);
+  });
+  it('a target outside the strip changes nothing', () => {
+    expect(moveView(views, 'one', 3)).toBe(views);
+  });
+  it('the moved tab keeps its whole definition, not just its name', () => {
+    const moved = moveView(views, 'two', 0);
+    expect(moved[0]).toBe(views[1]);
   });
 });

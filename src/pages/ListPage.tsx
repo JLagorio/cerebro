@@ -15,7 +15,14 @@ import type {
   ViewType,
 } from '@/engine/types';
 import { addFieldToType, addRelationProperty, normalizeFieldName } from '@/app/typeActions';
-import { clonePresentation, layoutLabel, newView, resolveView, toggleSort } from '@/engine/views';
+import {
+  clonePresentation,
+  layoutLabel,
+  moveView,
+  newView,
+  resolveView,
+  toggleSort,
+} from '@/engine/views';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
@@ -24,6 +31,8 @@ import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
+import { ViewLimitNotice } from '@/views/ViewLimitNotice';
+import { limitEntries, searchEntries } from '@/engine/viewFilters';
 
 export type ListSelection = Extract<Selection, { kind: 'list' }>;
 
@@ -70,17 +79,25 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   // M12.8: the chip bar below the tabs. Hidden until an icon engages it —
   // the icons tint when an axis is active, so nothing is silently filtered.
   const [controlsOpen, setControlsOpen] = useState(false);
+  // M16.26: search is where you are looking RIGHT NOW, not part of what the
+  // saved view is — so it lives here and never reaches the YAML, and it
+  // clears with the tab for the same reason the presentation re-seeds.
+  const [search, setSearch] = useState('');
   // Re-seed when the LIST or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
     setPresentation(clonePresentation(surface.presentation));
+    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.id, selection.collection, activeId]);
 
   const sortedEntries = useMemo(
-    () => sortEntries(surface.entries, presentation.sort, schema),
-    [surface.entries, presentation.sort, schema],
+    () => searchEntries(sortEntries(surface.entries, presentation.sort, schema), search),
+    [surface.entries, presentation.sort, schema, search],
   );
+  // Applied AFTER the sort, so "the first 25" means the first 25 of the order
+  // on screen rather than 25 arbitrary records that then get sorted.
+  const shownEntries = limitEntries(sortedEntries, presentation.limit);
 
   // M9.2: one resolution for every surface. A typeless view used to get [],
   // so an "Everything" view had no columns at all; columnUniverse unions the
@@ -215,7 +232,9 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   };
 
   const sourceLabel = list.definition.source.type ?? 'Everything';
-  const filtered = activeView.filters !== null;
+  // Search narrows too, so the empty state must say "nothing matches" rather
+  // than "this list is empty" — which would be a lie about the vault.
+  const filtered = activeView.filters !== null || search !== '';
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
@@ -296,6 +315,15 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             })();
           }}
           onDelete={removeView}
+          onReorder={(id, to) =>
+            changeList({ ...list.definition, views: moveView(list.definition.views, id, to) })
+          }
+          onChangeIcon={(id, icon) =>
+            changeList({
+              ...list.definition,
+              views: list.definition.views.map((v) => (v.id === id ? { ...v, icon } : v)),
+            })
+          }
           onConfigure={(id) => {
             if (id !== activeId) openTab(id);
             setSettingsOpen(true);
@@ -310,6 +338,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               onFiltersChange={(filters) => changeView({ ...activeView, filters })}
               barOpen={controlsOpen}
               onBarOpenChange={setControlsOpen}
+              search={search}
+              onSearchChange={setSearch}
               settingsOpen={settingsOpen}
               onSettingsOpenChange={setSettingsOpen}
               settingsPanel={
@@ -359,7 +389,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           />
         )}
         <ViewCanvas
-          entries={sortedEntries}
+          entries={shownEntries}
           allEntries={entries}
           presentation={presentation}
           schema={schema}
@@ -390,6 +420,11 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               },
             })
           }
+        />
+        <ViewLimitNotice
+          shown={shownEntries.length}
+          total={sortedEntries.length}
+          onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
         />
       </div>
       {confirmDelete && (

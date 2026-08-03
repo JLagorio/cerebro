@@ -3,6 +3,8 @@ import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
 import { moveColumnTo, toggleColumn } from '@/engine/columns';
@@ -29,7 +31,7 @@ import type {
   ListDefinition,
   ViewDefinition,
 } from '@/engine/types';
-import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
+import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH, MAX_SORT_KEYS, moveSortKey } from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
 import {
   VIEW_KINDS,
@@ -56,6 +58,7 @@ type Page =
   | 'filter'
   | 'sort'
   | 'group'
+  | 'limit'
   | 'axis'
   | 'list'
   | 'newProperty'
@@ -243,6 +246,15 @@ export function ViewSettingsPanel({
                 onClick={() => setPage('group')}
               />
             )}
+            {/* M16.26: Notion loads 25 and offers more; every view of ours
+                rendered `entries` in full, so a type with 4,000 records laid
+                out 4,000 rows before the first paint. */}
+            <Row
+              icon="list-end"
+              label="Load limit"
+              value={p.limit === undefined ? 'All' : String(p.limit)}
+              onClick={() => setPage('limit')}
+            />
             {/* M12.8: tailoring per layout — the dated views expose the axis
                 they draw on, which the table has no use for. */}
             {needsDate(p.type) && (
@@ -488,6 +500,10 @@ export function ViewSettingsPanel({
           />
         )}
 
+        {page === 'limit' && (
+          <LimitPage limit={p.limit} onChange={(limit) => setPresentation({ ...p, limit })} />
+        )}
+
         {page === 'group' && (
           <GroupPage
             group={p.group}
@@ -514,6 +530,8 @@ function titleFor(page: Page): string {
       return 'Sort';
     case 'group':
       return 'Group';
+    case 'limit':
+      return 'Load limit';
     case 'axis':
       return 'Date axis';
     case 'list':
@@ -847,41 +865,79 @@ function SortPage({
       .filter((f) => ORDERABLE_KINDS.has(f.kind) && !taken.has(f.name))
       .map((f) => ({ value: f.name, label: humanize(f.name) })),
   ];
+  // M16.26: this page enforced NO cap while the toolbar's chain builder passed
+  // `max={4}`, so the same view accepted a fifth key here and refused it there.
+  const atCap = sort.length >= MAX_SORT_KEYS;
+
+  const sortable = useSortableList({
+    ids: sort.map((s) => s.field),
+    labelFor,
+    onReorder: (field, to) =>
+      onChange(
+        moveSortKey(
+          sort,
+          sort.findIndex((s) => s.field === field),
+          to,
+        ),
+      ),
+  });
 
   return (
     <div className="flex flex-col gap-1.5">
-      {sort.map((s, i) => (
-        <div key={`${i}:${s.field}`} className="flex items-center gap-1.5">
-          <Select
-            size="sm"
-            value={s.field}
-            options={[{ value: s.field, label: labelFor(s.field) }, ...available].filter(
-              (o, j, all) => all.findIndex((x) => x.value === o.value) === j,
-            )}
-            onChange={(e) =>
-              onChange(sort.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
-            }
-            width="100%"
-          />
-          <IconButton
-            icon={s.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
-            label={`Sort ${i + 1} direction: ${s.dir === 'asc' ? 'ascending' : 'descending'}`}
-            size="sm"
-            onClick={() =>
-              onChange(
-                sort.map((x, j) => (j === i ? { ...x, dir: x.dir === 'asc' ? 'desc' : 'asc' } : x)),
-              )
-            }
-          />
-          <IconButton
-            icon="x"
-            label={`Remove sort ${i + 1}`}
-            size="sm"
-            onClick={() => onChange(sort.filter((_, j) => j !== i))}
-          />
-        </div>
-      ))}
-      {available.length > 0 && (
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col gap-1.5"
+      >
+        {sort.map((s, i) => (
+          <div
+            key={`${i}:${s.field}`}
+            className={[
+              'group flex items-center gap-1.5',
+              sortable.dragging === s.field ? 'opacity-40' : '',
+            ].join(' ')}
+            style={sortable.dropIndicator(i)}
+          >
+            <Tooltip label="Drag to reorder — the first key breaks ties first">
+              <span
+                {...sortable.gripProps(s.field, i)}
+                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-[3px] text-[var(--n-300)] hover:text-[var(--n-600)] focus-visible:text-[var(--n-600)] group-hover:text-[var(--n-500)]"
+              >
+                <Icon name="grip-vertical" size={13} />
+              </span>
+            </Tooltip>
+            <Select
+              size="sm"
+              value={s.field}
+              options={[{ value: s.field, label: labelFor(s.field) }, ...available].filter(
+                (o, j, all) => all.findIndex((x) => x.value === o.value) === j,
+              )}
+              onChange={(e) =>
+                onChange(sort.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
+              }
+              width="100%"
+            />
+            <IconButton
+              icon={s.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
+              label={`Sort ${i + 1} direction: ${s.dir === 'asc' ? 'ascending' : 'descending'}`}
+              size="sm"
+              onClick={() =>
+                onChange(
+                  sort.map((x, j) =>
+                    j === i ? { ...x, dir: x.dir === 'asc' ? 'desc' : 'asc' } : x,
+                  ),
+                )
+              }
+            />
+            <IconButton
+              icon="x"
+              label={`Remove sort ${i + 1}`}
+              size="sm"
+              onClick={() => onChange(sort.filter((_, j) => j !== i))}
+            />
+          </div>
+        ))}
+      </div>
+      {available.length > 0 && !atCap && (
         <Select
           size="sm"
           value={ADD}
@@ -892,11 +948,66 @@ function SortPage({
           width="100%"
         />
       )}
+      {atCap && (
+        <p className="m-0 px-1 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          {MAX_SORT_KEYS} keys is the maximum — a fifth tiebreak never decides anything.
+        </p>
+      )}
       {sort.length === 0 && (
         <p className="m-0 px-1 pt-1 text-[11.5px] leading-[16px] text-[var(--n-500)]">
           Records appear in vault order.
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * How many records the view draws (M16.26).
+ *
+ * Presets, not a free number box: the point of a limit is to keep the first
+ * paint fast, and a typed one invites 3,000 — which is the state this exists
+ * to avoid. "All" is stored as an ABSENT key, so a view that never wanted a
+ * limit carries nothing about one in its YAML.
+ */
+const LIMITS: { value: number | undefined; label: string }[] = [
+  { value: 25, label: '25 records' },
+  { value: 50, label: '50 records' },
+  { value: 100, label: '100 records' },
+  { value: undefined, label: 'All records' },
+];
+
+function LimitPage({
+  limit,
+  onChange,
+}: {
+  limit: number | undefined;
+  onChange: (next: number | undefined) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {LIMITS.map((l) => (
+        <button
+          key={l.label}
+          type="button"
+          data-testid={`view-limit-${l.value ?? 'all'}`}
+          aria-pressed={limit === l.value}
+          onClick={() => onChange(l.value)}
+          className={[
+            'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+            limit === l.value
+              ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
+              : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+          ].join(' ')}
+        >
+          <span className="flex-1">{l.label}</span>
+          {limit === l.value && <Icon name="check" size={12} />}
+        </button>
+      ))}
+      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+        A limited view says how many of how many it is showing, under the records. Nothing
+        disappears without saying so.
+      </p>
     </div>
   );
 }
@@ -1005,6 +1116,45 @@ function GroupPage({
         </div>
       ))}
 
+      {/* M16.26: `hideEmpty` has been honoured by `grouping.ts:140` since M9.1
+          and no UI ever set it, so the only way to drop the empty bands a
+          twelve-option select produces was to hand-edit the YAML.
+
+          PER LEVEL, because the engine is: a board wants its empty columns
+          (they are the columns you drag onto) while the sub-level banding
+          inside them usually does not. One switch for the whole chain would
+          have to lie about a mixed state. */}
+      {bandLevels(group).length > 0 && (
+        <div className="mt-1 flex flex-col gap-1 border-t border-[var(--n-100)] pt-2">
+          <div className="px-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            Empty groups
+          </div>
+          {group.map((level, i) =>
+            level.descend !== undefined ? null : (
+              <label
+                key={`hide:${i}:${level.field}`}
+                className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12px] text-[var(--n-700)]"
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  Hide empty {humanize(level.field).toLowerCase()} groups
+                </span>
+                <Switch
+                  ariaLabel={`Hide empty ${humanize(level.field).toLowerCase()} groups`}
+                  checked={level.hideEmpty === true}
+                  onChange={(on) =>
+                    onChange(
+                      group.map((g, j) =>
+                        j === i ? (on ? { ...g, hideEmpty: true } : omitHideEmpty(g)) : g,
+                      ),
+                    )
+                  }
+                />
+              </label>
+            ),
+          )}
+        </div>
+      )}
+
       {addOptions.length > 0 && (
         <div className="flex items-center gap-1.5">
           <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
@@ -1028,4 +1178,12 @@ function GroupPage({
       </p>
     </div>
   );
+}
+
+/** Off is the DEFAULT, so it is stored as an absent key rather than `false` —
+ * the same rule every other optional presentation key follows, and what keeps
+ * a view that never touched this from growing a line about it. */
+function omitHideEmpty(level: GroupSpec): GroupSpec {
+  const { hideEmpty: _dropped, ...rest } = level;
+  return rest;
 }

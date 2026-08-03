@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { icons } from 'lucide-react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
+import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
 import { ensureTypeDoc } from '@/app/typeActions';
 import type { TypeListing } from '@/engine/typeCatalog';
@@ -24,15 +24,6 @@ export const TYPE_COLORS = [
 ];
 
 const DEFAULT_ICON = 'file-text';
-
-/** lucide export names are PascalCase; Icon takes kebab-case. */
-const kebab = (name: string) =>
-  name
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1-$2')
-    .toLowerCase();
-
-const ALL_ICONS = Object.keys(icons).map(kebab);
 
 function useTypeNames(): Set<string> {
   const entries = useVaultStore((s) => s.entries);
@@ -213,14 +204,7 @@ export function TypeStyleDialog({
   const toast = useUiStore((s) => s.toast);
   const [color, setColor] = useState(listing.color ?? TYPE_COLORS[4]);
   const [icon, setIcon] = useState(listing.icon);
-  const [query, setQuery] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const pool = q === '' ? ALL_ICONS : ALL_ICONS.filter((n) => n.includes(q));
-    return pool.slice(0, 96);
-  }, [query]);
 
   const save = async () => {
     if (submitting) return;
@@ -269,37 +253,13 @@ export function TypeStyleDialog({
         </div>
         <div>
           <div className="mb-1.5 text-[12px] text-[var(--n-600)]">Icon</div>
-          <Input
-            placeholder="Search icons…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            width="100%"
-          />
-          <div className="mt-2 grid max-h-[180px] grid-cols-8 gap-1 overflow-y-auto">
-            {matches.map((n) => (
-              <button
-                key={n}
-                type="button"
-                title={n}
-                aria-label={`Icon ${n}`}
-                aria-pressed={icon === n}
-                onClick={() => setIcon(n)}
-                className={[
-                  'flex h-9 w-9 items-center justify-center rounded-md border',
-                  icon === n
-                    ? 'border-[var(--cortex-500)] bg-[var(--n-50)]'
-                    : 'border-transparent hover:bg-[var(--n-50)]',
-                ].join(' ')}
-              >
-                <Icon name={n} size={16} color={icon === n ? color : 'var(--n-600)'} />
-              </button>
-            ))}
-            {matches.length === 0 && (
-              <div className="col-span-8 py-3 text-center text-[12px] text-[var(--n-400)]">
-                No icons match "{query}"
-              </div>
-            )}
-          </div>
+          {/* M16.26: the grid this replaces was the app's only icon picker,
+              inline and reachable from nothing else — which is why a view tab
+              could not have an icon. It also offered every lucide export
+              kebab-cased, including the dozen whose casing `Icon` cannot
+              reproduce, so those tiles drew the dashed-square fallback and
+              picking one wrote a dead name into the type's frontmatter. */}
+          <IconPicker value={icon} onChange={setIcon} color={color} />
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-[var(--n-200)] bg-[var(--n-25)] px-3 py-2">
           <Icon name={icon} size={16} color={color} />
