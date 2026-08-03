@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
+import { Switch } from '@/components/ui/Switch';
+import { resolveColumns } from '@/engine/columns';
 import { toIsoDate } from '@/engine/dates';
 import { buildRows } from '@/engine/rows';
 import {
@@ -9,10 +11,12 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  dateKindOf,
   resolveDateField,
   spanBounds,
   spanOf,
   unscheduled,
+  DEFAULT_ZOOM,
   type Span,
   type Zoom,
 } from '@/engine/schedule';
@@ -20,8 +24,23 @@ import { typeStyle } from '@/engine/typeCatalog';
 import type { ColumnDef } from '@/engine/columns';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
-import { ROW_H, TimeAxisHeader, TimeGridLines, TodayLine, ZoomControl } from '@/views/TimeAxis';
+import { useVaultStore } from '@/stores/vaultStore';
+import {
+  BAND_H,
+  ROW_H,
+  ResizeGrips,
+  TimeAxisHeader,
+  TimeGridLines,
+  TimeTable,
+  TodayLine,
+  ZoomControl,
+  useZoomAnchor,
+} from '@/views/TimeAxis';
+import { useScheduleDrag } from '@/views/useScheduleDrag';
 import { viewKind } from '@/views/viewKinds';
+
+/** Name-column width when the view has not been told one. */
+const NAME_W = 280;
 
 export interface TimelineViewProps {
   entries: Entry[];
@@ -40,9 +59,13 @@ export interface TimelineViewProps {
  *
  * Distinct from Gantt, which answers a scheduling question — what blocks what,
  * what has slipped. A timeline answers a simpler one: when do these things
- * happen relative to each other. So it has no name gutter and no dependency
- * arrows; each bar carries its own label and the grouping chain's band levels
- * become swimlanes.
+ * happen relative to each other. So it has no dependency arrows; each bar
+ * carries its own label and the grouping chain's band levels become swimlanes.
+ *
+ * It DOES now get a table half (M16.24). "No name gutter by design" only ever
+ * argued against the gantt's work breakdown; it did not argue that a timeline
+ * should be unable to show a status beside a bar, which is what it meant in
+ * practice. Off by default here, on by default in the gantt.
  */
 export function TimelineView({
   entries,
@@ -55,11 +78,23 @@ export function TimelineView({
   onZoomChange,
 }: TimelineViewProps) {
   const dateField = resolveDateField(presentation, fields);
-  const [localZoom, setLocalZoom] = useState<Zoom>(presentation.zoom ?? 'week');
-  const zoom = presentation.zoom ?? localZoom;
+  // The override wins over the stored value, not the other way round. With
+  // `presentation.zoom ?? local` the in-view control was inert the moment a
+  // zoom was persisted on a surface that passes no `onZoomChange`.
+  const [zoomOverride, setZoomOverride] = useState<Zoom | null>(null);
+  const zoom = zoomOverride ?? presentation.zoom ?? DEFAULT_ZOOM;
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggle = useUiStore((s) => s.toggleCollapsed);
   const openPath = useOpenPath('in-place');
+  const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+
+  const [showTable, setShowTable] = useState(presentation.showTable === true);
+  const [nameWidth, setNameWidth] = useState(presentation.titleWidth ?? NAME_W);
+  const columns = useMemo(
+    () => resolveColumns(presentation.columns, fields).map((c) => ({ def: c.def, width: c.width })),
+    [presentation.columns, fields],
+  );
+  const tableWidth = showTable ? nameWidth + columns.reduce((sum, c) => sum + c.width, 0) : 0;
 
   const rows = useMemo(
     () =>
@@ -86,10 +121,14 @@ export function TimelineView({
   // skipped from the chart and listed under it instead.
   const [showUndated, setShowUndated] = useState(false);
 
+  const { scrollerRef, capture } = useZoomAnchor(axis, zoom, tableWidth);
   const setZoom = (next: Zoom) => {
-    setLocalZoom(next);
+    capture();
+    setZoomOverride(next);
     onZoomChange?.(next);
   };
+
+  const drag = useScheduleDrag({ rows, dateField, schema, zoom, patchFrontmatter });
 
   if (dateField === null) {
     return (
@@ -106,6 +145,8 @@ export function TimelineView({
     );
   }
 
+  const width = axisWidth(axis, zoom);
+
   return (
     <div
       data-testid="timeline-view"
@@ -113,8 +154,9 @@ export function TimelineView({
       data-zoom={zoom}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
+      <div className="flex flex-none items-center gap-3 border-b border-[var(--n-200)] px-5 py-2">
         <ZoomControl zoom={zoom} onChange={setZoom} />
+        <Switch checked={showTable} onChange={setShowTable} label="Show table" />
         <span className="flex-1" />
         {undated.length > 0 && (
           <button
@@ -129,77 +171,118 @@ export function TimelineView({
         )}
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <div className="relative" style={{ width: axisWidth(axis, zoom), minWidth: '100%' }}>
-          <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} today={today} />
-          <div className="relative">
-            <TimeGridLines ticks={ticks} zoom={zoom} />
-            <TodayLine axis={axis} zoom={zoom} today={today} />
-            {rows.map((row) => {
-              if (row.kind === 'add') return null;
-              if (row.kind === 'band') {
-                const collapsed = collapsedMap?.[row.key] === true;
-                return (
-                  <button
-                    key={row.key}
-                    type="button"
-                    data-testid="timeline-band"
-                    data-depth={row.node.depth}
-                    onClick={() => toggle(scope, row.key)}
-                    className="relative z-10 flex h-7 w-full items-center border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
-                    style={{ width: '100%' }}
-                  >
-                    {/* Full-width band cannot be sticky itself (no room to
-                        shift); the label cluster sticks instead. */}
-                    <span
-                      className="sticky left-0 flex items-center gap-2"
-                      style={{ paddingLeft: 12 + row.node.depth * 16 }}
+      <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <div className="flex" style={{ width: tableWidth + width, minWidth: '100%' }}>
+          {showTable && (
+            <TimeTable
+              rows={rows}
+              schema={schema}
+              columns={columns}
+              nameWidth={nameWidth}
+              isCollapsed={(key) => collapsedMap?.[key] === true}
+              onToggle={(key) => toggle(scope, key)}
+              onOpen={openPath}
+              onResize={setNameWidth}
+            />
+          )}
+          <div className="relative flex-none" style={{ width }}>
+            <TimeAxisHeader ticks={ticks} axis={axis} zoom={zoom} today={today} />
+            <div className="relative">
+              <TimeGridLines ticks={ticks} zoom={zoom} />
+              <TodayLine axis={axis} zoom={zoom} today={today} />
+              {rows.map((row) => {
+                if (row.kind === 'add') return null;
+                if (row.kind === 'band') {
+                  const collapsed = collapsedMap?.[row.key] === true;
+                  return (
+                    <button
+                      key={row.key}
+                      type="button"
+                      data-testid="timeline-band"
+                      data-depth={row.node.depth}
+                      onClick={() => toggle(scope, row.key)}
+                      className="relative z-10 flex w-full items-center border-b border-[var(--n-100)] bg-[var(--n-25)] text-left"
+                      style={{ width: '100%', height: BAND_H }}
                     >
-                      <Icon
-                        name={collapsed ? 'chevron-right' : 'chevron-down'}
-                        size={12}
-                        color="var(--n-400)"
-                      />
-                      <span className="text-[12px] font-semibold text-[var(--n-800)]">
-                        {row.node.label}
+                      {/* Full-width band cannot be sticky itself (no room to
+                          shift); the label cluster sticks instead. */}
+                      <span
+                        className="sticky left-0 flex items-center gap-2"
+                        style={{ paddingLeft: 12 + row.node.depth * 16 }}
+                      >
+                        <Icon
+                          name={collapsed ? 'chevron-right' : 'chevron-down'}
+                          size={12}
+                          color="var(--n-400)"
+                        />
+                        <span className="text-[12px] font-semibold text-[var(--n-800)]">
+                          {row.node.label}
+                        </span>
+                        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                          {row.node.count}
+                        </span>
                       </span>
-                      <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-                        {row.node.count}
-                      </span>
-                    </span>
-                  </button>
-                );
-              }
+                    </button>
+                  );
+                }
 
-              const span = spanOf(row.entry, dateField);
-              if (span === null) return null;
-              const style = typeStyle(row.entry.type, schema);
-              return (
-                <div
-                  key={row.key}
-                  data-testid="timeline-row"
-                  data-path={row.entry.path}
-                  className="relative border-b border-[var(--n-100)] hover:bg-[var(--n-25)]"
-                  style={{ height: ROW_H }}
-                >
-                  <button
-                    type="button"
-                    data-testid="timeline-bar"
+                const stored = spanOf(row.entry, dateField);
+                if (stored === null) {
+                  // With a table half the row EXISTS on the left, so the chart
+                  // side must keep its slot or the two halves shear apart.
+                  return showTable ? (
+                    <div
+                      key={row.key}
+                      className="border-b border-[var(--n-100)]"
+                      style={{ height: ROW_H }}
+                    />
+                  ) : null;
+                }
+                const span = drag.preview(row.key, stored);
+                const style = typeStyle(row.entry.type, schema);
+                const geo = barGeometry(span, axis, zoom);
+                return (
+                  <div
+                    key={row.key}
+                    data-testid="timeline-row"
                     data-path={row.entry.path}
-                    onClick={() => openPath(row.entry.path)}
-                    title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
-                    className="absolute top-1 flex items-center gap-1 overflow-hidden rounded-[5px] border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1.5 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]"
-                    style={{
-                      ...barGeometry(span, axis, zoom),
-                      height: ROW_H - 9,
-                    }}
+                    className="relative border-b border-[var(--n-100)] hover:bg-[var(--n-25)]"
+                    style={{ height: ROW_H }}
                   >
-                    <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
-                    <span className="truncate">{row.entry.title}</span>
-                  </button>
-                </div>
-              );
-            })}
+                    <button
+                      type="button"
+                      data-testid="timeline-bar"
+                      data-path={row.entry.path}
+                      data-start={span.start}
+                      data-end={span.end}
+                      {...drag.handle.handleProps(row.key)}
+                      onClick={() => {
+                        if (drag.handle.consumeClick()) return;
+                        openPath(row.entry.path);
+                      }}
+                      title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
+                      aria-label={`${row.entry.title}, ${span.start} to ${span.end}. Arrow keys move it; hold Shift to change its end.`}
+                      className="absolute top-1 flex touch-none select-none items-center gap-1 overflow-hidden rounded-[5px] border border-[var(--cortex-500)] bg-[var(--cortex-50)] px-1.5 text-left text-[11.5px] text-[var(--n-900)] hover:bg-[var(--cortex-100)]"
+                      style={{ ...geo, height: ROW_H - 9 }}
+                    >
+                      <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-500)'} />
+                      <span className="truncate">{row.entry.title}</span>
+                    </button>
+                    {dateKindOf(row.entry, dateField, schema) === 'daterange' && (
+                      <ResizeGrips
+                        id={row.key}
+                        title={row.entry.title}
+                        left={geo.left}
+                        width={geo.width}
+                        top={4}
+                        height={ROW_H - 9}
+                        drag={drag.handle}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>

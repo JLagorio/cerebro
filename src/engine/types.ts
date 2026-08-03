@@ -493,6 +493,21 @@ export interface Presentation {
   chart?: ChartSpec;
   /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
   dashboard?: DashboardSpec;
+  /** How much of the calendar one screen holds. Omitted = a month (M16.23). */
+  calendarSpan?: 'month' | 'week';
+  /** False drops Saturday and Sunday from the grid. Stored only when false. */
+  showWeekends?: boolean;
+  /**
+   * The weekday a grid row begins on. A name, not an index: a vault is edited
+   * by hand, and `weekStart: 1` is a number you have to know the convention for.
+   */
+  weekStart?: 'sunday' | 'monday';
+  /**
+   * Whether a timeline/gantt draws its rows as a table beside the axis
+   * (M16.24). Omitted takes the layout's own default — a work breakdown is the
+   * point of a gantt, and optional chrome on a timeline.
+   */
+  showTable?: boolean;
 }
 
 /**

@@ -4,7 +4,9 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  dateAtCentre,
   dateFieldOptions,
+  dateKindOf,
   dayCount,
   dayOffset,
   dependenciesOf,
@@ -17,15 +19,28 @@ import {
   monthStart,
   onDay,
   overlaps,
+  packWeek,
+  quarterEnd,
+  quarterLabel,
+  quarterStart,
   PX_PER_DAY,
+  rescheduleValue,
+  resizeSpan,
   resolveDateField,
+  scrollToCentre,
+  shiftSpan,
   spanBounds,
   spanOf,
   unscheduled,
+  visibleDays,
+  weekGrid,
+  weekLabel,
+  weekStartIndex,
   weekdayLabels,
 } from './schedule';
+import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
-import type { FieldKind, Presentation } from './types';
+import type { Entry, FieldKind, Presentation } from './types';
 
 /** Minimal presentation — only the axis keys matter here. */
 const pres = (patch: Partial<Presentation> = {}): Presentation => ({
@@ -211,6 +226,274 @@ describe('month grid', () => {
   });
 });
 
+/**
+ * The week grid and the weekday settings (M16.23).
+ *
+ * `monthGrid` took a `weekStart` from the day it was written and was called
+ * with no argument from both of its two call sites, so the parameter was a
+ * setting nothing could reach.
+ */
+describe('week grid and weekday settings', () => {
+  it('gives the seven days of the week a date falls in', () => {
+    // 2026-08-12 is a Wednesday.
+    expect(weekGrid('2026-08-12', 0)[0]).toBe('2026-08-09');
+    expect(weekGrid('2026-08-12', 1)[0]).toBe('2026-08-10');
+    expect(weekGrid('2026-08-12')).toHaveLength(7);
+  });
+
+  it('reads the week start off the view as a name, not an index', () => {
+    expect(weekStartIndex(pres())).toBe(0);
+    expect(weekStartIndex(pres({ weekStart: 'sunday' }))).toBe(0);
+    expect(weekStartIndex(pres({ weekStart: 'monday' }))).toBe(1);
+  });
+
+  it('drops weekends entirely rather than narrowing them', () => {
+    const week = weekGrid('2026-08-12', 0); // Sun 9 → Sat 15
+    expect(visibleDays(week, true)).toHaveLength(7);
+    expect(visibleDays(week, false)).toEqual([
+      '2026-08-10',
+      '2026-08-11',
+      '2026-08-12',
+      '2026-08-13',
+      '2026-08-14',
+    ]);
+  });
+
+  it('labels the weekday header to match the columns it heads', () => {
+    expect(weekdayLabels(0, false)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    expect(weekdayLabels(1, false)).toEqual(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+    expect(weekdayLabels(1, true)[6]).toBe('Sun');
+  });
+
+  it('names the week, repeating the month only when the week crosses one', () => {
+    expect(weekLabel(weekGrid('2026-08-12', 0))).toBe('Aug 9 – 15, 2026');
+    expect(weekLabel(weekGrid('2026-09-02', 0))).toBe('Aug 30 – Sep 5, 2026');
+    expect(weekLabel([])).toBe('');
+  });
+});
+
+/**
+ * Bar packing (M16.23) — moved out of CalendarView so the column arithmetic
+ * can be tested without a DOM, and generalised because columns and calendar
+ * days stopped being the same thing once weekends could be hidden.
+ */
+describe('packWeek', () => {
+  const week = weekGrid('2026-08-12', 0); // Sun Aug 9 → Sat Aug 15
+  const workdays = visibleDays(week, false);
+  const item = (path: string, start: string, end: string) => ({
+    entry: makeEntry({ path }),
+    span: { start, end },
+  });
+
+  it('ignores single-day records — those are chips, not bars', () => {
+    expect(packWeek([item('a.md', '2026-08-11', '2026-08-11')], week, week)).toEqual([]);
+  });
+
+  it('clips a span to the week and marks which ends continue', () => {
+    const [seg] = packWeek([item('a.md', '2026-08-06', '2026-08-20')], week, week);
+    expect(seg.startCol).toBe(0);
+    expect(seg.endCol).toBe(6);
+    expect(seg.continuesLeft).toBe(true);
+    expect(seg.continuesRight).toBe(true);
+  });
+
+  it('packs overlapping spans into distinct lanes, longest first on a tie', () => {
+    const segs = packWeek(
+      [item('a.md', '2026-08-10', '2026-08-12'), item('b.md', '2026-08-10', '2026-08-14')],
+      week,
+      week,
+    );
+    expect(segs.map((s) => s.entry.path)).toEqual(['b.md', 'a.md']);
+    expect(segs.map((s) => s.lane)).toEqual([0, 1]);
+  });
+
+  it('reuses a lane once the bar in it has ended', () => {
+    const segs = packWeek(
+      [item('a.md', '2026-08-09', '2026-08-10'), item('b.md', '2026-08-12', '2026-08-14')],
+      week,
+      week,
+    );
+    expect(segs.map((s) => s.lane)).toEqual([0, 0]);
+  });
+
+  it('columns a weekend-spanning bar against the VISIBLE days', () => {
+    // Sat 15 → Tue 18. The old `days.indexOf(span.start)` returned -1 for a
+    // Saturday start and fell back to column 0, drawing a bar that began on
+    // Monday morning — on a day the record does not cover.
+    const nextWeek = weekGrid('2026-08-17', 0);
+    const [seg] = packWeek(
+      [item('a.md', '2026-08-15', '2026-08-18')],
+      nextWeek,
+      visibleDays(nextWeek, false),
+    );
+    expect(seg.startCol).toBe(0); // Mon 17
+    expect(seg.endCol).toBe(1); // Tue 18
+    expect(seg.continuesLeft).toBe(true);
+  });
+
+  it('drops a span that falls entirely on hidden days', () => {
+    // Sat 15 → Sun 16 with weekends off has no column to occupy, and
+    // inventing one puts the record on a day it does not cover.
+    expect(packWeek([item('a.md', '2026-08-15', '2026-08-16')], week, workdays)).toEqual([]);
+  });
+
+  it('returns nothing when every column is hidden', () => {
+    expect(packWeek([item('a.md', '2026-08-10', '2026-08-14')], week, [])).toEqual([]);
+  });
+});
+
+/**
+ * Moving a record on the axis (M16.23/M16.24). Writing the value back is the
+ * half a drag gesture cannot fake: the shape has to survive its own schema.
+ */
+describe('reschedule', () => {
+  it('shifts a span without changing its duration', () => {
+    expect(shiftSpan({ start: '2026-08-10', end: '2026-08-14' }, 3)).toEqual({
+      start: '2026-08-13',
+      end: '2026-08-17',
+    });
+    expect(shiftSpan({ start: '2026-08-01', end: '2026-08-01' }, -2)).toEqual({
+      start: '2026-07-30',
+      end: '2026-07-30',
+    });
+  });
+
+  it('resizes one endpoint and holds the other', () => {
+    const span = { start: '2026-08-10', end: '2026-08-14' };
+    expect(resizeSpan(span, 'start', -2)).toEqual({ start: '2026-08-08', end: '2026-08-14' });
+    expect(resizeSpan(span, 'end', 3)).toEqual({ start: '2026-08-10', end: '2026-08-17' });
+  });
+
+  it('clamps rather than inverting — a backwards span reads back as a milestone', () => {
+    const span = { start: '2026-08-10', end: '2026-08-14' };
+    expect(resizeSpan(span, 'start', 30)).toEqual({ start: '2026-08-14', end: '2026-08-14' });
+    expect(resizeSpan(span, 'end', -30)).toEqual({ start: '2026-08-10', end: '2026-08-10' });
+  });
+
+  it('writes a scalar for a date field and a mapping for a daterange', () => {
+    expect(rescheduleValue('2026-08-10', 'date', { start: '2026-08-12', end: '2026-08-12' })).toBe(
+      '2026-08-12',
+    );
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: '2026-08-14' }, 'daterange', {
+        start: '2026-08-12',
+        end: '2026-08-16',
+      }),
+    ).toEqual({ start: '2026-08-12', end: '2026-08-16' });
+  });
+
+  it('carries the time through the move', () => {
+    // A 9:00 standup dragged to Thursday is still at 9:00. Dropping the time
+    // en route would silently reschedule the meeting as well as the day.
+    expect(
+      rescheduleValue('2026-08-10 09:00', 'date', { start: '2026-08-13', end: '2026-08-13' }),
+    ).toBe('2026-08-13 09:00');
+    expect(
+      rescheduleValue({ start: '2026-08-10 09:00', end: '2026-08-10 17:30' }, 'daterange', {
+        start: '2026-08-13',
+        end: '2026-08-13',
+      }),
+    ).toEqual({ start: '2026-08-13 09:00', end: '2026-08-13 17:30' });
+  });
+
+  it('leaves an open-ended range open when it is only moved', () => {
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: null }, 'daterange', {
+        start: '2026-08-12',
+        end: '2026-08-12',
+      }),
+    ).toEqual({ start: '2026-08-12', end: null });
+  });
+
+  it('gives an open-ended range a real end once one is dragged out', () => {
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: null }, 'daterange', {
+        start: '2026-08-10',
+        end: '2026-08-14',
+      }),
+    ).toEqual({ start: '2026-08-10', end: '2026-08-14' });
+  });
+
+  it('never writes `{start,end}` into a plain date field, whatever it is handed', () => {
+    // The schema would reject the mapping on the very next read, so a drag
+    // that produced one would fail the write it had just optimistically shown.
+    expect(
+      rescheduleValue({ start: '2026-08-10', end: '2026-08-14' }, 'date', {
+        start: '2026-08-12',
+        end: '2026-08-16',
+      }),
+    ).toBe('2026-08-12');
+  });
+
+  it('schedules a record whose field was empty', () => {
+    expect(rescheduleValue(undefined, 'date', { start: '2026-08-12', end: '2026-08-12' })).toBe(
+      '2026-08-12',
+    );
+  });
+
+  it('takes the write shape from the schema, not from the value it finds', () => {
+    const schema = buildSchema([
+      makeEntry({
+        path: 'types/campaign.md',
+        title: 'Campaign',
+        type: 'Type',
+        properties: {
+          fields: { due: { kind: 'date' }, window: { kind: 'daterange' } },
+        } as unknown as Entry['properties'],
+      }),
+    ]);
+    const e = makeEntry({ type: 'Campaign', properties: { due: '2026-08-01' } });
+    expect(dateKindOf(e, 'due', schema)).toBe('date');
+    expect(dateKindOf(e, 'window', schema)).toBe('daterange');
+  });
+
+  it('keeps an UNDECLARED field in the shape already on disk', () => {
+    // Flattening a hand-written `{start, end}` nothing declares would delete
+    // the end date as a side effect of moving the record by a day.
+    const schema = buildSchema([]);
+    const ranged = makeEntry({ properties: { w: { start: '2026-08-01', end: '2026-08-04' } } });
+    const scalar = makeEntry({ properties: { w: '2026-08-01' } });
+    expect(dateKindOf(ranged, 'w', schema)).toBe('daterange');
+    expect(dateKindOf(scalar, 'w', schema)).toBe('date');
+  });
+});
+
+/**
+ * Zoom scroll anchoring (M16.24). Changing the scale used to leave scrollLeft
+ * alone, and the same pixel offset is a different date at every zoom — so
+ * coming out of Quarter dropped you years from what you were reading.
+ */
+describe('zoom anchoring', () => {
+  const axis = { start: '2026-01-01', end: '2026-12-31' };
+
+  it('reads the date at the middle of the viewport, past the sticky table', () => {
+    // 300px of table, a 1000px viewport, scrolled 0: the middle of the CHART
+    // is 200px in, which at 34px a day is day 6.
+    expect(dateAtCentre(axis, 'day', 0, 1000, 300)).toBe('2026-01-07');
+    expect(dateAtCentre(axis, 'day', 34 * 10, 1000, 300)).toBe('2026-01-17');
+  });
+
+  it('clamps to the axis instead of naming a date that is not on it', () => {
+    expect(dateAtCentre(axis, 'day', 0, 100, 300)).toBe('2026-01-01');
+    expect(dateAtCentre(axis, 'day', 999_999, 100, 0)).toBe('2026-12-31');
+  });
+
+  it('round-trips a date through a zoom change', () => {
+    // The whole contract: what was in the middle at Day is in the middle at
+    // Quarter. 34px/day out to day 200, so nothing is up against either end.
+    const iso = dateAtCentre(axis, 'day', 34 * 200, 1000, 300);
+    const back = scrollToCentre(axis, 'quarter', iso, 1000, 300);
+    expect(dateAtCentre(axis, 'quarter', back, 1000, 300)).toBe(iso);
+  });
+
+  it('never scrolls to a negative offset', () => {
+    // Zooming out near the start of the axis cannot centre the date — there
+    // is no scroll left of zero — so it settles at the beginning.
+    expect(scrollToCentre(axis, 'day', '2026-01-01', 1000, 0)).toBe(0);
+    expect(scrollToCentre(axis, 'quarter', '2026-02-16', 1000, 300)).toBe(0);
+  });
+});
+
 describe('horizontal axis', () => {
   const data = { start: '2026-07-10', end: '2026-07-20' };
 
@@ -253,14 +536,36 @@ describe('horizontal axis', () => {
 
   it('clips the first and last tick to the axis rather than overhanging it', () => {
     const ticks = axisTicks({ start: '2026-07-15', end: '2026-08-10' }, 'month');
-    expect(ticks[0].days).toBe(31); // Jul 1 → Jul 31, the month's own width
+    // Both ends clamp (M16.24). The first tick used to claim the month's full
+    // 31 days on an axis that starts on the 15th, and a header cell wider than
+    // the days under it pushes every later tick off the grid lines it heads.
+    expect(ticks[0].days).toBe(17); // Jul 15 → Jul 31, the part that is on
     expect(ticks[1].days).toBe(10); // Aug 1 → Aug 10, clipped at the axis end
   });
 
-  it('labels only quarter starts at quarter zoom, where months would collide', () => {
+  it('clamps a unit clipped at BOTH ends to the days actually on the axis', () => {
+    // Wed → Thu inside one week. The old `Math.min` of two one-sided counts
+    // gave 4 (Mon → Thu) for a two-day axis.
+    const ticks = axisTicks({ start: '2026-08-12', end: '2026-08-13' }, 'week');
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0].days).toBe(2);
+  });
+
+  it('ticks by quarter at quarter zoom, not by month with the labels blanked', () => {
     const ticks = axisTicks({ start: '2026-01-01', end: '2026-06-30' }, 'quarter');
-    expect(ticks.map((t) => t.label)).toEqual(['Jan', '', '', 'Apr', '', '']);
-    expect(ticks.filter((t) => t.major).map((t) => t.iso)).toEqual(['2026-01-01', '2026-04-01']);
+    expect(ticks.map((t) => t.label)).toEqual(['Q1 2026', 'Q2 2026']);
+    expect(ticks.map((t) => t.days)).toEqual([90, 91]);
+    // The year boundary is the major rule at this scale; every quarter being
+    // major is the same as none of them being.
+    expect(ticks.filter((t) => t.major).map((t) => t.iso)).toEqual(['2026-01-01']);
+  });
+
+  it('snaps a quarter axis to whole quarters so it never opens on a stub', () => {
+    const span = axisSpan({ start: '2026-05-10', end: '2026-05-20' }, 'quarter', '2026-05-15');
+    expect(span).toEqual({ start: '2026-01-01', end: '2026-09-30' });
+    expect(quarterStart('2026-05-10')).toBe('2026-04-01');
+    expect(quarterEnd('2026-05-10')).toBe('2026-06-30');
+    expect(quarterLabel('2026-11-02')).toBe('Q4 2026');
   });
 
   it('positions a bar by day offset and inclusive width', () => {

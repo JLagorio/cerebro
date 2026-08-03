@@ -655,6 +655,89 @@ describe('serializeList', () => {
     it('drops a blank dateField so inference still runs', () => {
       expect(parse("presentation:\n  type: calendar\n  dateField: ''\n").dateField).toBeUndefined();
     });
+
+    // M16.23 grid chrome. Same rule: stored only off its default, so no
+    // existing calendar file gains three keys the day this shipped.
+    it('round-trips the calendar grid settings', () => {
+      const def = oneView(
+        {
+          name: 'Weeks',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Campaign', project: null },
+        },
+        {
+          type: 'calendar',
+          group: [],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [],
+          calendarSpan: 'week',
+          showWeekends: false,
+          weekStart: 'monday',
+        },
+      );
+      expect(parseListYaml('s', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('omits the grid settings when they are at their defaults', () => {
+      const yaml = serializeList(
+        oneView(
+          {
+            name: 'Months',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: 'Campaign', project: null },
+          },
+          {
+            type: 'calendar',
+            group: [],
+            sort: [],
+            columns: [],
+            calendarSpan: 'month',
+            showWeekends: true,
+            weekStart: 'sunday',
+          },
+        ),
+      );
+      expect(yaml).not.toContain('calendarSpan');
+      expect(yaml).not.toContain('showWeekends');
+      expect(yaml).not.toContain('weekStart');
+    });
+
+    it('round-trips showTable BOTH ways', () => {
+      // Unlike the rest it has no single default — a gantt shows its table and
+      // a timeline does not — so `false` has to survive as `false` rather than
+      // being written off as "the default, omit it".
+      for (const showTable of [true, false]) {
+        const def = oneView(
+          {
+            name: 'Schedule',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: 'Work item', project: null },
+          },
+          {
+            type: 'timeline',
+            group: [],
+            sort: [{ field: 'due', dir: 'asc' }],
+            columns: [],
+            showTable,
+          },
+        );
+        expect(parseListYaml('s', serializeList(def)).definition).toEqual(def);
+      }
+    });
+
+    it('ignores grid settings it does not recognize', () => {
+      const p = parse(
+        'presentation:\n  type: calendar\n  calendarSpan: fortnight\n  weekStart: tuesday\n',
+      );
+      expect(p.calendarSpan).toBeUndefined();
+      expect(p.weekStart).toBeUndefined();
+    });
   });
 
   /**
