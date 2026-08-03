@@ -600,11 +600,14 @@ describe('serializeList', () => {
   });
 
   /**
-   * The gallery's card settings (M16.22). Same contract the date-axis keys
-   * have: a saved gallery reopens as a gallery with its settings intact, and
-   * a layout that never configured cards writes no `gallery:` key at all.
+   * The layout-specific settings blocks (M16.22, M16.27). Same contract the
+   * date-axis keys have: a saved gallery or chart reopens as one with its
+   * settings intact, and a layout that configured nothing writes no block at
+   * all — `parseViewType` silently downgrading an unknown kind was this
+   * milestone's bug, and a settings block nobody can read back is the same
+   * failure one level down.
    */
-  describe('gallery card settings', () => {
+  describe('layout settings blocks', () => {
     const parse = (yaml: string) => presentationOf(parseListYaml('v', yaml));
 
     it('round-trips cover, size and fit', () => {
@@ -645,6 +648,50 @@ describe('serializeList', () => {
       expect(
         parse('presentation:\n  type: gallery\n  gallery:\n    size: enormous\n').gallery,
       ).toBeUndefined();
+    });
+
+    /**
+     * The chart's settings (M16.27). Note what is NOT here: the X axis, which
+     * is the grouping chain and round-trips as `group` like every other
+     * layout's.
+     */
+    it('round-trips the chart block', () => {
+      const def = oneView(
+        {
+          name: 'Burndown',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'chart',
+          group: [{ field: 'status' }],
+          // Non-empty on purpose: an empty chain is not representable —
+          // parseSortChain restores the default, which predates this and is
+          // not what the chart block is being tested for.
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [],
+          chart: { kind: 'donut', agg: 'sum', value: 'estimate', omitZero: true },
+        },
+      );
+      expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a chart type nothing draws', () => {
+      expect(
+        parse('presentation:\n  type: chart\n  chart:\n    kind: sankey\n').chart,
+      ).toBeUndefined();
+    });
+
+    it('omits the chart block when the view never configured one', () => {
+      const yaml = serializeList(
+        oneView(
+          { name: 'Bars', icon: null, color: null, order: null, source: NO_SOURCE },
+          { type: 'chart', group: [], sort: [], columns: [] },
+        ),
+      );
+      expect(yaml).not.toMatch(/^\s+chart:/m);
     });
 
     it('keeps a cover even when the rest of the block is junk', () => {

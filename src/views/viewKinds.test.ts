@@ -5,6 +5,7 @@ import {
   VIEW_SEGMENTS,
   axesFor,
   hasDependencies,
+  isCharted,
   isZoomable,
   needsDate,
   showsCards,
@@ -59,7 +60,17 @@ describe('view kind registration', () => {
       expect(hasDependencies(kind.value)).toBe(kind.dependencies === true);
       expect(showsChips(kind.value)).toBe(kind.chips === true);
       expect(showsCards(kind.value)).toBe(kind.cards === true);
+      expect(isCharted(kind.value)).toBe(kind.charted === true);
       expect(axesFor(kind.value).group).toBe(kind.groupable === true);
+    }
+  });
+
+  // A chart's X axis IS its grouping chain (M16.27) — a charted kind that
+  // could not group would have no axis and would render an empty state
+  // nobody could clear.
+  it('only lets a charted kind exist if it can group', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.charted === true) expect(kind.groupable).toBe(true);
     }
   });
 

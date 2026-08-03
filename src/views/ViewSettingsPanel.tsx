@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/Switch';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
 import { moveColumnTo, toggleColumn } from '@/engine/columns';
-import { GROUPABLE_KINDS, MEDIA_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
+import { GROUPABLE_KINDS, MEDIA_KINDS, NUMERIC_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
 import { useSortableList } from '@/hooks/useSortableList';
 import {
   chainTypes,
@@ -18,9 +18,13 @@ import {
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { PropertyEditor } from '@/views/PropertyEditor';
-import { CARD_SIZES, bandLevels, nestLevels } from '@/engine/types';
+import { measureLabel } from '@/engine/chart';
+import { CARD_SIZES, CHART_AGGS, CHART_KINDS, bandLevels, nestLevels } from '@/engine/types';
 import type {
   CardSize,
+  ChartAgg,
+  ChartKind,
+  ChartSpec,
   ChipStyle,
   ColumnSpec,
   FieldDef,
@@ -39,6 +43,7 @@ import {
   axesFor,
   hasDependencies,
   isZoomable,
+  isCharted,
   needsDate,
   showsCards,
   showsChips,
@@ -62,6 +67,7 @@ type Page =
   | 'group'
   | 'axis'
   | 'cards'
+  | 'chart'
   | 'list'
   | 'newProperty'
   | 'field';
@@ -74,6 +80,18 @@ const CARD_SIZE_LABEL: Record<CardSize, string> = {
   small: 'Small',
   medium: 'Medium',
   large: 'Large',
+};
+
+const CHART_KIND_LABEL: Record<ChartKind, string> = {
+  bar: 'Bar',
+  line: 'Line',
+  donut: 'Donut',
+};
+
+const CHART_AGG_LABEL: Record<ChartAgg, string> = {
+  count: 'Count of records',
+  sum: 'Sum',
+  avg: 'Average',
 };
 
 const META_SORTS = [
@@ -274,6 +292,17 @@ export function ViewSettingsPanel({
                 label="Cards"
                 value={CARD_SIZE_LABEL[p.gallery?.size ?? 'medium']}
                 onClick={() => setPage('cards')}
+              />
+            )}
+
+            {/* M16.27: the chart's shape and measure. Its X axis is NOT here —
+                that is the Group row above, which every layout shares. */}
+            {isCharted(p.type) && (
+              <Row
+                icon="chart-column"
+                label="Chart"
+                value={measureLabel(p.chart)}
+                onClick={() => setPage('chart')}
               />
             )}
 
@@ -499,6 +528,10 @@ export function ViewSettingsPanel({
           <CardsPage presentation={p} fields={fields} onChange={setPresentation} />
         )}
 
+        {page === 'chart' && (
+          <ChartPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
         {page === 'filter' && (
           <FilterBuilder
             filters={view.filters}
@@ -545,6 +578,8 @@ function titleFor(page: Page): string {
       return 'Date axis';
     case 'cards':
       return 'Cards';
+    case 'chart':
+      return 'Chart';
     case 'list':
       return 'This list';
     case 'newProperty':
@@ -937,6 +972,111 @@ function CardsPage({
           Fit the whole cover inside the tile instead of cropping it to fill.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The chart's shape and measure (M16.27).
+ *
+ * Its X AXIS IS ABSENT ON PURPOSE — that is the Group row, the same control
+ * every other layout uses, and duplicating it here would give a chart two
+ * grouping settings that could disagree. The panel says so rather than leaving
+ * the reader hunting for it.
+ *
+ * The properties offered for sum/average come from the `numeric` flag on
+ * KIND_META, not a `kind === 'number'` compare — the rule M16.4 established
+ * and M16.13 applied to grouping and sorting.
+ */
+function ChartPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const NONE = '__none__';
+  const chart = presentation.chart ?? {};
+  const agg: ChartAgg = chart.agg ?? 'count';
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+  const band = bandLevels(presentation.group)[0];
+
+  const patch = (next: ChartSpec) => {
+    const cleaned: ChartSpec = {
+      ...(next.kind !== undefined && next.kind !== 'bar' ? { kind: next.kind } : {}),
+      ...(next.agg !== undefined && next.agg !== 'count' ? { agg: next.agg } : {}),
+      // A value property is meaningless under Count, and keeping it would make
+      // the YAML claim a measure the view does not use.
+      ...(next.agg !== undefined && next.agg !== 'count' && next.value !== undefined
+        ? { value: next.value }
+        : {}),
+      ...(next.omitZero === true ? { omitZero: true } : {}),
+    };
+    const { chart: _drop, ...rest } = presentation;
+    onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, chart: cleaned });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-1">
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Chart type</span>
+        <Select
+          size="sm"
+          value={chart.kind ?? 'bar'}
+          options={CHART_KINDS.map((k) => ({ value: k, label: CHART_KIND_LABEL[k] }))}
+          onChange={(e) => patch({ ...chart, kind: e.target.value as ChartKind })}
+          width="100%"
+        />
+      </div>
+      <div>
+        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Measure</span>
+        <Select
+          size="sm"
+          value={agg}
+          options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+          onChange={(e) => patch({ ...chart, agg: e.target.value as ChartAgg })}
+          width="100%"
+        />
+      </div>
+      {agg !== 'count' && (
+        <div>
+          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
+            Of property
+          </span>
+          <Select
+            size="sm"
+            value={chart.value ?? NONE}
+            options={[
+              { value: NONE, label: 'Choose a number property…' },
+              ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, value: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+          {numeric.length === 0 && (
+            <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+              This view has no number property to add up.
+            </p>
+          )}
+        </div>
+      )}
+      <div className="border-t border-[var(--n-100)] pt-2">
+        <Switch
+          checked={chart.omitZero === true}
+          onChange={(omitZero) => patch({ ...chart, omitZero })}
+          label="Omit zero values"
+          ariaLabel="Omit zero values"
+        />
+      </div>
+      <p className="m-0 border-t border-[var(--n-100)] pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+        {band === undefined
+          ? 'The bars come from the view’s grouping, and this view has none yet — pick a property under Group.'
+          : `The bars come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+      </p>
     </div>
   );
 }

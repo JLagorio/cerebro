@@ -30,6 +30,9 @@ export interface ViewKind {
   dependencies?: boolean;
   /** Draws records as cards, so it gets the Cards settings page (M16.22). */
   cards?: boolean;
+  /** Draws an aggregation rather than records, so it gets the Chart page
+   * (M16.27). Its X axis is the grouping chain, hence `groupable` too. */
+  charted?: boolean;
 }
 
 /**
@@ -66,6 +69,14 @@ const CAPABILITIES = {
     groupable: true,
     chips: true,
     cards: true,
+  },
+  chart: {
+    label: 'Chart',
+    icon: 'chart-column',
+    // The grouping chain IS the X axis, so the Group control configures the
+    // chart and there is no second "group by" to drift from it.
+    groupable: true,
+    charted: true,
   },
 } satisfies Record<ViewType, Omit<ViewKind, 'value'>>;
 
@@ -107,6 +118,11 @@ export function showsChips(type: ViewType): boolean {
 /** True for the layouts that draw records as cards (M16.22). */
 export function showsCards(type: ViewType): boolean {
   return viewKind(type).cards === true;
+}
+
+/** True for the layouts that draw an aggregation rather than records (M16.27). */
+export function isCharted(type: ViewType): boolean {
+  return viewKind(type).charted === true;
 }
 
 /**

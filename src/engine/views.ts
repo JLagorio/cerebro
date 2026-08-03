@@ -1,6 +1,9 @@
 import { parse, stringify } from 'yaml';
 import type {
   CardSize,
+  ChartAgg,
+  ChartKind,
+  ChartSpec,
   ChildrenSpec,
   ChipStyle,
   ColumnSpec,
@@ -18,7 +21,7 @@ import type {
   ViewDefinition,
   ViewType,
 } from './types';
-import { CARD_SIZES, VIEW_TYPES } from './types';
+import { CARD_SIZES, CHART_AGGS, CHART_KINDS, VIEW_TYPES } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
 export const DEFAULT_PRESENTATION: Presentation = {
@@ -47,6 +50,7 @@ export function clonePresentation(p: Presentation): Presentation {
     // hand two views the same one — editing the gallery's card size in a
     // duplicated tab would change it in the tab it was duplicated from.
     ...(p.gallery !== undefined ? { gallery: { ...p.gallery } } : {}),
+    ...(p.chart !== undefined ? { chart: { ...p.chart } } : {}),
   };
 }
 
@@ -135,6 +139,7 @@ export const MAX_GROUP_DEPTH = 3;
 function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
   const gallery = parseGallery(obj.gallery);
+  const chart = parseChart(obj.chart);
   return {
     type: parseViewType(obj.type),
     group: parseGroupChain(obj),
@@ -167,10 +172,13 @@ function parsePresentation(raw: unknown): Presentation {
       ? { dependencyField: obj.dependencyField.trim() }
       : {}),
     ...(gallery !== undefined ? { gallery } : {}),
+    ...(chart !== undefined ? { chart } : {}),
   };
 }
 
 const SIZES = new Set<string>(CARD_SIZES);
+const KINDS = new Set<string>(CHART_KINDS);
+const AGGS = new Set<string>(CHART_AGGS);
 
 /**
  * Gallery card settings (M16.22). Every member is optional and only stored
@@ -184,6 +192,23 @@ function parseGallery(raw: unknown): GallerySpec | undefined {
   if (typeof obj.cover === 'string' && obj.cover.trim() !== '') spec.cover = obj.cover.trim();
   if (typeof obj.size === 'string' && SIZES.has(obj.size)) spec.size = obj.size as CardSize;
   if (obj.fit === true) spec.fit = true;
+  return Object.keys(spec).length === 0 ? undefined : spec;
+}
+
+/**
+ * Chart settings (M16.27). Same rule as the gallery's: members are stored only
+ * off their defaults, and an unrecognised one is dropped rather than trusted —
+ * a hand-edited `kind: sankey` must not reach the renderer as a chart type
+ * nothing draws.
+ */
+function parseChart(raw: unknown): ChartSpec | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = asRecord(raw);
+  const spec: ChartSpec = {};
+  if (typeof obj.kind === 'string' && KINDS.has(obj.kind)) spec.kind = obj.kind as ChartKind;
+  if (typeof obj.agg === 'string' && AGGS.has(obj.agg)) spec.agg = obj.agg as ChartAgg;
+  if (typeof obj.value === 'string' && obj.value.trim() !== '') spec.value = obj.value.trim();
+  if (obj.omitZero === true) spec.omitZero = true;
   return Object.keys(spec).length === 0 ? undefined : spec;
 }
 
@@ -412,6 +437,7 @@ const LAYOUT_LABEL: Record<ViewType, string> = {
   gantt: 'Gantt',
   timeline: 'Timeline',
   gallery: 'Gallery',
+  chart: 'Chart',
 };
 
 export function layoutLabel(type: ViewType): string {
@@ -592,6 +618,7 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     // Same rule for the layout-specific blocks (M16.22): written only when the
     // layout that reads them has been configured.
     ...(p.gallery !== undefined ? { gallery: p.gallery } : {}),
+    ...(p.chart !== undefined ? { chart: p.chart } : {}),
   };
 }
 

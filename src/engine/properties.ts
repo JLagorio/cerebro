@@ -132,6 +132,13 @@ export interface PropertyKindMeta {
    * (M16.22). Required, not optional, for the same reason `groupable` is: a
    * kind that forgets to answer would silently never be offered. */
   media: boolean;
+  /**
+   * Values are numbers, so they can be summed and averaged (M16.27). A rollup
+   * counts because its own calc decides — a `show` rollup aggregates to
+   * nothing numeric and `aggregateNumbers` reports that honestly rather than
+   * being prevented from trying.
+   */
+  numeric: boolean;
 }
 
 /**
@@ -152,6 +159,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   number: {
     label: 'Number',
@@ -161,6 +169,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: true,
   },
   select: {
     label: 'Select',
@@ -170,6 +179,7 @@ const KIND_META = {
     groupable: true,
     orderable: true,
     media: false,
+    numeric: false,
   },
   multiselect: {
     label: 'Multi-select',
@@ -180,6 +190,7 @@ const KIND_META = {
     groupable: true,
     orderable: false,
     media: false,
+    numeric: false,
   },
   status: {
     label: 'Status',
@@ -189,6 +200,7 @@ const KIND_META = {
     groupable: true,
     orderable: true,
     media: false,
+    numeric: false,
   },
   date: {
     label: 'Date',
@@ -198,6 +210,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   daterange: {
     label: 'Date range',
@@ -208,6 +221,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   person: {
     label: 'Person',
@@ -218,6 +232,7 @@ const KIND_META = {
     groupable: true,
     orderable: false,
     media: false,
+    numeric: false,
   },
   files: {
     label: 'Files & media',
@@ -228,6 +243,7 @@ const KIND_META = {
     groupable: false,
     orderable: false,
     media: true,
+    numeric: false,
   },
   checkbox: {
     label: 'Checkbox',
@@ -237,6 +253,7 @@ const KIND_META = {
     groupable: true,
     orderable: true,
     media: false,
+    numeric: false,
   },
   url: {
     label: 'URL',
@@ -246,6 +263,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   email: {
     label: 'Email',
@@ -255,6 +273,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   phone: {
     label: 'Phone',
@@ -264,6 +283,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   relation: {
     label: 'Relation',
@@ -274,6 +294,7 @@ const KIND_META = {
     groupable: true,
     orderable: false,
     media: false,
+    numeric: false,
   },
   rollup: {
     label: 'Rollup',
@@ -283,6 +304,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: true,
   },
   created_time: {
     label: 'Created time',
@@ -292,6 +314,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
   last_edited_time: {
     label: 'Last edited time',
@@ -301,6 +324,7 @@ const KIND_META = {
     groupable: false,
     orderable: true,
     media: false,
+    numeric: false,
   },
 } satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
 
@@ -334,6 +358,10 @@ export const ORDERABLE_KINDS: ReadonlySet<FieldKind> = new Set(
 /** Which kinds can supply a gallery card's cover (M16.22). */
 export const MEDIA_KINDS: ReadonlySet<FieldKind> = new Set(
   PROPERTY_KINDS.filter((k) => k.media).map((k) => k.kind),
+);
+/** Which kinds a chart can sum or average (M16.27). */
+export const NUMERIC_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.numeric).map((k) => k.kind),
 );
 
 // --- Relation and person targets (M16.13b) ---------------------------------
@@ -833,6 +861,37 @@ export function validatePatch(
 const asNumbers = (values: unknown[]): number[] =>
   values.map((v) => (typeof v === 'number' ? v : Number(v))).filter((n) => Number.isFinite(n));
 
+/** The calcs that reduce a list of values to one number. */
+export type NumericCalc = Extract<RollupCalc, 'sum' | 'avg' | 'min' | 'max'>;
+
+/**
+ * Reduce raw property values to one number, or null when none of them is one
+ * (M16.27).
+ *
+ * Extracted from `computeRollup` rather than written a second time for the
+ * chart. A chart that summed its own way would disagree with the rollup column
+ * beside it the first time a value arrived as the string "3" — which is what
+ * frontmatter does with a quoted number — and the two answers would both look
+ * plausible.
+ *
+ * `count` is deliberately absent: it counts RECORDS, not values, and only the
+ * caller knows how many records a bucket holds.
+ */
+export function aggregateNumbers(values: unknown[], calc: NumericCalc): number | null {
+  const nums = asNumbers(values);
+  if (nums.length === 0) return null;
+  switch (calc) {
+    case 'sum':
+      return nums.reduce((a, b) => a + b, 0);
+    case 'avg':
+      return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100;
+    case 'min':
+      return Math.min(...nums);
+    case 'max':
+      return Math.max(...nums);
+  }
+}
+
 /**
  * Aggregate `def.property` across the entries referenced by this entry's
  * `def.relation` field. Returns a display string ('' when unresolvable).
@@ -857,20 +916,17 @@ export function computeRollup(
   switch (calc) {
     case 'show':
       return values.map(String).join(', ');
+    // Sum of nothing-numeric has always reported 0 where the other three
+    // report ''. Preserved verbatim through the extraction rather than
+    // quietly changed — that is a decision about what a rollup says, not a
+    // side effect of sharing the arithmetic with a chart (M16.27).
     case 'sum':
-      return String(asNumbers(values).reduce((a, b) => a + b, 0));
-    case 'avg': {
-      const nums = asNumbers(values);
-      if (nums.length === 0) return '';
-      return String(Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100);
-    }
-    case 'min': {
-      const nums = asNumbers(values);
-      return nums.length === 0 ? '' : String(Math.min(...nums));
-    }
+      return String(aggregateNumbers(values, 'sum') ?? 0);
+    case 'avg':
+    case 'min':
     case 'max': {
-      const nums = asNumbers(values);
-      return nums.length === 0 ? '' : String(Math.max(...nums));
+      const n = aggregateNumbers(values, calc);
+      return n === null ? '' : String(n);
     }
     case 'earliest':
       return values.map(String).sort()[0] ?? '';

@@ -283,6 +283,7 @@ export const VIEW_TYPES = [
   'gantt',
   'timeline',
   'gallery',
+  'chart',
 ] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
@@ -326,6 +327,37 @@ export interface GallerySpec {
   fit?: boolean;
 }
 
+export const CHART_KINDS = ['bar', 'line', 'donut'] as const;
+export type ChartKind = (typeof CHART_KINDS)[number];
+
+/**
+ * What a chart's Y axis measures. A SUBSET of RollupCalc, not a new
+ * vocabulary: the rollup column and the chart run the same arithmetic
+ * (`aggregateNumbers`), so they must not disagree about what "average" means.
+ */
+export const CHART_AGGS = ['count', 'sum', 'avg'] as const;
+export type ChartAgg = Extract<RollupCalc, (typeof CHART_AGGS)[number]>;
+
+/**
+ * The chart's own settings (M16.27).
+ *
+ * Its X AXIS IS NOT HERE — that is `group`, the same grouping chain every
+ * other layout reads, and its first band level is the axis. The chart is
+ * therefore configured by the Group control the toolbar already has, a saved
+ * board re-opened as a chart charts what the board was banded by, and there is
+ * no second "group by" for the two to drift apart on.
+ */
+export interface ChartSpec {
+  /** Absent = 'bar'. */
+  kind?: ChartKind;
+  /** Absent = 'count' — the one measure that needs no property configured. */
+  agg?: ChartAgg;
+  /** The property summed or averaged. Unread when the measure is count. */
+  value?: string;
+  /** Drop bands that measure zero. Notion's "Omit zero values". */
+  omitZero?: boolean;
+}
+
 export interface Presentation {
   type: ViewType;
   /** Ordered grouping chain; empty = flat. */
@@ -360,6 +392,8 @@ export interface Presentation {
   dependencyField?: string;
   /** Gallery card settings (M16.22). Absent = every default. */
   gallery?: GallerySpec;
+  /** Chart settings (M16.27). Absent = a bar chart counting records. */
+  chart?: ChartSpec;
 }
 
 /**

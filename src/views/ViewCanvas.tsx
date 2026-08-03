@@ -4,6 +4,7 @@ import type { Zoom } from '@/engine/schedule';
 import type { ColumnSpec, Entry, Presentation, Schema } from '@/engine/types';
 import { BoardView } from '@/views/BoardView';
 import { CalendarView } from '@/views/CalendarView';
+import { ChartView } from '@/views/ChartView';
 import { GalleryView } from '@/views/GalleryView';
 import { GanttView } from '@/views/GanttView';
 import { ListView } from '@/views/ListView';
@@ -160,6 +161,15 @@ export function ViewCanvas({
           scope={scope}
           onZoomChange={onZoomChange}
           {...(today !== undefined ? { today } : {})}
+        />
+      );
+    case 'chart':
+      return (
+        <ChartView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          filtered={filtered}
         />
       );
     case 'gallery':
