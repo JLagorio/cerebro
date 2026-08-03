@@ -80,6 +80,77 @@ describe('search within the view (M16.26)', () => {
 });
 
 /**
+ * The quick-pick behind an empty axis icon could be typed into but not arrowed
+ * (M16.34): Enter always committed the FIRST match, so a field further down
+ * the list was reachable by pointer only.
+ */
+describe('axis quick-pick keyboard (M16.34)', () => {
+  function openFilterPick() {
+    const onFiltersChange = vi.fn();
+    setup({ onFiltersChange });
+    fireEvent.click(screen.getByTestId('view-control-filter'));
+    return { onFiltersChange, input: screen.getByLabelText('Filter by…') };
+  }
+
+  const picked = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls[0][0].all[0].field;
+
+  it('Enter still takes the top match when nothing has been arrowed', () => {
+    const { onFiltersChange, input } = openFilterPick();
+    fireEvent.change(input, { target: { value: 's' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(picked(onFiltersChange)).toBe('status');
+  });
+
+  it('ArrowDown then Enter commits the highlighted row, not the first', () => {
+    const { onFiltersChange, input } = openFilterPick();
+    fireEvent.change(input, { target: { value: 's' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(picked(onFiltersChange)).toBe('shipped');
+  });
+
+  it('the highlight is visible, and moves with the arrow', () => {
+    const { input } = openFilterPick();
+    fireEvent.change(input, { target: { value: 's' } });
+    const rows = () => screen.getAllByRole('button').filter((b) => b.dataset.highlighted === '');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].textContent).toBe('Status');
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(rows()[0].textContent).toBe('Shipped');
+  });
+
+  it('ArrowUp wraps to the bottom of the list', () => {
+    const { onFiltersChange, input } = openFilterPick();
+    fireEvent.change(input, { target: { value: 's' } });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(picked(onFiltersChange)).toBe('shipped');
+  });
+
+  /**
+   * Every keystroke re-cuts the list, so a held index would point at a
+   * different field than the one that was under the highlight a moment ago.
+   */
+  it('re-typing resets the highlight to the top', () => {
+    const { onFiltersChange, input } = openFilterPick();
+    fireEvent.change(input, { target: { value: 's' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(picked(onFiltersChange)).toBe('title');
+  });
+
+  it('Enter on a query that matches nothing does nothing', () => {
+    const { onFiltersChange, input } = openFilterPick();
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onFiltersChange).not.toHaveBeenCalled();
+    expect(screen.getByText('Nothing matches.')).toBeTruthy();
+  });
+});
+
+/**
  * The View settings popover had a click-away scrim and no keyboard exit at
  * all (M16.29). It mounts through `FixedBelowAnchor`, which registered no
  * layer, so Escape fell past it to the record panel's handler behind it: the

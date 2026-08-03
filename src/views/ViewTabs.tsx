@@ -82,6 +82,42 @@ export function ViewTabs({
     onReorder: (id, to) => onReorder?.(id, to),
   });
 
+  // Roving tabindex, the same shape as the SegmentedControl primitive: a
+  // tablist is ONE tab stop and arrows move within it (M16.34). The strip
+  // claimed `role="tablist"` while leaving every tab its own tab stop and
+  // ignoring arrow keys — the contract announced, none of it honoured. Falls
+  // back to the first tab so the strip stays reachable if `activeId` matches
+  // no view.
+  const activeIndex = views.findIndex((v) => v.id === activeId);
+  const focusIndex = activeIndex >= 0 ? activeIndex : 0;
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  const onTabsKeyDown = (e: React.KeyboardEvent) => {
+    // Only the tabs themselves rove. The reorder grip beside each tab takes
+    // Left/Right to MOVE a tab, the rename input takes them to move a caret,
+    // and the pickers below mount through portals whose events still bubble
+    // here in the React tree — none of them are asking to switch tabs.
+    if (!(e.target instanceof HTMLElement) || e.target.getAttribute('role') !== 'tab') return;
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(e.key) || views.length === 0) return;
+    e.preventDefault();
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? views.length - 1
+          : focusIndex + (e.key === 'ArrowRight' ? 1 : -1);
+    const i = ((next % views.length) + views.length) % views.length;
+    const target = views[i];
+    if (target.id !== activeId) onSelect(target.id);
+    // Selection follows focus, so the newly active tab is the tab stop — and
+    // the tab that was pressed is about to stop being one.
+    const tabs = Array.from(stripRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
+    // Matched on the id rather than indexed, because a tab being renamed is an
+    // input rather than a button and would shift every index after it.
+    tabs.find((t) => t.dataset.testid === `view-tab-${target.id}`)?.focus();
+  };
+
   const menuItems = (view: ViewDefinition): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
       { icon: 'pencil', label: 'Rename', onSelect: () => setRenaming(view.id) },
@@ -143,9 +179,11 @@ export function ViewTabs({
         </Dialog>
       )}
       <div
+        ref={stripRef}
         role="tablist"
         aria-label="Views"
         data-testid="view-tabs"
+        onKeyDown={onTabsKeyDown}
         // Scrolls rather than wraps: a tab row that reflows onto a second line
         // moves every other tab under the cursor as the window narrows. The
         // trailing icons sit OUTSIDE this strip so they cannot scroll away.
@@ -206,6 +244,7 @@ export function ViewTabs({
                   type="button"
                   role="tab"
                   aria-selected={active}
+                  tabIndex={index === focusIndex ? 0 : -1}
                   data-testid={`view-tab-${view.id}`}
                   onClick={(e) => {
                     if (!active) {

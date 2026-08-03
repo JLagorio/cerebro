@@ -184,6 +184,69 @@ describe('reordering tabs (M16.26)', () => {
 });
 
 /**
+ * The strip declared `role="tablist"` while leaving every tab its own tab stop
+ * and ignoring arrow keys entirely (M16.34) — the contract announced to a
+ * screen reader, none of it honoured. It is now the same roving tabindex the
+ * SegmentedControl primitive already used.
+ */
+describe('tablist keyboard contract (M16.34)', () => {
+  const tabs = () => screen.getAllByRole('tab');
+
+  it('is one tab stop: only the open tab is tabbable', () => {
+    setup({ activeId: 'risk' });
+    expect(tabs().map((t) => t.tabIndex)).toEqual([-1, 0]);
+  });
+
+  it('stays reachable when the active id matches no tab', () => {
+    setup({ activeId: 'gone' });
+    expect(tabs().map((t) => t.tabIndex)).toEqual([0, -1]);
+  });
+
+  it('Right activates the next view and moves focus onto it', () => {
+    const props = setup();
+    fireEvent.keyDown(screen.getByTestId('view-tab-grid'), { key: 'ArrowRight' });
+    expect(props.onSelect).toHaveBeenCalledWith('risk');
+    // Selection follows focus, so the tab that just became active is where the
+    // keyboard is standing — otherwise the next press comes from nowhere.
+    expect(document.activeElement).toBe(screen.getByTestId('view-tab-risk'));
+  });
+
+  it('Left wraps back round the strip', () => {
+    const props = setup();
+    fireEvent.keyDown(screen.getByTestId('view-tab-grid'), { key: 'ArrowLeft' });
+    expect(props.onSelect).toHaveBeenCalledWith('risk');
+  });
+
+  it('Home jumps to the first tab and End to the last', () => {
+    const props = setup({ activeId: 'risk' });
+    fireEvent.keyDown(screen.getByTestId('view-tab-risk'), { key: 'Home' });
+    expect(props.onSelect).toHaveBeenLastCalledWith('grid');
+    fireEvent.keyDown(screen.getByTestId('view-tab-risk'), { key: 'End' });
+    // Already last: nothing to select, and the strip must not thrash.
+    expect(props.onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The grip beside each tab takes the SAME keys to reorder. One keydown
+   * cannot both move a tab and switch to another one, so the tablist handler
+   * only listens to the tabs themselves.
+   */
+  it('reordering from the grip does not also switch tabs', () => {
+    const props = setup({ onReorder: vi.fn() });
+    fireEvent.keyDown(screen.getByLabelText(/^Reorder All work/), { key: 'ArrowRight' });
+    expect(props.onReorder).toHaveBeenCalledWith('grid', 1);
+    expect(props.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('arrowing inside the new-view form does not switch tabs', () => {
+    const props = setup();
+    fireEvent.click(screen.getByTestId('new-view'));
+    fireEvent.keyDown(screen.getByLabelText('View name'), { key: 'ArrowRight' });
+    expect(props.onSelect).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * `ViewDefinition.icon` has been parsed, serialized and rendered since M11 —
  * `ViewTabs` reads `view.icon ?? kind.icon` — but `newView` hardcodes null and
  * nothing in the app could write one, so every tab of the same layout wore the

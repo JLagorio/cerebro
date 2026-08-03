@@ -271,14 +271,26 @@ function QuickAxisIcon({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // Which row Enter commits (M16.34). It was always the FIRST match, so the
+  // list could be arrowed with nothing to arrow WITH: no highlight moved and
+  // no other row was reachable from the keyboard at all.
+  const [highlight, setHighlight] = useState(0);
 
   const openMenu = () => {
     setQuery('');
+    setHighlight(0);
     setOpen(true);
   };
   const close = () => setOpen(false);
 
   const shown = options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()));
+  // Every keystroke re-cuts the list, so a held index would point at a
+  // different field than the one under the highlight a moment ago.
+  const retype = (q: string) => {
+    setQuery(q);
+    setHighlight(0);
+  };
+  const at = Math.min(highlight, Math.max(shown.length - 1, 0));
 
   return (
     <span className="relative inline-flex">
@@ -316,29 +328,45 @@ function QuickAxisIcon({
                 aria-label={placeholder}
                 placeholder={placeholder}
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => retype(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     e.stopPropagation();
                     close();
                   }
+                  // Arrows stay in the input — the rows are not tab stops, and
+                  // moving focus onto one would take the caret out of the box
+                  // you are still typing in.
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (shown.length === 0) return;
+                    const next = at + (e.key === 'ArrowDown' ? 1 : -1);
+                    setHighlight(((next % shown.length) + shown.length) % shown.length);
+                  }
                   if (e.key === 'Enter' && shown.length > 0) {
                     close();
-                    onPick(shown[0].value);
+                    onPick(shown[at].value);
                   }
                 }}
                 className="mb-1 h-7 w-full rounded-md border border-[var(--n-200)] px-2 text-[12.5px] text-[var(--n-800)] outline-none focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]"
               />
               <div className="max-h-[264px] overflow-y-auto">
-                {shown.map((o) => (
+                {shown.map((o, i) => (
                   <button
                     key={o.value}
                     type="button"
+                    data-highlighted={i === at ? '' : undefined}
+                    onMouseEnter={() => setHighlight(i)}
                     onClick={() => {
                       close();
                       onPick(o.value);
                     }}
-                    className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                    // The highlight wears the hover background, so pointer and
+                    // keyboard say "this is the one Enter takes" the same way.
+                    className={[
+                      'flex w-full items-center gap-2 rounded-[6px] border-0 px-2 py-1.5 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                      i === at ? 'bg-[var(--n-50)]' : 'bg-transparent',
+                    ].join(' ')}
                   >
                     <Icon name={o.icon} size={12} color="var(--n-500)" />
                     <span className="min-w-0 flex-1 truncate">{o.label}</span>

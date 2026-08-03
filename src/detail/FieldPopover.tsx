@@ -1,9 +1,10 @@
 import { findOptionByLabel } from '@/engine/properties';
 import { resolveOptionColor } from '@/lib/swatch';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
 import { useEscapeLayer } from '@/components/ui/Popover';
+import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 /**
  * Escape dismisses THIS overlay and nothing behind it.
@@ -46,6 +47,15 @@ export function useEscapeToClose(onClose: () => void): void {
  * Pass `onClose` and it takes the keystroke as well. Without one it still
  * registers, because a surface the stack cannot see is a surface whose
  * keystrokes land on whatever is behind it.
+ *
+ * It also returns focus to whatever opened it (M16.35). Six popovers mount
+ * through here and every one of them dropped focus on `<body>` when it closed:
+ * the surface (or a field inside it) took focus on open and nothing gave it
+ * back, so the next Tab restarted from the top of the document and Escape
+ * reached nothing. `useFocusRestore` reads the opener in a `useState`
+ * initializer during THIS component's first render — before React commits a
+ * node of the subtree, and so before an `autoFocus`ed search box or the option
+ * surface below can steal the answer.
  */
 export function FixedBelowAnchor({
   children,
@@ -57,6 +67,7 @@ export function FixedBelowAnchor({
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useEscapeLayer(onClose);
+  useFocusRestore();
   useLayoutEffect(() => {
     const node = ref.current;
     if (node === null) return;
@@ -135,6 +146,12 @@ export function FieldPopover({
 }: FieldPopoverProps) {
   useEscapeToClose(onClose);
   const [query, setQuery] = useState('');
+  // The arrow-key cursor (M16.35). This is the app's universal option picker
+  // and it had no keyboard route at all: every status, select, person and
+  // relation value in the app could only be set with a mouse.
+  const [highlight, setHighlight] = useState(0);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const listId = useId();
   const trimmed = query.trim();
   const visible =
     trimmed === ''
@@ -156,6 +173,71 @@ export function FieldPopover({
   // value that already exists. Show the option instead.
   const rows = visible.length === 0 && clash !== undefined ? [clash] : visible;
 
+  // The Create row is the last stop on the same route as the options, which is
+  // how it reads on screen — arrowing past the final match lands on it.
+  const stops = rows.length + (canCreate ? 1 : 0);
+  // Clamped rather than reset from an effect: filtering shrinks `rows` during
+  // the same render that draws them, and a cursor pointing past the end would
+  // paint nothing highlighted and make Enter a no-op for one keystroke.
+  const active = stops === 0 ? -1 : Math.min(highlight, stops - 1);
+  const createActive = canCreate && active === rows.length;
+  const activeDescendant = createActive
+    ? `${listId}-create`
+    : active >= 0
+      ? `${listId}-${rows[active]?.id}`
+      : undefined;
+
+  // Without a search box nothing inside the popover is focusable, so no
+  // keystroke would ever reach the handler below. The surface takes focus
+  // itself; `FixedBelowAnchor` hands it back to the trigger on close.
+  useEffect(() => {
+    if (searchable !== true) surfaceRef.current?.focus();
+  }, [searchable]);
+
+  const create = () => {
+    onCreate?.(trimmed);
+    setQuery('');
+    setHighlight(0);
+    if (!multi) onClose();
+  };
+
+  const pickAt = (i: number) => {
+    if (canCreate && i === rows.length) {
+      create();
+      return;
+    }
+    const o = rows[i];
+    if (o === undefined) return;
+    onPick(o.id);
+    if (!multi) onClose();
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (stops === 0) return;
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setHighlight(Math.min(active + 1, stops - 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setHighlight(Math.max(active - 1, 0));
+        break;
+      case 'Home':
+        e.preventDefault();
+        setHighlight(0);
+        break;
+      case 'End':
+        e.preventDefault();
+        setHighlight(stops - 1);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        pickAt(active);
+        break;
+    }
+  };
+
   return (
     <>
       <button
@@ -171,8 +253,15 @@ export function FieldPopover({
       />
       <FixedBelowAnchor>
         <div
+          ref={surfaceRef}
           role="listbox"
-          className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+          // -1, not 0: the surface is a keystroke target, not a stop on the tab
+          // route — it only holds focus because a searchless popover has no
+          // field to hold it instead.
+          tabIndex={-1}
+          aria-activedescendant={activeDescendant}
+          onKeyDown={onKeyDown}
+          className="w-60 rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)] outline-none"
         >
           {searchable && (
             <div className="pb-1.5">
@@ -181,23 +270,35 @@ export function FieldPopover({
                 size="sm"
                 placeholder="Search…"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  // A new filter is a new list; leaving the cursor where it was
+                  // would arm Enter on whichever row happened to inherit the
+                  // index.
+                  setHighlight(0);
+                }}
                 width="100%"
               />
             </div>
           )}
           <div className="max-h-[264px] overflow-y-auto">
-            {rows.map((o) => (
+            {rows.map((o, i) => (
               <button
                 key={o.id}
+                id={`${listId}-${o.id}`}
                 type="button"
                 role="option"
                 aria-selected={selected.has(o.id)}
+                // The pointer moves the same cursor the arrows do, so the two
+                // can never shade different rows at once.
+                onMouseEnter={() => setHighlight(i)}
                 onClick={() => {
                   onPick(o.id);
                   if (!multi) onClose();
                 }}
-                className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)] ${
+                  i === active ? 'bg-[var(--n-50)]' : ''
+                }`}
               >
                 <span
                   className="box-border h-2 w-2 flex-none rounded-full"
@@ -231,13 +332,13 @@ export function FieldPopover({
             )}
             {canCreate && (
               <button
+                id={`${listId}-create`}
                 type="button"
-                onClick={() => {
-                  onCreate?.(trimmed);
-                  setQuery('');
-                  if (!multi) onClose();
-                }}
-                className="flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                onMouseEnter={() => setHighlight(rows.length)}
+                onClick={create}
+                className={`flex w-full items-center gap-2 rounded-[7px] px-2 py-[7px] text-left text-[13px] text-[var(--n-700)] hover:bg-[var(--n-50)] ${
+                  createActive ? 'bg-[var(--n-50)]' : ''
+                }`}
               >
                 <Icon name="plus" size={13} color="var(--n-400)" />
                 <span className="min-w-0 flex-1 truncate">

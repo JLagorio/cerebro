@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 export interface ContextMenuItem {
   icon: string;
@@ -26,6 +27,13 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  // Before the effect below, on purpose (M16.35): this reads
+  // `document.activeElement` during RENDER, while it is still the row or
+  // button the menu was summoned from. Called any later — from an effect — it
+  // would read back the menu item that the effect itself focused, record the
+  // menu as its own opener, and drop focus on `<body>` every time the menu
+  // closed, which is what it used to do.
+  useFocusRestore();
 
   useEffect(() => {
     const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');

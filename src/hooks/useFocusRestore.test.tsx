@@ -60,6 +60,27 @@ describe('useFocusRestore', () => {
     expect(document.activeElement).toBe(document.body);
   });
 
+  // A context menu item that opens a rename field unmounts the menu in the
+  // same commit that mounts and autofocuses the field, and this cleanup runs
+  // after that focus lands. Restoring unconditionally yanked the user back out.
+  it('stands down when something else already took focus', () => {
+    function Handoff({ step }: { step: 'closed' | 'open' | 'handed-off' }) {
+      return (
+        <>
+          <button type="button">Opener</button>
+          {step === 'open' ? <Panel /> : null}
+          {step === 'handed-off' ? <input aria-label="New name" autoFocus /> : null}
+        </>
+      );
+    }
+    const { rerender } = render(<Handoff step="closed" />);
+    const opener = screen.getByRole('button', { name: 'Opener' });
+    opener.focus();
+    rerender(<Handoff step="open" />);
+    rerender(<Handoff step="handed-off" />);
+    expect(document.activeElement).toBe(screen.getByLabelText('New name'));
+  });
+
   it('survives an opener that left the document while the surface was open', () => {
     const opener = document.createElement('button');
     document.body.appendChild(opener);

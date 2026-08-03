@@ -143,12 +143,22 @@ export function Dropdown({
             id={listId}
             role="listbox"
             aria-label={label}
+            // The arrow-key highlight was paint only (M16.35): it shaded a row
+            // and told assistive tech nothing, because DOM focus never leaves
+            // the trigger button. `aria-activedescendant` is what names the
+            // shaded row for a screen reader — without it the listbox reads as
+            // if nothing in it were current, and Enter appeared to pick at
+            // random. The ids come from the same `useId` that names the list.
+            aria-activedescendant={
+              options[active] === undefined ? undefined : `${listId}-${options[active].value}`
+            }
             className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
           >
             <div className="max-h-[264px] overflow-y-auto">
               {options.map((o, i) => (
                 <button
                   key={o.value}
+                  id={`${listId}-${o.value}`}
                   type="button"
                   role="option"
                   aria-selected={o.value === value}
