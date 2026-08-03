@@ -1,0 +1,43 @@
+WEBVTT
+
+NOTE Recorded automatically. Speaker labels are best-effort.
+
+1
+00:00:04.000 --> 00:00:11.500
+<v Marcus Webb>Right, cutover. We are eleven days out and the thing I keep
+coming back to is that nobody has actually run the rollback.
+
+2
+00:00:11.500 --> 00:00:19.000
+<v Marcus Webb>We have it written down. Written down is not rehearsed.
+
+3
+00:00:19.500 --> 00:00:31.000
+<v Priya Nair>The part that worries me is step two. Draining the pick queue
+is not instant — it took about forty minutes in staging, and that was with a
+tenth of the volume.
+
+4
+00:00:31.000 --> 00:00:44.000
+<v Priya Nair>If we cut DNS while there is still work in flight it lands in
+neither system. That is the failure mode nobody has a recovery for.
+
+5
+00:00:44.500 --> 00:00:52.000
+<v Tom Keller>Is that PHX-421? I thought we opened a ticket for the rehearsal
+after the last review.
+
+6
+00:00:52.000 --> 00:01:03.000
+<v Marcus Webb>PHX-421 is the rehearsal, yes. It is still open and unassigned,
+which is the actual problem.
+
+7
+00:01:03.500 --> 00:01:14.000
+<v Priya Nair>Forty minutes is the number to plan around. Anything shorter
+than an hour of drain time and we are guessing.
+
+8
+00:01:14.500 --> 00:01:22.000
+<v Tom Keller>Scanners are fine either way — the camera fallback is the
+assumed path on night one, so hardware is not on the critical path.

@@ -1,2 +1,25 @@
-# Cerebro
 .DS_Store
+
+# Vendored reference copy of the Tolaria OSS repo (architecture reference only)
+tolaria-main/
+
+# App build artifacts
+node_modules/
+dist/
+# Signed .app + DMG produced by scripts/mac-package.sh
+dist-mac/
+.vite/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Playwright artifacts
+test-results/
+playwright-report/
+
+docs/
+
+# vitest coverage output (M14.4)
+coverage/
+
+# Agent worktrees and local scratch (M16.1)
+.claude/

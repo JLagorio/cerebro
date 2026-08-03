@@ -1,0 +1,56 @@
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unknown) }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
+
+import { canPickFiles, importAttachment, scanVault, updateFrontmatter } from './ipc';
+
+afterEach(() => {
+  invokeSpy.mockClear();
+  delete (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'];
+});
+
+describe('ipc backend detection', () => {
+  it('delegates to the mock when not running inside Tauri', async () => {
+    const entries = await scanVault('/demo-vault');
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(invokeSpy).not.toHaveBeenCalled();
+  });
+
+  it('invokes Tauri commands when __TAURI_INTERNALS__ is present', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await scanVault('/my-vault');
+    expect(invokeSpy).toHaveBeenCalledWith('scan_vault', { vault: '/my-vault' });
+    await updateFrontmatter('/my-vault', 'items/a.md', { status: 'done' });
+    expect(invokeSpy).toHaveBeenCalledWith('update_frontmatter', {
+      vault: '/my-vault',
+      path: 'items/a.md',
+      patch: { status: 'done' },
+    });
+  });
+});
+
+/**
+ * `canPickFiles` is not cosmetic (M16.13c): a browser build has no native
+ * picker, and `pickFiles` returning [] there is indistinguishable from the
+ * user cancelling. The Files field branches on this to decide between
+ * offering the typed-path fallback and doing nothing at all.
+ */
+describe('attachment IPC', () => {
+  it('reports no native picker outside Tauri, and one inside it', () => {
+    expect(canPickFiles()).toBe(false);
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    expect(canPickFiles()).toBe(true);
+  });
+
+  it('passes the absolute source through and lets the backend choose the folder', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await importAttachment('/my-vault', '/Users/me/report.pdf');
+    expect(invokeSpy).toHaveBeenCalledWith('import_attachment', {
+      vault: '/my-vault',
+      source: '/Users/me/report.pdf',
+    });
+  });
+});

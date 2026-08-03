@@ -1,0 +1,171 @@
+:root {
+  /* neutrals — cool graphite */
+  --n-0: #ffffff;
+  --n-25: #fbfbfd;
+  --n-50: #f6f7fa;
+  --n-100: #eef0f5;
+  --n-200: #e3e6ee;
+  --n-300: #cdd2df;
+  /* M15: was #a8afc2 — 2.19:1 on --n-0, below even the 3:1 non-text floor, yet
+     it carries ~160 real text sites. Darkened to 3.23:1 on --n-0 / 3.01:1 on
+     --n-50 so borders, icon strokes and disabled labels are perceivable. It is
+     still NOT an AA body-text colour: use --text-meta for anything readable. */
+  --n-400: #888fa3;
+  --n-500: #7e8699;
+  --n-600: #5a6274;
+  --n-700: #3f4657;
+  --n-800: #272d3b;
+  --n-900: #161a24;
+  /* primary — cortex ultramarine */
+  --cortex-50: #eef1fe;
+  --cortex-100: #dde4fd;
+  --cortex-200: #bcc9fb;
+  --cortex-300: #93a7f5;
+  --cortex-400: #6580ec;
+  --cortex-500: #3d5bde;
+  --cortex-600: #2e48c2;
+  --cortex-700: #2439a0;
+  --cortex-800: #1e2f7d;
+  --cortex-900: #1a2760;
+  /* AI — synapse violet (AI surfaces ONLY) */
+  --synapse-50: #f5f0fe;
+  --synapse-100: #ebe2fd;
+  --synapse-200: #d5c4fa;
+  --synapse-300: #b79cf3;
+  --synapse-400: #9c77e9;
+  --synapse-500: #8250dc;
+  --synapse-600: #6c3bc2;
+  --synapse-700: #5730a0;
+  /* semantic */
+  --success-50: #e9f7f0;
+  --success-500: #1f9d61;
+  --success-600: #17814f;
+  --success-700: #126740;
+  --warn-50: #fcf3e1;
+  /* The only ramp step that existed solely as an inline `var(--warn-300, #f0c36d)`
+     fallback; promoted to a real token in M15 so stripping dead fallbacks is safe. */
+  --warn-300: #f0c36d;
+  --warn-500: #de8f0a;
+  --warn-600: #b87404;
+  --warn-700: #925e04;
+  --danger-50: #fdedef;
+  --danger-500: #de3b4e;
+  --danger-600: #bc2438;
+  --danger-700: #9a1d2e;
+  /* entity colors */
+  --ent-objective: #d97706;
+  --ent-keyresult: #1f9d61;
+  --ent-initiative: #3d5bde;
+  --ent-feature: #0e9bb5;
+  --ent-subfeature: #4fb3d9;
+  --ent-product: #5b6478;
+  --ent-component: #0e8585;
+  --ent-release: #e0562e;
+  --ent-releasegroup: #b4451f;
+  --ent-company: #11766b;
+  --ent-user: #64748b;
+  /* user-assignable swatches (features, kanban cards, timeline bars) */
+  --swatch-amber: #efb428;
+  --swatch-blue: #3d8be8;
+  --swatch-teal: #14b8a6;
+  --swatch-green: #34b764;
+  --swatch-violet: #8250dc;
+  --swatch-magenta: #d8569e;
+  --swatch-vermilion: #e0562e;
+  --swatch-sky: #38bdf8;
+  /* option & status colours — Notion's ten, named (M16.12).
+     Distinct from --swatch-* above, which is the older eight-hue set the type
+     picker and timeline bars use. These are the palette a SELECT option, a
+     multi-select tag and a workflow status draw from, and each is a triple:
+
+       --opt-<n>      the dot / solid fill
+       --opt-<n>-bg   the pill behind a tag, ~13% of the hue
+       --opt-<n>-ink  text ON that pill, >= 4.5:1 against it
+
+     The ink is the point. Tags used to paint their label in the raw option
+     colour over a 13% tint of the same colour — amber on amber at about
+     1.8:1 — which is the failure mode M15 spent a phase removing from the
+     neutral ramp. Nothing here reuses #A8AFC2, the value that ramp dropped.
+
+     These triples are also the seam a dark theme would override
+     (`:root[data-theme='dark']`). No such block exists yet: the app has no
+     dark mode at all, and inventing half of one here would be worse than
+     leaving the seam visible. */
+  --opt-gray: #7e8699;
+  --opt-gray-bg: #eef0f4;
+  --opt-gray-ink: #4a5163;
+  --opt-brown: #9a6b4f;
+  --opt-brown-bg: #f4ede8;
+  --opt-brown-ink: #6d4a36;
+  --opt-orange: #d97514;
+  --opt-orange-bg: #fdf0e3;
+  --opt-orange-ink: #8a4a0b;
+  --opt-yellow: #d9a406;
+  --opt-yellow-bg: #fdf6e0;
+  --opt-yellow-ink: #7a5c02;
+  --opt-green: #1f9d61;
+  --opt-green-bg: #e6f6ee;
+  --opt-green-ink: #14653f;
+  --opt-blue: #3d8be8;
+  --opt-blue-bg: #e8f1fd;
+  --opt-blue-ink: #1a5694;
+  --opt-purple: #8250dc;
+  --opt-purple-bg: #f1ebfc;
+  --opt-purple-ink: #58309b;
+  --opt-pink: #d8569e;
+  --opt-pink-bg: #fceaf4;
+  --opt-pink-ink: #93316a;
+  --opt-red: #de3b4e;
+  --opt-red-bg: #fdeaec;
+  --opt-red-ink: #99202f;
+
+  /* avatar backgrounds — same eight hues as --swatch-*, darkened so white
+     initials clear 4.5:1 (5.2–6.9:1). The tinted swatches themselves top out
+     around 2:1 against white and made every avatar's initials unreadable. */
+  --avatar-1: #1f61b0;
+  --avatar-2: #1c7a44;
+  --avatar-3: #8a5a06;
+  --avatar-4: #6c3bc2;
+  --avatar-5: #a82f70;
+  --avatar-6: #0f7a70;
+  --avatar-7: #a83a1c;
+  --avatar-8: #1c6f9e;
+  /* workflow status defaults */
+  --status-idea: #14b8a6;
+  --status-planned: #3d8be8;
+  --status-progress: #efb428;
+  --status-validation: #8250dc;
+  --status-released: #34b764;
+  --status-wontdo: #a8afc2;
+  /* health */
+  --health-on: #1f9d61;
+  --health-risk: #de8f0a;
+  --health-off: #de3b4e;
+  --health-none: #a8afc2;
+  /* semantic aliases */
+  --surface-app: var(--n-0);
+  --surface-board: var(--n-25);
+  --surface-sunken: var(--n-50);
+  --surface-raised: var(--n-0);
+  --surface-selected: var(--cortex-50);
+  --surface-ai: var(--synapse-50);
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-500);
+  /* Small informational text — keys, counts, timestamps, hints. AA at 6.12:1,
+     because none of --n-400 (3.23:1) or --n-500 (3.65:1) reaches 4.5:1 and all
+     of it ships at 10–12px. --text-disabled stays on --n-400 and is for
+     genuinely disabled controls, borders and icon strokes only. */
+  --text-meta: var(--n-600);
+  --text-disabled: var(--n-400);
+  --text-inverse: #ffffff;
+  --text-link: var(--cortex-500);
+  --text-ai: var(--synapse-600);
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-focus: var(--cortex-500);
+  --accent: var(--cortex-500);
+  --accent-hover: var(--cortex-600);
+  --accent-press: var(--cortex-700);
+  --scrim: rgba(22, 26, 36, 0.4);
+}

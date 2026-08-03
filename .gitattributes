@@ -1,0 +1,16 @@
+# Source files are text, always. A raw control byte in a source file makes git
+# store it as a binary blob — no diff, no blame, no grep — which is how 197
+# lines of production code once merged with a zero-line diff (M14 audit).
+# `text` guarantees line-ending normalization and, more importantly, makes any
+# file git still classifies as binary show up as a loud anomaly in review.
+*.ts text
+*.tsx text
+*.rs text
+*.md text
+*.yml text
+*.yaml text
+*.json text
+*.html text
+*.css text
+*.sh text eol=lf
+*.toml text
