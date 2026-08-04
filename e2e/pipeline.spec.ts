@@ -12,7 +12,13 @@ import { test, expect, type Page } from '@playwright/test';
 async function boot(page: Page): Promise<void> {
   // The background distiller (M8.6) is off for tests that are not about it:
   // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'false'));
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
+    // themeMode resolves 'system' — so a dark display would flip every colour
+    // out from under them. The app has two palettes now; the specs assume one.
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
   const sidebarTypes = page.getByTestId('sidebar-type');
@@ -200,7 +206,13 @@ test('grow: filing a capture hands it to the base without anyone asking', async 
   // The one spec that leaves the background distiller on. Everything it does
   // is silent by design, so what is asserted is the absence of interruption
   // as much as the presence of the work.
-  await page.addInitScript(() => window.localStorage.setItem('cerebro.autoLearn', 'true'));
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'true');
+    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
+    // themeMode resolves 'system' — so a dark display would flip every colour
+    // out from under them. The app has two palettes now; the specs assume one.
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
   await page.goto('/');
   const demoButton = page.getByRole('button', { name: 'Open demo vault' });
   const sidebarTypes = page.getByTestId('sidebar-type');

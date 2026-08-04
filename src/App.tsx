@@ -25,7 +25,7 @@ import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
-import { useTheme } from '@/hooks/useTheme';
+import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -206,6 +206,24 @@ function App() {
               .getState()
               .toast(`Couldn't capture: ${err instanceof Error ? err.message : String(err)}`);
           });
+      }
+      // Cmd+Shift+L flips the theme — the binding Notion uses for the same job,
+      // and M16's whole point is that Notion is the thing muscle memory arrives
+      // from. Not routed through QuickOpen: QuickOpen.tsx keeps its navigate
+      // mode deliberately, and one shortcut is cheaper than a command mode.
+      //
+      // Toggles against what is ON SCREEN, not against the stored mode. From
+      // 'system' the user means "the opposite of what I am looking at", and
+      // resolving first is the only way to know what that is — a naive
+      // mode === 'dark' ? 'light' : 'dark' sends a system-dark user to dark.
+      // Landing on an explicit mode is the intent: asking for the other one is
+      // asking to stop following the OS.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        const ui = useUiStore.getState();
+        const systemDark =
+          typeof window.matchMedia === 'function' && window.matchMedia(DARK_QUERY).matches;
+        ui.setThemeMode(resolveTheme(ui.themeMode, systemDark) === 'dark' ? 'light' : 'dark');
       }
       // M15: nav history existed in the store with no way to reach it. Not
       // bound while typing — ⌘[ / ⌘] are outdent/indent inside an editor, and
