@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { quickOpenScore } from '@/lib/quickOpenScore';
-import { listSkills, type SkillRef } from '@/engine/skills';
+import { argumentHint, listSkills, type SkillRef } from '@/engine/skills';
 import { chipId, placeChip, recordChip, type ContextChip } from '@/agent/contextChips';
 import type { Place } from '@/engine/place';
 import type { Entry } from '@/engine/types';
@@ -181,14 +181,20 @@ export function ChatInput({
     const items = skills
       .filter((s) => s.name.startsWith(slashFragment))
       .slice(0, 6)
-      .map((skill) => ({
-        key: skill.path,
-        icon: 'zap',
-        color: 'var(--synapse-500)',
-        label: `/${skill.name}`,
-        hint: skill.description,
-        run: () => completeSkill(skill),
-      }));
+      .map((skill) => {
+        // M17.8: the declared inputs, in the row that offers the skill. A
+        // skill that wants a project name should say so where you pick it,
+        // not after the turn comes back asking.
+        const args = argumentHint(skill);
+        return {
+          key: skill.path,
+          icon: 'zap',
+          color: 'var(--synapse-500)',
+          label: `/${skill.name}${args === '' ? '' : ` ${args}`}`,
+          hint: skill.description,
+          run: () => completeSkill(skill),
+        };
+      });
     return items.length === 0 ? null : { testid: 'skill-menu', anchor: 'slash', items };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slashFragment, skills]);

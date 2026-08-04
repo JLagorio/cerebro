@@ -51,7 +51,14 @@ export interface AgentChat {
    * the busy flag rises synchronously on send — an async expansion must not
    * open a window where a second send can interleave. If it rejects, the turn
    * falls back to sending `text` as typed. */
-  send(text: string, message?: string | (() => Promise<string>)): void;
+  send(
+    text: string,
+    message?: string | (() => Promise<string>),
+    /** Narrow THIS turn's tools — a skill's `allowed-tools:` (M17.8). Per
+     * invocation rather than per conversation, because it belongs to the
+     * thing being invoked, not to the thread it was invoked in. */
+    allowedTools?: string[] | null,
+  ): void;
   stop(): void;
   reset(): void;
   /** M9.5: the CLI session behind this transcript, so a conversation can be
@@ -260,7 +267,7 @@ export function useAgentChat(
   );
 
   const send = useCallback(
-    (text: string, message?: string | (() => Promise<string>)) => {
+    (text: string, message?: string | (() => Promise<string>), allowedTools?: string[] | null) => {
       const trimmed = text.trim();
       if (trimmed === '' || vaultPath === null) return;
       // Callers gate on `streaming`; this closes the same-tick window where
@@ -324,6 +331,7 @@ export function useAgentChat(
             // when the vault has no connectors.json (PR #5 security review).
             attended: true,
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
+            allowedTools: allowedTools ?? null,
             mcp: mcpRef.current,
           });
           // Cancelled during the spawn itself: the child exists now, so it has

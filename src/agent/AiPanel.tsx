@@ -415,9 +415,9 @@ export function AiPanel() {
   const anchorNow = conversations.anchorNow;
   const chatSend = chat.send;
   const ask = useCallback(
-    (text: string, message?: string | (() => Promise<string>)) => {
+    (text: string, message?: string | (() => Promise<string>), allowedTools?: string[] | null) => {
       anchorNow();
-      chatSend(text, message);
+      chatSend(text, message, allowedTools);
     },
     [anchorNow, chatSend],
   );
@@ -490,8 +490,13 @@ export function AiPanel() {
       return;
     }
     const { skill, request } = invocation;
-    ask(trimmed, () =>
-      readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
+    // M17.8: a skill's `allowed-tools:` narrows THIS turn. Passed as data to
+    // Rust, which intersects it with the granted policy — a vault file may
+    // subtract from what Settings allowed and can never add to it.
+    ask(
+      trimmed,
+      () => readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
+      skill.allowedTools,
     );
   };
 

@@ -52,6 +52,11 @@ export interface RunOptions {
    * machine (PR #5 security review) — engine/connectors.stdioFingerprint.
    * Absent reads as none approved: a missing field must never widen access. */
   approvedStdio?: string[];
+  /** A NARROWING of this run's tools, declared by the vault file that started
+   * it (M17.8). Intersected with the policy in Rust, never unioned — a vault
+   * file may subtract from what Settings granted and can never add to it.
+   * Absent means "do not narrow"; [] means "narrow to nothing". */
+  allowedTools?: string[] | null;
   mcp: McpInfo | null;
 }
 
@@ -94,6 +99,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       attended: options.attended,
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
+      allowed_tools: options.allowedTools ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },

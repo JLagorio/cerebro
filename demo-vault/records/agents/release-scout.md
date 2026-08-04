@@ -1,5 +1,6 @@
 ---
 type: Agent
+slug: release-scout
 description: Watches open risks and slipping work for anything that threatens a release, and keeps a short brief current.
 tools: safe
 ---

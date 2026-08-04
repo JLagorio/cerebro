@@ -203,7 +203,7 @@ export function useJobRunner(): void {
       // is how agent runs briefly looped forever. Fire-key jobs are the one
       // exception: they must read their record's body before anything else
       // can fail, so their record sits after that read, below.
-      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.path, job.runKey);
+      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.key, job.runKey);
 
       // An agent job runs AS the agent: its record's identity in the
       // provenance stamps, its memory in the prompt, and shell only when the
@@ -255,7 +255,7 @@ export function useJobRunner(): void {
           // after the read, so a read that dies surrenders the key instead
           // of eating the whole period (PR #5 review).
           if (job.ledger === 'skillRuns') {
-            useUiStore.getState().recordSkillRun(vaultPath, job.path, job.runKey);
+            useUiStore.getState().recordSkillRun(vaultPath, job.key, job.runKey);
             recorded = true;
           }
           const runId = await runAgent(vaultPath, {

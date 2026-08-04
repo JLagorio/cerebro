@@ -105,6 +105,14 @@ pub struct AgentRequest {
     /// Absent reads as none approved: a missing field must never widen
     /// access, least of all to executing commands a vault file names.
     pub approved_stdio: Option<Vec<String>>,
+    /// A NARROWING of this run's tools, declared by the vault file that
+    /// started it (M17.8 `allowed-tools:`, M17.13 agent scope).
+    ///
+    /// Intersected with the policy, never unioned — see `tool_policy`. Absent
+    /// means "do not narrow"; an empty list means "narrow to nothing", which
+    /// is a thing a read-only skill is allowed to ask for. The distinction is
+    /// the whole reason this is an Option<Vec> rather than a Vec.
+    pub allowed_tools: Option<Vec<String>>,
 }
 
 /// How many CLI children may be alive at once (M17.3).
@@ -392,8 +400,45 @@ fn tool_policy(shell: bool) -> Vec<&'static str> {
     tools
 }
 
+/// Apply a vault-declared narrowing to the granted policy (M17.8).
+///
+/// An INTERSECTION, and that direction is the entire point. The declaration
+/// comes out of a markdown file in the vault — the same trust boundary as any
+/// `CLAUDE.md` — so it may subtract from what Settings granted and can never
+/// add to it. A skill naming `Bash` in a vault whose owner never switched
+/// shell access on gets nothing, silently, because the grant it is asking for
+/// was never in the set.
+///
+/// Names are matched with and without the `mcp__cerebro__` prefix, because a
+/// person writing `allowed-tools: search_notes` in frontmatter means the tool
+/// they see in the transcript, not its wire name.
+fn narrow(granted: Vec<&'static str>, declared: Option<&Vec<String>>) -> Vec<&'static str> {
+    let Some(declared) = declared else {
+        return granted;
+    };
+    let wanted: Vec<String> = declared
+        .iter()
+        .map(|t| t.trim().to_ascii_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+    granted
+        .into_iter()
+        .filter(|tool| {
+            let full = tool.to_ascii_lowercase();
+            let short = full
+                .strip_prefix("mcp__cerebro__")
+                .unwrap_or(&full)
+                .to_string();
+            wanted.iter().any(|w| *w == full || *w == short)
+        })
+        .collect()
+}
+
 pub fn build_args(req: &AgentRequest, mcp_config: &Path, strict_mcp: bool) -> Vec<String> {
-    let tools = tool_policy(req.shell.unwrap_or(false));
+    let tools = narrow(
+        tool_policy(req.shell.unwrap_or(false)),
+        req.allowed_tools.as_ref(),
+    );
     let mut args: Vec<String> = vec![
         "-p".into(),
         req.message.clone(),
@@ -796,6 +841,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
             true,
@@ -964,11 +1010,82 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
             true,
         );
         assert!(!allowed_tools(&args).contains("Bash"));
+    }
+
+    /// M17.8: a vault file may SUBTRACT from the granted policy, never add.
+    ///
+    /// `allowed-tools:` is written in a markdown file inside the vault — the
+    /// same trust boundary as any CLAUDE.md — so the direction of the operation
+    /// is the whole security property. These four tests are that property.
+    fn narrowed(shell: bool, declared: Option<Vec<&str>>) -> Vec<String> {
+        let args = build_args(
+            &AgentRequest {
+                message: "hi".into(),
+                system_prompt: None,
+                session_id: None,
+                model: None,
+                shell: Some(shell),
+                connectors: None,
+                attended: None,
+                mcp_url: None,
+                mcp_token: None,
+                actor: None,
+                approved_stdio: None,
+                allowed_tools: declared
+                    .map(|d| d.into_iter().map(String::from).collect::<Vec<String>>()),
+            },
+            Path::new("/tmp/mcp.json"),
+            true,
+        );
+        allowed_tools(&args)
+            .split(',')
+            .filter(|t| !t.is_empty())
+            .map(String::from)
+            .collect()
+    }
+
+    #[test]
+    fn a_declaration_narrows_to_what_it_names() {
+        let tools = narrowed(false, Some(vec!["search_notes", "get_note"]));
+        assert_eq!(
+            tools,
+            vec!["mcp__cerebro__search_notes", "mcp__cerebro__get_note"]
+        );
+    }
+
+    #[test]
+    fn a_declaration_cannot_grant_what_settings_withheld() {
+        // The exact attack: a skill file asking for Bash in a vault whose owner
+        // never switched shell access on. It gets nothing, because the grant it
+        // names was never in the set to intersect with.
+        let tools = narrowed(false, Some(vec!["Bash", "Write", "search_notes"]));
+        assert!(!tools.iter().any(|t| t == "Bash"));
+        assert!(!tools.iter().any(|t| t == "Write"));
+        assert_eq!(tools, vec!["mcp__cerebro__search_notes"]);
+    }
+
+    #[test]
+    fn an_absent_declaration_does_not_narrow_but_an_empty_one_does() {
+        // Two different sentences, and conflating them would either make every
+        // ordinary turn toolless or make "read-only please" unsayable.
+        assert_eq!(narrowed(false, None).len(), 12);
+        assert!(narrowed(false, Some(vec![])).is_empty());
+    }
+
+    #[test]
+    fn a_declaration_may_name_a_tool_the_way_the_user_sees_it() {
+        // Frontmatter is written by a person, who sees `search_notes` in the
+        // transcript and not `mcp__cerebro__search_notes` anywhere.
+        assert_eq!(
+            narrowed(false, Some(vec!["mcp__cerebro__search_notes"])),
+            narrowed(false, Some(vec!["  SEARCH_NOTES  "]))
+        );
     }
 
     #[test]
@@ -1040,6 +1157,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
             false,
@@ -1074,6 +1192,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
             true,

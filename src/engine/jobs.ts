@@ -1,4 +1,5 @@
 import { isAgentEntry } from './agents';
+import { recordIdentity } from './identity';
 import { SOURCES_DIR } from './ingest';
 import { learnQueue, type LearnQueueInput } from './learn';
 import { isSkillEntry, lastFireKey, parseSchedule } from './skills';
@@ -26,6 +27,16 @@ export type JobKind = 'filed' | 'scheduled' | 'agent' | 'behind' | 'refresh' | '
 export interface AgentJob {
   kind: JobKind;
   path: string;
+  /**
+   * What the LEDGER remembers this job as (M17.8).
+   *
+   * The same as `path` for everything whose subject is an ordinary note. For a
+   * Skill or an Agent it is `recordIdentity`, so a record that declares a
+   * `slug:` keeps its place in the ledger across a rename — renaming a record
+   * renames its file, and a path-keyed ledger therefore forgot every fire the
+   * schedule had answered and ran one catch-up for the privilege.
+   */
+  key: string;
   title: string;
   /** What the ledger records at start: the note's modifiedAt for learn jobs,
    * the schedule's fire key for scheduled runs. */
@@ -90,6 +101,9 @@ export function jobQueue(
       refresh.push({
         kind: 'refresh',
         path: entry.path,
+        // An ordinary note has no declared identity: its path is what the
+        // ledger has always remembered it as, and still is.
+        key: entry.path,
         title: entry.title,
         runKey: entry.modifiedAt,
         ledger: 'attempts',
@@ -115,6 +129,7 @@ export function jobQueue(
     .map((j) => ({
       kind: j.reason,
       path: j.path,
+      key: j.path,
       title: j.title,
       runKey: j.modifiedAt,
       ledger: 'attempts' as const,
@@ -156,6 +171,7 @@ export function jobQueue(
     recheck.push({
       kind: newestTypeChange !== null ? 'schema' : 'stale',
       path: concept.entry.path,
+      key: concept.entry.path,
       title: concept.title,
       runKey,
       ledger: 'attempts',
@@ -176,10 +192,12 @@ export function jobQueue(
     const schedule = parseSchedule(entry.properties.schedule);
     if (schedule === null) continue;
     const key = lastFireKey(schedule, now);
-    if (skillRuns[entry.path] === key) continue;
+    const ledgerKey = recordIdentity(entry);
+    if (skillRuns[ledgerKey] === key) continue;
     scheduled.push({
       kind,
       path: entry.path,
+      key: ledgerKey,
       title: entry.title,
       runKey: key,
       ledger: 'skillRuns',
