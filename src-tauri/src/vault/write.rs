@@ -225,6 +225,75 @@ fn unique_rel_path(vault: &Path, folder: &str, slug: &str) -> String {
     }
 }
 
+/// The one folder attachments live in.
+///
+/// Already excluded from the scanner (`scan.rs`), the watcher, and the folder
+/// walker below, which is why a copied binary never surfaces as a note or
+/// bounces back as a `vault-changed` event. Attachment writes are the first
+/// thing that puts files there on purpose (M16.13c).
+pub const ATTACHMENTS_DIR: &str = "attachments";
+
+/// `report.pdf` → `attachments/report.pdf`, then `-2`, `-3`, …
+///
+/// Not `unique_rel_path`: that one hardcodes `.md`, and `report.pdf-2` is a
+/// file the OS can no longer open. The dedupe goes on the STEM.
+fn unique_attachment_path(vault: &Path, name: &str) -> String {
+    // A leading dot is the whole name (".gitignore"), not an extension.
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
+        _ => (name, String::new()),
+    };
+    let mut n = 1;
+    loop {
+        let suffix = if n == 1 {
+            String::new()
+        } else {
+            format!("-{n}")
+        };
+        let candidate = format!("{ATTACHMENTS_DIR}/{stem}{suffix}{ext}");
+        if !vault.join(&candidate).exists() {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Copy a file from anywhere on disk into the vault's `attachments/` folder
+/// and return its VAULT-RELATIVE path (M16.13c).
+///
+/// The destination folder is fixed here rather than taken from the caller.
+/// A files field stores whatever string it is handed, so letting the frontend
+/// choose would let a field drop a `.md` into a records folder, where the very
+/// next scan would adopt it as a note — and `attachments/` is precisely the
+/// one directory the scanner and the watcher already agree to ignore.
+///
+/// Removing a chip in the UI does NOT delete the copy. Dropping a reference is
+/// not deleting a file, and in a files-first app the vault folder is the user's
+/// to prune.
+pub fn import_attachment(vault: &Path, source: &str) -> Result<String, String> {
+    let src = Path::new(source);
+    if !src.is_absolute() {
+        return Err(format!("attachment source must be absolute: {source}"));
+    }
+    let meta = std::fs::metadata(src).map_err(|e| format!("{source}: {e}"))?;
+    if !meta.is_file() {
+        return Err(format!("not a file: {source}"));
+    }
+    let name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("unusable file name: {source}"))?;
+    safe_component("attachment name", name)?;
+    let rel = unique_attachment_path(vault, name);
+    let dest = safe_join(vault, &rel)?;
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::copy(src, &dest).map_err(|e| format!("{source}: {e}"))?;
+    super::watcher::note_own_write(&dest);
+    Ok(rel)
+}
+
 /// Create `<folder>/<slug>.md` (deduping to `-2`, `-3`, …) with the given
 /// frontmatter and body; empty body gets a humanized `# Title` line.
 /// Returns the vault-relative path.
@@ -1063,5 +1132,101 @@ mod tests {
             "---\ntype: Work item\nstatus: done\n---\nBody stays.\n"
         );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- Attachments (M16.13c) ---------------------------------------------
+
+    /// A file outside the vault, standing in for whatever the OS picker
+    /// returns — the point of `import_attachment` is that the source is not
+    /// vault-relative and not vault-contained.
+    fn source_file(label: &str, name: &str, body: &str) -> std::path::PathBuf {
+        let dir = testutil::temp_vault(label);
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn import_copies_into_attachments_and_returns_a_relative_path() {
+        let vault = testutil::temp_vault("wfm-attach");
+        let src = source_file("wfm-attach-src", "report.pdf", "%PDF-1.4");
+        let rel = import_attachment(&vault, src.to_str().unwrap()).unwrap();
+
+        assert_eq!(rel, "attachments/report.pdf");
+        assert_eq!(read(&vault, &rel), "%PDF-1.4");
+        // The original is COPIED, never moved — the user's Downloads folder is
+        // not ours to empty.
+        assert!(src.exists());
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    // `report.pdf-2` is a file the OS can no longer open, which is what
+    // reusing `unique_rel_path`'s `.md`-shaped dedupe would have produced.
+    #[test]
+    fn a_second_file_of_the_same_name_dedupes_the_stem_not_the_extension() {
+        let vault = testutil::temp_vault("wfm-attach-dupe");
+        let a = source_file("wfm-attach-dupe-a", "report.pdf", "first");
+        let b = source_file("wfm-attach-dupe-b", "report.pdf", "second");
+        assert_eq!(
+            import_attachment(&vault, a.to_str().unwrap()).unwrap(),
+            "attachments/report.pdf"
+        );
+        assert_eq!(
+            import_attachment(&vault, b.to_str().unwrap()).unwrap(),
+            "attachments/report-2.pdf"
+        );
+        // Neither clobbered the other.
+        assert_eq!(read(&vault, "attachments/report.pdf"), "first");
+        assert_eq!(read(&vault, "attachments/report-2.pdf"), "second");
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(a.parent().unwrap());
+        let _ = std::fs::remove_dir_all(b.parent().unwrap());
+    }
+
+    #[test]
+    fn a_dotfile_name_keeps_its_leading_dot() {
+        let vault = testutil::temp_vault("wfm-attach-dot");
+        let a = source_file("wfm-attach-dot-a", ".gitignore", "node_modules");
+        let b = source_file("wfm-attach-dot-b", ".gitignore", "target");
+        assert_eq!(
+            import_attachment(&vault, a.to_str().unwrap()).unwrap(),
+            "attachments/.gitignore"
+        );
+        // Not "attachments/-2.gitignore": a leading dot is the whole name.
+        assert_eq!(
+            import_attachment(&vault, b.to_str().unwrap()).unwrap(),
+            "attachments/.gitignore-2"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(a.parent().unwrap());
+        let _ = std::fs::remove_dir_all(b.parent().unwrap());
+    }
+
+    #[test]
+    fn import_refuses_relative_sources_directories_and_missing_files() {
+        let vault = testutil::temp_vault("wfm-attach-guard");
+        // Relative: `Path::join` on a relative source would resolve against
+        // the process CWD, which is not the vault and not the picker's folder.
+        assert!(import_attachment(&vault, "../../etc/passwd").is_err());
+        assert!(import_attachment(&vault, "").is_err());
+        assert!(import_attachment(&vault, vault.to_str().unwrap()).is_err());
+        assert!(import_attachment(&vault, "/nonexistent/nope.png").is_err());
+        assert!(!vault.join(ATTACHMENTS_DIR).exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The folder is fixed by this function, not chosen by the caller: a files
+    // field stores whatever string it is handed, and `attachments/` is the one
+    // directory the scanner and the watcher already agree to ignore.
+    #[test]
+    fn an_imported_markdown_file_lands_where_the_scanner_will_not_adopt_it() {
+        let vault = testutil::temp_vault("wfm-attach-md");
+        let src = source_file("wfm-attach-md-src", "notes.md", "# Not a record");
+        let rel = import_attachment(&vault, src.to_str().unwrap()).unwrap();
+        assert!(rel.starts_with("attachments/"));
+        assert!(crate::vault::scan::scan_vault(&vault).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+        let _ = std::fs::remove_dir_all(src.parent().unwrap());
     }
 }

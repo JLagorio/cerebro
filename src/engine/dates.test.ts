@@ -7,8 +7,10 @@ import {
   formatDateValue,
   formatTime,
   makeDateValue,
+  parseDateProperty,
   parseDateToken,
   remindAt,
+  serializeDateProperty,
   serializeDateValue,
 } from './dates';
 
@@ -122,5 +124,66 @@ describe('date math', () => {
   it('addDays crosses month boundaries', () => {
     expect(addDays('2026-07-31', 1)).toBe('2026-08-01');
     expect(addDays('2026-08-01', -1)).toBe('2026-07-31');
+  });
+});
+
+/**
+ * Date PROPERTIES (M16.14). The chip grammar above serializes into a note
+ * body; a property lives in frontmatter, where the shape has to stay readable
+ * YAML and keep parsing every date written before times existed.
+ */
+describe('date properties', () => {
+  it('reads a bare date, the shape every existing vault holds', () => {
+    const v = parseDateProperty('2026-08-02');
+    expect(v?.start).toBe('2026-08-02');
+    expect(v?.startTime).toBeNull();
+    expect(v?.end).toBeNull();
+  });
+
+  it('reads a time written with a space, and one pasted with a T', () => {
+    expect(parseDateProperty('2026-08-02 14:30')?.startTime).toBe('14:30');
+    expect(parseDateProperty('2026-08-02T14:30')?.startTime).toBe('14:30');
+  });
+
+  it('reads a range, times and all', () => {
+    const v = parseDateProperty({ start: '2026-08-02 09:00', end: '2026-08-09 17:00' });
+    expect(v?.start).toBe('2026-08-02');
+    expect(v?.startTime).toBe('09:00');
+    expect(v?.end).toBe('2026-08-09');
+    expect(v?.endTime).toBe('17:00');
+  });
+
+  // Null rather than today: an empty field stays empty, and a malformed one
+  // does not quietly become a date nobody typed.
+  it('is null for anything that is not a date', () => {
+    expect(parseDateProperty('')).toBeNull();
+    expect(parseDateProperty('next week')).toBeNull();
+    expect(parseDateProperty(null)).toBeNull();
+    expect(parseDateProperty({ end: '2026-08-09' })).toBeNull();
+  });
+
+  it('writes a space separator, matching the token grammar this app already uses', () => {
+    const v = { ...makeDateValue('2026-08-02'), startTime: '14:30' };
+    expect(serializeDateProperty(v, 'date')).toBe('2026-08-02 14:30');
+  });
+
+  // A `date` field stores one date. Writing {start, end} into it would fail
+  // its own validation on the next read, so the end is dropped rather than
+  // stored somewhere nothing reads.
+  it('never writes a range into a date field', () => {
+    const v = { ...makeDateValue('2026-08-02'), end: '2026-08-09' };
+    expect(serializeDateProperty(v, 'date')).toBe('2026-08-02');
+    expect(serializeDateProperty(v, 'daterange')).toEqual({
+      start: '2026-08-02',
+      end: '2026-08-09',
+    });
+  });
+
+  it('round-trips through the frontmatter shape unchanged', () => {
+    for (const raw of ['2026-08-02', '2026-08-02 14:30']) {
+      expect(serializeDateProperty(parseDateProperty(raw)!, 'date')).toBe(raw);
+    }
+    const range = { start: '2026-08-02 09:00', end: '2026-08-09' };
+    expect(serializeDateProperty(parseDateProperty(range)!, 'daterange')).toEqual(range);
   });
 });

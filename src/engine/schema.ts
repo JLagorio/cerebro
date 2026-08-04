@@ -3,11 +3,21 @@ import type {
   FieldDef,
   FieldKind,
   FieldOption,
+  FieldVisibility,
   ResolvedField,
   Schema,
   StatusDef,
   TypeDef,
 } from './types';
+import { FIELD_KINDS, FIELD_VISIBILITIES } from './types';
+import {
+  DATE_DISPLAY_FORMATS,
+  DEFAULT_TIME_FORMAT,
+  TIME_DISPLAY_FORMATS,
+  formatDateValue,
+  parseDateProperty,
+  toIsoDate,
+} from './dates';
 import { applyFormat, computeRollup, formatNumber, formatTimestamp } from './properties';
 import { buildRelationIndex, childrenOf } from './relations';
 import { parseViewList } from './views';
@@ -20,24 +30,6 @@ export const DEFAULT_STATUSES: StatusDef[] = [
   { id: 'in-progress', label: 'In progress', color: '#EFB428', group: 'active' },
   { id: 'done', label: 'Done', color: '#34B764', group: 'done' },
   { id: 'cancelled', label: 'Cancelled', color: '#A8AFC2', hollow: true, group: 'closed' },
-];
-
-const FIELD_KINDS: FieldKind[] = [
-  'text',
-  'number',
-  'checkbox',
-  'date',
-  'daterange',
-  'select',
-  'multiselect',
-  'status',
-  'person',
-  'relation',
-  'url',
-  'files',
-  'rollup',
-  'created_time',
-  'last_edited_time',
 ];
 
 const ROLLUP_CALCS = ['count', 'sum', 'avg', 'min', 'max', 'earliest', 'latest', 'show'];
@@ -53,8 +45,15 @@ export function humanize(id: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/**
+ * M16.4: the allowlist is FIELD_KINDS from types.ts now. It used to be a
+ * second hand-written copy here, and a kind missing from it fell through to
+ * `text` — silently, so a declared Select rendered as a text box.
+ */
 function asFieldKind(value: unknown): FieldKind {
-  return FIELD_KINDS.includes(value as FieldKind) ? (value as FieldKind) : 'text';
+  return (FIELD_KINDS as readonly string[]).includes(value as string)
+    ? (value as FieldKind)
+    : 'text';
 }
 
 function parseOption(raw: unknown): FieldOption | null {
@@ -106,6 +105,29 @@ function parseFieldDef(name: string, spec: unknown): FieldDef {
   }
   if (typeof s.precision === 'number' && Number.isFinite(s.precision)) {
     def.precision = Math.max(0, Math.min(6, Math.trunc(s.precision)));
+  }
+  // M16.14. `dateFormat`, not `format` — numbers already own that key, and a
+  // single key holding two unrelated enums would survive a kind change into a
+  // field that cannot read it.
+  if (
+    typeof s.dateFormat === 'string' &&
+    (DATE_DISPLAY_FORMATS as readonly string[]).includes(s.dateFormat)
+  ) {
+    def.dateFormat = s.dateFormat as FieldDef['dateFormat'];
+  }
+  if (
+    typeof s.timeFormat === 'string' &&
+    (TIME_DISPLAY_FORMATS as readonly string[]).includes(s.timeFormat)
+  ) {
+    def.timeFormat = s.timeFormat as FieldDef['timeFormat'];
+  }
+  // M16.10. An unrecognised value is dropped rather than guessed at: a
+  // property nobody can find is worse than one shown when it need not be.
+  if (
+    typeof s.visibility === 'string' &&
+    (FIELD_VISIBILITIES as readonly string[]).includes(s.visibility)
+  ) {
+    def.visibility = s.visibility as FieldVisibility;
   }
   return def;
 }
@@ -197,6 +219,27 @@ export function buildSchema(entries: Entry[]): Schema {
     return DEFAULT_STATUSES;
   }
 
+  /**
+   * WHICH link in that chain answered (M16.12).
+   *
+   * The inline status creator needs it: writing a new status to the TYPE is a
+   * silent no-op for a record whose statuses come from a project override,
+   * because the override wins on the very next read. Rather than write
+   * something the user will not see, the picker says where the statuses
+   * actually live.
+   */
+  function statusSourceFor(e: Entry): 'project' | 'type' | 'default' {
+    if (e.project !== null) {
+      const project = byPath.get(e.project);
+      if (project !== undefined) {
+        const override = parseStatuses((project.properties as Record<string, unknown>).statuses);
+        if (override.length > 0) return 'project';
+      }
+    }
+    const own = e.type !== null ? types.get(e.type)?.statuses : undefined;
+    return own !== undefined && own.length > 0 ? 'type' : 'default';
+  }
+
   function resolveField(e: Entry, field: string): ResolvedField {
     const typeDef = e.type !== null ? types.get(e.type) : undefined;
     const def = typeDef?.fields.find((f) => f.name === field) ?? null;
@@ -236,7 +279,10 @@ export function buildSchema(entries: Entry[]): Schema {
     // A two-way relation's reciprocal side stores nothing (M12.4): its value
     // is derived — the records of `from.type` whose `from.field` links here.
     // Edits write through to that owning side, never to this frontmatter.
-    if (def?.kind === 'relation' && def.from !== undefined) {
+    // `person` counts (M16.13b): it is a relation that renders avatars, and
+    // gating on the kind NAME left a derived person field reading its own
+    // empty frontmatter and rendering blank.
+    if ((def?.kind === 'relation' || def?.kind === 'person') && def.from !== undefined) {
       const sources = childrenOf(
         e,
         { direction: 'reverse', type: def.from.type, field: def.from.field },
@@ -301,10 +347,44 @@ export function buildSchema(entries: Entry[]): Schema {
       return { def, raw, display: formatNumber(raw, def), color: null, ghost: false };
     }
 
-    // text / date / daterange and undeclared fields
+    // A declared date renders in the format its property carries (M16.14).
+    // Before this, every date everywhere printed its raw ISO string and the
+    // picker's format menu was thrown away the moment the popover closed —
+    // and `String(raw)` on a daterange printed "[object Object]".
+    if (kind === 'date' || kind === 'daterange') {
+      const value = parseDateProperty(raw);
+      if (value !== null) {
+        return {
+          def,
+          raw,
+          display: formatDateValue(
+            {
+              ...value,
+              format: def?.dateFormat ?? 'short',
+              timeFormat: def?.timeFormat ?? DEFAULT_TIME_FORMAT,
+            },
+            toIsoDate(new Date()),
+          ),
+          color: null,
+          ghost: false,
+        };
+      }
+      // Not a date at all: an undeclared key or a value the schema doctor has
+      // yet to adopt. Fall through to the raw reading rather than blanking it.
+    }
+
+    // text and undeclared fields
     const display = Array.isArray(raw) ? raw.map(String).join(', ') : String(raw);
     return { def, raw, display, color: null, ghost: false };
   }
 
-  return { types, relations, projectForEntry, statusSetForProject, statusSetFor, resolveField };
+  return {
+    types,
+    relations,
+    projectForEntry,
+    statusSetForProject,
+    statusSetFor,
+    statusSourceFor,
+    resolveField,
+  };
 }

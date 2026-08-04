@@ -7,7 +7,19 @@ import { vi } from 'vitest';
 // persistence test flaked exactly this way). The timeout only bounds how
 // long a FAILING waitFor keeps polling — passing tests resolve the moment
 // their condition holds, so the suite runs no slower.
-configure({ asyncUtilTimeout: 5_000 });
+//
+// Raised from 5s to 10s (M16.29). 5s was not enough: as the suite grew past
+// 1700 tests the BlockNote specs began failing intermittently under full-suite
+// load — a different test each time, always a `waitFor` — while passing in
+// ~1.3s when run alone. Three separate agents hit it tonight and each had to
+// stop and decide whether they had broken something, which is the real cost of
+// a flake: it spends attention that belongs on actual defects.
+//
+// It stays below `testTimeout` (15s in vite.config.ts) on purpose. A waitFor
+// that genuinely never resolves must lose to its own budget and report the
+// condition it was waiting on; if it outlived the test timeout instead, the
+// failure would read as a mystery hang with no assertion attached.
+configure({ asyncUtilTimeout: 10_000 });
 
 // jsdom shims for BlockNote/mantine (M2 Task 9). All are missing-API
 // no-ops; none change behavior existing tests rely on.

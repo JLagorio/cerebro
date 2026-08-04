@@ -53,11 +53,11 @@ export function Toast({
     >
       <Icon name={c.icon} size={16} color={c.color} style={{ marginTop: 2 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--n-900)' }}>
+        <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--n-900)' }}>
           {title}
         </div>
         {description ? (
-          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
+          <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-secondary)', marginTop: 2 }}>
             {description}
           </div>
         ) : null}
@@ -70,7 +70,7 @@ export function Toast({
               background: 'none',
               padding: 0,
               fontFamily: 'var(--font-ui)',
-              fontSize: 'var(--text-xs)',
+              fontSize: 'var(--fs-xs)',
               fontWeight: 600,
               color: 'var(--text-link)',
               cursor: 'pointer',

@@ -1,7 +1,10 @@
+import type React from 'react';
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
+import { useSortableList } from '@/hooks/useSortableList';
 
 /**
  * The shared editor for an ordered chain — grouping levels, sort keys, or
@@ -34,6 +37,14 @@ export interface ChainBuilderProps {
   onToggleDir?(index: number): void;
   onRemove(index: number): void;
   onAdd(value: string): void;
+  /**
+   * Move the level at `from` so it sits at `to` (M16.26). Omitted leaves the
+   * chain unorderable, which is where the GROUPING chain stays for now: a
+   * relation level re-types every level below it, so a permutation there is
+   * not the no-op it is on a sort chain — the tail's fields would belong to
+   * the wrong type. Reordering it has to rebuild the tail, not swap two rows.
+   */
+  onMove?(from: number, to: number): void;
   max?: number;
   emptyHint?: string;
   /** Shown instead of the add row when the chain cannot be extended. */
@@ -54,6 +65,7 @@ export function ChainBuilder({
   onToggleDir,
   onRemove,
   onAdd,
+  onMove,
   max = 3,
   emptyHint,
   blockedHint,
@@ -61,6 +73,22 @@ export function ChainBuilder({
   const [open, setOpen] = useState(false);
   const atCap = rows.length >= max;
   const active = rows.length > 0;
+
+  // A chain is ORDERED — first key wins, and the only way to demote the
+  // leading sort was to delete every row and re-add them in the order you
+  // wanted. Row identity is the level's value, which is unique within a chain
+  // because every caller excludes the fields already taken.
+  const labelOf = (value: string) =>
+    rows.find((r) => r.value === value)?.options.find((o) => o.value === value)?.label ?? value;
+  const sortable = useSortableList({
+    ids: rows.map((r) => r.value),
+    disabled: onMove === undefined,
+    labelFor: labelOf,
+    onReorder: (value, to) => {
+      const from = rows.findIndex((r) => r.value === value);
+      if (from !== -1 && from !== to) onMove?.(from, to);
+    },
+  });
 
   return (
     <span className="relative inline-flex">
@@ -73,16 +101,16 @@ export function ChainBuilder({
           // whitespace-nowrap: the row WRAPS at narrow widths, but a pill must
           // wrap as a unit — "Group: status" broken across two lines reads as
           // two controls (M11 responsiveness).
-          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-[12.5px]',
+          'inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-md border px-2 text-sm',
           active
-            ? 'border-[var(--cortex-300)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-            : 'border-[var(--n-300)] bg-[var(--n-0)] text-[var(--n-700)] hover:border-[var(--n-400)]',
+            ? 'border-cortex-300 bg-cortex-50 text-cortex-700'
+            : 'border-n-300 bg-n-0 text-n-700 hover:border-n-400',
         ].join(' ')}
       >
         <Icon name={icon} size={13} color={active ? 'var(--cortex-600)' : 'var(--n-500)'} />
         {summary === '' ? label : summary}
         {rows.length > 1 && (
-          <span className="[font-family:var(--font-mono)] text-[11px] opacity-70">
+          <span className="[font-family:var(--font-mono)] text-2xs opacity-70">
             +{rows.length - 1}
           </span>
         )}
@@ -97,20 +125,51 @@ export function ChainBuilder({
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[330px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            <div className="w-[330px] rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
+              <div className="px-0.5 pb-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 {label}
               </div>
               {rows.length === 0 && emptyHint !== undefined && (
-                <p className="m-0 px-0.5 pb-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
-                  {emptyHint}
-                </p>
+                <p className="m-0 px-0.5 pb-2 text-xs leading-[16px] text-n-500">{emptyHint}</p>
               )}
-              <div className="flex flex-col gap-1.5">
+              <div
+                ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+                className="flex flex-col gap-1.5"
+              >
                 {rows.map((row, i) => (
-                  <div key={`${i}:${row.value}`} className="flex items-center gap-1.5">
-                    <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
-                      {i === 0 ? 'By' : 'then'}
+                  <div
+                    key={`${i}:${row.value}`}
+                    className={[
+                      'group flex items-center gap-1.5',
+                      sortable.dragging === row.value ? 'opacity-40' : '',
+                    ].join(' ')}
+                    style={sortable.dropIndicator(i)}
+                  >
+                    {/* The grip shares the By/then cell rather than appending
+                        itself, so the arrival of a pointer does not shove
+                        every row's control a glyph to the right (M16.8). */}
+                    <span className="relative flex w-8 flex-none items-center">
+                      <span
+                        className={[
+                          'text-2xs text-n-400',
+                          onMove === undefined ? '' : 'group-hover:opacity-0',
+                        ].join(' ')}
+                      >
+                        {i === 0 ? 'By' : 'then'}
+                      </span>
+                      {onMove !== undefined && (
+                        <Tooltip label="Drag to reorder — the first key breaks ties first">
+                          <span
+                            {...sortable.gripProps(row.value, i)}
+                            // Opacity, not `hidden`: a hidden grip is out of
+                            // the tab order, and arrow-key reordering is the
+                            // point of the primitive underneath it.
+                            className="absolute inset-0 flex cursor-grab items-center justify-start rounded-xs text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
+                          >
+                            <Icon name="grip-vertical" size={13} />
+                          </span>
+                        </Tooltip>
+                      )}
                     </span>
                     <Select
                       size="sm"
@@ -124,7 +183,7 @@ export function ChainBuilder({
                         type="button"
                         aria-label={`Level ${i + 1} direction: ${row.dir === 'asc' ? 'ascending' : 'descending'}`}
                         onClick={() => onToggleDir(i)}
-                        className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]"
+                        className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800"
                       >
                         <Icon name={row.dir === 'asc' ? 'arrow-up' : 'arrow-down'} size={12} />
                       </button>
@@ -133,7 +192,7 @@ export function ChainBuilder({
                       type="button"
                       aria-label={`Remove level ${i + 1}`}
                       onClick={() => onRemove(i)}
-                      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+                      className="inline-flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-50 hover:text-n-800"
                     >
                       <Icon name="x" size={12} />
                     </button>
@@ -141,8 +200,8 @@ export function ChainBuilder({
                 ))}
               </div>
               {!atCap && addOptions.length > 0 && (
-                <div className="mt-1.5 flex items-center gap-1.5 border-t border-[var(--n-100)] pt-2">
-                  <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
+                <div className="mt-1.5 flex items-center gap-1.5 border-t border-n-100 pt-2">
+                  <span className="w-8 flex-none text-2xs text-n-400">
                     {rows.length === 0 ? 'By' : 'then'}
                   </span>
                   <Select
@@ -157,7 +216,7 @@ export function ChainBuilder({
                 </div>
               )}
               {!atCap && addOptions.length === 0 && blockedHint !== undefined && (
-                <p className="m-0 mt-1.5 border-t border-[var(--n-100)] px-0.5 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+                <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-2xs leading-[15px] text-n-400">
                   {blockedHint}
                 </p>
               )}
@@ -173,7 +232,7 @@ export function ChainBuilder({
 function atcapNote(atCap: boolean, max: number) {
   if (!atCap) return null;
   return (
-    <p className="m-0 mt-1.5 border-t border-[var(--n-100)] px-0.5 pt-2 text-[11px] text-[var(--n-400)]">
+    <p className="m-0 mt-1.5 border-t border-n-100 px-0.5 pt-2 text-2xs text-n-400">
       {max} levels is the maximum — deeper nesting stops being readable.
     </p>
   );

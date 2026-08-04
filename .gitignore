@@ -20,3 +20,6 @@ docs/
 
 # vitest coverage output (M14.4)
 coverage/
+
+# Agent worktrees and local scratch (M16.1)
+.claude/

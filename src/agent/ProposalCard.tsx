@@ -42,25 +42,21 @@ export function ProposalCard({ proposal }: { proposal: OrganizeProposal }) {
   return (
     <div
       data-testid="proposal-card"
-      className="mb-3 rounded-[10px] border border-[var(--synapse-200)] bg-[var(--synapse-50)] p-3"
+      className="mb-3 rounded-lg border border-synapse-200 bg-synapse-50 p-3"
     >
       <div className="flex items-center gap-1.5 pb-1.5">
         <Icon name="sparkles" size={12} color="var(--synapse-500)" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--synapse-600)]">
+        <span className="text-2xs font-semibold uppercase tracking-[0.06em] text-synapse-600">
           Suggested filing
         </span>
       </div>
-      <p className="m-0 mb-2 text-[12px] leading-[17px] text-[var(--n-700)]">
-        {proposal.reasoning}
-      </p>
+      <p className="m-0 mb-2 text-xs leading-[17px] text-n-700">{proposal.reasoning}</p>
       {changes.length > 0 && (
         <dl className="m-0 mb-2.5 grid grid-cols-[72px_1fr] gap-x-2 gap-y-1">
           {changes.map(([label, value]) => (
             <div key={label} className="contents">
-              <dt className="text-[11px] text-[var(--n-500)]">{label}</dt>
-              <dd className="m-0 min-w-0 truncate text-[11.5px] font-medium text-[var(--n-800)]">
-                {value}
-              </dd>
+              <dt className="text-2xs text-n-500">{label}</dt>
+              <dd className="m-0 min-w-0 truncate text-xs font-medium text-n-800">{value}</dd>
             </div>
           ))}
         </dl>

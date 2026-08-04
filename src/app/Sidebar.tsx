@@ -183,13 +183,13 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
   // stays where the sidebar was instead of moving to a different chrome.
   if (collapsed) {
     return (
-      <div className="flex w-8 flex-none items-start justify-center border-r border-[var(--n-200)] bg-[var(--n-0)] pt-3.5">
+      <div className="flex w-8 flex-none items-start justify-center border-r border-n-200 bg-n-0 pt-3.5">
         <button
           type="button"
           aria-label="Show sidebar"
           data-testid="sidebar-expand"
           onClick={() => setCollapsed(false)}
-          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+          className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
         >
           <Icon name="panel-left-open" size={15} />
         </button>
@@ -206,7 +206,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
       // M15: SHRINKABLE — `flex-none` here is what made the canvas absorb every
       // pixel of a narrow window. It gives ground down to SIDEBAR_WIDTH_MIN
       // before the canvas gives up anything, which is the whole layout contract.
-      className="relative flex flex-col overflow-hidden border-r border-[var(--n-200)] bg-[var(--n-0)]"
+      className="relative flex flex-col overflow-hidden border-r border-n-200 bg-n-0"
       style={{ width: narrow ? SIDEBAR_WIDTH_MIN : width, minWidth: SIDEBAR_WIDTH_MIN }}
     >
       {/* Withdrawn while narrow: the sidebar is already pinned at its minimum,
@@ -226,7 +226,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
         {/* An h2, not an h1 (M15): this names the navigator, not the page. As an
             h1 it gave Docs two level-1 headings and made Inbox/Knowledge read as
             subsections of the file tree. */}
-        <h2 className="m-0 min-w-0 truncate text-[15px] font-semibold text-[var(--n-900)]">
+        <h2 className="m-0 min-w-0 truncate text-lg font-semibold text-n-900">
           {docsMode ? 'Docs' : knowledgeMode ? 'Knowledge' : 'Workspace'}
         </h2>
         <button
@@ -234,7 +234,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
           aria-label="Hide sidebar"
           data-testid="sidebar-collapse"
           onClick={() => setCollapsed(true)}
-          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+          className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-800"
         >
           <Icon name="panel-left-close" size={15} />
         </button>
@@ -263,13 +263,13 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               aria-label="New collection"
               data-testid="new-collection"
               onClick={() => setCollectionDialog({ mode: 'new' })}
-              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+              className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
             >
               <Icon name="plus" size={13} />
             </button>
           </div>
           {tree.length === 0 ? (
-            <div className="px-2 py-1 text-[12px] leading-[17px] text-[var(--n-400)]">
+            <div className="px-2 py-1 text-xs leading-[17px] text-n-400">
               No collections yet — make one to hold lists, folders, and docs.
             </div>
           ) : null}
@@ -290,7 +290,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
               type="button"
               aria-expanded={typesOpen}
               onClick={() => setTypesOpen(!typesOpen)}
-              className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-[var(--n-700)]`}
+              className={`${SECTION_LABEL} flex items-center gap-1 border-0 bg-transparent hover:text-n-700`}
             >
               <Icon name={typesOpen ? 'chevron-down' : 'chevron-right'} size={12} />
               Types
@@ -302,7 +302,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
                 type="button"
                 aria-label="Adopt vault schema"
                 onClick={() => setAdopting(true)}
-                className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+                className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
               >
                 <Icon name="wand-sparkles" size={12} />
               </button>
@@ -310,7 +310,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
                 type="button"
                 aria-label="New type"
                 onClick={() => setTypeDialog({ mode: 'new' })}
-                className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-700)]"
+                className="mt-2 flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent text-n-400 hover:bg-n-100 hover:text-n-700"
               >
                 <Icon name="plus" size={13} />
               </button>
@@ -333,7 +333,7 @@ export function Sidebar({ onNewView, narrow = false }: SidebarProps) {
                 >
                   <Icon name={t.icon} size={15} color={t.color ?? 'var(--n-500)'} />
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap">{t.name}</span>
-                  <span className="ml-auto [font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+                  <span className="ml-auto [font-family:var(--font-mono)] text-2xs text-n-400">
                     {t.count}
                   </span>
                 </button>

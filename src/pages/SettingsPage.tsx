@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
 import { ConnectorSettings } from '@/app/ConnectorSettings';
 import { jobQueue } from '@/engine/jobs';
@@ -8,10 +9,16 @@ import { GitSettings } from '@/git/GitSettings';
 import { listConcepts } from '@/engine/okf';
 import { pickVault } from '@/lib/ipc';
 import { todayIso } from '@/lib/templates';
-import { useUiStore } from '@/stores/uiStore';
+import { asThemeMode, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const APP_VERSION = '0.1.0';
+
+const THEME_OPTIONS = [
+  { value: 'light', label: 'Light', icon: 'sun', testId: 'theme-light' },
+  { value: 'dark', label: 'Dark', icon: 'moon', testId: 'theme-dark' },
+  { value: 'system', label: 'System', icon: 'monitor', testId: 'theme-system' },
+];
 
 /** One labelled toggle with its explanation — settings rows read as prose. */
 function SettingRow({
@@ -30,8 +37,8 @@ function SettingRow({
   return (
     <div className={`flex items-start gap-3 py-2 ${disabled ? 'opacity-50' : ''}`}>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-[var(--n-800)]">{label}</div>
-        <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">{hint}</div>
+        <div className="text-sm font-medium text-n-800">{label}</div>
+        <div className="mt-0.5 text-xs leading-[16px] text-n-500">{hint}</div>
       </div>
       <Switch ariaLabel={label} checked={checked} onChange={onChange} disabled={disabled} />
     </div>
@@ -43,6 +50,8 @@ export function SettingsPage() {
   const openVault = useVaultStore((s) => s.openVault);
   const status = useVaultStore((s) => s.status);
   const error = useVaultStore((s) => s.error);
+  const themeMode = useUiStore((s) => s.themeMode);
+  const setThemeMode = useUiStore((s) => s.setThemeMode);
   const inboxEnabled = useUiStore((s) => s.inboxEnabled);
   const setInboxEnabled = useUiStore((s) => s.setInboxEnabled);
   const inboxAutoAdvance = useUiStore((s) => s.inboxAutoAdvance);
@@ -103,22 +112,20 @@ export function SettingsPage() {
     // its clicks. PulsePage/ChangesPage already use exactly this pattern.
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto" data-testid="settings-page">
       <div className="mx-auto w-full max-w-[640px] px-8 py-8">
-        <h1 className="mb-6 text-[18px] font-semibold tracking-[-0.01em] text-[var(--n-900)]">
-          Settings
-        </h1>
-        <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Vault</h2>
-          <p className="mb-3 text-[12.5px] text-[var(--n-500)]">
+        <h1 className="mb-6 text-xl font-semibold tracking-[-0.01em] text-n-900">Settings</h1>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Vault</h2>
+          <p className="mb-3 text-sm text-n-500">
             Cerebro reads and writes plain markdown files in this folder.
           </p>
-          <div className="mb-4 rounded-lg border border-[var(--n-200)] bg-[var(--n-25)] px-3 py-2 [font-family:var(--font-mono)] text-[12px] text-[var(--n-700)]">
+          <div className="mb-4 rounded-lg border border-n-200 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-xs text-n-700">
             {vaultPath ?? 'No vault open'}
           </div>
           {status === 'error' && error ? (
             // Deviation from the plan's verbatim body (execution-log note 15a,
             // reported): vaultStore.status === 'error' was displayed nowhere —
             // surface it beside the recovery action.
-            <p className="mb-4 text-[12px] text-[var(--danger-500)]">{error}</p>
+            <p className="mb-4 text-xs text-danger-500">{error}</p>
           ) : null}
           <Button
             variant="secondary"
@@ -129,9 +136,34 @@ export function SettingsPage() {
             Change vault…
           </Button>
         </section>
-        <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Workflow</h2>
-          <p className="mb-4 text-[12.5px] text-[var(--n-500)]">
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Appearance</h2>
+          <p className="mb-4 text-sm text-n-500">
+            How cerebro looks. The choice is remembered on this machine.
+          </p>
+          <div className="flex items-start gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-n-800">Theme</div>
+              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
+                System follows your operating system and changes with it — including when it
+                switches on its own at sunset.
+              </div>
+            </div>
+            <SegmentedControl
+              ariaLabel="Theme"
+              options={THEME_OPTIONS}
+              value={themeMode}
+              // asThemeMode rather than a cast: SegmentedControl's onChange is
+              // typed `string`, and a cast would let a typo in THEME_OPTIONS
+              // through the compiler and into localStorage.
+              onChange={(v) => setThemeMode(asThemeMode(v))}
+              className="flex-none"
+            />
+          </div>
+        </section>
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Workflow</h2>
+          <p className="mb-4 text-sm text-n-500">
             Capture fast, organize deliberately. A note stays in the Inbox until it has a type.
           </p>
           <SettingRow
@@ -148,9 +180,9 @@ export function SettingsPage() {
             disabled={!inboxEnabled}
           />
         </section>
-        <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Assistant</h2>
-          <p className="mb-4 text-[12.5px] leading-[18px] text-[var(--n-500)]">
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Assistant</h2>
+          <p className="mb-4 text-sm leading-[18px] text-n-500">
             What the assistant may change follows from where it is writing, not from a mode you pick
             each time: it owns <span className="[font-family:var(--font-mono)]">knowledge/</span>{' '}
             and writes there directly, and it reaches everything else through cerebro's own tools.
@@ -171,8 +203,8 @@ export function SettingsPage() {
           {connectors && <ConnectorSettings />}
           <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-[var(--n-800)]">Issue keys</div>
-              <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+              <div className="text-sm font-medium text-n-800">Issue keys</div>
+              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
                 Your tracker's project keys, comma separated —{' '}
                 <span className="[font-family:var(--font-mono)]">PHX, SYN</span>. These cannot be
                 guessed: <span className="[font-family:var(--font-mono)]">PHX-421</span> and{' '}
@@ -190,9 +222,9 @@ export function SettingsPage() {
             />
           </div>
         </section>
-        <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">Knowledge</h2>
-          <p className="mb-4 text-[12.5px] text-[var(--n-500)]">
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">Knowledge</h2>
+          <p className="mb-4 text-sm text-n-500">
             The AI knowledge base in{' '}
             <span className="[font-family:var(--font-mono)]">knowledge/</span> is written by the
             agent and read-only here. Verifying a concept records who confirmed it.
@@ -204,7 +236,7 @@ export function SettingsPage() {
             onChange={setAutoLearn}
           />
           {pending > 0 && (
-            <p className="m-0 mb-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+            <p className="m-0 mb-2 text-xs leading-[16px] text-n-500">
               {learningPath !== null
                 ? `Reading ${learningPath} now.`
                 : `${pending} background job${pending === 1 ? '' : 's'} waiting.`}
@@ -212,8 +244,8 @@ export function SettingsPage() {
           )}
           <div className="flex items-start gap-3 py-2">
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-[var(--n-800)]">Your identity</div>
-              <div className="mt-0.5 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+              <div className="text-sm font-medium text-n-800">Your identity</div>
+              <div className="mt-0.5 text-xs leading-[16px] text-n-500">
                 Stamped as{' '}
                 <span className="[font-family:var(--font-mono)]">human:{actorId || 'me'}</span> when
                 you verify. The <span className="[font-family:var(--font-mono)]">human:</span>{' '}
@@ -228,12 +260,12 @@ export function SettingsPage() {
             />
           </div>
         </section>
-        <section className="mb-6 rounded-[14px] border border-[var(--n-200)] p-5">
+        <section className="mb-6 rounded-xl border border-n-200 p-5">
           <GitSettings />
         </section>
-        <section className="rounded-[14px] border border-[var(--n-200)] p-5">
-          <h2 className="mb-1 text-[14px] font-semibold text-[var(--n-900)]">About</h2>
-          <p className="text-[12.5px] text-[var(--n-500)]">
+        <section className="rounded-xl border border-n-200 p-5">
+          <h2 className="mb-1 text-md font-semibold text-n-900">About</h2>
+          <p className="text-sm text-n-500">
             Cerebro <span className="[font-family:var(--font-mono)]">{APP_VERSION}</span>
           </p>
         </section>

@@ -88,7 +88,7 @@ export function ResizeHandle({
       <span
         className={[
           'w-[2px] transition-colors',
-          active ? 'bg-[var(--cortex-500)]' : 'bg-transparent hover:bg-[var(--cortex-300)]',
+          active ? 'bg-cortex-500' : 'bg-transparent hover:bg-cortex-300',
         ].join(' ')}
       />
     </span>

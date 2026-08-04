@@ -1,0 +1,104 @@
+{
+  // Editor-side mirror of the exclusion list every other tool in this repo
+  // already applies (eslint.config.js `ignores`, .prettierignore, .gitignore,
+  // vite.config.ts coverage excludes). The editor was the only tool without
+  // one, so its language servers walked the vendored tree and reported
+  // thousands of foreign diagnostics in the Problems panel.
+  //
+  // `docs/` is the big one: per AGENTS.md it is gitignored VENDORED reference
+  // (tolaria-main, knowledge-catalog-main, obsidian-second-brain-main, ...),
+  // NOT project code. It ships 7 tsconfig.json files across 4 third-party
+  // repos with no node_modules installed, and VS Code's TypeScript server
+  // auto-discovers every tsconfig in an open workspace — so every import in
+  // ~1500 vendored files resolved to "Cannot find module".
+  //
+  // To read the vendored sources, flip "docs" to false here (or open the
+  // folder in its own window) — hiding it does not delete anything.
+  "files.exclude": {
+    "**/.DS_Store": true,
+    // Nested git worktrees live here. A worktree is a SECOND full checkout of
+    // this same repo, so leaving it visible makes Quick Open list every source
+    // file twice — open the wrong one and you are silently editing a different
+    // branch. It also hands the TS server a duplicate src/ plus its own
+    // tsconfigs. eslint.config.js, .prettierignore and .gitignore all already
+    // exclude .claude/; this is the editor saying the same thing.
+    ".claude": true,
+    "docs": true,
+    "dist": true,
+    "dist-mac": true,
+    "coverage": true,
+    "test-results": true,
+    "playwright-report": true,
+    ".vite": true,
+    "src-tauri/target": true,
+    "src-tauri/gen": true
+  },
+
+  // Keep the vault browsable in the explorer, but out of search results and
+  // the file watcher — demo-vault is the golden corpus, so grepping it
+  // constantly buries real hits in fixture noise.
+  "search.exclude": {
+    ".claude": true,
+    "docs": true,
+    "dist": true,
+    "dist-mac": true,
+    "coverage": true,
+    "test-results": true,
+    "playwright-report": true,
+    ".vite": true,
+    "src-tauri/target": true,
+    "src-tauri/gen": true,
+    "node_modules": true,
+    "pnpm-lock.yaml": true,
+    "demo-vault": true
+  },
+
+  // Watching the vendored tree and Rust's target/ dir costs file handles and
+  // wakes the TS server for changes that can never affect the app.
+  "files.watcherExclude": {
+    "**/.claude/**": true,
+    "**/docs/**": true,
+    "**/dist/**": true,
+    "**/dist-mac/**": true,
+    "**/coverage/**": true,
+    "**/test-results/**": true,
+    "**/playwright-report/**": true,
+    "**/.vite/**": true,
+    "**/src-tauri/target/**": true,
+    "**/src-tauri/gen/**": true,
+    "**/node_modules/**": true
+  },
+
+  // Pin the TS server to the workspace's own TypeScript so editor
+  // diagnostics match what `pnpm typecheck` reports in CI.
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // Report diagnostics for open files only. Project-wide diagnostics would
+  // re-introduce foreign errors the moment any excluded file is opened.
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+
+  // ESLint already ignores these in eslint.config.js; repeating it here stops
+  // the extension from spawning lint runs against vendored code.
+  "eslint.workingDirectories": [{ "mode": "auto" }],
+  "eslint.probe": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+
+  // Prettier is the formatter of record (100 cols, single quotes).
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // .gitattributes pins sources to text after two files went binary from
+  // embedded control bytes. Keep the editor from re-introducing them.
+  "files.eol": "\n",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  // Rust: analyzer should build into its own target dir so it never blocks a
+  // `cargo test` running in the terminal.
+  "rust-analyzer.linkedProjects": ["src-tauri/Cargo.toml"],
+  "rust-analyzer.cargo.targetDir": true
+}

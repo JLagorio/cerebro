@@ -1,0 +1,60 @@
+/* Table cell chrome — hidden at rest, revealed on the live row (M16.35).
+ *
+ * Measured against Notion's own table: an unset cell there renders COMPLETELY
+ * blank, no cell anywhere carries a dropdown chevron at rest, and the Due
+ * column is plain text with no calendar glyph. Cerebro's grid painted 450
+ * <svg> at full opacity in a single viewport of cells, so the affordances
+ * outnumbered the data and the eye had nothing to land on.
+ *
+ * What goes is the CHROME: the dropdown chevron every option/person/relation
+ * cell drew, the calendar repeated on every date cell (the column header
+ * already says the kind), and the inline edit pencil on url/email/phone. What
+ * STAYS is anything that carries meaning — the status dot, the person avatar,
+ * the relation chip's opt-in type icon, the nesting expander — because Notion
+ * shows those too.
+ *
+ * `visibility`, never `display`: the glyph keeps its box, so revealing it
+ * cannot shift the value it sits beside, and the row height is the same in
+ * both states. It also drops out of hit-testing while hidden, so there is no
+ * invisible target between the pointer and the cell.
+ *
+ * SCOPE — every rule is under `.cb-row`, which only a table row carries. The
+ * DETAIL PANEL is deliberately untouched: an unset property there shows grey
+ * "Empty" ghost text, which is what Notion's record page does and what
+ * FIELD_VISIBILITIES in engine/types.ts exists to let a user control.
+ *
+ * These rules are unlayered, so they sit above Tailwind's `utilities` layer
+ * and no `opacity-*`/`visible` utility on a cell can fight them.
+ */
+
+.cb-row
+  :is(
+    .cb-cell-chrome [data-icon='chevron-down'],
+    .cb-cell-chrome [data-icon='calendar'],
+    .cb-cell-chrome [data-icon='pencil'],
+    .cb-row-chrome
+  ) {
+  visibility: hidden;
+}
+
+/* Revealed when the row is live. Three hooks, because there are three ways a
+ * row becomes live in this grid and a hover-only reveal is a bug in itself:
+ *
+ *   :hover              — the pointer.
+ *   :focus-within       — real DOM focus inside the row, e.g. after Enter
+ *                         hands a cell over to its editor.
+ *   [data-focused]      — the roving cursor. useRowKeyboard drives the grid
+ *                         with aria-activedescendant, so DOM focus never
+ *                         leaves the scroll container and :focus-within alone
+ *                         would leave arrow-key users with no affordances at
+ *                         all.
+ */
+:is(.cb-row:hover, .cb-row:focus-within, .cb-row[data-focused='true'])
+  :is(
+    .cb-cell-chrome [data-icon='chevron-down'],
+    .cb-cell-chrome [data-icon='calendar'],
+    .cb-cell-chrome [data-icon='pencil'],
+    .cb-row-chrome
+  ) {
+  visibility: visible;
+}

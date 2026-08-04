@@ -8,13 +8,13 @@
  */
 
 export const SECTION_LABEL =
-  'px-2 pb-1 pt-3.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]';
+  'px-2 pb-1 pt-3.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500';
 
 export function rowClass(active: boolean): string {
   return [
-    'flex h-[30px] w-full items-center gap-[7px] rounded-md border-0 px-2 text-left text-[13px]',
+    'flex h-[30px] w-full items-center gap-[7px] rounded-md border-0 px-2 text-left text-sm',
     active
-      ? 'bg-[var(--n-100)] font-medium text-[var(--n-900)]'
-      : 'bg-transparent font-normal text-[var(--n-700)] hover:bg-[var(--n-100)]',
+      ? 'bg-n-100 font-medium text-n-900'
+      : 'bg-transparent font-normal text-n-700 hover:bg-n-100',
   ].join(' ');
 }

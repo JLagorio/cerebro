@@ -15,7 +15,8 @@ import type {
   ViewType,
 } from '@/engine/types';
 import { addFieldToType, addRelationProperty, normalizeFieldName } from '@/app/typeActions';
-import { clonePresentation, layoutLabel, newView, resolveView, toggleSort } from '@/engine/views';
+import { clonePresentation, layoutLabel, moveView, resolveView, toggleSort } from '@/engine/views';
+import { seedView } from '@/app/viewActions';
 import { useNavStore } from '@/stores/navStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { resolveDateField } from '@/engine/schedule';
@@ -24,6 +25,8 @@ import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
+import { ViewLimitNotice } from '@/views/ViewLimitNotice';
+import { limitEntries, searchEntries } from '@/engine/viewFilters';
 
 export type ListSelection = Extract<Selection, { kind: 'list' }>;
 
@@ -70,17 +73,25 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   // M12.8: the chip bar below the tabs. Hidden until an icon engages it —
   // the icons tint when an axis is active, so nothing is silently filtered.
   const [controlsOpen, setControlsOpen] = useState(false);
+  // M16.26: search is where you are looking RIGHT NOW, not part of what the
+  // saved view is — so it lives here and never reaches the YAML, and it
+  // clears with the tab for the same reason the presentation re-seeds.
+  const [search, setSearch] = useState('');
   // Re-seed when the LIST or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
     setPresentation(clonePresentation(surface.presentation));
+    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.id, selection.collection, activeId]);
 
   const sortedEntries = useMemo(
-    () => sortEntries(surface.entries, presentation.sort, schema),
-    [surface.entries, presentation.sort, schema],
+    () => searchEntries(sortEntries(surface.entries, presentation.sort, schema), search),
+    [surface.entries, presentation.sort, schema, search],
   );
+  // Applied AFTER the sort, so "the first 25" means the first 25 of the order
+  // on screen rather than 25 arbitrary records that then get sorted.
+  const shownEntries = limitEntries(sortedEntries, presentation.limit);
 
   // M9.2: one resolution for every surface. A typeless view used to get [],
   // so an "Everything" view had no columns at all; columnUniverse unions the
@@ -192,12 +203,15 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     void (async () => {
       // Seeded from the tab you are on: "same columns, drawn as a board" is
       // what people mean by adding a view, and starting blank throws away the
-      // configuration they just did.
-      const seeded = newView(
+      // configuration they just did. `seedView` decides what may travel —
+      // this used to hand the whole presentation over and swap `type`, so a
+      // table born on the gantt kept `zoom` forever (M16.29).
+      const seeded = seedView(
         name,
         type,
         list.definition.views.map((v) => v.id),
         presentation,
+        activeView.filters,
       );
       const id = await addView(list, seeded);
       if (id !== null) openTab(id);
@@ -215,7 +229,9 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   };
 
   const sourceLabel = list.definition.source.type ?? 'Everything';
-  const filtered = activeView.filters !== null;
+  // Search narrows too, so the empty state must say "nothing matches" rather
+  // than "this list is empty" — which would be a lie about the vault.
+  const filtered = activeView.filters !== null || search !== '';
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1" data-testid="collection-page">
@@ -229,21 +245,32 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               data-testid="list-title-edit"
               title="Edit list name & settings"
               onClick={() => setSettingsOpen(true)}
-              className="flex min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-[var(--n-50)]"
+              className="flex min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
             >
               <Icon
                 name={list.definition.icon ?? 'layout-list'}
                 size={16}
                 color={list.definition.color ?? 'var(--n-600)'}
               />
-              <h1 className="m-0 min-w-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+              <h1 className="m-0 min-w-0 truncate text-lg font-semibold leading-6 tracking-[-0.005em]">
                 {list.definition.name}
               </h1>
             </button>
-            <span className="flex-none [font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-              {surface.entries.length}
+            {/* M16.31: `sortedEntries`, which is filtered AND searched — not
+                `surface.entries`, which is only filtered. Typing in "Search
+                this view" narrowed the canvas and flipped the chip to
+                "· filtered" while this number stayed where it was, so one
+                header told two different stories about one screen depending
+                on which control you had narrowed with. NOT `shownEntries`: a
+                load limit is truncation, and how much of how much is showing
+                is what ViewLimitNotice says under the records. */}
+            <span
+              data-testid="view-count"
+              className="flex-none [font-family:var(--font-mono)] text-xs text-n-400"
+            >
+              {sortedEntries.length}
             </span>
-            <span className="hidden flex-none items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)] sm:inline-flex">
+            <span className="hidden flex-none items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500 sm:inline-flex">
               {sourceLabel}
               {filtered && ' · filtered'}
             </span>
@@ -296,6 +323,15 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             })();
           }}
           onDelete={removeView}
+          onReorder={(id, to) =>
+            changeList({ ...list.definition, views: moveView(list.definition.views, id, to) })
+          }
+          onChangeIcon={(id, icon) =>
+            changeList({
+              ...list.definition,
+              views: list.definition.views.map((v) => (v.id === id ? { ...v, icon } : v)),
+            })
+          }
           onConfigure={(id) => {
             if (id !== activeId) openTab(id);
             setSettingsOpen(true);
@@ -310,6 +346,8 @@ export function ListPage({ selection }: { selection: ListSelection }) {
               onFiltersChange={(filters) => changeView({ ...activeView, filters })}
               barOpen={controlsOpen}
               onBarOpenChange={setControlsOpen}
+              search={search}
+              onSearchChange={setSearch}
               settingsOpen={settingsOpen}
               onSettingsOpenChange={setSettingsOpen}
               settingsPanel={
@@ -359,7 +397,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           />
         )}
         <ViewCanvas
-          entries={sortedEntries}
+          entries={shownEntries}
           allEntries={entries}
           presentation={presentation}
           schema={schema}
@@ -391,6 +429,11 @@ export function ListPage({ selection }: { selection: ListSelection }) {
             })
           }
         />
+        <ViewLimitNotice
+          shown={shownEntries.length}
+          total={sortedEntries.length}
+          onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
+        />
       </div>
       {confirmDelete && (
         <Dialog
@@ -409,7 +452,7 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">
+          <p className="m-0 text-sm text-n-600">
             The list's configuration is removed, including its{' '}
             {list.definition.views.length === 1 ? 'view' : `${list.definition.views.length} views`}.
             The records it held are untouched — a list is a saved query, not the notes themselves.

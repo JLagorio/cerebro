@@ -122,14 +122,20 @@ export async function addFieldToType(
  * the cardinality. When `reciprocalName` is given, the TARGET type gets a
  * derived relation back — `from: { type, field }` — which stores nothing and
  * reads the reverse index, so two files never disagree about one link.
+ *
+ * `person` takes the same route (M16.13b) — it is a relation that renders
+ * avatars, and it needs a target for the very same reason. The reciprocal is
+ * always a plain `relation`: the reverse of "assignee" is "their tasks", not
+ * "their people".
  */
 export async function addRelationProperty(
   typeName: string,
   rawName: string,
   config: { target: string; limit?: 1; reciprocalName?: string },
+  kind: 'relation' | 'person' = 'relation',
 ): Promise<boolean> {
   const name = normalizeFieldName(rawName);
-  const added = await addFieldToType(typeName, rawName, 'relation', {
+  const added = await addFieldToType(typeName, rawName, kind, {
     target: config.target,
     ...(config.limit === 1 ? { limit: 1 } : {}),
   });
@@ -147,8 +153,14 @@ const KIND_KEYS: Record<string, string[]> = {
   multiselect: ['options'],
   status: ['options'],
   relation: ['target', 'limit', 'from'],
+  // A person field is a relation with an avatar renderer (M16.13b), so its
+  // wiring survives a relation ⇄ person conversion instead of being silently
+  // dropped and leaving the picker pointing at nothing.
+  person: ['target', 'limit', 'from'],
   rollup: ['relation', 'property', 'calculate', 'from', 'format', 'precision'],
   number: ['format', 'precision'],
+  date: ['dateFormat', 'timeFormat'],
+  daterange: ['dateFormat', 'timeFormat'],
 };
 
 /**
@@ -450,7 +462,23 @@ export async function setFieldConfig(
   fieldName: string,
   config: Partial<
     Record<
-      'relation' | 'property' | 'calculate' | 'format' | 'precision' | 'target' | 'limit' | 'from',
+      | 'relation'
+      | 'property'
+      | 'calculate'
+      | 'format'
+      | 'precision'
+      | 'target'
+      | 'limit'
+      | 'from'
+      // M16.14. A date's display format is a PROPERTY setting, not a per-value
+      // one — the picker's format menu used to be discarded when the popover
+      // closed. `dateFormat`, never `format`: numbers own that key.
+      | 'dateFormat'
+      | 'timeFormat'
+      // M16.10. Pass null for the default ('show') so the key is deleted
+      // rather than written — a Type doc should not carry the absence of an
+      // opinion.
+      | 'visibility',
       unknown
     >
   >,
@@ -570,8 +598,11 @@ export async function addPropertyToEntry(
     return false;
   }
   if (entry.type !== null) {
-    if (kind === 'relation' && relation !== undefined) {
-      return addRelationProperty(entry.type, name, relation);
+    // `person` too, not just `relation` (M16.13b): the add-property panel
+    // collects a target for both, and gating on 'relation' alone silently
+    // DISCARDED the one the user had just picked for a person field.
+    if ((kind === 'relation' || kind === 'person') && relation !== undefined) {
+      return addRelationProperty(entry.type, name, relation, kind);
     }
     return addFieldToType(entry.type, name, kind);
   }

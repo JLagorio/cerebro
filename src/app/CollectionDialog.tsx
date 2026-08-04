@@ -75,7 +75,7 @@ export function CollectionDialog({
         width="100%"
       />
       {state.mode === 'rename' && (
-        <p className="m-0 mt-2 text-[12px] text-[var(--n-500)]">
+        <p className="m-0 mt-2 text-xs text-n-500">
           The folder stays <code>{state.collection.folder}</code> — renaming changes what it is
           called, not where its contents live.
         </p>

@@ -30,18 +30,16 @@ function LinkRow({ link }: { link: DocLink }) {
       type="button"
       data-testid="doc-link-row"
       onClick={() => open(link.entry.path)}
-      className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left hover:bg-[var(--n-50)]"
+      className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left hover:bg-n-50"
     >
       <Icon
         name={typeStyle(link.entry.type, schema).icon}
         size={13}
         color={typeStyle(link.entry.type, schema).color ?? 'var(--n-500)'}
       />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--n-800)]">
-        {link.entry.title}
-      </span>
+      <span className="min-w-0 flex-1 truncate text-sm text-n-800">{link.entry.title}</span>
       {link.via !== 'body' && (
-        <span className="flex-none rounded-[5px] bg-[var(--n-50)] px-1 py-px text-[10.5px] text-[var(--n-500)]">
+        <span className="flex-none rounded-sm bg-n-50 px-1 py-px text-2xs text-n-500">
           {link.via}
         </span>
       )}
@@ -69,7 +67,7 @@ function LinksTab({ entry }: { entry: Entry }) {
   const section = (label: string, links: DocLink[]) =>
     links.length === 0 ? null : (
       <>
-        <h3 className="mb-1 mt-3 px-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)] first:mt-1">
+        <h3 className="mb-1 mt-3 px-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500 first:mt-1">
           {label}
         </h3>
         <div className="flex flex-col gap-px">
@@ -111,9 +109,9 @@ export function DocSidePanel({
     <aside
       data-testid="doc-side-panel"
       aria-label="Document panel"
-      className="flex w-[272px] flex-none flex-col border-l border-[var(--n-200)] bg-[var(--n-0)]"
+      className="flex w-[272px] flex-none flex-col border-l border-n-200 bg-n-0"
     >
-      <div className="flex flex-none items-center gap-1 border-b border-[var(--n-100)] px-2 py-1.5">
+      <div className="flex flex-none items-center gap-1 border-b border-n-100 px-2 py-1.5">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -121,10 +119,10 @@ export function DocSidePanel({
             data-testid={`doc-panel-tab-${t.id}`}
             onClick={() => setTab(t.id)}
             className={[
-              'rounded-md border-0 px-2.5 py-1 text-[12px]',
+              'rounded-md border-0 px-2.5 py-1 text-xs',
               tab === t.id
-                ? 'bg-[var(--n-100)] font-medium text-[var(--n-900)]'
-                : 'bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+                ? 'bg-n-100 font-medium text-n-900'
+                : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
             ].join(' ')}
           >
             {t.label}
@@ -146,7 +144,7 @@ export function DocSidePanel({
                 give the note: every doc is a candidate source, not just the
                 ones that happened to arrive through the Inbox. */}
             <KnowledgeCommit entry={entry} variant="panel" />
-            <div className="border-t border-[var(--n-100)] pt-3.5">
+            <div className="border-t border-n-100 pt-3.5">
               <RelatedKnowledge
                 entry={entry}
                 variant="panel"

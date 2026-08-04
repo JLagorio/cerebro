@@ -74,7 +74,7 @@ export function MoveDialog({
     >
       <div
         data-testid="move-target-list"
-        className="flex max-h-[300px] flex-col gap-px overflow-y-auto rounded-lg border border-[var(--n-200)] p-1"
+        className="flex max-h-[300px] flex-col gap-px overflow-y-auto rounded-lg border border-n-200 p-1"
       >
         {targets.map((f) => (
           <button
@@ -82,10 +82,10 @@ export function MoveDialog({
             type="button"
             onClick={() => setSelected(f)}
             className={[
-              'flex items-center gap-1.5 rounded-md border-0 px-2 py-1.5 text-left text-[13px]',
+              'flex items-center gap-1.5 rounded-md border-0 px-2 py-1.5 text-left text-sm',
               selected === f
-                ? 'bg-[var(--cortex-50)] font-medium text-[var(--cortex-600)]'
-                : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                ? 'bg-cortex-50 font-medium text-cortex-600'
+                : 'bg-transparent text-n-700 hover:bg-n-50',
             ].join(' ')}
           >
             <Icon name="folder" size={14} color="var(--n-500)" />

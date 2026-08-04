@@ -1,6 +1,6 @@
 import '@blocknote/mantine/style.css';
 import './editor.css';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BlockNoteSchema,
   createCodeBlockSpec,
@@ -24,11 +24,12 @@ import {
 } from '@blocknote/react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Icon } from '@/components/ui/Icon';
+import { peopleTypes } from '@/engine/properties';
 import type { Entry } from '@/engine/types';
 import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 import { CalloutBlock, MermaidBlock } from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
@@ -180,7 +181,15 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const editor = useCreateBlockNote({ schema: cerebroSchema });
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const vaultPath = useVaultStore((s) => s.vaultPath);
+  // Who the @ menu offers. This was `e.type === 'Person'` in three places
+  // (M16.13b) — the type-name routing AGENTS.md forbids, and the reason a
+  // vault whose people are `Teammate`s had an @ menu with no people in it.
+  // There is no FieldDef here to read a target off, so the schema answers:
+  // the types every person field points at.
+  const peopleSet = useMemo(() => peopleTypes(schema, entries), [schema, entries]);
+  const isPerson = useCallback((e: Entry) => e.type !== null && peopleSet.has(e.type), [peopleSet]);
   const toast = useUiStore((s) => s.toast);
   const [loaded, setLoaded] = useState(false);
   // Assign-task popover (M2.x feedback): opened from the checklist row's
@@ -315,7 +324,7 @@ export function MarkdownEditor({
       .filter(isLinkableDoc)
       // The @ menu already lists people under "People" — repeating them in
       // "Link page" would render duplicate titles (and duplicate React keys).
-      .filter((e) => !(opts?.excludePeople === true && e.type === 'Person'))
+      .filter((e) => !(opts?.excludePeople === true && isPerson(e)))
       .map((e) => ({
         title: e.title,
         subtext: e.path,
@@ -325,15 +334,13 @@ export function MarkdownEditor({
       }));
 
   const personItems = (): DefaultReactSuggestionItem[] =>
-    entries
-      .filter((e) => e.type === 'Person')
-      .map((e) => ({
-        title: e.title,
-        subtext: 'Assign',
-        group: 'People',
-        icon: <Icon name="circle-user" size={14} />,
-        onItemClick: () => insertChip({ type: 'assignee', props: { target: stem(e) } }),
-      }));
+    entries.filter(isPerson).map((e) => ({
+      title: e.title,
+      subtext: 'Assign',
+      group: 'People',
+      icon: <Icon name="circle-user" size={14} />,
+      onItemClick: () => insertChip({ type: 'assignee', props: { target: stem(e) } }),
+    }));
 
   const dueItems = (): DefaultReactSuggestionItem[] =>
     [
@@ -431,7 +438,7 @@ export function MarkdownEditor({
 
   // --- Assign-task dialog (M2.x feedback) ---------------------------------
 
-  const people = entries.filter((e) => e.type === 'Person');
+  const people = entries.filter(isPerson);
 
   const openAssignDialog = (blockId: string) => {
     const block = editor.getBlock(blockId);
@@ -563,16 +570,16 @@ export function MarkdownEditor({
             role="dialog"
             aria-label="Assign task"
             data-testid="assign-task-popover"
-            className="absolute flex w-[300px] flex-col gap-2 rounded-xl border border-[var(--n-200)] bg-[var(--n-0)] p-3 shadow-[0_8px_28px_rgba(22,26,36,0.16)]"
+            className="absolute flex w-[300px] flex-col gap-2 rounded-xl border border-n-200 bg-n-0 p-3 shadow-[0_8px_28px_rgba(22,26,36,0.16)]"
             style={{ left: assign.x, top: assign.y }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-2">
               <Icon name="user-round-plus" size={14} color="var(--n-500)" />
-              <span className="text-[12.5px] font-semibold text-[var(--n-800)]">Assign task</span>
+              <span className="text-sm font-semibold text-n-800">Assign task</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-16 flex-none text-[12px] text-[var(--n-500)]">Assignee</span>
+              <span className="w-16 flex-none text-xs text-n-500">Assignee</span>
               <Dropdown
                 size="sm"
                 label="Assignee"
@@ -586,7 +593,7 @@ export function MarkdownEditor({
               />
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-16 flex-none text-[12px] text-[var(--n-500)]">Due</span>
+              <span className="w-16 flex-none text-xs text-n-500">Due</span>
               <input
                 type="date"
                 autoFocus
@@ -596,21 +603,21 @@ export function MarkdownEditor({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') submitAssign();
                 }}
-                className="h-7 flex-1 rounded-md border border-[var(--n-200)] px-2 text-[13px] text-[var(--n-800)]"
+                className="h-7 flex-1 rounded-md border border-n-200 px-2 text-sm text-n-800"
               />
             </div>
             <div className="mt-0.5 flex items-center justify-end gap-1.5">
               <button
                 type="button"
                 onClick={() => setAssign(null)}
-                className="h-7 rounded-md border-0 bg-transparent px-2 text-[12px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+                className="h-7 rounded-md border-0 bg-transparent px-2 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={submitAssign}
-                className="h-7 rounded-md border-0 bg-[var(--cortex-500)] px-2.5 text-[12px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-600)]"
+                className="h-7 rounded-md border-0 bg-cortex-500 px-2.5 text-xs font-medium text-n-0 hover:bg-cortex-600"
               >
                 Apply
               </button>

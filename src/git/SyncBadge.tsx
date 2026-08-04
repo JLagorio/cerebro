@@ -78,7 +78,7 @@ export function SyncBadge() {
         data-testid="sync-badge"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--n-200)] bg-[var(--n-0)] px-2 text-[12px] text-[var(--n-600)] hover:border-[var(--n-300)]"
+        className="inline-flex h-7 items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-2 text-xs text-n-600 hover:border-n-300"
       >
         <Icon name={tone.icon} size={12} color={tone.color} />
         {tone.label(count)}
@@ -93,8 +93,8 @@ export function SyncBadge() {
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[260px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2 shadow-[var(--shadow-lg)]">
-              <div className="px-0.5 pb-1.5 text-[11px] text-[var(--n-500)]">
+            <div className="w-[260px] rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]">
+              <div className="px-0.5 pb-1.5 text-2xs text-n-500">
                 {remote === null
                   ? 'Tracked locally. No remote connected.'
                   : `${remote.branch} · ${remote.ahead} ahead, ${remote.behind} behind`}

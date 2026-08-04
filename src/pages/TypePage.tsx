@@ -9,7 +9,8 @@ import {
 import { Icon } from '@/components/ui/Icon';
 import { resolveSurface, sortEntries } from '@/engine/surface';
 import { columnUniverse } from '@/engine/columns';
-import { clonePresentation, layoutLabel, newView, nextViewId, toggleSort } from '@/engine/views';
+import { clonePresentation, layoutLabel, moveView, nextViewId, toggleSort } from '@/engine/views';
+import { seedView } from '@/app/viewActions';
 import { listTypes, typeViews, type TypeListing } from '@/engine/typeCatalog';
 import type { FieldDef, Presentation, Selection, ViewDefinition, ViewType } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
@@ -21,6 +22,8 @@ import { ViewCanvas } from '@/views/ViewCanvas';
 import { ViewControlIcons } from '@/views/ViewControlIcons';
 import { ViewTabs } from '@/views/ViewTabs';
 import { ViewToolbar } from '@/views/ViewToolbar';
+import { ViewLimitNotice } from '@/views/ViewLimitNotice';
+import { limitEntries, searchEntries } from '@/engine/viewFilters';
 
 export type TypeSelection = Extract<Selection, { kind: 'type' }>;
 
@@ -79,10 +82,14 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   // M12.8: the view-settings menu, floating from the tab row's sliders icon.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [presentation, setPresentation] = useState<Presentation>(collection.presentation);
+  // M16.26: ephemeral, unlike a filter — it is where you are looking right
+  // now, so it never reaches the Type doc and clears with the tab.
+  const [search, setSearch] = useState('');
   // Re-seed when the TYPE or the TAB changes — a tab carries its own
   // configuration, so switching tabs must not inherit the last one's.
   useEffect(() => {
     setPresentation(clonePresentation(collection.presentation));
+    setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name, activeId]);
 
@@ -133,11 +140,15 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   const createView = (name: string, type: ViewType) => {
     // Seeded from the tab you are on, and written together with the current
     // tabs — which also materializes the default view the first time.
-    const seeded = newView(
+    // `seedView` decides what may travel: this handed the whole presentation
+    // over and swapped `type`, so a table born on the gantt kept the gantt's
+    // axis keys in the Type doc forever (M16.29).
+    const seeded = seedView(
       name,
       type,
       savedViews.map((v) => v.id),
       presentation,
+      activeView.filters,
     );
     void (async () => {
       if (await setTypeViews(listing, [...savedViews, seeded])) openTab(seeded.id);
@@ -176,9 +187,12 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
   };
 
   const sortedEntries = useMemo(
-    () => sortEntries(collection.entries, presentation.sort, schema),
-    [collection.entries, presentation.sort, schema],
+    () => searchEntries(sortEntries(collection.entries, presentation.sort, schema), search),
+    [collection.entries, presentation.sort, schema, search],
   );
+  // After the sort: "the first 25" has to mean the first 25 of the order on
+  // screen, not 25 arbitrary records that are then sorted among themselves.
+  const shownEntries = limitEntries(sortedEntries, presentation.limit);
 
   // The calendar creates WITH a date, which the band mechanism cannot carry:
   // a band sets a grouping value, not an arbitrary property.
@@ -201,7 +215,7 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               data-testid="type-icon-edit"
               title="Change icon & color"
               onClick={() => setDialog('style')}
-              className="flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-[var(--n-50)]"
+              className="flex h-7 w-7 flex-none items-center justify-center rounded-md border-0 bg-transparent hover:bg-n-50"
             >
               <Icon name={listing.icon} size={16} color={listing.color ?? 'var(--n-600)'} />
             </button>
@@ -210,17 +224,27 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               data-testid="type-title-edit"
               title={listing.system ? 'Change icon & color' : 'Change display name'}
               onClick={() => setDialog(listing.system ? 'style' : 'rename')}
-              className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-[var(--n-50)]"
+              className="min-w-0 rounded-md border-0 bg-transparent px-1 py-0.5 hover:bg-n-50"
             >
-              <h1 className="m-0 truncate text-[15px] font-semibold leading-6 tracking-[-0.005em]">
+              <h1 className="m-0 truncate text-lg font-semibold leading-6 tracking-[-0.005em]">
                 {listing.name}
               </h1>
             </button>
-            <span className="[font-family:var(--font-mono)] text-[11.5px] text-[var(--n-400)]">
-              {listing.count}
+            {/* M16.31: the records this view is showing, not `listing.count`
+                — the number of records of this type in the vault. Those are
+                the same number until you filter or search, and then the
+                header goes on reporting the vault while the canvas reports
+                the view. The List page had the milder form of this (it
+                followed filters but not search) and both now read the same
+                thing: what is on screen. */}
+            <span
+              data-testid="view-count"
+              className="[font-family:var(--font-mono)] text-xs text-n-400"
+            >
+              {sortedEntries.length}
             </span>
             {listing.system && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
+              <span className="inline-flex items-center gap-1 rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
                 <Icon name="lock" size={10} />
                 System type
               </span>
@@ -256,6 +280,10 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           }
           onDuplicate={duplicateTab}
           onDelete={removeView}
+          onReorder={(id, to) => changeViews(moveView(savedViews, id, to))}
+          onChangeIcon={(id, icon) =>
+            changeViews(savedViews.map((v) => (v.id === id ? { ...v, icon } : v)))
+          }
           // M12.8: the view controls live in the tab row (Notion's toolbar).
           trailing={
             <ViewControlIcons
@@ -266,6 +294,8 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               onFiltersChange={(filters) => changeView({ ...activeView, filters })}
               barOpen={controlsOpen}
               onBarOpenChange={setControlsOpen}
+              search={search}
+              onSearchChange={setSearch}
               settingsOpen={settingsOpen}
               onSettingsOpenChange={setSettingsOpen}
               settingsPanel={
@@ -316,14 +346,16 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           />
         )}
         <ViewCanvas
-          entries={sortedEntries}
+          entries={shownEntries}
           allEntries={entries}
           presentation={presentation}
           schema={schema}
           fields={typeFields}
           scope={scope}
           createType={listing.name}
-          filtered={activeView.filters !== null}
+          // Search narrows too, so an empty canvas must read as "nothing
+          // matches" rather than as "this type has no records".
+          filtered={activeView.filters !== null || search !== ''}
           onCreate={quickAdd}
           onCreateOn={onCreateOn}
           onColumnsChange={(columns) => changePresentation({ ...presentation, columns })}
@@ -346,6 +378,11 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
               },
             })
           }
+        />
+        <ViewLimitNotice
+          shown={shownEntries.length}
+          total={sortedEntries.length}
+          onShowAll={() => changePresentation({ ...presentation, limit: undefined })}
         />
       </div>
       {dialog === 'style' && <TypeStyleDialog listing={listing} onClose={() => setDialog(null)} />}

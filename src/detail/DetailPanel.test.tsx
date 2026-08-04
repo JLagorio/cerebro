@@ -1,8 +1,13 @@
+import { useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DetailPanel } from '@/detail/DetailPanel';
+import { hasLayers, popLayer, pushLayer, resetLayers } from '@/components/ui/layers';
+import { Popover } from '@/components/ui/Popover';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FieldEditor } from '@/detail/FieldEditor';
+import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import { buildSchema } from '@/engine/schema';
 import * as ipc from '@/lib/ipc';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -29,8 +34,50 @@ vi.mock('@/lib/ipc', () => ({
 
 afterEach(cleanup);
 
+/**
+ * Escape delivered in the commit that opened a surface, before the browser has
+ * painted (M16.35).
+ *
+ * `useLayoutEffect` is what makes this deterministic: layout effects run
+ * inside the commit and in tree order, so this one fires with the sibling
+ * `Popover` mounted and rendered but with no passive effect anywhere having
+ * run yet. That is exactly the window a real fast keystroke lands in, and
+ * while the layer stack registered from `useEffect` it was a window in which
+ * the stack said nothing was open.
+ */
+function EscapeOnFirstCommit() {
+  useLayoutEffect(() => {
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+  }, []);
+  return null;
+}
+
+function SurfaceOpenedOverThePanel() {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-flex">
+      <button type="button" data-testid="open-surface" onClick={() => setOpen(true)}>
+        open
+      </button>
+      {open && (
+        <>
+          <Popover onClose={() => setOpen(false)} role="menu" ariaLabel="Same-commit surface">
+            <button type="button">item</button>
+          </Popover>
+          <EscapeOnFirstCommit />
+        </>
+      )}
+    </span>
+  );
+}
+
 describe('DetailPanel', () => {
   beforeEach(() => {
+    // Layers are module state; a case that leaves one pushed would make every
+    // later Escape assertion pass for the wrong reason.
+    resetLayers();
     useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
     useUiStore.setState({ detailPath: 'projects/onboarding/items/fld-1.md' });
   });
@@ -77,14 +124,128 @@ describe('DetailPanel', () => {
     useUiStore.setState({ diffView: null });
   });
 
-  it('leaves the record panel open when a modal is on top', () => {
+  // M16.1: "something is on top" is now a registered layer, not a rendered
+  // `role="dialog"`. The old probe only saw surfaces that happened to carry
+  // that role, so the add-property panel — which carries none — was invisible
+  // to it, and Escape inside it closed this whole panel.
+  it('leaves the record panel open when any dismissable layer is on top', () => {
     render(<DetailPanel />);
-    const modal = document.createElement('div');
-    modal.setAttribute('role', 'dialog');
-    document.body.appendChild(modal);
+    pushLayer('some-popover');
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(useUiStore.getState().detailPath).not.toBeNull();
-    modal.remove();
+    popLayer('some-popover');
+  });
+
+  it('closes once the layer above it has gone', () => {
+    render(<DetailPanel />);
+    pushLayer('some-popover');
+    popLayer('some-popover');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUiStore.getState().detailPath).toBeNull();
+  });
+
+  /**
+   * Escape closed the wrong layer across the panel boundary (M16.29).
+   *
+   * Within the panel, precedence was already right: a property menu is a
+   * `Popover`, which registers a layer and swallows the keystroke, so Escape
+   * closed the menu and left the panel. Across the boundary it inverted. The
+   * View settings popover mounts through `FixedBelowAnchor` — the pre-M16.1
+   * positioner six surfaces still use — which registered nothing, so
+   * `hasLayers()` answered false with a popover open on screen and this panel
+   * took the keystroke. The record vanished and the popover was left floating
+   * over an empty canvas.
+   *
+   * The panel now registers a layer of its own and asks whether it is the
+   * innermost one, instead of asking whether anything at all is open.
+   */
+  it('leaves the record panel open when a popover outside it is on top', async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <DetailPanel />
+        {/* What ViewControlIcons mounts the View settings panel in. */}
+        <span style={{ position: 'relative' }}>
+          <FixedBelowAnchor onClose={() => {}}>
+            <div data-testid="view-settings">View settings</div>
+          </FixedBelowAnchor>
+        </span>
+      </div>,
+    );
+    await user.keyboard('{Escape}');
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+  });
+
+  /**
+   * A layer must be true on the FIRST commit, not a paint later (M16.35).
+   *
+   * `useLayer` pushed from a passive effect, which React runs after the
+   * browser paints. So for one frame the add-property surface was on screen
+   * and the stack still answered "nothing is open" — and an Escape in that
+   * window came straight here and closed the whole record instead of the
+   * surface the user was looking at. Registration moved to the layout phase,
+   * which runs inside the commit.
+   *
+   * Both assertions matter: unregistered, the panel closed AND the popover
+   * stayed open, because nothing had claimed the keystroke.
+   */
+  it('leaves the record panel open when a surface opened in the same commit takes the Escape', () => {
+    render(
+      <div>
+        <DetailPanel />
+        <SurfaceOpenedOverThePanel />
+      </div>,
+    );
+    fireEvent.click(screen.getByTestId('open-surface'));
+
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+    expect(screen.queryByRole('menu', { name: 'Same-commit surface' })).toBeNull();
+  });
+
+  /**
+   * One Escape dismissed a tooltip AND this panel (M16.35).
+   *
+   * `Tooltip` hid itself on a bubble-phase `window` listener that stopped
+   * nothing and registered no layer, so this panel was told the keystroke was
+   * unclaimed and took it — the record vanished because the user wanted a hint
+   * out of the way. A tooltip is a layer now, of a non-blocking kind, and the
+   * panel asks who OWNS the Escape rather than which surface is innermost.
+   */
+  it('leaves the record panel open when a visible tooltip takes the Escape', async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <DetailPanel />
+        <Tooltip label="Archive this" delayMs={0}>
+          <button type="button" data-testid="tipped">
+            go
+          </button>
+        </Tooltip>
+      </div>,
+    );
+    await user.hover(screen.getByTestId('tipped'));
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeTruthy());
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+    expect(useUiStore.getState().detailPath).not.toBeNull();
+  });
+
+  // The other half: the panel is a layer, so it must stop being one the
+  // moment it closes — a stale entry would sit on top of every popover
+  // opened afterwards and eat their Escape instead.
+  it('leaves the stack when it closes', () => {
+    const { rerender } = render(<DetailPanel />);
+    expect(hasLayers()).toBe(true);
+    useUiStore.setState({ detailPath: null });
+    rerender(<DetailPanel />);
+    expect(hasLayers()).toBe(false);
+  });
+
+  it('is not a layer while it has no record to show', () => {
+    useUiStore.setState({ detailPath: null });
+    render(<DetailPanel />);
+    expect(hasLayers()).toBe(false);
   });
 
   it('renders nothing when no detail path is open', () => {

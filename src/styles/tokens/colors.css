@@ -49,6 +49,14 @@
   --warn-600: #b87404;
   --warn-700: #925e04;
   --danger-50: #fdedef;
+  /* Sibling of the --warn-300 promotion above, and the reason it was missed:
+     warn-300 was written `var(--warn-300, #f0c36d)`, so it still painted. The
+     three error banners using --danger-200 (AiActionCard, AiPanel, ChangesPage)
+     carry NO fallback, so the var was invalid at computed-value time and
+     border-color fell back to its initial `currentColor` — rendering the
+     danger-700 text colour as a hard #9a1d2e border on a #fdedef ground.
+     25% danger-500 over danger-50, matching the ramp's hue. */
+  --danger-200: #f5c1c7;
   --danger-500: #de3b4e;
   --danger-600: #bc2438;
   --danger-700: #9a1d2e;
@@ -73,6 +81,52 @@
   --swatch-magenta: #d8569e;
   --swatch-vermilion: #e0562e;
   --swatch-sky: #38bdf8;
+  /* option & status colours — Notion's ten, named (M16.12).
+     Distinct from --swatch-* above, which is the older eight-hue set the type
+     picker and timeline bars use. These are the palette a SELECT option, a
+     multi-select tag and a workflow status draw from, and each is a triple:
+
+       --opt-<n>      the dot / solid fill
+       --opt-<n>-bg   the pill behind a tag, ~13% of the hue
+       --opt-<n>-ink  text ON that pill, >= 4.5:1 against it
+
+     The ink is the point. Tags used to paint their label in the raw option
+     colour over a 13% tint of the same colour — amber on amber at about
+     1.8:1 — which is the failure mode M15 spent a phase removing from the
+     neutral ramp. Nothing here reuses #A8AFC2, the value that ramp dropped.
+
+     These triples are also the seam a dark theme would override
+     (`:root[data-theme='dark']`). No such block exists yet: the app has no
+     dark mode at all, and inventing half of one here would be worse than
+     leaving the seam visible. */
+  --opt-gray: #7e8699;
+  --opt-gray-bg: #eef0f4;
+  --opt-gray-ink: #4a5163;
+  --opt-brown: #9a6b4f;
+  --opt-brown-bg: #f4ede8;
+  --opt-brown-ink: #6d4a36;
+  --opt-orange: #d97514;
+  --opt-orange-bg: #fdf0e3;
+  --opt-orange-ink: #8a4a0b;
+  --opt-yellow: #d9a406;
+  --opt-yellow-bg: #fdf6e0;
+  --opt-yellow-ink: #7a5c02;
+  --opt-green: #1f9d61;
+  --opt-green-bg: #e6f6ee;
+  --opt-green-ink: #14653f;
+  --opt-blue: #3d8be8;
+  --opt-blue-bg: #e8f1fd;
+  --opt-blue-ink: #1a5694;
+  --opt-purple: #8250dc;
+  --opt-purple-bg: #f1ebfc;
+  --opt-purple-ink: #58309b;
+  --opt-pink: #d8569e;
+  --opt-pink-bg: #fceaf4;
+  --opt-pink-ink: #93316a;
+  --opt-red: #de3b4e;
+  --opt-red-bg: #fdeaec;
+  --opt-red-ink: #99202f;
+
   /* avatar backgrounds — same eight hues as --swatch-*, darkened so white
      initials clear 4.5:1 (5.2–6.9:1). The tinted swatches themselves top out
      around 2:1 against white and made every avatar's initials unreadable. */
@@ -122,4 +176,146 @@
   --accent-hover: var(--cortex-600);
   --accent-press: var(--cortex-700);
   --scrim: rgba(22, 26, 36, 0.4);
+}
+
+/* ── Dark theme (M16.38) ──────────────────────────────────────────────────
+ *
+ * The seam the --opt-* comment above predicted, finally filled in.
+ *
+ * This block RE-POINTS the ramps rather than re-styling components, because
+ * components reach for --n-*, --danger-*, --opt-* directly — `bg-n-0`,
+ * `text-n-900`, `border-n-200` appear in the hundreds. Invert the ramps and
+ * every one of those call sites is already correct; add a per-component dark
+ * rule and you would be maintaining two stylesheets forever.
+ *
+ * So the ramps invert end-for-end: --n-0 is now the darkest surface and
+ * --n-900 the lightest ink, and the same for the semantic ramps. That is what
+ * keeps the existing `bg-danger-50 text-danger-700` pairing legible without
+ * touching the markup — 50 stays "the quiet background of this hue" and 700
+ * stays "ink that reads on it", which is what those steps always meant. Only
+ * their lightness changes.
+ *
+ * Written on [data-theme] with no prefers-color-scheme media query on purpose:
+ * the hook resolves the OS preference and always writes a concrete
+ * light/dark value, so there is exactly one place that decides. A media query
+ * here would be a second, silent decider that could disagree with an explicit
+ * user choice.
+ *
+ * Contrast was checked against --n-0 (#15181f), not against black:
+ *   --n-900 ink        16.3:1   body text
+ *   --n-600 meta        8.1:1   AA at the 11-13px this ships at
+ *   --n-400 disabled    3.9:1   clears the 3:1 non-text floor for borders and
+ *                               icon strokes; still NOT an AA body colour, the
+ *                               same caveat the light ramp carries.
+ * --accent deliberately stays on cortex-500. Lightening it to cortex-400 would
+ * have dropped white labels on a filled accent button to 3.6:1; the lighter
+ * steps are used where the accent is ink or an outline instead of a fill.
+ */
+:root[data-theme='dark'] {
+  /* neutrals — inverted, same cool graphite cast */
+  --n-0: #15181f;
+  --n-25: #191d25;
+  --n-50: #1e222b;
+  --n-100: #252a35;
+  --n-200: #2e3440;
+  --n-300: #3c4350;
+  --n-400: #6e7688;
+  --n-500: #8b93a5;
+  --n-600: #a8b0c0;
+  --n-700: #c5cbd7;
+  --n-800: #e0e4ec;
+  --n-900: #f4f6fa;
+
+  /* tint steps of the brand ramps become dark tints; the saturated mid and
+     high steps still read on a dark ground and are left as they are. */
+  --cortex-50: #1b2547;
+  --cortex-100: #223059;
+  --synapse-50: #241c3d;
+  --synapse-100: #2f2450;
+
+  /* semantic ramps invert the same way the neutrals do: 50 is the quiet
+     ground, 700 the ink that reads on it. */
+  --success-50: #12301f;
+  --success-500: #35b87a;
+  --success-600: #5fcd97;
+  --success-700: #8ddcb4;
+  --warn-50: #33280c;
+  --warn-300: #6b5620;
+  --warn-500: #e0a52a;
+  --warn-600: #ecc05e;
+  --warn-700: #f2d492;
+  --danger-50: #351a1e;
+  --danger-200: #5c2b32;
+  --danger-500: #e8596a;
+  --danger-600: #ef7d8a;
+  --danger-700: #f5a8b0;
+
+  /* option triples — dot stays the identity of the hue, the pill ground goes
+     dark and the ink goes light, preserving the >= 4.5:1 ink-on-pill contract
+     the light theme documents above. */
+  --opt-gray: #8b93a5;
+  --opt-gray-bg: #2a2f3a;
+  --opt-gray-ink: #c5cbd7;
+  --opt-brown: #b8845f;
+  --opt-brown-bg: #33291f;
+  --opt-brown-ink: #dcb08c;
+  --opt-orange: #e08a3c;
+  --opt-orange-bg: #3a2612;
+  --opt-orange-ink: #f0b57c;
+  --opt-yellow: #e0b23a;
+  --opt-yellow-bg: #33290c;
+  --opt-yellow-ink: #e8cd7a;
+  --opt-green: #35b87a;
+  --opt-green-bg: #14301f;
+  --opt-green-ink: #7fd6a8;
+  --opt-blue: #5a9cea;
+  --opt-blue-bg: #14263d;
+  --opt-blue-ink: #9ec8f5;
+  --opt-purple: #9a6ee6;
+  --opt-purple-bg: #241a3d;
+  --opt-purple-ink: #c3a6f2;
+  --opt-pink: #e074ae;
+  --opt-pink-bg: #3a1c2d;
+  --opt-pink-ink: #f0a8cd;
+  --opt-red: #e8596a;
+  --opt-red-bg: #3a1a1f;
+  --opt-red-ink: #f2989f;
+
+  /* health / status greys that were picked against white */
+  --status-wontdo: #6e7688;
+  --health-none: #6e7688;
+
+  /* semantic aliases. --surface-raised sits ABOVE the app ground here: on dark,
+     elevation reads as lighter, the inverse of the light theme where a raised
+     surface is white on a tinted ground. */
+  --surface-app: var(--n-0);
+  --surface-board: var(--n-25);
+  --surface-sunken: var(--n-50);
+  --surface-raised: var(--n-100);
+  --surface-selected: #1b2547;
+  --surface-ai: #241c3d;
+  --text-primary: var(--n-900);
+  --text-secondary: var(--n-600);
+  --text-muted: var(--n-500);
+  --text-meta: var(--n-600);
+  --text-disabled: var(--n-400);
+  --text-inverse: #ffffff;
+  --text-link: var(--cortex-300);
+  --text-ai: var(--synapse-300);
+  --border-subtle: var(--n-200);
+  --border-strong: var(--n-300);
+  --border-focus: var(--cortex-400);
+  --accent: var(--cortex-500);
+  --accent-hover: var(--cortex-400);
+  --accent-press: var(--cortex-300);
+
+  /* Shadows are ink-on-white in the light theme and all but invisible on a
+     dark ground, so elevation leans on opacity instead of hue. The scrim goes
+     heavier for the same reason: a 0.4 veil over a dark app barely registers. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55), 0 2px 4px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6), 0 4px 8px rgba(0, 0, 0, 0.4);
+  --ring: 0 0 0 3px rgba(101, 128, 236, 0.45);
+  --scrim: rgba(0, 0, 0, 0.6);
 }

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
 import { buildSchema } from '@/engine/schema';
@@ -7,6 +7,7 @@ import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault, makeEntry } from '@/test/factories';
+import type { ColumnDef } from '@/engine/columns';
 import type { Entry, Presentation } from '@/engine/types';
 
 const presentation: Presentation = {
@@ -234,6 +235,564 @@ describe('TableView column resizing (M11)', () => {
     );
     expect(screen.queryByLabelText('Resize Status column')).toBeNull();
     expect(screen.queryByLabelText('Resize Name column')).toBeNull();
+  });
+});
+
+/**
+ * The cell cursor (M16.17).
+ *
+ * Every cell is an always-live `FieldEditor`, so there was no inert state to
+ * escape from, nothing bound Tab, and no cell carried an id or an
+ * `aria-colindex`. `useRowKeyboard` was a ROW cursor that bailed on
+ * INPUT/TEXTAREA — including on Escape, which is the one key whose whole job
+ * is getting back out of an editor.
+ */
+describe('TableView cell cursor (M16.17)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    useUiStore.setState({ detailPath: null });
+    useNavStore.setState({
+      selection: { kind: 'list', id: 'at-risk-work' },
+      history: [{ kind: 'list', id: 'at-risk-work' }],
+      historyIndex: 0,
+    });
+  });
+
+  const cursorCell = () => document.querySelector('[data-cursor="true"]');
+
+  /** A table whose third display slot is a plain text cell, so Enter lands on
+   * a text field rather than on a chip that opens a popover. */
+  function textGrid() {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, columns: [{ field: 'status' }, { field: 'notes' }] }}
+        schema={schema}
+        fields={[...(schema.types.get('Work item')?.fields ?? []), { name: 'notes', kind: 'text' }]}
+      />,
+    );
+    return screen.getByTestId('table-view');
+  }
+
+  it('numbers its columns, so a screen reader can say where the cursor is', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    // Name + the two data columns.
+    expect(grid.getAttribute('aria-colcount')).toBe('3');
+    const cells = screen.getAllByRole('gridcell');
+    expect(cells.some((c) => c.getAttribute('aria-colindex') === '1')).toBe(true);
+  });
+
+  it('the row cursor stays column-less until you arrow sideways', () => {
+    const { items } = setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    expect(cursorCell()).toBeNull();
+    // Enter still opens the record while no cell is picked out — the M15
+    // contract this must not break.
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(useUiStore.getState().detailPath).toBe(items[0].path);
+  });
+
+  it('arrows and Tab walk a ring across the cells', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    // ArrowLeft off the first cell hands the ROW back rather than wrapping
+    // onto the row above: the row cursor is where Enter opens the record.
+    fireEvent.keyDown(grid, { key: 'ArrowLeft' });
+    expect(cursorCell()).toBeNull();
+  });
+
+  it('Tab is only bound once a cell is picked out', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    // A grid that swallowed Tab unconditionally would trap every keyboard
+    // user who merely tabbed onto it on their way somewhere else.
+    expect(cursorCell()).toBeNull();
+  });
+
+  it('Tab wraps onto the next row instead of stopping at the last cell', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    const rows = screen.getAllByTestId('table-row');
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(rows[0].contains(cursorCell())).toBe(true);
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('3');
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(rows[1].contains(cursorCell())).toBe(true);
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+  });
+
+  it('points aria-activedescendant at the CELL once one is picked out', () => {
+    setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    const rows = screen.getAllByTestId('table-row');
+    expect(grid.getAttribute('aria-activedescendant')).toBe(rows[0].id);
+    fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    expect(grid.getAttribute('aria-activedescendant')).toBe(cursorCell()?.id);
+  });
+
+  it('Enter hands the cell to its control, and Escape takes it back', async () => {
+    const grid = textGrid();
+    fireEvent.focus(grid, { target: grid });
+    // Third display slot: the text column. The name column is first and its
+    // control opens the record rather than editing a value.
+    for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    const cell = cursorCell();
+    expect(cell?.getAttribute('aria-colindex')).toBe('3');
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    expect(cell?.contains(document.activeElement)).toBe(true);
+    // FieldEditor's own Escape stops propagation and unmounts the input, and
+    // removing a focused element fires no blur — so focus used to land on
+    // the body with the cursor still on the cell, and the grid answered
+    // nothing at all.
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(grid));
+    expect(cursorCell()).toBe(cell);
+  });
+
+  it('leaves the arrows alone while an editor has focus', () => {
+    const grid = textGrid();
+    fireEvent.focus(grid, { target: grid });
+    for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grid, { key: 'ArrowRight' });
+    fireEvent.keyDown(grid, { key: 'Enter' });
+    const before = cursorCell();
+    // Moving the caret is what an arrow means inside a text field.
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+    expect(cursorCell()).toBe(before);
+  });
+});
+
+/**
+ * Row gutter and bulk actions (M16.16).
+ *
+ * `TableRow` had none of it: the `maximize-2` glyph in the title cell was
+ * `aria-hidden` decoration, there was no row menu, and bulk selection did not
+ * exist anywhere in the app — `useRowKeyboard` holds a scalar cursor index,
+ * not a set.
+ */
+describe('TableView row gutter (M16.16)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault(), vaultPath: '/vault' });
+    useUiStore.setState({ detailPath: null, toasts: [] });
+    useNavStore.setState({
+      selection: { kind: 'list', id: 'at-risk-work' },
+      history: [{ kind: 'list', id: 'at-risk-work' }],
+      historyIndex: 0,
+    });
+  });
+
+  function grid(props: Partial<React.ComponentProps<typeof TableView>> = {}) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.type === 'Work item');
+    render(
+      <TableView
+        entries={items}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+        {...props}
+      />,
+    );
+    return { items };
+  }
+
+  it('gives every row a checkbox and raises a bulk bar once one is ticked', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('1 selected');
+  });
+
+  it('shift-click extends from the last box touched', async () => {
+    const user = userEvent.setup();
+    // Four rows, because a range of two is indistinguishable from two clicks.
+    const extra = ['One', 'Two', 'Three', 'Four'].map((title, i) =>
+      makeEntry({ path: `records/row-${i}.md`, title, type: 'Work item' }),
+    );
+    const entries = [...fixtureVault(), ...extra];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={extra}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />,
+    );
+    await user.click(screen.getByLabelText('Select One'));
+    await user.keyboard('{Shift>}');
+    await user.click(screen.getByLabelText('Select Three'));
+    await user.keyboard('{/Shift}');
+    // Without an anchor a range select is just a second single click.
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe('3 selected');
+  });
+
+  it('select-all ticks every row and clicking it again clears them', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('bulk-bar').getAttribute('aria-label')).toBe(
+      `${items.length} selected`,
+    );
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
+  });
+
+  it('drops a selected path the row set no longer contains', () => {
+    // A rescan, a filter or a delete renumbers the rows; a bulk delete must
+    // not still be holding a path that resolves to nothing.
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const items = entries.filter((e) => e.type === 'Work item');
+    const view = (list: Entry[]) => (
+      <TableView
+        entries={list}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />
+    );
+    const { rerender } = render(view(items));
+    fireEvent.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.getByTestId('bulk-bar')).toBeTruthy();
+    rerender(view(items.slice(1)));
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
+  });
+
+  it('the grip opens a row menu, which is what a grip can honestly do here', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getAllByLabelText(`Actions for ${items[0].title}`)[0]);
+    await user.click(screen.getByTestId('row-open'));
+    // Row ORDER is the view's sort chain — there is no stored index a drag
+    // could write to — so the grip carries the half of Notion's affordance
+    // that means something: the menu.
+    expect(useUiStore.getState().detailPath).toBe(items[0].path);
+  });
+
+  it('deleting from the row menu asks first', async () => {
+    const user = userEvent.setup();
+    const { items } = grid();
+    await user.click(screen.getAllByLabelText(`Actions for ${items[0].title}`)[0]);
+    await user.click(screen.getByTestId('row-delete'));
+    expect(screen.getByText(`Delete "${items[0].title}"?`)).toBeTruthy();
+  });
+
+  it('offers no insert affordance on a surface that cannot create', () => {
+    grid();
+    expect(screen.queryByTestId('row-insert')).toBeNull();
+  });
+
+  it('the insert affordance opens an input inheriting the row it was clicked on', async () => {
+    const user = userEvent.setup();
+    const onCreate = vi.fn().mockResolvedValue(true);
+    grid({ onCreate });
+    await user.click(screen.getAllByTestId('row-insert')[0]);
+    const input = screen.getByLabelText('New record title');
+    await user.type(input, 'Fresh work');
+    await user.keyboard('{Enter}');
+    expect(onCreate).toHaveBeenCalledWith('Fresh work', { groupBy: '', groupValue: '' });
+  });
+});
+
+/**
+ * The calculation footer (M16.15).
+ *
+ * There was no footer element at all and no aggregate module in the engine, so
+ * the single most-used question about a column of numbers — what do they add
+ * up to — could not be asked anywhere in the app.
+ */
+describe('TableView calculation footer (M16.15)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+  });
+
+  function footer(columns: Presentation['columns'], extra: Partial<Presentation> = {}) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const onColumnsChange = vi.fn();
+    const onPresentationChange = vi.fn();
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, columns, ...extra }}
+        schema={schema}
+        fields={[
+          ...(schema.types.get('Work item')?.fields ?? []),
+          { name: 'estimate', kind: 'number' },
+        ]}
+        onColumnsChange={onColumnsChange}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    return { onColumnsChange, onPresentationChange };
+  }
+
+  it('shows a footer cell per column, blank until one is configured', () => {
+    footer([{ field: 'status' }, { field: 'priority' }]);
+    expect(screen.getByTestId('table-footer')).toBeTruthy();
+    // Notion's resting state: the offer is there, the number is not. A table
+    // that volunteers nine totals nobody asked for is noise.
+    expect(screen.getByTestId('calc-status').textContent).toBe('Calculate');
+  });
+
+  it('computes the configured calculation over the rows on screen', () => {
+    const { onColumnsChange } = footer([{ field: 'status', calc: 'count_all' }]);
+    const items = fixtureVault().filter((e) => e.type === 'Work item');
+    expect(screen.getByTestId('calc-status').textContent).toContain(String(items.length));
+    expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+
+  it('persists the choice to the column, not to component state', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = footer([{ field: 'status' }]);
+    await user.click(screen.getByTestId('calc-status'));
+    await user.click(screen.getByTestId('calc-option-count_empty'));
+    expect(onColumnsChange.mock.calls[0][0]).toContainEqual({
+      field: 'status',
+      calc: 'count_empty',
+    });
+  });
+
+  it('None clears the key rather than storing a "none" calculation', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = footer([{ field: 'status', calc: 'count_all' }]);
+    await user.click(screen.getByTestId('calc-status'));
+    await user.click(screen.getByTestId('calc-option-none'));
+    expect(onColumnsChange.mock.calls[0][0]).toEqual([{ field: 'status' }]);
+  });
+
+  it('offers Sum on a number column and withholds it from a select', async () => {
+    const user = userEvent.setup();
+    footer([{ field: 'estimate' }, { field: 'status' }]);
+    await user.click(screen.getByTestId('calc-estimate'));
+    expect(screen.queryByTestId('calc-option-sum')).not.toBeNull();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByTestId('calc-status'));
+    // Capability-gated on the KIND, so a status column cannot be asked for a
+    // total it has no numbers to produce.
+    expect(screen.queryByTestId('calc-option-sum')).toBeNull();
+  });
+
+  it('the name column calculates too, and writes to the presentation', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = footer([{ field: 'status' }]);
+    await user.click(screen.getByTestId('calc-title'));
+    await user.click(screen.getByTestId('calc-option-count_all'));
+    // The name column has been a peer of the data columns since M12.8, but it
+    // has no ColumnSpec to carry a calc on.
+    expect(onPresentationChange.mock.calls[0][0].titleCalc).toBe('count_all');
+  });
+
+  it('renders no footer at all when there is nothing to count', () => {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={[]}
+        presentation={presentation}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />,
+    );
+    expect(screen.queryByTestId('table-footer')).toBeNull();
+  });
+});
+
+/**
+ * Header and column settings (M16.18).
+ *
+ * The 15-item header menu had zero UI coverage in any unit or e2e test, and
+ * four of Notion's column controls had no equivalent at all: freeze past the
+ * name column, fit to content, an inline "+", and a row height — the last of
+ * which was parsed and serialized and consumed by NOTHING.
+ */
+describe('TableView header settings (M16.18)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+  });
+
+  function grid(over: Partial<Presentation> = {}, extraFields: ColumnDef[] = []) {
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    const onColumnsChange = vi.fn();
+    const onPresentationChange = vi.fn();
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, ...over }}
+        schema={schema}
+        fields={[...(schema.types.get('Work item')?.fields ?? []), ...extraFields]}
+        sourceType="Work item"
+        onColumnsChange={onColumnsChange}
+        onPresentationChange={onPresentationChange}
+      />,
+    );
+    return { onColumnsChange, onPresentationChange };
+  }
+
+  /**
+   * Deleting a property destroys a schema declaration and, with it, the way
+   * every record of the type is read. There is no undo in the app — recovery
+   * is git. `PropertyMenu` and `PropertyEditor` were given a confirmation;
+   * THIS menu has its own `Delete property` item, which called
+   * `removeFieldFromType` on the single click, from a surface that already
+   * tells you it edits N records. Third call site, same dialog.
+   */
+  it('does not delete a property until the confirmation is accepted', async () => {
+    const user = userEvent.setup();
+    const written: string[] = [];
+    useVaultStore.setState({
+      entries: fixtureVault(),
+      patchFrontmatter: vi.fn(async (path: string) => {
+        written.push(path);
+      }),
+    });
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
+    // Nothing written to the type doc, and the column is still in the view.
+    expect(written).toEqual([]);
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('backing out of the confirmation leaves the property alone', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Delete property/ }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+
+  it('freezes up to a column, not just the name one', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid();
+    await user.click(screen.getByLabelText('Priority column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Freeze up to this column/ }));
+    // Priority is display slot 3 (name, status, priority), so freezing
+    // through it pins three columns.
+    expect(onPresentationChange.mock.calls[0][0].frozenColumns).toBe(3);
+  });
+
+  it('unfreezing a frozen column leaves the ones before it pinned', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid({ frozenColumns: 3 });
+    await user.click(screen.getByLabelText('Priority column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Unfreeze up to here/ }));
+    expect(onPresentationChange.mock.calls[0][0].frozenColumns).toBe(2);
+  });
+
+  it('the name column can be unfrozen from its own menu', async () => {
+    const user = userEvent.setup();
+    const { onPresentationChange } = grid();
+    await user.click(screen.getByLabelText('Name column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Unfreeze up to here/ }));
+    expect(onPresentationChange.mock.calls[0][0].frozenColumns).toBe(0);
+  });
+
+  it('offers the hidden columns behind the header "+"', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid({
+      columns: [{ field: 'status' }, { field: 'priority', hidden: true }],
+    });
+    await user.click(screen.getByTestId('add-column'));
+    await user.click(screen.getByTestId('show-column-priority'));
+    // `hiddenColumns` has been exported since M9.2 with no call site; this is
+    // it, and re-showing keeps the column's slot rather than appending it.
+    expect(onColumnsChange.mock.calls[0][0]).toEqual([
+      { field: 'status' },
+      { field: 'priority', hidden: false },
+    ]);
+  });
+
+  it('defaults its rows to the default height', () => {
+    grid();
+    expect(screen.getAllByTestId('table-row')[0].className).toContain('h-9');
+  });
+
+  it('renders the stored row height instead of ignoring it', () => {
+    grid({ rowHeight: 'compact' });
+    expect(screen.getAllByTestId('table-row')[0].className).toContain('h-8');
+  });
+
+  /**
+   * Row height and "Wrap all columns" left this menu in M16.29. They are
+   * settings for the WHOLE table and this was the only place either could be
+   * reached — a menu whose every other item acts on the name column, and which
+   * no other column's header carries, so someone hunting for row height opened
+   * Priority's menu and found nothing. They live in view settings › Rows now
+   * (see ViewSettingsPanel.test.tsx), and offering them in both places would
+   * be the same duplication that gave "Card size" two homes.
+   */
+  it('keeps whole-table settings out of the name column’s menu', async () => {
+    const user = userEvent.setup();
+    grid();
+    await user.click(screen.getByLabelText('Name column menu'));
+    expect(screen.queryByTestId('row-height')).toBeNull();
+    expect(screen.queryByTestId('wrap-all')).toBeNull();
+    // What IS the name column's business stays.
+    expect(screen.getByRole('menuitem', { name: /Sort ascending/ })).toBeTruthy();
+  });
+
+  /** Per-COLUMN wrapping is a column's own business and stays on its menu. */
+  it('still wraps one column from that column’s menu', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid({
+      columns: [{ field: 'status' }, { field: 'priority' }],
+    });
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: /Wrap content/ }));
+    expect(onColumnsChange.mock.calls[0][0]).toEqual([
+      { field: 'status', wrap: true },
+      { field: 'priority' },
+    ]);
+  });
+
+  it('marks every sort key, not only the first', () => {
+    grid({
+      sort: [
+        { field: 'status', dir: 'asc' },
+        { field: 'priority', dir: 'desc' },
+      ],
+    });
+    // The second key used to render nothing at all, so a two-key sort looked
+    // like a one-key sort with a mysterious order.
+    expect(screen.getByTestId('sort-mark-status').textContent).toBe('1');
+    expect(screen.getByTestId('sort-mark-priority').textContent).toBe('2');
+  });
+
+  it('offers fit-to-content from the column menu and the divider', async () => {
+    const user = userEvent.setup();
+    const { onColumnsChange } = grid();
+    await user.click(screen.getByLabelText('Status column menu'));
+    await user.click(screen.getByRole('menuitem', { name: 'Fit to content' }));
+    // jsdom reports every scrollWidth as 0, and an unmeasurable grid is not a
+    // reason to slam the column to its minimum — so this writes nothing.
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    fireEvent.doubleClick(screen.getByLabelText('Resize Status column'));
+    expect(onColumnsChange).not.toHaveBeenCalled();
   });
 });
 

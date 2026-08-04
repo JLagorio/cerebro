@@ -29,28 +29,24 @@ export function GitHistoryPanel({ path }: { path: string }) {
 
   return (
     <div data-testid="git-history" className="mt-5">
-      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+      <div className="mb-2 flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
         <Icon name="history" size={12} />
         History
       </div>
       <div className="flex flex-col gap-2">
         {commits.map((c) => (
-          <div
-            key={c.hash}
-            data-testid="git-commit"
-            className="border-l-2 border-[var(--n-200)] pl-2.5"
-          >
+          <div key={c.hash} data-testid="git-commit" className="border-l-2 border-n-200 pl-2.5">
             <button
               type="button"
               onClick={() => openDiff(path, c.hash)}
-              className="w-full truncate border-0 bg-transparent p-0 text-left text-[12px] text-[var(--cortex-600)] hover:underline"
+              className="w-full truncate border-0 bg-transparent p-0 text-left text-xs text-cortex-600 hover:underline"
               title={`View what ${c.shortHash} changed`}
             >
-              <span className="[font-family:var(--font-mono)] text-[11px]">{c.shortHash}</span>
+              <span className="[font-family:var(--font-mono)] text-2xs">{c.shortHash}</span>
               {' · '}
               {c.message}
             </button>
-            <div className="text-[10.5px] text-[var(--n-400)]">
+            <div className="text-2xs text-n-400">
               {c.author} · {relativeDate(c.date)}
             </div>
           </div>

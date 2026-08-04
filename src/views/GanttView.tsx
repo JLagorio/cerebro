@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Icon } from '@/components/ui/Icon';
+import { Switch } from '@/components/ui/Switch';
+import { resolveColumns } from '@/engine/columns';
 import { toIsoDate } from '@/engine/dates';
 import { buildRows, type RenderRow } from '@/engine/rows';
 import {
@@ -9,6 +10,7 @@ import {
   axisTicks,
   axisWidth,
   barGeometry,
+  dateKindOf,
   dayOffset,
   dependenciesOf,
   isSlipping,
@@ -16,19 +18,30 @@ import {
   spanBounds,
   spanOf,
   unscheduled,
+  DEFAULT_ZOOM,
   PX_PER_DAY,
   type Span,
   type Zoom,
 } from '@/engine/schedule';
-import { typeStyle } from '@/engine/typeCatalog';
 import type { ColumnDef } from '@/engine/columns';
 import type { Entry, Presentation, Schema } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
-import { ROW_H, TimeAxisHeader, TimeGridLines, TodayLine, ZoomControl } from '@/views/TimeAxis';
+import { useVaultStore } from '@/stores/vaultStore';
+import {
+  BAND_H,
+  ROW_H,
+  ResizeGrips,
+  TimeAxisHeader,
+  TimeGridLines,
+  TimeTable,
+  TodayLine,
+  ZoomControl,
+  useZoomAnchor,
+} from '@/views/TimeAxis';
+import { useScheduleDrag } from '@/views/useScheduleDrag';
 
-/** Width of the work-breakdown gutter. */
+/** Width of the work-breakdown gutter when the view has not been told one. */
 const NAME_W = 300;
-const INDENT = 16;
 
 export interface GanttViewProps {
   entries: Entry[];
@@ -38,6 +51,14 @@ export interface GanttViewProps {
   allEntries?: Entry[];
   scope?: string;
   today?: string;
+  /**
+   * True when the view has filters, so the empty state can say why (M16.35).
+   *
+   * Required for the reason BoardView's is: the board declared this prop,
+   * branched on it, and never received it, because an optional prop dropped by
+   * a caller is a prop nothing complains about.
+   */
+  filtered: boolean;
   onZoomChange?: (zoom: Zoom) => void;
 }
 
@@ -71,14 +92,32 @@ export function GanttView({
   allEntries = entries,
   scope = 'gantt',
   today = toIsoDate(new Date()),
+  filtered,
   onZoomChange,
 }: GanttViewProps) {
   const dateField = resolveDateField(presentation, fields);
-  const [localZoom, setLocalZoom] = useState<Zoom>(presentation.zoom ?? 'month');
-  const zoom = presentation.zoom ?? localZoom;
+  // One default, and the override wins over the stored value. This opened at
+  // `month` while TimelineView opened at `week` and the settings panel showed
+  // `week` for both — so an unconfigured gantt was on a scale its own Zoom
+  // control denied. And `presentation.zoom ?? local` left the control inert on
+  // any surface that passes no `onZoomChange`.
+  const [zoomOverride, setZoomOverride] = useState<Zoom | null>(null);
+  const zoom = zoomOverride ?? presentation.zoom ?? DEFAULT_ZOOM;
   const collapsedMap = useUiStore((s) => s.collapsed[scope]);
   const toggle = useUiStore((s) => s.toggleCollapsed);
   const openPath = useOpenPath('in-place');
+  const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
+
+  // The gutter was `const NAME_W = 300` — not state, not a prop, not
+  // persisted, so the one half of the view that carries the record names could
+  // not be shown, hidden or resized (M16.24).
+  const [showTable, setShowTable] = useState(presentation.showTable !== false);
+  const [nameWidth, setNameWidth] = useState(presentation.titleWidth ?? NAME_W);
+  const columns = useMemo(
+    () => resolveColumns(presentation.columns, fields).map((c) => ({ def: c.def, width: c.width })),
+    [presentation.columns, fields],
+  );
+  const tableWidth = showTable ? nameWidth + columns.reduce((sum, c) => sum + c.width, 0) : 0;
 
   const rows = useMemo(
     () =>
@@ -118,9 +157,10 @@ export function GanttView({
   // medium-weight text that resists clicking is worse than no indicator. Both
   // are controls now: the conflict count walks the slipping edges, the undated
   // count reveals the rows that have no bar to point at.
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [focusedSlip, setFocusedSlip] = useState(-1);
   const [showUndated, setShowUndated] = useState(false);
+
+  const { scrollerRef, capture } = useZoomAnchor(axis, zoom, tableWidth);
 
   const stepSlip = () => {
     if (slips.length === 0) return;
@@ -132,9 +172,12 @@ export function GanttView({
   };
 
   const setZoom = (next: Zoom) => {
-    setLocalZoom(next);
+    capture();
+    setZoomOverride(next);
     onZoomChange?.(next);
   };
+
+  const drag = useScheduleDrag({ rows, dateField, schema, zoom, patchFrontmatter });
 
   if (dateField === null) {
     return (
@@ -160,8 +203,9 @@ export function GanttView({
       data-zoom={zoom}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] px-5 py-2">
+      <div className="flex flex-none items-center gap-3 border-b border-n-200 px-5 py-2">
         <ZoomControl zoom={zoom} onChange={setZoom} />
+        <Switch checked={showTable} onChange={setShowTable} label="Show table" />
         <span className="flex-1" />
         {/* The one number a schedule owes you. Absent when the view has no
             dependency field — zero slips and no edges are different facts. */}
@@ -172,13 +216,13 @@ export function GanttView({
               data-testid="gantt-slips"
               title="Go to the next slipping dependency"
               onClick={stepSlip}
-              className="rounded-md border border-[var(--danger-500)] bg-transparent px-2 py-0.5 text-[11.5px] font-medium text-[var(--danger-500)] hover:bg-[var(--danger-50)]"
+              className="rounded-md border border-danger-500 bg-transparent px-2 py-0.5 text-xs font-medium text-danger-500 hover:bg-danger-50"
             >
               {slips.length} dependency {slips.length === 1 ? 'conflict' : 'conflicts'}
               {focusedSlip >= 0 && ` · ${focusedSlip + 1}/${slips.length}`}
             </button>
           ) : (
-            <span data-testid="gantt-slips" className="text-[11.5px] text-[var(--n-500)]">
+            <span data-testid="gantt-slips" className="text-xs text-n-500">
               No dependency conflicts
             </span>
           ))}
@@ -189,10 +233,10 @@ export function GanttView({
             aria-expanded={showUndated}
             onClick={() => setShowUndated(!showUndated)}
             className={[
-              'rounded-md border px-2 py-0.5 text-[11.5px]',
+              'rounded-md border px-2 py-0.5 text-xs',
               showUndated
-                ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-600)]'
-                : 'border-[var(--n-200)] bg-transparent text-[var(--n-500)] hover:border-[var(--n-400)] hover:text-[var(--n-800)]',
+                ? 'border-cortex-500 bg-cortex-50 text-cortex-600'
+                : 'border-n-200 bg-transparent text-n-500 hover:border-n-400 hover:text-n-800',
             ].join(' ')}
           >
             {undated.length} without a date
@@ -201,70 +245,19 @@ export function GanttView({
       </div>
 
       <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <div className="flex" style={{ width: NAME_W + width, minWidth: '100%' }}>
-          {/* Work breakdown gutter */}
-          <div className="sticky left-0 z-30 flex-none bg-[var(--n-0)]" style={{ width: NAME_W }}>
-            <div className="flex h-8 items-center border-b border-r border-[var(--n-200)] bg-[var(--n-25)] px-3 text-[11.5px] font-semibold text-[var(--n-600)]">
-              Name
-            </div>
-            {rows.map((row) =>
-              row.kind === 'band' ? (
-                <button
-                  key={row.key}
-                  type="button"
-                  onClick={() => toggle(scope, row.key)}
-                  className="flex h-7 w-full items-center gap-2 border-b border-r border-[var(--n-100)] bg-[var(--n-25)] text-left"
-                  style={{ paddingLeft: 12 + row.node.depth * INDENT }}
-                >
-                  <Icon
-                    name={collapsedMap?.[row.key] === true ? 'chevron-right' : 'chevron-down'}
-                    size={12}
-                    color="var(--n-400)"
-                  />
-                  <span className="truncate text-[12px] font-semibold text-[var(--n-800)]">
-                    {row.node.label}
-                  </span>
-                </button>
-              ) : (
-                <div
-                  key={row.key}
-                  data-testid="gantt-name"
-                  data-depth={row.depth}
-                  className="flex items-center gap-1.5 border-b border-r border-[var(--n-100)] pr-2"
-                  style={{ height: ROW_H, paddingLeft: 10 + row.depth * INDENT }}
-                >
-                  {row.childCount > 0 ? (
-                    <button
-                      type="button"
-                      aria-expanded={collapsedMap?.[row.key] !== true}
-                      aria-label={`${collapsedMap?.[row.key] === true ? 'Expand' : 'Collapse'} ${row.entry.title}`}
-                      onClick={() => toggle(scope, row.key)}
-                      className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)]"
-                    >
-                      <Icon
-                        name={collapsedMap?.[row.key] === true ? 'chevron-right' : 'chevron-down'}
-                        size={12}
-                      />
-                    </button>
-                  ) : (
-                    <span className="h-4 w-4 flex-none" />
-                  )}
-                  <Icon
-                    name={typeStyle(row.entry.type, schema).icon}
-                    size={12}
-                    color={typeStyle(row.entry.type, schema).color ?? 'var(--n-400)'}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => openPath(row.entry.path)}
-                    className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] text-[var(--n-900)] hover:underline"
-                  >
-                    {row.entry.title}
-                  </button>
-                </div>
-              ),
-            )}
-          </div>
+        <div className="flex" style={{ width: tableWidth + width, minWidth: '100%' }}>
+          {showTable && (
+            <TimeTable
+              rows={rows}
+              schema={schema}
+              columns={columns}
+              nameWidth={nameWidth}
+              isCollapsed={(key) => collapsedMap?.[key] === true}
+              onToggle={(key) => toggle(scope, key)}
+              onOpen={openPath}
+              onResize={setNameWidth}
+            />
+          )}
 
           {/* Schedule */}
           <div className="relative flex-none" style={{ width }}>
@@ -284,20 +277,22 @@ export function GanttView({
                   return (
                     <div
                       key={row.key}
-                      className="border-b border-[var(--n-100)] bg-[var(--n-25)]"
-                      style={{ height: 28 }}
+                      className="border-b border-n-100 bg-n-25"
+                      style={{ height: BAND_H }}
                     />
                   );
                 }
-                const span = spanOf(row.entry, dateField);
+                const stored = spanOf(row.entry, dateField);
+                const span = stored === null ? null : drag.preview(row.key, stored);
                 const isParent = row.childCount > 0;
+                const geo = span === null ? null : barGeometry(span, axis, zoom);
                 return (
                   <div
                     key={row.key}
                     data-testid="gantt-row"
                     data-path={row.entry.path}
                     data-row-index={rowIndex}
-                    className="relative border-b border-[var(--n-100)]"
+                    className="relative border-b border-n-100"
                     style={{ height: ROW_H }}
                   >
                     {span === null && showUndated && (
@@ -310,7 +305,7 @@ export function GanttView({
                         data-path={row.entry.path}
                         onClick={() => openPath(row.entry.path)}
                         title={`${row.entry.title} · no ${dateField} — open to set one`}
-                        className="absolute top-1.5 rounded-[4px] border border-dashed border-[var(--n-400)] bg-transparent text-[10.5px] text-[var(--n-500)] hover:border-[var(--cortex-500)] hover:text-[var(--cortex-600)]"
+                        className="absolute top-1.5 rounded-xs border border-dashed border-n-400 bg-transparent text-2xs text-n-500 hover:border-cortex-500 hover:text-cortex-600"
                         style={{
                           left: Math.max(0, dayOffset(axis, today)) * PX_PER_DAY[zoom],
                           width: 96,
@@ -320,27 +315,44 @@ export function GanttView({
                         Set dates
                       </button>
                     )}
-                    {span !== null && (
-                      <button
-                        type="button"
-                        data-testid="gantt-bar"
-                        data-path={row.entry.path}
-                        onClick={() => openPath(row.entry.path)}
-                        title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
-                        // A row with children is a summary: drawn as a thin
-                        // spine so it reads as the roll-up of what is under it
-                        // rather than as another task competing with them.
-                        className={[
-                          'absolute rounded-[4px] border',
-                          isParent
-                            ? 'top-3 border-[var(--n-600)] bg-[var(--n-600)]'
-                            : 'top-1.5 border-[var(--cortex-500)] bg-[var(--cortex-400)]',
-                        ].join(' ')}
-                        style={{
-                          ...barGeometry(span, axis, zoom),
-                          height: isParent ? 5 : ROW_H - 12,
-                        }}
-                      />
+                    {span !== null && geo !== null && (
+                      <>
+                        <button
+                          type="button"
+                          data-testid="gantt-bar"
+                          data-path={row.entry.path}
+                          data-start={span.start}
+                          data-end={span.end}
+                          {...drag.handle.handleProps(row.key)}
+                          onClick={() => {
+                            if (drag.handle.consumeClick()) return;
+                            openPath(row.entry.path);
+                          }}
+                          title={`${row.entry.title} · ${span.start}${span.end === span.start ? '' : ` → ${span.end}`}`}
+                          aria-label={`${row.entry.title}, ${span.start} to ${span.end}. Arrow keys move it; hold Shift to change its end.`}
+                          // A row with children is a summary: drawn as a thin
+                          // spine so it reads as the roll-up of what is under it
+                          // rather than as another task competing with them.
+                          className={[
+                            'absolute touch-none select-none rounded-xs border',
+                            isParent
+                              ? 'top-3 border-n-600 bg-n-600'
+                              : 'top-1.5 border-cortex-500 bg-cortex-400',
+                          ].join(' ')}
+                          style={{ ...geo, height: isParent ? 5 : ROW_H - 12 }}
+                        />
+                        {dateKindOf(row.entry, dateField, schema) === 'daterange' && (
+                          <ResizeGrips
+                            id={row.key}
+                            title={row.entry.title}
+                            left={geo.left}
+                            width={geo.width}
+                            top={isParent ? 12 : 6}
+                            height={isParent ? 5 : ROW_H - 12}
+                            drag={drag.handle}
+                          />
+                        )}
+                      </>
                     )}
                   </div>
                 );
@@ -352,10 +364,17 @@ export function GanttView({
 
       {entries.length === 0 && (
         <div className="flex-none px-3 py-8">
+          {/* A schedule emptied by its own filters is not an empty project
+              (M16.35) — the table, list, board and gallery all say which one
+              this is, and the two time views were the last that did not. */}
           <EmptyState
             icon="chart-gantt"
-            title="No records yet"
-            description="Dated records appear here as scheduled bars."
+            title={filtered ? 'Nothing matches these filters' : 'No records yet'}
+            description={
+              filtered
+                ? 'Adjust the filters in view settings to widen the query.'
+                : 'Dated records appear here as scheduled bars.'
+            }
           />
         </div>
       )}

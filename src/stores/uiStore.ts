@@ -5,6 +5,28 @@ import type { InboxPeriod } from '@/engine/inbox';
 
 export type DocPanelTab = 'outline' | 'info' | 'links' | 'knowledge';
 
+/**
+ * What the person chose, NOT what is on screen (M16.36).
+ *
+ * `system` is a standing instruction — "track the OS" — so it is the value
+ * that persists, and resolving it to a concrete light/dark happens in
+ * `useTheme`. Storing the resolved theme instead would freeze whichever
+ * appearance the OS happened to have the day the choice was made.
+ */
+export type ThemeMode = 'light' | 'dark' | 'system';
+
+/**
+ * Narrow anything to a ThemeMode, defaulting to 'system'.
+ *
+ * Exported because two call sites need the same answer: the loader below
+ * (a hand-edited or half-written localStorage value must not throw or leave
+ * the app themeless) and the Settings control (SegmentedControl's onChange is
+ * typed `string`, and a cast there would let a typo through the compiler).
+ */
+export function asThemeMode(v: unknown): ThemeMode {
+  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system';
+}
+
 interface UiState {
   /**
    * The record showing in the RIGHT-HAND SLOT, or null.
@@ -18,6 +40,19 @@ interface UiState {
   detailPath: string | null;
   openDetail(path: string): void;
   closeDetail(): void;
+  /**
+   * The records the open canvas is showing, in its order (M16.11) — what the
+   * panel's previous/next step through.
+   *
+   * It lives here rather than being threaded through `openDetail` because a
+   * row does not know its neighbours: every surface opens a record through
+   * one `useOpenPath(path)` call, and only the canvas knows the filtered,
+   * sorted list that call came out of.
+   */
+  detailSiblings: string[];
+  setDetailSiblings(paths: string[]): void;
+  /** Move the open record along `detailSiblings`. No-op at either end. */
+  stepDetail(delta: number): void;
   /**
    * Width of the record side panel, in px (M11). Persisted.
    *
@@ -35,6 +70,15 @@ interface UiState {
   setSidebarCollapsed(v: boolean): void;
   quickOpenVisible: boolean;
   setQuickOpen(v: boolean): void;
+  /**
+   * Light, dark, or follow the OS (M16.36). Persisted; defaults to 'system'.
+   *
+   * The store holds the CHOICE only — nothing here touches the DOM. What ends
+   * up on `<html data-theme>` is resolved by `useTheme`, which is also what
+   * keeps 'system' live when the OS flips mid-session.
+   */
+  themeMode: ThemeMode;
+  setThemeMode(v: ThemeMode): void;
   /**
    * Collapsed group bands and tree rows (M9.1), keyed scope → key → true.
    * Scope is the surface's identity (`view:<id>`, `project:<path>`,
@@ -229,6 +273,15 @@ const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
 const SIDEBAR_COLLAPSED_KEY = 'cerebro.sidebarCollapsed';
+const COLLAPSED_KEY = 'cerebro.collapsed';
+/**
+ * DUPLICATED VERBATIM in index.html's pre-paint theme script (M16.36).
+ *
+ * That script has to run before any module loads — it cannot import this
+ * constant — so changing this string means changing it there too, or a
+ * dark-mode user gets a white flash on every launch.
+ */
+export const THEME_MODE_KEY = 'cerebro.themeMode';
 
 /**
  * Panel sizing (M11).
@@ -272,6 +325,36 @@ function loadExpanded(): Record<string, boolean> {
     const raw = window.localStorage.getItem(EXPANDED_KEY);
     const parsed: unknown = raw === null ? {} : JSON.parse(raw);
     return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Collapsed bands and tree rows, scope → key → true (M16.21).
+ *
+ * Only COLLAPSED entries are stored — `toggleCollapsed` deletes the key on
+ * the way back open rather than writing `false`. Absent already means
+ * expanded everywhere that reads this, and a map that accumulated a `false`
+ * for every band anyone ever touched would grow without bound in
+ * localStorage while meaning nothing.
+ */
+function loadCollapsed(): Record<string, Record<string, boolean>> {
+  try {
+    // window.localStorage explicitly, for the same reason loadExpanded does.
+    const raw = window.localStorage.getItem(COLLAPSED_KEY);
+    const parsed: unknown = raw === null ? {} : JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+    const out: Record<string, Record<string, boolean>> = {};
+    for (const [scope, band] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof band !== 'object' || band === null || Array.isArray(band)) continue;
+      out[scope] = Object.fromEntries(
+        Object.entries(band as Record<string, unknown>).filter(
+          (pair): pair is [string, boolean] => pair[1] === true,
+        ),
+      );
+    }
+    return out;
   } catch {
     return {};
   }
@@ -403,6 +486,24 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   closeDetail: () => set({ detailPath: null }),
 
+  detailSiblings: [],
+  setDetailSiblings: (paths) => {
+    // Reference-stable when nothing changed: this is set from a render-time
+    // effect on every canvas render, and a fresh array each time would
+    // re-render the panel continuously.
+    const current = get().detailSiblings;
+    if (current.length === paths.length && current.every((p, i) => p === paths[i])) return;
+    set({ detailSiblings: paths });
+  },
+  stepDetail: (delta) => {
+    const { detailPath, detailSiblings } = get();
+    if (detailPath === null) return;
+    const at = detailSiblings.indexOf(detailPath);
+    const next = detailSiblings[at + delta];
+    if (at === -1 || next === undefined) return;
+    get().openDetail(next);
+  },
+
   detailWidth: loadNumber(
     DETAIL_WIDTH_KEY,
     DETAIL_WIDTH_DEFAULT,
@@ -435,6 +536,16 @@ export const useUiStore = create<UiState>((set, get) => ({
   quickOpenVisible: false,
   setQuickOpen: (v) => set({ quickOpenVisible: v }),
 
+  // Stored as the bare word, matching every other scalar preference here
+  // (docPanelTab, inboxPeriod) — the pre-paint script in index.html reads it
+  // with a plain getItem, so a JSON-quoted value would cost it a parse it has
+  // no business doing. Anything unrecognised reads back as 'system'.
+  themeMode: asThemeMode(loadString(THEME_MODE_KEY, 'system')),
+  setThemeMode: (v) => {
+    storeString(THEME_MODE_KEY, v);
+    set({ themeMode: v });
+  },
+
   autoCheckpoint: loadString(AUTO_CHECKPOINT_KEY, 'true') === 'true',
   setAutoCheckpoint: (v) => {
     storeString(AUTO_CHECKPOINT_KEY, String(v));
@@ -445,11 +556,21 @@ export const useUiStore = create<UiState>((set, get) => ({
   openDiff: (path, commit = null) => set({ diffView: { path, commit } }),
   closeDiff: () => set({ diffView: null }),
 
-  collapsed: {},
+  // M16.21: persisted. It was the one member of this store's collapse family
+  // that was not — `expandedFolders`, `docPagesOpen`, `typesOpen` and the
+  // sidebar all write themselves back — so a list's bands sprang open on every
+  // reload and a deep nesting had to be re-collapsed each session.
+  collapsed: loadCollapsed(),
   toggleCollapsed: (scope, key) =>
     set((s) => {
-      const band = s.collapsed[scope] ?? {};
-      return { collapsed: { ...s.collapsed, [scope]: { ...band, [key]: band[key] !== true } } };
+      const band = { ...(s.collapsed[scope] ?? {}) };
+      // Delete rather than store false: absent already means expanded, and a
+      // false per band ever touched would grow this map for no information.
+      if (band[key] === true) delete band[key];
+      else band[key] = true;
+      const next = { ...s.collapsed, [scope]: band };
+      storeString(COLLAPSED_KEY, JSON.stringify(next));
+      return { collapsed: next };
     }),
   isCollapsed: (scope, key) => get().collapsed[scope]?.[key] === true,
 

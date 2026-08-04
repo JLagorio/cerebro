@@ -89,8 +89,8 @@ function WikilinkRender({ target, alias }: { target: string; alias: string }) {
       }}
       className={
         resolved !== null
-          ? `${CHIP_BASE} cursor-pointer border-0 bg-[var(--cortex-50)] font-medium text-[var(--cortex-600)] hover:underline`
-          : `${CHIP_BASE} cursor-default border-0 bg-[var(--n-50)] text-[var(--n-500)] [text-decoration:underline] [text-decoration-style:dashed] [text-underline-offset:2px]`
+          ? `${CHIP_BASE} cursor-pointer border-0 bg-cortex-50 font-medium text-cortex-600 hover:underline`
+          : `${CHIP_BASE} cursor-default border-0 bg-n-50 text-n-500 [text-decoration:underline] [text-decoration-style:dashed] [text-underline-offset:2px]`
       }
       title={resolved !== null ? resolved.path : `No page named "${target}"`}
     >
@@ -131,7 +131,7 @@ function AssigneeRender({ target }: { target: string }) {
       onClick={() => {
         if (resolved !== null) open(resolved.path);
       }}
-      className={`${CHIP_BASE} cursor-pointer border border-[var(--n-200)] bg-[var(--n-0)] text-[var(--n-700)] hover:border-[var(--n-300)] hover:bg-[var(--n-50)]`}
+      className={`${CHIP_BASE} cursor-pointer border border-n-200 bg-n-0 text-n-700 hover:border-n-300 hover:bg-n-50`}
       title={resolved !== null ? resolved.path : `No person named "${target}"`}
     >
       <Icon name="circle-user" size={12} color="var(--n-500)" />
@@ -169,10 +169,10 @@ function DueRender({
   const bucket = dueBucket(value.end ?? value.start, today);
   const tone =
     bucket === 'overdue'
-      ? 'bg-[var(--danger-50)] text-[var(--danger-600)]'
+      ? 'bg-danger-50 text-danger-600'
       : bucket === 'today'
-        ? 'bg-[var(--warn-50)] text-[var(--warn-700)]'
-        : 'bg-[var(--n-50)] text-[var(--n-600)]';
+        ? 'bg-warn-50 text-warn-700'
+        : 'bg-n-50 text-n-600';
 
   return (
     <span ref={rootRef} className="relative inline-flex" data-chip="due" contentEditable={false}>

@@ -1,5 +1,25 @@
 import React, { useId, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useEscapeLayer } from '@/components/ui/Popover';
+
+/**
+ * Puts the open listbox on the layer stack (M16.34).
+ *
+ * The Escape branch in `onKeyDown` below is a React BUBBLE handler, and its
+ * comment promised that "an open dropdown must swallow Escape before global
+ * listeners". That was true when the global listeners bubbled too. M16.1
+ * moved them to `window` in the CAPTURE phase, which runs before any React
+ * handler — so the promise quietly inverted, and a Dropdown open inside a
+ * Popover let Escape close the POPOVER out from under it. The listbox
+ * appeared to close as well, but only because its parent had unmounted.
+ *
+ * A child component, so the layer exists exactly as long as the listbox does:
+ * a hook in the parent would hold one open for a closed menu.
+ */
+function DropdownEscapeLayer({ onClose }: { onClose: () => void }) {
+  useEscapeLayer(onClose);
+  return null;
+}
 
 /**
  * DS dropdown (M2 Task 2): a custom listbox-button replacing native selects
@@ -62,8 +82,10 @@ export function Dropdown({
       return;
     }
     if (e.key === 'Escape') {
-      // stopPropagation: an open dropdown must swallow Escape before global
-      // listeners (DetailPanel close, dialogs) act on it.
+      // Belt only. `DropdownEscapeLayer` handles this from the layer stack
+      // before the key ever reaches React, and is what makes the dropdown win
+      // against an enclosing popover; this branch survives for the case where
+      // the event is dispatched at the element rather than at the window.
       e.stopPropagation();
       setOpen(false);
     } else if (e.key === 'ArrowDown') {
@@ -89,6 +111,7 @@ export function Dropdown({
 
   return (
     <span className="relative inline-flex" style={{ width }} onKeyDown={onKeyDown}>
+      {open && <DropdownEscapeLayer onClose={() => setOpen(false)} />}
       <button
         type="button"
         aria-label={label}
@@ -98,7 +121,7 @@ export function Dropdown({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         style={{ height: size === 'sm' ? 'var(--control-h-sm)' : 'var(--control-h)' }}
-        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--n-300)] bg-[var(--n-0)] pl-2.5 pr-2 text-[13px] text-[var(--n-800)] outline-none hover:bg-[var(--n-50)] focus-visible:border-[var(--cortex-500)] focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-[var(--n-50)] disabled:text-[var(--n-400)]"
+        className="inline-flex w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-n-300 bg-n-0 pl-2.5 pr-2 text-sm text-n-800 outline-none hover:bg-n-50 focus-visible:border-cortex-500 focus-visible:shadow-[0_0_0_3px_var(--cortex-100)] disabled:cursor-not-allowed disabled:bg-n-50 disabled:text-n-400"
       >
         {selected?.icon && <Icon name={selected.icon} size={13} color="var(--n-500)" />}
         <span className="min-w-0 flex-1 truncate text-left">{selected?.label ?? ''}</span>
@@ -120,19 +143,29 @@ export function Dropdown({
             id={listId}
             role="listbox"
             aria-label={label}
-            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]"
+            // The arrow-key highlight was paint only (M16.35): it shaded a row
+            // and told assistive tech nothing, because DOM focus never leaves
+            // the trigger button. `aria-activedescendant` is what names the
+            // shaded row for a screen reader — without it the listbox reads as
+            // if nothing in it were current, and Enter appeared to pick at
+            // random. The ids come from the same `useId` that names the list.
+            aria-activedescendant={
+              options[active] === undefined ? undefined : `${listId}-${options[active].value}`
+            }
+            className="cb-menu-in absolute left-0 top-full z-50 mt-1 min-w-full whitespace-nowrap rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]"
           >
             <div className="max-h-[264px] overflow-y-auto">
               {options.map((o, i) => (
                 <button
                   key={o.value}
+                  id={`${listId}-${o.value}`}
                   type="button"
                   role="option"
                   aria-selected={o.value === value}
                   onMouseEnter={() => setActive(i)}
                   onClick={() => pick(o.value)}
-                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-[13px] text-[var(--n-800)] ${
-                    i === active ? 'bg-[var(--n-50)]' : ''
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-[7px] text-left text-sm text-n-800 ${
+                    i === active ? 'bg-n-50' : ''
                   }`}
                 >
                   {o.icon && <Icon name={o.icon} size={13} color="var(--n-500)" />}

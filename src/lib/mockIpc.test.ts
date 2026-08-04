@@ -345,6 +345,47 @@ describe('mockIpc', () => {
     });
   });
 
+  /**
+   * Parity with `vault::write::import_attachment` (M16.13c). The mock backend
+   * must mirror every Rust-side rule, or a bug only reproduces in the packaged
+   * app — the same requirement the knowledge guards are held to.
+   */
+  describe('importAttachment', () => {
+    it('copies into attachments/ and returns a vault-relative path', async () => {
+      expect(await mock.importAttachment('/demo-vault', '/Users/me/report.pdf')).toBe(
+        'attachments/report.pdf',
+      );
+    });
+
+    it('dedupes the stem, not the extension', async () => {
+      await mock.importAttachment('/demo-vault', '/a/report.pdf');
+      expect(await mock.importAttachment('/demo-vault', '/b/report.pdf')).toBe(
+        'attachments/report-2.pdf',
+      );
+    });
+
+    it('treats a leading dot as the whole name', async () => {
+      await mock.importAttachment('/demo-vault', '/a/.gitignore');
+      expect(await mock.importAttachment('/demo-vault', '/b/.gitignore')).toBe(
+        'attachments/.gitignore-2',
+      );
+    });
+
+    it('refuses a relative source, the way the backend does', async () => {
+      await expect(mock.importAttachment('/demo-vault', '../etc/passwd')).rejects.toThrow(
+        /absolute/,
+      );
+    });
+
+    // attachments/ is skipped by the scanner on both sides, so an imported
+    // markdown file can never be adopted as a record.
+    it('lands where the scanner will not adopt it', async () => {
+      const rel = await mock.importAttachment('/demo-vault', '/a/notes.md');
+      const entries = await mock.scanVault('/demo-vault');
+      expect(entries.some((e) => e.path === rel)).toBe(false);
+    });
+  });
+
   it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
     await mock.createFolder('/demo-vault', 'projects/empty-folder');
     await mock.saveView('/demo-vault', 'v', 'name: V\n');

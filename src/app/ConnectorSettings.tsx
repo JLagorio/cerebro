@@ -73,13 +73,13 @@ export function ConnectorSettings() {
   if (loadError !== null) {
     return (
       <div className="mt-1" data-testid="connector-settings-blocked">
-        <p className="m-0 text-[10.5px] leading-[14px] text-[var(--warn-600)]">
+        <p className="m-0 text-2xs leading-[14px] text-warn-600">
           The connector list can’t be read, so agent runs are pinned to no connectors until this is
           fixed: {loadError}{' '}
           <button
             type="button"
             onClick={() => setLoadSeq((n) => n + 1)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-[10.5px] underline"
+            className="cursor-pointer border-0 bg-transparent p-0 text-2xs underline"
           >
             Retry
           </button>
@@ -177,18 +177,18 @@ export function ConnectorSettings() {
         return (
           <div
             key={spec.name}
-            className="flex items-center gap-2 rounded-[9px] border border-[var(--n-200)] px-2.5 py-1.5"
+            className="flex items-center gap-2 rounded-lg border border-n-200 px-2.5 py-1.5"
           >
-            <span className="text-[12px] font-medium text-[var(--n-800)]">{spec.name}</span>
+            <span className="text-xs font-medium text-n-800">{spec.name}</span>
             <span
               title={shown}
-              className="min-w-0 flex-1 truncate text-[11px] text-[var(--n-500)] [font-family:var(--font-mono)]"
+              className="min-w-0 flex-1 truncate text-2xs text-n-500 [font-family:var(--font-mono)]"
             >
               {shown}
             </span>
             {unapproved && (
               <>
-                <span className="flex-none text-[10.5px] text-[var(--warn-600)]">
+                <span className="flex-none text-2xs text-warn-600">
                   {fp === null ? 'malformed env' : 'runs a local command'}
                 </span>
                 {fp !== null && (
@@ -225,7 +225,7 @@ export function ConnectorSettings() {
           aria-label="Connector transport"
           value={transport}
           onChange={(e) => setTransport(e.target.value as 'http' | 'stdio')}
-          className="h-[28px] flex-none rounded-[8px] border border-[var(--n-200)] bg-[var(--n-0)] px-1.5 text-[12px] text-[var(--n-800)]"
+          className="h-[28px] flex-none rounded-md border border-n-200 bg-n-0 px-1.5 text-xs text-n-800"
         >
           <option value="http">http</option>
           <option value="stdio">stdio</option>
@@ -245,18 +245,18 @@ export function ConnectorSettings() {
         </Button>
       </div>
       {specs.length === 0 && filePresent && (
-        <p className="m-0 text-[10.5px] leading-[14px] text-[var(--warn-600)]">
+        <p className="m-0 text-2xs leading-[14px] text-warn-600">
           The list exists but is empty — runs are pinned to no connectors at all.{' '}
           <button
             type="button"
             onClick={resetToGlobal}
-            className="cursor-pointer border-0 bg-transparent p-0 text-[10.5px] underline"
+            className="cursor-pointer border-0 bg-transparent p-0 text-2xs underline"
           >
             Use my global MCP config instead
           </button>
         </p>
       )}
-      <p className="m-0 text-[10.5px] leading-[14px] text-[var(--n-400)]">
+      <p className="m-0 text-2xs leading-[14px] text-n-400">
         Stored in .cerebro/connectors.json — headers and env vars are edited there, kept out of git
         checkpoints, and your credentials never leave this vault. Naming servers here pins the
         assistant to exactly this list; with no list, turns you watch inherit your global MCP config

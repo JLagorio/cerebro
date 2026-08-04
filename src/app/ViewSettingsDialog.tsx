@@ -55,7 +55,7 @@ function withFirstView(def: ListDefinition, next: Partial<ViewDefinition>): List
   return { ...def, views: [{ ...def.views[0], ...next }, ...def.views.slice(1)] };
 }
 
-const label = 'mb-1 block text-[11.5px] font-medium text-[var(--n-600)]';
+const label = 'mb-1 block text-xs font-medium text-n-600';
 
 /**
  * Create/configure a List (M10): its source type, project scope,

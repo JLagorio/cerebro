@@ -60,16 +60,16 @@ function PeriodPills({
               if (!empty) onChange(value);
             }}
             className={[
-              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] font-medium',
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium',
               on
-                ? 'border-[var(--n-300)] bg-[var(--n-100)] text-[var(--n-900)]'
+                ? 'border-n-300 bg-n-100 text-n-900'
                 : empty
-                  ? 'cursor-default border-transparent bg-transparent text-[var(--n-400)] opacity-60'
-                  : 'border-transparent bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+                  ? 'cursor-default border-transparent bg-transparent text-n-400 opacity-60'
+                  : 'border-transparent bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
             ].join(' ')}
           >
             {label}
-            <span className="text-[10.5px] tabular-nums text-[var(--n-500)]">{counts[value]}</span>
+            <span className="text-2xs tabular-nums text-n-500">{counts[value]}</span>
           </button>
         );
       })}
@@ -104,23 +104,17 @@ function OrganizeChecklist({
         // every item read as a form field that ignored clicks.
         const fixable = !c.done && (c.id === 'type' || c.id === 'status');
         const glyph = (
-          <span
-            className={`flex-none pt-[1px] ${c.done ? 'text-[var(--success-600)]' : 'text-[var(--n-400)]'}`}
-          >
+          <span className={`flex-none pt-[1px] ${c.done ? 'text-success-600' : 'text-n-400'}`}>
             <Icon name={c.done ? 'circle-check' : 'minus'} size={13} />
           </span>
         );
         const text = (
           <span className="min-w-0 text-left">
-            <span
-              className={`block text-[12.5px] ${c.done ? 'text-[var(--n-500)]' : 'font-medium text-[var(--n-800)]'}`}
-            >
+            <span className={`block text-sm ${c.done ? 'text-n-500' : 'font-medium text-n-800'}`}>
               {c.label}
             </span>
             {!c.done && (
-              <span className="mt-0.5 block text-[11px] leading-[15px] text-[var(--n-500)]">
-                {c.hint}
-              </span>
+              <span className="mt-0.5 block text-2xs leading-[15px] text-n-500">{c.hint}</span>
             )}
           </span>
         );
@@ -131,11 +125,11 @@ function OrganizeChecklist({
                 type="button"
                 data-testid={`checklist-fix-${c.id}`}
                 onClick={() => onFix(c.id)}
-                className="-mx-1 flex w-full gap-2 rounded-[6px] border-0 bg-transparent px-1 py-0.5 text-left hover:bg-[var(--n-50)]"
+                className="-mx-1 flex w-full gap-2 rounded-sm border-0 bg-transparent px-1 py-0.5 text-left hover:bg-n-50"
               >
                 {glyph}
                 {text}
-                <span className="ml-auto flex-none pt-[1px] text-[var(--cortex-600)]">
+                <span className="ml-auto flex-none pt-[1px] text-cortex-600">
                   <Icon name="chevron-right" size={13} />
                 </span>
               </button>
@@ -149,9 +143,7 @@ function OrganizeChecklist({
         );
       })}
       {outstanding.length === 0 && (
-        <li className="pt-1 text-[11.5px] text-[var(--success-600)]">
-          Ready — this note will be findable later.
-        </li>
+        <li className="pt-1 text-xs text-success-600">Ready — this note will be findable later.</li>
       )}
     </ul>
   );
@@ -214,7 +206,7 @@ function OrganizePanel({
   return (
     <aside
       aria-label="Organize"
-      className="flex w-[272px] flex-none flex-col overflow-y-auto border-l border-[var(--n-200)] px-4 pb-5 pt-3.5 @[1100px]/canvas:w-[300px] @[1360px]/canvas:w-[320px]"
+      className="flex w-[272px] flex-none flex-col overflow-y-auto border-l border-n-200 px-4 pb-5 pt-3.5 @[1100px]/canvas:w-[300px] @[1360px]/canvas:w-[320px]"
     >
       {/* Type leads, and the type's own fields follow it, because assigning a
           type is the whole job here — everything else on this panel is either
@@ -227,7 +219,7 @@ function OrganizePanel({
           implicit association a wrapping label gives. Clicking "Type" now
           focuses the dropdown too. */}
       <label ref={typeField} className="flex items-center gap-2">
-        <span className="flex-none text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+        <span className="flex-none text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
           Type
         </span>
         <Select
@@ -246,7 +238,7 @@ function OrganizePanel({
       {/* Once typed, the type's declared fields are the rest of the form —
           the same property stack the record surfaces use, not a second one. */}
       {entry.type !== null && (
-        <div ref={typeFields} className="mt-3 border-t border-[var(--n-100)] pt-3">
+        <div ref={typeFields} className="mt-3 border-t border-n-100 pt-3">
           <RecordProperties key={entry.path} entry={entry} schema={schema} />
         </div>
       )}
@@ -262,23 +254,23 @@ function OrganizePanel({
             it lives; this decides what is LEARNED from it, and the two are
             independent: material worth keeping knowledge from is often
             material you would otherwise file and never reread. */}
-        <div className="border-t border-[var(--n-100)] pt-3">
+        <div className="border-t border-n-100 pt-3">
           <KnowledgeCommit entry={entry} />
         </div>
 
-        <div className="border-t border-[var(--n-100)] pt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+        <div className="border-t border-n-100 pt-3">
+          <div className="text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
             Before you file
           </div>
           {/* Said out loud, because a list of unmet items reads as a blocker
               until something tells you it is not one. */}
-          <div className="pb-1.5 text-[10.5px] text-[var(--n-400)]">
+          <div className="pb-1.5 text-2xs text-n-400">
             Advisory — you can file with items outstanding.
           </div>
           <OrganizeChecklist entry={entry} schema={schema} onFix={fixCheck} />
         </div>
 
-        <div className="flex flex-col gap-2 border-t border-[var(--n-100)] pt-3">
+        <div className="flex flex-col gap-2 border-t border-n-100 pt-3">
           {proposal === undefined && (
             <Button
               variant="secondary"
@@ -311,7 +303,7 @@ function OrganizePanel({
           <Button variant="primary" icon="circle-check" onClick={() => onFile(entry.path)}>
             Mark organized
           </Button>
-          <span className="text-center text-[10.5px] text-[var(--n-400)]">
+          <span className="text-center text-2xs text-n-400">
             <kbd className="[font-family:var(--font-mono)]">⌘E</kbd> · removes it from the Inbox
           </span>
         </div>
@@ -517,11 +509,11 @@ export function InboxPage() {
         takeFiles([...e.dataTransfer.files]);
       }}
     >
-      <header className="flex flex-none items-center gap-3 border-b border-[var(--n-200)] px-5 py-2.5">
+      <header className="flex flex-none items-center gap-3 border-b border-n-200 px-5 py-2.5">
         {/* h1, like every other page's chrome title — the Inbox used to be
             the one screen whose highest-ranked heading was an h2, so "jump to
             main heading" found nothing here. */}
-        <h1 className="m-0 text-[15px] font-semibold text-[var(--n-900)]">Inbox</h1>
+        <h1 className="m-0 text-lg font-semibold text-n-900">Inbox</h1>
         <PeriodPills active={period} counts={counts} onChange={setPeriod} />
         <span className="flex-1" />
         <input
@@ -556,14 +548,12 @@ export function InboxPage() {
       {lastFiled !== null && (
         <div
           data-testid="inbox-undo"
-          className="flex flex-none items-center gap-2 border-b border-[var(--n-200)] bg-[var(--n-25)] px-5 py-1.5"
+          className="flex flex-none items-center gap-2 border-b border-n-200 bg-n-25 px-5 py-1.5"
         >
-          <span className="inline-flex flex-none text-[var(--success-600)]">
+          <span className="inline-flex flex-none text-success-600">
             <Icon name="circle-check" size={13} />
           </span>
-          <span className="min-w-0 truncate text-[12px] text-[var(--n-600)]">
-            Filed “{lastFiled.title}”
-          </span>
+          <span className="min-w-0 truncate text-xs text-n-600">Filed “{lastFiled.title}”</span>
           <Button
             size="sm"
             variant="secondary"
@@ -579,7 +569,7 @@ export function InboxPage() {
             type="button"
             aria-label="Dismiss"
             onClick={() => setLastFiled(null)}
-            className="ml-auto inline-flex flex-none border-0 bg-transparent p-1 text-[var(--n-400)] hover:text-[var(--n-700)]"
+            className="ml-auto inline-flex flex-none border-0 bg-transparent p-1 text-n-400 hover:text-n-700"
           >
             <Icon name="x" size={13} />
           </button>
@@ -589,13 +579,11 @@ export function InboxPage() {
       {dragDepth > 0 && (
         <div
           data-testid="inbox-dropzone"
-          className="pointer-events-none absolute inset-0 z-10 m-3 flex flex-col items-center justify-center gap-2 rounded-[14px] border-2 border-dashed border-[var(--cortex-400)] bg-[var(--cortex-50)]"
+          className="pointer-events-none absolute inset-0 z-10 m-3 flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-cortex-400 bg-cortex-50"
         >
           <Icon name="file-down" size={22} color="var(--cortex-600)" />
-          <span className="text-[13px] font-medium text-[var(--cortex-700)]">
-            Drop to file in the Inbox
-          </span>
-          <span className="text-[11.5px] text-[var(--n-500)]">
+          <span className="text-sm font-medium text-cortex-700">Drop to file in the Inbox</span>
+          <span className="text-xs text-n-500">
             Transcripts and notes — {INGESTIBLE_EXTENSIONS.map((e) => `.${e}`).join(' ')}
           </span>
         </div>
@@ -637,7 +625,7 @@ export function InboxPage() {
             role="listbox"
             aria-label="Captures"
             onKeyDown={onListKeyDown}
-            className="flex w-[220px] flex-none flex-col overflow-y-auto border-r border-[var(--n-200)] @[1100px]/canvas:w-[260px] @[1360px]/canvas:w-[300px]"
+            className="flex w-[220px] flex-none flex-col overflow-y-auto border-r border-n-200 @[1100px]/canvas:w-[260px] @[1360px]/canvas:w-[300px]"
           >
             {queue.entries.map((e) => {
               const active = e.path === selectedPath;
@@ -664,13 +652,13 @@ export function InboxPage() {
                   data-path={e.path}
                   onClick={() => queue.select(e.path)}
                   className={[
-                    'flex flex-col gap-0.5 border-0 border-b border-solid border-[var(--n-100)] px-4 py-2.5 text-left',
-                    active ? 'bg-[var(--cortex-50)]' : 'bg-transparent hover:bg-[var(--n-25)]',
+                    'flex flex-col gap-0.5 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left',
+                    active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
                   ].join(' ')}
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     {e.parseError !== null && (
-                      <span className="inline-flex flex-none text-[var(--warn-500)]">
+                      <span className="inline-flex flex-none text-warn-500">
                         <Icon name="triangle-alert" size={12} />
                       </span>
                     )}
@@ -684,7 +672,7 @@ export function InboxPage() {
                             ? 'Organized — press ⌘E to file it'
                             : 'Organized — open it to file it'
                         }
-                        className="inline-flex flex-none text-[var(--success-600)]"
+                        className="inline-flex flex-none text-success-600"
                       >
                         <Icon name="circle-check" size={12} />
                       </span>
@@ -694,28 +682,28 @@ export function InboxPage() {
                       // width most of them clip mid-word.
                       title={e.title}
                       className={[
-                        'truncate text-[13px]',
+                        'truncate text-sm',
                         ready
-                          ? 'font-medium text-[var(--n-500)]'
+                          ? 'font-medium text-n-500'
                           : active
-                            ? 'font-semibold text-[var(--n-900)]'
-                            : 'font-medium text-[var(--n-800)]',
+                            ? 'font-semibold text-n-900'
+                            : 'font-medium text-n-800',
                       ].join(' ')}
                     >
                       {e.title}
                     </span>
                   </span>
                   {e.snippet !== '' && (
-                    <span className="truncate text-[11.5px] text-[var(--n-500)]">{e.snippet}</span>
+                    <span className="truncate text-xs text-n-500">{e.snippet}</span>
                   )}
-                  <span className="flex items-center gap-2 text-[11px] text-[var(--n-400)]">
+                  <span className="flex items-center gap-2 text-2xs text-n-400">
                     <span>{e.createdAt.slice(0, 10)}</span>
                     {/* M7: what the agent wrote is labelled, so the review
                         queue never hides machine output among your own. */}
                     {isAgentWritten(e) && (
                       <span
                         data-testid="from-ai"
-                        className="inline-flex items-center gap-1 text-[var(--synapse-600)]"
+                        className="inline-flex items-center gap-1 text-synapse-600"
                       >
                         <Icon name="sparkles" size={10} />
                         AI
@@ -738,7 +726,7 @@ export function InboxPage() {
                       <span
                         data-testid="row-committed"
                         title={`${learned} concept${learned === 1 ? '' : 's'} distilled from this`}
-                        className="inline-flex items-center gap-1 text-[var(--cortex-600)]"
+                        className="inline-flex items-center gap-1 text-cortex-600"
                       >
                         <Icon name="brain" size={10} />
                         {learned}
@@ -758,22 +746,22 @@ export function InboxPage() {
                   it out of the list you would check against. */}
               <div
                 data-testid="inbox-pane-header"
-                className="mb-4 flex items-baseline gap-3 border-b border-[var(--n-100)] pb-2"
+                className="mb-4 flex items-baseline gap-3 border-b border-n-100 pb-2"
               >
                 <span className="min-w-0 flex-1">
                   <span
                     title={selected.title}
-                    className={`block truncate text-[13.5px] font-semibold ${
-                      hasRealTitle(selected) ? 'text-[var(--n-900)]' : 'text-[var(--n-500)] italic'
+                    className={`block truncate text-md font-semibold ${
+                      hasRealTitle(selected) ? 'text-n-900' : 'text-n-500 italic'
                     }`}
                   >
                     {hasRealTitle(selected) ? selected.title : '(untitled capture)'}
                   </span>
-                  <span className="block text-[11px] text-[var(--n-500)]">
+                  <span className="block text-2xs text-n-500">
                     Captured {selected.createdAt.slice(0, 10)}
                   </span>
                 </span>
-                <span className="flex-none text-[11px] tabular-nums text-[var(--n-500)]">
+                <span className="flex-none text-2xs tabular-nums text-n-500">
                   {index + 1} of {queue.entries.length}
                 </span>
                 <span className="flex flex-none items-center gap-0.5">
@@ -782,7 +770,7 @@ export function InboxPage() {
                     aria-label="Previous capture"
                     disabled={index <= 0}
                     onClick={() => moveSelection(index - 1)}
-                    className="inline-flex border-0 bg-transparent p-1 text-[var(--n-500)] hover:text-[var(--n-800)] disabled:opacity-40"
+                    className="inline-flex border-0 bg-transparent p-1 text-n-500 hover:text-n-800 disabled:opacity-40"
                   >
                     <Icon name="chevron-up" size={14} />
                   </button>
@@ -791,7 +779,7 @@ export function InboxPage() {
                     aria-label="Next capture"
                     disabled={index < 0 || index >= queue.entries.length - 1}
                     onClick={() => moveSelection(index + 1)}
-                    className="inline-flex border-0 bg-transparent p-1 text-[var(--n-500)] hover:text-[var(--n-800)] disabled:opacity-40"
+                    className="inline-flex border-0 bg-transparent p-1 text-n-500 hover:text-n-800 disabled:opacity-40"
                   >
                     <Icon name="chevron-down" size={14} />
                   </button>
@@ -801,7 +789,7 @@ export function InboxPage() {
               <button
                 type="button"
                 onClick={() => navigate({ kind: 'doc', path: selected.path })}
-                className="mt-6 inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-[11.5px] text-[var(--n-500)] hover:text-[var(--n-800)]"
+                className="mt-6 inline-flex items-center gap-1.5 border-0 bg-transparent p-0 text-xs text-n-500 hover:text-n-800"
               >
                 <Icon name="external-link" size={12} />
                 Open as document

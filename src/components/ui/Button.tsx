@@ -5,9 +5,9 @@ const css = `
 .cb-btn{font-family:var(--font-ui);font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--r-md);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:background var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out);outline:none}
 .cb-btn:focus-visible{border-color:var(--border-focus);box-shadow:var(--ring)}
 .cb-btn[disabled]{cursor:not-allowed;opacity:.45}
-.cb-btn-md{height:var(--control-h);padding:0 12px;font-size:var(--text-sm)}
-.cb-btn-sm{height:var(--control-h-sm);padding:0 10px;font-size:var(--text-xs)}
-.cb-btn-lg{height:var(--control-h-lg);padding:0 16px;font-size:var(--text-md)}
+.cb-btn-md{height:var(--control-h);padding:0 12px;font-size:var(--fs-sm)}
+.cb-btn-sm{height:var(--control-h-sm);padding:0 10px;font-size:var(--fs-xs)}
+.cb-btn-lg{height:var(--control-h-lg);padding:0 16px;font-size:var(--fs-md)}
 .cb-btn-primary{background:var(--accent);color:#fff}
 .cb-btn-primary:hover:not([disabled]){background:var(--accent-hover)}
 .cb-btn-primary:active:not([disabled]){background:var(--accent-press)}

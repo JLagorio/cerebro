@@ -103,7 +103,7 @@ function UntitledDocHeading({
       }}
       // 45 + 1px border + 8px padding = the editor's 54px block gutter, so the
       // heading and the first paragraph share one left edge.
-      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-[42px] font-bold leading-[63px] text-[var(--n-900)] outline-none hover:border-[var(--n-200)] focus-visible:border-[var(--cortex-500)] focus-visible:shadow-[var(--ring)]"
+      className="mb-1 ml-[45px] block w-[calc(100%-45px)] resize-none overflow-hidden rounded-lg border border-transparent bg-transparent px-2 py-0 text-4xl font-bold leading-[63px] text-n-900 outline-none hover:border-n-200 focus-visible:border-cortex-500 focus-visible:shadow-[var(--ring)]"
     />
   );
 }
@@ -122,24 +122,24 @@ function BlankPageBar({
       data-testid="blank-page-bar"
       className="pointer-events-none absolute bottom-6 left-0 right-0 flex justify-center"
     >
-      <div className="pointer-events-auto flex max-w-[90%] items-center gap-1.5 overflow-x-auto rounded-full border border-[var(--n-200)] bg-[var(--n-0)] px-3 py-1.5 shadow-[0_4px_16px_rgba(22,26,36,0.10)]">
+      <div className="pointer-events-auto flex max-w-[90%] items-center gap-1.5 overflow-x-auto rounded-full border border-n-200 bg-n-0 px-3 py-1.5 shadow-[0_4px_16px_rgba(22,26,36,0.10)]">
         <Icon name="layout-template" size={14} color="var(--n-500)" />
         {templates.length > 0 ? (
           <>
-            <span className="flex-none text-[12px] text-[var(--n-500)]">Start from a template</span>
+            <span className="flex-none text-xs text-n-500">Start from a template</span>
             {templates.map((t) => (
               <button
                 key={t.path}
                 type="button"
                 onClick={() => onPick(t)}
-                className="flex-none rounded-full border border-[var(--n-200)] bg-[var(--n-0)] px-2.5 py-0.5 text-[12px] text-[var(--n-700)] hover:border-[var(--cortex-500)] hover:text-[var(--cortex-600)]"
+                className="flex-none rounded-full border border-n-200 bg-n-0 px-2.5 py-0.5 text-xs text-n-700 hover:border-cortex-500 hover:text-cortex-600"
               >
                 {templateDisplayName(t)}
               </button>
             ))}
           </>
         ) : (
-          <span className="text-[12px] text-[var(--n-500)]">
+          <span className="text-xs text-n-500">
             No templates yet — build this page, then ⋯ → Save as template to reuse it.
           </span>
         )}
@@ -458,7 +458,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
       <button
         type="button"
         onClick={opts.onClick}
-        className="inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-[13px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-0.5 text-sm text-n-500 hover:bg-n-50 hover:text-n-800"
       >
         {opts.icon !== undefined && <Icon name={opts.icon} size={13} />}
         <span className="truncate">{label}</span>
@@ -466,8 +466,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
     ) : (
       <span
         className={[
-          'inline-flex min-w-0 items-center gap-1.5 px-1 text-[13px]',
-          opts.strong === true ? 'font-medium text-[var(--n-900)]' : 'text-[var(--n-500)]',
+          'inline-flex min-w-0 items-center gap-1.5 px-1 text-sm',
+          opts.strong === true ? 'font-medium text-n-900' : 'text-n-500',
         ].join(' ')}
       >
         {opts.icon !== undefined && <Icon name={opts.icon} size={13} color="var(--n-500)" />}
@@ -479,7 +479,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="doc-page">
-      <div className="flex h-11 flex-none items-center gap-0.5 border-b border-[var(--n-200)] px-3">
+      <div className="flex h-11 flex-none items-center gap-0.5 border-b border-n-200 px-3">
         {crumb('Docs', { icon: 'library', onClick: () => navigate({ kind: 'docs' }) })}
         {crumbFolders.map((seg, i) => (
           <span key={i} className="flex min-w-0 items-center gap-0.5">
@@ -518,10 +518,8 @@ export function DocPage({ selection }: { selection: DocSelection }) {
             data-testid="doc-save-state"
             title={saveState === 'failed' ? undefined : 'Saves automatically — ⌘S to save now'}
             className={[
-              'mr-1 flex-none whitespace-nowrap text-[11.5px]',
-              saveState === 'failed'
-                ? 'font-medium text-[var(--danger-600)]'
-                : 'text-[var(--text-meta)]',
+              'mr-1 flex-none whitespace-nowrap text-xs',
+              saveState === 'failed' ? 'font-medium text-danger-600' : 'text-[var(--text-meta)]',
             ].join(' ')}
           >
             {SAVE_LABEL[saveState]}
@@ -635,7 +633,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setAddingPage(false) }}
         >
-          <p className="m-0 mb-2 text-[12.5px] text-[var(--n-500)]">
+          <p className="m-0 mb-2 text-sm text-n-500">
             {docPages === null
               ? 'This turns the page into a multi-page doc — its pages show as tabs.'
               : `Adds a page to "${docPages.main.title}".`}
@@ -665,7 +663,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setRenaming(null) }}
         >
-          <p className="m-0 mb-2 text-[12.5px] text-[var(--n-500)]">
+          <p className="m-0 mb-2 text-sm text-n-500">
             This rewrites the page's heading — the filename on disk stays as it is.
           </p>
           <Input
@@ -699,7 +697,7 @@ export function DocPage({ selection }: { selection: DocSelection }) {
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setConfirmDelete(false) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">
+          <p className="m-0 text-sm text-n-600">
             {isDocMain
               ? 'The whole doc — every page in it — moves to the system Trash.'
               : 'The page moves to the system Trash.'}

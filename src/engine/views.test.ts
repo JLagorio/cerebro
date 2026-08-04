@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { FILTER_OPS, VIEW_TYPES } from '@/engine/types';
 import {
   layoutLabel,
+  moveSortKey,
+  moveView,
   newView,
   nextViewId,
   parseListYaml,
@@ -8,7 +11,7 @@ import {
   resolveView,
   serializeList,
 } from './views';
-import type { FilterGroup, ListDefinition, ListFile, Presentation } from './types';
+import type { FilterGroup, ListDefinition, ListFile, Presentation, SortSpec } from './types';
 
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
@@ -361,6 +364,64 @@ describe('views', () => {
     expect(parseListYaml('styled', serializeList(def)).definition).toEqual(def);
   });
 
+  it('round-trips the footer calculations, per column and on the name column', () => {
+    const def = parseListYaml(
+      'totals',
+      'views:\n  - { id: v, presentation: { type: table, titleCalc: count_all, columns: [{ field: cost, calc: sum }] } }\n',
+    ).definition;
+    expect(def.views[0].presentation.titleCalc).toBe('count_all');
+    expect(def.views[0].presentation.columns[0].calc).toBe('sum');
+    expect(parseListYaml('totals', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('round-trips the frozen-column count', () => {
+    const def = parseListYaml(
+      'pinned',
+      'views:\n  - { id: v, presentation: { type: table, frozenColumns: 3 } }\n',
+    ).definition;
+    expect(def.views[0].presentation.frozenColumns).toBe(3);
+    expect(parseListYaml('pinned', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('migrates the old titleFrozen flag rather than dropping the setting', () => {
+    // `titleFrozen: false` said "the name column scrolls", which is the same
+    // statement as "nothing is frozen". A view saved before M16.18 must not
+    // silently re-pin its first column.
+    const def = parseListYaml(
+      'legacy',
+      'views:\n  - { id: v, presentation: { type: table, titleFrozen: false } }\n',
+    ).definition;
+    expect(def.views[0].presentation.frozenColumns).toBe(0);
+    // `titleFrozen: true` was the default and carried no information.
+    const on = parseListYaml(
+      'legacy-on',
+      'views:\n  - { id: v, presentation: { type: table, titleFrozen: true } }\n',
+    ).definition;
+    expect(on.views[0].presentation.frozenColumns).toBeUndefined();
+    // Written back in the new spelling only, so a file converges on one shape.
+    expect(serializeList(def)).not.toContain('titleFrozen');
+  });
+
+  it('drops a nonsense frozen count rather than pinning by a fraction', () => {
+    const def = parseListYaml(
+      'bad',
+      'views:\n  - { id: v, presentation: { frozenColumns: -2 } }\n',
+    ).definition;
+    expect(def.views[0].presentation.frozenColumns).toBeUndefined();
+  });
+
+  it('drops a calculation it cannot compute rather than storing it', () => {
+    // A hand-edited view file naming `median` must degrade to "no
+    // calculation"; letting it through would reach `aggregate`'s exhaustive
+    // guard with a value the union says cannot exist.
+    const def = parseListYaml(
+      'bogus',
+      'views:\n  - { id: v, presentation: { titleCalc: median, columns: [{ field: cost, calc: mode }] } }\n',
+    ).definition;
+    expect(def.views[0].presentation.titleCalc).toBeUndefined();
+    expect(def.views[0].presentation.columns[0].calc).toBeUndefined();
+  });
+
   it('drops a chip style it does not recognize rather than trusting it', () => {
     const def = parseListYaml(
       'bad',
@@ -449,6 +510,84 @@ describe('serializeList', () => {
     expect(parseListYaml('sprint-board', serializeList(def)).definition).toEqual(def);
   });
 
+  /**
+   * The read-side allowlist and the operator union were two hand-written
+   * lists (M16.25). An operator missing from `views.ts`'s copy made
+   * `parseFilterNode` treat the rule as MALFORMED and drop it, so the view
+   * reopened with one fewer condition and silently showed records it had been
+   * configured to hide. This asserts the two can no longer disagree.
+   */
+  it('round-trips every operator in the catalog', () => {
+    const def = oneView(
+      { name: 'Every op', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+      },
+      {
+        all: FILTER_OPS.map((op) => ({
+          field: 'due',
+          op,
+          // Whatever shape the operator takes, the value has to survive too:
+          // an `is_between` that came back as a scalar would silently become
+          // "between X and undefined".
+          ...(op === 'is_empty' || op === 'is_not_empty'
+            ? {}
+            : op === 'is_between'
+              ? { value: ['2026-01-01', '2026-12-31'] }
+              : op === 'any_of' || op === 'none_of'
+                ? { value: ['a', 'b'] }
+                : { value: '2026-06-01' }),
+        })),
+      },
+    );
+    const back = parseListYaml('every-op', serializeList(def)).definition;
+    expect(back).toEqual(def);
+    expect(back.views[0].filters).not.toBeNull();
+  });
+
+  /**
+   * A typed value editor writes real numbers and real booleans (M16.25). YAML
+   * keeps both, so a rule authored as `is 5` must not come back as `is "5"`.
+   */
+  it('round-trips a rule whose value is a number and one whose value is a boolean', () => {
+    const def = oneView(
+      { name: 'Typed', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+      },
+      {
+        all: [
+          { field: 'estimate', op: 'gte', value: 5 },
+          { field: 'done', op: 'equals', value: true },
+        ],
+      },
+    );
+    expect(parseListYaml('typed', serializeList(def)).definition).toEqual(def);
+  });
+
+  it('round-trips a load limit, and drops a nonsense one on read (M16.26)', () => {
+    const def = oneView(
+      { name: 'Capped', icon: null, color: null, order: null, source: NO_SOURCE },
+      {
+        type: 'table',
+        group: [],
+        sort: [{ field: 'title', dir: 'asc' }],
+        columns: [{ field: 'key' }],
+        limit: 25,
+      },
+    );
+    expect(parseListYaml('capped', serializeList(def)).definition).toEqual(def);
+    // A limit only a hand-edit can produce. Honouring it would render an
+    // empty canvas that nothing on screen can explain or undo.
+    expect(presentationOf(parseListYaml('v', 'presentation:\n  limit: 0\n')).limit).toBeUndefined();
+  });
+
   // M3.5: a view is rooted in a type, and a relation level descends it — both
   // have to survive the YAML round trip or a saved view loses its shape.
   it('round-trips a type-rooted nesting view', () => {
@@ -530,8 +669,11 @@ describe('serializeList', () => {
       expect(parse('presentation: {}\n').type).toBe('list');
     });
 
+    // M16.3: driven by VIEW_TYPES, so a kind added to the union is parsed
+    // here automatically. Omitting one from the LAYOUTS allowlist used to
+    // downgrade every saved file of that kind to `list`, silently.
     it('accepts every live kind verbatim', () => {
-      for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
+      for (const kind of VIEW_TYPES) {
         expect(parse(`presentation:\n  type: ${kind}\n`).type).toBe(kind);
       }
     });
@@ -592,6 +734,340 @@ describe('serializeList', () => {
 
     it('drops a blank dateField so inference still runs', () => {
       expect(parse("presentation:\n  type: calendar\n  dateField: ''\n").dateField).toBeUndefined();
+    });
+
+    // M16.23 grid chrome. Same rule: stored only off its default, so no
+    // existing calendar file gains three keys the day this shipped.
+    it('round-trips the calendar grid settings', () => {
+      const def = oneView(
+        {
+          name: 'Weeks',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Campaign', project: null },
+        },
+        {
+          type: 'calendar',
+          group: [],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [],
+          calendarSpan: 'week',
+          showWeekends: false,
+          weekStart: 'monday',
+        },
+      );
+      expect(parseListYaml('s', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('omits the grid settings when they are at their defaults', () => {
+      const yaml = serializeList(
+        oneView(
+          {
+            name: 'Months',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: 'Campaign', project: null },
+          },
+          {
+            type: 'calendar',
+            group: [],
+            sort: [],
+            columns: [],
+            calendarSpan: 'month',
+            showWeekends: true,
+            weekStart: 'sunday',
+          },
+        ),
+      );
+      expect(yaml).not.toContain('calendarSpan');
+      expect(yaml).not.toContain('showWeekends');
+      expect(yaml).not.toContain('weekStart');
+    });
+
+    it('round-trips showTable BOTH ways', () => {
+      // Unlike the rest it has no single default — a gantt shows its table and
+      // a timeline does not — so `false` has to survive as `false` rather than
+      // being written off as "the default, omit it".
+      for (const showTable of [true, false]) {
+        const def = oneView(
+          {
+            name: 'Schedule',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: 'Work item', project: null },
+          },
+          {
+            type: 'timeline',
+            group: [],
+            sort: [{ field: 'due', dir: 'asc' }],
+            columns: [],
+            showTable,
+          },
+        );
+        expect(parseListYaml('s', serializeList(def)).definition).toEqual(def);
+      }
+    });
+
+    it('ignores grid settings it does not recognize', () => {
+      const p = parse(
+        'presentation:\n  type: calendar\n  calendarSpan: fortnight\n  weekStart: tuesday\n',
+      );
+      expect(p.calendarSpan).toBeUndefined();
+      expect(p.weekStart).toBeUndefined();
+    });
+  });
+
+  /**
+   * The layout-specific settings blocks (M16.22, M16.27). Same contract the
+   * date-axis keys have: a saved gallery or chart reopens as one with its
+   * settings intact, and a layout that configured nothing writes no block at
+   * all — `parseViewType` silently downgrading an unknown kind was this
+   * milestone's bug, and a settings block nobody can read back is the same
+   * failure one level down.
+   */
+  describe('layout settings blocks', () => {
+    const parse = (yaml: string) => presentationOf(parseListYaml('v', yaml));
+
+    it('round-trips cover, size and fit', () => {
+      const def = oneView(
+        {
+          name: 'Assets',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'gallery',
+          group: [],
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [{ field: 'status' }],
+          cardSize: 'large',
+          gallery: { cover: 'artwork', fit: true },
+        },
+      );
+      expect(parseListYaml('g', serializeList(def)).definition).toEqual(def);
+    });
+
+    /**
+     * A pre-M16.29 gallery stored its card size as `gallery.size` while the
+     * board stored the same setting as `cardSize`, so the settings panel
+     * offered the control twice and each copy wrote a key the other layout
+     * ignored. The two collapsed onto `cardSize`; a file written by the old
+     * panel has to keep the size its owner chose rather than snap to medium.
+     */
+    it('migrates a pre-M16.29 gallery.size onto cardSize', () => {
+      const p = parse('presentation:\n  type: gallery\n  gallery:\n    size: large\n');
+      expect(p.cardSize).toBe('large');
+      expect(p.gallery).toBeUndefined();
+    });
+
+    /** Both spellings on one file can only come from a hand edit; the current
+     * key wins rather than being overwritten by the legacy one. */
+    it('prefers cardSize over a legacy gallery.size', () => {
+      const p = parse(
+        'presentation:\n  type: gallery\n  cardSize: small\n  gallery:\n    size: large\n',
+      );
+      expect(p.cardSize).toBe('small');
+    });
+
+    it('omits the block entirely when the gallery was never configured', () => {
+      const yaml = serializeList(
+        oneView(
+          { name: 'Cards', icon: null, color: null, order: null, source: NO_SOURCE },
+          { type: 'gallery', group: [], sort: [], columns: [] },
+        ),
+      );
+      // The word appears as the LAYOUT (`type: gallery`); what must not be
+      // there is a settings block nobody configured.
+      expect(yaml).not.toMatch(/^\s+gallery:/m);
+    });
+
+    // A hand-edited size that no layout implements would otherwise reach the
+    // grid as an unknown key and index METRICS to undefined.
+    it('drops a card size it does not recognize', () => {
+      const p = parse('presentation:\n  type: gallery\n  gallery:\n    size: enormous\n');
+      expect(p.cardSize).toBeUndefined();
+      expect(p.gallery).toBeUndefined();
+    });
+
+    /**
+     * The chart's settings (M16.27). Note what is NOT here: the X axis, which
+     * is the grouping chain and round-trips as `group` like every other
+     * layout's.
+     */
+    it('round-trips the chart block', () => {
+      const def = oneView(
+        {
+          name: 'Burndown',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'chart',
+          group: [{ field: 'status' }],
+          // Non-empty on purpose: an empty chain is not representable —
+          // parseSortChain restores the default, which predates this and is
+          // not what the chart block is being tested for.
+          sort: [{ field: 'title', dir: 'asc' }],
+          columns: [],
+          chart: { kind: 'donut', agg: 'sum', value: 'estimate', omitZero: true },
+        },
+      );
+      expect(parseListYaml('c', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a chart type nothing draws', () => {
+      expect(
+        parse('presentation:\n  type: chart\n  chart:\n    kind: sankey\n').chart,
+      ).toBeUndefined();
+    });
+
+    it('omits the chart block when the view never configured one', () => {
+      const yaml = serializeList(
+        oneView(
+          { name: 'Bars', icon: null, color: null, order: null, source: NO_SOURCE },
+          { type: 'chart', group: [], sort: [], columns: [] },
+        ),
+      );
+      expect(yaml).not.toMatch(/^\s+chart:/m);
+    });
+
+    /**
+     * The dashboard's blocks (M16.28) — a LIST, unlike the other two, so a
+     * malformed member is dropped alone rather than taking the others with it.
+     */
+    it('round-trips a dashboard’s blocks in order', () => {
+      const def = oneView(
+        { name: 'Ops', icon: null, color: null, order: null, source: NO_SOURCE },
+        {
+          type: 'dashboard',
+          group: [],
+          sort: [{ field: 'modifiedAt', dir: 'desc' }],
+          columns: [],
+          dashboard: {
+            blocks: [
+              { id: 'total', kind: 'number', agg: 'sum', value: 'estimate', title: 'Points' },
+              { id: 'grid', kind: 'view', list: 'delivery', collection: 'ops', wide: true },
+              { id: 'count', kind: 'number', agg: 'count' },
+            ],
+          },
+        },
+      );
+      expect(parseListYaml('d', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('drops a view block with no list to point at, keeping its siblings', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: a, kind: view }\n      - { id: b, kind: number, agg: count }\n',
+      );
+      expect(p.dashboard?.blocks).toEqual([{ id: 'b', kind: 'number', agg: 'count' }]);
+    });
+
+    it('makes block ids unique, because a delete addresses one', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: x, kind: number, agg: count }\n      - { id: x, kind: number, agg: count }\n',
+      );
+      expect(p.dashboard?.blocks.map((b) => b.id)).toEqual(['x', 'block-2']);
+    });
+
+    it('forgets a value property the measure cannot use', () => {
+      const p = parse(
+        'presentation:\n  type: dashboard\n  dashboard:\n    blocks:\n      - { id: n, kind: number, agg: count, value: estimate }\n',
+      );
+      expect(p.dashboard?.blocks[0]).toEqual({ id: 'n', kind: 'number', agg: 'count' });
+    });
+
+    it('reads an empty dashboard as empty, not as unconfigured', () => {
+      // `blocks: []` is a dashboard someone emptied; absent is one nobody has
+      // touched. Both render the same, but only the first survives a rewrite.
+      expect(
+        parse('presentation:\n  type: dashboard\n  dashboard:\n    blocks: []\n').dashboard,
+      ).toEqual({ blocks: [] });
+      expect(parse('presentation:\n  type: dashboard\n').dashboard).toBeUndefined();
+    });
+
+    it('keeps a cover even when the rest of the block is junk', () => {
+      const p = parse(
+        'presentation:\n  type: gallery\n  gallery:\n    cover: artwork\n    size: 7\n    fit: yes please\n',
+      );
+      expect(p.gallery).toEqual({ cover: 'artwork' });
+    });
+  });
+
+  // M16.20 board card keys. Same rule as the axis keys: written only when
+  // set, so switching a board back to its defaults leaves the file as it was
+  // rather than storing three keys that say "the default".
+  describe('board card keys', () => {
+    const parse = (yaml: string) => presentationOf(parseListYaml('v', yaml));
+
+    it('round-trips cardSize, cardPreview, and colorColumns', () => {
+      const def = oneView(
+        {
+          name: 'Wall',
+          icon: null,
+          color: null,
+          order: null,
+          source: { type: 'Work item', project: null },
+        },
+        {
+          type: 'board',
+          group: [{ field: 'status' }],
+          sort: [{ field: 'due', dir: 'asc' }],
+          columns: [{ field: 'status' }],
+          cardSize: 'large',
+          cardPreview: 'content',
+          colorColumns: true,
+        },
+      );
+      expect(parseListYaml('w', serializeList(def)).definition).toEqual(def);
+    });
+
+    it('omits them entirely when unset', () => {
+      const yaml = serializeList(
+        oneView(
+          {
+            name: 'Grid',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: null, project: null },
+          },
+          { type: 'table', group: [], sort: [], columns: [] },
+        ),
+      );
+      expect(yaml).not.toContain('cardSize');
+      expect(yaml).not.toContain('cardPreview');
+      expect(yaml).not.toContain('colorColumns');
+    });
+
+    it('drops a card size it does not recognize rather than trusting it', () => {
+      expect(
+        parse('presentation:\n  type: board\n  cardSize: enormous\n').cardSize,
+      ).toBeUndefined();
+    });
+
+    // 'cover' is the one Notion offers and we cannot render — a record has no
+    // cover image. Accepting it here would put a value on disk that the board
+    // silently ignores forever.
+    it('drops a card preview it cannot render', () => {
+      expect(
+        parse('presentation:\n  type: board\n  cardPreview: cover\n').cardPreview,
+      ).toBeUndefined();
+    });
+
+    it('treats anything but true as colorColumns off', () => {
+      expect(parse('presentation:\n  type: board\n  colorColumns: false\n').colorColumns).toBe(
+        undefined,
+      );
+      expect(parse("presentation:\n  type: board\n  colorColumns: 'yes'\n").colorColumns).toBe(
+        undefined,
+      );
     });
   });
 
@@ -687,5 +1163,66 @@ describe('serializeList', () => {
       expect(p.group.filter((g) => g.descend !== undefined)).toHaveLength(6);
       expect(p.group.filter((g) => g.descend === undefined)).toHaveLength(0);
     });
+  });
+});
+
+/**
+ * A sort chain is ORDERED — the first key decides and later ones break its
+ * ties — and there was no grip anywhere (`ChainBuilder.tsx:110-141`). The only
+ * way to demote the leading key was to delete every row and re-add them in the
+ * order you wanted (M16.26).
+ */
+describe('moveSortKey', () => {
+  const chain: SortSpec[] = [
+    { field: 'status', dir: 'asc' },
+    { field: 'due', dir: 'desc' },
+    { field: 'title', dir: 'asc' },
+  ];
+
+  it('promotes a key to the front', () => {
+    expect(moveSortKey(chain, 2, 0).map((s) => s.field)).toEqual(['title', 'status', 'due']);
+  });
+  it('demotes a key to the back', () => {
+    expect(moveSortKey(chain, 0, 2).map((s) => s.field)).toEqual(['due', 'title', 'status']);
+  });
+  it('a move to the same slot is not a new array to persist', () => {
+    expect(moveSortKey(chain, 1, 1)).toBe(chain);
+  });
+  /**
+   * Called from a pointer drag whose slot maths was measured against a DOM
+   * that may have re-rendered mid-gesture, so a stale index must be a no-op
+   * rather than a splice that duplicates or drops a key.
+   */
+  it('an out-of-range index leaves the chain untouched', () => {
+    expect(moveSortKey(chain, 5, 0)).toBe(chain);
+    expect(moveSortKey(chain, 0, -1)).toBe(chain);
+    expect(moveSortKey(chain, 0, 9)).toBe(chain);
+  });
+});
+
+/**
+ * Tab order is the order of the `views:` array on disk, and nothing could
+ * write a different one: no drag handler, no Move left/right item, and no
+ * action anywhere in the app (M16.26).
+ */
+describe('moveView', () => {
+  const views = [
+    newView('One', 'table', []),
+    newView('Two', 'board', ['one']),
+    newView('Three', 'list', ['one', 'two']),
+  ];
+
+  it('moves a tab by id, not by index', () => {
+    expect(moveView(views, 'three', 0).map((v) => v.id)).toEqual(['three', 'one', 'two']);
+  });
+  it('an unknown id changes nothing', () => {
+    expect(moveView(views, 'nope', 0)).toBe(views);
+  });
+  it('a target outside the strip changes nothing', () => {
+    expect(moveView(views, 'one', 3)).toBe(views);
+  });
+  it('the moved tab keeps its whole definition, not just its name', () => {
+    const moved = moveView(views, 'two', 0);
+    expect(moved[0]).toBe(views[1]);
   });
 });

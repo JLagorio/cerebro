@@ -134,3 +134,45 @@ describe('ListPage view tabs (M11)', () => {
     expect(screen.getByTestId('new-view')).toBeTruthy();
   });
 });
+
+/**
+ * The number beside the list's name (M16.31).
+ *
+ * It read `surface.entries.length` — filtered but not searched. So typing in
+ * "Search this view" narrowed the canvas to three cards, flipped the chip to
+ * "· filtered", and left the count reading 45. A Filter rule DID move it. One
+ * header, two different truths about the same screen, depending on which
+ * control you narrowed with.
+ */
+describe('ListPage header count (M16.31)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ vaultPath: null, entries: [], views: [], collections: [] });
+  });
+
+  const search = (query: string) => {
+    fireEvent.click(screen.getByLabelText('Search this view'));
+    fireEvent.change(screen.getByTestId('view-search-input'), { target: { value: query } });
+  };
+
+  it('counts the records on screen, not the ones a search just removed', () => {
+    setup(TWO_VIEWS, 'grid');
+    // The fixture holds two Work items; "sync" matches one of them.
+    expect(screen.getByTestId('view-count').textContent).toBe('2');
+    search('sync');
+    expect(screen.getByTestId('view-count').textContent).toBe('1');
+  });
+
+  it('goes back up when the search is cleared', () => {
+    setup(TWO_VIEWS, 'grid');
+    search('sync');
+    search('');
+    expect(screen.getByTestId('view-count').textContent).toBe('2');
+  });
+
+  /** A filter already moved the count, and the two controls must not disagree
+   * — that disagreement is what made the search's silence look deliberate. */
+  it('still counts what the view’s filters left', () => {
+    setup(TWO_VIEWS, 'risk');
+    expect(screen.getByTestId('view-count').textContent).toBe('1');
+  });
+});

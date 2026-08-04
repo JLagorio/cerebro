@@ -1,3 +1,4 @@
+import { resolveOptionColor } from '@/lib/swatch';
 import { Avatar } from '@/components/ui/Avatar';
 import type { ResolvedField } from '@/engine/types';
 
@@ -14,31 +15,32 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
 
   if (resolved.ghost) {
     return (
-      <span className="inline-flex flex-none items-center rounded-md border border-dashed border-[var(--n-300)] px-1.5 py-0.5 text-[11px] text-[var(--n-400)]">
+      <span className="inline-flex flex-none items-center rounded-md border border-dashed border-n-300 px-1.5 py-0.5 text-2xs text-n-400">
         {resolved.display}
       </span>
     );
   }
   if (kind === 'person') {
     return (
-      <span className="inline-flex flex-none items-center gap-1.5 text-[12px] text-[var(--n-700)]">
+      <span className="inline-flex flex-none items-center gap-1.5 text-xs text-n-700">
         <Avatar name={resolved.display} size={20} />
         {resolved.display}
       </span>
     );
   }
   if (kind === 'date' || kind === 'daterange') {
-    return (
-      <span className="inline-flex flex-none [font-family:var(--font-mono)] text-[11px] text-[var(--n-500)]">
-        {resolved.display}
-      </span>
-    );
+    // Dates ride in the UI font like every other chip kind here. Mono is for
+    // columnar alignment — TableView renders its own cells and keeps it — but
+    // a chip sits inline on a card or list row, where mono buys no alignment
+    // and only makes the one value that is not text look like code.
+    return <span className="inline-flex flex-none text-xs text-n-600">{resolved.display}</span>;
   }
   if (kind === 'status' || kind === 'select' || kind === 'multiselect') {
-    const color = resolved.color ?? 'var(--n-400)';
+    const sw = resolveOptionColor(resolved.color);
+    const color = resolved.color === null ? 'var(--n-400)' : sw.solid;
     const hollow = optionHollow(resolved);
     return (
-      <span className="inline-flex flex-none items-center gap-1.5 text-[12px] text-[var(--n-700)]">
+      <span className="inline-flex flex-none items-center gap-1.5 text-xs text-n-700">
         <span
           className="box-border h-[9px] w-[9px] flex-none rounded-full"
           style={
@@ -51,9 +53,5 @@ export function FieldChip({ resolved }: { resolved: ResolvedField }) {
       </span>
     );
   }
-  return (
-    <span className="inline-flex flex-none text-[12px] text-[var(--n-600)]">
-      {resolved.display}
-    </span>
-  );
+  return <span className="inline-flex flex-none text-xs text-n-600">{resolved.display}</span>;
 }

@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '@/components/ui/ContextMenu';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
+import { IconPicker } from '@/components/ui/IconPicker';
 import { Input } from '@/components/ui/Input';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
+import { useSortableList } from '@/hooks/useSortableList';
 import type { ViewDefinition, ViewType } from '@/engine/types';
 import { layoutLabel } from '@/engine/views';
 import { VIEW_KINDS, viewKind } from '@/views/viewKinds';
@@ -31,6 +34,10 @@ export interface ViewTabsProps {
   onChangeLayout: (id: string, type: ViewType) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Move a tab to a new position (M16.26). Omitted leaves the strip fixed. */
+  onReorder?: (id: string, toIndex: number) => void;
+  /** Set or clear a tab's own icon (M16.26). Omitted hides the menu item. */
+  onChangeIcon?: (id: string, icon: string | null) => void;
   /** Opens the full settings panel for a view. Absent on surfaces that have
    * no settings aside (M12.3: the type screen) — the menu item is omitted. */
   onConfigure?: (id: string) => void;
@@ -48,11 +55,14 @@ export function ViewTabs({
   onChangeLayout,
   onDuplicate,
   onDelete,
+  onReorder,
+  onChangeIcon,
   onConfigure,
   trailing,
 }: ViewTabsProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [layoutFor, setLayoutFor] = useState<string | null>(null);
+  const [iconFor, setIconFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   // A ViewDefinition carries the tab's filters, its column set with widths and
@@ -61,9 +71,65 @@ export function ViewTabs({
   // unrecoverable — the app has no undo.
   const [deleting, setDeleting] = useState<ViewDefinition | null>(null);
 
+  // Horizontal, because the tabs are. The primitive's arrow keys follow the
+  // axis, so a keyboard user moves a tab with Left/Right rather than being
+  // told to use Up/Down on a row.
+  const sortable = useSortableList({
+    ids: views.map((v) => v.id),
+    axis: 'x',
+    disabled: onReorder === undefined,
+    labelFor: (id) => views.find((v) => v.id === id)?.name ?? id,
+    onReorder: (id, to) => onReorder?.(id, to),
+  });
+
+  // Roving tabindex, the same shape as the SegmentedControl primitive: a
+  // tablist is ONE tab stop and arrows move within it (M16.34). The strip
+  // claimed `role="tablist"` while leaving every tab its own tab stop and
+  // ignoring arrow keys — the contract announced, none of it honoured. Falls
+  // back to the first tab so the strip stays reachable if `activeId` matches
+  // no view.
+  const activeIndex = views.findIndex((v) => v.id === activeId);
+  const focusIndex = activeIndex >= 0 ? activeIndex : 0;
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  const onTabsKeyDown = (e: React.KeyboardEvent) => {
+    // Only the tabs themselves rove. The reorder grip beside each tab takes
+    // Left/Right to MOVE a tab, the rename input takes them to move a caret,
+    // and the pickers below mount through portals whose events still bubble
+    // here in the React tree — none of them are asking to switch tabs.
+    if (!(e.target instanceof HTMLElement) || e.target.getAttribute('role') !== 'tab') return;
+    const keys = ['ArrowLeft', 'ArrowRight', 'Home', 'End'];
+    if (!keys.includes(e.key) || views.length === 0) return;
+    e.preventDefault();
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? views.length - 1
+          : focusIndex + (e.key === 'ArrowRight' ? 1 : -1);
+    const i = ((next % views.length) + views.length) % views.length;
+    const target = views[i];
+    if (target.id !== activeId) onSelect(target.id);
+    // Selection follows focus, so the newly active tab is the tab stop — and
+    // the tab that was pressed is about to stop being one.
+    const tabs = Array.from(stripRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
+    // Matched on the id rather than indexed, because a tab being renamed is an
+    // input rather than a button and would shift every index after it.
+    tabs.find((t) => t.dataset.testid === `view-tab-${target.id}`)?.focus();
+  };
+
   const menuItems = (view: ViewDefinition): ContextMenuItem[] => {
     const items: ContextMenuItem[] = [
       { icon: 'pencil', label: 'Rename', onSelect: () => setRenaming(view.id) },
+      ...(onChangeIcon !== undefined
+        ? [
+            {
+              icon: view.icon ?? viewKind(view.presentation.type).icon,
+              label: 'Change icon…',
+              onSelect: () => setIconFor(view.id),
+            },
+          ]
+        : []),
       {
         icon: viewKind(view.presentation.type).icon,
         label: 'Change layout…',
@@ -88,7 +154,7 @@ export function ViewTabs({
   };
 
   return (
-    <div className="flex min-w-0 flex-none items-end border-b border-[var(--n-200)] px-5">
+    <div className="flex min-w-0 flex-none items-end border-b border-n-200 px-5">
       {deleting !== null && (
         <Dialog
           open
@@ -105,7 +171,7 @@ export function ViewTabs({
           }}
           secondaryAction={{ label: 'Cancel', onClick: () => setDeleting(null) }}
         >
-          <p className="m-0 text-[13px] text-[var(--n-600)]">
+          <p className="m-0 text-sm text-n-600">
             This removes the tab and everything it holds — its{' '}
             {layoutLabel(deleting.presentation.type).toLowerCase()} layout, filters, sort, grouping
             and column arrangement. The records stay where they are.
@@ -113,79 +179,128 @@ export function ViewTabs({
         </Dialog>
       )}
       <div
+        ref={stripRef}
         role="tablist"
         aria-label="Views"
         data-testid="view-tabs"
+        onKeyDown={onTabsKeyDown}
         // Scrolls rather than wraps: a tab row that reflows onto a second line
         // moves every other tab under the cursor as the window narrows. The
         // trailing icons sit OUTSIDE this strip so they cannot scroll away.
         className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {views.map((view) => {
-          const active = view.id === activeId;
-          const kind = viewKind(view.presentation.type);
-          if (renaming === view.id) {
+        {/* `display: contents` so the tabs stay direct flex children of the
+            strip while the sortable measures ONLY them. Its slot maths reads
+            `container.children`, and the "+ View" button below would otherwise
+            count as a drop slot you could never mean. */}
+        <div
+          ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+          style={{ display: 'contents' }}
+        >
+          {views.map((view, index) => {
+            const active = view.id === activeId;
+            const kind = viewKind(view.presentation.type);
+            if (renaming === view.id) {
+              return (
+                <RenameTab
+                  key={view.id}
+                  name={view.name}
+                  icon={view.icon ?? kind.icon}
+                  onCommit={(name) => {
+                    setRenaming(null);
+                    if (name !== '' && name !== view.name) onRename(view.id, name);
+                  }}
+                />
+              );
+            }
             return (
-              <RenameTab
+              <div
                 key={view.id}
-                name={view.name}
-                icon={view.icon ?? kind.icon}
-                onCommit={(name) => {
-                  setRenaming(null);
-                  if (name !== '' && name !== view.name) onRename(view.id, name);
-                }}
-              />
-            );
-          }
-          return (
-            <div key={view.id} className="relative flex-none">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={active}
-                data-testid={`view-tab-${view.id}`}
-                onClick={(e) => {
-                  if (!active) {
-                    onSelect(view.id);
-                    return;
-                  }
-                  // Anchor the menu to the tab that was pressed, taken from the
-                  // event rather than looked up — the tab IS the event target.
-                  const box = e.currentTarget.getBoundingClientRect();
-                  setMenu({ x: box.left, y: box.bottom, id: view.id });
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setMenu({ x: e.clientX, y: e.clientY, id: view.id });
-                }}
                 className={[
-                  'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-[13px]',
-                  active
-                    ? 'border-[var(--cortex-500)] font-semibold text-[var(--n-900)]'
-                    : 'border-transparent font-normal text-[var(--n-500)] hover:text-[var(--n-800)]',
+                  'group relative flex-none',
+                  sortable.dragging === view.id ? 'opacity-40' : '',
                 ].join(' ')}
-                style={{ borderBottomStyle: 'solid' }}
+                style={sortable.dropIndicator(index)}
               >
-                <Icon name={view.icon ?? kind.icon} size={13} />
-                <span className="min-w-0 truncate">{view.name}</span>
-                {/* The caret appears on the tab you are standing on, because
+                {/* The grip sits in the tab's own left padding, which is dead
+                  space — an appended handle would shove every tab sideways
+                  the moment the pointer arrived, and one overlaying the icon
+                  would have to be aligned by hand against a button whose
+                  vertical padding is asymmetric. */}
+                {onReorder !== undefined && (
+                  <Tooltip label="Drag to reorder">
+                    <span
+                      {...sortable.gripProps(view.id, index)}
+                      // Opacity, not `hidden`: a hidden grip is out of the tab
+                      // order, and Left/Right reordering is the point of the
+                      // primitive underneath it.
+                      className="absolute inset-y-1 left-0 z-10 flex w-2.5 cursor-grab items-center justify-center rounded-xs text-n-400 opacity-0 hover:text-n-600 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <Icon name="grip-vertical" size={11} />
+                    </span>
+                  </Tooltip>
+                )}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  tabIndex={index === focusIndex ? 0 : -1}
+                  data-testid={`view-tab-${view.id}`}
+                  onClick={(e) => {
+                    if (!active) {
+                      onSelect(view.id);
+                      return;
+                    }
+                    // Anchor the menu to the tab that was pressed, taken from the
+                    // event rather than looked up — the tab IS the event target.
+                    const box = e.currentTarget.getBoundingClientRect();
+                    setMenu({ x: box.left, y: box.bottom, id: view.id });
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMenu({ x: e.clientX, y: e.clientY, id: view.id });
+                  }}
+                  className={[
+                    'inline-flex max-w-[220px] items-center gap-1.5 whitespace-nowrap border-0 border-b-2 bg-transparent px-2.5 pb-2 pt-1.5 text-sm',
+                    active
+                      ? 'border-cortex-500 font-semibold text-n-900'
+                      : 'border-transparent font-normal text-n-500 hover:text-n-800',
+                  ].join(' ')}
+                  style={{ borderBottomStyle: 'solid' }}
+                >
+                  <Icon name={view.icon ?? kind.icon} size={13} />
+                  <span className="min-w-0 truncate">{view.name}</span>
+                  {/* The caret appears on the tab you are standing on, because
                   that is the only one whose settings you can act on without
                   first leaving where you are. */}
-                {active && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
-              </button>
-              {layoutFor === view.id && (
-                <LayoutPicker
-                  current={view.presentation.type}
-                  onPick={(type) => {
-                    setLayoutFor(null);
-                    if (type !== view.presentation.type) onChangeLayout(view.id, type);
-                  }}
-                  onClose={() => setLayoutFor(null)}
-                />
-              )}
-            </div>
-          );
-        })}
+                  {active && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
+                </button>
+                {layoutFor === view.id && (
+                  <LayoutPicker
+                    current={view.presentation.type}
+                    onPick={(type) => {
+                      setLayoutFor(null);
+                      if (type !== view.presentation.type) onChangeLayout(view.id, type);
+                    }}
+                    onClose={() => setLayoutFor(null)}
+                  />
+                )}
+                {iconFor === view.id && onChangeIcon !== undefined && (
+                  <ViewIconPicker
+                    current={view.icon}
+                    layoutIcon={kind.icon}
+                    layoutLabel={kind.label}
+                    onPick={(icon) => {
+                      setIconFor(null);
+                      onChangeIcon(view.id, icon);
+                    }}
+                    onClose={() => setIconFor(null)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         <div className="relative flex-none">
           <button
@@ -193,7 +308,7 @@ export function ViewTabs({
             data-testid="new-view"
             aria-label="New view"
             onClick={() => setCreating(true)}
-            className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            className="mb-1 ml-1 inline-flex items-center gap-1 rounded-md border-0 bg-transparent px-1.5 py-1 text-xs text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name="plus" size={13} />
             View
@@ -253,7 +368,7 @@ function RenameTab({
             onCommit('');
           }
         }}
-        className="h-[26px] w-32 rounded-md border border-[var(--cortex-500)] px-1.5 text-[13px] text-[var(--n-900)] shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
+        className="h-[26px] w-32 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[0_0_0_3px_var(--cortex-100)] outline-none"
       />
     </span>
   );
@@ -285,7 +400,7 @@ function LayoutPicker({
         <div
           role="listbox"
           aria-label="Layout"
-          className="z-50 w-[188px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1 shadow-[var(--shadow-lg)]"
+          className="z-50 w-[188px] rounded-lg border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]"
         >
           {VIEW_KINDS.map((k) => (
             <button
@@ -296,10 +411,10 @@ function LayoutPicker({
               data-testid={`view-switch-${k.value}`}
               onClick={() => onPick(k.value)}
               className={[
-                'flex w-full items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                'flex w-full items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
                 k.value === current
-                  ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                  : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                  ? 'bg-cortex-50 text-cortex-700'
+                  : 'bg-transparent text-n-700 hover:bg-n-50',
               ].join(' ')}
             >
               <Icon name={k.icon} size={13} />
@@ -307,6 +422,64 @@ function LayoutPicker({
               {k.value === current && <Icon name="check" size={12} />}
             </button>
           ))}
+        </div>
+      </FixedBelowAnchor>
+    </>
+  );
+}
+
+/**
+ * A tab's own icon (M16.26).
+ *
+ * `ViewDefinition.icon` has been parsed, serialized and RENDERED since M11 —
+ * `ViewTabs` reads `view.icon ?? kind.icon` — but `newView` hardcodes `null`
+ * and nothing in the app could write one, so every tab of the same layout wore
+ * the same glyph and the key was dead weight in the YAML.
+ *
+ * Clearing it is a real choice, not an absence: the tab falls back to its
+ * LAYOUT's icon, which is what the first tile says.
+ */
+function ViewIconPicker({
+  current,
+  layoutIcon,
+  layoutLabel: layoutName,
+  onPick,
+  onClose,
+}: {
+  current: string | null;
+  layoutIcon: string;
+  layoutLabel: string;
+  onPick: (icon: string | null) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close icon picker"
+        onClick={onClose}
+        onWheel={onClose}
+        className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
+      />
+      {/* Fixed for the same reason the layout picker is: the tab strip is a
+          horizontal scroll container and clips its absolute descendants. */}
+      <FixedBelowAnchor>
+        <div
+          data-testid="view-icon-picker"
+          className="z-50 w-[300px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
+        >
+          <div className="mb-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+            Tab icon
+          </div>
+          <IconPicker
+            value={current}
+            onChange={onPick}
+            clear={{
+              label: `Use the ${layoutName.toLowerCase()} icon`,
+              icon: layoutIcon,
+              onClear: () => onPick(null),
+            }}
+          />
         </div>
       </FixedBelowAnchor>
     </>
@@ -363,9 +536,9 @@ function NewViewForm({
         <div
           ref={ref}
           data-testid="new-view-form"
-          className="z-50 w-[268px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-2.5 shadow-[var(--shadow-lg)]"
+          className="z-50 w-[268px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
         >
-          <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             New view
           </div>
           <Input
@@ -392,10 +565,10 @@ function NewViewForm({
                 data-testid={`new-view-${k.value}`}
                 onClick={() => setType(k.value)}
                 className={[
-                  'flex flex-col items-center gap-1 rounded-[8px] border px-1 py-2 text-[11px]',
+                  'flex flex-col items-center gap-1 rounded-md border px-1 py-2 text-2xs',
                   k.value === type
-                    ? 'border-[var(--cortex-500)] bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                    : 'border-[var(--n-200)] bg-transparent text-[var(--n-600)] hover:bg-[var(--n-50)]',
+                    ? 'border-cortex-500 bg-cortex-50 text-cortex-700'
+                    : 'border-n-200 bg-transparent text-n-600 hover:bg-n-50',
                 ].join(' ')}
               >
                 <Icon name={k.icon} size={15} />
@@ -407,7 +580,7 @@ function NewViewForm({
             <button
               type="button"
               onClick={onCancel}
-              className="rounded-md border border-[var(--n-200)] bg-transparent px-2.5 py-1 text-[12px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+              className="rounded-md border border-n-200 bg-transparent px-2.5 py-1 text-xs text-n-700 hover:bg-n-50"
             >
               Cancel
             </button>
@@ -415,7 +588,7 @@ function NewViewForm({
               type="button"
               data-testid="create-view"
               onClick={() => onCreate(effective, type)}
-              className="rounded-md border-0 bg-[var(--cortex-500)] px-2.5 py-1 text-[12px] font-medium text-[var(--n-0)] hover:bg-[var(--cortex-600)]"
+              className="rounded-md border-0 bg-cortex-500 px-2.5 py-1 text-xs font-medium text-n-0 hover:bg-cortex-600"
             >
               Create
             </button>

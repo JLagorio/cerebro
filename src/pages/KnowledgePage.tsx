@@ -54,47 +54,44 @@ function ConceptRow({
       title={concept.supersededBy !== null ? 'Replaced by a newer concept' : undefined}
       onClick={onClick}
       className={[
-        'flex flex-col gap-1 border-0 border-b border-solid border-[var(--n-100)] px-4 py-2.5 text-left',
-        active ? 'bg-[var(--cortex-50)]' : 'bg-transparent hover:bg-[var(--n-25)]',
+        'flex flex-col gap-1 border-0 border-b border-solid border-n-100 px-4 py-2.5 text-left',
+        active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
       ].join(' ')}
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span
           className={[
-            'truncate text-[13px]',
+            'truncate text-sm',
             // M8.7 — a replaced concept is struck through in the list. The
             // alternative is hiding it, which loses the record of what was
             // believed before; this keeps it readable and unmistakable.
             concept.supersededBy !== null
-              ? 'font-medium text-[var(--n-400)] line-through'
+              ? 'font-medium text-n-400 line-through'
               : active
-                ? 'font-semibold text-[var(--n-900)]'
-                : 'font-medium text-[var(--n-800)]',
+                ? 'font-semibold text-n-900'
+                : 'font-medium text-n-800',
           ].join(' ')}
         >
           {concept.title}
         </span>
       </span>
       {concept.description !== null && (
-        <span className="line-clamp-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+        <span className="line-clamp-2 text-xs leading-[16px] text-n-500">
           {concept.description}
         </span>
       )}
       <span className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[10.5px] text-[var(--n-400)]">{concept.conceptType}</span>
+        <span className="text-2xs text-n-400">{concept.conceptType}</span>
         {/* M15: a strikethrough alone is a legend nobody has — deleted,
             deprecated, done and filtered-out all look like this. */}
         {concept.supersededBy !== null && (
-          <span
-            data-testid="replaced-tag"
-            className="rounded-[5px] bg-[var(--n-100)] px-1 text-[10px] text-[var(--n-500)]"
-          >
+          <span data-testid="replaced-tag" className="rounded-sm bg-n-100 px-1 text-2xs text-n-500">
             Replaced
           </span>
         )}
         <TrustChip tier={concept.trust} size="sm" />
         {concept.stale && (
-          <span className="inline-flex items-center gap-1 text-[10.5px] text-[var(--warn-600)]">
+          <span className="inline-flex items-center gap-1 text-2xs text-warn-600">
             <Icon name="clock-alert" size={10} />
             Stale
           </span>
@@ -295,17 +292,14 @@ export function KnowledgePage({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="knowledge-page">
-      <header className="flex flex-none items-center gap-2.5 border-b border-[var(--n-200)] px-5 py-2.5">
+      <header className="flex flex-none items-center gap-2.5 border-b border-n-200 px-5 py-2.5">
         {/* h1, like the other five page-chrome titles (Docs, Changes, Pulse,
             List, Type). Knowledge was the last page with no h1 at all, so a
             screen reader's heading list started at the selected concept. */}
-        <h1
-          className="m-0 text-[15px] font-semibold text-[var(--n-900)]"
-          data-testid="knowledge-heading"
-        >
+        <h1 className="m-0 text-lg font-semibold text-n-900" data-testid="knowledge-heading">
           {heading}
         </h1>
-        <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+        <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
           {concepts.length}
         </span>
         {/* On an entity slice the subject itself is one click away — that link
@@ -334,7 +328,7 @@ export function KnowledgePage({
           </Button>
         )}
         {!narrow && (
-          <span className="inline-flex items-center gap-1.5 text-[11.5px] text-[var(--n-500)]">
+          <span className="inline-flex items-center gap-1.5 text-xs text-n-500">
             <Icon name="lock" size={12} />
             Maintained by the agent
           </span>
@@ -370,7 +364,7 @@ export function KnowledgePage({
         >
           <div
             className={[
-              'flex flex-none flex-col overflow-y-auto border-r border-[var(--n-200)]',
+              'flex flex-none flex-col overflow-y-auto border-r border-n-200',
               narrow ? 'w-[220px]' : 'w-[280px]',
             ].join(' ')}
           >
@@ -391,7 +385,7 @@ export function KnowledgePage({
               {selected.supersededBy !== null && (
                 <div
                   data-testid="superseded-banner"
-                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-[10px] border border-[var(--n-200)] bg-[var(--warn-50)] px-3 py-2 text-[12px] text-[var(--warn-700)]"
+                  className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-n-200 bg-warn-50 px-3 py-2 text-xs text-warn-700"
                 >
                   <Icon name="archive" size={12} />
                   <span>No longer believed. Replaced by</span>
@@ -399,22 +393,22 @@ export function KnowledgePage({
                     type="button"
                     data-path={selected.supersededBy}
                     onClick={() => openConcept(replacedBy)}
-                    className="border-0 bg-transparent p-0 text-[12px] font-medium text-[var(--warn-700)] underline underline-offset-2"
+                    className="border-0 bg-transparent p-0 text-xs font-medium text-warn-700 underline underline-offset-2"
                   >
                     {replacement?.title ?? 'a newer concept'}
                   </button>
                 </div>
               )}
-              <div className="mb-1 flex items-center gap-2 text-[11px] text-[var(--n-400)]">
+              <div className="mb-1 flex items-center gap-2 text-2xs text-n-400">
                 <span className="[font-family:var(--font-mono)]">{selected.id}</span>
               </div>
               {/* h2: the concept is a section of the Knowledge page, not the
                   page itself. Size is unchanged — the level is the fix. */}
-              <h2 className="m-0 text-[26px] font-semibold tracking-[-0.02em] text-[var(--n-900)]">
+              <h2 className="m-0 text-2xl font-semibold tracking-[-0.02em] text-n-900">
                 {selected.title}
               </h2>
               {selected.description !== null && (
-                <p className="mb-1 mt-1.5 text-[13.5px] leading-[20px] text-[var(--n-600)]">
+                <p className="mb-1 mt-1.5 text-md leading-[20px] text-n-600">
                   {selected.description}
                 </p>
               )}

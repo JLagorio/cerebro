@@ -25,7 +25,18 @@ export function useFocusRestore(): void {
     return () => {
       // A node that left the document while the surface was open — a row the
       // surface's own work replaced — cannot take focus back.
-      if (opener !== null && opener.isConnected) opener.focus();
+      if (opener === null || !opener.isConnected) return;
+      // Restore only from nowhere (M16.35). Closing a surface normally leaves
+      // focus on `<body>`, because the node holding it was just removed —
+      // that is the case this hook exists for. But a surface that hands off,
+      // like a context menu item opening a rename field, unmounts in the SAME
+      // commit that mounts and autofocuses its successor, and this cleanup
+      // runs after that: restoring unconditionally yanked focus out of the
+      // field the user was sent to. Anything already holding focus took it
+      // deliberately and outranks a going-away surface's memory.
+      const now = document.activeElement;
+      if (now !== null && now !== document.body) return;
+      opener.focus();
     };
   }, [opener]);
 }

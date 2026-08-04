@@ -60,10 +60,10 @@ function Citation({ id, ctx }: { id: string; ctx: InlineContext }) {
       }
       onClick={known ? () => ctx.onCite?.(id) : undefined}
       className={[
-        'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-[9.5px] font-semibold [font-family:var(--font-mono)]',
+        'mx-[1px] inline-flex h-[15px] min-w-[15px] items-center justify-center rounded-full border-0 px-1 align-super text-2xs font-semibold [font-family:var(--font-mono)]',
         known
-          ? 'cursor-pointer bg-[var(--cortex-50)] text-[var(--cortex-600)] hover:bg-[var(--cortex-100)]'
-          : 'cursor-default bg-[var(--n-100)] text-[var(--n-400)]',
+          ? 'cursor-pointer bg-cortex-50 text-cortex-600 hover:bg-cortex-100'
+          : 'cursor-default bg-n-100 text-n-400',
       ].join(' ')}
     >
       {known ? index + 1 : '?'}
@@ -84,7 +84,7 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
       nodes.push(
         <code
           key={key++}
-          className="rounded bg-[var(--n-100)] px-1 py-[1px] [font-family:var(--font-mono)] text-[12px] text-[var(--n-800)]"
+          className="rounded bg-n-100 px-1 py-[1px] [font-family:var(--font-mono)] text-xs text-n-800"
         >
           {m[1].slice(1, -1)}
         </code>,
@@ -100,7 +100,7 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
             key={key++}
             type="button"
             onClick={() => ctx.onOpenConcept?.(target.internal)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-[var(--cortex-600)] underline decoration-[var(--cortex-200)] underline-offset-2 hover:decoration-[var(--cortex-500)]"
+            className="cursor-pointer border-0 bg-transparent p-0 text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
           >
             {label}
           </button>
@@ -110,7 +110,7 @@ export function renderInline(text: string, ctx: InlineContext): React.ReactNode[
             href={target.external}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-[var(--cortex-600)] underline decoration-[var(--cortex-200)] underline-offset-2 hover:decoration-[var(--cortex-500)]"
+            className="text-cortex-600 underline decoration-cortex-200 underline-offset-2 hover:decoration-cortex-500"
           >
             {label}
           </a>
@@ -141,9 +141,9 @@ const isDivider = (line: string): boolean => /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(l
 const isFootnoteDef = (line: string): boolean => /^\[\^[^\]\s]+\]:/.test(line);
 
 const HEADING_CLASS: Record<number, string> = {
-  1: 'mb-2 mt-6 text-[22px] font-semibold tracking-[-0.01em] text-[var(--n-900)]',
-  2: 'mb-2 mt-6 text-[16px] font-semibold text-[var(--n-900)]',
-  3: 'mb-1.5 mt-5 text-[14px] font-semibold text-[var(--n-800)]',
+  1: 'mb-2 mt-6 text-2xl font-semibold tracking-[-0.01em] text-n-900',
+  2: 'mb-2 mt-6 text-lg font-semibold text-n-900',
+  3: 'mb-1.5 mt-5 text-md font-semibold text-n-800',
 };
 
 export function ConceptBody({
@@ -182,7 +182,7 @@ export function ConceptBody({
       blocks.push(
         <pre
           key={key++}
-          className="my-3 overflow-x-auto rounded-lg border border-[var(--n-200)] bg-[var(--n-25)] px-3 py-2.5 [font-family:var(--font-mono)] text-[12px] leading-[18px] text-[var(--n-800)]"
+          className="my-3 overflow-x-auto rounded-lg border border-n-200 bg-n-25 px-3 py-2.5 [font-family:var(--font-mono)] text-xs leading-[18px] text-n-800"
         >
           <code>{code.join('\n')}</code>
         </pre>,
@@ -204,7 +204,7 @@ export function ConceptBody({
     }
 
     if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
-      blocks.push(<hr key={key++} className="my-5 border-0 border-t border-[var(--n-200)]" />);
+      blocks.push(<hr key={key++} className="my-5 border-0 border-t border-n-200" />);
       i += 1;
       continue;
     }
@@ -220,13 +220,13 @@ export function ConceptBody({
       }
       blocks.push(
         <div key={key++} className="my-3 overflow-x-auto">
-          <table className="w-full border-collapse text-[12.5px]">
+          <table className="w-full border-collapse text-sm">
             <thead>
               <tr>
                 {header.map((cell, c) => (
                   <th
                     key={c}
-                    className="border-0 border-b border-solid border-[var(--n-200)] px-2 py-1.5 text-left font-semibold text-[var(--n-700)]"
+                    className="border-0 border-b border-solid border-n-200 px-2 py-1.5 text-left font-semibold text-n-700"
                   >
                     {inline(cell)}
                   </th>
@@ -239,7 +239,7 @@ export function ConceptBody({
                   {row.map((cell, c) => (
                     <td
                       key={c}
-                      className="border-0 border-b border-solid border-[var(--n-100)] px-2 py-1.5 align-top text-[var(--n-700)]"
+                      className="border-0 border-b border-solid border-n-100 px-2 py-1.5 align-top text-n-700"
                     >
                       {inline(cell)}
                     </td>
@@ -262,7 +262,7 @@ export function ConceptBody({
       blocks.push(
         <blockquote
           key={key++}
-          className="my-3 border-0 border-l-2 border-solid border-[var(--n-200)] pl-3 text-[13px] text-[var(--n-600)]"
+          className="my-3 border-0 border-l-2 border-solid border-n-200 pl-3 text-sm text-n-600"
         >
           {inline(quote.join(' '))}
         </blockquote>,
@@ -285,7 +285,7 @@ export function ConceptBody({
       blocks.push(
         <ListTag
           key={key++}
-          className={`my-2 flex list-outside flex-col gap-1 pl-5 text-[13.5px] leading-[21px] text-[var(--n-700)] ${
+          className={`my-2 flex list-outside flex-col gap-1 pl-5 text-md leading-[21px] text-n-700 ${
             ordered ? 'list-decimal' : 'list-disc'
           }`}
         >
@@ -310,7 +310,7 @@ export function ConceptBody({
     }
     if (paragraph.length > 0) {
       blocks.push(
-        <p key={key++} className="my-2.5 text-[13.5px] leading-[21px] text-[var(--n-700)]">
+        <p key={key++} className="my-2.5 text-md leading-[21px] text-n-700">
           {inline(paragraph.join(' '))}
         </p>,
       );

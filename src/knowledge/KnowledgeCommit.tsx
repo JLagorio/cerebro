@@ -83,22 +83,20 @@ export function KnowledgeCommit({
       data-testid="knowledge-commit"
       data-state={commit.state}
       data-count={commit.concepts.length}
-      className={variant === 'panel' ? '' : 'mt-8 border-t border-[var(--n-100)] pt-5'}
+      className={variant === 'panel' ? '' : 'mt-8 border-t border-n-100 pt-5'}
     >
       <div className="flex items-center gap-2">
         <Icon name={heading.icon} size={14} color={heading.color} />
-        <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+        <h3 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-n-500">
           {heading.label}
         </h3>
         {learned !== null && (
-          <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-            {learned}
-          </span>
+          <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{learned}</span>
         )}
       </div>
 
       {commit.concepts.length === 0 ? (
-        <p className="m-0 mt-2 text-[12.5px] leading-[18px] text-[var(--n-500)]">
+        <p className="m-0 mt-2 text-sm leading-[18px] text-n-500">
           Nothing has been distilled from this note yet.
         </p>
       ) : (
@@ -112,12 +110,10 @@ export function KnowledgeCommit({
                 onClick={() =>
                   navigate({ kind: 'knowledge', nav: { tab: 'all' }, path: concept.entry.path })
                 }
-                className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
+                className="flex w-full min-w-0 items-center gap-1.5 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
               >
                 <Icon name="brain" size={12} color="var(--cortex-500)" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--n-800)]">
-                  {concept.title}
-                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-n-800">{concept.title}</span>
                 {concept.stale && <Icon name="clock-alert" size={11} color="var(--warn-600)" />}
               </button>
             </li>
@@ -126,7 +122,7 @@ export function KnowledgeCommit({
       )}
 
       {commit.state === 'behind' && (
-        <p className="m-0 mt-1.5 px-2 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+        <p className="m-0 mt-1.5 px-2 text-xs leading-[16px] text-n-500">
           The bundle is still reading the version from {learned}.
         </p>
       )}
@@ -137,7 +133,7 @@ export function KnowledgeCommit({
       {queued && (
         <p
           data-testid="learn-queued"
-          className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-[11.5px] text-[var(--cortex-600)]"
+          className="m-0 mt-1.5 flex items-center gap-1.5 px-2 text-xs text-cortex-600"
         >
           {/* M15: it turns while a read is actually in flight. */}
           <span className={reading ? 'inline-flex animate-spin' : 'inline-flex'}>

@@ -49,8 +49,8 @@ function Segment({
           ? 'var(--danger-500)'
           : 'var(--n-500)';
   const className = [
-    'inline-flex h-6 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-[11.5px]',
-    onClick !== undefined ? 'hover:bg-[var(--n-100)]' : 'cursor-default',
+    'inline-flex h-6 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-xs',
+    onClick !== undefined ? 'hover:bg-n-100' : 'cursor-default',
   ].join(' ');
 
   const body = (
@@ -80,7 +80,7 @@ function Segment({
   );
 }
 
-const Divider = () => <span aria-hidden className="h-3 w-px flex-none bg-[var(--n-200)]" />;
+const Divider = () => <span aria-hidden className="h-3 w-px flex-none bg-n-200" />;
 
 export function StatusBar() {
   const vaultPath = useVaultStore((s) => s.vaultPath);
@@ -125,7 +125,7 @@ export function StatusBar() {
   return (
     <footer
       data-testid="status-bar"
-      className="flex h-7 flex-none items-center gap-1 border-t border-[var(--n-200)] bg-[var(--n-25)] px-2"
+      className="flex h-7 flex-none items-center gap-1 border-t border-n-200 bg-n-25 px-2"
     >
       <Segment
         icon="folder"

@@ -70,7 +70,7 @@ export function StatusFlag({
         borderRadius: 'var(--r-sm)',
         background: 'var(--n-50)',
         border: '1px solid var(--n-200)',
-        fontSize: 'var(--text-xs)',
+        fontSize: 'var(--fs-xs)',
         fontWeight: 500,
         color: 'var(--n-700)',
         whiteSpace: 'nowrap',

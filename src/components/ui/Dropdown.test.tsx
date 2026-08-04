@@ -76,6 +76,32 @@ describe('Dropdown', () => {
     expect(screen.queryByRole('listbox')).toBeNull();
   });
 
+  /**
+   * The highlight was paint only (M16.35). DOM focus never leaves the trigger,
+   * so without `aria-activedescendant` the listbox reads to assistive tech as
+   * though nothing in it were current and Enter appears to pick at random.
+   */
+  it('names the highlighted row with aria-activedescendant', () => {
+    setup();
+    const trigger = screen.getByRole('button', { name: 'Group by' });
+    fireEvent.click(trigger);
+    const list = screen.getByRole('listbox');
+    const status = screen.getByRole('option', { name: /Group: status/ });
+    const priority = screen.getByRole('option', { name: /Group: priority/ });
+    // Opening homes the highlight on the current value.
+    expect(list.getAttribute('aria-activedescendant')).toBe(status.id);
+    expect(status.id).not.toBe('');
+
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(list.getAttribute('aria-activedescendant')).toBe(priority.id);
+
+    // The pointer drives the same cursor, so the announcement follows it too.
+    fireEvent.mouseEnter(screen.getByRole('option', { name: 'No grouping' }));
+    expect(list.getAttribute('aria-activedescendant')).toBe(
+      screen.getByRole('option', { name: 'No grouping' }).id,
+    );
+  });
+
   it('closes on backdrop click', () => {
     setup();
     fireEvent.click(screen.getByRole('button', { name: 'Group by' }));

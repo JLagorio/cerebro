@@ -59,6 +59,26 @@ describe('SettingsPage', () => {
     });
   });
 
+  // M16.36: the only place the theme can be chosen. The control writes the
+  // CHOICE — resolving 'system' to a concrete palette is useTheme's job, and
+  // is covered there.
+  it('picks a theme, and the choice reaches the store', async () => {
+    const user = userEvent.setup();
+    useUiStore.setState({ themeMode: 'system' });
+    render(<SettingsPage />);
+    await user.click(screen.getByTestId('theme-dark'));
+    expect(useUiStore.getState().themeMode).toBe('dark');
+    await user.click(screen.getByTestId('theme-system'));
+    expect(useUiStore.getState().themeMode).toBe('system');
+  });
+
+  it('marks the stored mode as the selected segment', () => {
+    useUiStore.setState({ themeMode: 'light' });
+    render(<SettingsPage />);
+    expect(screen.getByTestId('theme-light').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('theme-dark').getAttribute('aria-selected')).toBe('false');
+  });
+
   // M15 [CRITICAL]: Settings had no scroll container at all — its root was a
   // plain `mx-auto max-w-[640px]` div inside a flex row that neither scrolls
   // nor clips. Everything below the fold was unreachable, and the overflow

@@ -128,7 +128,7 @@ export function ChatInput({
       {slashOpen && (
         <div
           data-testid="skill-menu"
-          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-lg)]"
+          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
         >
           {skillMatches.map((skill, i) => (
             <button
@@ -137,13 +137,13 @@ export function ChatInput({
               onMouseEnter={() => setActive(i)}
               onClick={() => completeSkill(skill)}
               className={[
-                'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-[12px]',
-                i === active ? 'bg-[var(--cortex-50)]' : 'bg-transparent hover:bg-[var(--n-25)]',
+                'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-xs',
+                i === active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
               ].join(' ')}
             >
               <Icon name="zap" size={12} color="var(--synapse-500)" />
-              <span className="flex-none text-[var(--n-800)]">/{skill.name}</span>
-              <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--n-400)]">
+              <span className="flex-none text-n-800">/{skill.name}</span>
+              <span className="min-w-0 flex-1 truncate text-2xs text-n-400">
                 {skill.description}
               </span>
             </button>
@@ -153,7 +153,7 @@ export function ChatInput({
       {open && (
         <div
           data-testid="wikilink-menu"
-          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-lg)]"
+          className="absolute bottom-full left-0 z-20 mb-1 w-full overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
         >
           {matches.map((entry, i) => {
             const style = typeStyle(entry.type, schema);
@@ -164,15 +164,13 @@ export function ChatInput({
                 onMouseEnter={() => setActive(i)}
                 onClick={() => complete(entry)}
                 className={[
-                  'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-[12px]',
-                  i === active ? 'bg-[var(--cortex-50)]' : 'bg-transparent hover:bg-[var(--n-25)]',
+                  'flex w-full items-center gap-2 border-0 px-2.5 py-1.5 text-left text-xs',
+                  i === active ? 'bg-cortex-50' : 'bg-transparent hover:bg-n-25',
                 ].join(' ')}
               >
                 <Icon name={style.icon} size={12} color={style.color ?? 'var(--n-400)'} />
-                <span className="min-w-0 flex-1 truncate text-[var(--n-800)]">{entry.title}</span>
-                <span className="flex-none text-[10.5px] text-[var(--n-400)]">
-                  {entry.type ?? 'Note'}
-                </span>
+                <span className="min-w-0 flex-1 truncate text-n-800">{entry.title}</span>
+                <span className="flex-none text-2xs text-n-400">{entry.type ?? 'Note'}</span>
               </button>
             );
           })}
@@ -245,7 +243,7 @@ export function ChatInput({
             onSubmit();
           }
         }}
-        className="w-full resize-none rounded-[9px] border border-[var(--n-200)] bg-[var(--n-0)] px-2.5 py-2 text-[12.5px] leading-[18px] text-[var(--n-900)] outline-none placeholder:text-[var(--n-400)] focus-visible:border-[var(--cortex-400)]"
+        className="w-full resize-none rounded-lg border border-n-200 bg-n-0 px-2.5 py-2 text-sm leading-[18px] text-n-900 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
       />
     </div>
   );

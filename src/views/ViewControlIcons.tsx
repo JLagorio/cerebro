@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
+import { IconButton } from '@/components/ui/IconButton';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { FixedBelowAnchor } from '@/detail/FieldPopover';
 import type { ColumnDef } from '@/engine/columns';
 import { kindMeta } from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import type { FilterGroup, Presentation } from '@/engine/types';
+import { seedFilterRule } from '@/engine/viewFilters';
 import { groupByField, sortBy } from '@/engine/views';
 import { countRules, GROUPABLE_KINDS, META_SORTS, ORDERABLE_KINDS } from '@/views/ViewToolbar';
 import { axesFor } from '@/views/viewKinds';
@@ -32,6 +35,8 @@ export function ViewControlIcons({
   settingsOpen = false,
   onSettingsOpenChange,
   settingsPanel,
+  search,
+  onSearchChange,
   onNew,
 }: {
   presentation: Presentation;
@@ -47,6 +52,13 @@ export function ViewControlIcons({
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
   settingsPanel?: React.ReactNode;
+  /**
+   * Free-text search within the open view (M16.26). Ephemeral, unlike a
+   * filter: it is where you are looking right now, not part of what the saved
+   * view IS, so it never reaches the YAML. Absent hides the control.
+   */
+  search?: string;
+  onSearchChange?: (query: string) => void;
   /** Creates an untitled record and opens it. Absent on typeless views. */
   onNew?: () => void;
 }) {
@@ -73,7 +85,12 @@ export function ViewControlIcons({
           barOpen={barOpen}
           onToggleBar={toggleBar}
           onPick={(field) => {
-            onFiltersChange({ all: [{ field, op: 'is_not_empty', value: '' }] });
+            // Seeded through the engine so the starter rule is one the FIELD'S
+            // KIND can express (M16.25). It also carried a dead `value: ''` on
+            // a valueless operator, which then round-tripped into the YAML.
+            onFiltersChange({
+              all: [seedFilterRule(field, fields.find((f) => f.name === field)?.kind ?? 'text')],
+            });
             onBarOpenChange(true);
           }}
         />
@@ -109,6 +126,7 @@ export function ViewControlIcons({
           }}
         />
       )}
+      {onSearchChange !== undefined && <SearchBox query={search ?? ''} onChange={onSearchChange} />}
       {onSettingsOpenChange !== undefined && (
         <span className="relative inline-flex">
           <button
@@ -120,8 +138,8 @@ export function ViewControlIcons({
             className={[
               'flex h-7 w-7 items-center justify-center rounded-md border-0',
               settingsOpen
-                ? 'bg-[var(--n-100)] text-[var(--n-800)]'
-                : 'bg-transparent text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+                ? 'bg-n-100 text-n-800'
+                : 'bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800',
             ].join(' ')}
           >
             <Icon name="sliders-horizontal" size={14} />
@@ -135,7 +153,12 @@ export function ViewControlIcons({
                 onWheel={() => onSettingsOpenChange(false)}
                 className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
               />
-              <FixedBelowAnchor>{settingsPanel}</FixedBelowAnchor>
+              {/* Escape closes THIS, which it never did (M16.29): the panel
+                  had a click-away scrim and no keyboard exit at all, so the
+                  keystroke fell through to the record panel behind it. */}
+              <FixedBelowAnchor onClose={() => onSettingsOpenChange(false)}>
+                {settingsPanel}
+              </FixedBelowAnchor>
             </>
           )}
         </span>
@@ -148,6 +171,77 @@ export function ViewControlIcons({
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * Search within the view (M16.26).
+ *
+ * Collapsed to a glyph until pressed, the way Notion's is: a permanent input
+ * in a row of 28px icons is the widest thing in the row and earns that width
+ * on the minority of visits where anyone types in it. It stays open while it
+ * holds a query, because a control that hides a narrowed result set is how a
+ * view ends up looking broken.
+ */
+function SearchBox({ query, onChange }: { query: string; onChange: (q: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) input.current?.focus();
+  }, [open]);
+
+  if (!open && query === '') {
+    return (
+      <Tooltip label="Search this view">
+        <button
+          type="button"
+          data-testid="view-control-search"
+          aria-label="Search this view"
+          onClick={() => setOpen(true)}
+          className="flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent text-n-500 hover:bg-n-50 hover:text-n-800"
+        >
+          <Icon name="search" size={14} />
+        </button>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <span className="inline-flex h-7 items-center gap-1 rounded-md border border-n-300 bg-n-0 pl-1.5 pr-0.5">
+      <Icon name="search" size={12} color="var(--n-400)" />
+      <input
+        ref={input}
+        data-testid="view-search-input"
+        aria-label="Search this view"
+        placeholder="Search…"
+        value={query}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={() => {
+          // Collapses only when it is empty. Collapsing with a live query
+          // would leave the canvas narrowed by something no longer on screen.
+          if (query === '') setOpen(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Escape') return;
+          e.stopPropagation();
+          onChange('');
+          setOpen(false);
+        }}
+        className="h-6 w-[124px] border-0 bg-transparent text-sm text-n-800 outline-none placeholder:text-n-400"
+      />
+      {query !== '' && (
+        <IconButton
+          icon="x"
+          label="Clear search"
+          size="sm"
+          onClick={() => {
+            onChange('');
+            setOpen(false);
+          }}
+        />
+      )}
+    </span>
   );
 }
 
@@ -177,14 +271,26 @@ function QuickAxisIcon({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // Which row Enter commits (M16.34). It was always the FIRST match, so the
+  // list could be arrowed with nothing to arrow WITH: no highlight moved and
+  // no other row was reachable from the keyboard at all.
+  const [highlight, setHighlight] = useState(0);
 
   const openMenu = () => {
     setQuery('');
+    setHighlight(0);
     setOpen(true);
   };
   const close = () => setOpen(false);
 
   const shown = options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase()));
+  // Every keystroke re-cuts the list, so a held index would point at a
+  // different field than the one under the highlight a moment ago.
+  const retype = (q: string) => {
+    setQuery(q);
+    setHighlight(0);
+  };
+  const at = Math.min(highlight, Math.max(shown.length - 1, 0));
 
   return (
     <span className="relative inline-flex">
@@ -200,8 +306,8 @@ function QuickAxisIcon({
         className={[
           'flex h-7 w-7 items-center justify-center rounded-md border-0 bg-transparent',
           active
-            ? 'text-[var(--cortex-600)] hover:bg-[var(--cortex-50)]'
-            : 'text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]',
+            ? 'text-cortex-600 hover:bg-cortex-50'
+            : 'text-n-500 hover:bg-n-50 hover:text-n-800',
         ].join(' ')}
       >
         <Icon name={icon} size={14} />
@@ -216,44 +322,58 @@ function QuickAxisIcon({
             className="fixed inset-0 z-40 cursor-default border-0 bg-transparent"
           />
           <FixedBelowAnchor>
-            <div className="w-[240px] rounded-[10px] border border-[var(--n-200)] bg-[var(--n-0)] p-1.5 shadow-[var(--shadow-lg)]">
+            <div className="w-[240px] rounded-lg border border-n-200 bg-n-0 p-1.5 shadow-[var(--shadow-lg)]">
               <input
                 autoFocus
                 aria-label={placeholder}
                 placeholder={placeholder}
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => retype(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') {
                     e.stopPropagation();
                     close();
                   }
+                  // Arrows stay in the input — the rows are not tab stops, and
+                  // moving focus onto one would take the caret out of the box
+                  // you are still typing in.
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (shown.length === 0) return;
+                    const next = at + (e.key === 'ArrowDown' ? 1 : -1);
+                    setHighlight(((next % shown.length) + shown.length) % shown.length);
+                  }
                   if (e.key === 'Enter' && shown.length > 0) {
                     close();
-                    onPick(shown[0].value);
+                    onPick(shown[at].value);
                   }
                 }}
-                className="mb-1 h-7 w-full rounded-md border border-[var(--n-200)] px-2 text-[12.5px] text-[var(--n-800)] outline-none focus:border-[var(--cortex-500)] focus:shadow-[0_0_0_3px_var(--cortex-100)]"
+                className="mb-1 h-7 w-full rounded-md border border-n-200 px-2 text-sm text-n-800 outline-none focus:border-cortex-500 focus:shadow-[0_0_0_3px_var(--cortex-100)]"
               />
               <div className="max-h-[264px] overflow-y-auto">
-                {shown.map((o) => (
+                {shown.map((o, i) => (
                   <button
                     key={o.value}
                     type="button"
+                    data-highlighted={i === at ? '' : undefined}
+                    onMouseEnter={() => setHighlight(i)}
                     onClick={() => {
                       close();
                       onPick(o.value);
                     }}
-                    className="flex w-full items-center gap-2 rounded-[6px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+                    // The highlight wears the hover background, so pointer and
+                    // keyboard say "this is the one Enter takes" the same way.
+                    className={[
+                      'flex w-full items-center gap-2 rounded-sm border-0 px-2 py-1.5 text-left text-sm text-n-700 hover:bg-n-50',
+                      i === at ? 'bg-n-50' : 'bg-transparent',
+                    ].join(' ')}
                   >
                     <Icon name={o.icon} size={12} color="var(--n-500)" />
                     <span className="min-w-0 flex-1 truncate">{o.label}</span>
                   </button>
                 ))}
                 {shown.length === 0 && (
-                  <div className="px-2 py-1.5 text-[12px] text-[var(--n-400)]">
-                    Nothing matches.
-                  </div>
+                  <div className="px-2 py-1.5 text-xs text-n-400">Nothing matches.</div>
                 )}
               </div>
             </div>

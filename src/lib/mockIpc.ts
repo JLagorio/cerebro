@@ -437,6 +437,40 @@ export async function deleteNote(_vault: string, path: string): Promise<void> {
   if (!hadFile && !hadChildren && !hadFolder) throw new Error(`Note not found: ${path}`);
 }
 
+// --- Attachments (M16.13c) --------------------------------------------------
+
+/** No native picker in a browser. `canPickFiles()` is what callers branch on;
+ * this exists so the facade has something to delegate to. */
+export async function pickFiles(): Promise<string[]> {
+  return [];
+}
+
+/**
+ * Mirror of `vault::write::import_attachment` — same forced folder, same
+ * stem-not-extension dedupe, same absolute-source guard. The mock disk is
+ * text-only, so the copy is a stub; what the tests care about is the returned
+ * VAULT-RELATIVE path and the fact that the file lands somewhere the mock
+ * scanner already skips.
+ */
+export async function importAttachment(_vault: string, source: string): Promise<string> {
+  if (!source.startsWith('/')) throw new Error(`attachment source must be absolute: ${source}`);
+  const name = source.split('/').pop() ?? '';
+  if (name === '' || name === '.' || name === '..') {
+    throw new Error(`unusable file name: ${source}`);
+  }
+  const dot = name.lastIndexOf('.');
+  // A leading dot is the whole name (".gitignore"), not an extension.
+  const [stem, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  for (let n = 1; ; n += 1) {
+    const rel = `attachments/${stem}${n === 1 ? '' : `-${n}`}${ext}`;
+    if (!files.has(rel)) {
+      files.set(rel, '');
+      touch(rel);
+      return rel;
+    }
+  }
+}
+
 /** All directories in the vault (derived from file paths + explicit folders). */
 export async function listFolders(_vault: string): Promise<string[]> {
   const skipped = /(^|\/)(views|attachments|\.[^/]*)(\/|$)/;

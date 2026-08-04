@@ -181,6 +181,46 @@ describe('App boot flow', () => {
     field.remove();
   });
 
+  // M16.39: the theme was reachable only by walking to Settings.
+  it('flips the theme on cmd+shift+l', async () => {
+    act(() => useUiStore.getState().setThemeMode('light'));
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    fireEvent.keyDown(window, { key: 'l', metaKey: true, shiftKey: true });
+    expect(useUiStore.getState().themeMode).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    fireEvent.keyDown(window, { key: 'l', metaKey: true, shiftKey: true });
+    expect(useUiStore.getState().themeMode).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  // The whole point of resolving before toggling. On 'system' with a dark OS
+  // the screen is dark, so the shortcut must go to LIGHT — a naive
+  // `mode === 'dark' ? 'light' : 'dark'` reads 'system', is not 'dark', and
+  // sends the user to the dark they are already looking at.
+  it('toggles against the resolved theme, not the stored mode', async () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === '(prefers-color-scheme: dark)',
+          media: query,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          onchange: null,
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+    act(() => useUiStore.getState().setThemeMode('system'));
+    render(<App />);
+    await screen.findByRole('navigation', { name: 'Sidebar' });
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    fireEvent.keyDown(window, { key: 'l', metaKey: true, shiftKey: true });
+    expect(useUiStore.getState().themeMode).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
   it('routes the settings selection to the settings page', async () => {
     render(<App />);
     await screen.findByRole('navigation', { name: 'Sidebar' });

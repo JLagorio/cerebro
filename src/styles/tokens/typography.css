@@ -1,23 +1,53 @@
 :root {
   --font-ui: 'Instrument Sans', -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
-  /* size/line pairs */
-  --text-2xs: 11px;
-  --leading-2xs: 16px;
-  --text-xs: 12px;
-  --leading-xs: 16px;
-  --text-sm: 13px;
-  --leading-sm: 20px; /* base UI */
-  --text-md: 14px;
-  --leading-md: 20px;
-  --text-lg: 16px;
-  --leading-lg: 24px;
-  --text-xl: 20px;
-  --leading-xl: 28px; /* page titles */
-  --text-2xl: 24px;
-  --leading-2xl: 32px;
-  --text-3xl: 32px;
-  --leading-3xl: 40px; /* display */
+
+  /* size/line pairs.
+   *
+   * Named --fs-* and --lh-*, NOT --text-* and --leading-*, because those two are
+   * Tailwind v4's own theme namespaces for font-size and line-height (M16.36).
+   * While this scale used the namespace directly, three different things laid
+   * claim to it at once:
+   *
+   *   1. Tailwind's stock scale    --text-sm: .875rem  (14px)
+   *   2. this DS scale             --text-sm: 13px
+   *   3. the semantic ink tokens   --text-meta, --text-inverse, … in colors.css
+   *
+   * (1) and (2) both reached :root and disagreed — stock says 18px for
+   * --text-lg where this scale says 16px. The DS value won only because this
+   * file is unlayered while @theme sits inside `@layer theme`, so the app
+   * rendered correctly on cascade order rather than on anything anyone had
+   * decided. Renaming leaves @theme as the single place a scale becomes a
+   * utility, and lets index.css reset the stock scale to `initial` the way it
+   * already does for --color-* and --radius-*.
+   *
+   * (3) is deliberately left alone. Those are colours that merely read as
+   * typography; they are not theme entries, and @theme already re-exports the
+   * one that needed a utility as --color-inverse.
+   */
+  --fs-2xs: 11px;
+  --lh-2xs: 16px;
+  --fs-xs: 12px;
+  --lh-xs: 16px;
+  --fs-sm: 13px;
+  --lh-sm: 20px; /* base UI */
+  --fs-md: 14px;
+  --lh-md: 20px;
+  --fs-lg: 16px;
+  --lh-lg: 24px;
+  --fs-xl: 20px;
+  --lh-xl: 28px; /* page titles */
+  --fs-2xl: 24px;
+  --lh-2xl: 32px;
+  --fs-3xl: 32px;
+  --lh-3xl: 40px; /* display */
+  /* Editorial display, one tier above the UI scale (M16.37). The document
+     title input in DocPage sets type at this size; it is the largest thing a
+     user ever reads in the app and the only place the 8-step UI scale did not
+     reach. Snapping it down to 3xl would have shrunk the title by 10px, which
+     is a redesign rather than a rounding — so the scale grows a step instead. */
+  --fs-4xl: 42px;
+  --lh-4xl: 63px;
   /* weights */
   --w-regular: 400; /* @kind font */
   --w-medium: 500; /* @kind font */

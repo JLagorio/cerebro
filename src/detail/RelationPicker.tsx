@@ -156,14 +156,12 @@ export function RelationPicker({
             onClose();
           }
         }}
-        className="fixed left-1/2 top-[8vh] z-[1001] flex max-h-[80vh] w-[min(680px,calc(100vw-32px))] -translate-x-1/2 flex-col rounded-[14px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-lg)]"
+        className="fixed left-1/2 top-[8vh] z-[1001] flex max-h-[80vh] w-[min(680px,calc(100vw-32px))] -translate-x-1/2 flex-col rounded-xl border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
       >
-        <header className="flex flex-none items-center gap-2 border-b border-[var(--n-100)] px-4 py-3">
+        <header className="flex flex-none items-center gap-2 border-b border-n-100 px-4 py-3">
           <Icon name="link" size={15} color="var(--n-500)" />
-          <h2 className="m-0 text-[14px] font-semibold text-[var(--n-900)]">
-            {humanize(fieldName)}
-          </h2>
-          <span className="rounded-full border border-[var(--n-200)] px-2 py-0.5 text-[11px] text-[var(--n-500)]">
+          <h2 className="m-0 text-md font-semibold text-n-900">{humanize(fieldName)}</h2>
+          <span className="rounded-full border border-n-200 px-2 py-0.5 text-2xs text-n-500">
             {targetType ?? 'Any record'}
             {limit === 1 && ' · single'}
           </span>
@@ -172,7 +170,7 @@ export function RelationPicker({
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+            className="flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-n-50 hover:text-n-800"
           >
             <Icon name="x" size={14} />
           </button>
@@ -205,7 +203,7 @@ export function RelationPicker({
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2 pt-3">
           {value.length > 0 && (
             <section className="mb-4">
-              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+              <h3 className="mb-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
                 Linked · {value.length}
               </h3>
               <div className="flex flex-col gap-px">
@@ -216,7 +214,7 @@ export function RelationPicker({
                     <div
                       key={id}
                       data-testid="relation-linked-row"
-                      className="group flex items-center gap-2 rounded-[8px] px-2 py-1.5 hover:bg-[var(--n-25)]"
+                      className="group flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-n-25"
                     >
                       {/* 12x16px stacked with no gap was well under WCAG
                           2.5.8's 24x24 floor, on a control that decides which
@@ -228,7 +226,7 @@ export function RelationPicker({
                           aria-label={`Move ${entry?.title ?? id} up`}
                           disabled={i === 0}
                           onClick={() => move(i, -1)}
-                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-300)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)] disabled:opacity-30"
+                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-n-300 hover:bg-n-50 hover:text-n-700 disabled:opacity-30"
                         >
                           <Icon name="chevron-up" size={11} />
                         </button>
@@ -237,19 +235,19 @@ export function RelationPicker({
                           aria-label={`Move ${entry?.title ?? id} down`}
                           disabled={i === value.length - 1}
                           onClick={() => move(i, 1)}
-                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-300)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)] disabled:opacity-30"
+                          className="flex h-6 w-6 items-center justify-center rounded border-0 bg-transparent p-0 text-n-300 hover:bg-n-50 hover:text-n-700 disabled:opacity-30"
                         >
                           <Icon name="chevron-down" size={11} />
                         </button>
                       </span>
                       <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] text-[var(--n-900)]">
+                        <span className="block truncate text-sm text-n-900">
                           {entry?.title ?? id}
                         </span>
                         {/* A link to something that is not there any more is a
                             fact about the data, not an error to hide. */}
-                        <span className="block truncate text-[11px] text-[var(--n-400)]">
+                        <span className="block truncate text-2xs text-n-400">
                           {entry === null
                             ? 'Not found in this vault'
                             : entry.folder || 'Vault root'}
@@ -259,7 +257,7 @@ export function RelationPicker({
                         type="button"
                         aria-label={`Unlink ${entry?.title ?? id}`}
                         onClick={() => onChange(value.filter((v) => v !== id))}
-                        className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-[var(--n-400)] hover:bg-[var(--danger-50)] hover:text-[var(--danger-600)]"
+                        className="flex h-6 w-6 flex-none items-center justify-center rounded-md border-0 bg-transparent text-n-400 hover:bg-danger-50 hover:text-danger-600"
                       >
                         <Icon name="minus" size={14} />
                       </button>
@@ -270,7 +268,7 @@ export function RelationPicker({
             </section>
           )}
 
-          <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+          <h3 className="mb-1.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
             {trimmed === '' ? 'Link a record' : `Matches · ${results.length}`}
           </h3>
           <div className="flex flex-col gap-px">
@@ -283,14 +281,12 @@ export function RelationPicker({
                   type="button"
                   data-testid="relation-result-row"
                   onClick={() => link(pathStem(entry.path))}
-                  className="flex items-center gap-2 rounded-[8px] border-0 bg-transparent px-2 py-1.5 text-left hover:bg-[var(--n-50)]"
+                  className="flex items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left hover:bg-n-50"
                 >
                   <Icon name={style.icon} size={14} color={style.color ?? 'var(--n-500)'} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] text-[var(--n-900)]">
-                      {entry.title}
-                    </span>
-                    <span className="block truncate text-[11px] text-[var(--n-400)]">
+                    <span className="block truncate text-sm text-n-900">{entry.title}</span>
+                    <span className="block truncate text-2xs text-n-400">
                       {/* Enough to tell two "Overview"s apart, which the old
                           popover's bare title could not. */}
                       {[entry.type, project?.title, entry.folder || 'Vault root']
@@ -303,7 +299,7 @@ export function RelationPicker({
               );
             })}
             {results.length === 0 && !canCreate && (
-              <p className="m-0 px-2 py-4 text-center text-[12.5px] text-[var(--n-400)]">
+              <p className="m-0 px-2 py-4 text-center text-sm text-n-400">
                 {candidates.length === 0
                   ? `Nothing of type ${targetType ?? 'any'} exists yet.`
                   : 'Everything that matches is already linked.'}
@@ -315,13 +311,13 @@ export function RelationPicker({
                 data-testid="relation-create"
                 disabled={busy}
                 onClick={() => void create()}
-                className="flex items-center gap-2 rounded-[8px] border-0 bg-transparent px-2 py-2 text-left hover:bg-[var(--n-50)] disabled:opacity-50"
+                className="flex items-center gap-2 rounded-md border-0 bg-transparent px-2 py-2 text-left hover:bg-n-50 disabled:opacity-50"
               >
                 <Icon name="plus" size={14} color="var(--cortex-600)" />
-                <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--n-700)]">
-                  Create <span className="font-medium text-[var(--n-900)]">{trimmed}</span>
+                <span className="min-w-0 flex-1 truncate text-sm text-n-700">
+                  Create <span className="font-medium text-n-900">{trimmed}</span>
                   {targetType !== null && (
-                    <span className="text-[var(--n-400)]"> as a new {targetType}</span>
+                    <span className="text-n-400"> as a new {targetType}</span>
                   )}
                 </span>
               </button>
@@ -329,15 +325,15 @@ export function RelationPicker({
           </div>
         </div>
 
-        <footer className="flex flex-none items-center gap-2 border-t border-[var(--n-100)] px-4 py-2.5">
-          <span className="text-[11.5px] text-[var(--n-400)]">
+        <footer className="flex flex-none items-center gap-2 border-t border-n-100 px-4 py-2.5">
+          <span className="text-xs text-n-400">
             Links save as you make them. Order here is the order they render in.
           </span>
           <span className="flex-1" />
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md border border-[var(--n-200)] bg-transparent px-3 py-1 text-[12.5px] text-[var(--n-700)] hover:bg-[var(--n-50)]"
+            className="rounded-md border border-n-200 bg-transparent px-3 py-1 text-sm text-n-700 hover:bg-n-50"
           >
             Done
           </button>

@@ -1,3 +1,4 @@
+import { resolveOptionColor } from '@/lib/swatch';
 import { useMemo } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -5,6 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { FieldEditor } from '@/detail/FieldEditor';
 import { FieldChip } from '@/views/FieldChip';
 import { QuickAddInline, useQuickAdd } from '@/views/QuickAdd';
+import { RecordRowMenu } from '@/views/RecordRowMenu';
 import { buildRows, entryRows } from '@/engine/rows';
 import { typeStyle } from '@/engine/typeCatalog';
 import { visibleColumns } from '@/engine/views';
@@ -86,7 +88,7 @@ function ListRow({
           e.stopPropagation();
           onToggle();
         }}
-        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
       </button>
@@ -106,17 +108,17 @@ function ListRow({
           openPath(entry.path);
         }}
         className={[
-          'flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]',
-          selected ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
+          'flex h-10 cursor-pointer items-center gap-2.5 border-b border-n-100 pr-5 hover:bg-n-50',
+          selected ? 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
         ].join(' ')}
         style={{ paddingLeft: 20 + depth * INDENT }}
       >
         <span className="w-[52px] flex-none" />
-        <span className="inline-flex flex-none text-[var(--warn-500)]">
+        <span className="inline-flex flex-none text-warn-500">
           <Icon name="triangle-alert" size={14} />
         </span>
-        <span className="truncate text-[13px] text-[var(--n-700)]">{entry.filename}</span>
-        <span className="inline-flex flex-none items-center rounded-md border border-[var(--warn-500)] px-1.5 py-0.5 text-[11px] text-[var(--warn-500)]">
+        <span className="truncate text-sm text-n-700">{entry.filename}</span>
+        <span className="inline-flex flex-none items-center rounded-md border border-warn-500 px-1.5 py-0.5 text-2xs text-warn-500">
           Cannot parse
         </span>
       </div>
@@ -134,12 +136,12 @@ function ListRow({
         openPath(entry.path);
       }}
       className={[
-        'flex h-10 cursor-pointer items-center gap-2.5 border-b border-[var(--n-100)] pr-5 hover:bg-[var(--n-50)]',
-        selected ? 'bg-[var(--cortex-50)] shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
+        'group flex h-10 cursor-pointer items-center gap-2.5 border-b border-n-100 pr-5 hover:bg-n-50',
+        selected ? 'bg-cortex-50 shadow-[inset_2px_0_0_var(--cortex-500)]' : '',
       ].join(' ')}
       style={{ paddingLeft: 20 + depth * INDENT }}
     >
-      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-[10.5px] text-[var(--n-400)]">
+      <span className="w-[52px] flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
         {key}
       </span>
       {expander}
@@ -150,7 +152,7 @@ function ListRow({
       >
         <Icon name={typeStyle(entry.type, schema).icon} size={14} />
       </span>
-      <span className="truncate text-[13px] text-[var(--n-900)]">{entry.title}</span>
+      <span className="truncate text-sm text-n-900">{entry.title}</span>
       <span className="flex-1" />
       {/* M9.6: editable in place, the same FieldEditor the table and
           hierarchy use. A read-only chip here meant the same property was
@@ -175,6 +177,40 @@ function ListRow({
             </span>
           );
         })}
+      {/* M16.21: the row's own controls.
+          The row is a `<div role="row">` with an onClick — clickable with a
+          mouse and openable with the grid's Enter key, but carrying no NAMED
+          control anywhere, so assistive tech saw a strip of text with no
+          announced way to act on it. And the only thing a list could do to a
+          record was open it: copying a link to one, duplicating it, or
+          deleting it all meant opening it first to reach the panel's header.
+          Reserved with opacity rather than mounted on hover, so rows do not
+          reflow under the pointer as it moves down the list. */}
+      <span
+        className="ml-1 flex flex-none items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100"
+        onClick={(e) => e.stopPropagation()}
+        role="presentation"
+      >
+        <button
+          type="button"
+          data-testid="row-open-affordance"
+          aria-label={`Open ${entry.title}`}
+          onClick={() => {
+            onSelect();
+            openPath(entry.path);
+          }}
+          className="rounded-sm border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800"
+        >
+          Open
+        </button>
+        <RecordRowMenu
+          entry={entry}
+          onOpen={() => {
+            onSelect();
+            openPath(entry.path);
+          }}
+        />
+      </span>
     </div>
   );
 }
@@ -199,7 +235,7 @@ function BandHeader({
     <header
       data-testid="list-group-header"
       data-depth={node.depth}
-      className="sticky z-10 flex h-9 items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] pr-5"
+      className="sticky z-10 flex h-9 items-center gap-2 border-b border-n-100 bg-n-25 pr-5"
       style={{ top: node.depth * 36, paddingLeft: 20 + node.depth * INDENT }}
     >
       <button
@@ -207,7 +243,7 @@ function BandHeader({
         aria-expanded={!collapsed}
         aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.label}`}
         onClick={onToggle}
-        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-[var(--n-400)] hover:bg-[var(--n-100)] hover:text-[var(--n-800)]"
+        className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
       </button>
@@ -219,21 +255,22 @@ function BandHeader({
         style={
           node.ghost || !node.color
             ? { border: '1.5px solid var(--n-400)' }
-            : { background: node.color, border: `1.5px solid ${node.color}` }
+            : {
+                background: resolveOptionColor(node.color).solid,
+                border: `1.5px solid ${resolveOptionColor(node.color).solid}`,
+              }
         }
       />
       <span
         className={[
-          node.depth === 0 ? 'text-[12.5px] font-semibold' : 'text-[12px] font-medium',
-          'min-w-0 truncate text-[var(--n-800)]',
+          node.depth === 0 ? 'text-sm font-semibold' : 'text-xs font-medium',
+          'min-w-0 truncate text-n-800',
         ].join(' ')}
       >
         {node.label}
       </span>
       {/* Recursive count: a collapsed parent still reports what is inside. */}
-      <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
-        {node.count}
-      </span>
+      <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{node.count}</span>
     </header>
   );
 }
@@ -305,14 +342,14 @@ export function ListView({
           <header
             data-testid="list-group-header"
             data-depth={0}
-            className="sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-[var(--n-100)] bg-[var(--n-25)] px-5"
+            className="sticky top-0 z-10 flex h-9 items-center gap-2 border-b border-n-100 bg-n-25 px-5"
           >
             <span
               className="box-border h-2.5 w-2.5 flex-none rounded-full"
               style={{ border: '1.5px solid var(--n-400)' }}
             />
-            <span className="text-[12.5px] font-semibold text-[var(--n-800)]">All items</span>
-            <span className="[font-family:var(--font-mono)] text-[11px] text-[var(--n-400)]">
+            <span className="text-sm font-semibold text-n-800">All items</span>
+            <span className="[font-family:var(--font-mono)] text-2xs text-n-400">
               {entries.length}
             </span>
           </header>

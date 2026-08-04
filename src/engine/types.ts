@@ -1,3 +1,5 @@
+import type { AggregateCalc } from './aggregate';
+import type { DateDisplayFormat, TimeDisplayFormat } from './dates';
 import type { RelationIndex } from './relations';
 
 export type Scalar = string | number | boolean | null;
@@ -21,22 +23,39 @@ export interface Entry {
   parseError: string | null; // YAML error message, or null
 }
 
-export type FieldKind =
-  | 'text'
-  | 'number'
-  | 'checkbox'
-  | 'date'
-  | 'daterange'
-  | 'select'
-  | 'multiselect'
-  | 'status'
-  | 'person'
-  | 'relation'
-  | 'url'
-  | 'files'
-  | 'rollup'
-  | 'created_time'
-  | 'last_edited_time';
+/**
+ * Every property kind, as an array with the union derived from it (M16.4).
+ *
+ * There were three hand-maintained copies of this list — here, `FIELD_KINDS`
+ * in schema.ts, and `PROPERTY_KINDS` in properties.ts — and only the union was
+ * compiler-enforced. Omitting the schema.ts entry made `asFieldKind` silently
+ * resolve the kind to `text`, so a declared Select rendered as a text box and
+ * the YAML that said otherwise was ignored.
+ *
+ * Order here is irrelevant; the "+ Add property" catalog order is declaration
+ * order in properties.ts.
+ */
+export const FIELD_KINDS = [
+  'text',
+  'number',
+  'checkbox',
+  'date',
+  'daterange',
+  'select',
+  'multiselect',
+  'status',
+  'person',
+  'relation',
+  'url',
+  'email',
+  'phone',
+  'files',
+  'rollup',
+  'created_time',
+  'last_edited_time',
+] as const;
+
+export type FieldKind = (typeof FIELD_KINDS)[number];
 
 export type RollupCalc = 'count' | 'sum' | 'avg' | 'min' | 'max' | 'earliest' | 'latest' | 'show';
 
@@ -76,7 +95,37 @@ export interface FieldDef {
   format?: FieldFormat;
   /** decimal places for numeric formats; defaults to 2 (trailing zeros trimmed). */
   precision?: number;
+  /**
+   * How a date/daterange renders (M16.14). A SEPARATE key from `format`,
+   * which numbers already own — one key holding two unrelated enums would
+   * make `changeFieldKind` between number and date silently carry a value
+   * neither side understands.
+   *
+   * Absent means 'short', which is what every date rendered as before this
+   * was persistable at all.
+   */
+  dateFormat?: DateDisplayFormat;
+  /** 12h / 24h / hidden for the time half of a date value; absent = '12'. */
+  timeFormat?: TimeDisplayFormat;
+  /**
+   * Whether the detail panel shows this property (M16.10). PER-PROPERTY, on
+   * the type — not per view. `ColumnSpec.hidden` answers a different
+   * question ("does THIS view show this column"), and a record panel has no
+   * view to read it from.
+   *
+   * Absent means `show`, so every vault that predates this reads unchanged.
+   */
+  visibility?: FieldVisibility;
 }
+
+/**
+ * Notion's three states, verbatim: Always show / Hide when empty / Always
+ * hide. `hide_when_empty` is the one that earns the model — a type with
+ * twenty optional properties shows a wall of "Empty" on every record
+ * otherwise, and per-view column toggles cannot fix a panel.
+ */
+export const FIELD_VISIBILITIES = ['show', 'hide_when_empty', 'hide'] as const;
+export type FieldVisibility = (typeof FIELD_VISIBILITIES)[number];
 
 export interface TypeDef {
   name: string;
@@ -194,18 +243,25 @@ export interface ColumnSpec {
   width?: number;
   hidden?: boolean;
   wrap?: boolean;
+  /** The footer calculation for this column (M16.15). Absent = no footer
+   * cell, which is Notion's resting state and stays the default: a table that
+   * volunteers nine numbers nobody asked for is noise. */
+  calc?: AggregateCalc;
 }
 
 /**
- * The six record views (M10). Mutually exclusive — a collection shows one at a
- * time, chosen from the toolbar.
+ * The record views (M10, extended M16.22/.27/.28). Mutually exclusive — a
+ * collection shows one at a time, chosen from the open tab's layout picker.
  *
- * - `table`    — spreadsheet grid with inline-editable cells (M3.4)
- * - `list`     — banded rows
- * - `board`    — kanban columns from the first band level
- * - `calendar` — month grid, records on their date
- * - `timeline` — records as bars on a horizontal date axis
- * - `gantt`    — timeline plus scheduling: nested WBS rows, dependency arrows
+ * - `table`     — spreadsheet grid with inline-editable cells (M3.4)
+ * - `list`      — banded rows
+ * - `board`     — kanban columns from the first band level
+ * - `calendar`  — month grid, records on their date
+ * - `timeline`  — records as bars on a horizontal date axis
+ * - `gantt`     — timeline plus scheduling: nested WBS rows, dependency arrows
+ * - `gallery`   — a card grid, cards optionally covered by a files property
+ * - `chart`     — bar/line/donut over an aggregation of the same rows
+ * - `dashboard` — a grid of blocks: saved views and single numbers
  *
  * Two kinds were REMOVED here, and both for the same reason — they were views
  * whose only job was something another axis already does:
@@ -217,8 +273,26 @@ export interface ColumnSpec {
  *   panel does from any view.
  *
  * Saved files naming either one migrate to `table` on read (engine/views.ts).
+ *
+ * The array is the source and the union is derived from it (M16.3), so adding
+ * a kind is one edit. It used to be the other way round — a hand-written union
+ * beside a hand-written `LAYOUTS` set in views.ts, and forgetting the set made
+ * `parseViewType` silently downgrade every saved file of the new kind to
+ * `list`, losing the layout with no error anywhere.
  */
-export type ViewType = 'table' | 'list' | 'board' | 'calendar' | 'gantt' | 'timeline';
+export const VIEW_TYPES = [
+  'table',
+  'list',
+  'board',
+  'calendar',
+  'gantt',
+  'timeline',
+  'gallery',
+  'chart',
+  'dashboard',
+] as const;
+
+export type ViewType = (typeof VIEW_TYPES)[number];
 
 /**
  * How a relation value draws in this view (M11).
@@ -232,6 +306,142 @@ export type ViewType = 'table' | 'list' | 'board' | 'calendar' | 'gantt' | 'time
  */
 export type ChipStyle = 'plain' | 'type-icon';
 
+/** How wide a gallery card is — a named step, not a pixel count, so the grid
+ * stays responsive and two vaults agree on what "medium" looks like. */
+/**
+ * How tall a table row is. Derived rather than an inline union on
+ * `Presentation`, so the settings page offering the choices and the table
+ * mapping them to heights cannot list different ones (M16.29).
+ */
+export const ROW_HEIGHTS = ['compact', 'default', 'tall'] as const;
+export type RowHeight = (typeof ROW_HEIGHTS)[number];
+
+/**
+ * How big a board card is (M16.20) — Notion's Small / Medium / Large.
+ *
+ * It sets the column width and the card's density together, because those
+ * are one decision: a 240px column with roomy cards shows two of them.
+ * Absent means `medium`, which is the size every board rendered at before
+ * this was expressible, so no saved view changes appearance.
+ */
+export const CARD_SIZES = ['small', 'medium', 'large'] as const;
+export type CardSize = (typeof CARD_SIZES)[number];
+
+/**
+ * The gallery's card settings (M16.22).
+ *
+ * Which PROPERTIES a card shows is not here: that is `columns`, the same list
+ * every other layout reads and the same Properties page configures. A second
+ * per-card visibility list would be a second answer to one question, and
+ * switching a view from Table to Gallery would lose the columns you chose.
+ */
+export interface GallerySpec {
+  /**
+   * Files property whose first value covers the card. Absent = no cover, which
+   * is the default: a cover is a choice, and guessing one would silently
+   * promote whatever attachment happened to be first.
+   */
+  cover?: string;
+  /* Card SIZE is deliberately not here. It lived here as `size` while the
+   * board kept the same setting as a top-level `cardSize`, so one control
+   * appeared twice in the settings panel writing two different keys — and
+   * whichever one you found, only one of the two layouts read it (M16.29). */
+  /** True = the cover is fitted whole inside the tile; absent/false = cropped
+   * to fill it. Notion's "Fit media", same default (off). */
+  fit?: boolean;
+}
+
+export const CHART_KINDS = ['bar', 'line', 'donut'] as const;
+export type ChartKind = (typeof CHART_KINDS)[number];
+
+/**
+ * What a chart's Y axis measures. A SUBSET of RollupCalc, not a new
+ * vocabulary: the rollup column and the chart run the same arithmetic
+ * (`aggregateNumbers`), so they must not disagree about what "average" means.
+ */
+export const CHART_AGGS = ['count', 'sum', 'avg'] as const;
+export type ChartAgg = Extract<RollupCalc, (typeof CHART_AGGS)[number]>;
+
+/**
+ * The chart's own settings (M16.27).
+ *
+ * Its X AXIS IS NOT HERE — that is `group`, the same grouping chain every
+ * other layout reads, and its first band level is the axis. The chart is
+ * therefore configured by the Group control the toolbar already has, a saved
+ * board re-opened as a chart charts what the board was banded by, and there is
+ * no second "group by" for the two to drift apart on.
+ */
+export interface ChartSpec {
+  /** Absent = 'bar'. */
+  kind?: ChartKind;
+  /** Absent = 'count' — the one measure that needs no property configured. */
+  agg?: ChartAgg;
+  /** The property summed or averaged. Unread when the measure is count. */
+  value?: string;
+  /** Drop bands that measure zero. Notion's "Omit zero values". */
+  omitZero?: boolean;
+}
+
+/**
+ * One block of a dashboard (M16.28).
+ *
+ * Two kinds, and they read different data on purpose:
+ *
+ * - `view` embeds a SAVED VIEW from the vault — a List and one of its tabs,
+ *   addressed the way a selection addresses one. That is what makes a
+ *   dashboard worth having: widgets spanning several sources, which is
+ *   Notion's model too. It carries the reference, never a copy of the view's
+ *   configuration; editing the List updates every dashboard showing it.
+ * - `number` measures the DASHBOARD'S OWN rows, so the dashboard's filters
+ *   scope it. A number block that ignored them would be a constant.
+ */
+export type DashboardBlock =
+  | {
+      /** Unique within the dashboard; what a reorder and a delete address. */
+      id: string;
+      kind: 'view';
+      /** List id. Ids are unique per folder, hence `collection` beside it. */
+      list: string;
+      collection?: string | null;
+      /** Which of the List's tabs; absent = its first. */
+      view?: string;
+      /** Overrides the List's own name in the block header. */
+      title?: string;
+      /** Spans both columns. Absent = one. */
+      wide?: boolean;
+    }
+  | {
+      id: string;
+      kind: 'number';
+      agg: ChartAgg;
+      /** Property summed or averaged. Unread when the measure is count. */
+      value?: string;
+      title?: string;
+      wide?: boolean;
+    };
+
+export interface DashboardSpec {
+  /** In render order. Never absent — a dashboard with no blocks is [] and
+   * says so, rather than being indistinguishable from an unparsed one. */
+  blocks: DashboardBlock[];
+}
+/**
+ * What a board card previews above its properties (M16.20).
+ *
+ * Notion offers None / Page cover / Page content. **Page cover is
+ * deliberately absent**: a record has no cover — `Entry` carries a per-TYPE
+ * icon and nothing per record — so the option would be a menu row that
+ * changes nothing on screen, which is the exact class of control this
+ * milestone exists to delete. It becomes offerable the day records carry
+ * one (M16.22's gallery needs the same thing).
+ *
+ * `content` renders `Entry.snippet` — the first ~160 characters of the body,
+ * which the scanner has produced since v1 and which, outside the Inbox
+ * queue's rows, no surface has shown.
+ */
+export const CARD_PREVIEWS = ['none', 'content'] as const;
+export type CardPreview = (typeof CARD_PREVIEWS)[number];
+
 export interface Presentation {
   type: ViewType;
   /** Ordered grouping chain; empty = flat. */
@@ -239,16 +449,40 @@ export interface Presentation {
   /** Ordered sort chain; never empty in practice (parse supplies a default). */
   sort: SortSpec[];
   columns: ColumnSpec[];
-  rowHeight?: 'compact' | 'default' | 'tall';
+  rowHeight?: RowHeight;
   /** Width of the sticky name column. Omitted = the layout's default. */
   titleWidth?: number;
-  /** False = the name column scrolls with the grid instead of pinning left.
-   * Only meaningful while the name column is first (M12.8). */
-  titleFrozen?: boolean;
+  /**
+   * How many columns pin to the left edge, counted in DISPLAY slots (M16.18).
+   *
+   * Replaces `titleFrozen`, which could only ever answer for the name column
+   * and only while it was first — Notion freezes UP TO a column, and a table
+   * whose first three columns are identity ought to be able to say so. A
+   * saved `titleFrozen: false` migrates to 0 on read.
+   *
+   * Omitted means "the name column, if it leads": the M12.8 default, stated
+   * once rather than recomputed at each reader.
+   */
+  frozenColumns?: number;
   /** The name column's index among the visible columns. Omitted = first. */
   titlePosition?: number;
+  /** The name column's footer calculation (M16.15). It is a column like any
+   * other since M12.8, but it has no ColumnSpec to carry this on. */
+  titleCalc?: AggregateCalc;
   /** Relation/person chip rendering; defaults to 'plain'. */
   chips?: ChipStyle;
+  /** Card density for every layout that draws cards; omitted = 'medium'. A
+   * pre-M16.29 gallery stored this as `gallery.size` and is migrated on read. */
+  cardSize?: CardSize;
+  /** Board card preview block; omitted = 'none'. */
+  cardPreview?: CardPreview;
+  /**
+   * Paint each board column in its own option colour (Notion's "Color
+   * columns"). Off unless asked for: the colour is already carried by the
+   * dot in the header, and ten tinted columns is a lot of paint to acquire
+   * by accident.
+   */
+  colorColumns?: boolean;
   /**
    * Date property placing records on the calendar/timeline/gantt axis. Omitted
    * means "infer it" — engine/schedule.ts picks the type's first daterange, or
@@ -264,6 +498,36 @@ export interface Presentation {
    * guess here draws a schedule that isn't the one the data states.
    */
   dependencyField?: string;
+  /** Gallery card settings (M16.22). Absent = every default. */
+  gallery?: GallerySpec;
+  /** Chart settings (M16.27). Absent = a bar chart counting records. */
+  chart?: ChartSpec;
+  /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
+  dashboard?: DashboardSpec;
+  /** How much of the calendar one screen holds. Omitted = a month (M16.23). */
+  calendarSpan?: 'month' | 'week';
+  /** False drops Saturday and Sunday from the grid. Stored only when false. */
+  showWeekends?: boolean;
+  /**
+   * The weekday a grid row begins on. A name, not an index: a vault is edited
+   * by hand, and `weekStart: 1` is a number you have to know the convention for.
+   */
+  weekStart?: 'sunday' | 'monday';
+  /**
+   * Whether a timeline/gantt draws its rows as a table beside the axis
+   * (M16.24). Omitted takes the layout's own default — a work breakdown is the
+   * point of a gantt, and optional chrome on a timeline.
+   */
+  showTable?: boolean;
+  /**
+   * How many records the view draws before it stops (M16.26). Omitted means
+   * all of them, which is what every view did — Notion's default is 25.
+   *
+   * Truncation is never silent: the surfaces that apply this render a footer
+   * saying how many of how many are shown, because a view that hides records
+   * without saying so is indistinguishable from a filter that is wrong.
+   */
+  limit?: number;
 }
 
 /**
@@ -274,19 +538,72 @@ export interface Presentation {
 export type ChildrenSpec =
   { direction: 'forward'; field: string } | { direction: 'reverse'; type: string; field: string };
 
-export type FilterOp =
-  | 'equals'
-  | 'not_equals'
-  | 'contains'
-  | 'any_of'
-  | 'none_of'
-  | 'is_empty'
-  | 'is_not_empty'
-  | 'before'
-  | 'after';
+/**
+ * Every filter operator, as an array with the union derived from it (M16.25).
+ *
+ * The union was hand-written here and `views.ts` kept a hand-written
+ * `FILTER_OPS: FilterOp[]` beside it — and that array is the READ-SIDE
+ * allowlist: `parseFilterNode` returns null for any op not in it. An operator
+ * added to the union and forgotten there therefore parsed as a malformed node
+ * and was DROPPED on load, so a saved view came back missing a condition and
+ * quietly showed records it had been configured to hide. Same shape as
+ * `FIELD_KINDS` and `VIEW_TYPES`, for the same reason.
+ *
+ * Order here is menu order.
+ */
+export const FILTER_OPS = [
+  'equals',
+  'not_equals',
+  'contains',
+  'does_not_contain',
+  'starts_with',
+  'ends_with',
+  'any_of',
+  'none_of',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'before',
+  'after',
+  'on_or_before',
+  'on_or_after',
+  'is_between',
+  'is_empty',
+  'is_not_empty',
+] as const;
+
+export type FilterOp = (typeof FILTER_OPS)[number];
+
+/**
+ * Which comparisons a property kind admits (M16.25).
+ *
+ * A date wants before/after, a number wants >/</between, prose wants
+ * starts-with — and offering all nineteen operators on every kind, which is
+ * what the builder did, meant "Status is before High" was one click away and
+ * evaluated to a string comparison nobody asked for.
+ *
+ * The kind→family answer is a flag on `KIND_META` (properties.ts) so
+ * `satisfies Record<FieldKind, …>` forces every new kind to answer it; the
+ * family→operators answer lives in `viewFilters.ts` beside the evaluator that
+ * implements them. `any` is the rollup's honest answer: what a rollup holds
+ * depends on its `calculate`, which is not knowable from the kind alone.
+ */
+export const FILTER_FAMILIES = [
+  'text',
+  'number',
+  'date',
+  'choice',
+  'multi',
+  'boolean',
+  'any',
+] as const;
+export type FilterFamily = (typeof FILTER_FAMILIES)[number];
+
 export interface FilterRule {
   field: string;
   op: FilterOp;
+  /** `is_between` stores its two bounds as a two-element list. */
   value?: Scalar | Scalar[];
 }
 export type FilterGroup =
@@ -457,5 +774,9 @@ export interface Schema {
   // M3.1: the same chain with the entry's OWN type consulted before the
   // Work item fallback, so every type can carry its own status set.
   statusSetFor(entry: Entry): StatusDef[];
+  /** Which link in that chain answered — the inline status creator needs to
+   * know, because writing to the type is a silent no-op under a project
+   * override (M16.12). */
+  statusSourceFor(entry: Entry): 'project' | 'type' | 'default';
   resolveField(e: Entry, field: string): ResolvedField;
 }

@@ -1,15 +1,23 @@
 import { useState } from 'react';
-import { TYPE_COLORS } from '@/app/TypeDialogs';
-import { setFieldOptions } from '@/app/typeActions';
+import { PICKABLE_OPTION_COLORS, resolveOptionColor } from '@/lib/swatch';
+import { setFieldConfig, setFieldOptions, setTypeStatuses } from '@/app/typeActions';
 import { Avatar } from '@/components/ui/Avatar';
 import { DatePicker } from '@/components/ui/DatePicker';
 import { Icon } from '@/components/ui/Icon';
 import { Switch } from '@/components/ui/Switch';
 import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
+import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
-import { optionId } from '@/detail/OptionListEditor';
+import { findOptionByLabel, optionId, personCandidates } from '@/engine/properties';
 import { RelationPicker } from '@/detail/RelationPicker';
-import { formatDateValue, makeDateValue, toIsoDate, type DateValue } from '@/engine/dates';
+import {
+  DEFAULT_TIME_FORMAT,
+  makeDateValue,
+  parseDateProperty,
+  serializeDateProperty,
+  toIsoDate,
+  type DateValue,
+} from '@/engine/dates';
 import { typeStyle } from '@/engine/typeCatalog';
 import { formatWikilink, resolveTarget } from '@/engine/wikilink';
 import { useUiStore } from '@/stores/uiStore';
@@ -36,21 +44,48 @@ const stripWikilink = (v: string) => v.replace(/^\[\[/, '').replace(/\]\]$/, '')
 const toggle = (values: string[], id: string): string[] =>
   values.includes(id) ? values.filter((v) => v !== id) : [...values, id];
 
-/** A selected multi-select value: filled pill in the option's color. */
+/**
+ * A selected multi-select value: a pill tinted with the option's colour.
+ *
+ * It used to paint the LABEL in the raw option colour over a 13% tint of that
+ * same colour — amber text on amber at about 1.8:1 — and built the tint by
+ * string concatenation, so `#fff` became `#fff22`, an invalid declaration the
+ * browser drops, and a three-digit hex rendered a clear pill (M16.12).
+ */
 function OptionTag({ label, color }: { label: string; color: string | null }) {
+  const sw = resolveOptionColor(color);
   return (
     <span
-      className="inline-flex items-center rounded-[5px] px-1.5 py-px text-[11.5px] leading-[16px]"
-      style={
-        color === null
-          ? { background: 'var(--n-100)', color: 'var(--n-700)' }
-          : { background: `${color}22`, color }
-      }
+      className="inline-flex items-center rounded-sm px-1.5 py-px text-xs leading-[16px]"
+      style={{ background: sw.tint, color: sw.ink }}
     >
       {label}
     </span>
   );
 }
+
+/**
+ * What an unset value draws (M16.35).
+ *
+ * `ghost` is Notion's RECORD PAGE: grey "Empty" standing in for the value, so
+ * the property is still a visible, clickable row. `blank` is Notion's TABLE
+ * CELL: nothing at all — no ghost text, no chevron, no per-cell type icon —
+ * with the affordance arriving on hover/focus instead.
+ *
+ * Deliberately NOT derived from `compact`, which means "this view does not
+ * wrap text": turning column wrapping on would otherwise silently repaint
+ * every empty cell.
+ */
+export type FieldPlaceholder = 'ghost' | 'blank';
+
+/**
+ * A blank cell draws nothing, so the BUTTON has to be the hit target — Notion's
+ * unset cell is clickable across its whole width, not in the 16px of padding
+ * that is all a button with no children would occupy. `flex-1 self-stretch`
+ * fills the cell it is laid into; the `min-h` is the floor when nothing around
+ * it has height either.
+ */
+const BLANK_FILL = 'min-h-[22px] flex-1 self-stretch';
 
 export interface FieldEditorProps {
   entry: Entry;
@@ -61,6 +96,10 @@ export interface FieldEditorProps {
   compact?: boolean;
   /** M11: how relation chips draw. Per view — see Presentation.chips. */
   chips?: ChipStyle;
+  /** M16.35: how an UNSET value draws. Defaults to the record page's ghost
+   * "Empty" so every existing consumer is unchanged; the table opts into
+   * `blank`. See FieldPlaceholder. */
+  placeholder?: FieldPlaceholder;
 }
 
 export function FieldEditor({
@@ -69,6 +108,7 @@ export function FieldEditor({
   schema,
   compact = false,
   chips = 'plain',
+  placeholder = 'ghost',
 }: FieldEditorProps) {
   const wrapClass = compact ? 'flex-nowrap overflow-hidden' : 'flex-wrap';
   const [open, setOpen] = useState(false);
@@ -81,35 +121,92 @@ export function FieldEditor({
 
   if (def.kind === 'status' || def.kind === 'select' || def.kind === 'multiselect') {
     const statuses = schema.statusSetFor(entry);
+    const multi = def.kind === 'multiselect';
+    const values = asList(resolved.raw);
+    const ownerType = entry.type;
+
+    // The options THIS RECORD's type declares, not whatever `def` carries.
+    //
+    // In a typeless view `columnUniverse` unions the field across every type
+    // present and keeps the first declaration's options, flagging
+    // `heterogeneous` only when the KINDS differ. Two types each declaring a
+    // select named `status` are therefore not flagged, so creating an option
+    // on a row of type B wrote `setFieldOptions(B, name, [...A's options,
+    // new])` — replacing B's option set with A's (M16.12).
+    const ownerDef =
+      ownerType === null
+        ? undefined
+        : schema.types.get(ownerType)?.fields.find((f) => f.name === def.name);
+    const declaredOptions = ownerDef?.options ?? [];
     const options: FieldPopoverOption[] =
       def.kind === 'status'
         ? statuses.map((s) => ({ id: s.id, label: s.label, color: s.color, hollow: s.hollow }))
-        : (def.options ?? []).map((o) => ({
+        : (ownerDef?.options ?? def.options ?? []).map((o) => ({
             id: o.id,
             label: o.label,
             color: o.color,
             hollow: o.hollow,
           }));
-    const multi = def.kind === 'multiselect';
-    const values = asList(resolved.raw);
-    // A freshly declared Select has no options, and the popover was a dead
-    // end: "No matches", nothing to type into, no way out. Typing a label now
-    // declares it on the type (the same write the type screen makes) and picks
-    // it. Statuses are a different store (the type's status set) and untyped
-    // docs have no schema to write to, so both keep the read-only hint below.
-    const ownerType = entry.type;
-    const declaredOptions = def.options ?? [];
+
+    // Where a status set comes from decides whether writing to the type would
+    // do anything: a project override lives on the project, not the type.
+    const statusSource = schema.statusSourceFor(entry);
+    const canWriteOptions =
+      ownerType !== null && ownerDef !== undefined && ownerDef.kind === def.kind;
+
+    /**
+     * Typing a label into the picker declares it (M3.1, extended M16.12).
+     *
+     * A freshly declared Select had no options and the popover was a dead
+     * end. Status was excluded outright and told you to go to the type
+     * screen — which is no longer even the only place, since M16.7 mounts the
+     * editors in the record panel. Statuses live in a different store (the
+     * type's `statuses:`), so they take a different write, not no write.
+     */
     const createOption =
-      def.kind !== 'status' && ownerType !== null
+      (def.kind === 'status' ? statusSource === 'type' || statusSource === 'default' : true) &&
+      canWriteOptions &&
+      ownerType !== null
         ? (label: string) => {
+            // Slug-aware: if the label collides with an option that already
+            // exists, SELECT it rather than appending a shadowed twin.
+            const existing = findOptionByLabel(
+              def.kind === 'status' ? statuses : declaredOptions,
+              label,
+            );
+            if (existing !== undefined) {
+              patch(multi ? toggle(values, existing.id) : existing.id);
+              return;
+            }
             const id = optionId(label);
             void (async () => {
+              if (def.kind === 'status') {
+                // Spreading `statuses` when it is DEFAULT_STATUSES is
+                // deliberate: it materialises the default chain onto the Type
+                // doc, which is the list the user is looking at. docPath is
+                // null because setTypeStatuses resolves the doc itself and
+                // creates one when it is missing.
+                const ok = await setTypeStatuses({ name: ownerType, docPath: null }, [
+                  ...statuses,
+                  {
+                    id,
+                    label,
+                    color: PICKABLE_OPTION_COLORS[statuses.length % PICKABLE_OPTION_COLORS.length],
+                    // The engine's own fallback; there is no group picker in
+                    // a one-line create row.
+                    group: 'active',
+                  },
+                ]);
+                if (ok) patch(id);
+                return;
+              }
               const ok = await setFieldOptions(ownerType, def.name, [
                 ...declaredOptions,
                 {
                   id,
                   label,
-                  color: TYPE_COLORS[declaredOptions.length % TYPE_COLORS.length],
+                  color:
+                    PICKABLE_OPTION_COLORS[declaredOptions.length % PICKABLE_OPTION_COLORS.length],
                 },
               ]);
               if (ok) patch(multi ? toggle(values, id) : id);
@@ -120,40 +217,59 @@ export function FieldEditor({
       const match = options.find((o) => o.id === v);
       return { id: v, label: match?.label ?? v, color: match?.color ?? null };
     });
+    // Nothing chosen and this is a table cell: paint the cell blank, chevron
+    // included (M16.35).
+    const blank = placeholder === 'blank' && chips.length === 0;
     return (
-      <span className="relative inline-flex min-w-0 max-w-full">
-        {/* No aria-label: the accessible name is the value ("Todo"), which is
-            what both screen readers and the panel tests read. `text-left`
-            matters once values wrap — buttons center their text by default. */}
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
+        {/* No aria-label while there is a value: the accessible name is the
+            value ("Todo"), which is what both screen readers and the panel
+            tests read. A blank cell has no such name, so it borrows the
+            property's. `text-left` matters once values wrap — buttons center
+            their text by default. */}
         <button
           type="button"
+          {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
           {chips.length === 0 ? (
-            <span className="text-[var(--n-400)]">Empty</span>
+            blank ? null : (
+              <span className="text-n-400">Empty</span>
+            )
           ) : multi ? (
             chips.map((c) => <OptionTag key={c.id} label={c.label} color={c.color} />)
           ) : (
             <>
               <span
                 className="box-border h-[9px] w-[9px] flex-none rounded-full"
-                style={{ background: chips[0].color ?? 'var(--n-300)' }}
+                style={{ background: resolveOptionColor(chips[0].color).solid }}
               />
               {chips[0].label}
             </>
           )}
-          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
         </button>
         {open && (
           <FieldPopover
             options={options}
             searchable={options.length > 6 || multi || createOption !== undefined}
             {...(createOption !== undefined ? { onCreate: createOption } : {})}
+            // Both hints used to send you to the type screen, which stopped
+            // being the only route when M16.7 put the property editor in the
+            // record panel — and for status it was a dead end, since nothing
+            // here could create one at all.
             emptyHint={
-              def.kind === 'status'
-                ? 'No statuses yet — add them on the type screen.'
-                : 'No options yet — add them on the type screen.'
+              canWriteOptions
+                ? `No ${def.kind === 'status' ? 'statuses' : 'options'} yet — type one to add it.`
+                : `No ${def.kind === 'status' ? 'statuses' : 'options'} yet — add them from the property menu.`
+            }
+            unavailableHint={
+              def.kind === 'status' && statusSource === 'project'
+                ? 'Statuses come from this record’s project — edit them there.'
+                : canWriteOptions
+                  ? undefined
+                  : 'Add options from the property menu.'
             }
             {...(multi ? { activeIds: values } : { activeId: values[0] ?? null })}
             onPick={(id) => patch(multi ? toggle(values, id) : id)}
@@ -167,26 +283,32 @@ export function FieldEditor({
   if (def.kind === 'person') {
     // M3.1: people hold as many targets as you pick — the popover toggles and
     // stays open, and values render as avatars.
-    const options: FieldPopoverOption[] = entries
-      .filter((e) => e.type === 'Person')
-      .map((c) => ({ id: pathStem(c.path), label: c.title, color: null }));
+    //
+    // Candidates came from `e.type === 'Person'` until M16.13b, which is the
+    // type-name routing AGENTS.md forbids: a vault whose people are
+    // `Teammate`s got an empty picker with no control anywhere to fix it.
+    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry.type).map(
+      (c) => ({ id: pathStem(c.path), label: c.title, color: null }),
+    );
     const values = asList(resolved.raw).map(stripWikilink);
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
+    const blank = placeholder === 'blank' && values.length === 0;
     return (
-      <span className="relative inline-flex min-w-0 max-w-full">
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
+          {...(blank ? { 'aria-label': humanize(def.name) } : {})}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
-          {values.length === 0 && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
           {values.map((v) => (
             <span key={v} className="inline-flex min-w-0 items-center gap-[5px]">
               <Avatar name={labelOf(v)} size={18} />
               <span className="truncate">{labelOf(v)}</span>
             </span>
           ))}
-          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
         </button>
         {open && (
           <FieldPopover
@@ -244,16 +366,17 @@ export function FieldEditor({
       }
       void Promise.all(jobs);
     };
+    const blank = placeholder === 'blank' && values.length === 0;
     return (
-      <span className="inline-flex min-w-0 max-w-full">
+      <span className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
           data-testid="relation-field"
           aria-label={`Edit ${humanize(def.name)}`}
           onClick={() => setOpen(true)}
-          className={`inline-flex min-w-0 max-w-full ${wrapClass} items-center gap-1 rounded-md px-2 py-[3px] text-left text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]`}
+          className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
-          {values.length === 0 && <span className="text-[var(--n-400)]">Empty</span>}
+          {values.length === 0 && !blank && <span className="text-n-400">Empty</span>}
           {values.map((v) => {
             const target = targetOf(v);
             // M11: a related record is a CHIP. It used to carry an
@@ -266,7 +389,7 @@ export function FieldEditor({
               <span
                 key={v}
                 data-testid="relation-chip"
-                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[5px] bg-[var(--n-100)] px-1.5 py-px leading-[17px] text-[var(--n-700)]"
+                className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-sm bg-n-100 px-1.5 py-px leading-[17px] text-n-700"
               >
                 {style !== null && (
                   <Icon name={style.icon} size={10} color={style.color ?? 'var(--n-400)'} />
@@ -275,7 +398,7 @@ export function FieldEditor({
               </span>
             );
           })}
-          <Icon name="chevron-down" size={11} color="var(--n-400)" />
+          {!blank && <Icon name="chevron-down" size={11} color="var(--n-400)" />}
         </button>
         {open && (
           // M11: a dialog, not a 240px popover. Choosing what to link and
@@ -301,19 +424,26 @@ export function FieldEditor({
 
   if (def.kind === 'date' || def.kind === 'daterange') {
     // The shared DatePicker (M2.x): frontmatter carries only what the field
-    // kind can store — a bare date, or a {start, end} range.
+    // kind can store — a bare date, or a {start, end} range, either endpoint
+    // optionally carrying a time (M16.14).
     const today = toIsoDate(new Date());
-    let value: DateValue;
-    if (def.kind === 'date') {
-      const raw = typeof resolved.raw === 'string' ? resolved.raw : '';
-      value = makeDateValue(raw === '' ? today : raw);
-    } else {
-      const raw = (resolved.raw ?? {}) as { start?: string | null; end?: string | null };
-      value = { ...makeDateValue(raw.start ?? today), end: raw.end ?? null };
-    }
+    const kind = def.kind;
+    const stored = parseDateProperty(resolved.raw);
+    // Display config lives on the PROPERTY, not in the value, so every record
+    // of the type renders the same way — which is what a format setting means.
+    // Before M16.14 the picker's format menu was discarded the moment the
+    // popover closed.
+    const value: DateValue = {
+      ...(stored ?? makeDateValue(today)),
+      format: def.dateFormat ?? 'short',
+      timeFormat: def.timeFormat ?? DEFAULT_TIME_FORMAT,
+    };
     const empty = resolved.display === '';
+    // The calendar glyph goes with the ghost text: Notion's Due column is
+    // plain text with no icon, and an unset one is nothing at all (M16.35).
+    const blank = placeholder === 'blank' && empty;
     return (
-      <span className="relative inline-flex min-w-0 max-w-full">
+      <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
           aria-label={humanize(def.name)}
@@ -321,14 +451,11 @@ export function FieldEditor({
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
           // clipped through the row below it (M11 item 3).
-          className="inline-flex min-w-0 max-w-full items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-[12.5px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+          className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} items-center gap-1.5 truncate whitespace-nowrap rounded-md px-2 py-[3px] text-sm text-n-800 hover:bg-n-50`}
         >
-          <Icon name="calendar" size={12} color="var(--n-500)" />
-          {empty ? (
-            <span className="text-[var(--n-400)]">Empty</span>
-          ) : (
-            formatDateValue({ ...value, format: 'short' }, today)
-          )}
+          {!blank && <Icon name="calendar" size={12} color="var(--n-500)" />}
+          {empty && !blank && <span className="text-n-400">Empty</span>}
+          {!empty && resolved.display}
         </button>
         {open && (
           <>
@@ -345,15 +472,27 @@ export function FieldEditor({
             <FixedBelowAnchor>
               <DatePicker
                 value={value}
-                onChange={(v) =>
-                  patch(def.kind === 'date' ? v.start : { start: v.start, end: v.end })
-                }
+                onChange={(v) => {
+                  // The value and its display config go to different files: the
+                  // dates to this record, the format to the TYPE, so every
+                  // record of it renders alike. Splitting them here is what
+                  // makes the format menu persist at all (M16.14).
+                  if (v.format !== value.format || v.timeFormat !== value.timeFormat) {
+                    if (entry.type !== null) {
+                      void setFieldConfig(entry.type, def.name, {
+                        dateFormat: v.format === 'short' ? null : v.format,
+                        timeFormat: v.timeFormat === DEFAULT_TIME_FORMAT ? null : v.timeFormat,
+                      });
+                    }
+                    return;
+                  }
+                  patch(serializeDateProperty(v, kind));
+                }}
                 onClear={() => {
                   patch(null);
                   setOpen(false);
                 }}
-                showEndToggle={def.kind === 'daterange'}
-                showTime={false}
+                showEndToggle={kind === 'daterange'}
                 showRemind={false}
               />
             </FixedBelowAnchor>
@@ -373,7 +512,7 @@ export function FieldEditor({
             href={href}
             target="_blank"
             rel="noreferrer"
-            className="truncate text-[12.5px] text-[var(--cortex-600)] hover:underline"
+            className="truncate text-sm text-cortex-600 hover:underline"
           >
             {url}
           </a>
@@ -381,7 +520,7 @@ export function FieldEditor({
             type="button"
             aria-label={`Edit ${humanize(def.name)}`}
             onClick={() => setDraft(url)}
-            className="flex-none rounded-md border-0 bg-transparent p-1 text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            className="flex-none rounded-md border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
           >
             <Icon name="pencil" size={11} />
           </button>
@@ -391,59 +530,50 @@ export function FieldEditor({
     // Falls through to the text-editing branch below via `draft`.
   }
 
-  if (def.kind === 'files') {
-    const files = Array.isArray(resolved.raw)
-      ? resolved.raw.map(String)
-      : typeof resolved.raw === 'string' && resolved.raw !== ''
-        ? [resolved.raw]
-        : [];
-    return (
-      <span className="flex min-w-0 flex-wrap items-center gap-1">
-        {files.map((f) => (
-          <span
-            key={f}
-            className="inline-flex max-w-full items-center gap-1 rounded-md bg-[var(--n-50)] px-1.5 py-px text-[12px] text-[var(--n-700)]"
-          >
-            <Icon name="paperclip" size={11} color="var(--n-500)" />
-            <span className="truncate">{f.split('/').pop()}</span>
-            <button
-              type="button"
-              aria-label={`Remove ${f}`}
-              onClick={() => patch(files.filter((x) => x !== f))}
-              className="border-0 bg-transparent p-0 text-[var(--n-400)] hover:text-[var(--danger-600)]"
-            >
-              <Icon name="x" size={11} />
-            </button>
-          </span>
-        ))}
-        {draft !== null ? (
-          <input
-            autoFocus
-            aria-label={`Add file to ${humanize(def.name)}`}
-            placeholder="Path or URL"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={() => {
-              if (draft.trim() !== '') patch([...files, draft.trim()]);
-              setDraft(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              if (e.key === 'Escape') setDraft(null);
-            }}
-            className="h-[22px] w-36 rounded-md border border-[var(--cortex-500)] px-1.5 text-[12px] outline-none"
-          />
-        ) : (
+  if (def.kind === 'email' || def.kind === 'phone') {
+    // The url branch's shape, with the scheme the kind implies. Nothing
+    // validates the value — see validateValue: refusing a frontmatter write
+    // is a worse failure than an address that will not linkify — so the
+    // link is offered for whatever is stored and the pencil always returns
+    // you to the text.
+    const value = typeof resolved.raw === 'string' ? resolved.raw : '';
+    if (draft === null && value !== '') {
+      const href =
+        def.kind === 'email'
+          ? value.startsWith('mailto:')
+            ? value
+            : `mailto:${value}`
+          : `tel:${value.replace(/[^\d+]/g, '')}`;
+      return (
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <a href={href} className="truncate text-sm text-cortex-600 hover:underline">
+            {value.replace(/^mailto:/, '')}
+          </a>
           <button
             type="button"
-            aria-label={`Add file to ${humanize(def.name)}`}
-            onClick={() => setDraft('')}
-            className="rounded-md border-0 bg-transparent px-1 py-px text-[12px] text-[var(--n-400)] hover:bg-[var(--n-50)] hover:text-[var(--n-700)]"
+            aria-label={`Edit ${humanize(def.name)}`}
+            onClick={() => setDraft(value)}
+            className="flex-none rounded-md border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
           >
-            + Add
+            <Icon name="pencil" size={11} />
           </button>
-        )}
-      </span>
+        </span>
+      );
+    }
+    // Falls through to the shared text editor below.
+  }
+
+  if (def.kind === 'files') {
+    // M16.13c: picking now COPIES into the vault and stores a vault-relative
+    // path, so the value survives the vault being synced or moved. The whole
+    // control lives in its own component because it needs hooks, and this
+    // function is a chain of early returns.
+    return (
+      <FilesField
+        values={asList(resolved.raw)}
+        label={humanize(def.name)}
+        onChange={(next) => patch(next.length === 0 ? null : next)}
+      />
     );
   }
 
@@ -451,13 +581,9 @@ export function FieldEditor({
     return (
       <span
         title="Computed from the vault — read only"
-        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-[12.5px] text-[var(--n-600)]"
+        className="inline-flex items-center gap-1.5 px-2 py-[3px] text-sm text-n-600"
       >
-        {resolved.display === '' ? (
-          <span className="text-[var(--n-400)]">—</span>
-        ) : (
-          resolved.display
-        )}
+        {resolved.display === '' ? <span className="text-n-400">—</span> : resolved.display}
         <Icon name="lock" size={10} color="var(--n-300)" />
       </span>
     );
@@ -494,6 +620,10 @@ export function FieldEditor({
     return (
       <input
         autoFocus
+        // The right keyboard on touch, and the browser's own affordances
+        // (autofill, the phone keypad). The input was untyped for every kind.
+        type={def.kind === 'email' ? 'email' : def.kind === 'phone' ? 'tel' : 'text'}
+        inputMode={def.kind === 'phone' ? 'tel' : def.kind === 'email' ? 'email' : undefined}
         aria-label={humanize(def.name)}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -505,10 +635,11 @@ export function FieldEditor({
             setDraft(null);
           }
         }}
-        className="h-[26px] w-40 rounded-md border border-[var(--cortex-500)] px-1.5 text-[13px] text-[var(--n-900)] shadow-[var(--ring)] outline-none"
+        className="h-[26px] w-40 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[var(--ring)] outline-none"
       />
     );
   }
+  const blank = placeholder === 'blank' && resolved.display === '';
   return (
     // max-w-full + truncate keep long text on one line inside a table cell;
     // the full value stays readable in the title and the detail panel.
@@ -517,6 +648,10 @@ export function FieldEditor({
     <button
       type="button"
       title={resolved.display === '' ? undefined : resolved.display}
+      // A blank cell renders no text, so nothing is left to name it. The
+      // property does the naming instead — blank means "draws no glyph", not
+      // "is invisible to a screen reader or a click" (M16.35).
+      {...(blank ? { 'aria-label': humanize(def.name) } : {})}
       // Seed the draft from the RAW value, never the formatted display: a
       // percent field opened holding "76%" and a currency field "$1,840",
       // and commit then rejected the app's own display string as not a
@@ -528,10 +663,12 @@ export function FieldEditor({
             : resolved.display,
         )
       }
-      className="inline-flex min-w-0 max-w-full rounded-md px-2 py-[3px] text-left text-[13px] text-[var(--n-800)] hover:bg-[var(--n-50)]"
+      className={`inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''} rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
     >
       {resolved.display === '' ? (
-        <span className="text-[var(--n-400)]">Empty</span>
+        blank ? null : (
+          <span className="text-n-400">Empty</span>
+        )
       ) : (
         <span className="min-w-0 truncate">{resolved.display}</span>
       )}

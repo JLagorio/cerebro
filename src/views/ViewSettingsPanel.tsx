@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Switch } from '@/components/ui/Switch';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { AddPropertyPanel } from '@/detail/AddPropertyPanel';
 import type { ColumnDef } from '@/engine/columns';
-import { moveColumnTo, toggleColumn } from '@/engine/columns';
+import { allColumnsWrap, moveColumnTo, toggleColumn, wrapAllColumns } from '@/engine/columns';
+import { GROUPABLE_KINDS, MEDIA_KINDS, NUMERIC_KINDS, ORDERABLE_KINDS } from '@/engine/properties';
+import { useSortableList } from '@/hooks/useSortableList';
 import {
   chainTypes,
   descentOptions,
@@ -13,23 +17,63 @@ import {
   parseDescentValue,
 } from '@/engine/hierarchyOptions';
 import { kindMeta } from '@/engine/properties';
+import { DEFAULT_ZOOM, ZOOM_LABELS } from '@/engine/schedule';
 import { humanize } from '@/engine/schema';
 import { PropertyEditor } from '@/views/PropertyEditor';
-import { bandLevels, nestLevels } from '@/engine/types';
+import { measureLabel } from '@/engine/chart';
+import {
+  CARD_PREVIEWS,
+  CARD_SIZES,
+  CHART_AGGS,
+  CHART_KINDS,
+  ROW_HEIGHTS,
+  bandLevels,
+  nestLevels,
+} from '@/engine/types';
 import type {
+  CardPreview,
+  CardSize,
+  ChartAgg,
+  ChartKind,
+  ChartSpec,
   ChipStyle,
   ColumnSpec,
+  DashboardBlock,
   FieldDef,
+  GallerySpec,
   GroupSpec,
   Presentation,
+  RowHeight,
   Schema,
   SortSpec,
   ListDefinition,
   ViewDefinition,
 } from '@/engine/types';
-import { MAX_GROUP_DEPTH, MAX_NEST_DEPTH } from '@/engine/views';
+import {
+  MAX_GROUP_DEPTH,
+  MAX_NEST_DEPTH,
+  MAX_SORT_KEYS,
+  moveSortKey,
+  nextDashboardBlockId,
+} from '@/engine/views';
 import { FilterBuilder } from '@/views/FilterBuilder';
-import { VIEW_KINDS } from '@/views/viewKinds';
+import { useVaultStore } from '@/stores/vaultStore';
+import {
+  VIEW_KINDS,
+  axesFor,
+  hasDependencies,
+  hasGroupColumns,
+  isDayGrid,
+  isTabular,
+  isZoomable,
+  hasBlocks,
+  isCharted,
+  needsDate,
+  showsCards,
+  showsChips,
+  showsCovers,
+  showsPreview,
+} from '@/views/viewKinds';
 
 /**
  * The view's whole configuration in one place (M9.7).
@@ -47,25 +91,58 @@ type Page =
   | 'filter'
   | 'sort'
   | 'group'
+  | 'limit'
+  | 'rows'
   | 'axis'
+  | 'cards'
+  | 'chart'
+  | 'blocks'
   | 'list'
   | 'newProperty'
   | 'field';
 
-/** Layouts that draw records on a date axis — they get the Axis page. */
-const DATED_LAYOUTS = new Set(['calendar', 'timeline', 'gantt']);
-/** Layouts that render relation chips — they get the chip-style section. */
-const CHIP_LAYOUTS = new Set(['table', 'list', 'board']);
+// Layout capabilities are declared on the kind now (M16.3). These were two
+// plain Set<string> plus two hardcoded p.type comparisons, so a new kind
+// compiled clean and then silently had no Axis page and no chip section.
 
-const GROUPABLE_KINDS = new Set([
-  'status',
-  'select',
-  'multiselect',
-  'person',
-  'checkbox',
-  'relation',
-]);
-const ORDERABLE_KINDS = new Set(['status', 'select', 'number', 'date', 'daterange']);
+const CARD_SIZE_LABEL: Record<CardSize, string> = {
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
+};
+
+const CARD_PREVIEW_LABEL: Record<CardPreview, string> = {
+  none: 'None',
+  content: 'Page content',
+};
+
+const ROW_HEIGHT_LABEL: Record<RowHeight, string> = {
+  compact: 'Compact',
+  default: 'Default',
+  tall: 'Tall',
+};
+
+const CHART_KIND_LABEL: Record<ChartKind, string> = {
+  bar: 'Bar',
+  line: 'Line',
+  donut: 'Donut',
+};
+
+/** What one band of a chart is CALLED, per kind — the word the Chart page's
+ * footnote uses. `Record<ChartKind, …>` so a fourth kind cannot be drawn
+ * without being named (M16.29). */
+const CHART_PARTS: Record<ChartKind, string> = {
+  bar: 'bars',
+  line: 'points',
+  donut: 'slices',
+};
+
+const CHART_AGG_LABEL: Record<ChartAgg, string> = {
+  count: 'Count of records',
+  sum: 'Sum',
+  avg: 'Average',
+};
+
 const META_SORTS = [
   { value: 'modifiedAt', label: 'Last modified' },
   { value: 'createdAt', label: 'Created' },
@@ -162,13 +239,13 @@ export function ViewSettingsPanel({
       data-testid="view-settings-panel"
       role="dialog"
       aria-label="View settings"
-      className="flex max-h-[min(70vh,640px)] w-[320px] flex-col overflow-hidden rounded-[12px] border border-[var(--n-200)] bg-[var(--n-0)] shadow-[var(--shadow-lg)]"
+      className="flex max-h-[min(70vh,640px)] w-[320px] flex-col overflow-hidden rounded-xl border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
     >
-      <header className="flex flex-none items-center gap-1.5 border-b border-[var(--n-200)] px-3 py-2.5">
+      <header className="flex flex-none items-center gap-1.5 border-b border-n-200 px-3 py-2.5">
         {page !== 'root' && (
           <IconButton icon="arrow-left" label="Back" size="sm" onClick={() => setPage('root')} />
         )}
-        <span className="flex-1 truncate text-[13px] font-semibold text-[var(--n-900)]">
+        <span className="flex-1 truncate text-sm font-semibold text-n-900">
           {page === 'root' ? view.name : titleFor(page)}
         </span>
         <IconButton icon="x" label="Close view settings" size="sm" onClick={onClose} />
@@ -226,8 +303,11 @@ export function ViewSettingsPanel({
             />
             {/* M9.7: one row. Grouping by a property bands; grouping by a
                 relation nests. They were two rows answering one question.
-                M12.8: absent on the calendar — days are its grouping. */}
-            {p.type !== 'calendar' && (
+                M12.8: absent on the calendar — days are its grouping.
+                M16.3: which is now `groupable` on the kind, so this row and
+                the tab row's Group icon read the same declaration instead of
+                each hardcoding the calendar. */}
+            {axesFor(p.type).group && (
               <Row
                 icon="rows-3"
                 label="Group"
@@ -241,9 +321,30 @@ export function ViewSettingsPanel({
                 onClick={() => setPage('group')}
               />
             )}
+            {/* M16.29: row height and "Wrap all columns" are settings for the
+                whole table, and both could only be reached from the NAME
+                column's header menu — not here, where every other whole-view
+                setting is, and not from any other column's menu. */}
+            {isTabular(p.type) && (
+              <Row
+                icon="rows-2"
+                label="Rows"
+                value={ROW_HEIGHT_LABEL[p.rowHeight ?? 'default']}
+                onClick={() => setPage('rows')}
+              />
+            )}
+            {/* M16.26: Notion loads 25 and offers more; every view of ours
+                rendered `entries` in full, so a type with 4,000 records laid
+                out 4,000 rows before the first paint. */}
+            <Row
+              icon="list-end"
+              label="Load limit"
+              value={p.limit === undefined ? 'All' : String(p.limit)}
+              onClick={() => setPage('limit')}
+            />
             {/* M12.8: tailoring per layout — the dated views expose the axis
                 they draw on, which the table has no use for. */}
-            {DATED_LAYOUTS.has(p.type) && (
+            {needsDate(p.type) && (
               <Row
                 icon="calendar"
                 label="Date axis"
@@ -252,11 +353,47 @@ export function ViewSettingsPanel({
               />
             )}
 
+            {/* M16.22: the card settings — size, and whatever else the layout
+                can actually draw on a card. Declared on the kind (`cards`), so
+                a future card layout gets this page by saying so rather than by
+                being added to a string set. M16.29: and the page's own rows are
+                gated the same way, because `cards` was too coarse for all of
+                them. */}
+            {showsCards(p.type) && (
+              <Row
+                icon="layout-grid"
+                label="Cards"
+                value={CARD_SIZE_LABEL[p.cardSize ?? 'medium']}
+                onClick={() => setPage('cards')}
+              />
+            )}
+
+            {/* M16.27: the chart's shape and measure. Its X axis is NOT here —
+                that is the Group row above, which every layout shares. */}
+            {isCharted(p.type) && (
+              <Row
+                icon="chart-column"
+                label="Chart"
+                value={measureLabel(p.chart)}
+                onClick={() => setPage('chart')}
+              />
+            )}
+
+            {/* M16.28: the dashboard's blocks. */}
+            {hasBlocks(p.type) && (
+              <Row
+                icon="layout-dashboard"
+                label="Blocks"
+                value={String(p.dashboard?.blocks.length ?? 0)}
+                onClick={() => setPage('blocks')}
+              />
+            )}
+
             {/* M11: how related records draw, per view. A dense table wants
                 bare chips; a mixed one wants to see which type each points at. */}
-            {CHIP_LAYOUTS.has(p.type) && (
-              <div className="mt-2 border-t border-[var(--n-100)] pt-2">
-                <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            {showsChips(p.type) && (
+              <div className="mt-2 border-t border-n-100 pt-2">
+                <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                   Related records
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -268,10 +405,10 @@ export function ViewSettingsPanel({
                       aria-pressed={chipStyle === style.value}
                       onClick={() => setPresentation({ ...p, chips: style.value })}
                       className={[
-                        'flex items-start gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                        'flex items-start gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
                         chipStyle === style.value
-                          ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                          : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                          ? 'bg-cortex-50 text-cortex-700'
+                          : 'bg-transparent text-n-700 hover:bg-n-50',
                       ].join(' ')}
                     >
                       <Icon
@@ -281,7 +418,7 @@ export function ViewSettingsPanel({
                       />
                       <span className="min-w-0 flex-1">
                         {style.label}
-                        <span className="mt-px block text-[11px] leading-[15px] text-[var(--n-400)]">
+                        <span className="mt-px block text-2xs leading-[15px] text-n-400">
                           {style.hint}
                         </span>
                       </span>
@@ -292,10 +429,10 @@ export function ViewSettingsPanel({
               </div>
             )}
 
-            <div className="mt-2 border-t border-[var(--n-100)] pt-2">
+            <div className="mt-2 border-t border-n-100 pt-2">
               {surface === 'list' && (
                 <>
-                  <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+                  <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                     This list
                   </div>
                   <Row
@@ -310,7 +447,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteView}
-                  className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-600)] hover:bg-[var(--n-50)]"
+                  className="mt-1 flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-600 hover:bg-n-50"
                 >
                   <Icon name="trash-2" size={13} />
                   Delete this view
@@ -320,7 +457,7 @@ export function ViewSettingsPanel({
                 <button
                   type="button"
                   onClick={onDeleteList}
-                  className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--danger-600)] hover:bg-[var(--danger-50)]"
+                  className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-danger-600 hover:bg-danger-50"
                 >
                   <Icon name="trash-2" size={13} />
                   {surface === 'type' ? 'Delete type' : 'Delete list'}
@@ -333,9 +470,7 @@ export function ViewSettingsPanel({
         {page === 'list' && (
           <div className="flex flex-col gap-2 px-1">
             <div>
-              <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-                List name
-              </span>
+              <span className="mb-1 block text-xs font-medium text-n-600">List name</span>
               <Input
                 ariaLabel="List name"
                 placeholder="List name"
@@ -353,22 +488,22 @@ export function ViewSettingsPanel({
                 width="100%"
               />
             </div>
-            <p className="m-0 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+            <p className="m-0 text-xs leading-[16px] text-n-500">
               Records come from{' '}
-              <span className="font-medium text-[var(--n-800)]">
+              <span className="font-medium text-n-800">
                 {list.source.type ?? 'everything in the vault'}
               </span>
               . The source is what the list IS — changing it would invalidate every view's columns,
               so it is fixed once created.
             </p>
-            <div className="border-t border-[var(--n-100)] pt-2">
-              <div className="pb-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+            <div className="border-t border-n-100 pt-2">
+              <div className="pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
                 Views
               </div>
               {list.views.map((v) => (
                 <div
                   key={v.id}
-                  className="flex items-center gap-2 rounded-[7px] px-1 py-1 text-[12.5px] text-[var(--n-700)]"
+                  className="flex items-center gap-2 rounded-md px-1 py-1 text-sm text-n-700"
                 >
                   <Icon
                     name={
@@ -380,9 +515,7 @@ export function ViewSettingsPanel({
                     color="var(--n-500)"
                   />
                   <span className="min-w-0 flex-1 truncate">{v.name}</span>
-                  {v.id === view.id && (
-                    <span className="flex-none text-[10.5px] text-[var(--n-400)]">open</span>
-                  )}
+                  {v.id === view.id && <span className="flex-none text-2xs text-n-400">open</span>}
                 </div>
               ))}
             </div>
@@ -398,10 +531,10 @@ export function ViewSettingsPanel({
                 data-testid={`view-switch-${l.value}`}
                 onClick={() => setPresentation({ ...p, type: l.value })}
                 className={[
-                  'flex items-center gap-2 rounded-[7px] border-0 px-2 py-1.5 text-left text-[12.5px]',
+                  'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
                   p.type === l.value
-                    ? 'bg-[var(--cortex-50)] text-[var(--cortex-700)]'
-                    : 'bg-transparent text-[var(--n-700)] hover:bg-[var(--n-50)]',
+                    ? 'bg-cortex-50 text-cortex-700'
+                    : 'bg-transparent text-n-700 hover:bg-n-50',
                 ].join(' ')}
               >
                 <Icon name={l.icon} size={13} />
@@ -441,7 +574,7 @@ export function ViewSettingsPanel({
         {page === 'field' &&
           editingField !== null &&
           (list.source.type === null ? (
-            <p className="m-0 px-2 py-3 text-[12px] leading-[17px] text-[var(--n-500)]">
+            <p className="m-0 px-2 py-3 text-xs leading-[17px] text-n-500">
               This property can't be edited here — the view has no single source type that declares
               it.
             </p>
@@ -470,6 +603,18 @@ export function ViewSettingsPanel({
           <AxisPage presentation={p} fields={fields} onChange={setPresentation} />
         )}
 
+        {page === 'cards' && (
+          <CardsPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
+        {page === 'chart' && (
+          <ChartPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
+        {page === 'blocks' && (
+          <BlocksPage presentation={p} fields={fields} onChange={setPresentation} />
+        )}
+
         {page === 'filter' && (
           <FilterBuilder
             filters={view.filters}
@@ -485,6 +630,12 @@ export function ViewSettingsPanel({
             onChange={(sort) => setPresentation({ ...p, sort })}
           />
         )}
+
+        {page === 'limit' && (
+          <LimitPage limit={p.limit} onChange={(limit) => setPresentation({ ...p, limit })} />
+        )}
+
+        {page === 'rows' && <RowsPage presentation={p} onChange={setPresentation} />}
 
         {page === 'group' && (
           <GroupPage
@@ -512,8 +663,18 @@ function titleFor(page: Page): string {
       return 'Sort';
     case 'group':
       return 'Group';
+    case 'limit':
+      return 'Load limit';
+    case 'rows':
+      return 'Rows';
     case 'axis':
       return 'Date axis';
+    case 'cards':
+      return 'Cards';
+    case 'chart':
+      return 'Chart';
+    case 'blocks':
+      return 'Blocks';
     case 'list':
       return 'This list';
     case 'newProperty':
@@ -541,26 +702,20 @@ function Row({
   const content = (
     <>
       <Icon name={icon} size={13} color="var(--n-500)" />
-      <span className={`flex-1 ${muted ? 'text-[var(--n-500)]' : 'text-[var(--n-800)]'}`}>
-        {label}
-      </span>
-      {value !== '' && <span className="text-[11.5px] text-[var(--n-400)]">{value}</span>}
+      <span className={`flex-1 ${muted ? 'text-n-500' : 'text-n-800'}`}>{label}</span>
+      {value !== '' && <span className="text-xs text-n-400">{value}</span>}
       {onClick !== undefined && <Icon name="chevron-right" size={12} color="var(--n-400)" />}
     </>
   );
   if (onClick === undefined) {
-    return (
-      <div className="flex items-center gap-2 rounded-[7px] px-2 py-1.5 text-[12.5px]">
-        {content}
-      </div>
-    );
+    return <div className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm">{content}</div>;
   }
   return (
     <button
       type="button"
       data-testid={`view-settings-${label.toLowerCase()}`}
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-[7px] border-0 bg-transparent px-2 py-1.5 text-left text-[12.5px] hover:bg-[var(--n-50)]"
+      className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm hover:bg-n-50"
     >
       {content}
     </button>
@@ -591,9 +746,6 @@ function PropertiesPage({
   onNewProperty?: () => void;
 }) {
   const [query, setQuery] = useState('');
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const [dropSlot, setDropSlot] = useState<number | null>(null);
-  const [dragging, setDragging] = useState<string | null>(null);
 
   const shown = new Set(columns.filter((c) => c.hidden !== true).map((c) => c.field));
   const visible: ColumnDef[] = columns
@@ -605,56 +757,29 @@ function PropertiesPage({
     humanize(f.name).toLowerCase().includes(query.trim().toLowerCase());
   const searching = query.trim() !== '';
 
-  /** Drag a shown row by its grip to a new slot. Same shape as the table's
-   * header drag: measure once, pick the slot by midpoint, commit on release. */
-  const startDrag = (field: string) => (e: React.PointerEvent) => {
-    if (searching || e.button !== 0) return;
-    e.preventDefault();
-    const rows = Array.from(listRef.current?.children ?? []) as HTMLElement[];
-    const mids = rows.map((r) => {
-      const box = r.getBoundingClientRect();
-      return box.top + box.height / 2;
-    });
-    const move = (ev: PointerEvent) => {
-      setDragging(field);
-      setDropSlot(Math.min(mids.filter((m) => ev.clientY > m).length, rows.length));
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-      setDragging(null);
-      setDropSlot(null);
-      const slot = mids.filter((m) => ev.clientY > m).length;
-      const from = visible.findIndex((f) => f.name === field);
-      if (from === -1) return;
-      onChange(moveColumnTo(columns, field, slot > from ? slot - 1 : slot));
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  };
+  // One reorder implementation, keyboard-operable (M16.2). This used to be a
+  // hand-rolled pointer drag whose own comment said it was a copy of the
+  // table's — and, like the table's, it could not be driven without a mouse.
+  const sortable = useSortableList({
+    ids: visible.map((f) => f.name),
+    onReorder: (field, to) => onChange(moveColumnTo(columns, field, to)),
+    disabled: searching,
+    labelFor: (field) => humanize(field),
+  });
 
   const row = (f: ColumnDef, on: boolean, index?: number) => (
     <div
       key={f.name}
       className={[
-        'group flex items-center gap-1.5 rounded-[7px] px-1 py-1 hover:bg-[var(--n-50)]',
-        dragging === f.name ? 'opacity-60' : '',
+        'group flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-n-50',
+        sortable.dragging === f.name ? 'opacity-60' : '',
       ].join(' ')}
-      style={
-        index !== undefined && dropSlot === index
-          ? { boxShadow: 'inset 0 2px 0 var(--cortex-500)' }
-          : index !== undefined && dropSlot === visible.length && index === visible.length - 1
-            ? { boxShadow: 'inset 0 -2px 0 var(--cortex-500)' }
-            : undefined
-      }
+      style={index !== undefined ? sortable.dropIndicator(index) : undefined}
     >
-      {on && !searching ? (
+      {on && !searching && index !== undefined ? (
         <span
-          onPointerDown={startDrag(f.name)}
-          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-[var(--n-300)] hover:text-[var(--n-500)]"
-          aria-hidden
+          {...sortable.gripProps(f.name, index)}
+          className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
         >
           <Icon name="grip-vertical" size={12} />
         </span>
@@ -668,14 +793,12 @@ function PropertiesPage({
           data-testid={`property-row-${f.name}`}
           title={`Edit ${humanize(f.name)}`}
           onClick={() => onEditField(f.name)}
-          className={`min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-[12.5px] hover:underline ${on ? 'text-[var(--n-800)]' : 'text-[var(--n-400)]'}`}
+          className={`min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm hover:underline ${on ? 'text-n-800' : 'text-n-400'}`}
         >
           {humanize(f.name)}
         </button>
       ) : (
-        <span
-          className={`min-w-0 flex-1 truncate text-[12.5px] ${on ? 'text-[var(--n-800)]' : 'text-[var(--n-400)]'}`}
-        >
+        <span className={`min-w-0 flex-1 truncate text-sm ${on ? 'text-n-800' : 'text-n-400'}`}>
           {humanize(f.name)}
         </span>
       )}
@@ -703,25 +826,28 @@ function PropertiesPage({
 
       {visible.filter(matches).length > 0 && (
         <div className="flex items-center px-2 pb-0.5">
-          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <span className="flex-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Shown in this view
           </span>
           <button
             type="button"
             onClick={() => onChange(columns.map((c) => ({ ...c, hidden: true })))}
-            className="border-0 bg-transparent p-0 text-[11px] text-[var(--cortex-600)] hover:underline"
+            className="border-0 bg-transparent p-0 text-2xs text-cortex-600 hover:underline"
           >
             Hide all
           </button>
         </div>
       )}
-      <div ref={listRef} className="flex flex-col gap-0.5">
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col gap-0.5"
+      >
         {visible.map((f, i) => (matches(f) ? row(f, true, i) : null))}
       </div>
 
       {hidden.filter(matches).length > 0 && (
         <div className="mt-1.5 flex items-center px-2 pb-0.5">
-          <span className="flex-1 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-[var(--n-400)]">
+          <span className="flex-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             Hidden in this view
           </span>
           <button
@@ -734,7 +860,7 @@ function PropertiesPage({
                   .map((f) => ({ field: f.name })),
               ])
             }
-            className="border-0 bg-transparent p-0 text-[11px] text-[var(--cortex-600)] hover:underline"
+            className="border-0 bg-transparent p-0 text-2xs text-cortex-600 hover:underline"
           >
             Show all
           </button>
@@ -743,9 +869,7 @@ function PropertiesPage({
       {hidden.map((f) => (matches(f) ? row(f, false) : null))}
 
       {visible.length === 0 && hidden.length === 0 && (
-        <p className="m-0 px-2 py-3 text-[12px] text-[var(--n-400)]">
-          This type declares no properties yet.
-        </p>
+        <p className="m-0 px-2 py-3 text-xs text-n-400">This type declares no properties yet.</p>
       )}
 
       {onNewProperty !== undefined && canEdit && (
@@ -753,7 +877,7 @@ function PropertiesPage({
           type="button"
           data-testid="new-property"
           onClick={onNewProperty}
-          className="mt-1 flex w-full items-center gap-2 rounded-[7px] border-0 border-t border-[var(--n-100)] bg-transparent px-2 py-1.5 text-left text-[12.5px] text-[var(--n-500)] hover:bg-[var(--n-50)] hover:text-[var(--n-800)]"
+          className="mt-1 flex w-full items-center gap-2 rounded-md border-0 border-t border-n-100 bg-transparent px-2 py-1.5 text-left text-sm text-n-500 hover:bg-n-50 hover:text-n-800"
         >
           <Icon name="plus" size={13} />
           New property
@@ -784,9 +908,7 @@ function AxisPage({
   return (
     <div className="flex flex-col gap-2 px-1">
       <div>
-        <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-          Date property
-        </span>
+        <span className="mb-1 block text-xs font-medium text-n-600">Date property</span>
         <Select
           size="sm"
           value={presentation.dateField ?? AUTO}
@@ -803,33 +925,92 @@ function AxisPage({
           width="100%"
         />
       </div>
-      {(presentation.type === 'timeline' || presentation.type === 'gantt') && (
-        <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">Zoom</span>
-          <Select
-            size="sm"
-            value={presentation.zoom ?? 'week'}
-            options={[
-              { value: 'day', label: 'Day' },
-              { value: 'week', label: 'Week' },
-              { value: 'month', label: 'Month' },
-              { value: 'quarter', label: 'Quarter' },
-            ]}
-            onChange={(e) =>
-              onChange({
-                ...presentation,
-                zoom: e.target.value as NonNullable<Presentation['zoom']>,
-              })
-            }
-            width="100%"
-          />
-        </div>
+      {isDayGrid(presentation.type) && (
+        <>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-n-600">Show calendar as</span>
+            <Select
+              size="sm"
+              value={presentation.calendarSpan ?? 'month'}
+              options={[
+                { value: 'month', label: 'Month' },
+                { value: 'week', label: 'Week' },
+              ]}
+              onChange={(e) =>
+                onChange({
+                  ...presentation,
+                  calendarSpan: e.target.value as NonNullable<Presentation['calendarSpan']>,
+                })
+              }
+              width="100%"
+            />
+          </div>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-n-600">Start week on</span>
+            <Select
+              size="sm"
+              value={presentation.weekStart ?? 'sunday'}
+              options={[
+                { value: 'sunday', label: 'Sunday' },
+                { value: 'monday', label: 'Monday' },
+              ]}
+              onChange={(e) =>
+                onChange({
+                  ...presentation,
+                  weekStart: e.target.value as NonNullable<Presentation['weekStart']>,
+                })
+              }
+              width="100%"
+            />
+          </div>
+          <div className="pt-0.5">
+            <Switch
+              checked={presentation.showWeekends !== false}
+              onChange={(on) => onChange({ ...presentation, showWeekends: on })}
+              label="Show weekends"
+            />
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+              Off drops Saturday and Sunday from the grid, rather than narrowing them.
+            </p>
+          </div>
+        </>
       )}
-      {presentation.type === 'gantt' && (
+      {isZoomable(presentation.type) && (
+        <>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-n-600">Zoom</span>
+            <Select
+              size="sm"
+              // DEFAULT_ZOOM, not a literal: this said 'week' while GanttView
+              // opened at 'month', so an unconfigured gantt showed a scale its
+              // own settings denied. The options come from the engine's list
+              // for the same reason — one place decides what the zooms are.
+              value={presentation.zoom ?? DEFAULT_ZOOM}
+              options={ZOOM_LABELS.map((z) => ({ value: z.value, label: z.label }))}
+              onChange={(e) =>
+                onChange({
+                  ...presentation,
+                  zoom: e.target.value as NonNullable<Presentation['zoom']>,
+                })
+              }
+              width="100%"
+            />
+          </div>
+          <div className="pt-0.5">
+            <Switch
+              checked={presentation.showTable !== false}
+              onChange={(on) => onChange({ ...presentation, showTable: on })}
+              label="Show table"
+            />
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+              The rows beside the axis, carrying this view&rsquo;s properties.
+            </p>
+          </div>
+        </>
+      )}
+      {hasDependencies(presentation.type) && (
         <div>
-          <span className="mb-1 block text-[11.5px] font-medium text-[var(--n-600)]">
-            Dependencies
-          </span>
+          <span className="mb-1 block text-xs font-medium text-n-600">Dependencies</span>
           <Select
             size="sm"
             value={presentation.dependencyField ?? AUTO}
@@ -845,11 +1026,443 @@ function AxisPage({
             }
             width="100%"
           />
-          <p className="m-0 pt-1 text-[11px] leading-[15px] text-[var(--n-400)]">
+          <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
             The relation naming what each record waits on — the arrows the gantt draws.
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Everything about a card, in ONE place, each row gated on the capability it
+ * actually needs (M16.22, consolidated M16.29).
+ *
+ * There were two card sections: this page (the gallery's cover, size and fit)
+ * and a `BoardSettings` block on the ROOT page (the board's size, preview and
+ * "Color columns"). Both were shown to both card layouts, because both hung
+ * off one `showsCards` check — so a gallery offered "Color columns", wrote
+ * `colorColumns: true` to its view file, and coloured nothing: a gallery has
+ * no columns. And "Card size" appeared twice, once per section, writing
+ * `cardSize` in one and `gallery.size` in the other.
+ *
+ * Each control now asks the kind for the capability it depends on — `preview`
+ * for a body snippet, `covers` for a cover, `groupColumns` for a tint — so a
+ * new card layout gets exactly the settings it can honour, and `satisfies`
+ * makes it answer.
+ *
+ * WHICH properties a card shows is deliberately absent: that is the Properties
+ * page, the same one the table uses. A card-only visibility list would be a
+ * second answer to one question, and switching a view between Table and
+ * Gallery would quietly lose the choice made on the other side.
+ *
+ * Cover candidates come from the kind's `media` flag rather than a
+ * `kind === 'files'` compare, so the day a second file-bearing kind exists it
+ * is offered here without anyone remembering to come back (M16.4's rule).
+ */
+function CardsPage({
+  presentation: p,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const NONE = '__none__';
+  const gallery = p.gallery ?? {};
+  const covers = fields.filter((f) => MEDIA_KINDS.has(f.kind));
+  // Only stored off its default, so an untouched gallery writes no key at all.
+  const patchGallery = (next: GallerySpec) => {
+    const cleaned: GallerySpec = {
+      ...(next.cover !== undefined && next.cover !== '' ? { cover: next.cover } : {}),
+      ...(next.fit === true ? { fit: true } : {}),
+    };
+    const { gallery: _drop, ...rest } = p;
+    onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, gallery: cleaned });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-1">
+      <div>
+        <span className="mb-1 block text-xs font-medium text-n-600">Card size</span>
+        <Select
+          size="sm"
+          value={p.cardSize ?? 'medium'}
+          options={CARD_SIZES.map((s) => ({ value: s, label: CARD_SIZE_LABEL[s] }))}
+          onChange={(e) => onChange({ ...p, cardSize: e.target.value as CardSize })}
+          width="100%"
+        />
+      </div>
+
+      {showsPreview(p.type) && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Card preview</span>
+          <Select
+            size="sm"
+            value={p.cardPreview ?? 'none'}
+            options={CARD_PREVIEWS.map((v) => ({ value: v, label: CARD_PREVIEW_LABEL[v] }))}
+            onChange={(e) => onChange({ ...p, cardPreview: e.target.value as CardPreview })}
+            width="100%"
+          />
+          <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+            Page content shows the first line or two of the record&rsquo;s body.
+          </p>
+        </div>
+      )}
+
+      {showsCovers(p.type) && (
+        <>
+          <div>
+            <span className="mb-1 block text-xs font-medium text-n-600">Card cover</span>
+            <Select
+              size="sm"
+              value={gallery.cover ?? NONE}
+              options={[
+                { value: NONE, label: 'None' },
+                ...covers.map((f) => ({ value: f.name, label: humanize(f.name) })),
+              ]}
+              onChange={(e) =>
+                patchGallery({
+                  ...gallery,
+                  cover: e.target.value === NONE ? undefined : e.target.value,
+                })
+              }
+              width="100%"
+            />
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+              {covers.length === 0
+                ? 'No files property on this type yet — add one and it becomes a cover.'
+                : 'The first file on each record. Images are not drawn yet: the webview cannot load a vault file until the asset protocol is enabled, so a cover names its file instead of showing a broken one.'}
+            </p>
+          </div>
+          <div className="border-t border-n-100 pt-2">
+            <Switch
+              checked={gallery.fit === true}
+              onChange={(fit) => patchGallery({ ...gallery, fit })}
+              label="Fit media"
+              ariaLabel="Fit media"
+            />
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+              Fit the whole cover inside the tile instead of cropping it to fill.
+            </p>
+          </div>
+        </>
+      )}
+
+      {hasGroupColumns(p.type) && (
+        <div className="border-t border-n-100 pt-2">
+          <Switch
+            checked={p.colorColumns === true}
+            label="Color columns"
+            ariaLabel="Color columns"
+            onChange={(on) => {
+              // Written only when true, so turning it back off leaves the view
+              // file as it was rather than storing a false nobody asked for.
+              const { colorColumns: _was, ...rest } = p;
+              onChange(on ? { ...rest, colorColumns: true } : rest);
+            }}
+          />
+          <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+            Paints each column in its group&rsquo;s own colour.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The chart's shape and measure (M16.27).
+ *
+ * Its X AXIS IS ABSENT ON PURPOSE — that is the Group row, the same control
+ * every other layout uses, and duplicating it here would give a chart two
+ * grouping settings that could disagree. The panel says so rather than leaving
+ * the reader hunting for it.
+ *
+ * The properties offered for sum/average come from the `numeric` flag on
+ * KIND_META, not a `kind === 'number'` compare — the rule M16.4 established
+ * and M16.13 applied to grouping and sorting.
+ */
+function ChartPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const NONE = '__none__';
+  const chart = presentation.chart ?? {};
+  const agg: ChartAgg = chart.agg ?? 'count';
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+  const band = bandLevels(presentation.group)[0];
+
+  const patch = (next: ChartSpec) => {
+    const cleaned: ChartSpec = {
+      ...(next.kind !== undefined && next.kind !== 'bar' ? { kind: next.kind } : {}),
+      ...(next.agg !== undefined && next.agg !== 'count' ? { agg: next.agg } : {}),
+      // A value property is meaningless under Count, and keeping it would make
+      // the YAML claim a measure the view does not use.
+      ...(next.agg !== undefined && next.agg !== 'count' && next.value !== undefined
+        ? { value: next.value }
+        : {}),
+      ...(next.omitZero === true ? { omitZero: true } : {}),
+    };
+    const { chart: _drop, ...rest } = presentation;
+    onChange(Object.keys(cleaned).length === 0 ? rest : { ...rest, chart: cleaned });
+  };
+
+  return (
+    <div className="flex flex-col gap-2 px-1">
+      <div>
+        <span className="mb-1 block text-xs font-medium text-n-600">Chart type</span>
+        <Select
+          size="sm"
+          value={chart.kind ?? 'bar'}
+          options={CHART_KINDS.map((k) => ({ value: k, label: CHART_KIND_LABEL[k] }))}
+          onChange={(e) => patch({ ...chart, kind: e.target.value as ChartKind })}
+          width="100%"
+        />
+      </div>
+      <div>
+        <span className="mb-1 block text-xs font-medium text-n-600">Measure</span>
+        <Select
+          size="sm"
+          value={agg}
+          options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+          onChange={(e) => patch({ ...chart, agg: e.target.value as ChartAgg })}
+          width="100%"
+        />
+      </div>
+      {agg !== 'count' && (
+        <div>
+          <span className="mb-1 block text-xs font-medium text-n-600">Of property</span>
+          <Select
+            size="sm"
+            value={chart.value ?? NONE}
+            options={[
+              { value: NONE, label: 'Choose a number property…' },
+              ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
+            ]}
+            onChange={(e) =>
+              patch({ ...chart, value: e.target.value === NONE ? undefined : e.target.value })
+            }
+            width="100%"
+          />
+          {numeric.length === 0 && (
+            <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+              This view has no number property to add up.
+            </p>
+          )}
+        </div>
+      )}
+      <div className="border-t border-n-100 pt-2">
+        <Switch
+          checked={chart.omitZero === true}
+          onChange={(omitZero) => patch({ ...chart, omitZero })}
+          label="Omit zero values"
+          ariaLabel="Omit zero values"
+        />
+      </div>
+      {/* M16.29: the shape is named from the chart kind. This said "bars"
+          whatever was selected, so the one sentence explaining where a chart's
+          X axis comes from described a bar chart to someone looking at a
+          donut. */}
+      <p className="m-0 border-t border-n-100 pt-2 text-2xs leading-[15px] text-n-400">
+        {band === undefined
+          ? `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, and this view has none yet — pick a property under Group.`
+          : `The ${CHART_PARTS[chart.kind ?? 'bar']} come from the view’s grouping, currently ${humanize(band.field)}. Change it under Group.`}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The dashboard's blocks (M16.28): add, name, widen, reorder, remove.
+ *
+ * A view block stores a REFERENCE to a saved view — the List's id and folder,
+ * addressed exactly as a selection addresses one — rather than a copy of its
+ * configuration. Editing that List updates every dashboard showing it, which
+ * is the whole reason to point at one instead of building a second view.
+ *
+ * Reordering goes through `useSortableList`, the one drag implementation, so a
+ * block moves from the keyboard like a property row does.
+ */
+function BlocksPage({
+  presentation,
+  fields,
+  onChange,
+}: {
+  presentation: Presentation;
+  fields: ColumnDef[];
+  onChange: (next: Presentation) => void;
+}) {
+  const lists = useVaultStore((s) => s.views);
+  const blocks = presentation.dashboard?.blocks ?? [];
+  const numeric = fields.filter((f) => NUMERIC_KINDS.has(f.kind));
+
+  const write = (next: DashboardBlock[]) =>
+    onChange(
+      next.length === 0
+        ? ((): Presentation => {
+            const { dashboard: _drop, ...rest } = presentation;
+            return rest;
+          })()
+        : { ...presentation, dashboard: { blocks: next } },
+    );
+  const patch = (id: string, next: Partial<DashboardBlock>) =>
+    write(blocks.map((b) => (b.id === id ? ({ ...b, ...next } as DashboardBlock) : b)));
+
+  const sortable = useSortableList({
+    ids: blocks.map((b) => b.id),
+    onReorder: (id, to) => {
+      const from = blocks.findIndex((b) => b.id === id);
+      if (from === -1) return;
+      const next = blocks.filter((b) => b.id !== id);
+      next.splice(to, 0, blocks[from]);
+      write(next);
+    },
+    labelFor: (id) => blocks.find((b) => b.id === id)?.title ?? id,
+  });
+
+  const addNumber = () =>
+    write([
+      ...blocks,
+      { id: nextDashboardBlockId(blocks), kind: 'number', agg: 'count' } as DashboardBlock,
+    ]);
+  const addView = (value: string) => {
+    const hit = lists.find((l) => `${l.collection ?? ''}::${l.id}` === value);
+    if (hit === undefined) return;
+    write([
+      ...blocks,
+      {
+        id: nextDashboardBlockId(blocks),
+        kind: 'view',
+        list: hit.id,
+        ...(hit.collection !== null ? { collection: hit.collection } : {}),
+      } as DashboardBlock,
+    ]);
+  };
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div ref={sortable.containerRef as React.RefObject<HTMLDivElement>}>
+        {blocks.map((block, i) => (
+          <div
+            key={block.id}
+            data-testid={`block-row-${block.id}`}
+            className={[
+              'mb-1.5 rounded-md border border-n-200 p-1.5',
+              sortable.dragging === block.id ? 'opacity-60' : '',
+            ].join(' ')}
+            style={sortable.dropIndicator(i)}
+          >
+            <div className="flex items-center gap-1">
+              <span
+                {...sortable.gripProps(block.id, i)}
+                className="flex h-5 w-4 flex-none cursor-grab touch-none items-center justify-center text-n-300 hover:text-n-500 focus-visible:text-cortex-600 focus-visible:outline-none"
+              >
+                <Icon name="grip-vertical" size={12} />
+              </span>
+              <Icon
+                name={block.kind === 'number' ? 'hash' : 'table-2'}
+                size={12}
+                color="var(--n-400)"
+              />
+              <Input
+                size="sm"
+                ariaLabel={`Block ${i + 1} title`}
+                placeholder={block.kind === 'number' ? 'Number' : block.list}
+                value={block.title ?? ''}
+                onChange={(e) =>
+                  patch(block.id, { title: e.target.value === '' ? undefined : e.target.value })
+                }
+                width="100%"
+              />
+              <IconButton
+                icon="trash-2"
+                label={`Remove block ${i + 1}`}
+                size="sm"
+                onClick={() => write(blocks.filter((b) => b.id !== block.id))}
+              />
+            </div>
+            {block.kind === 'number' && (
+              <div className="mt-1.5 flex items-center gap-1.5 pl-5">
+                <Select
+                  size="sm"
+                  value={block.agg}
+                  options={CHART_AGGS.map((a) => ({ value: a, label: CHART_AGG_LABEL[a] }))}
+                  onChange={(e) => patch(block.id, { agg: e.target.value as ChartAgg })}
+                  width="100%"
+                />
+                {block.agg !== 'count' && (
+                  <Select
+                    size="sm"
+                    value={block.value ?? ''}
+                    options={[
+                      { value: '', label: 'Property…' },
+                      ...numeric.map((f) => ({ value: f.name, label: humanize(f.name) })),
+                    ]}
+                    onChange={(e) =>
+                      patch(block.id, {
+                        value: e.target.value === '' ? undefined : e.target.value,
+                      })
+                    }
+                    width="100%"
+                  />
+                )}
+              </div>
+            )}
+            <div className="mt-1.5 pl-5">
+              <Switch
+                checked={block.wide === true}
+                onChange={(wide) => patch(block.id, { wide: wide ? true : undefined })}
+                label="Full width"
+                ariaLabel={`Block ${i + 1} full width`}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        data-testid="add-number-block"
+        onClick={addNumber}
+        className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-600 hover:bg-n-50"
+      >
+        <Icon name="hash" size={13} />
+        Add a number
+      </button>
+      {lists.length > 0 ? (
+        <Select
+          size="sm"
+          value={ADD}
+          options={[
+            { value: ADD, label: 'Add a saved view…' },
+            ...lists.map((l) => ({
+              value: `${l.collection ?? ''}::${l.id}`,
+              label: l.definition.name,
+            })),
+          ]}
+          onChange={(e) => {
+            if (e.target.value !== ADD) addView(e.target.value);
+          }}
+          width="100%"
+        />
+      ) : (
+        <p className="m-0 px-2 text-2xs leading-[15px] text-n-400">
+          There are no saved lists in the vault to embed yet.
+        </p>
+      )}
+
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
+        A number measures this view’s own records, so its filters apply. A saved view is shown as it
+        is configured where it lives.
+      </p>
     </div>
   );
 }
@@ -872,41 +1485,79 @@ function SortPage({
       .filter((f) => ORDERABLE_KINDS.has(f.kind) && !taken.has(f.name))
       .map((f) => ({ value: f.name, label: humanize(f.name) })),
   ];
+  // M16.26: this page enforced NO cap while the toolbar's chain builder passed
+  // `max={4}`, so the same view accepted a fifth key here and refused it there.
+  const atCap = sort.length >= MAX_SORT_KEYS;
+
+  const sortable = useSortableList({
+    ids: sort.map((s) => s.field),
+    labelFor,
+    onReorder: (field, to) =>
+      onChange(
+        moveSortKey(
+          sort,
+          sort.findIndex((s) => s.field === field),
+          to,
+        ),
+      ),
+  });
 
   return (
     <div className="flex flex-col gap-1.5">
-      {sort.map((s, i) => (
-        <div key={`${i}:${s.field}`} className="flex items-center gap-1.5">
-          <Select
-            size="sm"
-            value={s.field}
-            options={[{ value: s.field, label: labelFor(s.field) }, ...available].filter(
-              (o, j, all) => all.findIndex((x) => x.value === o.value) === j,
-            )}
-            onChange={(e) =>
-              onChange(sort.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
-            }
-            width="100%"
-          />
-          <IconButton
-            icon={s.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
-            label={`Sort ${i + 1} direction: ${s.dir === 'asc' ? 'ascending' : 'descending'}`}
-            size="sm"
-            onClick={() =>
-              onChange(
-                sort.map((x, j) => (j === i ? { ...x, dir: x.dir === 'asc' ? 'desc' : 'asc' } : x)),
-              )
-            }
-          />
-          <IconButton
-            icon="x"
-            label={`Remove sort ${i + 1}`}
-            size="sm"
-            onClick={() => onChange(sort.filter((_, j) => j !== i))}
-          />
-        </div>
-      ))}
-      {available.length > 0 && (
+      <div
+        ref={sortable.containerRef as React.RefObject<HTMLDivElement>}
+        className="flex flex-col gap-1.5"
+      >
+        {sort.map((s, i) => (
+          <div
+            key={`${i}:${s.field}`}
+            className={[
+              'group flex items-center gap-1.5',
+              sortable.dragging === s.field ? 'opacity-40' : '',
+            ].join(' ')}
+            style={sortable.dropIndicator(i)}
+          >
+            <Tooltip label="Drag to reorder — the first key breaks ties first">
+              <span
+                {...sortable.gripProps(s.field, i)}
+                className="flex h-6 w-3 flex-none cursor-grab items-center justify-center rounded-xs text-n-300 hover:text-n-600 focus-visible:text-n-600 group-hover:text-n-500"
+              >
+                <Icon name="grip-vertical" size={13} />
+              </span>
+            </Tooltip>
+            <Select
+              size="sm"
+              value={s.field}
+              options={[{ value: s.field, label: labelFor(s.field) }, ...available].filter(
+                (o, j, all) => all.findIndex((x) => x.value === o.value) === j,
+              )}
+              onChange={(e) =>
+                onChange(sort.map((x, j) => (j === i ? { ...x, field: e.target.value } : x)))
+              }
+              width="100%"
+            />
+            <IconButton
+              icon={s.dir === 'asc' ? 'arrow-up' : 'arrow-down'}
+              label={`Sort ${i + 1} direction: ${s.dir === 'asc' ? 'ascending' : 'descending'}`}
+              size="sm"
+              onClick={() =>
+                onChange(
+                  sort.map((x, j) =>
+                    j === i ? { ...x, dir: x.dir === 'asc' ? 'desc' : 'asc' } : x,
+                  ),
+                )
+              }
+            />
+            <IconButton
+              icon="x"
+              label={`Remove sort ${i + 1}`}
+              size="sm"
+              onClick={() => onChange(sort.filter((_, j) => j !== i))}
+            />
+          </div>
+        ))}
+      </div>
+      {available.length > 0 && !atCap && (
         <Select
           size="sm"
           value={ADD}
@@ -917,8 +1568,13 @@ function SortPage({
           width="100%"
         />
       )}
+      {atCap && (
+        <p className="m-0 px-1 pt-1 text-2xs leading-[15px] text-n-400">
+          {MAX_SORT_KEYS} keys is the maximum — a fifth tiebreak never decides anything.
+        </p>
+      )}
       {sort.length === 0 && (
-        <p className="m-0 px-1 pt-1 text-[11.5px] leading-[16px] text-[var(--n-500)]">
+        <p className="m-0 px-1 pt-1 text-xs leading-[16px] text-n-500">
           Records appear in vault order.
         </p>
       )}
@@ -926,8 +1582,118 @@ function SortPage({
   );
 }
 
+/**
+ * How many records the view draws (M16.26).
+ *
+ * Presets, not a free number box: the point of a limit is to keep the first
+ * paint fast, and a typed one invites 3,000 — which is the state this exists
+ * to avoid. "All" is stored as an ABSENT key, so a view that never wanted a
+ * limit carries nothing about one in its YAML.
+ */
+const LIMITS: { value: number | undefined; label: string }[] = [
+  { value: 25, label: '25 records' },
+  { value: 50, label: '50 records' },
+  { value: 100, label: '100 records' },
+  { value: undefined, label: 'All records' },
+];
+
+function LimitPage({
+  limit,
+  onChange,
+}: {
+  limit: number | undefined;
+  onChange: (next: number | undefined) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      {LIMITS.map((l) => (
+        <button
+          key={l.label}
+          type="button"
+          data-testid={`view-limit-${l.value ?? 'all'}`}
+          aria-pressed={limit === l.value}
+          onClick={() => onChange(l.value)}
+          className={[
+            'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
+            limit === l.value
+              ? 'bg-cortex-50 text-cortex-700'
+              : 'bg-transparent text-n-700 hover:bg-n-50',
+          ].join(' ')}
+        >
+          <span className="flex-1">{l.label}</span>
+          {limit === l.value && <Icon name="check" size={12} />}
+        </button>
+      ))}
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
+        A limited view says how many of how many it is showing, under the records. Nothing
+        disappears without saying so.
+      </p>
+    </div>
+  );
+}
+
 function labelFor(field: string): string {
   return META_SORTS.find((m) => m.value === field)?.label ?? humanize(field);
+}
+
+/**
+ * How tall a row is, and whether its cells wrap (M16.29).
+ *
+ * Both are settings for the WHOLE table, and both used to live only on the
+ * NAME column's header menu — a menu whose other items are all about the name
+ * column itself, and which no other column's menu carried. Someone looking for
+ * row height opened Priority's menu, found sort/filter/hide/freeze and no
+ * height, and had no reason to think Name's menu held two extra items.
+ *
+ * They are still writes to `presentation`/`columns`, so the table redraws the
+ * moment either changes — nothing about this page is a copy of the table's
+ * state.
+ */
+function RowsPage({
+  presentation: p,
+  onChange,
+}: {
+  presentation: Presentation;
+  onChange: (next: Presentation) => void;
+}) {
+  const height = p.rowHeight ?? 'default';
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="px-2 pb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+        Row height
+      </div>
+      {ROW_HEIGHTS.map((value) => (
+        <button
+          key={value}
+          type="button"
+          data-testid={`row-height-${value}`}
+          aria-pressed={height === value}
+          onClick={() => onChange({ ...p, rowHeight: value })}
+          className={[
+            'flex items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm',
+            height === value
+              ? 'bg-cortex-50 text-cortex-700'
+              : 'bg-transparent text-n-700 hover:bg-n-50',
+          ].join(' ')}
+        >
+          <span className="flex-1">{ROW_HEIGHT_LABEL[value]}</span>
+          {height === value && <Icon name="check" size={12} />}
+        </button>
+      ))}
+      <div className="mt-2 border-t border-n-100 px-1 pt-2">
+        <Switch
+          checked={allColumnsWrap(p.columns)}
+          onChange={() => onChange({ ...p, columns: wrapAllColumns(p.columns) })}
+          label="Wrap all columns"
+          ariaLabel="Wrap all columns"
+        />
+        <p className="m-0 pt-1 text-2xs leading-[15px] text-n-400">
+          Wrapped cells grow the row instead of clipping. One column at a time is still on its own
+          header menu.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -987,9 +1753,7 @@ function GroupPage({
     <div className="flex flex-col gap-1.5">
       {group.map((level, i) => (
         <div key={`${i}:${level.field}`} className="flex items-center gap-1.5">
-          <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
-            {i === 0 ? 'By' : 'then'}
-          </span>
+          <span className="w-8 flex-none text-2xs text-n-400">{i === 0 ? 'By' : 'then'}</span>
           <Select
             size="sm"
             value={
@@ -1030,9 +1794,48 @@ function GroupPage({
         </div>
       ))}
 
+      {/* M16.26: `hideEmpty` has been honoured by `grouping.ts:140` since M9.1
+          and no UI ever set it, so the only way to drop the empty bands a
+          twelve-option select produces was to hand-edit the YAML.
+
+          PER LEVEL, because the engine is: a board wants its empty columns
+          (they are the columns you drag onto) while the sub-level banding
+          inside them usually does not. One switch for the whole chain would
+          have to lie about a mixed state. */}
+      {bandLevels(group).length > 0 && (
+        <div className="mt-1 flex flex-col gap-1 border-t border-n-100 pt-2">
+          <div className="px-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+            Empty groups
+          </div>
+          {group.map((level, i) =>
+            level.descend !== undefined ? null : (
+              <label
+                key={`hide:${i}:${level.field}`}
+                className="flex items-center gap-2 rounded-md px-1 py-1 text-xs text-n-700"
+              >
+                <span className="min-w-0 flex-1 truncate">
+                  Hide empty {humanize(level.field).toLowerCase()} groups
+                </span>
+                <Switch
+                  ariaLabel={`Hide empty ${humanize(level.field).toLowerCase()} groups`}
+                  checked={level.hideEmpty === true}
+                  onChange={(on) =>
+                    onChange(
+                      group.map((g, j) =>
+                        j === i ? (on ? { ...g, hideEmpty: true } : omitHideEmpty(g)) : g,
+                      ),
+                    )
+                  }
+                />
+              </label>
+            ),
+          )}
+        </div>
+      )}
+
       {addOptions.length > 0 && (
         <div className="flex items-center gap-1.5">
-          <span className="w-8 flex-none text-[11px] text-[var(--n-400)]">
+          <span className="w-8 flex-none text-2xs text-n-400">
             {group.length === 0 ? 'By' : 'then'}
           </span>
           <Select
@@ -1048,9 +1851,17 @@ function GroupPage({
         </div>
       )}
 
-      <p className="m-0 border-t border-[var(--n-100)] px-1 pt-2 text-[11px] leading-[15px] text-[var(--n-400)]">
+      <p className="m-0 border-t border-n-100 px-1 pt-2 text-2xs leading-[15px] text-n-400">
         A property bands records by its value. A relation (↳) nests them under what they link to.
       </p>
     </div>
   );
+}
+
+/** Off is the DEFAULT, so it is stored as an absent key rather than `false` —
+ * the same rule every other optional presentation key follows, and what keeps
+ * a view that never touched this from growing a line about it. */
+function omitHideEmpty(level: GroupSpec): GroupSpec {
+  const { hideEmpty: _dropped, ...rest } = level;
+  return rest;
 }

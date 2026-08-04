@@ -13,8 +13,13 @@
  * unchanged.
  */
 
-export type DateDisplayFormat = 'full' | 'short' | 'mdy' | 'dmy' | 'ymd' | 'relative';
-export type TimeDisplayFormat = '12' | '24' | 'hidden';
+/** Derived unions (M16.14): these became persistable property config, and a
+ * hand-written union with no runtime list means every parser validating one
+ * writes its own copy of the members. */
+export const DATE_DISPLAY_FORMATS = ['full', 'short', 'mdy', 'dmy', 'ymd', 'relative'] as const;
+export type DateDisplayFormat = (typeof DATE_DISPLAY_FORMATS)[number];
+export const TIME_DISPLAY_FORMATS = ['12', '24', 'hidden'] as const;
+export type TimeDisplayFormat = (typeof TIME_DISPLAY_FORMATS)[number];
 /** Days before the start date that the reminder fires. */
 export type RemindOffset = '0d' | '1d' | '2d' | '1w';
 
@@ -219,6 +224,75 @@ export function remindAt(v: DateValue): string | null {
   if (v.remind === null) return null;
   const day = addDays(v.start, -OFFSET_DAYS[v.remind]);
   return `${day}T${v.startTime ?? '09:00'}`;
+}
+
+// --- Date PROPERTIES (M16.14) ----------------------------------------------
+// The chip grammar above serializes into a note BODY. A date property lives in
+// frontmatter, where the shape has to stay readable YAML and — crucially —
+// has to keep parsing every date already written before this existed.
+
+/** `2026-08-02 14:30` → date + time; `2026-08-02` → date + null. */
+const SCALAR_RE = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/;
+
+/**
+ * The stored form of one endpoint: a bare ISO date, or a date and a 24h time
+ * separated by a space.
+ *
+ * A space, not a `T`: `📅 2026-07-26 16:00` is already the token grammar this
+ * app writes into note bodies, and one app should spell a timestamp one way.
+ * Both are accepted on read — `T` is what a paste from anywhere else looks
+ * like. Verified against serde_yaml 0.9: all three spellings deserialize as
+ * plain strings, so nothing here becomes a YAML timestamp behind our backs.
+ */
+export function serializeEndpoint(date: string, time: string | null): string {
+  return time === null ? date : `${date} ${time}`;
+}
+
+export function parseEndpoint(raw: unknown): { date: string; time: string | null } | null {
+  if (typeof raw !== 'string') return null;
+  const m = SCALAR_RE.exec(raw.trim());
+  return m === null ? null : { date: m[1], time: m[2] ?? null };
+}
+
+/**
+ * A `date` or `daterange` property's frontmatter → the picker's value model.
+ *
+ * Returns null for anything that is not a date, which is how an empty or
+ * malformed field stays empty rather than silently becoming today.
+ */
+export function parseDateProperty(raw: unknown): DateValue | null {
+  const scalar = parseEndpoint(raw);
+  if (scalar !== null) {
+    return { ...makeDateValue(scalar.date), startTime: scalar.time };
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as { start?: unknown; end?: unknown };
+  const start = parseEndpoint(r.start);
+  if (start === null) return null;
+  const end = parseEndpoint(r.end);
+  return {
+    ...makeDateValue(start.date),
+    startTime: start.time,
+    end: end?.date ?? null,
+    endTime: end?.time ?? null,
+  };
+}
+
+/**
+ * The picker's value → what goes in frontmatter, for the given field kind.
+ *
+ * A `date` field stores a scalar even when the picker offers an end, because
+ * the schema says a `date` holds one date — writing `{start, end}` into it
+ * would fail its own validation on the very next read. The end is dropped
+ * loudly (the picker only shows the toggle for `daterange`), never quietly
+ * stored somewhere nothing reads.
+ */
+export function serializeDateProperty(v: DateValue, kind: 'date' | 'daterange'): unknown {
+  const start = serializeEndpoint(v.start, v.startTime);
+  if (kind === 'date') return start;
+  return v.end === null
+    ? { start, end: null }
+    : { start, end: serializeEndpoint(v.end, v.endTime) };
 }
 
 // --- Editor chip props -----------------------------------------------------

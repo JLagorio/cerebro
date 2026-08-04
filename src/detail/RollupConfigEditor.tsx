@@ -1,12 +1,18 @@
 import { Dropdown } from '@/components/ui/Dropdown';
 import { humanize } from '@/engine/schema';
-import { FIELD_FORMATS, ROLLUP_CALCS, rollupCalcMeta } from '@/engine/properties';
+import {
+  FIELD_FORMATS,
+  ROLLUP_CALCS,
+  relationTargetFor,
+  rollupCalcMeta,
+} from '@/engine/properties';
+import { useVaultStore } from '@/stores/vaultStore';
 import type { FieldDef, Schema } from '@/engine/types';
 
 const NONE = '__none__';
 
 const row = 'flex items-center gap-2';
-const label = 'w-[86px] flex-none text-[11.5px] text-[var(--n-500)]';
+const label = 'w-[86px] flex-none text-xs text-n-500';
 
 /**
  * Rollup wiring (M3.4): follow one of this type's relation fields, read a
@@ -25,12 +31,17 @@ export function RollupConfigEditor({
   schema: Schema;
   onChange: (config: Record<string, unknown>) => void;
 }) {
+  const entries = useVaultStore((s) => s.entries);
   const ownFields = schema.types.get(typeName)?.fields ?? [];
   const relationFields = ownFields.filter((f) => f.kind === 'relation' || f.kind === 'person');
 
   const relationDef = relationFields.find((f) => f.name === def.relation) ?? null;
-  const targetType = relationDef?.kind === 'person' ? 'Person' : (relationDef?.target ?? '');
-  const targetFields = schema.types.get(targetType)?.fields ?? [];
+  // Was `kind === 'person' ? 'Person' : …` (M16.13b). A rollup through a
+  // person field offered the fields of a type this vault might not have, and
+  // silently listed none for a vault whose people are `Teammate`s.
+  const targetType =
+    relationDef === null ? null : relationTargetFor(relationDef, entries, typeName);
+  const targetFields = targetType === null ? [] : (schema.types.get(targetType)?.fields ?? []);
   const calc = rollupCalcMeta(def.calculate);
 
   return (
@@ -53,7 +64,7 @@ export function RollupConfigEditor({
         />
       </div>
       {relationFields.length === 0 && (
-        <p className="m-0 pl-[94px] text-[11.5px] leading-4 text-[var(--n-400)]">
+        <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
           This type has no relation property yet — add one first, then point the rollup at it.
         </p>
       )}
@@ -78,7 +89,12 @@ export function RollupConfigEditor({
             options={[
               {
                 value: NONE,
-                label: targetType === '' ? 'Pick a relation first' : 'Pick a property…',
+                label:
+                  relationDef === null
+                    ? 'Pick a relation first'
+                    : targetType === null
+                      ? 'That relation targets any record'
+                      : 'Pick a property…',
               },
               ...targetFields.map((f) => ({ value: f.name, label: humanize(f.name) })),
             ]}
@@ -86,6 +102,12 @@ export function RollupConfigEditor({
             onChange={(v) => onChange({ property: v === NONE ? null : v })}
           />
         </div>
+      )}
+      {calc.needsProperty && relationDef !== null && targetType === null && (
+        <p className="m-0 pl-[94px] text-xs leading-4 text-n-400">
+          Give <strong className="font-medium">{humanize(relationDef.name)}</strong> a target type
+          and its properties will be listed here.
+        </p>
       )}
       <FormatRow def={def} onChange={onChange} />
     </div>

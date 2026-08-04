@@ -38,7 +38,7 @@ export function DocsPage() {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="docs-page">
       <div className="flex flex-none items-center gap-2 px-5 pb-2 pt-3.5">
         <Icon name="library" size={16} color="var(--n-600)" />
-        <h1 className="m-0 text-[15px] font-semibold leading-6 tracking-[-0.005em]">Docs</h1>
+        <h1 className="m-0 text-lg font-semibold leading-6 tracking-[-0.005em]">Docs</h1>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
         {recents.length === 0 && (
@@ -50,7 +50,7 @@ export function DocsPage() {
         )}
         {recents.length > 0 && (
           <>
-            <h2 className="mb-1.5 mt-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--n-500)]">
+            <h2 className="mb-1.5 mt-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-500">
               Pick up where you left off
             </h2>
             <ul className="m-0 mb-4 flex max-w-[720px] flex-col gap-0.5 p-0">
@@ -61,7 +61,7 @@ export function DocsPage() {
                     data-testid="recent-doc"
                     data-path={e.path}
                     onClick={() => open(e.path)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-1.5 text-left hover:bg-[var(--n-50)]"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-1.5 text-left hover:bg-n-50"
                   >
                     {(() => {
                       const style = typeStyle(e.type, schema);
@@ -73,15 +73,15 @@ export function DocsPage() {
                         never the first: it has a readable floor, the project
                         chip shrinks before it, and the date drops out of the
                         row entirely on a narrow canvas. */}
-                    <span className="min-w-[12ch] flex-1 truncate text-[13px] text-[var(--n-800)]">
+                    <span className="min-w-[12ch] flex-1 truncate text-sm text-n-800">
                       {e.title}
                     </span>
                     {projectTitle(e) !== null && (
-                      <span className="hidden min-w-0 shrink truncate rounded-[5px] bg-[var(--n-50)] px-1.5 py-px text-[11px] text-[var(--n-600)] @[380px]/canvas:inline-block">
+                      <span className="hidden min-w-0 shrink truncate rounded-sm bg-n-50 px-1.5 py-px text-2xs text-n-600 @[380px]/canvas:inline-block">
                         {projectTitle(e)}
                       </span>
                     )}
-                    <span className="hidden flex-none text-[11px] text-[var(--text-meta)] [font-family:var(--font-mono)] @[520px]/canvas:inline">
+                    <span className="hidden flex-none text-2xs text-[var(--text-meta)] [font-family:var(--font-mono)] @[520px]/canvas:inline">
                       {formatDay(e.modifiedAt)}
                     </span>
                   </button>

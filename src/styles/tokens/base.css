@@ -11,8 +11,8 @@ body {
 }
 body {
   font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
   color: var(--text-primary);
   background: var(--surface-app);
   -webkit-font-smoothing: antialiased;
@@ -31,7 +31,7 @@ a:hover {
 }
 kbd {
   font-family: var(--font-mono);
-  font-size: var(--text-2xs);
+  font-size: var(--fs-2xs);
   line-height: 16px;
   color: var(--text-muted);
   background: var(--n-50);

@@ -109,6 +109,7 @@ export function Icon({ name, size = 16, strokeWidth = 1.75, color, style, classN
         className={className}
         style={baseStyle}
         aria-hidden="true"
+        data-icon={name}
         data-unknown-icon={name}
       />
     );
@@ -120,6 +121,12 @@ export function Icon({ name, size = 16, strokeWidth = 1.75, color, style, classN
       className={className}
       style={baseStyle}
       aria-hidden="true"
+      // The name, in the DOM (M16.35). lucide's own `lucide-*` class is a
+      // third-party string that has already been renamed once in this
+      // codebase's lifetime (see ICON_ALIASES), so a stylesheet that needs to
+      // tell one glyph from another — the table hiding its dropdown chevrons
+      // at rest, styles/table-chrome.css — keys on an attribute we own.
+      data-icon={name}
     />
   );
 }

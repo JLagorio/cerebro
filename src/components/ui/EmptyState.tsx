@@ -55,7 +55,7 @@ export function EmptyState({
       </div>
       <div
         style={{
-          fontSize: compact ? 'var(--text-sm)' : 'var(--text-lg)',
+          fontSize: compact ? 'var(--fs-sm)' : 'var(--fs-lg)',
           fontWeight: 600,
           letterSpacing: 'var(--track-tight)',
           color: 'var(--n-800)',
@@ -66,7 +66,7 @@ export function EmptyState({
       {description ? (
         <div
           style={{
-            fontSize: compact ? 'var(--text-xs)' : 'var(--text-sm)',
+            fontSize: compact ? 'var(--fs-xs)' : 'var(--fs-sm)',
             color: 'var(--text-muted)',
             maxWidth: 340,
             lineHeight: 1.5,

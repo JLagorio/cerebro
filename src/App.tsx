@@ -25,6 +25,7 @@ import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
 import { Button } from '@/components/ui/Button';
 import { RemindersHost } from '@/hooks/useReminders';
+import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
@@ -121,18 +122,18 @@ function VaultChooser() {
   };
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[var(--n-25)]">
-      <div className="flex w-[380px] flex-col gap-3 rounded-[14px] border border-[var(--n-200)] bg-[var(--n-0)] p-7 shadow-[var(--shadow-md)]">
-        <span className="text-[18px] font-bold tracking-[-0.02em]">
-          cerebro<span className="text-[var(--synapse-500)]">.</span>
+    <div className="flex h-screen items-center justify-center bg-n-25">
+      <div className="flex w-[380px] flex-col gap-3 rounded-xl border border-n-200 bg-n-0 p-7 shadow-[var(--shadow-md)]">
+        <span className="text-xl font-bold tracking-[-0.02em]">
+          cerebro<span className="text-synapse-500">.</span>
         </span>
-        <h1 className="m-0 text-[16px] font-semibold text-[var(--n-900)]">Open a vault</h1>
-        <p className="m-0 text-[13px] leading-[19px] text-[var(--n-600)]">
+        <h1 className="m-0 text-lg font-semibold text-n-900">Open a vault</h1>
+        <p className="m-0 text-sm leading-[19px] text-n-600">
           A vault is a folder of markdown files — projects, docs, and work items live there as plain
           text.
         </p>
         {(error ?? pickError) ? (
-          <p className="m-0 text-[12px] text-[var(--danger-500)]">{error ?? pickError}</p>
+          <p className="m-0 text-xs text-danger-500">{error ?? pickError}</p>
         ) : null}
         <div className="mt-1 flex gap-2">
           <Button variant="primary" onClick={guarded(openDemo)}>
@@ -148,6 +149,11 @@ function VaultChooser() {
 }
 
 function App() {
+  // Above every early return on purpose (M16.36): the vault chooser and the
+  // blank pre-boot frame are painted too, and a launch that shows a white card
+  // for a second before the shell arrives is the flash the theme work exists
+  // to remove. index.html covers the first paint; this owns every one after.
+  useTheme();
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const openVault = useVaultStore((s) => s.openVault);
   const entries = useVaultStore((s) => s.entries);
@@ -201,6 +207,24 @@ function App() {
               .toast(`Couldn't capture: ${err instanceof Error ? err.message : String(err)}`);
           });
       }
+      // Cmd+Shift+L flips the theme — the binding Notion uses for the same job,
+      // and M16's whole point is that Notion is the thing muscle memory arrives
+      // from. Not routed through QuickOpen: QuickOpen.tsx keeps its navigate
+      // mode deliberately, and one shortcut is cheaper than a command mode.
+      //
+      // Toggles against what is ON SCREEN, not against the stored mode. From
+      // 'system' the user means "the opposite of what I am looking at", and
+      // resolving first is the only way to know what that is — a naive
+      // mode === 'dark' ? 'light' : 'dark' sends a system-dark user to dark.
+      // Landing on an explicit mode is the intent: asking for the other one is
+      // asking to stop following the OS.
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        const ui = useUiStore.getState();
+        const systemDark =
+          typeof window.matchMedia === 'function' && window.matchMedia(DARK_QUERY).matches;
+        ui.setThemeMode(resolveTheme(ui.themeMode, systemDark) === 'dark' ? 'light' : 'dark');
+      }
       // M15: nav history existed in the store with no way to reach it. Not
       // bound while typing — ⌘[ / ⌘] are outdent/indent inside an editor, and
       // losing the page you are writing on is worse than having no shortcut.
@@ -246,13 +270,13 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--n-0)] text-[13px] leading-5 text-[var(--n-900)]">
+    <div className="flex h-screen overflow-hidden bg-n-0 text-sm leading-5 text-n-900">
       {/* The rail and the whole sidebar tree sit between the top of the tab
           order and the content, which in a real vault is dozens of stops. */}
       <button
         type="button"
         onClick={() => document.getElementById('main')?.focus()}
-        className="sr-only rounded-md bg-[var(--cortex-500)] px-3 py-1.5 text-[12px] font-medium text-[var(--n-0)] focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
+        className="sr-only rounded-md bg-cortex-500 px-3 py-1.5 text-xs font-medium text-n-0 focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50"
       >
         Skip to content
       </button>
@@ -277,7 +301,7 @@ function App() {
             the canvas. `overflow-hidden` is the box nothing may paint outside,
             and `@container/canvas` lets a page respond to the width it actually
             has rather than the viewport's. */}
-        <div className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-[var(--n-0)]">
+        <div className="@container/canvas flex min-h-0 min-w-0 flex-1 overflow-hidden bg-n-0">
           <main
             id="main"
             // -1 so the skip link can put focus here; no ring, because a ring

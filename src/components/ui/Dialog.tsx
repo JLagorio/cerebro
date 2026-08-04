@@ -2,16 +2,17 @@ import React, { useEffect, useId, useRef } from 'react';
 import { IconButton } from '@/components/ui/IconButton';
 import { Button } from '@/components/ui/Button';
 import { useFocusRestore } from '@/hooks/useFocusRestore';
+import { isTopLayer, ownsEscape, useLayer } from '@/components/ui/layers';
 
 const css = `
 .cb-dlg-scrim{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:flex-start;justify-content:center;padding:64px 24px;z-index:1000;animation:cbFade var(--dur-med) var(--ease-out)}
 .cb-dlg{background:var(--n-0);border-radius:var(--r-xl);box-shadow:var(--shadow-lg);width:100%;display:flex;flex-direction:column;max-height:calc(100vh - 128px);animation:cbUp var(--dur-med) var(--ease-out)}
 .cb-dlg:focus{outline:none}
 .cb-dlg-hd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 0 24px}
-.cb-dlg-hd h2{margin:0;font-size:var(--text-lg);line-height:var(--leading-lg);font-weight:600;letter-spacing:var(--track-tight);color:var(--n-900)}
-.cb-dlg-bd{padding:16px 24px;overflow:auto;font-size:var(--text-sm);color:var(--n-800)}
+.cb-dlg-hd h2{margin:0;font-size:var(--fs-lg);line-height:var(--lh-lg);font-weight:600;letter-spacing:var(--track-tight);color:var(--n-900)}
+.cb-dlg-bd{padding:16px 24px;overflow:auto;font-size:var(--fs-sm);color:var(--n-800)}
 .cb-dlg-ft{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid var(--n-100)}
-.cb-dlg-ft .cb-dlg-note{font-size:var(--text-xs);color:var(--text-muted);margin-right:auto}
+.cb-dlg-ft .cb-dlg-note{font-size:var(--fs-xs);color:var(--text-muted);margin-right:auto}
 @keyframes cbFade{from{opacity:0}to{opacity:1}}
 @keyframes cbUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}`;
 if (typeof document !== 'undefined' && !document.getElementById('cb-dlg-css')) {
@@ -65,6 +66,7 @@ function DialogCard({
 }: DialogProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const layerId = useLayer();
 
   // Focus goes back where it came from on close. Captured at render time, not
   // here: the very child this effect defers to below has ALREADY taken focus
@@ -96,10 +98,14 @@ function DialogCard({
     const onEscape = (e: KeyboardEvent) => {
       const card = cardRef.current;
       if (e.key !== 'Escape' || !card || !onClose) return;
-      // Nested dialogs: only the last one in document order — the topmost —
-      // takes the keystroke, so Escape dismisses one surface at a time.
-      const dialogs = [...document.querySelectorAll('.cb-dlg')];
-      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== card) return;
+      // Only the innermost dismissable surface takes the keystroke, so Escape
+      // dismisses one thing at a time. This used to compare `.cb-dlg` nodes in
+      // document order, which could only see other dialogs — a popover opened
+      // from inside a dialog was not counted, and both closed at once (M16.1).
+      // `ownsEscape`, not `isTopLayer`: the latter skips tooltips, which is
+      // right for the Tab trap below and wrong here, where a visible tooltip
+      // is exactly what the keystroke is aimed at (M16.35).
+      if (!ownsEscape(layerId)) return;
       e.preventDefault();
       e.stopPropagation();
       onClose();
@@ -107,8 +113,7 @@ function DialogCard({
     const onTab = (e: KeyboardEvent) => {
       const card = cardRef.current;
       if (e.key !== 'Tab' || !card) return;
-      const dialogs = [...document.querySelectorAll('.cb-dlg')];
-      if (dialogs.length > 0 && dialogs[dialogs.length - 1] !== card) return;
+      if (!isTopLayer(layerId)) return;
       const items = [...card.querySelectorAll<HTMLElement>(FOCUSABLE)];
       const active = document.activeElement;
       const inside = card.contains(active);
@@ -137,7 +142,7 @@ function DialogCard({
       document.removeEventListener('keydown', onEscape);
       document.removeEventListener('keydown', onTab, true);
     };
-  }, [onClose]);
+  }, [onClose, layerId]);
 
   return (
     <div

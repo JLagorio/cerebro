@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useFocusRestore } from '@/hooks/useFocusRestore';
 
 export interface ContextMenuItem {
   icon: string;
@@ -26,6 +27,13 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  // Before the effect below, on purpose (M16.35): this reads
+  // `document.activeElement` during RENDER, while it is still the row or
+  // button the menu was summoned from. Called any later — from an effect — it
+  // would read back the menu item that the effect itself focused, record the
+  // menu as its own opener, and drop focus on `<body>` every time the menu
+  // closed, which is what it used to do.
+  useFocusRestore();
 
   useEffect(() => {
     const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
@@ -82,7 +90,7 @@ export function ContextMenu({
         role="menu"
         onKeyDown={onKeyDown}
         style={{ left, top, width: MENU_WIDTH }}
-        className="cb-menu-in fixed z-50 rounded-lg border border-[var(--n-200)] bg-[var(--n-0)] py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
+        className="cb-menu-in fixed z-50 rounded-lg border border-n-200 bg-n-0 py-1 shadow-[0_8px_24px_rgba(22,26,36,0.14)]"
       >
         {items.map((item) => (
           <button
@@ -94,10 +102,8 @@ export function ContextMenu({
               item.onSelect();
             }}
             className={[
-              'flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-[12.5px]',
-              item.danger
-                ? 'text-[var(--danger-600)] hover:bg-[var(--danger-50)]'
-                : 'text-[var(--n-700)] hover:bg-[var(--n-50)]',
+              'flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-[5px] text-left text-sm',
+              item.danger ? 'text-danger-600 hover:bg-danger-50' : 'text-n-700 hover:bg-n-50',
             ].join(' ')}
           >
             <Icon name={item.icon} size={13} />

@@ -13,7 +13,16 @@
  */
 
 import { childrenOf, rollupSpec, type RelationIndex } from './relations';
-import type { Entry, FieldDef, FieldFormat, FieldKind, RollupCalc, Schema } from './types';
+import { resolveTarget } from './wikilink';
+import type {
+  Entry,
+  FieldDef,
+  FieldFormat,
+  FieldKind,
+  FilterFamily,
+  RollupCalc,
+  Schema,
+} from './types';
 
 // --- System properties (M4) -------------------------------------------------
 
@@ -123,59 +132,253 @@ export interface PropertyKindMeta {
   legacy?: boolean;
   /** Holds several values at once — the pickers stay open and toggle. */
   multi?: boolean;
+  /** Values bucket meaningfully, so a view can group by this field. */
+  groupable: boolean;
+  /** Values have a total order, so a view can sort by this field. */
+  orderable: boolean;
+  /** Values are file references, so a card layout can draw one as a cover
+   * (M16.22). Required, not optional, for the same reason `groupable` is: a
+   * kind that forgets to answer would silently never be offered. */
+  media: boolean;
+  /**
+   * Values are numbers, so they can be summed and averaged — the table's
+   * calculation footer (M16.15) and the chart's aggregation (M16.27), which
+   * arrived on separate branches and independently asked for this same flag
+   * rather than each keeping a `Set<FieldKind>`.
+   *
+   * A rollup counts because its own calc decides: a `show` rollup aggregates
+   * to nothing numeric, and the aggregators report that honestly rather than
+   * being prevented from trying.
+   */
+  numeric: boolean;
+  /** Which comparisons a filter may offer on this field (M16.25). See
+   * `FilterFamily` in types.ts, and `filterOpsFor` in viewFilters.ts. */
+  filters: FilterFamily;
+  /**
+   * This kind's option set lives on the TYPE (`statuses:`), not on the field
+   * (`options:`) — so a `FieldDef` alone cannot say what the choices are, and
+   * a surface holding one has to resolve them (M16.29).
+   *
+   * True for exactly one kind, and optional for the same reason `multi` and
+   * `legacy` are: a kind that says nothing is saying the ordinary thing. It
+   * is a flag here rather than a `kind === 'status'` test at the two call
+   * sites, which is how the filter surface came to have no answer at all.
+   */
+  statusSet?: boolean;
 }
 
-export const PROPERTY_KINDS: PropertyKindMeta[] = [
-  { kind: 'text', label: 'Text', icon: 'type', computed: false, seed: '' },
-  { kind: 'number', label: 'Number', icon: 'hash', computed: false, seed: '' },
-  { kind: 'select', label: 'Select', icon: 'circle-chevron-down', computed: false, seed: '' },
-  {
-    kind: 'multiselect',
+/**
+ * Every kind's metadata, in "+ Add property" catalog order (M16.4).
+ *
+ * `satisfies Record<FieldKind, ...>` is the enforcement: this was a bare
+ * array, so a kind added to the union but forgotten here fell through
+ * `kindMeta`'s `?? PROPERTY_KINDS[0]` and silently rendered as Text — with a
+ * Text icon, in every surface, forever. Declaration order is catalog order,
+ * because object key order is insertion order for string keys.
+ */
+const KIND_META = {
+  text: {
+    label: 'Text',
+    icon: 'type',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'text',
+  },
+  number: {
+    label: 'Number',
+    icon: 'hash',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: true,
+    filters: 'number',
+  },
+  select: {
+    label: 'Select',
+    icon: 'circle-chevron-down',
+    computed: false,
+    seed: '',
+    groupable: true,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'choice',
+  },
+  multiselect: {
     label: 'Multi-select',
     icon: 'list-checks',
     computed: false,
     seed: '',
     multi: true,
+    groupable: true,
+    orderable: false,
+    media: false,
+    numeric: false,
+    filters: 'multi',
   },
-  { kind: 'status', label: 'Status', icon: 'loader', computed: false, seed: '' },
-  { kind: 'date', label: 'Date', icon: 'calendar', computed: false, seed: '' },
-  {
-    kind: 'daterange',
+  status: {
+    label: 'Status',
+    icon: 'loader',
+    computed: false,
+    seed: '',
+    groupable: true,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'choice',
+    statusSet: true,
+  },
+  date: {
+    label: 'Date',
+    icon: 'calendar',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'date',
+  },
+  daterange: {
     label: 'Date range',
     icon: 'calendar-range',
     computed: false,
     seed: '',
     legacy: true,
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'date',
   },
-  { kind: 'person', label: 'Person', icon: 'circle-user', computed: false, seed: '', multi: true },
-  {
-    kind: 'files',
+  person: {
+    label: 'Person',
+    icon: 'circle-user',
+    computed: false,
+    seed: '',
+    multi: true,
+    groupable: true,
+    orderable: false,
+    media: false,
+    numeric: false,
+    filters: 'multi',
+  },
+  files: {
     label: 'Files & media',
     icon: 'paperclip',
     computed: false,
     seed: '',
     multi: true,
+    groupable: false,
+    orderable: false,
+    media: true,
+    numeric: false,
+    filters: 'multi',
   },
-  { kind: 'checkbox', label: 'Checkbox', icon: 'square-check', computed: false, seed: false },
-  { kind: 'url', label: 'URL', icon: 'link', computed: false, seed: '' },
-  {
-    kind: 'relation',
+  checkbox: {
+    label: 'Checkbox',
+    icon: 'square-check',
+    computed: false,
+    seed: false,
+    groupable: true,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'boolean',
+  },
+  url: {
+    label: 'URL',
+    icon: 'link',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'text',
+  },
+  email: {
+    label: 'Email',
+    icon: 'mail',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'text',
+  },
+  phone: {
+    label: 'Phone',
+    icon: 'phone',
+    computed: false,
+    seed: '',
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'text',
+  },
+  relation: {
     label: 'Relation',
     icon: 'arrow-up-right',
     computed: false,
     seed: '',
     multi: true,
+    groupable: true,
+    orderable: false,
+    media: false,
+    numeric: false,
+    filters: 'multi',
   },
-  { kind: 'rollup', label: 'Rollup', icon: 'sigma', computed: true, seed: null },
-  { kind: 'created_time', label: 'Created time', icon: 'clock', computed: true, seed: null },
-  {
-    kind: 'last_edited_time',
+  rollup: {
+    label: 'Rollup',
+    icon: 'sigma',
+    computed: true,
+    seed: null,
+    groupable: false,
+    orderable: true,
+    // Every rollup calculation but `show` produces a number, and a `show`
+    // rollup asked for a Sum answers with nothing — which is the truth about
+    // a column holding no numbers, and cheaper than a second registry of
+    // which calculations return which shape.
+    media: false,
+    numeric: true,
+    filters: 'any',
+  },
+  created_time: {
+    label: 'Created time',
+    icon: 'clock',
+    computed: true,
+    seed: null,
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'date',
+  },
+  last_edited_time: {
     label: 'Last edited time',
     icon: 'history',
     computed: true,
     seed: null,
+    groupable: false,
+    orderable: true,
+    media: false,
+    numeric: false,
+    filters: 'date',
   },
-];
+} satisfies Record<FieldKind, Omit<PropertyKindMeta, 'kind'>>;
+
+export const PROPERTY_KINDS: PropertyKindMeta[] = (Object.keys(KIND_META) as FieldKind[]).map(
+  (kind) => ({ kind, ...KIND_META[kind] }),
+);
 
 /** The kinds offered in "+ Add property" — legacy kinds stay resolvable but
  * are no longer creatable. */
@@ -184,8 +387,305 @@ export const CREATABLE_PROPERTY_KINDS = PROPERTY_KINDS.filter((k) => k.legacy !=
 export const kindMeta = (kind: FieldKind): PropertyKindMeta =>
   PROPERTY_KINDS.find((k) => k.kind === kind) ?? PROPERTY_KINDS[0];
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Which kinds a view may group and sort by (M16.13).
+ *
+ * These were two hand-maintained `Set<string>` pairs — `ViewToolbar` exported
+ * one and `ViewSettingsPanel` kept a verbatim copy — so adding a kind meant
+ * remembering both, deleting from one produced no compile error and no
+ * failing test, and the settings panel could offer a sort on a kind the
+ * toolbar did not. They are flags on KIND_META now, which `satisfies
+ * Record<FieldKind, …>` forces every new kind to answer.
+ */
+export const GROUPABLE_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.groupable).map((k) => k.kind),
+);
+export const ORDERABLE_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.orderable).map((k) => k.kind),
+);
+/** Which kinds can supply a gallery card's cover (M16.22). */
+export const MEDIA_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.media).map((k) => k.kind),
+);
+/** Which kinds a chart can sum or average (M16.27). */
+export const NUMERIC_KINDS: ReadonlySet<FieldKind> = new Set(
+  PROPERTY_KINDS.filter((k) => k.numeric).map((k) => k.kind),
+);
+
+// --- Relation and person targets (M16.13b) ---------------------------------
+
+/**
+ * The majority type among a set of raw wikilink targets — the type a field is
+ * evidently pointing at, when nobody declared one.
+ *
+ * Lived in `engine/adopt.ts`, where only the adoption doctor could reach it.
+ * It answers exactly the question a person field asks about the values it
+ * already holds, so it moved here rather than being written a second time.
+ */
+export function inferTarget(rawTargets: string[], entries: Entry[]): string | null {
+  const counts = new Map<string, number>();
+  for (const raw of rawTargets) {
+    const resolved = resolveTarget(raw, entries);
+    if (resolved === null || resolved.type === null || resolved.type === '') continue;
+    counts.set(resolved.type, (counts.get(resolved.type) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [type, count] of counts) {
+    if (count > bestCount) {
+      best = type;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+/**
+ * Which type a relation-family field points at, or null for "any record".
+ *
+ * A `person` field IS a relation with an avatar renderer, so it answers the
+ * same question the same way — except that three call sites answered it with
+ * the literal string `'Person'` instead (M16.13b). AGENTS.md forbids exactly
+ * that: behaviour is capability-gated, never routed on a type NAME. A vault
+ * whose people are `Teammate`s got an empty picker, an empty rollup target,
+ * and no control anywhere that could fix either.
+ *
+ * Inference from held values is deliberately restricted to `person`. On a
+ * relation an absent target is the user's explicit "Any record (unenforced)"
+ * choice — `RelationConfigEditor` writes null for it — and narrowing that to
+ * whatever the field happens to hold today would silently re-enforce a
+ * constraint they had turned off.
+ */
+export function relationTargetFor(
+  def: FieldDef,
+  entries: Entry[],
+  /** Restricts value inference to records of the declaring type; a field name
+   * is not unique across types. */
+  ownerType?: string | null,
+): string | null {
+  // The derived side of a two-way pair: the data lives on `from.type`.
+  if (def.from !== undefined) return def.from.type;
+  if (def.target !== undefined && def.target !== '') return def.target;
+  if (def.kind !== 'person') return null;
+  const owned =
+    ownerType === undefined || ownerType === null
+      ? entries
+      : entries.filter((e) => e.type === ownerType);
+  return inferTarget(
+    owned.flatMap((e) => e.relationships[def.name] ?? []),
+    entries,
+  );
+}
+
+/**
+ * The types this vault treats as people: every type a `person` field targets.
+ *
+ * Derived rather than declared, because the surfaces that need it most — the
+ * editor's `@` menu, a person field with no target yet — have no FieldDef to
+ * read a target off. The type named "Person" is a last-resort CONVENTION, not
+ * a rule: it keeps a vault that has people but has declared no person field
+ * working, without making the name load-bearing anywhere else.
+ *
+ * An empty set means this vault has no notion of people, which is a real
+ * answer — surfaces should drop their People section, not list everything.
+ */
+export function peopleTypes(schema: Schema, entries: Entry[]): ReadonlySet<string> {
+  const found = new Set<string>();
+  for (const [typeName, def] of schema.types) {
+    for (const field of def.fields) {
+      if (field.kind !== 'person') continue;
+      const target = relationTargetFor(field, entries, typeName);
+      if (target !== null) found.add(target);
+    }
+  }
+  if (found.size === 0 && schema.types.has('Person')) found.add('Person');
+  return found;
+}
+
+/**
+ * The records a person field may pick from.
+ *
+ * Most specific answer first: the field's declared target, then the majority
+ * type of the people it already holds (both via `relationTargetFor`), then
+ * the vault's people types, and finally every record — an over-long picker
+ * is merely long, while the empty one this used to produce was a dead end.
+ */
+export function personCandidates(
+  def: FieldDef,
+  schema: Schema,
+  entries: Entry[],
+  ownerType?: string | null,
+): Entry[] {
+  const target = relationTargetFor(def, entries, ownerType);
+  if (target !== null) return entries.filter((e) => e.type === target);
+  const people = peopleTypes(schema, entries);
+  // Type docs are schema, never candidates — the same exclusion RelationPicker
+  // applies to an unenforced relation.
+  const records = entries.filter((e) => e.type !== 'Type');
+  return people.size === 0 ? records : records.filter((e) => people.has(e.type ?? ''));
+}
+
+// --- Option identity and order (M16.12) ------------------------------------
+
+/**
+ * The id a new option's label slugs to.
+ *
+ * It lived in `detail/OptionListEditor.tsx`, which is why `FieldPopover`'s
+ * create row could not see it and compared LABELS instead — see
+ * `findOptionByLabel`.
+ */
+export const optionId = (label: string): string => label.trim().replace(/\s+/g, '-').toLowerCase();
+
+/**
+ * The option a label would collide with, by SLUG rather than by label.
+ *
+ * "In-Progress" and "In Progress" are different labels and the same id. The
+ * inline-create row compared labels, so it offered to create the second one;
+ * nothing overwrote anything, because the write APPENDS — the type doc ended
+ * holding two entries with id `in-progress`, and every lookup in the app is a
+ * `.find` on id, so the FIRST won. The new label was invisible forever, the
+ * record kept rendering the old one, and the write reported success.
+ */
+export function findOptionByLabel<T extends { id: string; label: string }>(
+  list: T[],
+  label: string,
+): T | undefined {
+  const id = optionId(label);
+  const lower = label.trim().toLowerCase();
+  return list.find((o) => o.id === id || o.label.trim().toLowerCase() === lower);
+}
+
+/** Move one item to a new index, returning a new array. */
+export function moveOption<T>(list: T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || from >= list.length || to < 0 || to >= list.length) return list;
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+// --- Per-property visibility (M16.10) --------------------------------------
+
+/**
+ * Whether a property counts as absent for `hide_when_empty`.
+ *
+ * A checkbox is never empty: `false` is an answer, not a blank, and hiding
+ * every unticked box would make the state unreachable from the panel.
+ */
+export function isEmptyForVisibility(def: FieldDef, display: string): boolean {
+  return def.kind !== 'checkbox' && display === '';
+}
+
+/**
+ * Split declared fields into what a record panel shows and what it folds away
+ * behind the "N hidden properties" expander (M16.10).
+ *
+ * Per-property, on the type. `ColumnSpec.hidden` answers a different question
+ * — "does THIS view show this column" — and a record panel has no view to
+ * read it from.
+ */
+export function splitByVisibility(
+  fields: FieldDef[],
+  isEmpty: (def: FieldDef) => boolean,
+): { shown: FieldDef[]; hidden: FieldDef[] } {
+  const shown: FieldDef[] = [];
+  const hidden: FieldDef[] = [];
+  for (const f of fields) {
+    const v = f.visibility ?? 'show';
+    if (v === 'hide' || (v === 'hide_when_empty' && isEmpty(f))) hidden.push(f);
+    else shown.push(f);
+  }
+  return { shown, hidden };
+}
+
+/**
+ * The `moveFieldOnType` delta for dropping `id` into slot `toShownIndex` of a
+ * list that is only PART of the declared order (M16.10).
+ *
+ * Dragging over a panel with hidden properties would otherwise write the
+ * visible index straight into the full mapping and scatter the hidden ones.
+ * The row lands immediately before whichever visible row will occupy that
+ * slot, so the hidden properties around it keep their relative places.
+ */
+export function visibilityDelta(
+  all: string[],
+  shown: string[],
+  id: string,
+  toShownIndex: number,
+): number {
+  const from = all.indexOf(id);
+  if (from === -1) return 0;
+  const rest = all.filter((n) => n !== id);
+  const shownRest = shown.filter((n) => n !== id);
+  const anchor = shownRest[toShownIndex];
+  const at =
+    anchor !== undefined
+      ? rest.indexOf(anchor)
+      : shownRest.length === 0
+        ? rest.length
+        : rest.indexOf(shownRest[shownRest.length - 1]) + 1;
+  return at - from;
+}
+
+/**
+ * A stored date endpoint: the ISO day, optionally followed by a 24h time
+ * (M16.14). Validation had only `ISO_DATE`, so the first date given a time of
+ * day was rejected by the very write that set it.
+ */
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}(?:[ T](?:[01]\d|2[0-3]):[0-5]\d)?$/;
+/**
+ * One stored endpoint out of arbitrary text, normalized to `YYYY-MM-DD` or
+ * `YYYY-MM-DD HH:MM`.
+ *
+ * The time is kept only when the WHOLE value is one of those two shapes.
+ * `2026-07-30T10:00:00Z` is a UTC instant, and lifting `10:00` out of it and
+ * storing it as a local wall-clock time would shift the value by the user's
+ * offset — the exact mistake schedule.ts is written to avoid ("a task due the
+ * 3rd is due the 3rd in the user's timezone"). Those degrade to the date.
+ */
+function readEndpoint(text: string): string | null {
+  const v = text.trim();
+  if (ISO_DATETIME.test(v)) return v.replace('T', ' ');
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(v);
+  return m === null ? null : m[1];
+}
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
+/** Only for INFERRING a kind from a loose value — never for validation. */
+const EMAIL_SHAPE = /^(mailto:)?[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
+/**
+ * The kind an UNDECLARED frontmatter value looks like (M16.6).
+ *
+ * Every property row leads with its kind's icon, and a loose key has no
+ * declared kind — an empty slot there reads as a rendering fault rather than
+ * as "this key is not on the type". The stored shape is the only evidence
+ * available, and it is the same evidence `coerceValueToKind` reads in the
+ * other direction.
+ *
+ * This describes what the value IS. It never writes anything, and it is not
+ * a suggestion the schema should adopt: promoting a loose key to a declared
+ * field stays an explicit act.
+ */
+export function inferKindFromValue(value: unknown): FieldKind {
+  if (typeof value === 'boolean') return 'checkbox';
+  if (typeof value === 'number') return 'number';
+  if (Array.isArray(value)) return 'multiselect';
+  if (typeof value === 'string') {
+    if (ISO_DATETIME.test(value)) return 'date';
+    // Before the url check: `mailto:` matches URL_SHAPE too, and an address
+    // is more specific than "some link".
+    if (EMAIL_SHAPE.test(value)) return 'email';
+    if (URL_SHAPE.test(value)) return 'url';
+    return 'text';
+  }
+  // A leftover from a field dropped off its type: the daterange mapping
+  // outlives the declaration that gave it meaning.
+  if (typeof value === 'object' && value !== null) {
+    const r = value as Record<string, unknown>;
+    return 'start' in r || 'end' in r ? 'daterange' : 'text';
+  }
+  return 'text';
+}
 
 const isScalarString = (v: unknown): v is string => typeof v === 'string';
 const isStringArray = (v: unknown): v is string[] =>
@@ -208,17 +708,21 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
     case 'checkbox':
       return typeof value === 'boolean' ? null : `${label} must be on or off`;
     case 'date':
-      return isScalarString(value) && ISO_DATE.test(value)
+      return isScalarString(value) && ISO_DATETIME.test(value)
         ? null
-        : `${label} must be a date (YYYY-MM-DD)`;
+        : `${label} must be a date (YYYY-MM-DD, optionally HH:MM)`;
     case 'daterange': {
       if (typeof value !== 'object' || Array.isArray(value)) {
         return `${label} must be a start/end range`;
       }
       const r = value as { start?: unknown; end?: unknown };
       for (const part of [r.start, r.end]) {
-        if (part !== null && part !== undefined && !(isScalarString(part) && ISO_DATE.test(part))) {
-          return `${label} dates must be YYYY-MM-DD`;
+        if (
+          part !== null &&
+          part !== undefined &&
+          !(isScalarString(part) && ISO_DATETIME.test(part))
+        ) {
+          return `${label} dates must be YYYY-MM-DD (optionally HH:MM)`;
         }
       }
       return null;
@@ -252,6 +756,14 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
       return isScalarString(value) && (value === '' || URL_SHAPE.test(value))
         ? null
         : `${label} must be a URL (https://…)`;
+    case 'email':
+    case 'phone':
+      // Shape only, no pattern. This module's contract (see the header) is
+      // that SHAPE is strict and semantics stay advisory, Notion does not
+      // validate either, and refusing a frontmatter write is a far worse
+      // failure than an address that will not linkify. The value these kinds
+      // add is a mailto:/tel: link and the right keyboard, not rejection.
+      return isScalarString(value) ? null : `${label} must be text`;
     case 'files':
       return isScalarString(value) || isStringArray(value)
         ? null
@@ -261,6 +773,21 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
     case 'last_edited_time':
       return `${label} is computed and can't be edited`;
   }
+}
+
+/**
+ * A `{start, end}` daterange as its non-empty endpoints, or null when the
+ * value is not one. The only reader of a daterange's shape outside the date
+ * engine, and the reason a conversion out of one no longer sees
+ * "[object Object]".
+ */
+function rangeParts(raw: unknown): string[] | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as { start?: unknown; end?: unknown };
+  if (!('start' in r) && !('end' in r)) return null;
+  return [r.start, r.end]
+    .filter((v): v is string => typeof v === 'string' && v !== '')
+    .map((v) => v.trim());
 }
 
 /**
@@ -275,11 +802,20 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
  */
 export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
   if (raw === null || raw === undefined || raw === '') return null;
-  const list = (Array.isArray(raw) ? raw : [raw]).map(String).filter((v) => v !== '');
+  // A daterange is a {start, end} MAPPING, and `String(…)` on it produced the
+  // literal "[object Object]" (M16.14). Every conversion out of a daterange
+  // was therefore either that string or a null — a date range converted to
+  // text wrote garbage into every record of the type, and converted to a date
+  // it silently cleared them.
+  const range = rangeParts(raw);
+  const list =
+    range !== null ? range : (Array.isArray(raw) ? raw : [raw]).map(String).filter((v) => v !== '');
   const first = list[0] ?? '';
   switch (kind) {
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return list.join(', ');
     case 'number': {
       const cleaned = String(first).replace(/[^0-9.eE+-]/g, '');
@@ -296,12 +832,21 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
       return null;
     }
     case 'date': {
-      const m = /^(\d{4}-\d{2}-\d{2})/.exec(first);
-      return m !== null ? m[1] : null;
+      // Keeps the time when there is one: a `daterange` collapsing to a
+      // `date` loses its end, which is unavoidable, but losing 14:30 as well
+      // is not.
+      return readEndpoint(first);
     }
     case 'daterange': {
-      const m = /^(\d{4}-\d{2}-\d{2})/.exec(first);
-      return m !== null ? { start: m[1], end: null } : null;
+      // Splitting the text too, so a range that went out through `text`
+      // ("2026-08-02, 2026-08-09") comes back as a range rather than as its
+      // start date with the end quietly dropped.
+      const parts = list
+        .flatMap((v) => v.split(/\s*(?:→|->|,|\.\.)\s*/))
+        .map(readEndpoint)
+        .filter((v): v is string => v !== null);
+      if (parts.length === 0) return null;
+      return { start: parts[0], end: parts[1] ?? null };
     }
     case 'select':
     case 'status':
@@ -325,6 +870,16 @@ export function coerceValueToKind(raw: unknown, kind: FieldKind): unknown {
     case 'last_edited_time':
       // Computed kinds ignore stored values; leave the frontmatter alone.
       return raw;
+    default: {
+      // The return type is `unknown`, and `undefined` is assignable to it —
+      // so a kind added to the union and forgotten HERE compiled clean, and
+      // `changeFieldKind` then pushed the undefined through
+      // `patchFrontmatter`, which spells undefined as "delete". Converting to
+      // a forgotten kind wiped the value on every record of the type, in
+      // silence. This is the M16.4 guard the one `unknown` return escaped.
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
 }
 
@@ -354,6 +909,37 @@ export function validatePatch(
 const asNumbers = (values: unknown[]): number[] =>
   values.map((v) => (typeof v === 'number' ? v : Number(v))).filter((n) => Number.isFinite(n));
 
+/** The calcs that reduce a list of values to one number. */
+export type NumericCalc = Extract<RollupCalc, 'sum' | 'avg' | 'min' | 'max'>;
+
+/**
+ * Reduce raw property values to one number, or null when none of them is one
+ * (M16.27).
+ *
+ * Extracted from `computeRollup` rather than written a second time for the
+ * chart. A chart that summed its own way would disagree with the rollup column
+ * beside it the first time a value arrived as the string "3" — which is what
+ * frontmatter does with a quoted number — and the two answers would both look
+ * plausible.
+ *
+ * `count` is deliberately absent: it counts RECORDS, not values, and only the
+ * caller knows how many records a bucket holds.
+ */
+export function aggregateNumbers(values: unknown[], calc: NumericCalc): number | null {
+  const nums = asNumbers(values);
+  if (nums.length === 0) return null;
+  switch (calc) {
+    case 'sum':
+      return nums.reduce((a, b) => a + b, 0);
+    case 'avg':
+      return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100;
+    case 'min':
+      return Math.min(...nums);
+    case 'max':
+      return Math.max(...nums);
+  }
+}
+
 /**
  * Aggregate `def.property` across the entries referenced by this entry's
  * `def.relation` field. Returns a display string ('' when unresolvable).
@@ -378,20 +964,17 @@ export function computeRollup(
   switch (calc) {
     case 'show':
       return values.map(String).join(', ');
+    // Sum of nothing-numeric has always reported 0 where the other three
+    // report ''. Preserved verbatim through the extraction rather than
+    // quietly changed — that is a decision about what a rollup says, not a
+    // side effect of sharing the arithmetic with a chart (M16.27).
     case 'sum':
-      return String(asNumbers(values).reduce((a, b) => a + b, 0));
-    case 'avg': {
-      const nums = asNumbers(values);
-      if (nums.length === 0) return '';
-      return String(Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100);
-    }
-    case 'min': {
-      const nums = asNumbers(values);
-      return nums.length === 0 ? '' : String(Math.min(...nums));
-    }
+      return String(aggregateNumbers(values, 'sum') ?? 0);
+    case 'avg':
+    case 'min':
     case 'max': {
-      const nums = asNumbers(values);
-      return nums.length === 0 ? '' : String(Math.max(...nums));
+      const n = aggregateNumbers(values, calc);
+      return n === null ? '' : String(n);
     }
     case 'earliest':
       return values.map(String).sort()[0] ?? '';

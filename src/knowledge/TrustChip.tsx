@@ -28,7 +28,7 @@ export function TrustChip({
       data-testid="trust-chip"
       data-tier={tier}
       className={`inline-flex items-center gap-1.5 rounded-full ${
-        size === 'sm' ? 'px-1.5 py-[1px] text-[10.5px]' : 'px-2 py-[3px] text-[11.5px]'
+        size === 'sm' ? 'px-1.5 py-[1px] text-2xs' : 'px-2 py-[3px] text-xs'
       } font-medium`}
       style={{ background: tone.bg, color: tone.fg }}
     >
@@ -53,7 +53,7 @@ export function FlagChip({
   const bg = tone === 'warn' ? 'var(--warn-50)' : 'var(--n-100)';
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-[11.5px] font-medium"
+      className="inline-flex items-center gap-1.5 rounded-full px-2 py-[3px] text-xs font-medium"
       style={{ background: bg, color: fg }}
     >
       <Icon name={icon} size={12} />

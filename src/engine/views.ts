@@ -1,20 +1,37 @@
 import { parse, stringify } from 'yaml';
+import { parseAggregateCalc } from './aggregate';
 import type {
+  CardPreview,
+  CardSize,
+  ChartAgg,
+  ChartKind,
+  ChartSpec,
   ChildrenSpec,
   ChipStyle,
   ColumnSpec,
+  DashboardBlock,
+  DashboardSpec,
   FilterGroup,
   FilterOp,
   FilterRule,
+  GallerySpec,
   GroupSpec,
-  Presentation,
-  Scalar,
-  SortSpec,
   ListDefinition,
   ListFile,
   ListSource,
+  Presentation,
+  Scalar,
+  SortSpec,
   ViewDefinition,
   ViewType,
+} from './types';
+import {
+  CARD_PREVIEWS,
+  CARD_SIZES,
+  CHART_AGGS,
+  CHART_KINDS,
+  FILTER_OPS,
+  VIEW_TYPES,
 } from './types';
 
 /** Project default: list grouped by status, modified desc (spec "Collections and views"). */
@@ -40,6 +57,14 @@ export function clonePresentation(p: Presentation): Presentation {
     group: p.group.map((g) => ({ ...g, ...(g.descend ? { descend: { ...g.descend } } : {}) })),
     sort: p.sort.map((s) => ({ ...s })),
     columns: p.columns.map((c) => ({ ...c })),
+    // The layout-specific settings are objects too, and a shallow copy would
+    // hand two views the same one — editing the gallery's card size in a
+    // duplicated tab would change it in the tab it was duplicated from.
+    ...(p.gallery !== undefined ? { gallery: { ...p.gallery } } : {}),
+    ...(p.chart !== undefined ? { chart: { ...p.chart } } : {}),
+    ...(p.dashboard !== undefined
+      ? { dashboard: { blocks: p.dashboard.blocks.map((b) => ({ ...b })) } }
+      : {}),
   };
 }
 
@@ -77,25 +102,18 @@ export function groupByField(p: Presentation, field: string): Presentation {
   return { ...p, group: already ? nests : [{ field }, ...nests] };
 }
 
-const FILTER_OPS: FilterOp[] = [
-  'equals',
-  'not_equals',
-  'contains',
-  'any_of',
-  'none_of',
-  'is_empty',
-  'is_not_empty',
-  'before',
-  'after',
-];
-
 function asRecord(raw: unknown): Record<string, unknown> {
   return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
     : {};
 }
 
-const LAYOUTS = new Set<ViewType>(['table', 'list', 'board', 'calendar', 'gantt', 'timeline']);
+/**
+ * Derived, never hand-written (M16.3). This used to be a literal set, and
+ * omitting a kind from it made `parseViewType` silently downgrade every saved
+ * file of that kind to `list` — a data-losing failure with no error anywhere.
+ */
+const LAYOUTS = new Set<ViewType>(VIEW_TYPES);
 
 /**
  * The two view kinds M10 retired, and what they become (see types.ts for why).
@@ -107,10 +125,62 @@ const RETIRED_LAYOUTS: Record<string, ViewType> = { tree: 'table', split: 'table
 
 const ZOOMS = new Set(['day', 'week', 'month', 'quarter']);
 
+// Derived from the const arrays for the reason LAYOUTS is: a hand-written
+// second copy is a value the parser silently drops the day someone adds one.
+const CARD_SIZE_SET = new Set<string>(CARD_SIZES);
+const CARD_PREVIEW_SET = new Set<string>(CARD_PREVIEWS);
+/**
+ * Derived, never hand-written (M16.25). This was a literal array beside the
+ * `FilterOp` union, and it is the READ-SIDE allowlist — an operator missing
+ * from it made `parseFilterNode` treat the rule as malformed and DROP it, so a
+ * saved view reopened with one fewer condition and silently showed records it
+ * had been configured to hide.
+ */
+const KNOWN_OPS = new Set<FilterOp>(FILTER_OPS);
+
 /** Beyond this a nesting chain stops being legible and starts being a cycle. */
 export const MAX_NEST_DEPTH = 6;
 /** Notion caps sub-grouping here for the same reason: nesting stops reading. */
 export const MAX_GROUP_DEPTH = 3;
+/**
+ * The sort chain's cap (M16.26). The toolbar's chain builder passed `max={4}`
+ * and the settings panel's SortPage enforced none, so the same view accepted a
+ * fifth sort key from one surface and refused it from the other.
+ */
+export const MAX_SORT_KEYS = 4;
+
+/**
+ * Move one sort key to a new position (M16.26).
+ *
+ * A sort chain is ORDERED — the first key decides, later ones break its ties —
+ * and the only way to demote the leading key was to delete every row and
+ * re-add them in the order you wanted. Out-of-range indices return the chain
+ * untouched rather than throwing: this is called from a pointer drag, whose
+ * slot maths is measured against a DOM that may have re-rendered mid-gesture.
+ */
+export function moveSortKey(sort: SortSpec[], from: number, to: number): SortSpec[] {
+  if (from === to || from < 0 || from >= sort.length || to < 0 || to >= sort.length) return sort;
+  const next = [...sort];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+/**
+ * Move one view tab to a new position (M16.26).
+ *
+ * Tab order is the order of the `views:` array on disk, and nothing could
+ * write a different one: there was no drag handler, no Move left/right item,
+ * and no action. A List that grew a fifth view had it pinned last forever.
+ */
+export function moveView(views: ViewDefinition[], id: string, to: number): ViewDefinition[] {
+  const from = views.findIndex((v) => v.id === id);
+  if (from === -1 || from === to || to < 0 || to >= views.length) return views;
+  const next = [...views];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
 
 /**
  * Presentation parse (M9.1) — accepts both the v1 keys (`groupBy`, `orderBy`,
@@ -122,6 +192,11 @@ export const MAX_GROUP_DEPTH = 3;
  */
 function parsePresentation(raw: unknown): Presentation {
   const obj = asRecord(raw);
+  const titleCalc = parseAggregateCalc(obj.titleCalc);
+  const gallery = parseGallery(obj.gallery);
+  const cardSize = parseCardSize(obj.cardSize) ?? parseCardSize(asRecord(obj.gallery).size);
+  const chart = parseChart(obj.chart);
+  const dashboard = parseDashboard(obj.dashboard);
   return {
     type: parseViewType(obj.type),
     group: parseGroupChain(obj),
@@ -134,16 +209,37 @@ function parsePresentation(raw: unknown): Presentation {
     ...(typeof obj.titleWidth === 'number' && Number.isFinite(obj.titleWidth)
       ? { titleWidth: obj.titleWidth }
       : {}),
-    // Both stored only off their defaults, so existing files stay untouched.
-    ...(obj.titleFrozen === false ? { titleFrozen: false } : {}),
+    // Stored only off the default, so existing files stay untouched. The
+    // pre-M16.18 `titleFrozen: false` means the same thing as "no frozen
+    // columns" and migrates to it; `titleFrozen: true` was the default and
+    // carries no information.
+    ...(typeof obj.frozenColumns === 'number' &&
+    Number.isInteger(obj.frozenColumns) &&
+    obj.frozenColumns >= 0
+      ? { frozenColumns: obj.frozenColumns }
+      : obj.titleFrozen === false
+        ? { frozenColumns: 0 }
+        : {}),
     ...(typeof obj.titlePosition === 'number' &&
     Number.isInteger(obj.titlePosition) &&
     obj.titlePosition > 0
       ? { titlePosition: obj.titlePosition }
       : {}),
+    ...(titleCalc !== null ? { titleCalc } : {}),
     ...(obj.chips === 'plain' || obj.chips === 'type-icon'
       ? { chips: obj.chips as ChipStyle }
       : {}),
+    // Card settings (M16.20). Stored only off their defaults, so a table's
+    // YAML never grows three keys about a layout it is not in.
+    //
+    // The gallery kept its own `gallery.size` until M16.29, when the two
+    // spellings of one setting were collapsed onto this key. A file written
+    // by the old panel migrates on read rather than losing the choice.
+    ...(cardSize !== undefined ? { cardSize } : {}),
+    ...(typeof obj.cardPreview === 'string' && CARD_PREVIEW_SET.has(obj.cardPreview)
+      ? { cardPreview: obj.cardPreview as CardPreview }
+      : {}),
+    ...(obj.colorColumns === true ? { colorColumns: true } : {}),
     ...(typeof obj.dateField === 'string' && obj.dateField.trim() !== ''
       ? { dateField: obj.dateField.trim() }
       : {}),
@@ -153,7 +249,137 @@ function parsePresentation(raw: unknown): Presentation {
     ...(typeof obj.dependencyField === 'string' && obj.dependencyField.trim() !== ''
       ? { dependencyField: obj.dependencyField.trim() }
       : {}),
+    ...(gallery !== undefined ? { gallery } : {}),
+    ...(chart !== undefined ? { chart } : {}),
+    ...(dashboard !== undefined ? { dashboard } : {}),
+    // M16.23 grid chrome. Every one is stored only off its default, so a view
+    // file that never touched them stays byte-identical.
+    ...(obj.calendarSpan === 'week' ? { calendarSpan: 'week' as const } : {}),
+    ...(obj.showWeekends === false ? { showWeekends: false } : {}),
+    ...(obj.weekStart === 'monday' ? { weekStart: 'monday' as const } : {}),
+    // showTable has no single default — it is per layout — so unlike the rest
+    // it is stored whenever it was decided, either way.
+    ...(typeof obj.showTable === 'boolean' ? { showTable: obj.showTable } : {}),
+    // A limit of zero or less is dropped on read rather than honoured: it can
+    // only come from a hand-edited file, and a canvas emptied by a key nothing
+    // on screen mentions has no way back (M16.26).
+    ...(typeof obj.limit === 'number' && Number.isFinite(obj.limit) && obj.limit > 0
+      ? { limit: Math.floor(obj.limit) }
+      : {}),
   };
+}
+
+const KINDS = new Set<string>(CHART_KINDS);
+const AGGS = new Set<string>(CHART_AGGS);
+
+/**
+ * Gallery card settings (M16.22). Every member is optional and only stored
+ * off its default, so a gallery nobody configured writes no `gallery:` key at
+ * all — the same rule the date-axis keys follow.
+ */
+function parseGallery(raw: unknown): GallerySpec | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = asRecord(raw);
+  const spec: GallerySpec = {};
+  if (typeof obj.cover === 'string' && obj.cover.trim() !== '') spec.cover = obj.cover.trim();
+  if (obj.fit === true) spec.fit = true;
+  return Object.keys(spec).length === 0 ? undefined : spec;
+}
+
+/** A stored card size, or undefined. Used twice: once for `cardSize`, once for
+ * the pre-M16.29 `gallery.size` it absorbed. */
+function parseCardSize(raw: unknown): CardSize | undefined {
+  return typeof raw === 'string' && CARD_SIZE_SET.has(raw) ? (raw as CardSize) : undefined;
+}
+
+/**
+ * Chart settings (M16.27). Same rule as the gallery's: members are stored only
+ * off their defaults, and an unrecognised one is dropped rather than trusted —
+ * a hand-edited `kind: sankey` must not reach the renderer as a chart type
+ * nothing draws.
+ */
+function parseChart(raw: unknown): ChartSpec | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = asRecord(raw);
+  const spec: ChartSpec = {};
+  if (typeof obj.kind === 'string' && KINDS.has(obj.kind)) spec.kind = obj.kind as ChartKind;
+  if (typeof obj.agg === 'string' && AGGS.has(obj.agg)) spec.agg = obj.agg as ChartAgg;
+  if (typeof obj.value === 'string' && obj.value.trim() !== '') spec.value = obj.value.trim();
+  if (obj.omitZero === true) spec.omitZero = true;
+  return Object.keys(spec).length === 0 ? undefined : spec;
+}
+
+/**
+ * Dashboard blocks (M16.28).
+ *
+ * Unlike the gallery and chart blocks this one is a LIST, so a malformed
+ * member is dropped individually — one hand-edited block must not take the
+ * other five down with it. Ids are made unique here for the same reason view
+ * ids are: they address a reorder and a delete, and two blocks answering to
+ * one name means deleting either one deletes whichever sorted first.
+ */
+function parseDashboard(raw: unknown): DashboardSpec | undefined {
+  if (!Array.isArray(raw) && asRecord(raw).blocks === undefined) return undefined;
+  const list = Array.isArray(raw) ? raw : (asRecord(raw).blocks as unknown);
+  if (!Array.isArray(list)) return { blocks: [] };
+  const taken = new Set<string>();
+  const blocks: DashboardBlock[] = [];
+  for (const entry of list) {
+    const block = parseBlock(entry, taken, blocks.length);
+    if (block !== null) blocks.push(block);
+  }
+  return { blocks };
+}
+
+function parseBlock(raw: unknown, taken: Set<string>, index: number): DashboardBlock | null {
+  const obj = asRecord(raw);
+  const declared = typeof obj.id === 'string' && obj.id.trim() !== '' ? obj.id.trim() : '';
+  const id = declared !== '' && !taken.has(declared) ? declared : nextBlockId(taken, index);
+  const shared = {
+    id,
+    ...(typeof obj.title === 'string' && obj.title.trim() !== ''
+      ? { title: obj.title.trim() }
+      : {}),
+    ...(obj.wide === true ? { wide: true } : {}),
+  };
+  if (obj.kind === 'number') {
+    taken.add(id);
+    const agg: ChartAgg =
+      typeof obj.agg === 'string' && AGGS.has(obj.agg) ? (obj.agg as ChartAgg) : 'count';
+    return {
+      ...shared,
+      kind: 'number',
+      agg,
+      ...(agg !== 'count' && typeof obj.value === 'string' && obj.value.trim() !== ''
+        ? { value: obj.value.trim() }
+        : {}),
+    };
+  }
+  // A view block with no List to point at is not a block — it would render as
+  // a permanent "that view is gone" tile nobody deliberately made.
+  if (typeof obj.list !== 'string' || obj.list.trim() === '') return null;
+  taken.add(id);
+  return {
+    ...shared,
+    kind: 'view',
+    list: obj.list.trim(),
+    ...(typeof obj.collection === 'string' && obj.collection.trim() !== ''
+      ? { collection: obj.collection.trim() }
+      : {}),
+    ...(typeof obj.view === 'string' && obj.view.trim() !== '' ? { view: obj.view.trim() } : {}),
+  };
+}
+
+function nextBlockId(taken: Set<string>, index: number): string {
+  for (let n = index + 1; ; n += 1) {
+    const candidate = `block-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** An id no sibling block holds — what "add a block" needs. */
+export function nextDashboardBlockId(blocks: DashboardBlock[]): string {
+  return nextBlockId(new Set(blocks.map((b) => b.id)), blocks.length);
 }
 
 /**
@@ -283,6 +509,8 @@ function parseColumns(obj: Record<string, unknown>): ColumnSpec[] {
         if (typeof c.width === 'number' && Number.isFinite(c.width)) spec.width = c.width;
         if (c.hidden === true) spec.hidden = true;
         if (c.wrap === true) spec.wrap = true;
+        const calc = parseAggregateCalc(c.calc);
+        if (calc !== null) spec.calc = calc;
         return spec;
       })
       .filter((c): c is ColumnSpec => c !== null);
@@ -320,7 +548,7 @@ function parseSource(raw: unknown): ListSource {
 function parseFilterNode(raw: unknown, path: Set<unknown>): FilterRule | FilterGroup | null {
   const obj = asRecord(raw);
   if (Array.isArray(obj.all) || Array.isArray(obj.any)) return parseGroupNode(raw, path);
-  if (typeof obj.field === 'string' && FILTER_OPS.includes(obj.op as FilterOp)) {
+  if (typeof obj.field === 'string' && KNOWN_OPS.has(obj.op as FilterOp)) {
     const rule: FilterRule = { field: obj.field, op: obj.op as FilterOp };
     if (obj.value !== undefined) rule.value = obj.value as Scalar | Scalar[];
     return rule;
@@ -380,6 +608,9 @@ const LAYOUT_LABEL: Record<ViewType, string> = {
   calendar: 'Calendar',
   gantt: 'Gantt',
   timeline: 'Timeline',
+  gallery: 'Gallery',
+  chart: 'Chart',
+  dashboard: 'Dashboard',
 };
 
 export function layoutLabel(type: ViewType): string {
@@ -547,16 +778,30 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     columns: p.columns,
     ...(p.rowHeight !== undefined ? { rowHeight: p.rowHeight } : {}),
     ...(p.titleWidth !== undefined ? { titleWidth: p.titleWidth } : {}),
-    ...(p.titleFrozen === false ? { titleFrozen: false } : {}),
+    ...(p.frozenColumns !== undefined ? { frozenColumns: p.frozenColumns } : {}),
     ...(p.titlePosition !== undefined && p.titlePosition > 0
       ? { titlePosition: p.titlePosition }
       : {}),
+    ...(p.titleCalc !== undefined ? { titleCalc: p.titleCalc } : {}),
     ...(p.chips !== undefined ? { chips: p.chips } : {}),
+    ...(p.cardSize !== undefined ? { cardSize: p.cardSize } : {}),
+    ...(p.cardPreview !== undefined ? { cardPreview: p.cardPreview } : {}),
+    ...(p.colorColumns === true ? { colorColumns: true } : {}),
     // M10 axis configuration — written only when set, so a table's YAML
     // does not carry three keys about date axes it has no use for.
     ...(p.dateField !== undefined ? { dateField: p.dateField } : {}),
     ...(p.zoom !== undefined ? { zoom: p.zoom } : {}),
     ...(p.dependencyField !== undefined ? { dependencyField: p.dependencyField } : {}),
+    // Same rule for the layout-specific blocks (M16.22): written only when the
+    // layout that reads them has been configured.
+    ...(p.gallery !== undefined ? { gallery: p.gallery } : {}),
+    ...(p.chart !== undefined ? { chart: p.chart } : {}),
+    ...(p.dashboard !== undefined ? { dashboard: p.dashboard } : {}),
+    ...(p.calendarSpan === 'week' ? { calendarSpan: p.calendarSpan } : {}),
+    ...(p.showWeekends === false ? { showWeekends: false } : {}),
+    ...(p.weekStart === 'monday' ? { weekStart: p.weekStart } : {}),
+    ...(p.showTable !== undefined ? { showTable: p.showTable } : {}),
+    ...(p.limit !== undefined ? { limit: p.limit } : {}),
   };
 }
 
