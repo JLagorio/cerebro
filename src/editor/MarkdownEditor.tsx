@@ -9,6 +9,7 @@ import {
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
 import { codeBlockOptions } from '@blocknote/code-block';
+import { onAgentEvent, runAgent, startMcp } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
@@ -31,7 +32,7 @@ import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { CalloutBlock, MermaidBlock } from './blocks';
+import { AiBlock, CalloutBlock, MermaidBlock } from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
@@ -43,6 +44,7 @@ export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec(codeBlockOptions),
+    ai: AiBlock(),
     callout: CalloutBlock(),
     mermaid: MermaidBlock(),
   },
@@ -395,6 +397,14 @@ export function MarkdownEditor({
 
   const blockSlashItems = (): DefaultReactSuggestionItem[] => [
     {
+      title: 'AI block',
+      subtext: 'A standing question — a summary, the open questions — you can ask again',
+      group: 'Advanced blocks',
+      aliases: ['ai', 'summary', 'summarise', 'summarize', 'questions', 'actions'],
+      icon: <Icon name="sparkles" size={14} />,
+      onItemClick: () => insertBlockAtCursor({ type: 'ai', props: { prompt: '', generated: '' } }),
+    },
+    {
       title: 'Callout',
       subtext: 'Highlighted note — info, tip, warning…',
       group: 'Advanced blocks',
@@ -499,6 +509,81 @@ export function MarkdownEditor({
     const spaced = additions.flatMap((a) => [' ', a]);
     editor.updateBlock(block, { content: [...rest, ...spaced] as never });
   };
+
+  /**
+   * Answer an AI block (M17.18).
+   *
+   * The block dispatches an event rather than calling the agent itself, so
+   * blocks.tsx stays free of app state and can be rendered in a test with no
+   * store behind it. The run is granted no tools for the same reason a rewrite
+   * is (M17.16): it transforms text that is already in the prompt, and a run
+   * that could call open_note would navigate the reader away from the block
+   * they are watching.
+   */
+  useEffect(() => {
+    const onRun = (event: Event) => {
+      const { id, prompt } = (event as CustomEvent<{ id: string; prompt: string }>).detail;
+      if (vaultPath === null || prompt.trim() === '') return;
+      const block = editor.getBlock(id);
+      if (block === undefined) return;
+      void (async () => {
+        try {
+          const document = await blocksToMarkdown(editor);
+          const mcp = await startMcp(vaultPath);
+          const runId = await runAgent(vaultPath, {
+            message: [
+              `Answer this about the document below: ${prompt.trim()}`,
+              '',
+              'Return only the answer, as markdown, with no preamble and no code fence.',
+              'If the document does not support an answer, say that in one line rather than inventing one.',
+              '',
+              document,
+            ].join('\n'),
+            systemPrompt:
+              'You answer a standing question about a document the user is writing. Return only the answer.',
+            sessionId: null,
+            model: null,
+            shell: false,
+            connectors: false,
+            attended: true,
+            allowedTools: [],
+            mcp,
+          });
+          let text = '';
+          const stop = onAgentEvent((e) => {
+            if (e.kind === 'TextDelta') text += e.text;
+            if (e.kind === 'Result' && e.text.trim() !== '') text = e.text;
+            if (e.kind === 'Error') {
+              toast(e.message);
+              stop();
+            }
+            if (e.kind === 'Done') {
+              stop();
+              const clean = text.trim().replace(/^```[a-z]*\n?|\n?```$/g, '');
+              const current = editor.getBlock(id);
+              if (current === undefined || clean === '') return;
+              // One edit, so it is one undo step and one save — the same
+              // reason the rewrite is not streamed in.
+              editor.updateBlock(current, {
+                props: { prompt, generated: todayIso() },
+                content: clean,
+              } as never);
+              scheduleEmit();
+            }
+          }, runId);
+        } catch (err) {
+          toast(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    };
+    window.addEventListener('cerebro:ai-block-run', onRun);
+    return () => window.removeEventListener('cerebro:ai-block-run', onRun);
+    // `scheduleEmit` is deliberately not a dep: it is redefined every render
+    // (it closes over the debounce timer), and listing it would tear down and
+    // re-add the listener on every keystroke. The handler only calls it, and
+    // the version it captures debounces onto the same ref either way.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, vaultPath, toast]);
 
   // Cmd/Ctrl-K over a selection. Bound on the container rather than the
   // window so it only fires for the editor that has focus — two editors are on
