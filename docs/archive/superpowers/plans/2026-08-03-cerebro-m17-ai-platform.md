@@ -563,3 +563,63 @@ similar distractors hurt more than sheer length.
   closes the *invisible* half of it.
 - **`git add -f`** — this file lives under a gitignored path, like every plan
   before it.
+
+---
+
+## Outcome — M17 complete (2026-08-04)
+
+All twenty milestones shipped on `m17-ai-platform`, 22 commits off `bf6c476`.
+Final gate: **2103 vitest / 139 files · 212 cargo · 30 e2e**, with tsc,
+eslint `--max-warnings=0`, prettier, `cargo fmt --check` and
+`cargo clippy -D warnings` clean.
+
+### The three verify-first gates, resolved by experiment
+
+- **BlockNote decorations (M17.16): YES.** 0.46.2 has a first-class public
+  `extensions` option taking raw ProseMirror plugins — not an escape hatch, and
+  next to the `@internal` `_tiptapOptions` we did NOT need. Observed mounting,
+  surviving position mapping through an unrelated edit, and invisible to
+  `blocksToMarkdown`. In the end M17.16 did not need them: the decision surface
+  is a popover over a word-level diff, which is testable in jsdom and does not
+  add `prosemirror-state`/`prosemirror-view` to package.json. The finding stands
+  for whoever wants in-buffer decorations later.
+- **Claude Code memory (M17.14): leaking, and NOT closable.** 18 session
+  transcripts, ~2.2 MB of verbatim vault content, under
+  `~/.claude/projects/<vault-slug>/`; the `memory/` directory exists and is one
+  write from being populated. `--bare` is the only flag that skips auto-memory
+  and it also stops the CLI reading the keychain — verified against the real
+  binary, which answers "Not logged in". Since Cerebro's premise is the user's
+  own signed-in CLI, the honest answer was disclosure plus a purge, not a fix.
+- **Ranked search (M17.19): build no index.** The okf rule is about the VAULT,
+  not about memory, and two in-memory derived caches already coexist with it.
+  Measured: full scan 4.6 ms, a full-corpus query 48 µs, and `tool_search`
+  already paid both on every call. The real defect was `break` returning the
+  alphabetically-first 20.
+
+### Decisions that changed during the build
+
+- **M17.7b reversed M17.5's context rule, on the user's call.** The place chip
+  showed the thread's anchor, so walking away left the context wrong with
+  "start a new conversation" as the only cure. The chip follows you now, and
+  where the conversation began is told to the agent as a fact (`startedIn`).
+- **M17.9 and M17.11 merged.** Skills and agents differ in exactly one way — an
+  agent runs itself — so two screens would have been two copies of one list.
+- **M17.11 does not edit in place.** The record panel already edits frontmatter
+  properly; a bespoke five-section form would have been a second, worse editor
+  and would quietly have become where a schema lives.
+- **M17.14's third tier is not a field.** "Intelligence" is the knowledge
+  bundle, which already stores inferences with provenance and needs a human
+  stamp. A third frontmatter blob would have been a worse copy of M8.
+
+### Known limits, stated rather than hidden
+
+- A closed app observes nothing: an edit made elsewhere while cerebro was quit
+  produces no trigger event, ever.
+- Event-triggered agents carry a 15-minute cooldown as a loop-breaker, so an
+  agent that writes into the folder it watches runs at most four times an hour
+  rather than forever.
+- Scope is folders only. Type-scoped agents are not offered because the
+  enforceable version does not exist and the promptable one is what this
+  milestone replaced.
+- `startedIn` is a new prompt line whenever the user has moved; worth watching
+  for the agent over-weighting it in real use.
