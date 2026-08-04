@@ -135,7 +135,44 @@ describe('describeTrigger', () => {
 
   it('names the model gate as a second step rather than hiding it', () => {
     expect(describeTrigger({ event: 'created', ask: 'Is this a real risk?' })).toContain(
-      'then ask: Is this a real risk?',
+      'ask: Is this a real risk?',
     );
+  });
+
+  it('names the per-trigger instruction too, in the order the two run', () => {
+    // M18.5. A summary that hid either half would defeat its own purpose —
+    // you should be able to say what a trigger will do without running it.
+    const sentence = describeTrigger({
+      event: 'changed',
+      field: 'status',
+      to: 'at-risk',
+      ask: 'Does this threaten the release?',
+      do: 'Check the release date before writing anything.',
+    });
+    expect(sentence.indexOf('ask:')).toBeLessThan(sentence.indexOf('then:'));
+    expect(sentence).toContain('then: Check the release date before writing anything.');
+  });
+});
+
+describe('per-trigger instructions (M18.5)', () => {
+  it('parses `do:` alongside the clause and the gate', () => {
+    const [trigger] = parseTriggers([
+      { event: 'changed', field: 'status', do: 'Only report, never file.' },
+    ]);
+    expect(trigger.do).toBe('Only report, never file.');
+  });
+
+  it('is separate from `ask:` — one decides whether, the other decides what', () => {
+    // Folding them into one field is the tempting simplification and the
+    // wrong one: a gate that also carries instructions gets answered "yes"
+    // and then obeyed, so the agent acts on a waking it should have skipped.
+    const [trigger] = parseTriggers([{ event: 'created', ask: 'Real?', do: 'File it.' }]);
+    expect(trigger.ask).toBe('Real?');
+    expect(trigger.do).toBe('File it.');
+  });
+
+  it('drops a blank one rather than carrying an empty instruction', () => {
+    const [trigger] = parseTriggers([{ event: 'created', do: '   ' }]);
+    expect('do' in trigger).toBe(false);
   });
 });

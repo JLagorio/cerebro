@@ -143,7 +143,7 @@ export function agentRunPrompt(
   /** What woke this run, when an event did (M17.12) — layer TWO of the
    * trigger. Layer one already passed deterministically; this is the model
    * gate, and it comes with an explicit permission to do nothing. */
-  trigger?: { subject: string; because: string; ask?: string } | null,
+  trigger?: { subject: string; because: string; ask?: string; do?: string } | null,
   /** Folders this run may write inside (M17.13). Stated so the agent plans
    * inside its boundary rather than discovering it as a tool error. */
   scope?: readonly string[] | null,
@@ -160,6 +160,17 @@ export function agentRunPrompt(
             : [
                 `Before doing anything else, answer this for yourself: ${trigger.ask}`,
                 'If the answer is no, write nothing and stop. A run that correctly does nothing is a success, and this question exists precisely so that most wakings end here.',
+              ]),
+          // M18.5 — placed BEFORE the standing instructions and named as an
+          // addition to them, because the failure mode of per-trigger prose is
+          // a model that treats it as a replacement and forgets the agent's
+          // own rules. Said twice, in effect: here, and again by "Your
+          // instructions" arriving afterwards as the general case.
+          ...(trigger.do === undefined
+            ? []
+            : [
+                `For this waking in particular, on top of your standing instructions below: ${trigger.do}`,
+                'Your standing instructions still apply in full — this narrows what to do, it does not replace them.',
               ]),
           '',
         ]),

@@ -429,12 +429,22 @@ function TriggerRow({
         )}
       </div>
 
-      <div className="mt-2">
+      {/* The two prose fields, in the order they run: whether to act, then
+          what acting means for THIS waking. Both optional; a trigger with
+          neither is the deterministic clause and nothing else. */}
+      <div className="mt-2 flex flex-col gap-1.5">
         <input
           value={trigger.ask ?? ''}
           aria-label={`Trigger ${index + 1} question`}
           placeholder="…and only if: a yes/no question the agent answers first (optional)"
           onChange={(e) => onChange({ ask: e.target.value })}
+          className="w-full rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-2xs text-n-800 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
+        />
+        <input
+          value={trigger.do ?? ''}
+          aria-label={`Trigger ${index + 1} instructions`}
+          placeholder="…then do this in particular: added to the standing instructions, not instead of them (optional)"
+          onChange={(e) => onChange({ do: e.target.value })}
           className="w-full rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-2xs text-n-800 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
         />
       </div>

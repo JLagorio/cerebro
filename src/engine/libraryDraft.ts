@@ -135,6 +135,7 @@ function triggerToYaml(trigger: Trigger): Record<string, unknown> {
   if (trigger.to !== undefined) out.to = trigger.to;
   if (trigger.in !== undefined) out.in = trigger.in;
   if (trigger.ask !== undefined) out.ask = trigger.ask;
+  if (trigger.do !== undefined) out.do = trigger.do;
   return out;
 }
 

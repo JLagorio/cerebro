@@ -312,6 +312,11 @@ test('library: an agent is built from pickers, not from remembered strings', asy
   const value = trigger.getByLabel('Trigger 1 value');
   await expect(value.locator('option')).toContainText(['any value', 'at-risk']);
   await value.selectOption('at-risk');
+  // M18.5: what this waking in particular is for, on top of the standing
+  // instructions. One agent usefully answers differently depending on what
+  // woke it, and the alternative is three agents sharing 90% of their prose.
+  await trigger.getByLabel('Trigger 1 instructions').fill('Check the release date first.');
+  await expect(trigger).toContainText('then: Check the release date first.');
   await expect(trigger).toContainText('status');
   await expect(editor).toContainText('On duty');
 
@@ -326,6 +331,7 @@ test('library: an agent is built from pickers, not from remembered strings', asy
     page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path),
   );
   await after.toContain('at-risk');
+  await after.toContain('Check the release date first.');
 });
 
 test('library: a schedule is built, never typed as a grammar', async ({ page }) => {

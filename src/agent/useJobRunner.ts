@@ -296,6 +296,7 @@ export function useJobRunner(): void {
                     .replace(/^When /, '')
                     .replace(/\.$/, ''),
                   ...(trigger.ask === undefined ? {} : { ask: trigger.ask }),
+                  ...(trigger.do === undefined ? {} : { do: trigger.do }),
                 };
           const message =
             job.kind === 'agent'

@@ -45,6 +45,19 @@ export interface Trigger {
    * until nobody can read them.
    */
   ask?: string;
+  /**
+   * What to do WHEN this particular trigger fires (M18.5).
+   *
+   * Added on top of the agent's standing instructions, never in place of
+   * them, and this is a different thing from `ask:` — that decides WHETHER to
+   * act, this shapes the acting. ClickUp separates the two for a reason worth
+   * copying: one agent usefully answers differently depending on what woke it
+   * ("a status went to at-risk → check the release date; a new record
+   * appeared → just file it"), and the alternative is either three agents
+   * that share 90% of their prose or one prose blob full of "if you were
+   * woken by…" that the model has to disambiguate every run.
+   */
+  do?: string;
 }
 
 const str = (v: unknown): string | undefined =>
@@ -81,6 +94,7 @@ export function parseTriggers(raw: unknown): Trigger[] {
               .replace(/\/+$/, ''),
           }),
       ...(str(r.ask) === undefined ? {} : { ask: str(r.ask) }),
+      ...(str(r.do) === undefined ? {} : { do: str(r.do) }),
     };
     // A trigger that constrains nothing would fire on every change in the
     // vault. That is never what someone meant to write, so it is not a
@@ -150,5 +164,13 @@ export function describeTrigger(trigger: Trigger): string {
     if (trigger.to !== undefined) parts.push(`and ${trigger.field} becomes ${trigger.to}`);
   }
   const when = parts.filter((p) => p !== '').join(' ');
-  return trigger.ask === undefined ? `When ${when}.` : `When ${when} — then ask: ${trigger.ask}`;
+  // The two layers read in the order they run: the deterministic clause, then
+  // the model gate, then what this waking in particular is for. A sentence
+  // that hid either half would defeat the point of the summary — you should be
+  // able to say what a trigger will do without running it.
+  const tail = [
+    ...(trigger.ask === undefined ? [] : [`ask: ${trigger.ask}`]),
+    ...(trigger.do === undefined ? [] : [`then: ${trigger.do}`]),
+  ];
+  return tail.length === 0 ? `When ${when}.` : `When ${when} — ${tail.join(' — ')}`;
 }
