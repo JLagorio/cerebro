@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Entry } from '@/engine/types';
+import { makeEntry } from '@/test/factories';
 import {
   applyTemplateBody,
+  templateFill,
+  templateFillPrompt,
   applyTemplateFrontmatter,
   isTemplate,
   listTemplates,
@@ -68,5 +71,61 @@ describe('templates', () => {
 
   it('todayIso is a YYYY-MM-DD date', () => {
     expect(todayIso()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+/**
+ * M17.10 — a template that knows how to fill itself.
+ *
+ * `fill:` is a declared PROMPT, not a new artifact type. The template stays an
+ * ordinary markdown file you can open and edit, which is the whole point: the
+ * useful version of "AI-assisted PRD" is one the person can change. A built-in
+ * generator is a black box producing someone else's idea of a PRD, and the only
+ * way to disagree with it is to stop using it.
+ */
+describe('templateFill', () => {
+  const template = (properties: Record<string, unknown>) =>
+    makeEntry({
+      path: 'templates/prd.md',
+      folder: 'templates',
+      title: 'PRD',
+      properties: properties as never,
+    });
+
+  it('is empty for an ordinary template, which then behaves exactly as before', () => {
+    expect(templateFill(template({}))).toBe('');
+  });
+
+  it('reads the declared instruction', () => {
+    expect(templateFill(template({ fill: '  Draft it from the project.  ' }))).toBe(
+      'Draft it from the project.',
+    );
+  });
+
+  it('never copies itself onto the page it makes', () => {
+    // Otherwise every page made from the template would look like a template
+    // and re-fill itself the next time anyone opened it.
+    const frontmatter = applyTemplateFrontmatter(template({ fill: 'x', status: 'draft' }), VARS);
+    expect('fill' in frontmatter).toBe(false);
+    expect(frontmatter.status).toBe('draft');
+  });
+});
+
+describe('templateFillPrompt', () => {
+  const prompt = templateFillPrompt('docs/a.md', 'A PRD', 'Draft the risks from what we know.');
+
+  it('names the page that already exists rather than asking for a new one', () => {
+    expect(prompt).toContain('docs/a.md');
+    expect(prompt).toContain('Do not create a second page');
+  });
+
+  it('forbids inventing content for a section the base knows nothing about', () => {
+    // A template filled with plausible fiction is worse than one left blank —
+    // the blank one is obviously unfinished.
+    expect(prompt).toContain('instead of inventing content');
+  });
+
+  it('carries the template author’s own words through', () => {
+    expect(prompt).toContain('Draft the risks from what we know.');
   });
 });

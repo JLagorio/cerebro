@@ -1,6 +1,10 @@
 ---
 type: Skill
+slug: risk-sweep
 description: Sweep open work for risks nobody has written down, and draft Risk records for the ones that matter.
+arguments:
+  - name: scope
+    description: A project or list to sweep; the whole vault when omitted.
 ---
 
 # Risk sweep

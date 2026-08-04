@@ -1,5 +1,6 @@
 ---
 type: Skill
+slug: create-an-agent
 description: Interview the user about a job worth delegating, then draft an Agent record they can review and activate.
 ---
 

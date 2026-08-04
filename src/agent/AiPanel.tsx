@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -7,9 +7,16 @@ import { checkAgent } from '@/agent/agentIpc';
 import { AiActionCard } from '@/agent/AiActionCard';
 import { ChatInput } from '@/agent/ChatInput';
 import { buildSnapshot, extractReferences, renderSnapshot } from '@/agent/context';
+import {
+  chipId,
+  placeChip,
+  recordChip,
+  resolveChips,
+  type ContextChip,
+} from '@/agent/contextChips';
 import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
-import { useAgentChat } from '@/agent/useAgentChat';
+import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
 import {
   listSkills,
@@ -18,9 +25,12 @@ import {
   skillPrompt,
   type SkillRef,
 } from '@/engine/skills';
+import { listConcepts } from '@/engine/okf';
+import { placeOf, samePlace } from '@/engine/place';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { readNote } from '@/lib/ipc';
+import { todayIso } from '@/lib/templates';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
@@ -219,6 +229,7 @@ export function AiPanel() {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const views = useVaultStore((s) => s.views);
+  const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
   const openPath = useOpenPath();
   const openDiff = useUiStore((s) => s.openDiff);
@@ -241,39 +252,141 @@ export function AiPanel() {
   const { isRepo, refresh } = useGit();
   const checkpoint = useAgentCheckpoint(refresh);
 
-  // M9.5: the rows the current surface is showing. Asking "what is at risk"
-  // from the At risk view should be answered from that view's records, not
-  // from the agent re-deriving a query it will get subtly wrong.
-  const collection = useMemo(
-    () => resolveSurface(selection, entries, schema, views),
-    [selection, entries, schema, views],
-  );
-  const activeView =
-    selection.kind === 'list'
-      ? (views.find((v) => v.id === selection.id && v.project === null) ?? null)
-      : null;
-
   // M13.1: the skill catalog — names and descriptions only; a body loads when
   // one is invoked, so the vault can hold many skills at no per-turn cost.
   const skills = useMemo(() => listSkills(entries), [entries]);
+  // M17.20: the knowledge bundle, for the `about:` lookup in the snapshot.
+  const concepts = useMemo(() => listConcepts(entries, todayIso()), [entries]);
+
+  // The turn's context is read through a ref at send (M17.6). It has to be
+  // built from the CONVERSATION's chips, and the conversation list is built on
+  // top of the chat hook — so none of it exists yet at this point in the
+  // render. Assigned below, once it does.
+  const turnRef = useRef<TurnContext>({ systemPrompt: '', place: null, conversationId: null });
+  const getTurn = useCallback(() => turnRef.current, []);
+  const chat = useAgentChat(getTurn, { shell, connectors }, null, isRepo ? checkpoint : undefined);
+  // M17.5: the SUBJECT of the current selection, with its lenses stripped —
+  // the board tab and the table tab of one List are one place. A thread is
+  // stamped with it at its first turn, which is what lets a thread be found
+  // again by what it was about instead of by when it happened.
+  const place = useMemo(() => placeOf(selection), [selection]);
+  const placeLookup = useMemo(
+    () => ({ entries, views, collections }),
+    [entries, views, collections],
+  );
+  const conversations = useConversations(chat, place, placeLookup);
+
+  // --- Context chips (M17.6) ------------------------------------------------
+  //
+  // What the agent is being told about, as things on screen rather than as a
+  // derivation nobody can see. `dismissed` and `added` are per-conversation:
+  // switching threads must not carry one thread's attachments into another's.
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [added, setAdded] = useState<ContextChip[]>([]);
+  const activeId = conversations.activeId;
+  useEffect(() => {
+    setDismissed([]);
+    setAdded([]);
+  }, [activeId]);
+
+  // Where you are NOW, and it follows you.
+  //
+  // This chip briefly showed the thread's anchor instead, which meant walking
+  // to the Inbox left the context saying "Home" — wrong, and the only cure on
+  // offer was "start a new conversation". That was the app handing its own
+  // bookkeeping to the user. Two things make the simple answer the right one:
+  // a turn's context is frozen at send (so the agent moving you mid-answer
+  // cannot rewrite it), and where the conversation STARTED is told to the
+  // agent as a fact (`startedIn`) rather than pinned into the chip. It has the
+  // transcript and both places; reconciling them is not a hard problem for it.
+  const autoChips = useMemo(() => {
+    const list = [placeChip(place, placeLookup)];
+    // The open record. Not part of the PLACE (see engine/place.ts) — the agent
+    // opens records itself — but very much part of the context.
+    const open = detailPath === null ? null : recordChip(detailPath, entries);
+    if (open !== null) list.push(open);
+    return list;
+  }, [place, placeLookup, detailPath, entries]);
+
+  const chips = useMemo(
+    () => resolveChips(autoChips, dismissed, added),
+    [autoChips, dismissed, added],
+  );
+  const attachedIds = useMemo(() => chips.map(chipId), [chips]);
+  const removeChip = (chip: ContextChip) => {
+    const id = chipId(chip);
+    setAdded((prev) => prev.filter((c) => chipId(c) !== id));
+    setDismissed((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  // At most one place chip, so "where this conversation is" stays singular and
+  // everything downstream — the rows, the filters, the system prompt's one
+  // "you are looking at" line — has a single answer. Removing it means the
+  // agent is told nothing about where anyone is standing, which is a real and
+  // useful thing to be able to say.
+  const contextPlace = chips.find((c) => c.kind === 'place')?.place ?? null;
+  // Standing in the place the chip names: use the live selection, so the open
+  // view TAB's filters travel too. Otherwise the place alone, which resolves
+  // to the List's first view — the best available answer for a surface the
+  // user is not currently looking at.
+  const contextSelection =
+    contextPlace === null ? null : samePlace(contextPlace, place) ? selection : contextPlace;
+
+  // M9.5: the rows the surface is showing. Asking "what is at risk" from the
+  // At risk view should be answered from that view's records, not from the
+  // agent re-deriving a query it will get subtly wrong.
+  const collection = useMemo(
+    () =>
+      contextSelection === null ? null : resolveSurface(contextSelection, entries, schema, views),
+    [contextSelection, entries, schema, views],
+  );
+  const activeView =
+    contextSelection?.kind === 'list'
+      ? // Matched on (collection, id), the way ListPage resolves it: ids are
+        // unique per FOLDER, so `project === null` alone picked the wrong
+        // List's filters whenever two Collections each held a "roadmap".
+        (views.find(
+          (v) =>
+            v.id === contextSelection.id && v.collection === (contextSelection.collection ?? null),
+        ) ?? null)
+      : null;
+
+  const recordChips = chips.filter((c) => c.kind === 'record');
+  const activeChipPath = recordChips.some((c) => c.path === detailPath) ? detailPath : null;
 
   // Context is a system-prompt suffix, not a hidden first message: it must
   // travel with every turn, because a resumed session re-reads it.
   const systemPrompt = useMemo(() => {
-    const base = buildSystemPrompt(selection, { connectors, issuePrefixes, skills });
+    const base = buildSystemPrompt(contextSelection ?? { kind: 'none' }, {
+      connectors,
+      issuePrefixes,
+      skills,
+    });
     const snapshot = buildSnapshot({
-      selection,
+      selection: contextSelection ?? undefined,
       entries,
       schema,
-      activePath: detailPath,
-      visible: collection.entries,
+      activePath: activeChipPath,
+      visible: collection?.entries,
       // M11: the open TAB's filters — what the person is actually looking at.
       filters:
-        activeView === null
+        activeView === null || contextSelection === null
           ? null
-          : resolveView(activeView.definition, selection.kind === 'list' ? selection.view : null)
-              .filters,
+          : resolveView(
+              activeView.definition,
+              contextSelection.kind === 'list' ? (contextSelection.view ?? null) : null,
+            ).filters,
       references: extractReferences(draft),
+      attached: recordChips.map((c) => c.path),
+      // Where this conversation began, when the user has since walked. Given
+      // to the agent as a FACT rather than turned into a question for the
+      // user — it already has the transcript, so "we were on the Roadmap and
+      // you are now in the Inbox" is a sentence it can act on.
+      startedIn: conversations.startedElsewhere,
+      // M17.20: the bundle reaches the turn, by `about:` anchor. Derived here
+      // rather than inside buildSnapshot so the O(entries) pass is memoized
+      // with the rest of the prompt instead of running per render.
+      concepts,
     });
     return `${base}${renderSnapshot(snapshot)}`;
     // `draft` is deliberately excluded: rebuilding the prompt on every
@@ -283,21 +396,40 @@ export function AiPanel() {
     connectors,
     issuePrefixes,
     skills,
-    selection,
+    contextSelection,
     entries,
     schema,
-    detailPath,
-    collection.entries,
+    activeChipPath,
+    collection?.entries,
     activeView,
+    recordChips,
+    conversations.startedElsewhere,
+    concepts,
   ]);
-
-  const chat = useAgentChat(
+  // Handed to the chat hook through a ref rather than an argument — see
+  // getTurn above. Assigned during render, like every other latest-value ref
+  // in this codebase. The run list files a task under where the CONVERSATION
+  // started, so it stays findable under what it was about rather than moving
+  // to wherever the agent's own `open_note` left the user.
+  turnRef.current = {
     systemPrompt,
-    { shell, connectors },
-    null,
-    isRepo ? checkpoint : undefined,
+    place: conversations.active?.place ?? place,
+    conversationId: conversations.activeId,
+  };
+
+  // Every send goes through here so no path can leave a thread unanchored —
+  // there are three (the composer, a suggestion chip, and a retry) plus the
+  // handoff below, and "remember to call anchorNow" at four call sites is a
+  // convention, not a guarantee.
+  const anchorNow = conversations.anchorNow;
+  const chatSend = chat.send;
+  const ask = useCallback(
+    (text: string, message?: string | (() => Promise<string>), allowedTools?: string[] | null) => {
+      anchorNow();
+      chatSend(text, message, allowedTools);
+    },
+    [anchorNow, chatSend],
   );
-  const conversations = useConversations(chat);
 
   useEffect(() => {
     void checkAgent()
@@ -320,13 +452,31 @@ export function AiPanel() {
   // revise" on a concept) is sent once and then cleared. Held while a turn
   // is streaming — sending mid-turn would be dropped by the hook's
   // one-turn guard — and delivered when the stream ends (PR #5 review).
-  const send = chat.send;
   const streaming = chat.streaming;
   useEffect(() => {
     if (pendingPrompt === null || streaming) return;
+    // M17.6: the handoff's SUBJECT becomes a context chip. Six call sites used
+    // to hand over a prompt naming a record and drop the record itself, so the
+    // agent was asked to revise a concept and handed whatever surface the user
+    // happened to be standing on.
+    //
+    // Attaching is its own pass, ending with the subject consumed rather than
+    // the whole handoff: the prompt is built from the chips DURING RENDER, so
+    // sending in the same tick would send the context from before the chip
+    // existed — the exact staleness this milestone is about.
+    if (pendingPrompt.subject !== null) {
+      const chip = recordChip(pendingPrompt.subject, entries);
+      setPendingPrompt({ text: pendingPrompt.text, subject: null });
+      if (chip !== null) {
+        const id = chipId(chip);
+        setDismissed((prev) => prev.filter((d) => d !== id));
+        setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
+      }
+      return;
+    }
     setPendingPrompt(null);
-    send(pendingPrompt);
-  }, [pendingPrompt, send, setPendingPrompt, streaming]);
+    ask(pendingPrompt.text);
+  }, [ask, entries, pendingPrompt, setPendingPrompt, streaming]);
 
   const submit = () => {
     // Mid-turn, Enter is a no-op: the Send button is already replaced by
@@ -345,12 +495,17 @@ export function AiPanel() {
     const invocation = literal ? null : matchSkillInvocation(trimmed, skills);
     setDraft('');
     if (invocation === null || vaultPath === null) {
-      chat.send(trimmed);
+      ask(trimmed);
       return;
     }
     const { skill, request } = invocation;
-    chat.send(trimmed, () =>
-      readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
+    // M17.8: a skill's `allowed-tools:` narrows THIS turn. Passed as data to
+    // Rust, which intersects it with the granted policy — a vault file may
+    // subtract from what Settings allowed and can never add to it.
+    ask(
+      trimmed,
+      () => readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
+      skill.allowedTools,
     );
   };
 
@@ -374,7 +529,7 @@ export function AiPanel() {
     const index = chat.messages.findIndex((m) => m.id === assistantId);
     const question = index > 0 ? chat.messages[index - 1] : undefined;
     if (question === undefined || question.role !== 'user') return;
-    chat.send(question.text);
+    ask(question.text);
   };
 
   const onListScroll = () => {
@@ -452,7 +607,7 @@ export function AiPanel() {
                 <button
                   key={suggestion}
                   type="button"
-                  onClick={() => chat.send(suggestion)}
+                  onClick={() => ask(suggestion)}
                   className="rounded-lg border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
                 >
                   {suggestion}
@@ -486,10 +641,59 @@ export function AiPanel() {
             Jump to latest
           </button>
         )}
+        {/* M17.6: what the agent is being told about, as things rather than as
+            a derivation. Removable, because the most useful thing a context
+            control can do is take something OUT — an answer about the wrong
+            record reads as the model being stupid until you can see that the
+            app handed it the wrong page. */}
+        {chips.length > 0 && (
+          <div
+            data-testid="context-chips"
+            className="mb-1.5 flex flex-wrap items-center gap-1"
+            aria-label="Context"
+          >
+            {chips.map((chip) => (
+              <span
+                key={chipId(chip)}
+                data-testid="context-chip"
+                data-kind={chip.kind}
+                className="inline-flex max-w-full items-center gap-1 rounded-md border border-n-200 bg-n-25 py-0.5 pl-1.5 pr-0.5 text-2xs text-n-600"
+              >
+                <Icon
+                  name={chip.kind === 'place' ? 'map-pin' : 'file-text'}
+                  size={10}
+                  color="var(--n-400)"
+                />
+                <span className="min-w-0 truncate">{chip.label}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${chip.label} from context`}
+                  onClick={() => removeChip(chip)}
+                  className="flex-none rounded border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
+                >
+                  <Icon name="x" size={9} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {/* M9.5: `[[` completes against the vault, and the note you name
             travels into the snapshot with its content rather than as a word
             the agent has to go searching for. */}
-        <ChatInput autoFocus value={draft} onChange={setDraft} onSubmit={submit} />
+        <ChatInput
+          autoFocus
+          value={draft}
+          onChange={setDraft}
+          onSubmit={submit}
+          // M17.6b: `@` attaches. A chip re-added on purpose beats an earlier
+          // dismissal — see resolveChips.
+          onAttach={(chip) => {
+            const id = chipId(chip);
+            setDismissed((prev) => prev.filter((d) => d !== id));
+            setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
+          }}
+          attached={attachedIds}
+        />
         <div className="mt-1.5 flex items-center gap-2">
           <span className="flex-1 text-2xs text-n-400">
             {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}
@@ -520,6 +724,11 @@ export function buildSystemPrompt(
     'Use the cerebro MCP tools: get_vault_context to orient, search_notes and get_note to read, and the write tools to change things. Call open_note so the user sees what you are referring to.',
     'When you mention a note, write it as [[note-name]] so it is clickable.',
     "You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user's stamp, and claiming it would defeat the review model.",
+    // M17.20. The snapshot now SHOWS what the base believes about the records
+    // in context, so the prompt has to say how to read it — a claim's trust
+    // and its contradictions are the whole reason it is worth carrying, and a
+    // superseded belief quoted as current is worse than no belief at all.
+    "The context snapshot may carry a `knowledge` list: what this vault's base already believes about the records in view, reached by `about:` anchor. Use it before searching for the same thing again. Weigh it by `trust` — `human-reviewed` means a person stood behind it, `unverified` means only you have. Never present a claim marked `supersededBy` as current, and when a claim carries `contradictedBy`, say that the base disagrees with itself rather than picking a side.",
     'To file an Inbox capture, use propose_organize so the user can accept or reject it. Do not edit captures directly.',
     "Never create or modify `type: Type` docs on your own — schema is the user's to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (the Types screen and the adoption wizard are the human path).",
     'Be concise.',

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
+import { isBeingRead } from '@/agent/runs';
 import { learnQueue } from '@/engine/learn';
 import { commitOf, listConcepts, type CommitState } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
@@ -44,8 +45,7 @@ export function KnowledgeCommit({
 }) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
-  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const askAgent = useUiStore((s) => s.askAgent);
 
   const today = todayIso();
   const commit = useMemo(
@@ -58,11 +58,10 @@ export function KnowledgeCommit({
 
   // Outstanding for THIS note only — the queue is computed here rather than
   // read from a counter so nothing anywhere holds a running total.
-  const learningPath = useUiStore((s) => s.learningPath);
+  const reading = useUiStore((s) => isBeingRead(s.runs, entry.path));
   const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const autoLearn = useUiStore((s) => s.autoLearn);
-  const reading = learningPath === entry.path;
   // Asked by path, not by "is the queue non-empty": the queue also carries
   // stale concepts and every other note's edits, so a length check here would
   // report every note in the vault as queued the moment anything was.
@@ -74,8 +73,7 @@ export function KnowledgeCommit({
       ));
 
   const distill = () => {
-    setAiPanelOpen(true);
-    setPendingPrompt(distillPrompt(entry.path, entry.title));
+    askAgent(distillPrompt(entry.path, entry.title), entry.path);
   };
 
   return (

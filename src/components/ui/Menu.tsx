@@ -103,6 +103,14 @@ export interface MenuItemProps {
   danger?: boolean;
   disabled?: boolean;
   testId?: string;
+  /** Native title, for an item whose full effect does not fit its label. */
+  title?: string;
+  /**
+   * Runs BEFORE focus moves. The one case that needs it: a menu that acts on
+   * the document's text selection, where the default mousedown behaviour
+   * would clear the very thing the item operates on.
+   */
+  onMouseDown?: (e: React.MouseEvent) => void;
   onSelect: () => void;
 }
 
@@ -115,6 +123,8 @@ export function MenuItem({
   danger = false,
   disabled = false,
   testId,
+  title,
+  onMouseDown,
   onSelect,
 }: MenuItemProps) {
   return (
@@ -123,6 +133,8 @@ export function MenuItem({
       role="menuitem"
       data-testid={testId}
       disabled={disabled}
+      title={title}
+      onMouseDown={onMouseDown}
       onClick={onSelect}
       className={[
         ITEM_BASE,

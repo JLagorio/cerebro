@@ -267,7 +267,24 @@ export function Popover({
 
   useEffect(() => {
     if (!closeOnScroll) return;
+    /**
+     * Armed one frame late, and that frame is the whole fix (M18.4).
+     *
+     * Clicking a trigger that is only partly in view makes the browser scroll
+     * it into view, and scroll events are dispatched asynchronously — so the
+     * scroll caused by OPENING the popover arrived after it had mounted and
+     * dismissed it instantly. On screen that reads as a button that does
+     * nothing, and it got worse the further down a long form you went.
+     *
+     * A user cannot scroll deliberately inside one frame of their own click,
+     * so nothing real is lost by waiting for it.
+     */
+    let armed = false;
+    const frame = requestAnimationFrame(() => {
+      armed = true;
+    });
     const onScroll = (e: Event) => {
+      if (!armed) return;
       const target = e.target;
       if (target instanceof Node) {
         if (panelRef.current?.contains(target) === true) return;
@@ -281,7 +298,10 @@ export function Popover({
     // Capture: scroll does not bubble, so a scrolling pane deeper in the tree
     // is only observable from above.
     document.addEventListener('scroll', onScroll, true);
-    return () => document.removeEventListener('scroll', onScroll, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('scroll', onScroll, true);
+    };
   }, [closeOnScroll, layerId]);
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { runMockAgent, type MockRun } from './mockAgent';
-import type { AgentEvent, AgentStatus, McpInfo, UiAction } from './types';
+import type { AgentEvent, AgentStatus, CliWorkspace, McpInfo, UiAction } from './types';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -22,6 +22,31 @@ export function checkAgent(): Promise<AgentStatus> {
     : // The mock stands in for a working install so the panel is usable in
       // `pnpm dev`; the version string says plainly that it is not real.
       Promise.resolve({ installed: true, version: 'mock (browser)', path: null });
+}
+
+/** What the CLI has stored about this vault outside it (M17.14). */
+export function agentWorkspace(vault: string): Promise<CliWorkspace> {
+  return inTauri()
+    ? invokeTauri<{
+        path: string;
+        exists: boolean;
+        sessions: number;
+        bytes: number;
+        memory_files: number;
+      }>('agent_workspace', { vault }).then((w) => ({
+        path: w.path,
+        exists: w.exists,
+        sessions: w.sessions,
+        bytes: w.bytes,
+        memoryFiles: w.memory_files,
+      }))
+    : // Browser mode spawns no CLI, so there is nothing outside the vault to
+      // report. Saying "0 files" would be a claim about a real directory.
+      Promise.resolve({ path: '', exists: false, sessions: 0, bytes: 0, memoryFiles: 0 });
+}
+
+export function purgeAgentWorkspace(vault: string): Promise<number> {
+  return inTauri() ? invokeTauri<number>('purge_agent_workspace', { vault }) : Promise.resolve(0);
 }
 
 export function startMcp(vault: string): Promise<McpInfo> {
@@ -52,26 +77,48 @@ export interface RunOptions {
    * machine (PR #5 security review) — engine/connectors.stdioFingerprint.
    * Absent reads as none approved: a missing field must never widen access. */
   approvedStdio?: string[];
+  /** A NARROWING of this run's tools, declared by the vault file that started
+   * it (M17.8). Intersected with the policy in Rust, never unioned — a vault
+   * file may subtract from what Settings granted and can never add to it.
+   * Absent means "do not narrow"; [] means "narrow to nothing". */
+  allowedTools?: string[] | null;
+  /** Connectors this run may reach, when the record named some (M18.4). The
+   * same narrowing contract as allowedTools: absent means "whatever the vault
+   * enabled", [] means none, and a name the vault has not enabled is dropped
+   * rather than conjured. Enforced in connectors.rs. */
+  connectorNames?: string[] | null;
+  /** Vault-relative folders this run may WRITE inside (M17.13). Absent is
+   * unrestricted. Enforced in Rust against the bearer the child presents, so
+   * an agent cannot talk its way out of it. */
+  scope?: string[] | null;
   mcp: McpInfo | null;
 }
 
-let mockRun: MockRun | null = null;
+/** Live mock runs by id (M17.3) — a Map for the same reason AgentState is one:
+ * three module singletons could only ever describe a single child, so the mock
+ * could not reproduce the concurrency the real backend now has. */
+const mockRuns = new Map<number, MockRun>();
 let mockRunSeq = 0;
-let mockRunId: number | null = null;
 
 /** Start a run. Resolves to the RUN ID whose tag every event of this run
  * carries — the same id stopAgent reports back when the run is killed. */
 export async function runAgent(vault: string, options: RunOptions): Promise<number> {
   if (!inTauri()) {
     const run = ++mockRunSeq;
-    mockRunId = run;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.
     // Tagging happens here for the same reason it happens in agent.rs: the
     // script only knows its own stream, the runtime knows which run it is.
-    mockRun = runMockAgent(options.message, (event) => emitLocal({ ...event, run }), {
-      onUiAction: emitUiAction,
-    });
+    const mock = runMockAgent(
+      options.message,
+      (event) => {
+        emitLocal({ ...event, run });
+        // Reap at the terminal event, mirroring the reader thread's finish().
+        if (event.kind === 'Done') mockRuns.delete(run);
+      },
+      { onUiAction: emitUiAction },
+    );
+    mockRuns.set(run, mock);
     return run;
   }
   return invokeTauri<number>('run_agent', {
@@ -86,24 +133,44 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       attended: options.attended,
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
+      allowed_tools: options.allowedTools ?? null,
+      connector_names: options.connectorNames ?? null,
+      scope: options.scope ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },
   });
 }
 
-/** Kill the current run. Resolves to the killed run's id (null when nothing
- * was running) so the caller can drop that run's trailing events — its
- * terminal Done arrives AFTER the kill (PR #5 review). */
-export async function stopAgent(): Promise<number | null> {
+/**
+ * Kill ONE run (M17.3). `false` means it had already finished — a race, not a
+ * failure.
+ *
+ * This used to take no argument and kill whatever child existed, which was
+ * only ever safe because there could be one. It is why closing the assistant
+ * aborted a background distill, and why opening a stored conversation did too.
+ */
+export async function stopAgent(run: number): Promise<boolean> {
   if (!inTauri()) {
-    mockRun?.cancel();
-    mockRun = null;
-    const dead = mockRunId;
-    mockRunId = null;
+    const mock = mockRuns.get(run);
+    if (mock === undefined) return false;
+    mock.cancel();
+    mockRuns.delete(run);
+    return true;
+  }
+  return invokeTauri<boolean>('stop_agent', { run });
+}
+
+/** Kill everything. For shutdown and vault switches — never for "I am done
+ * with this turn", which is what stopAgent(run) is for. */
+export async function stopAllAgents(): Promise<number[]> {
+  if (!inTauri()) {
+    const dead = [...mockRuns.keys()];
+    for (const mock of mockRuns.values()) mock.cancel();
+    mockRuns.clear();
     return dead;
   }
-  return invokeTauri<number | null>('stop_agent');
+  return invokeTauri<number[]>('stop_all_agents');
 }
 
 // --- Event fan-out ---------------------------------------------------------
@@ -120,9 +187,22 @@ function emitLocal(event: AgentEvent): void {
  * Subscribe to the agent stream. The Tauri listener is bound once for the
  * app's lifetime and fanned out here — re-binding per subscriber would
  * deliver each event as many times as the panel had mounted.
+ *
+ * With no `run`, every event is delivered and the subscriber self-filters —
+ * how the whole app worked before M17.3, and still what the UI-action bridge
+ * and any future task list want. Passing a run makes the subscription belong
+ * to that run: the reason `deadRuns` had to exist was that a listener could
+ * not say which stream was its own, so it had to recognise other runs'
+ * terminal events and refuse them by hand.
  */
-export function onAgentEvent(listener: Listener): () => void {
-  listeners.add(listener);
+export function onAgentEvent(listener: Listener, run?: number): () => void {
+  const scoped: Listener =
+    run === undefined
+      ? listener
+      : (event) => {
+          if (event.run === run) listener(event);
+        };
+  listeners.add(scoped);
   if (inTauri() && !bound) {
     bound = true;
     void (async () => {
@@ -133,7 +213,7 @@ export function onAgentEvent(listener: Listener): () => void {
       bound = false;
     });
   }
-  return () => listeners.delete(listener);
+  return () => listeners.delete(scoped);
 }
 
 type UiListener = (action: UiAction) => void;

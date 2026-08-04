@@ -127,3 +127,147 @@ describe('skillIndex', () => {
     expect(line).toContain('/bare;');
   });
 });
+
+/**
+ * M17.8 — a skill that can be renamed.
+ *
+ * Nothing about a skill was stable before this: the handle came from the
+ * title, and the run ledger came from the path. Renaming one record therefore
+ * retired a handle the user had written down AND, because handles are
+ * de-duplicated in title order, could hand a DIFFERENT skill's `-2` suffix to
+ * somebody else.
+ */
+describe('a declared slug is the skill’s identity', () => {
+  it('keeps the handle across a rename', () => {
+    const before = skill('Risk sweep', { properties: { slug: 'sweep' } });
+    const after = skill('Risk review', {
+      path: 'records/skills/risk-review.md',
+      properties: { slug: 'sweep' },
+    });
+    expect(listSkills([before])[0].name).toBe('sweep');
+    expect(listSkills([after])[0].name).toBe('sweep');
+  });
+
+  it('keeps the ledger key across a rename, so no catch-up run is owed', () => {
+    // Renaming a record renames its FILE, so a path-keyed ledger forgot every
+    // fire the schedule had answered and ran one catch-up for the privilege.
+    const before = skill('Risk sweep', { properties: { slug: 'sweep' } });
+    const after = skill('Risk review', {
+      path: 'records/skills/risk-review.md',
+      properties: { slug: 'sweep' },
+    });
+    expect(listSkills([before])[0].id).toBe(listSkills([after])[0].id);
+  });
+
+  it('falls back to the path when nothing is declared, so no vault is migrated', () => {
+    const plain = skill('Weekly review');
+    expect(listSkills([plain])[0].id).toBe('records/skills/weekly-review.md');
+  });
+
+  it('never lets a title-derived name steal a handle somebody declared', () => {
+    // Claimed in a first pass, before any title is slugified: "Audit" sorts
+    // first, so a single pass would hand it `audit` and suffix the record that
+    // asked for that handle by name.
+    const entries = [skill('Audit'), skill('Zed', { properties: { slug: 'audit' } })];
+    const byTitle = Object.fromEntries(listSkills(entries).map((s) => [s.title, s.name]));
+    expect(byTitle.Zed).toBe('audit');
+    expect(byTitle.Audit).toBe('audit-2');
+  });
+
+  it('gives a duplicate declaration to the first in title order rather than suffixing', () => {
+    // Suffixing would silently rewrite a handle the author wrote down. The
+    // duplicate is their mistake, and it stays visible as one.
+    const entries = [
+      skill('Alpha', { properties: { slug: 'dup' } }),
+      skill('Beta', { properties: { slug: 'dup' } }),
+    ];
+    const byTitle = Object.fromEntries(listSkills(entries).map((s) => [s.title, s.name]));
+    expect(byTitle.Alpha).toBe('dup');
+    expect(byTitle.Beta).toBe('beta');
+  });
+});
+
+describe('declared arguments', () => {
+  const withArgs = skill('Sweep', {
+    properties: {
+      description: 'Sweep it.',
+      arguments: [
+        { name: 'project', description: 'Which project', required: true },
+        'since',
+        { nonsense: true },
+        { name: '   ' },
+      ],
+    },
+  });
+
+  it('parses both shapes and skips what it cannot read', () => {
+    expect(listSkills([withArgs])[0].arguments).toEqual([
+      { name: 'project', description: 'Which project', required: true },
+      { name: 'since', description: '', required: false },
+    ]);
+  });
+
+  it('shows required and optional differently in the catalogue', () => {
+    expect(skillIndex(listSkills([withArgs]))).toContain('/sweep <project> [since]');
+  });
+
+  it('names them in the prompt, and asks rather than inventing when required input is missing', () => {
+    const [ref] = listSkills([withArgs]);
+    const prompt = skillPrompt(ref, '---\ntype: Skill\n---\nBody.', '');
+    expect(prompt).toContain('project (required) — Which project');
+    expect(prompt).toContain('ask for what you need');
+  });
+
+  it('says nothing about inputs when a skill declares none', () => {
+    const [ref] = listSkills([skill('Plain')]);
+    expect(skillPrompt(ref, '---\ntype: Skill\n---\nBody.', '')).not.toContain('declares inputs');
+  });
+});
+
+describe('allowed-tools is a narrowing, and only a narrowing', () => {
+  it('is null when undeclared — undeclared means "do not narrow"', () => {
+    expect(listSkills([skill('Plain')])[0].allowedTools).toBeNull();
+  });
+
+  it('accepts a list or a comma-separated string', () => {
+    const asList = skill('A', { properties: { 'allowed-tools': ['search_notes', 'get_note'] } });
+    const asText = skill('B', { properties: { 'allowed-tools': 'search_notes, get_note' } });
+    expect(listSkills([asList])[0].allowedTools).toEqual(['search_notes', 'get_note']);
+    expect(listSkills([asText])[0].allowedTools).toEqual(['search_notes', 'get_note']);
+  });
+
+  it('honours an EMPTY declaration as "narrow to nothing"', () => {
+    // Distinct from undeclared on purpose: a skill that wants a read-only turn
+    // has to be able to say so, and [] is how it says it.
+    expect(
+      listSkills([skill('C', { properties: { 'allowed-tools': [] } })])[0].allowedTools,
+    ).toEqual([]);
+  });
+});
+
+describe('the catalogue is budgeted', () => {
+  const many = Array.from({ length: 60 }, (_, i) =>
+    skill(`Skill ${String(i).padStart(2, '0')}`, {
+      path: `records/skills/s${i}.md`,
+      properties: { description: 'A reasonably wordy description of what this skill does.' },
+    }),
+  );
+
+  it('stops well short of spending the context window on skills it is not running', () => {
+    const index = skillIndex(listSkills(many))!;
+    expect(index.length).toBeLessThan(2_000);
+  });
+
+  it('says how many it dropped instead of reading as the complete set', () => {
+    // A silently truncated catalogue makes the agent tell the user a skill
+    // does not exist.
+    const index = skillIndex(listSkills(many))!;
+    expect(index).toMatch(/\d+ more skills are defined but not listed here/);
+    expect(index).toContain('search_notes');
+  });
+
+  it('always ships at least one, however long its description', () => {
+    const wordy = skill('Verbose', { properties: { description: 'x'.repeat(5_000) } });
+    expect(skillIndex(listSkills([wordy]))).toContain('/verbose');
+  });
+});

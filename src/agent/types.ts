@@ -1,3 +1,5 @@
+import type { Place } from '@/engine/place';
+
 /**
  * Local agent types (M6). Mirrors the normalized events emitted by
  * src-tauri/src/agent.rs — the CLI's own wire format is richer and changes
@@ -35,6 +37,29 @@ export interface McpInfo {
   token: string;
 }
 
+/**
+ * What the Claude Code CLI has stored about this vault OUTSIDE it (M17.14).
+ *
+ * Cerebro spawns the CLI with cwd = the vault, and it files its own session
+ * transcripts — and its auto-memory — under a slug derived from that path, in
+ * the user's home directory. Vault content therefore accumulates outside the
+ * vault: outside its git, outside its backups, outside every guard in
+ * knowledge.rs.
+ *
+ * It cannot be switched off without breaking the product: `--bare` is the only
+ * flag that skips auto-memory and it also stops the CLI reading the keychain,
+ * which is how the user is signed in at all. So the app names the directory
+ * and offers to empty it. A leak you can see and clear is a different thing
+ * from one nobody mentions.
+ */
+export interface CliWorkspace {
+  path: string;
+  exists: boolean;
+  sessions: number;
+  bytes: number;
+  memoryFiles: number;
+}
+
 /** What the agent did, shown inline in the transcript as an action card. */
 export interface ToolCall {
   id: string;
@@ -63,6 +88,25 @@ export interface Conversation {
   messages: ChatMessage[];
   createdAt: string;
   archived: boolean;
+  /**
+   * Where this conversation was had (M17.5), stamped at its FIRST turn — a
+   * thread with nothing in it is not about anywhere yet, and anchoring an
+   * empty one would file it under whatever surface happened to be open when
+   * the panel was.
+   *
+   * Null on every thread written before M17.5, and on any whose stored place
+   * this build cannot read (`engine/place.isPlace`).
+   */
+  place?: Place | null;
+  /**
+   * What that place was CALLED when the thread was anchored.
+   *
+   * Stored rather than re-derived because a thread outlives the List it was
+   * about: re-resolving a deleted List gives its id, while the label recorded
+   * at the time still says "Roadmap". The place itself stays the identity —
+   * this is only what to print.
+   */
+  placeLabel?: string;
 }
 
 export interface ChatMessage {

@@ -149,6 +149,7 @@ export function DocSidePanel({
                 entry={entry}
                 variant="panel"
                 askPrompt={augmentDocPrompt(entry.path, entry.title)}
+                askSubject={entry.path}
                 askLabel="What am I missing?"
               />
             </div>

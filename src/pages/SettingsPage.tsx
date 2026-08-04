@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { CliWorkspaceRow } from '@/pages/CliWorkspaceRow';
 import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
@@ -66,7 +67,7 @@ export function SettingsPage() {
   const setIssuePrefixes = useUiStore((s) => s.setIssuePrefixes);
   const autoLearn = useUiStore((s) => s.autoLearn);
   const setAutoLearn = useUiStore((s) => s.setAutoLearn);
-  const learningPath = useUiStore((s) => s.learningPath);
+  const reading = useUiStore((s) => s.runs.find((r) => r.owner === 'job')?.path ?? null);
   const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const entries = useVaultStore((s) => s.entries);
@@ -201,6 +202,7 @@ export function SettingsPage() {
             onChange={setConnectors}
           />
           {connectors && <ConnectorSettings />}
+          <CliWorkspaceRow />
           <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-n-800">Issue keys</div>
@@ -237,8 +239,8 @@ export function SettingsPage() {
           />
           {pending > 0 && (
             <p className="m-0 mb-2 text-xs leading-[16px] text-n-500">
-              {learningPath !== null
-                ? `Reading ${learningPath} now.`
+              {reading !== null
+                ? `Reading ${reading} now.`
                 : `${pending} background job${pending === 1 ? '' : 's'} waiting.`}
             </p>
           )}

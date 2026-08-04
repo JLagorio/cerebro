@@ -138,22 +138,71 @@ export function agentRunPrompt(
   path: string,
   title: string,
   actor: string,
-  memory: string,
+  memory: { recent: string; preferences: string },
   body: string,
+  /** What woke this run, when an event did (M17.12) — layer TWO of the
+   * trigger. Layer one already passed deterministically; this is the model
+   * gate, and it comes with an explicit permission to do nothing. */
+  trigger?: { subject: string; because: string; ask?: string; do?: string } | null,
+  /** Folders this run may write inside (M17.13). Stated so the agent plans
+   * inside its boundary rather than discovering it as a tool error. */
+  scope?: readonly string[] | null,
 ): string {
   return [
-    `You are "${title}", the agent defined at ${path} in this vault, on an unattended scheduled run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
+    `You are "${title}", the agent defined at ${path} in this vault, on an unattended ${trigger == null ? 'scheduled' : 'event-triggered'} run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
     '',
+    ...(trigger == null
+      ? []
+      : [
+          `You were woken because ${trigger.because}: ${trigger.subject}. Read it first.`,
+          ...(trigger.ask === undefined
+            ? []
+            : [
+                `Before doing anything else, answer this for yourself: ${trigger.ask}`,
+                'If the answer is no, write nothing and stop. A run that correctly does nothing is a success, and this question exists precisely so that most wakings end here.',
+              ]),
+          // M18.5 — placed BEFORE the standing instructions and named as an
+          // addition to them, because the failure mode of per-trigger prose is
+          // a model that treats it as a replacement and forgets the agent's
+          // own rules. Said twice, in effect: here, and again by "Your
+          // instructions" arriving afterwards as the general case.
+          ...(trigger.do === undefined
+            ? []
+            : [
+                `For this waking in particular, on top of your standing instructions below: ${trigger.do}`,
+                'Your standing instructions still apply in full — this narrows what to do, it does not replace them.',
+              ]),
+          '',
+        ]),
+    ...(scope == null
+      ? []
+      : [
+          scope.length === 0
+            ? 'You are scoped to no folder at all: every write to a record will be refused. Say so in your memory and stop.'
+            : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
+          '',
+        ]),
     'Rules for unattended runs, which override anything your instructions say:',
     '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
     '- If a step would be destructive or needs an answer only the user has, skip it and note that in what you write.',
     '',
-    memory === ''
-      ? 'This is your first run — you have no memory yet.'
-      : `Your memory from previous runs:\n${memory}`,
+    // M17.14 — two tiers, in priority order, and the order is the point. What
+    // a person corrected outranks what the agent concluded about itself, every
+    // time; presenting them as one blob is how the second quietly overwrites
+    // the first.
+    ...(memory.preferences === ''
+      ? []
+      : [
+          `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
+          '',
+        ]),
+    memory.recent === ''
+      ? 'This is your first run — you have no working notes yet.'
+      : `Your working notes from previous runs:\n${memory.recent}`,
     '',
-    `Before you finish, rewrite your memory with update_frontmatter on ${path}, patching the \`memory\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+    `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+    'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',
     '',
     'Your instructions:',
     '',

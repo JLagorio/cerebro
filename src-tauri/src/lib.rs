@@ -6,6 +6,7 @@ pub mod git;
 pub mod git_commands;
 pub mod knowledge;
 pub mod mcp;
+pub mod search;
 pub mod vault;
 
 use std::path::{Path, PathBuf};
@@ -67,7 +68,8 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
 
 // The write commands below are the HUMAN path — every one of them is
 // reachable from the UI, so each guards the knowledge/ bundle (M5). The
-// agent's MCP tools call vault::write directly and are not gated here.
+// agent's MCP tools have their own, narrower boundary (M17.1): they reach
+// the bundle through `write_concept` alone. See mcp.rs.
 #[tauri::command(async)]
 fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
     knowledge::guard_human_write(&path)?;
@@ -160,6 +162,11 @@ fn rename_note(vault: String, from: String, to: String) -> Result<(), String> {
 
 #[tauri::command(async)]
 fn delete_note(vault: String, path: String) -> Result<(), String> {
+    // The one write command that never had this guard (M17.1). Read-only
+    // that a delete can empty is not read-only: every other door into the
+    // bundle was shut while this one let a concept — and its provenance —
+    // be thrown away outright.
+    knowledge::guard_human_write(&path)?;
     vault::write::delete_note(Path::new(&vault), &path)
 }
 
@@ -208,6 +215,17 @@ fn check_agent() -> agent::AgentStatus {
     agent::status()
 }
 
+/// What the CLI has stored about this vault OUTSIDE it (M17.14).
+#[tauri::command(async)]
+fn agent_workspace(vault: String) -> agent::CliWorkspace {
+    agent::cli_workspace(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn purge_agent_workspace(vault: String) -> Result<usize, String> {
+    agent::purge_cli_workspace(Path::new(&vault))
+}
+
 /// Start (or retarget) the loopback MCP endpoint and return its address. The
 /// token is handed to the CLI through a private config file; the frontend
 /// carries it only to pass it back into `run_agent`.
@@ -236,7 +254,10 @@ fn run_agent(
     // child was gone — where the outgoing run's trailing writes stamped as
     // the incoming run (PR #5 security review).
     let mut request = request;
-    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref())?);
+    // M17.13: the scope rides the same token. It is taken from the REQUEST,
+    // which the app builds from the Agent record — the CLI never sees it and
+    // therefore cannot argue with it.
+    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref(), request.scope.clone())?);
     let dir = config_dir(&app)?;
     agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
 }
@@ -259,8 +280,20 @@ fn save_connectors(vault: String, json: String) -> Result<(), String> {
 /// Returns the killed run's id (if anything was running) so the frontend can
 /// recognize and drop that run's trailing events (PR #5 review).
 #[tauri::command(async)]
-fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<Option<u64>, String> {
-    state.stop()
+/// Stop ONE run (M17.3). `false` means it had already finished — a race, not
+/// an error. Taking a run id is the point: a global kill was safe only while
+/// there could be one child, and it is how closing the assistant used to
+/// abort a background distill that had nothing to do with it.
+fn stop_agent(state: tauri::State<'_, agent::AgentState>, run: u64) -> Result<bool, String> {
+    state.stop(run)
+}
+
+/// Stop everything, reporting what died. For shutdown and vault switches: a
+/// child left pointed at the vault you just closed is worse than one
+/// interrupted.
+#[tauri::command(async)]
+fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
+    state.stop_all()
 }
 
 #[tauri::command(async)]
@@ -305,9 +338,12 @@ pub fn run() {
             read_connectors,
             save_connectors,
             check_agent,
+            agent_workspace,
+            purge_agent_workspace,
             start_mcp,
             run_agent,
             stop_agent,
+            stop_all_agents,
             // M9.4 — git tracking. Every command resolves the workspace
             // first, so a vault nested in a larger repo scopes correctly.
             git_commands::git_workspace_info,

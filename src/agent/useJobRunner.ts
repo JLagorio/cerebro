@@ -3,7 +3,12 @@ import { onAgentEvent, runAgent, startMcp } from './agentIpc';
 import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
+import { diffEntries, type VaultEvent } from '@/engine/events';
 import { jobQueue, unlearnableFiled, type AgentJob } from '@/engine/jobs';
+import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
+import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
+import type { Entry } from '@/engine/types';
+import { newRunId, shouldYield } from './runs';
 import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
 import { readNote } from '@/lib/ipc';
@@ -31,9 +36,13 @@ import { useVaultStore } from '@/stores/vaultStore';
  *    output is notes and concepts, visible where they are relevant. A
  *    scheduled skill that wants to say something writes it into the vault.
  *
- * 2. **There is one agent.** `AgentState` holds a single child process, so a
- *    background turn and a typed question cannot both be in flight. The runner
- *    yields: it starts only when nothing else is running.
+ * 2. **It yields.** This was once forced: `AgentState` held a single child, so
+ *    a background turn and a typed question could not both be in flight. Since
+ *    M17.3 they can, and the runner still holds off while anything else is
+ *    running — for a better reason. Someone waiting on a reply should not be
+ *    made to wait behind a distill, and the queue itself is unattended work,
+ *    so there is nothing to gain by draining more than one job at a time.
+ *    `runs.shouldYield` is the whole rule.
  *
  * 3. **It must not spin.** Every job is recorded in its ledger BEFORE the run
  *    — learn jobs by note version, scheduled runs by fire key — so a run that
@@ -60,7 +69,11 @@ export function useJobRunner(): void {
   const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const skillRuns = useUiStore((s) => s.skillRuns);
-  const agentBusy = useUiStore((s) => s.agentBusy);
+  const triggerRuns = useUiStore((s) => s.triggerRuns);
+  // M17.7: read off the run registry rather than off a shared boolean anybody
+  // could set. Also the signal that this runner is free again — `agentBusy`
+  // flipping back to false was what re-ran the effect below, by accident.
+  const yielding = useUiStore((s) => shouldYield(s.runs));
   const shell = useUiStore((s) => s.agentShellAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
@@ -105,6 +118,26 @@ export function useJobRunner(): void {
   // proceed.
   const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
 
+  /**
+   * What changed since the last scan (M17.12) — the trigger event source.
+   *
+   * The runner's own memory of what it has already looked at, rather than
+   * store state, and `null` until the first corpus arrives: a first scan must
+   * produce NOTHING, or launching the app reads as "every note in the vault
+   * was just created" and fires every trigger at once.
+   */
+  const seen = useRef<Entry[] | null>(null);
+  const [events, setEvents] = useState<VaultEvent[]>([]);
+  useEffect(() => {
+    if (entries.length === 0) return;
+    const next = diffEntries(seen.current, entries);
+    seen.current = entries;
+    // Replaced, never appended. An event the queue has already been offered
+    // and declined will not become interesting later, and a growing list would
+    // re-offer it on every scan for the rest of the session.
+    if (next.length > 0) setEvents(next);
+  }, [entries]);
+
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
     if (!autoLearn || vaultPath === null) return null;
@@ -118,6 +151,8 @@ export function useJobRunner(): void {
         skillRuns: skillRuns[vaultPath] ?? {},
         now,
         connectors,
+        events,
+        triggerRuns: triggerRuns[vaultPath] ?? {},
       }).find((j) => failedReads[vaultPath]?.[j.path] !== j.runKey) ?? null
     );
   }, [
@@ -126,76 +161,101 @@ export function useJobRunner(): void {
     connectors,
     entries,
     failedReads,
+    events,
     filed,
     now,
     skillRuns,
     today,
+    triggerRuns,
     vaultPath,
   ]);
 
-  // Owns the run: the event stream is shared with the chat, so both sides need
-  // to know whose turn the events belong to.
+  // Owns the run. M17.3: "whose events are these" is answered by the run id
+  // now, not by two hooks agreeing to take turns — this ref only tracks
+  // whether a job is in flight, so a second is not started on top of it.
   const running = useRef(false);
+  /** This job's entry in the run registry (M17.7). It carries the note being
+   * read, which is what `learningPath` was — now attached to the run doing the
+   * reading rather than to a global anybody could set. */
+  const task = useRef<string | null>(null);
+  /** What this run has written, for the run log (M17.15). Collected from the
+   * event stream rather than guessed from the prompt: "wrote nothing" is a
+   * real and common outcome and has to be distinguishable from "we did not
+   * look". */
+  const wrote = useRef<string[]>([]);
+  const logged = useRef<Omit<RunLogEntry, 'files' | 'status' | 'at' | 'id'> | null>(null);
+  const unsubscribe = useRef<(() => void) | null>(null);
   const mcp = useRef<McpInfo | null>(null);
+
+  const failure = useRef<string | null>(null);
 
   const finish = useCallback(() => {
     if (!running.current) return;
     running.current = false;
-    const ui = useUiStore.getState();
-    ui.setLearningPath(null);
-    ui.setAgentBusy(false);
+    unsubscribe.current?.();
+    unsubscribe.current = null;
+    if (task.current !== null) {
+      useUiStore.getState().endRun(task.current);
+      task.current = null;
+    }
+    // Recorded on the way out, once, whatever ended the run. A log that only
+    // captured successes would be a log of the runs that did not need one.
+    if (logged.current !== null) {
+      appendRunLog({
+        ...logged.current,
+        id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        at: new Date().toISOString(),
+        files: [...wrote.current],
+        status: failure.current === null ? 'ok' : 'failed',
+        ...(failure.current === null ? {} : { error: failure.current }),
+      });
+      logged.current = null;
+      wrote.current = [];
+      failure.current = null;
+    }
     // Whatever it just wrote is on disk and nowhere else until this runs.
     void rescan();
   }, [rescan]);
 
-  // The chat's release wait can take the stream by TIMEOUT: streamReleased
-  // clears learningPath itself when the killed child's terminal Done is lost
-  // (useAgentChat). That lost Done is the very event finish() rides, so
-  // waiting for a terminal event to drop this claim could wedge the runner
-  // for the session — `running` stuck true, no job ever scheduled again
-  // (PR #5 review). The takeover transition itself is the signal: the path
-  // going null while the claim is still held can only be the chat's timeout,
-  // because finish() drops the claim BEFORE clearing the path. Drop the
-  // claim and rescan; the busy flag is the chat's now — clearing it would
-  // let this runner read the agent as idle and start a run that replaces
-  // the chat's child mid-answer.
-  useEffect(
-    () =>
-      useUiStore.subscribe((state, prev) => {
-        if (prev.learningPath === null || state.learningPath !== null) return;
-        if (!running.current) return;
-        running.current = false;
-        void rescan().catch(() => undefined);
-      }),
-    [rescan],
-  );
-
-  useEffect(
-    () =>
-      onAgentEvent((event) => {
-        if (!running.current) return;
-        // `Error` is terminal for the turn but is followed by `Done`; ending on
-        // either is harmless because finish() is idempotent.
-        if (event.kind === 'Done' || event.kind === 'Error') finish();
-      }),
-    [finish],
-  );
+  // M17.3 deleted two whole mechanisms here. The chat used to PREEMPT this
+  // runner — kill its child, wait up to 5s for `learningPath` to clear, then
+  // take the single shared slot — and this hook needed a store subscriber to
+  // notice when that wait timed out and took the stream anyway, or it would
+  // wedge `running` true for the session. Both existed because there was one
+  // child. A background job and a typed question are now two runs, so neither
+  // has anything to hand over.
+  //
+  // The terminal-event subscription moved into the run itself (see below),
+  // scoped to its id: `Error` is terminal but is followed by `Done`, and
+  // finishing on either is harmless because finish() is idempotent.
 
   useEffect(() => {
-    if (next === null || vaultPath === null || agentBusy || running.current) return;
+    if (next === null || vaultPath === null || yielding || running.current) return;
     const job = next;
     const timer = setTimeout(() => {
       if (running.current) return;
       running.current = true;
       const ui = useUiStore.getState();
-      ui.setAgentBusy(true);
-      ui.setLearningPath(job.path);
+      const taskId = newRunId();
+      task.current = taskId;
+      ui.startRun({
+        id: taskId,
+        owner: 'job',
+        label: job.title,
+        // A background job is not standing anywhere — see the systemPrompt
+        // below, which tells it the same thing. What it IS about is the note.
+        place: null,
+        path: job.path,
+        conversationId: null,
+        run: null,
+        startedAt: Date.now(),
+      });
       // Recorded first, on purpose — see the header. The job SAYS which
       // ledger gates it (jobs.ts decides both sides); re-deriving that here
       // is how agent runs briefly looped forever. Fire-key jobs are the one
       // exception: they must read their record's body before anything else
       // can fail, so their record sits after that read, below.
-      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.path, job.runKey);
+      if (job.ledger === 'attempts') ui.recordLearnAttempt(job.key, job.runKey);
 
       // An agent job runs AS the agent: its record's identity in the
       // provenance stamps, its memory in the prompt, and shell only when the
@@ -211,14 +271,43 @@ export function useJobRunner(): void {
       void (async () => {
         let recorded = job.ledger === 'attempts';
         try {
+          // M17.12: an event run says what woke it and carries the trigger's
+          // `ask:` — layer two, reached only because layer one already passed
+          // deterministically, with no model consulted.
+          const event = job.runKey.startsWith('event:')
+            ? (events.find((e) => job.runKey.endsWith(`:${e.path}@${e.entry.modifiedAt}`)) ?? null)
+            : null;
+          const trigger =
+            event === null
+              ? null
+              : firstMatch(
+                  parseTriggers(
+                    useVaultStore.getState().entries.find((e) => e.path === job.path)?.properties
+                      .when,
+                  ),
+                  event,
+                );
+          const woken =
+            event === null || trigger === null
+              ? null
+              : {
+                  subject: event.path,
+                  because: describeTrigger(trigger)
+                    .replace(/^When /, '')
+                    .replace(/\.$/, ''),
+                  ...(trigger.ask === undefined ? {} : { ask: trigger.ask }),
+                  ...(trigger.do === undefined ? {} : { do: trigger.do }),
+                };
           const message =
             job.kind === 'agent'
               ? agentRunPrompt(
                   job.path,
                   job.title,
                   agent?.actor ?? 'process:agent',
-                  agent?.memory ?? '',
+                  agent?.memory ?? { recent: '', preferences: '' },
                   splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
+                  woken,
+                  agent?.scope ?? null,
                 )
               : job.kind === 'scheduled'
                 ? scheduledSkillPrompt(
@@ -247,10 +336,16 @@ export function useJobRunner(): void {
           // after the read, so a read that dies surrenders the key instead
           // of eating the whole period (PR #5 review).
           if (job.ledger === 'skillRuns') {
-            useUiStore.getState().recordSkillRun(vaultPath, job.path, job.runKey);
+            useUiStore.getState().recordSkillRun(vaultPath, job.key, job.runKey);
+            // The cooldown clock starts at the RUN, not at its end: an agent
+            // that watches a folder it also writes to would otherwise re-fire
+            // on its own output the moment it finished (M17.12).
+            if (job.runKey.startsWith('event:')) {
+              useUiStore.getState().recordTriggerRun(vaultPath, job.key, new Date().toISOString());
+            }
             recorded = true;
           }
-          await runAgent(vaultPath, {
+          const runId = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
             // The same rules the panel's agent gets — the conventions about
@@ -270,6 +365,11 @@ export function useJobRunner(): void {
             // a schedule is an Agent record declaring `tools: shell`, and
             // no record can grant itself what Settings denies.
             shell: job.kind === 'agent' && shell && (agent?.shell ?? false),
+            // M17.13/M17.8: the record's own declarations, enforced in Rust.
+            // Both are narrowings — neither can widen what Settings granted.
+            scope: agent?.scope ?? null,
+            allowedTools: agent?.allowedTools ?? null,
+            connectorNames: agent?.connectors ?? null,
             connectors,
             // Unattended, and it matters beyond bookkeeping: with connectors
             // on but no connectors.json, an attended turn falls back to the
@@ -281,6 +381,30 @@ export function useJobRunner(): void {
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
           });
+          // Scoped to THIS job's run (M17.3). The old subscription saw every
+          // event in the app and guessed with `running.current`, which is how
+          // a chat turn's Done could end a background job — and vice versa.
+          useUiStore.getState().attachChild(taskId, runId);
+          logged.current = {
+            owner: 'job',
+            label: job.title,
+            source: job.path,
+            trigger:
+              woken === null
+                ? job.kind === 'agent' || job.kind === 'scheduled'
+                  ? 'schedule'
+                  : job.kind
+                : `event: ${woken.because}`,
+            scope: agent?.scope ?? null,
+          };
+          unsubscribe.current = onAgentEvent((event) => {
+            if (event.kind === 'ToolStart') {
+              const path = writtenPath(event.tool_name, event.input ?? null);
+              if (path !== null && !wrote.current.includes(path)) wrote.current.push(path);
+            }
+            if (event.kind === 'Error') failure.current = event.message;
+            if (event.kind === 'Done' || event.kind === 'Error') finish();
+          }, runId);
         } catch {
           // Silent by construction. A background runner that could raise a
           // toast would be a notification, which is the one thing this whole
@@ -296,7 +420,10 @@ export function useJobRunner(): void {
       })();
     }, SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [agentBusy, connectors, finish, issuePrefixes, next, shell, vaultPath]);
+    // `events` is read inside the timer to describe what woke a run. Listed
+    // because it is genuinely read — and harmless as a dep: it only changes
+    // when a scan produced something new, which is also when `next` changes.
+  }, [connectors, events, finish, issuePrefixes, next, shell, vaultPath, yielding]);
 }
 
 /** Mounts the runner where its minute tick re-renders nothing but itself. */

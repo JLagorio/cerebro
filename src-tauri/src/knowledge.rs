@@ -4,13 +4,22 @@
 //! knowledge base. Humans read and VERIFY it; they do not edit it. That
 //! boundary is enforced here, at the IPC layer, rather than by disabling
 //! buttons in the UI — a disabled button is a suggestion, a rejected
-//! command is a rule. The agent's own tool path calls `vault::write`
-//! directly and is unaffected.
+//! command is a rule.
 //!
 //! Verification is the one exception, and it is deliberately narrow:
 //! `verify_concept` may touch the `verified` key and nothing else. Without
 //! it the format's `human-reviewed` trust tier would be unreachable and the
 //! whole provenance ledger would be decorative.
+//!
+//! The AGENT has a boundary too, and until M17.1 it had none (this module
+//! used to say its tool path "calls `vault::write` directly and is
+//! unaffected", which was the whole problem). `write_concept` refuses a
+//! `verified` field and stamps `generated` server-side, so the model cannot
+//! self-certify — but `create_note`, `update_frontmatter` and `append_to_note`
+//! reached the same files with no such check, which made the refusal a
+//! formality anyone could route around. `guard_agent_write` closes the other
+//! three doors, so `write_concept` is what it always claimed to be: the only
+//! way into the bundle.
 
 use serde_json::{Map, Value};
 
@@ -158,6 +167,27 @@ pub fn guard_human_write(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Reject an AGENT write that reaches into the bundle by any door other than
+/// `write_concept` (M17.1).
+///
+/// `write_concept` is the only tool that refuses a `verified` field and stamps
+/// `generated` from the run's actor. Every guarantee the trust model makes —
+/// that a tier is derived, that provenance is server-side, that the human's
+/// stamp is the human's — rests on it being the ONLY writer. It was not:
+/// `update_frontmatter` could patch `verified` straight onto a concept,
+/// `create_note` could author one pre-stamped, and `append_to_note` could
+/// grow a body with no provenance at all.
+pub fn guard_agent_write(path: &str) -> Result<(), String> {
+    if is_knowledge_path(path) {
+        return Err(AGENT_USE_WRITE_CONCEPT.to_string());
+    }
+    Ok(())
+}
+
+const AGENT_USE_WRITE_CONCEPT: &str =
+    "knowledge/ is written through write_concept only, which records provenance. \
+Use write_concept for concepts; `verified` is the user's stamp and is never yours to set.";
+
 /// A move must be refused from BOTH sides: dragging a concept out would
 /// strip it of the boundary, dragging a note in would smuggle human content
 /// into the agent's corpus.
@@ -275,6 +305,19 @@ mod tests {
     }
 
     const REL: &str = "knowledge/playbooks/cutover.md";
+
+    #[test]
+    fn the_agent_reaches_the_bundle_through_write_concept_only() {
+        // write_concept refuses `verified` and stamps `generated` itself. That
+        // is only a guarantee while it is the ONLY writer (M17.1).
+        assert!(guard_agent_write(REL).is_err());
+        assert!(guard_agent_write("knowledge").is_err());
+        assert!(guard_agent_write("knowledge/index.md").is_err());
+        // Everything outside the bundle stays the agent's to write.
+        assert!(guard_agent_write("records/decisions/d-1.md").is_ok());
+        // The trailing-slash rule holds here too: a sibling is not the bundle.
+        assert!(guard_agent_write("knowledge-archive/old.md").is_ok());
+    }
 
     #[test]
     fn writes_a_whole_log_when_none_exists() {

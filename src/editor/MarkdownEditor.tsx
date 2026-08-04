@@ -9,6 +9,9 @@ import {
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
 import { codeBlockOptions } from '@blocknote/code-block';
+import { onAgentEvent, runAgent, startMcp } from '@/agent/agentIpc';
+import { AskAiPopover } from '@/editor/AskAiPopover';
+import { AiFormattingToolbar, type Preset } from '@/editor/SelectionToolbar';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
   AddBlockButton,
@@ -30,7 +33,7 @@ import { readNote } from '@/lib/ipc';
 import { isTemplate, listTemplates, templateDisplayName, todayIso } from '@/lib/templates';
 import { useUiStore } from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
-import { CalloutBlock, MermaidBlock } from './blocks';
+import { AiBlock, CalloutBlock, MermaidBlock } from './blocks';
 import { AssigneeChip, DueChip, WikilinkChip } from './chips';
 import { buildOutline } from './DocOutline';
 import { blocksToMarkdown, isLossyImport, markdownToBlocks } from './markdown';
@@ -42,6 +45,7 @@ export const cerebroSchema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
     codeBlock: createCodeBlockSpec(codeBlockOptions),
+    ai: AiBlock(),
     callout: CalloutBlock(),
     mermaid: MermaidBlock(),
   },
@@ -192,6 +196,31 @@ export function MarkdownEditor({
   const isPerson = useCallback((e: Entry) => e.type !== null && peopleSet.has(e.type), [peopleSet]);
   const toast = useUiStore((s) => s.toast);
   const [loaded, setLoaded] = useState(false);
+  /**
+   * Ask AI on the selection (M17.16), opened with Cmd/Ctrl-K.
+   *
+   * The selected TEXT is captured when the popover opens, not read when it
+   * closes: the user is about to type into an input, which collapses the
+   * editor selection the moment focus leaves. Holding the string is also what
+   * lets the rewrite be diffed against exactly what was shown.
+   */
+  const [asking, setAsking] = useState<{
+    text: string;
+    x: number;
+    y: number;
+    preset?: string;
+  } | null>(null);
+  /**
+   * The range the rewrite will replace, cloned when the popover OPENS.
+   *
+   * Not read back at apply time. Opening the popover moves focus into its
+   * input, which collapses the document selection — so by the time there is a
+   * decision to apply, `window.getSelection()` describes the text box the user
+   * typed the instruction into, not the passage they picked. A cloned Range
+   * keeps live node references, so it survives the editor re-rendering around
+   * an untouched passage.
+   */
+  const target = useRef<Range | null>(null);
   // Assign-task popover (M2.x feedback): opened from the checklist row's
   // side-menu button, floats NEXT TO the task line (not a modal); writes
   // assignee/due chips into that block.
@@ -385,6 +414,14 @@ export function MarkdownEditor({
 
   const blockSlashItems = (): DefaultReactSuggestionItem[] => [
     {
+      title: 'AI block',
+      subtext: 'A standing question — a summary, the open questions — you can ask again',
+      group: 'Advanced blocks',
+      aliases: ['ai', 'summary', 'summarise', 'summarize', 'questions', 'actions'],
+      icon: <Icon name="sparkles" size={14} />,
+      onItemClick: () => insertBlockAtCursor({ type: 'ai', props: { prompt: '', generated: '' } }),
+    },
+    {
       title: 'Callout',
       subtext: 'Highlighted note — info, tip, warning…',
       group: 'Advanced blocks',
@@ -490,8 +527,152 @@ export function MarkdownEditor({
     editor.updateBlock(block, { content: [...rest, ...spaced] as never });
   };
 
+  /**
+   * Answer an AI block (M17.18).
+   *
+   * The block dispatches an event rather than calling the agent itself, so
+   * blocks.tsx stays free of app state and can be rendered in a test with no
+   * store behind it. The run is granted no tools for the same reason a rewrite
+   * is (M17.16): it transforms text that is already in the prompt, and a run
+   * that could call open_note would navigate the reader away from the block
+   * they are watching.
+   */
+  useEffect(() => {
+    const onRun = (event: Event) => {
+      const { id, prompt } = (event as CustomEvent<{ id: string; prompt: string }>).detail;
+      if (vaultPath === null || prompt.trim() === '') return;
+      const block = editor.getBlock(id);
+      if (block === undefined) return;
+      void (async () => {
+        try {
+          const document = await blocksToMarkdown(editor);
+          const mcp = await startMcp(vaultPath);
+          const runId = await runAgent(vaultPath, {
+            message: [
+              `Answer this about the document below: ${prompt.trim()}`,
+              '',
+              'Return only the answer, as markdown, with no preamble and no code fence.',
+              'If the document does not support an answer, say that in one line rather than inventing one.',
+              '',
+              document,
+            ].join('\n'),
+            systemPrompt:
+              'You answer a standing question about a document the user is writing. Return only the answer.',
+            sessionId: null,
+            model: null,
+            shell: false,
+            connectors: false,
+            attended: true,
+            allowedTools: [],
+            mcp,
+          });
+          let text = '';
+          const stop = onAgentEvent((e) => {
+            if (e.kind === 'TextDelta') text += e.text;
+            if (e.kind === 'Result' && e.text.trim() !== '') text = e.text;
+            if (e.kind === 'Error') {
+              toast(e.message);
+              stop();
+            }
+            if (e.kind === 'Done') {
+              stop();
+              const clean = text.trim().replace(/^```[a-z]*\n?|\n?```$/g, '');
+              const current = editor.getBlock(id);
+              if (current === undefined || clean === '') return;
+              // One edit, so it is one undo step and one save — the same
+              // reason the rewrite is not streamed in.
+              editor.updateBlock(current, {
+                props: { prompt, generated: todayIso() },
+                content: clean,
+              } as never);
+              scheduleEmit();
+            }
+          }, runId);
+        } catch (err) {
+          toast(err instanceof Error ? err.message : String(err));
+        }
+      })();
+    };
+    window.addEventListener('cerebro:ai-block-run', onRun);
+    return () => window.removeEventListener('cerebro:ai-block-run', onRun);
+    // `scheduleEmit` is deliberately not a dep: it is redefined every render
+    // (it closes over the debounce timer), and listing it would tear down and
+    // re-add the listener on every keystroke. The handler only calls it, and
+    // the version it captures debounces onto the same ref either way.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, vaultPath, toast]);
+
+  // Cmd/Ctrl-K over a selection. Bound on the container rather than the
+  // window so it only fires for the editor that has focus — two editors are on
+  // screen at once whenever the record panel is open beside a doc.
+  const onEditorKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'k' || !(e.metaKey || e.ctrlKey) || readOnly) return;
+    const text = window.getSelection()?.toString() ?? '';
+    // Nothing selected is not an error — it is the other feature (a slash
+    // menu), and stealing the keystroke to show an empty rewrite would be
+    // worse than not binding it.
+    if (text.trim() === '') return;
+    e.preventDefault();
+    const live = window.getSelection()?.getRangeAt(0);
+    target.current = live?.cloneRange() ?? null;
+    const rect = live?.getBoundingClientRect();
+    setAsking({
+      text,
+      x: Math.min(rect?.left ?? 80, window.innerWidth - 440),
+      y: (rect?.bottom ?? 80) + 6,
+    });
+  };
+
+  /**
+   * Open the rewrite surface from the toolbar.
+   *
+   * The DOM range is saved into `asking` here, while it still exists: clicking
+   * the bar moves focus, and by the time the popover mounts the selection the
+   * user made is gone. Same reason Cmd-K captures the string rather than
+   * reading it back later.
+   */
+  const askFromToolbar = (preset?: Preset) => {
+    const live = window.getSelection();
+    if (live === null || live.rangeCount === 0 || live.isCollapsed) return;
+    const text = live.toString();
+    if (text.trim() === '') return;
+    const range = live.getRangeAt(0);
+    target.current = range.cloneRange();
+    const rect = range.getBoundingClientRect();
+    setAsking({
+      text,
+      x: Math.min(rect.left, window.innerWidth - 440),
+      y: rect.bottom + 8,
+      preset: preset?.instruction,
+    });
+  };
+
+  /**
+   * Replace the selected text with the decided passage.
+   *
+   * Through the DOM selection rather than by block id, because the selection
+   * may span several blocks and part of one — "rewrite this sentence" is the
+   * common case, and a block-granular replace would take the paragraph. One
+   * edit, so it is one undo step and one debounce, which is the whole reason
+   * the rewrite is not streamed in.
+   */
+  const replaceSelection = (text: string) => {
+    const range = target.current;
+    if (range === null) return;
+    range.deleteContents();
+    range.insertNode(document.createTextNode(text));
+    // The range now describes the text just inserted; dropping it stops a
+    // second Apply — from a stale popover — writing into it again.
+    target.current = null;
+    scheduleEmit();
+  };
+
   return (
-    <div data-testid="markdown-editor" className="cerebro-editor min-h-0 flex-1">
+    <div
+      data-testid="markdown-editor"
+      className="cerebro-editor min-h-0 flex-1"
+      onKeyDown={onEditorKeyDown}
+    >
       {loaded && (
         <BlockNoteView
           editor={editor}
@@ -500,6 +681,10 @@ export function MarkdownEditor({
           onChange={scheduleEmit}
           sideMenu={false}
           slashMenu={false}
+          // M18: ours replaces it (AI first, then everything it would have
+          // rendered). Left on, BlockNote mounts a SECOND controller and two
+          // toolbars stack on the same selection.
+          formattingToolbar={false}
         >
           <SuggestionMenuController
             triggerCharacter="@"
@@ -541,6 +726,10 @@ export function MarkdownEditor({
               )
             }
           />
+          {/* M18: AI at the head of the editor's OWN formatting toolbar. A
+              second floating bar beside BlockNote's fought it for the same few
+              pixels on every selection. */}
+          {!readOnly && <AiFormattingToolbar onAsk={askFromToolbar} />}
           <SideMenuController
             sideMenu={(props) => (
               <SideMenu {...props}>
@@ -551,6 +740,28 @@ export function MarkdownEditor({
             )}
           />
         </BlockNoteView>
+      )}
+      {asking !== null && (
+        <div
+          className="fixed inset-0 z-40"
+          onMouseDown={() => setAsking(null)}
+          onWheel={(e) => {
+            if (e.target === e.currentTarget) setAsking(null);
+          }}
+        >
+          <div
+            className="absolute"
+            style={{ left: asking.x, top: asking.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <AskAiPopover
+              selection={asking.text}
+              preset={asking.preset}
+              onReplace={replaceSelection}
+              onClose={() => setAsking(null)}
+            />
+          </div>
+        </div>
       )}
       {assign !== null && (
         // Anchored popover, not a modal — it floats beside the task line

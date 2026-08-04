@@ -5,22 +5,40 @@ const handlers: Array<(event: unknown) => void> = [];
 vi.mock('./agentIpc', () => ({
   runAgent: vi.fn(async () => 8),
   startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
-  stopAgent: vi.fn(async () => null),
-  onAgentEvent: vi.fn((handler: (event: unknown) => void) => {
-    handlers.push(handler);
+  stopAgent: vi.fn(async () => true),
+  // Mirrors the real fan-out (M17.3): a subscriber that names a run sees only
+  // that run's events. Wrapping here rather than filtering in each test is
+  // the point — the scoping is the behaviour under test, so the harness must
+  // not be more permissive than production.
+  onAgentEvent: vi.fn((handler: (event: unknown) => void, run?: number) => {
+    const scoped =
+      run === undefined
+        ? handler
+        : (event: unknown) => {
+            if ((event as { run?: number }).run === run) handler(event);
+          };
+    handlers.push(scoped);
     return () => {
-      const i = handlers.indexOf(handler);
+      const i = handlers.indexOf(scoped);
       if (i >= 0) handlers.splice(i, 1);
     };
   }),
 }));
 
 import * as agentIpc from './agentIpc';
-import { useAgentChat } from './useAgentChat';
+import { useAgentChat, type TurnContext } from './useAgentChat';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
+
+/** A turn's context (M17.6/M17.7). Most tests care only about the prompt. */
+const turnOf = (systemPrompt: string): TurnContext => ({
+  systemPrompt,
+  place: null,
+  conversationId: 'c-1',
+});
+const turn = (systemPrompt: string) => () => turnOf(systemPrompt);
 
 /**
  * The seam that makes skills real (M13.1): the transcript shows what was
@@ -36,8 +54,37 @@ describe('useAgentChat send expansion', () => {
     useVaultStore.setState({ vaultPath: '/vault' });
   });
 
+  it('freezes the context the question was asked in (M17.6)', async () => {
+    // The prompt is a getter because the panel rebuilds it from context chips,
+    // the vault, and the open record — all of which move while a send is
+    // parked on a skill expansion and the MCP handshake. Reading it after
+    // those awaits would send the context the user drifted INTO, which is the
+    // whole complaint: "it confuses the AI".
+    let context = 'context: Roadmap';
+    let release = (_: string) => {};
+    const expansion = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const { result } = renderHook(() => useAgentChat(() => turnOf(context), opts, null));
+
+    act(() => result.current.send('revise this', () => expansion));
+    // The user walks somewhere else while the expansion is still in flight.
+    context = 'context: Inbox';
+    await act(async () => {
+      release('EXPANDED');
+      await expansion;
+    });
+
+    await vi.waitFor(() =>
+      expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
+        '/vault',
+        expect.objectContaining({ systemPrompt: 'context: Roadmap' }),
+      ),
+    );
+  });
+
   it('shows the typed text but runs the expanded message', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/weekly-review', () => Promise.resolve('EXPANDED BODY')));
     expect(result.current.messages[0].text).toBe('/weekly-review');
     await vi.waitFor(() =>
@@ -49,7 +96,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('falls back to sending the typed text when the expansion rejects', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/gone', () => Promise.reject(new Error('unreadable'))));
     await vi.waitFor(() =>
       expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
@@ -60,7 +107,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('appends the turn synchronously — a pending expansion leaves no window to interleave', () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/slow', () => new Promise<string>(() => undefined)));
     // Both bubbles exist and streaming is up before the expansion resolves,
     // so a second send sees a busy conversation rather than an idle one.
@@ -69,7 +116,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('still accepts a plain pre-expanded string', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('shown', 'sent'));
     expect(result.current.messages[0].text).toBe('shown');
     await vi.waitFor(() =>
@@ -84,7 +131,7 @@ describe('useAgentChat send expansion', () => {
     // `attended` gates connector_context's absent-file branch (PR #5
     // security review): a person typed this turn and is watching it, which
     // is what makes inheriting their global MCP config defensible at all.
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('hello'));
     await vi.waitFor(() =>
       expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
@@ -100,7 +147,7 @@ describe('useAgentChat send expansion', () => {
     // it would resume, re-claim the stream, and spawn a child the user
     // already cancelled (PR #5 review).
     let release: (body: string) => void = () => undefined;
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() =>
       result.current.send(
         '/slow',
@@ -127,7 +174,7 @@ describe('useAgentChat send expansion', () => {
 
   it('a cancelled send does not wedge the next one', async () => {
     let release: (body: string) => void = () => undefined;
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() =>
       result.current.send(
         '/slow',
@@ -155,63 +202,16 @@ describe('useAgentChat send expansion', () => {
 });
 
 /**
- * Preempting the background runner (PR #5 review). Two races lived here:
- * send() fired runAgent before the runner's finish() released the stream
- * (the new turn's events were dropped while learningPath was set — empty
- * bubble), and finish() dropped agentBusy on its way out, letting the
- * runner read the agent as idle and schedule a background run that would
- * replace the chat's child mid-answer.
+ * Concurrency (M17.3).
+ *
+ * Two describes used to live here — one for the preempt handshake, one for
+ * recognising a killed run's trailing events — and both described the same
+ * underlying fact: the backend held ONE child, so a turn could have its
+ * process taken out from under it and had to refuse other runs' events by
+ * hand. Children are keyed by run id now, and a turn subscribes to its own,
+ * so neither situation can arise.
  */
-describe('useAgentChat preempting the background runner', () => {
-  const opts = { shell: false, connectors: false };
-
-  beforeEach(() => {
-    vi.mocked(agentIpc.runAgent).mockClear();
-    vi.mocked(agentIpc.stopAgent).mockClear();
-    useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
-  });
-
-  it('waits for the runner to release the stream, then re-claims the busy flag', async () => {
-    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => result.current.send('question'));
-
-    // The kill was issued…
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-    // …but the runner still owns the stream, so the new child must not
-    // start: its events would land while the handler is ignoring them.
-    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
-
-    // The killed child's terminal Done lands: the runner's finish()
-    // releases the stream and drops agentBusy on its way out.
-    act(() => {
-      useUiStore.getState().setLearningPath(null);
-      useUiStore.getState().setAgentBusy(false);
-    });
-
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    // The chat re-claimed the agent — the runner cannot read it as idle
-    // and schedule a background run over this turn.
-    expect(useUiStore.getState().agentBusy).toBe(true);
-  });
-
-  it('starts immediately when no background run owns the stream', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * The killed child's terminal Done (PR #5 review, round four). Events are
- * tagged with their run and stopAgent names the run it killed, so the chat
- * drops a dead run's trailing events by IDENTITY. Timing cannot do it: the
- * stray Done can land in the same dispatch that released the stream — before
- * the new turn even starts — or seconds after a timeout takeover, mid-answer.
- */
-describe('useAgentChat and the killed run’s trailing events', () => {
+describe('useAgentChat runs beside the background runner', () => {
   const opts = { shell: false, connectors: false };
 
   beforeEach(() => {
@@ -219,87 +219,68 @@ describe('useAgentChat and the killed run’s trailing events', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
-  it('drops the dead run’s late Done instead of ending the new turn', async () => {
-    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(7);
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-
-    // The runner's finish() releases the stream; the new turn starts.
-    act(() => {
-      useUiStore.getState().setLearningPath(null);
-      useUiStore.getState().setAgentBusy(false);
+  it('starts immediately while a background job runs, and kills nothing', async () => {
+    // The runner owns a job. The chat used to stop that child and wait up to
+    // five seconds for the single slot to be handed over; now both simply run.
+    useUiStore.setState({
+      runs: [
+        {
+          id: 'job-1',
+          owner: 'job',
+          label: 'reading',
+          place: null,
+          path: 'notes/reading.md',
+          conversationId: null,
+          run: 7,
+          startedAt: 0,
+        },
+      ],
     });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
+  });
 
-    // The killed child's Done lands late — after the new turn claimed the
-    // stream. It belongs to dead history, not to this turn.
-    act(() => handlers.forEach((h) => h({ run: 7, kind: 'Done' })));
+  it('never sees another run’s events, including its terminal Done', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+
+    // A foreign run reports finished — a background distill, another
+    // conversation, or a child killed a moment ago. None of it is this turn's
+    // business, and no bookkeeping is needed to know that.
+    act(() => handlers.forEach((h) => h({ run: 999, kind: 'Done' })));
     expect(result.current.streaming).toBe(true);
-    expect(useUiStore.getState().agentBusy).toBe(true);
+    act(() => handlers.forEach((h) => h({ run: 999, kind: 'TextDelta', text: 'not mine' })));
+    expect(result.current.messages[1].text).toBe('');
 
-    // The live run's events still land, and its own Done still ends it.
+    // Its own run still drives it.
     act(() => handlers.forEach((h) => h({ run: 8, kind: 'TextDelta', text: 'answer' })));
     expect(result.current.messages[1].text).toBe('answer');
     act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
     expect(result.current.streaming).toBe(false);
   });
 
-  // The kill that outlives the hook that made it (PR #7 review). Closing the
-  // assistant mid-answer kills the run from an unmount, and that hook is gone
-  // long before the dead Done arrives — so the record of the kill has to
-  // outlive it too, or the next panel adopts the stray as its own.
-  it('remembers a run killed by unmount, so its Done cannot end the next panel’s turn', async () => {
-    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(42);
-    const first = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => first.result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+  it('stops its OWN run by id, not whatever happens to be running', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
 
-    // ⌘J closes the panel mid-answer: the hook tears down and kills run 42.
-    first.unmount();
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-
-    // Reopening builds a FRESH hook — the one a per-instance dead-run set
-    // left with an empty filter — and a new question claims the stream.
-    const second = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => second.result.current.send('next question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
-
-    // The killed child's terminal Done lands now. It is dead history, not
-    // the end of a turn whose child has not said a word yet.
-    act(() => handlers.forEach((h) => h({ run: 42, kind: 'Done' })));
-    expect(second.result.current.streaming).toBe(true);
-    expect(second.result.current.messages[1].streaming).toBe(true);
-
-    // The live run still ends its own turn.
-    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
-    expect(second.result.current.streaming).toBe(false);
-    second.unmount();
+    act(() => result.current.stop());
+    expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalledWith(8);
+    expect(result.current.streaming).toBe(false);
   });
 
-  it('ignores a stray Done delivered before the new turn claims the stream', async () => {
-    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(7);
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+  it('unsubscribes when the turn ends, so a later run cannot reach it', async () => {
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-
-    // The runner's listener ran FIRST for the killed child's Done, so the
-    // stream is already released when the chat's listener sees the same
-    // event — the ordering that used to adopt it as the new turn's Done.
-    act(() => {
-      useUiStore.getState().setLearningPath(null);
-      useUiStore.getState().setAgentBusy(false);
-    });
-    act(() => handlers.forEach((h) => h({ run: 7, kind: 'Done' })));
-
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    expect(result.current.streaming).toBe(true);
-    expect(result.current.messages[1].streaming).toBe(true);
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
+    expect(handlers.length).toBe(0);
   });
 });
 
@@ -320,11 +301,11 @@ describe('useAgentChat one turn at a time', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('drops a send fired while a turn is in flight', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => {
       result.current.send('first');
       // Same tick: `streaming` render state is still stale here, which is
@@ -343,7 +324,7 @@ describe('useAgentChat one turn at a time', () => {
 
   it('a turn that fails to start releases the guard for the next send', async () => {
     vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error('spawn failed'));
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('doomed'));
     await vi.waitFor(() => expect(result.current.streaming).toBe(false));
     act(() => result.current.send('retry'));
@@ -352,7 +333,7 @@ describe('useAgentChat one turn at a time', () => {
   });
 
   it('stop() releases the guard for the next send', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('first'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
     act(() => result.current.stop());
@@ -377,22 +358,31 @@ describe('useAgentChat unmounted mid-turn', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
-  it('stops the run and releases the shared busy flag', async () => {
-    const { result, unmount } = renderHook(() => useAgentChat('sys', opts, null));
+  it('stops the run and takes it out of the registry', async () => {
+    const { result, unmount } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    expect(useUiStore.getState().agentBusy).toBe(true);
+    // M17.7: a task exists from the moment Send is pressed, and carries the
+    // question as its label — a run list saying "Assistant working" and
+    // nothing else was the thing that could not answer "working on what?".
+    const task = useUiStore.getState().runs[0];
+    expect(task.owner).toBe('chat');
+    expect(task.label).toBe('question');
+    expect(task.run).toBe(8);
 
     unmount();
     expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled();
-    expect(useUiStore.getState().agentBusy).toBe(false);
+    // The registry is what the status bar reads. A run left in it after its
+    // child died is a spinner that never stops — which is exactly what the
+    // old `agentBusy` did when the panel was closed mid-turn (M15).
+    expect(useUiStore.getState().runs).toEqual([]);
   });
 
   it('leaves an idle agent alone', () => {
-    const { unmount } = renderHook(() => useAgentChat('sys', opts, null));
+    const { unmount } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     unmount();
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
@@ -412,11 +402,11 @@ describe('useAgentChat and a redelivered ToolStart', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('keeps a finished tool finished', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
 
@@ -443,7 +433,7 @@ describe('useAgentChat and a redelivered ToolStart', () => {
   });
 
   it('still collapses a redelivery that arrives before the tool finishes', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
 
@@ -474,11 +464,11 @@ describe('useAgentChat message ids', () => {
     handlers.length = 0;
     vi.mocked(agentIpc.runAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('mints ids that a restored transcript cannot already hold', () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() =>
       result.current.restore(
         [

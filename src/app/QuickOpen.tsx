@@ -3,6 +3,7 @@ import { useOpenPath } from '@/app/useOpenPath';
 import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
+import { libraryIcon, libraryKind, libraryLabel } from '@/engine/library';
 import { listTypes, typeStyle } from '@/engine/typeCatalog';
 import { quickOpenScore } from '@/lib/quickOpenScore';
 import { useNavStore } from '@/stores/navStore';
@@ -65,14 +66,18 @@ export function QuickOpen() {
     const noteTargets: Target[] = entries.map((e) => {
       const style = typeStyle(e.type, schema);
       const key = typeof e.properties.key === 'string' ? e.properties.key : '';
+      // M18: a library entry has no Type doc to take an icon from any more, so
+      // it would fall back to the generic page glyph and read as an ordinary
+      // note in the one list where telling them apart matters most.
+      const kind = libraryKind(e);
       return {
         id: `note:${e.path}`,
         label: e.title,
-        icon: style.icon,
-        color: style.color,
+        icon: kind === null ? style.icon : libraryIcon(kind),
+        color: kind === null ? style.color : 'var(--synapse-500)',
         hint: key,
         meta: '',
-        kindLabel: e.type ?? 'Note',
+        kindLabel: kind === null ? (e.type ?? 'Note') : libraryLabel(kind),
         alias: key,
         run: () => openEntry(e),
       };
@@ -143,6 +148,17 @@ export function QuickOpen() {
         icon: 'activity',
         alias: 'git history commits',
         sel: { kind: 'pulse' },
+      },
+      // M18: the library had no destination here at all — reachable only by
+      // finding the rail button, which is the exact problem the library was
+      // built to fix one level down. Its shelves are aliases rather than three
+      // rows, because "skills" and "agents" are what people type.
+      {
+        id: 'go:library',
+        label: 'Library',
+        icon: 'blocks',
+        alias: 'skills agents templates automations',
+        sel: { kind: 'library' },
       },
       {
         id: 'go:settings',

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { RunRecord } from '@/agent/runs';
 import type { OrganizeProposal } from '@/agent/types';
 import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
@@ -29,13 +30,25 @@ export function asThemeMode(v: unknown): ThemeMode {
 
 interface UiState {
   /**
-   * The record showing in the RIGHT-HAND SLOT, or null.
+   * The record showing in the right-hand area, or null.
    *
-   * M15: `detailPath` and `aiPanelOpen` are the two occupants of ONE slot, and
-   * the store — not the call sites — is what makes them mutually exclusive.
-   * As independent booleans they stacked: a record panel plus the assistant
-   * beside a 264px sidebar left a ~20px canvas on a 1280px window, with three
-   * separate close buttons in three chromes as the only way out.
+   * M15 made `detailPath` and `aiPanelOpen` the two occupants of ONE slot,
+   * mutually exclusive in the store rather than at the call sites, because as
+   * independent booleans they stacked: a record panel plus the assistant
+   * beside a 264px sidebar left a ~20px canvas on a 1280px window.
+   *
+   * M17.2 undoes the exclusivity and keeps the width discipline, because the
+   * exclusivity had a consequence nobody costed. The assistant's system prompt
+   * tells it to call `open_note`; `open_note` routes to `openDetail`;
+   * `openDetail` closed the assistant; the panel is rendered conditionally, so
+   * closing it UNMOUNTED it; and its unmount cleanup kills the in-flight run.
+   * The agent could not show you a note without killing its own answer
+   * mid-sentence — and neither could you, by clicking a [[wikilink]] in one.
+   *
+   * So they are independent again, and the width problem is solved where it
+   * actually lives: in the layout (see SHELL_TWO_PANEL_MIN in App.tsx), which
+   * draws both when there is room and hides one WITHOUT unmounting when there
+   * is not. A hidden panel keeps streaming; a closed one still stops.
    */
   detailPath: string | null;
   openDetail(path: string): void;
@@ -189,9 +202,21 @@ interface UiState {
    * engine/ingest.ts. Persisted. */
   issuePrefixes: string;
   setIssuePrefixes(v: string): void;
-  /** A prompt handed to the panel from elsewhere ("Ask the agent to revise"). */
-  agentPendingPrompt: string | null;
-  setAgentPendingPrompt(v: string | null): void;
+  /**
+   * A prompt handed to the panel from elsewhere ("Ask the agent to revise").
+   *
+   * M17.6: it carries its SUBJECT. Six call sites used to hand over a prompt
+   * string naming a record and drop the record itself on the floor — so the
+   * agent was told to revise a concept and then handed whatever surface the
+   * user happened to be standing on as context. The subject arrives as a
+   * context chip instead: visible, and removable if it was the wrong one.
+   */
+  agentPendingPrompt: { text: string; subject: string | null } | null;
+  setAgentPendingPrompt(v: { text: string; subject: string | null } | null): void;
+  /** Open the panel and hand it a prompt about `subject`. One action because
+   * the two halves were always done together, and doing only the second is a
+   * prompt that lands in a panel nobody can see. */
+  askAgent(text: string, subject?: string | null): void;
   // --- Automatic learning (M8.6) ---
   /**
    * Let the base read filed captures and edited notes on its own. Persisted.
@@ -226,12 +251,28 @@ interface UiState {
    */
   skillRuns: Record<string, Record<string, string>>;
   recordSkillRun(vault: string, path: string, fireKey: string): void;
-  /** True while ANY agent turn is in flight — the chat's or the runner's. */
-  agentBusy: boolean;
-  setAgentBusy(v: boolean): void;
-  /** The note the background distiller is reading right now, if any. */
-  learningPath: string | null;
-  setLearningPath(v: string | null): void;
+  /**
+   * Vault → agent identity → when it last ran from an EVENT trigger, ISO
+   * (M17.12). Separate from skillRuns because it answers a different question:
+   * skillRuns says "has this exact fire been answered", this says "how long
+   * ago did this agent last wake at all". Only the second can break the loop
+   * an agent creates by writing into the folder it watches, because every such
+   * write mints a genuinely new fire key.
+   */
+  triggerRuns: Record<string, Record<string, string>>;
+  recordTriggerRun(vault: string, agent: string, at: string): void;
+  /**
+   * Everything the assistant is doing, in start order (M17.7).
+   *
+   * Was `agentBusy` (a boolean) plus `learningPath` (a string), both unowned
+   * and both written from whichever hook felt like it. See agent/runs.ts for
+   * why a flag stopped being able to answer the question.
+   */
+  runs: RunRecord[];
+  startRun(record: RunRecord): void;
+  /** Record the child once it exists, so Stop has something to kill. */
+  attachChild(id: string, run: number): void;
+  endRun(id: string): void;
   /**
    * Home insight cards the user has waved away (M8.3), by concept path.
    * Persisted, because a card you dismissed and that came back tomorrow is
@@ -269,6 +310,7 @@ const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const STDIO_APPROVALS_KEY = 'cerebro.stdioApprovals';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 const SKILL_RUNS_KEY = 'cerebro.skillRuns';
+const TRIGGER_RUNS_KEY = 'cerebro.triggerRuns';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
@@ -477,13 +519,12 @@ let nextToastId = 1;
 
 export const useUiStore = create<UiState>((set, get) => ({
   detailPath: null,
-  // One slot (M15): a record takes it from the assistant rather than stacking
-  // beside it. The persisted flag follows, or the assistant would come back on
-  // the next launch having been closed here.
-  openDetail: (path) => {
-    if (get().aiPanelOpen) storeString(AI_PANEL_KEY, 'false');
-    set({ detailPath: path, aiPanelOpen: false });
-  },
+  // M17.2: opening a record no longer closes the assistant. This line WAS the
+  // bug — `open_note` is the tool the system prompt tells the agent to call,
+  // and it landed here, where closing the panel unmounted it and killed the
+  // run that was mid-answer. Showing you something must never end the sentence
+  // that referred to it.
+  openDetail: (path) => set({ detailPath: path }),
   closeDetail: () => set({ detailPath: null }),
 
   detailSiblings: [],
@@ -655,10 +696,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
   setAiPanelOpen: (v) => {
     storeString(AI_PANEL_KEY, String(v));
-    // The other half of the one-slot rule: opening the assistant vacates the
-    // slot rather than stacking on top of the record panel. Closing it leaves
-    // `detailPath` alone — there is nothing to displace.
-    set(v ? { aiPanelOpen: true, detailPath: null } : { aiPanelOpen: false });
+    // M17.2: the other half of the one-slot rule, and the other half of the
+    // damage. Opening the assistant used to null `detailPath`, which is why
+    // every "Ask the agent about this" button threw away the record it was
+    // asking about — the snapshot's activeNote is derived from detailPath,
+    // so only whatever was baked into the prompt string survived.
+    set({ aiPanelOpen: v });
   },
   // Defaults off: shell access is a choice the user makes, never one they
   // inherit. Everything else the agent can do follows from the folder model.
@@ -698,6 +741,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   agentPendingPrompt: null,
   setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+  askAgent: (text, subject = null) => {
+    storeString(AI_PANEL_KEY, 'true');
+    set({ aiPanelOpen: true, agentPendingPrompt: { text, subject } });
+  },
 
   autoLearn: loadString(AUTO_LEARN_KEY, 'true') === 'true',
   setAutoLearn: (v) => {
@@ -731,6 +778,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(FILED_LEARN_KEY, JSON.stringify(filed));
       return { learnAttempts: next, filedForLearning: filed };
     }),
+  triggerRuns: loadNestedStringMap(TRIGGER_RUNS_KEY),
+  recordTriggerRun: (vault, agent, at) =>
+    set((s) => {
+      const scoped = { ...(s.triggerRuns[vault] ?? {}), [agent]: at };
+      const next = { ...s.triggerRuns, [vault]: scoped };
+      storeString(TRIGGER_RUNS_KEY, JSON.stringify(next));
+      return { triggerRuns: next };
+    }),
   skillRuns: loadNestedStringMap(SKILL_RUNS_KEY),
   recordSkillRun: (vault, path, fireKey) =>
     set((s) => {
@@ -739,10 +794,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(SKILL_RUNS_KEY, JSON.stringify(next));
       return { skillRuns: next };
     }),
-  agentBusy: false,
-  setAgentBusy: (v) => set({ agentBusy: v }),
-  learningPath: null,
-  setLearningPath: (v) => set({ learningPath: v }),
+  runs: [],
+  startRun: (record) => set((s) => ({ runs: [...s.runs, record] })),
+  attachChild: (id, run) =>
+    set((s) => ({ runs: s.runs.map((r) => (r.id === id ? { ...r, run } : r)) })),
+  // Idempotent: a turn can end through Done, through Error, through the panel
+  // unmounting, or through Stop, and more than one of those routinely happens
+  // for the same run.
+  endRun: (id) => set((s) => ({ runs: s.runs.filter((r) => r.id !== id) })),
 
   dismissedInsights: loadStringList(DISMISSED_INSIGHTS_KEY),
   dismissInsight: (path) =>

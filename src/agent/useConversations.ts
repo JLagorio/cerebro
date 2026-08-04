@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  anchor,
   loadActiveId,
   loadConversations,
   newConversation,
@@ -8,6 +9,7 @@ import {
   saveActiveId,
   saveConversations,
 } from '@/agent/conversations';
+import { placeLabel, samePlace, type Place } from '@/engine/place';
 import type { AgentChat } from '@/agent/useAgentChat';
 import type { Conversation } from '@/agent/types';
 
@@ -15,11 +17,31 @@ export interface ConversationState {
   conversations: Conversation[];
   activeId: string;
   active: Conversation | null;
+  /** Where the user is standing right now (M17.5) — what an unanchored thread
+   * will be stamped with, and what "here" means in the switcher. */
+  here: Place;
+  hereLabel: string;
+  /**
+   * Where the active thread STARTED, when that is somewhere else.
+   *
+   * Not a prompt to do anything about it — the panel briefly asked the user to
+   * start a new conversation when they walked away, which was the app making
+   * its own bookkeeping their problem. It is a fact the agent is told (see
+   * `startedIn` in the snapshot), and a label in the switcher. Nothing else.
+   */
+  startedElsewhere: string | null;
+  /** Stamp the active thread with the current place if it has none. Called at
+   * SEND, never after: a turn navigates, so anchoring when it ends would
+   * record wherever the agent left you. */
+  anchorNow(): void;
   start(): void;
   select(id: string): void;
   rename(id: string, title: string): void;
   remove(id: string): void;
 }
+
+/** What `placeLabel` resolves names against — the vault, when the caller has it. */
+export type PlaceLookup = Parameters<typeof placeLabel>[1];
 
 /**
  * Many named conversations instead of one ephemeral thread (M9.5).
@@ -29,7 +51,13 @@ export interface ConversationState {
  * lets switching conversations be a `restore` call rather than a rebuild of
  * the streaming machinery.
  */
-export function useConversations(chat: AgentChat): ConversationState {
+export function useConversations(
+  chat: AgentChat,
+  /** Where the panel is standing. Threads are stamped with it at their first
+   * turn (M17.5) so a thread can be found again by what it was about. */
+  here: Place = { kind: 'home' },
+  lookup?: PlaceLookup,
+): ConversationState {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const stored = loadConversations();
     return stored.length > 0 ? stored : [newConversation()];
@@ -99,6 +127,24 @@ export function useConversations(chat: AgentChat): ConversationState {
     };
   }, []);
 
+  // Closed over directly rather than read through a latest-value ref. The refs
+  // were there to guard against a send queued a render earlier stamping a
+  // stale place — but `here` and `lookup` are this hook's own arguments, so
+  // every caller of `anchorNow` is recreated when they change and there is no
+  // stale version to call. A render-phase ref write also defeats the compiler
+  // (react-hooks/preserve-manual-memoization) for a guarantee already held.
+  const anchorNow = useCallback(() => {
+    setConversations((prev) => {
+      const current = prev.find((c) => c.id === activeId);
+      // Already anchored: where a thread STARTED is a fact about the thread,
+      // and walking somewhere else mid-conversation does not change it.
+      if (current === undefined || current.place != null) return prev;
+      const next = prev.map((c) => (c.id === activeId ? anchor(c, here, lookup) : c));
+      saveConversations(next);
+      return next;
+    });
+  }, [activeId, here, lookup]);
+
   const start = useCallback(() => {
     const created = newConversation();
     setConversations((prev) => {
@@ -152,10 +198,20 @@ export function useConversations(chat: AgentChat): ConversationState {
     [activeId, chat],
   );
 
+  const active = conversations.find((c) => c.id === activeId) ?? null;
   return {
     conversations: ordered(conversations),
     activeId,
-    active: conversations.find((c) => c.id === activeId) ?? null,
+    active,
+    here,
+    hereLabel: placeLabel(here, lookup),
+    // Null for an unanchored thread: it has not started anywhere yet, so
+    // there is nothing to say about where it started.
+    startedElsewhere:
+      active?.place != null && !samePlace(active.place, here)
+        ? (active.placeLabel ?? placeLabel(active.place, lookup))
+        : null,
+    anchorNow,
     start,
     select,
     rename,

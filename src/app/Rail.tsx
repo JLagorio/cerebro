@@ -82,6 +82,7 @@ export function Rail() {
   // Task 11: Docs owns the document surfaces; Home keeps the item world.
   const docsActive = selection.kind === 'docs' || selection.kind === 'doc';
   const settingsActive = selection.kind === 'settings';
+  const libraryActive = selection.kind === 'library';
   const inboxActive = selection.kind === 'inbox';
   const knowledgeActive = selection.kind === 'knowledge';
   // M9.4: the two git surfaces share a rail slot's worth of "history".
@@ -160,6 +161,19 @@ export function Rail() {
         toggle
         active={aiPanelOpen}
         onClick={() => setAiPanelOpen(!aiPanelOpen)}
+      />
+      {/* Skills, agents and templates. Below the fold with Settings rather
+          than beside Home, because it is where you go to CHANGE how the
+          assistant works rather than somewhere you work.
+
+          `blocks`, not `library` — Docs already owns that glyph, and two rail
+          buttons drawn identically is the rail failing at the one job it has
+          (M18). */}
+      <RailButton
+        icon="blocks"
+        label="Library"
+        active={libraryActive}
+        onClick={() => navigate({ kind: 'library' })}
       />
       <RailButton
         icon="settings"

@@ -1,3 +1,4 @@
+import { libraryKind } from '@/engine/library';
 import { isRecordEntry } from '@/engine/typeCatalog';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -51,6 +52,16 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     // editor is the old world.
     if (entry.type === 'Type') {
       navigate({ kind: 'type', name: entry.title });
+      return;
+    }
+    // M18: same rule, one level out. A skill's frontmatter is the app's own
+    // contract — `allowed-tools:` is a boundary Rust enforces — so it opens in
+    // the editor that knows what those values mean, never in a property table
+    // or a doc canvas. This is why a wikilink to a template lands somewhere
+    // useful instead of in a body editor that would let you break it.
+    const kind = libraryKind(entry);
+    if (kind !== null) {
+      navigate({ kind: 'library', tab: kind, path });
       return;
     }
     if (isRecordEntry(entry) && entry.type !== null) {
