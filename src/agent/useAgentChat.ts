@@ -59,7 +59,17 @@ export interface AgentChat {
  * brand-new bubble the moment a question was asked.
  */
 export function useAgentChat(
-  systemPrompt: string,
+  /**
+   * Read once, synchronously, at the top of each send (M17.6).
+   *
+   * A getter rather than a string for two reasons. The panel has to build the
+   * prompt from the CONVERSATION's context chips, and the conversation list is
+   * built on top of this hook — so the string does not exist yet when this is
+   * called. And a send parks on a skill expansion and the MCP handshake before
+   * it spawns; reading the prompt after those awaits would send whatever the
+   * context had drifted to by then, which is the opposite of freezing it.
+   */
+  getSystemPrompt: () => string,
   { shell, connectors }: { shell: boolean; connectors: boolean },
   model: string | null,
   /** Fires after a turn that wrote files, with a one-line summary (M9.5). */
@@ -238,6 +248,9 @@ export function useAgentChat(
       // that hit it kept its draft, so nothing is lost.
       if (turnInFlight.current) return;
       turnInFlight.current = true;
+      // Frozen here, before anything can await: this turn's context is the
+      // context the question was asked in.
+      const systemPrompt = getSystemPrompt();
       const assistantId = nextId();
       lastPrompt.current = trimmed;
       setMessages((prev) => [
@@ -304,13 +317,13 @@ export function useAgentChat(
     [
       connectors,
       endTurn,
+      getSystemPrompt,
       handleEvent,
       model,
       nextId,
       patchMessage,
       setAgentBusy,
       shell,
-      systemPrompt,
       toast,
       vaultPath,
     ],

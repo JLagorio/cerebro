@@ -29,13 +29,20 @@ export interface RecordSummary {
 }
 
 export interface ContextSnapshot {
-  selection: Record<string, unknown>;
+  /** Omitted when the user removed the place chip (M17.6) — "do not tell it
+   * where I am standing" is a thing they are allowed to say, and an empty
+   * object here would say it badly. */
+  selection?: Record<string, unknown>;
   activeNote?: RecordSummary & { body?: string };
   linkedNotes?: { path: string; title: string; type: string | null }[];
   visibleRecords?: RecordSummary[];
   visibleRecordsTruncated?: { shown: number; total: number };
   visibleFilters?: unknown;
   referencedNotes?: (RecordSummary & { body?: string })[];
+  /** Records the user attached as context chips (M17.6). Separate from
+   * `referencedNotes` because those are `[[links]]` found in the prompt — a
+   * guess about what was meant — while these were put there on purpose. */
+  attachedNotes?: (RecordSummary & { body?: string })[];
   vault: { types: string[]; projects: number; notes: number };
 }
 
@@ -67,7 +74,8 @@ function describeSelection(selection: Selection): Record<string, unknown> {
 }
 
 export interface SnapshotInput {
-  selection: Selection;
+  /** Absent when the place chip was removed. */
+  selection?: Selection;
   entries: Entry[];
   schema: Schema;
   /** The record open in the detail panel or doc page. */
@@ -80,14 +88,26 @@ export interface SnapshotInput {
   filters?: unknown;
   /** `[[wikilinks]]` the user typed into the prompt. */
   references?: string[];
+  /** Vault paths attached as context chips (M17.6). Resolved by exact path,
+   * unlike `references`, which are wikilink targets matched by stem or title. */
+  attached?: string[];
 }
 
 export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
-  const { selection, entries, schema, activePath, activeBody, visible, filters, references } =
-    input;
+  const {
+    selection,
+    entries,
+    schema,
+    activePath,
+    activeBody,
+    visible,
+    filters,
+    references,
+    attached,
+  } = input;
 
   const snapshot: ContextSnapshot = {
-    selection: describeSelection(selection),
+    ...(selection === undefined ? {} : { selection: describeSelection(selection) }),
     vault: {
       types: [...schema.types.keys()],
       projects: entries.filter((e) => e.type === 'Project').length,
@@ -128,6 +148,17 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
       snapshot.visibleRecordsTruncated = { shown: MAX_RECORDS, total: visible.length };
     }
     if (filters != null) snapshot.visibleFilters = filters;
+  }
+
+  if (attached !== undefined && attached.length > 0) {
+    const resolved = attached
+      // The active note is already in the snapshot in full, with its links —
+      // repeating it here would spend context saying the same thing twice.
+      .filter((path) => path !== activePath)
+      .map((path) => entries.find((e) => e.path === path))
+      .filter((e): e is Entry => e !== undefined)
+      .map((e) => ({ ...summarize(e, schema), body: e.snippet }));
+    if (resolved.length > 0) snapshot.attachedNotes = resolved;
   }
 
   if (references !== undefined && references.length > 0) {

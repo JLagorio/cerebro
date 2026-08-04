@@ -90,6 +90,44 @@ describe('buildSnapshot', () => {
     expect(snap.linkedNotes?.map((l) => l.path)).toEqual(['linked.md']);
   });
 
+  it('carries records attached as context chips, with their bodies (M17.6)', () => {
+    const attachable = makeEntry({
+      path: 'concepts/pricing.md',
+      title: 'Pricing',
+      snippet: 'Two tiers, annual only.',
+    });
+    const snap = buildSnapshot({
+      selection: { kind: 'home' },
+      entries: [...entries, attachable],
+      schema,
+      attached: ['concepts/pricing.md'],
+    });
+    expect(snap.attachedNotes?.map((n) => n.path)).toEqual(['concepts/pricing.md']);
+    expect(snap.attachedNotes?.[0].body).toBe('Two tiers, annual only.');
+  });
+
+  it('does not repeat the active note among the attached ones', () => {
+    // The open record is already in the snapshot in full, with its links.
+    // Repeating it would spend context saying the same thing twice.
+    const snap = buildSnapshot({
+      selection: { kind: 'home' },
+      entries,
+      schema,
+      activePath: 'a.md',
+      attached: ['a.md', 'b.md'],
+    });
+    expect(snap.attachedNotes?.map((n) => n.path)).toEqual(['b.md']);
+    expect(snap.activeNote?.path).toBe('a.md');
+  });
+
+  it('says nothing about where the user is when the place chip was removed', () => {
+    // "Do not tell it where I am standing" is a thing the user is allowed to
+    // say. An empty object would say it badly — the key is simply absent.
+    const snap = buildSnapshot({ entries, schema });
+    expect('selection' in snap).toBe(false);
+    expect(snap.vault.notes).toBe(3);
+  });
+
   it('omits the agent’s own corpus from the vault note count', () => {
     const snap = buildSnapshot({
       selection: { kind: 'home' },

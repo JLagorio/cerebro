@@ -77,7 +77,10 @@ test('agent: a thread says where it was had, and does not follow you around', as
   // assistant navigates you around by design, so a panel that re-threaded on
   // navigation would lose the answer you were reading. The transcript is
   // still here; only the offer of a new thread is new.
-  await expect(panel.getByTestId('thread-elsewhere')).toContainText('Home');
+  await expect(panel.getByTestId('thread-elsewhere')).toContainText('Inbox');
+  // The context chip still names what the thread is ABOUT — the two lines say
+  // different things on purpose (M17.6).
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
   await expect(
     panel.getByTestId('chat-message').filter({ hasText: 'Two risks are open' }),
   ).toBeVisible();
@@ -90,6 +93,44 @@ test('agent: a thread says where it was had, and does not follow you around', as
   await panel.getByTestId('conversation-switcher').click();
   await expect(page.getByTestId('conversation-group').first()).toHaveText('Inbox');
   await expect(page.getByTestId('conversation-row').filter({ hasText: 'Home' })).toBeVisible();
+});
+
+test('agent: context is shown as chips you can take away', async ({ page }) => {
+  // Wide enough for the record panel AND the assistant (M17.2's
+  // SHELL_TWO_PANEL_MIN); below that the record wins and the assistant parks.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  const panel = page.getByTestId('ai-panel');
+
+  // Where you are is context, and it says so rather than being folded
+  // invisibly into the system prompt.
+  const chips = panel.getByTestId('context-chip');
+  await expect(chips).toHaveCount(1);
+  await expect(chips.first()).toHaveAttribute('data-kind', 'place');
+  await expect(chips.first()).toContainText('Home');
+
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Work item');
+
+  // Opening a record adds it. The open record is CONTEXT, never the place —
+  // the agent opens records itself, so a place that moved with it would
+  // re-anchor the thread the assistant was answering in.
+  const row = page.getByTestId('table-row').first();
+  await row.hover();
+  await row.getByRole('button', { name: /^Open / }).click();
+  await expect(page.getByTestId('detail-panel')).toBeVisible();
+  const record = panel.locator('[data-testid="context-chip"][data-kind="record"]');
+  await expect(record).toHaveCount(1);
+
+  // …and taking it away is one click. This is the useful direction: an answer
+  // about the wrong record reads as the model being stupid right up until you
+  // can see which page the app handed it.
+  await record.getByRole('button', { name: /^Remove/ }).click();
+  await expect(panel.locator('[data-testid="context-chip"][data-kind="record"]')).toHaveCount(0);
+  // The record is still open — removing it from context is about what the
+  // agent is told, not about what the user is reading.
+  await expect(page.getByTestId('detail-panel')).toBeVisible();
 });
 
 test('agent: shell access is one persisted ceiling in Settings, not a per-chat mode', async ({

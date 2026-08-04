@@ -162,8 +162,7 @@ function OrganizePanel({
 }) {
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const proposal = useUiStore((s) => s.proposals[entry.path]);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
-  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const askAgent = useUiStore((s) => s.askAgent);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
   const allEntries = useVaultStore((s) => s.entries);
@@ -276,8 +275,7 @@ function OrganizePanel({
               variant="secondary"
               icon="sparkles"
               onClick={() => {
-                setAiPanelOpen(true);
-                setPendingPrompt(organizePrompt(entry.path));
+                askAgent(organizePrompt(entry.path), entry.path);
               }}
             >
               Ask the agent to file it
@@ -288,12 +286,12 @@ function OrganizePanel({
               variant="secondary"
               icon="download"
               onClick={() => {
-                setAiPanelOpen(true);
-                setPendingPrompt(
+                askAgent(
                   fetchRefsPrompt(
                     entry.path,
                     unresolved.map((r) => r.id),
                   ),
+                  entry.path,
                 );
               }}
             >

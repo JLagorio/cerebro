@@ -46,8 +46,37 @@ describe('useAgentChat send expansion', () => {
     useVaultStore.setState({ vaultPath: '/vault' });
   });
 
+  it('freezes the context the question was asked in (M17.6)', async () => {
+    // The prompt is a getter because the panel rebuilds it from context chips,
+    // the vault, and the open record — all of which move while a send is
+    // parked on a skill expansion and the MCP handshake. Reading it after
+    // those awaits would send the context the user drifted INTO, which is the
+    // whole complaint: "it confuses the AI".
+    let context = 'context: Roadmap';
+    let release = (_: string) => {};
+    const expansion = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const { result } = renderHook(() => useAgentChat(() => context, opts, null));
+
+    act(() => result.current.send('revise this', () => expansion));
+    // The user walks somewhere else while the expansion is still in flight.
+    context = 'context: Inbox';
+    await act(async () => {
+      release('EXPANDED');
+      await expansion;
+    });
+
+    await vi.waitFor(() =>
+      expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
+        '/vault',
+        expect.objectContaining({ systemPrompt: 'context: Roadmap' }),
+      ),
+    );
+  });
+
   it('shows the typed text but runs the expanded message', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('/weekly-review', () => Promise.resolve('EXPANDED BODY')));
     expect(result.current.messages[0].text).toBe('/weekly-review');
     await vi.waitFor(() =>
@@ -59,7 +88,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('falls back to sending the typed text when the expansion rejects', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('/gone', () => Promise.reject(new Error('unreadable'))));
     await vi.waitFor(() =>
       expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
@@ -70,7 +99,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('appends the turn synchronously — a pending expansion leaves no window to interleave', () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('/slow', () => new Promise<string>(() => undefined)));
     // Both bubbles exist and streaming is up before the expansion resolves,
     // so a second send sees a busy conversation rather than an idle one.
@@ -79,7 +108,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('still accepts a plain pre-expanded string', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('shown', 'sent'));
     expect(result.current.messages[0].text).toBe('shown');
     await vi.waitFor(() =>
@@ -94,7 +123,7 @@ describe('useAgentChat send expansion', () => {
     // `attended` gates connector_context's absent-file branch (PR #5
     // security review): a person typed this turn and is watching it, which
     // is what makes inheriting their global MCP config defensible at all.
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('hello'));
     await vi.waitFor(() =>
       expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
@@ -110,7 +139,7 @@ describe('useAgentChat send expansion', () => {
     // it would resume, re-claim the stream, and spawn a child the user
     // already cancelled (PR #5 review).
     let release: (body: string) => void = () => undefined;
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() =>
       result.current.send(
         '/slow',
@@ -137,7 +166,7 @@ describe('useAgentChat send expansion', () => {
 
   it('a cancelled send does not wedge the next one', async () => {
     let release: (body: string) => void = () => undefined;
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() =>
       result.current.send(
         '/slow',
@@ -189,14 +218,14 @@ describe('useAgentChat runs beside the background runner', () => {
     // The runner owns a job. The chat used to stop that child and wait up to
     // five seconds for the single slot to be handed over; now both simply run.
     useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
 
   it('never sees another run’s events, including its terminal Done', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
 
@@ -216,7 +245,7 @@ describe('useAgentChat runs beside the background runner', () => {
   });
 
   it('stops its OWN run by id, not whatever happens to be running', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
 
@@ -226,7 +255,7 @@ describe('useAgentChat runs beside the background runner', () => {
   });
 
   it('unsubscribes when the turn ends, so a later run cannot reach it', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
     act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
@@ -255,7 +284,7 @@ describe('useAgentChat one turn at a time', () => {
   });
 
   it('drops a send fired while a turn is in flight', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => {
       result.current.send('first');
       // Same tick: `streaming` render state is still stale here, which is
@@ -274,7 +303,7 @@ describe('useAgentChat one turn at a time', () => {
 
   it('a turn that fails to start releases the guard for the next send', async () => {
     vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error('spawn failed'));
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('doomed'));
     await vi.waitFor(() => expect(result.current.streaming).toBe(false));
     act(() => result.current.send('retry'));
@@ -283,7 +312,7 @@ describe('useAgentChat one turn at a time', () => {
   });
 
   it('stop() releases the guard for the next send', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('first'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
     act(() => result.current.stop());
@@ -312,7 +341,7 @@ describe('useAgentChat unmounted mid-turn', () => {
   });
 
   it('stops the run and releases the shared busy flag', async () => {
-    const { result, unmount } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result, unmount } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
     expect(useUiStore.getState().agentBusy).toBe(true);
@@ -323,7 +352,7 @@ describe('useAgentChat unmounted mid-turn', () => {
   });
 
   it('leaves an idle agent alone', () => {
-    const { unmount } = renderHook(() => useAgentChat('sys', opts, null));
+    const { unmount } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     unmount();
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
@@ -347,7 +376,7 @@ describe('useAgentChat and a redelivered ToolStart', () => {
   });
 
   it('keeps a finished tool finished', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
 
@@ -374,7 +403,7 @@ describe('useAgentChat and a redelivered ToolStart', () => {
   });
 
   it('still collapses a redelivery that arrives before the tool finishes', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
 
@@ -409,7 +438,7 @@ describe('useAgentChat message ids', () => {
   });
 
   it('mints ids that a restored transcript cannot already hold', () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
     act(() =>
       result.current.restore(
         [

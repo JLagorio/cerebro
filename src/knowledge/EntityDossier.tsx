@@ -124,8 +124,7 @@ export function EntityDossier({
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
   const openPath = useOpenPath();
-  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const askAgent = useUiStore((s) => s.askAgent);
 
   const today = todayIso();
   const dossier = useMemo(
@@ -143,8 +142,10 @@ export function EntityDossier({
   };
 
   const ask = () => {
-    setAiPanelOpen(true);
-    setPendingPrompt(distillPrompt(entry.path, entry.title));
+    // The entity travels WITH the prompt (M17.6) — it becomes a context
+    // chip, so the agent reads this record rather than whatever surface the
+    // user happened to be standing on when they clicked.
+    askAgent(distillPrompt(entry.path, entry.title), entry.path);
   };
 
   const since = relativeDay(dossier.firstLearned, today);

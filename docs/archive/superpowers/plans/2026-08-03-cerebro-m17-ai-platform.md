@@ -288,6 +288,32 @@ attach it as a chip instead.
 `@` in the composer completes against records, views **and agents**, grouped
 with the current place first.
 
+**Landed (`agent/contextChips.ts`).** Two chip kinds — `place` and `record`.
+Exactly one place chip, so "where this conversation is" stays singular and the
+rows, the filters and the system prompt's one "you are looking at" line all
+have a single answer; removing it means the agent is told nothing about where
+anyone is standing, which is a real thing to be able to say (the snapshot's
+`selection` key is then simply absent). Any number of record chips, from the
+open record and from the handoffs.
+
+Freezing turned out to need a shape change: `useAgentChat` takes a **getter**
+rather than a prompt string, and reads it once, synchronously, at the top of
+`send`. A string could not work — the prompt is built from the conversation's
+chips, and the conversation list is built on top of the chat hook, so it does
+not exist yet at the call. And a send parks on a skill expansion and the MCP
+handshake before it spawns, so reading after those awaits sends the context the
+user drifted *into*. There is a regression test, confirmed red first.
+
+A drive-by that belongs here: `activeView` matched `v.project === null` and
+ignored the collection, so with two Collections each holding a `roadmap` the
+agent got the wrong List's filters. Matched on `(collection, id)` now, the way
+`ListPage` has always resolved it.
+
+**Deferred to M17.6b**: `@` completion, and with it the only way to attach the
+place you are *currently* standing in to a thread anchored elsewhere. Until
+then that case is served by "New one here" — one click, a fresh thread anchored
+where you are.
+
 ### M17.7 — A run registry, and a task list
 
 `agentBusy` (one unowned boolean written from eight places across two hooks)

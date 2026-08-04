@@ -44,8 +44,7 @@ export function KnowledgeCommit({
 }) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
-  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const askAgent = useUiStore((s) => s.askAgent);
 
   const today = todayIso();
   const commit = useMemo(
@@ -74,8 +73,7 @@ export function KnowledgeCommit({
       ));
 
   const distill = () => {
-    setAiPanelOpen(true);
-    setPendingPrompt(distillPrompt(entry.path, entry.title));
+    askAgent(distillPrompt(entry.path, entry.title), entry.path);
   };
 
   return (

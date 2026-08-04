@@ -201,9 +201,21 @@ interface UiState {
    * engine/ingest.ts. Persisted. */
   issuePrefixes: string;
   setIssuePrefixes(v: string): void;
-  /** A prompt handed to the panel from elsewhere ("Ask the agent to revise"). */
-  agentPendingPrompt: string | null;
-  setAgentPendingPrompt(v: string | null): void;
+  /**
+   * A prompt handed to the panel from elsewhere ("Ask the agent to revise").
+   *
+   * M17.6: it carries its SUBJECT. Six call sites used to hand over a prompt
+   * string naming a record and drop the record itself on the floor — so the
+   * agent was told to revise a concept and then handed whatever surface the
+   * user happened to be standing on as context. The subject arrives as a
+   * context chip instead: visible, and removable if it was the wrong one.
+   */
+  agentPendingPrompt: { text: string; subject: string | null } | null;
+  setAgentPendingPrompt(v: { text: string; subject: string | null } | null): void;
+  /** Open the panel and hand it a prompt about `subject`. One action because
+   * the two halves were always done together, and doing only the second is a
+   * prompt that lands in a panel nobody can see. */
+  askAgent(text: string, subject?: string | null): void;
   // --- Automatic learning (M8.6) ---
   /**
    * Let the base read filed captures and edited notes on its own. Persisted.
@@ -711,6 +723,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   agentPendingPrompt: null,
   setAgentPendingPrompt: (v) => set({ agentPendingPrompt: v }),
+  askAgent: (text, subject = null) => {
+    storeString(AI_PANEL_KEY, 'true');
+    set({ aiPanelOpen: true, agentPendingPrompt: { text, subject } });
+  },
 
   autoLearn: loadString(AUTO_LEARN_KEY, 'true') === 'true',
   setAutoLearn: (v) => {

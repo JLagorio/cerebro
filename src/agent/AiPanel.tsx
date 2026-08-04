@@ -7,6 +7,13 @@ import { checkAgent } from '@/agent/agentIpc';
 import { AiActionCard } from '@/agent/AiActionCard';
 import { ChatInput } from '@/agent/ChatInput';
 import { buildSnapshot, extractReferences, renderSnapshot } from '@/agent/context';
+import {
+  chipId,
+  placeChip,
+  recordChip,
+  resolveChips,
+  type ContextChip,
+} from '@/agent/contextChips';
 import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
 import { useAgentChat } from '@/agent/useAgentChat';
@@ -18,7 +25,7 @@ import {
   skillPrompt,
   type SkillRef,
 } from '@/engine/skills';
-import { placeOf } from '@/engine/place';
+import { placeOf, samePlace } from '@/engine/place';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { readNote } from '@/lib/ipc';
@@ -243,58 +250,17 @@ export function AiPanel() {
   const { isRepo, refresh } = useGit();
   const checkpoint = useAgentCheckpoint(refresh);
 
-  // M9.5: the rows the current surface is showing. Asking "what is at risk"
-  // from the At risk view should be answered from that view's records, not
-  // from the agent re-deriving a query it will get subtly wrong.
-  const collection = useMemo(
-    () => resolveSurface(selection, entries, schema, views),
-    [selection, entries, schema, views],
-  );
-  const activeView =
-    selection.kind === 'list'
-      ? (views.find((v) => v.id === selection.id && v.project === null) ?? null)
-      : null;
-
   // M13.1: the skill catalog — names and descriptions only; a body loads when
   // one is invoked, so the vault can hold many skills at no per-turn cost.
   const skills = useMemo(() => listSkills(entries), [entries]);
 
-  // Context is a system-prompt suffix, not a hidden first message: it must
-  // travel with every turn, because a resumed session re-reads it.
-  const systemPrompt = useMemo(() => {
-    const base = buildSystemPrompt(selection, { connectors, issuePrefixes, skills });
-    const snapshot = buildSnapshot({
-      selection,
-      entries,
-      schema,
-      activePath: detailPath,
-      visible: collection.entries,
-      // M11: the open TAB's filters — what the person is actually looking at.
-      filters:
-        activeView === null
-          ? null
-          : resolveView(activeView.definition, selection.kind === 'list' ? selection.view : null)
-              .filters,
-      references: extractReferences(draft),
-    });
-    return `${base}${renderSnapshot(snapshot)}`;
-    // `draft` is deliberately excluded: rebuilding the prompt on every
-    // keystroke would thrash, and `send` reads the references it needs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    connectors,
-    issuePrefixes,
-    skills,
-    selection,
-    entries,
-    schema,
-    detailPath,
-    collection.entries,
-    activeView,
-  ]);
-
+  // The prompt is read through a ref at send (M17.6). It has to be built from
+  // the CONVERSATION's chips, and the conversation list is built on top of the
+  // chat hook — so it does not exist yet at this point in the render.
+  const promptRef = useRef('');
+  const getSystemPrompt = useCallback(() => promptRef.current, []);
   const chat = useAgentChat(
-    systemPrompt,
+    getSystemPrompt,
     { shell, connectors },
     null,
     isRepo ? checkpoint : undefined,
@@ -309,6 +275,123 @@ export function AiPanel() {
     [entries, views, collections],
   );
   const conversations = useConversations(chat, place, placeLookup);
+
+  // --- Context chips (M17.6) ------------------------------------------------
+  //
+  // What the agent is being told about, as things on screen rather than as a
+  // derivation nobody can see. `dismissed` and `added` are per-conversation:
+  // switching threads must not carry one thread's attachments into another's.
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [added, setAdded] = useState<ContextChip[]>([]);
+  const activeId = conversations.activeId;
+  useEffect(() => {
+    setDismissed([]);
+    setAdded([]);
+  }, [activeId]);
+
+  // The thread's own place, not wherever the user has since walked. This is
+  // the "confuses the AI" half of the reported bug: a resumed conversation
+  // used to be handed today's surface as what it was looking at.
+  const threadPlace = conversations.active?.place ?? place;
+  const autoChips = useMemo(() => {
+    const list = [placeChip(threadPlace, placeLookup)];
+    // The open record. Not part of the PLACE (see engine/place.ts) — the agent
+    // opens records itself — but very much part of the context.
+    const open = detailPath === null ? null : recordChip(detailPath, entries);
+    if (open !== null) list.push(open);
+    return list;
+  }, [threadPlace, placeLookup, detailPath, entries]);
+
+  const chips = useMemo(
+    () => resolveChips(autoChips, dismissed, added),
+    [autoChips, dismissed, added],
+  );
+  const removeChip = (chip: ContextChip) => {
+    const id = chipId(chip);
+    setAdded((prev) => prev.filter((c) => chipId(c) !== id));
+    setDismissed((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  // At most one place chip, so "where this conversation is" stays singular and
+  // everything downstream — the rows, the filters, the system prompt's one
+  // "you are looking at" line — has a single answer. Removing it means the
+  // agent is told nothing about where anyone is standing, which is a real and
+  // useful thing to be able to say.
+  const contextPlace = chips.find((c) => c.kind === 'place')?.place ?? null;
+  // Standing in the place the chip names: use the live selection, so the open
+  // view TAB's filters travel too. Otherwise the place alone, which resolves
+  // to the List's first view — the best available answer for a surface the
+  // user is not currently looking at.
+  const contextSelection =
+    contextPlace === null ? null : samePlace(contextPlace, place) ? selection : contextPlace;
+
+  // M9.5: the rows the surface is showing. Asking "what is at risk" from the
+  // At risk view should be answered from that view's records, not from the
+  // agent re-deriving a query it will get subtly wrong.
+  const collection = useMemo(
+    () =>
+      contextSelection === null ? null : resolveSurface(contextSelection, entries, schema, views),
+    [contextSelection, entries, schema, views],
+  );
+  const activeView =
+    contextSelection?.kind === 'list'
+      ? // Matched on (collection, id), the way ListPage resolves it: ids are
+        // unique per FOLDER, so `project === null` alone picked the wrong
+        // List's filters whenever two Collections each held a "roadmap".
+        (views.find(
+          (v) =>
+            v.id === contextSelection.id && v.collection === (contextSelection.collection ?? null),
+        ) ?? null)
+      : null;
+
+  const recordChips = chips.filter((c) => c.kind === 'record');
+  const activeChipPath = recordChips.some((c) => c.path === detailPath) ? detailPath : null;
+
+  // Context is a system-prompt suffix, not a hidden first message: it must
+  // travel with every turn, because a resumed session re-reads it.
+  const systemPrompt = useMemo(() => {
+    const base = buildSystemPrompt(contextSelection ?? { kind: 'none' }, {
+      connectors,
+      issuePrefixes,
+      skills,
+    });
+    const snapshot = buildSnapshot({
+      selection: contextSelection ?? undefined,
+      entries,
+      schema,
+      activePath: activeChipPath,
+      visible: collection?.entries,
+      // M11: the open TAB's filters — what the person is actually looking at.
+      filters:
+        activeView === null || contextSelection === null
+          ? null
+          : resolveView(
+              activeView.definition,
+              contextSelection.kind === 'list' ? (contextSelection.view ?? null) : null,
+            ).filters,
+      references: extractReferences(draft),
+      attached: recordChips.map((c) => c.path),
+    });
+    return `${base}${renderSnapshot(snapshot)}`;
+    // `draft` is deliberately excluded: rebuilding the prompt on every
+    // keystroke would thrash, and `send` reads the references it needs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    connectors,
+    issuePrefixes,
+    skills,
+    contextSelection,
+    entries,
+    schema,
+    activeChipPath,
+    collection?.entries,
+    activeView,
+    recordChips,
+  ]);
+  // Handed to the chat hook through a ref rather than an argument — see
+  // getSystemPrompt above. Assigned during render, like every other
+  // latest-value ref in this codebase.
+  promptRef.current = systemPrompt;
 
   // Every send goes through here so no path can leave a thread unanchored —
   // there are three (the composer, a suggestion chip, and a retry) plus the
@@ -348,9 +431,28 @@ export function AiPanel() {
   const streaming = chat.streaming;
   useEffect(() => {
     if (pendingPrompt === null || streaming) return;
+    // M17.6: the handoff's SUBJECT becomes a context chip. Six call sites used
+    // to hand over a prompt naming a record and drop the record itself, so the
+    // agent was asked to revise a concept and handed whatever surface the user
+    // happened to be standing on.
+    //
+    // Attaching is its own pass, ending with the subject consumed rather than
+    // the whole handoff: the prompt is built from the chips DURING RENDER, so
+    // sending in the same tick would send the context from before the chip
+    // existed — the exact staleness this milestone is about.
+    if (pendingPrompt.subject !== null) {
+      const chip = recordChip(pendingPrompt.subject, entries);
+      setPendingPrompt({ text: pendingPrompt.text, subject: null });
+      if (chip !== null) {
+        const id = chipId(chip);
+        setDismissed((prev) => prev.filter((d) => d !== id));
+        setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
+      }
+      return;
+    }
     setPendingPrompt(null);
-    ask(pendingPrompt);
-  }, [ask, pendingPrompt, setPendingPrompt, streaming]);
+    ask(pendingPrompt.text);
+  }, [ask, entries, pendingPrompt, setPendingPrompt, streaming]);
 
   const submit = () => {
     // Mid-turn, Enter is a no-op: the Send button is already replaced by
@@ -520,9 +622,12 @@ export function AiPanel() {
             data-testid="thread-elsewhere"
             className="mb-1.5 flex items-center gap-1.5 text-2xs text-n-500"
           >
-            <Icon name="map-pin" size={11} color="var(--n-400)" />
+            <Icon name="corner-down-right" size={11} color="var(--n-400)" />
+            {/* Says what CHANGED, not what the chip above already says: the
+                place chip names the thread's subject, this names where you
+                have walked to. The button is the point of the row. */}
             <span className="min-w-0 flex-1 truncate">
-              This conversation is about {conversations.active?.placeLabel}
+              You’ve moved to {conversations.hereLabel}.
             </span>
             <button
               type="button"
@@ -532,6 +637,42 @@ export function AiPanel() {
             >
               New one here
             </button>
+          </div>
+        )}
+        {/* M17.6: what the agent is being told about, as things rather than as
+            a derivation. Removable, because the most useful thing a context
+            control can do is take something OUT — an answer about the wrong
+            record reads as the model being stupid until you can see that the
+            app handed it the wrong page. */}
+        {chips.length > 0 && (
+          <div
+            data-testid="context-chips"
+            className="mb-1.5 flex flex-wrap items-center gap-1"
+            aria-label="Context"
+          >
+            {chips.map((chip) => (
+              <span
+                key={chipId(chip)}
+                data-testid="context-chip"
+                data-kind={chip.kind}
+                className="inline-flex max-w-full items-center gap-1 rounded-md border border-n-200 bg-n-25 py-0.5 pl-1.5 pr-0.5 text-2xs text-n-600"
+              >
+                <Icon
+                  name={chip.kind === 'place' ? 'map-pin' : 'file-text'}
+                  size={10}
+                  color="var(--n-400)"
+                />
+                <span className="min-w-0 truncate">{chip.label}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${chip.label} from context`}
+                  onClick={() => removeChip(chip)}
+                  className="flex-none rounded border-0 bg-transparent p-0.5 text-n-400 hover:text-n-800"
+                >
+                  <Icon name="x" size={9} />
+                </button>
+              </span>
+            ))}
           </div>
         )}
         {/* M9.5: `[[` completes against the vault, and the note you name

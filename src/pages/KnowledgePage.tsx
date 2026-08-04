@@ -111,8 +111,7 @@ export function KnowledgePage({
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const actorId = useUiStore((s) => s.actorId);
-  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const askAgent = useUiStore((s) => s.askAgent);
   const navigate = useNavStore((s) => s.navigate);
   const openPath = useOpenPath();
 
@@ -448,8 +447,10 @@ export function KnowledgePage({
               onOpenEntity={openPath}
               onOpenConcept={openConcept}
               onAskAgent={() => {
-                setAiPanelOpen(true);
-                setPendingPrompt(reviewConceptPrompt(selected.entry.path, selected.title));
+                askAgent(
+                  reviewConceptPrompt(selected.entry.path, selected.title),
+                  selected.entry.path,
+                );
               }}
             />
           )}

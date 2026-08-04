@@ -27,6 +27,9 @@ export interface RelatedKnowledgeProps {
   limit?: number;
   /** Prompt to hand the assistant when the user asks it to look harder. */
   askPrompt?: string;
+  /** The record that prompt is ABOUT (M17.6) — attached as a context chip
+   * so the agent reads it rather than inferring it from the prompt text. */
+  askSubject?: string | null;
   askLabel?: string;
   /** 'section' sits in a page; 'panel' is the narrower side-panel variant. */
   variant?: 'section' | 'panel';
@@ -36,13 +39,13 @@ export function RelatedKnowledge({
   entry,
   limit = 5,
   askPrompt,
+  askSubject,
   askLabel = 'Ask what is missing',
   variant = 'section',
 }: RelatedKnowledgeProps) {
   const entries = useVaultStore((s) => s.entries);
   const navigate = useNavStore((s) => s.navigate);
-  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
-  const setPendingPrompt = useUiStore((s) => s.setAgentPendingPrompt);
+  const askAgent = useUiStore((s) => s.askAgent);
   const closeDetail = useUiStore((s) => s.closeDetail);
 
   const today = todayIso();
@@ -56,8 +59,7 @@ export function RelatedKnowledge({
 
   const ask = () => {
     if (askPrompt === undefined) return;
-    setAiPanelOpen(true);
-    setPendingPrompt(askPrompt);
+    askAgent(askPrompt, askSubject ?? null);
   };
 
   // An empty state that still offers the ask: "nothing yet" is exactly when
