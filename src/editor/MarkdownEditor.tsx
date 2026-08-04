@@ -9,6 +9,7 @@ import {
 } from '@blocknote/core';
 import { SideMenuExtension } from '@blocknote/core/extensions';
 import { codeBlockOptions } from '@blocknote/code-block';
+import { AskAiPopover } from '@/editor/AskAiPopover';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
   AddBlockButton,
@@ -192,6 +193,15 @@ export function MarkdownEditor({
   const isPerson = useCallback((e: Entry) => e.type !== null && peopleSet.has(e.type), [peopleSet]);
   const toast = useUiStore((s) => s.toast);
   const [loaded, setLoaded] = useState(false);
+  /**
+   * Ask AI on the selection (M17.16), opened with Cmd/Ctrl-K.
+   *
+   * The selected TEXT is captured when the popover opens, not read when it
+   * closes: the user is about to type into an input, which collapses the
+   * editor selection the moment focus leaves. Holding the string is also what
+   * lets the rewrite be diffed against exactly what was shown.
+   */
+  const [asking, setAsking] = useState<{ text: string; x: number; y: number } | null>(null);
   // Assign-task popover (M2.x feedback): opened from the checklist row's
   // side-menu button, floats NEXT TO the task line (not a modal); writes
   // assignee/due chips into that block.
@@ -490,8 +500,48 @@ export function MarkdownEditor({
     editor.updateBlock(block, { content: [...rest, ...spaced] as never });
   };
 
+  // Cmd/Ctrl-K over a selection. Bound on the container rather than the
+  // window so it only fires for the editor that has focus — two editors are on
+  // screen at once whenever the record panel is open beside a doc.
+  const onEditorKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'k' || !(e.metaKey || e.ctrlKey) || readOnly) return;
+    const text = window.getSelection()?.toString() ?? '';
+    // Nothing selected is not an error — it is the other feature (a slash
+    // menu), and stealing the keystroke to show an empty rewrite would be
+    // worse than not binding it.
+    if (text.trim() === '') return;
+    e.preventDefault();
+    const rect = window.getSelection()?.getRangeAt(0).getBoundingClientRect();
+    setAsking({
+      text,
+      x: Math.min(rect?.left ?? 80, window.innerWidth - 440),
+      y: (rect?.bottom ?? 80) + 6,
+    });
+  };
+
+  /**
+   * Replace the selected text with the decided passage.
+   *
+   * Through the DOM selection rather than by block id, because the selection
+   * may span several blocks and part of one — "rewrite this sentence" is the
+   * common case, and a block-granular replace would take the paragraph. One
+   * edit, so it is one undo step and one debounce, which is the whole reason
+   * the rewrite is not streamed in.
+   */
+  const replaceSelection = (text: string) => {
+    const range = window.getSelection()?.getRangeAt(0);
+    if (range === undefined) return;
+    range.deleteContents();
+    range.insertNode(document.createTextNode(text));
+    scheduleEmit();
+  };
+
   return (
-    <div data-testid="markdown-editor" className="cerebro-editor min-h-0 flex-1">
+    <div
+      data-testid="markdown-editor"
+      className="cerebro-editor min-h-0 flex-1"
+      onKeyDown={onEditorKeyDown}
+    >
       {loaded && (
         <BlockNoteView
           editor={editor}
@@ -551,6 +601,27 @@ export function MarkdownEditor({
             )}
           />
         </BlockNoteView>
+      )}
+      {asking !== null && (
+        <div
+          className="fixed inset-0 z-40"
+          onMouseDown={() => setAsking(null)}
+          onWheel={(e) => {
+            if (e.target === e.currentTarget) setAsking(null);
+          }}
+        >
+          <div
+            className="absolute"
+            style={{ left: asking.x, top: asking.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <AskAiPopover
+              selection={asking.text}
+              onReplace={replaceSelection}
+              onClose={() => setAsking(null)}
+            />
+          </div>
+        </div>
       )}
       {assign !== null && (
         // Anchored popover, not a modal — it floats beside the task line
