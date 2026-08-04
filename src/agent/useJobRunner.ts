@@ -368,6 +368,7 @@ export function useJobRunner(): void {
             // Both are narrowings — neither can widen what Settings granted.
             scope: agent?.scope ?? null,
             allowedTools: agent?.allowedTools ?? null,
+            connectorNames: agent?.connectors ?? null,
             connectors,
             // Unattended, and it matters beyond bookkeeping: with connectors
             // on but no connectors.json, an attended turn falls back to the

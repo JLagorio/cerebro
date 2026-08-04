@@ -22,9 +22,17 @@ import {
   type TemplateDraft,
 } from '@/engine/libraryDraft';
 import { parseSchedule } from '@/engine/skills';
-import { listTypes } from '@/engine/typeCatalog';
+import { parseConnectors, type ConnectorSpec } from '@/engine/connectors';
+import { isRecordEntry, listTypes } from '@/engine/typeCatalog';
 import type { Entry, Schema } from '@/engine/types';
-import { createNote, readNote, saveNote, setNoteTitle, updateFrontmatter } from '@/lib/ipc';
+import {
+  createNote,
+  readConnectors,
+  readNote,
+  saveNote,
+  setNoteTitle,
+  updateFrontmatter,
+} from '@/lib/ipc';
 import { splitFrontmatter } from '@/lib/mockParse';
 import { slugify } from '@/lib/slug';
 import { useNavStore } from '@/stores/navStore';
@@ -181,6 +189,25 @@ function LibraryEditor({
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const entry = entries.find((e) => e.path === path);
+  const [connectorSpecs, setConnectorSpecs] = useState<ConnectorSpec[]>([]);
+  // Read on open rather than held in a store: the connector list lives in the
+  // vault's own `.cerebro/connectors.json`, is edited on another screen, and is
+  // small. Failing quietly to an empty list is right — the picker then says
+  // "this vault has no connectors enabled", which is also what a broken config
+  // means for a run (connectors.rs fails closed on an unreadable file).
+  useEffect(() => {
+    if (vaultPath === null || kind !== 'agent') return;
+    let live = true;
+    void readConnectors(vaultPath)
+      .then((raw) => {
+        if (live) setConnectorSpecs(parseConnectors(raw));
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [vaultPath, kind]);
+  const vault = useMemo(() => vaultOptions(entries, connectorSpecs), [entries, connectorSpecs]);
 
   const [name, setName] = useState(entry?.title ?? '');
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -325,7 +352,10 @@ function LibraryEditor({
             <AgentEditor
               draft={draft.value}
               title={name}
-              folders={folderList(entries)}
+              folders={vault.folders}
+              fields={vault.fields}
+              valuesFor={vault.valuesFor}
+              connectors={vault.connectors}
               onChange={(value) => edit({ kind: 'agent', value })}
             />
           ) : (
@@ -364,7 +394,64 @@ function dutyOf(
   return null;
 }
 
-/** Every folder that holds a note, for the scope and trigger pickers. */
-function folderList(entries: { folder: string }[]): string[] {
-  return [...new Set(entries.map((e) => e.folder).filter((f) => f !== ''))].sort();
+/**
+ * What the pickers pick FROM (M18.4).
+ *
+ * Derived from the vault rather than typed, which is the whole point: a folder
+ * that does not exist, a property nothing carries, and a connector nobody
+ * enabled are all values the old text boxes accepted without complaint and that
+ * silently did nothing.
+ */
+export interface VaultOptions {
+  folders: { path: string; count: number }[];
+  fields: string[];
+  valuesFor: (field: string) => string[];
+  connectors: { name: string; transport: string }[];
+}
+
+export function vaultOptions(entries: Entry[], connectorSpecs: ConnectorSpec[]): VaultOptions {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.folder === '') continue;
+    // Every ancestor, not only the immediate parent: `records` is a legitimate
+    // scope even when every file lives two levels down, and a picker that only
+    // offered leaves would make the broad, common choice unreachable.
+    const parts = entry.folder.split('/');
+    for (let i = 1; i <= parts.length; i++) {
+      const path = parts.slice(0, i).join('/');
+      counts.set(path, (counts.get(path) ?? 0) + 1);
+    }
+  }
+
+  // Property names records actually carry. Relationship fields included:
+  // wikilink-valued properties land in `relationships` (the scanner shape
+  // AGENTS.md warns about), and `owner` is exactly the kind of field somebody
+  // wants a trigger on.
+  const fields = new Set<string>();
+  for (const entry of entries) {
+    if (!isRecordEntry(entry)) continue;
+    for (const key of Object.keys(entry.properties)) fields.add(key);
+    for (const key of Object.keys(entry.relationships)) fields.add(key);
+  }
+
+  return {
+    folders: [...counts.entries()]
+      .map(([path, count]) => ({ path, count }))
+      .sort((a, b) => a.path.localeCompare(b.path)),
+    fields: [...fields].sort(),
+    // Values a field has actually HELD. A trigger on `status: blocked` in a
+    // vault whose statuses are open/doing/done fires never, and nothing else
+    // in the app would ever say so.
+    valuesFor: (field: string) => {
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        const value = entry.properties[field];
+        if (typeof value === 'string' && value.trim() !== '') seen.add(value.trim());
+      }
+      return [...seen].sort().slice(0, 40);
+    },
+    connectors: connectorSpecs
+      .filter((c) => c.enabled)
+      .map((c) => ({ name: c.name, transport: c.transport })),
+  };
 }

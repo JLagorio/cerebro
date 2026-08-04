@@ -1,9 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
-import { formatList, parseList, type SkillDraft } from '@/engine/libraryDraft';
-import { parseSchedule } from '@/engine/skills';
+import type { SkillDraft } from '@/engine/libraryDraft';
+import { matchedToolset, TOOLSETS, writesAnything } from '@/engine/tools';
 import { slugify } from '@/lib/slug';
 import { BodyField, EditorSection, Field, GuardRow, TextField } from './chrome';
+import { Picker } from './Picker';
+import { ScheduleField } from './ScheduleField';
 
 /**
  * The skill editor (M18).
@@ -33,7 +35,6 @@ export function SkillEditor({
   const set = <K extends keyof SkillDraft>(key: K, value: SkillDraft[K]) =>
     onChange({ ...draft, [key]: value });
   const derived = slugify(title);
-  const scheduleValid = draft.schedule.trim() === '' || parseSchedule(draft.schedule) !== null;
 
   return (
     <>
@@ -181,18 +182,33 @@ export function SkillEditor({
           checked={draft.allowedTools !== null}
           onChange={(on) => set('allowedTools', on ? [] : null)}
         >
-          <TextField
+          <Picker
             testId="skill-allowed-tools"
-            ariaLabel="Allowed tools"
-            value={formatList(draft.allowedTools ?? [])}
-            onChange={(v) => set('allowedTools', parseList(v))}
-            placeholder="search_notes, get_note"
+            ariaLabel="Tools this skill may use"
+            addLabel="Add tools"
+            emptyLabel="No tools at all — a pure text transformation."
+            options={TOOLSETS.flatMap((group) =>
+              group.tools.map((tool) => ({
+                value: tool.name,
+                label: tool.name,
+                hint: tool.summary,
+                group: group.label,
+                icon: tool.writes ? 'pencil' : 'eye',
+              })),
+            )}
+            groupHint={Object.fromEntries(TOOLSETS.map((g) => [g.label, g.hint]))}
+            selected={draft.allowedTools ?? []}
+            onChange={(next) => set('allowedTools', next)}
           />
-          <p className="m-0 mt-1 text-2xs text-n-500">
-            {draft.allowedTools !== null && draft.allowedTools.length === 0
-              ? 'Empty: this skill runs with no tools at all.'
-              : `Only these ${draft.allowedTools?.length ?? 0} will be available.`}
-          </p>
+          {draft.allowedTools !== null && draft.allowedTools.length > 0 && (
+            <p className="m-0 mt-1.5 text-2xs text-n-500">
+              {matchedToolset(draft.allowedTools)?.label ?? ''}
+              {matchedToolset(draft.allowedTools) === null ? '' : '. '}
+              {writesAnything(draft.allowedTools)
+                ? 'This selection can change files in your vault.'
+                : 'Read-only: nothing in this selection changes a file.'}
+            </p>
+          )}
         </GuardRow>
       </EditorSection>
 
@@ -200,28 +216,9 @@ export function SkillEditor({
         title="On a schedule"
         hint="A skill with a schedule runs unattended, like an agent. An app that was closed all week owes one catch-up run, not seven."
       >
-        <Field
-          label="Schedule"
-          htmlFor="skill-schedule"
-          hint="hourly · daily 09:00 · weekdays 08:30 · weekly fri 17:00. Leave blank to run only when invoked."
-        >
-          <TextField
-            id="skill-schedule"
-            testId="skill-schedule"
-            value={draft.schedule}
-            onChange={(v) => set('schedule', v)}
-            placeholder="weekly fri 17:00"
-          />
+        <Field label="Schedule">
+          <ScheduleField value={draft.schedule} onChange={(v) => set('schedule', v)} />
         </Field>
-        {!scheduleValid && (
-          // Said at the point of entry, because a schedule nobody can parse is
-          // silently not a schedule — the skill simply never runs, and there is
-          // nowhere else the app would ever mention it.
-          <p className="m-0 flex items-center gap-1.5 text-2xs text-danger-600" role="alert">
-            <Icon name="triangle-alert" size={12} color="var(--danger-600)" />
-            Not a schedule this app can read — it will not run. Try “weekly fri 17:00”.
-          </p>
-        )}
       </EditorSection>
     </>
   );

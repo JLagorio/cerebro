@@ -28,8 +28,20 @@ export interface SelectProps {
   size?: 'sm' | 'md';
   disabled?: boolean;
   width?: number | string;
+  /**
+   * Accessible name, for a select with no visible `<label for>` — a filter or
+   * a clause in a sentence.
+   *
+   * Named `ariaLabel`, like every other control here, and that spelling is the
+   * point: `aria-label` written on this component was silently DROPPED, and
+   * TypeScript could not catch it because JSX skips excess-property checking
+   * for any attribute whose name contains a hyphen. Six selects in the agent
+   * builder had no accessible name at all and typechecked clean.
+   */
+  ariaLabel?: string;
   style?: React.CSSProperties;
   className?: string;
+  testId?: string;
 }
 
 export function Select({
@@ -39,13 +51,22 @@ export function Select({
   size = 'md',
   disabled,
   width,
+  ariaLabel,
   style,
   className = '',
+  testId,
 }: SelectProps) {
   const h = size === 'sm' ? 'var(--control-h-sm)' : 'var(--control-h)';
   return (
     <span className={`cb-select ${className}`} style={{ width, ...style }}>
-      <select value={value} onChange={onChange} disabled={disabled} style={{ height: h }}>
+      <select
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        data-testid={testId}
+        style={{ height: h }}
+      >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}

@@ -82,6 +82,11 @@ export interface RunOptions {
    * file may subtract from what Settings granted and can never add to it.
    * Absent means "do not narrow"; [] means "narrow to nothing". */
   allowedTools?: string[] | null;
+  /** Connectors this run may reach, when the record named some (M18.4). The
+   * same narrowing contract as allowedTools: absent means "whatever the vault
+   * enabled", [] means none, and a name the vault has not enabled is dropped
+   * rather than conjured. Enforced in connectors.rs. */
+  connectorNames?: string[] | null;
   /** Vault-relative folders this run may WRITE inside (M17.13). Absent is
    * unrestricted. Enforced in Rust against the bearer the child presents, so
    * an agent cannot talk its way out of it. */
@@ -129,6 +134,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
       allowed_tools: options.allowedTools ?? null,
+      connector_names: options.connectorNames ?? null,
       scope: options.scope ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,

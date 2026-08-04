@@ -88,6 +88,14 @@ pub struct AgentRequest {
     /// friends — so the connector inlet has something to connect with.
     /// Absent reads as false, for the same reason.
     pub connectors: Option<bool>,
+    /// Connectors this run may reach, when the record named some (M18.4).
+    ///
+    /// A subtraction from what `connectors` already allowed, never an
+    /// addition: a name the vault has not enabled is dropped, and `Some([])`
+    /// means none rather than all. Same shape and same rule as
+    /// `allowed_tools` — the two boundaries an agent record can draw are
+    /// enforced here rather than requested in a prompt.
+    pub connector_names: Option<Vec<String>>,
     /// Whether a person is watching this run (the panel's turns) or it is a
     /// background job executing vault-authored content unattended. Only an
     /// attended run may fall back to legacy open mode — the user's own MCP
@@ -723,6 +731,10 @@ pub fn stream(
     let (extra_servers, strict_mcp) = crate::connectors::connector_context(
         vault,
         req.connectors.unwrap_or(false),
+        // M18.4: an agent record may name the connectors it needs. Narrowing
+        // only — see connectors::narrow. Absent leaves the run with whatever
+        // the vault has enabled, which is what every run had before.
+        req.connector_names.as_deref(),
         req.attended.unwrap_or(false),
         req.approved_stdio.as_deref().unwrap_or(&[]),
     );
@@ -973,6 +985,7 @@ mod tests {
                 model: None,
                 shell: Some(shell),
                 connectors: None,
+                connector_names: None,
                 attended: None,
                 mcp_url: None,
                 mcp_token: None,
@@ -1143,6 +1156,7 @@ mod tests {
                 model: None,
                 shell: None,
                 connectors: None,
+                connector_names: None,
                 attended: None,
                 mcp_url: None,
                 mcp_token: None,
@@ -1171,6 +1185,7 @@ mod tests {
                 model: None,
                 shell: Some(shell),
                 connectors: None,
+                connector_names: None,
                 attended: None,
                 mcp_url: None,
                 mcp_token: None,
@@ -1324,6 +1339,7 @@ mod tests {
                 model: None,
                 shell: None,
                 connectors: Some(true),
+                connector_names: None,
                 attended: None,
                 mcp_url: None,
                 mcp_token: None,
@@ -1360,6 +1376,7 @@ mod tests {
                 model: Some("claude-opus-5".into()),
                 shell: None,
                 connectors: None,
+                connector_names: None,
                 attended: None,
                 mcp_url: None,
                 mcp_token: None,

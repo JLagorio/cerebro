@@ -13,6 +13,9 @@ import { hasLayers, resetLayers } from '@/components/ui/layers';
  * closes the record panel" to Escape.
  */
 
+/** Wait one animation frame — the window the scroll guard covers. */
+const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
 function Harness({ trapFocus, onClose }: { trapFocus?: boolean; onClose?: () => void }) {
   const [open, setOpen] = useState(false);
   const close = () => {
@@ -155,8 +158,31 @@ describe('Popover dismissal contract', () => {
     render(<Harness onClose={onClose} />);
     await user.click(screen.getByTestId('trigger'));
 
+    // One frame, added in M18.4 — see the test below for why. The contract is
+    // unchanged: a scroll the user made still dismisses. What changed is that
+    // the scroll the OPENING CLICK caused no longer counts as one, and this
+    // test could not tell the two apart because it never waited.
+    await frame();
     document.dispatchEvent(new Event('scroll', { bubbles: false }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('survives the scroll its own opening click caused', async () => {
+    // M18.4, and a real bug rather than a test artifact. Clicking a trigger
+    // that is only partly in view makes the browser scroll it into view, and
+    // scroll events are dispatched asynchronously — so the scroll caused by
+    // OPENING the popover arrived after it had mounted and dismissed it
+    // instantly. On screen that reads as a button that does nothing, and it
+    // got worse the further down a long form you went.
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<Harness onClose={onClose} />);
+    await user.click(screen.getByTestId('trigger'));
+
+    // Same turn as the click, before any frame has passed.
+    document.dispatchEvent(new Event('scroll', { bubbles: false }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('menu')).toBeTruthy();
   });
 });
 

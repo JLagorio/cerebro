@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@/lib/ipc', async () => {
   const actual = await vi.importActual<typeof import('@/lib/ipc')>('@/lib/ipc');
@@ -47,6 +47,13 @@ const AGENT = makeEntry({
     scope: ['records/risks'],
   } as never,
 });
+const RISK = makeEntry({
+  path: 'records/risks/rollback.md',
+  folder: 'records/risks',
+  title: 'Rollback unrehearsed',
+  type: 'Risk',
+  properties: { status: 'open' } as never,
+});
 const TEMPLATE = makeEntry({
   path: 'templates/prd.md',
   folder: 'templates',
@@ -60,7 +67,7 @@ describe('LibraryPage', () => {
     vi.clearAllMocks();
     useVaultStore.setState({
       vaultPath: '/vault',
-      entries: [SKILL, AGENT, TEMPLATE],
+      entries: [SKILL, AGENT, RISK, TEMPLATE],
       rescan: vi.fn(async () => undefined) as never,
     });
     useNavStore.setState({ selection: { kind: 'library' } });
@@ -144,10 +151,123 @@ describe('LibraryPage', () => {
     });
     render(<LibraryPage />);
     const scope = await screen.findByTestId('agent-scope');
-    fireEvent.change(scope, { target: { value: '' } });
+    fireEvent.click(within(scope).getByRole('button', { name: 'Remove records/risks' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalled());
     expect(vi.mocked(ipc.updateFrontmatter).mock.calls[0][2].scope).toEqual([]);
+  });
+
+  it('offers folders that EXIST, with what is in them', async () => {
+    // The complaint that started M18.4: "I should not have to say
+    // records/risks, it should load where I can select". A text box accepted a
+    // folder that does not exist and scoped the agent to nothing, silently.
+    useNavStore.setState({
+      selection: { kind: 'library', tab: 'agent', path: AGENT.path },
+    });
+    render(<LibraryPage />);
+    const scope = await screen.findByTestId('agent-scope');
+    fireEvent.click(within(scope).getByTestId('picker-add'));
+    const labels = (await screen.findAllByTestId('picker-option')).map((o) => o.textContent);
+    expect(labels.some((l) => l?.includes('records/risks'))).toBe(true);
+    expect(labels.some((l) => l?.includes('records/agents'))).toBe(true);
+    // Ancestors too — `records` is a legitimate scope even when every file
+    // lives two levels down, and a picker offering only leaves would make the
+    // broad, common choice unreachable.
+    expect(labels).toContain('records3');
+  });
+
+  it('picks tools from the catalog the server actually serves', async () => {
+    useNavStore.setState({
+      selection: { kind: 'library', tab: 'agent', path: AGENT.path },
+    });
+    render(<LibraryPage />);
+    // The body loads from disk, so wait for the form before touching it.
+    await screen.findByTestId('agent-description');
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /Restrict this agent to specific tools/ }),
+    );
+    const tools = await screen.findByTestId('agent-allowed-tools');
+    fireEvent.click(within(tools).getByTestId('picker-add'));
+    const labels = (await screen.findAllByTestId('picker-option')).map((o) => o.textContent);
+    expect(labels.some((l) => l?.includes('search_notes'))).toBe(true);
+    expect(labels.some((l) => l?.includes('write_concept'))).toBe(true);
+  });
+
+  it('takes a whole toolset in one click, and says whether it can write', async () => {
+    useNavStore.setState({
+      selection: { kind: 'library', tab: 'agent', path: AGENT.path },
+    });
+    render(<LibraryPage />);
+    // The body loads from disk, so wait for the form before touching it.
+    await screen.findByTestId('agent-description');
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /Restrict this agent to specific tools/ }),
+    );
+    const tools = await screen.findByTestId('agent-allowed-tools');
+    fireEvent.click(within(tools).getByTestId('picker-add'));
+    const readGroup = (await screen.findAllByTestId('picker-group')).find((g) =>
+      g.textContent?.includes('Read the vault'),
+    );
+    fireEvent.click(readGroup!);
+    // The one sentence a tool picker owes you: can this change my files?
+    expect((await screen.findByTestId('agent-tools-summary')).textContent).toContain('Read-only');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalled());
+    expect(vi.mocked(ipc.updateFrontmatter).mock.calls[0][2]['allowed-tools']).toEqual([
+      'get_vault_context',
+      'search_notes',
+      'get_note',
+      'list_inbox',
+    ]);
+  });
+
+  it('keeps a tool name it does not recognise, and says it does not', async () => {
+    // Dropping one would rewrite the user's policy behind their back on save,
+    // and a hand-edited `allowed-tools:` is exactly where the app should say
+    // "I do not know this" rather than quietly disagree.
+    useVaultStore.setState({
+      entries: [
+        makeEntry({
+          path: 'records/agents/odd.md',
+          type: 'Agent',
+          title: 'Odd',
+          properties: { 'allowed-tools': ['get_note', 'delete_everything'] } as never,
+        }),
+      ],
+    });
+    useNavStore.setState({
+      selection: { kind: 'library', tab: 'agent', path: 'records/agents/odd.md' },
+    });
+    render(<LibraryPage />);
+    await screen.findByTestId('agent-description');
+    const tools = await screen.findByTestId('agent-allowed-tools');
+    expect(within(tools).getByText(/not something this vault has/)).toBeTruthy();
+    // Save is disabled until something changes — edit an unrelated field, so
+    // the assertion is about what SURVIVES a save rather than what it writes.
+    fireEvent.change(screen.getByTestId('agent-description'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalled());
+    expect(vi.mocked(ipc.updateFrontmatter).mock.calls[0][2]['allowed-tools']).toEqual([
+      'get_note',
+      'delete_everything',
+    ]);
+  });
+
+  it('builds a schedule instead of asking for its grammar', async () => {
+    // An unparseable `schedule:` is not an error — it is silently not a
+    // schedule, so the agent never runs and nothing anywhere says why.
+    useNavStore.setState({
+      selection: { kind: 'library', tab: 'agent', path: AGENT.path },
+    });
+    render(<LibraryPage />);
+    const repeat = await screen.findByLabelText('Repeat');
+    expect((repeat as HTMLSelectElement).value).toBe('weekdays');
+    fireEvent.change(repeat, { target: { value: 'weekly' } });
+    fireEvent.change(screen.getByLabelText('Day'), { target: { value: '5' } });
+    fireEvent.change(screen.getByTestId('schedule-time'), { target: { value: '17:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(vi.mocked(ipc.updateFrontmatter)).toHaveBeenCalled());
+    expect(vi.mocked(ipc.updateFrontmatter).mock.calls[0][2].schedule).toBe('weekly fri 17:30');
   });
 
   it('un-scoping an agent removes the key, which means anywhere', async () => {

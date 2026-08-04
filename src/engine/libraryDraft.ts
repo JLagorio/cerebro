@@ -81,6 +81,8 @@ export interface AgentDraft {
   /** Folders it may write inside. Null = anywhere; [] = nowhere. */
   scope: string[] | null;
   allowedTools: string[] | null;
+  /** Connectors it may reach. Null = whatever the vault enabled; [] = none. */
+  connectors: string[] | null;
   /** `tools: shell` — the host tools, still capped by the Settings ceiling. */
   shell: boolean;
   schedule: string;
@@ -99,6 +101,7 @@ export function agentDraft(entry: Entry, body: string): AgentDraft {
     description: text(entry.properties.description),
     scope: parseScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
+    connectors: parseAllowedTools(entry.properties.connectors),
     shell: entry.properties.tools === 'shell',
     schedule: text(entry.properties.schedule),
     triggers: parseTriggers(entry.properties.when),
@@ -114,6 +117,7 @@ export function agentPatch(draft: AgentDraft): Record<string, unknown> {
     description: blank(draft.description),
     scope: draft.scope,
     'allowed-tools': draft.allowedTools,
+    connectors: draft.connectors,
     // `tools: safe` is written rather than removed: the default is safe either
     // way, but a record that says so out loud is one you can read the policy
     // off without knowing what the default is.

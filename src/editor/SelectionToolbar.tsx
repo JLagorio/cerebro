@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   FormattingToolbar,
   FormattingToolbarController,
@@ -6,6 +6,8 @@ import {
   useComponentsContext,
 } from '@blocknote/react';
 import { Icon } from '@/components/ui/Icon';
+import { MenuItem, MenuSurface } from '@/components/ui/Menu';
+import { Popover } from '@/components/ui/Popover';
 
 /**
  * The AI controls you can actually see (M18).
@@ -99,6 +101,7 @@ export function AiFormattingToolbar({ onAsk }: { onAsk: (preset?: Preset) => voi
 function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
   const Components = useComponentsContext();
   const [more, setMore] = useState(false);
+  const moreRef = useRef<HTMLSpanElement>(null);
   if (Components === undefined) return null;
   const Button = Components.FormattingToolbar.Button;
 
@@ -129,7 +132,7 @@ function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
           onClick={() => onAsk(preset)}
         />
       ))}
-      <span className="relative inline-flex">
+      <span ref={moreRef} className="inline-flex">
         <Button
           className="bn-button"
           label="More AI actions"
@@ -138,33 +141,39 @@ function AiToolbarButtons({ onAsk }: { onAsk: (preset?: Preset) => void }) {
           isSelected={more}
           onClick={() => setMore((v) => !v)}
         />
-        {more && (
-          <div
-            data-testid="selection-more"
-            className="absolute left-0 top-full z-[60] mt-1 flex min-w-[204px] flex-col rounded-lg border border-n-200 bg-n-0 p-1 shadow-[var(--shadow-lg)]"
-          >
+      </span>
+      {more && (
+        // A real floating layer, not `absolute` inside the toolbar. The
+        // toolbar is a positioned, clipping, transform-placed element, so an
+        // absolutely-positioned child rendered THERE is cropped at its edge —
+        // which is exactly what it did: the button lit up and no menu
+        // appeared. Popover portals out and anchors to the button.
+        <Popover
+          anchorRef={moreRef}
+          role="menu"
+          ariaLabel="More AI actions"
+          onClose={() => setMore(false)}
+        >
+          <MenuSurface width={210}>
             {PRESETS.map((preset) => (
-              <button
+              <MenuItem
                 key={preset.label}
-                type="button"
-                data-testid="selection-preset"
+                icon={preset.icon}
+                label={preset.label}
+                testId="selection-preset"
                 title={preset.instruction}
                 // The selection has to survive the click, and mousedown is
                 // where it would be lost.
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
+                onSelect={() => {
                   setMore(false);
                   onAsk(preset);
                 }}
-                className="flex h-7 cursor-pointer items-center gap-2 rounded-md border-0 bg-transparent px-2 text-left text-xs text-n-700 hover:bg-n-50"
-              >
-                <Icon name={preset.icon} size={13} color="var(--synapse-500)" />
-                {preset.label}
-              </button>
+              />
             ))}
-          </div>
-        )}
-      </span>
+          </MenuSurface>
+        </Popover>
+      )}
       <span className="mx-1 h-4 w-px flex-none self-center bg-n-200" aria-hidden="true" />
     </>
   );

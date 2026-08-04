@@ -143,6 +143,7 @@ pub fn save_raw(vault: &Path, json: &str) -> Result<(), String> {
 pub fn connector_context(
     vault: &Path,
     connectors: bool,
+    allow: Option<&[String]>,
     attended: bool,
     approved_stdio: &[String],
 ) -> (Map<String, Value>, bool) {
@@ -154,8 +155,32 @@ pub fn connector_context(
         ConfigRead::Unreadable(_) => (Map::new(), true),
         ConfigRead::Content(raw) => match serde_json::from_str::<Value>(&raw) {
             Err(_) => (Map::new(), true),
-            Ok(parsed) => (enabled_servers(&parsed, approved_stdio), true),
+            Ok(parsed) => (
+                narrow(enabled_servers(&parsed, approved_stdio), allow),
+                true,
+            ),
         },
+    }
+}
+
+/// Keep only the connectors a record named (M18.4).
+///
+/// A NARROWING, exactly like `allowed-tools:`: `None` means the record did not
+/// ask for one and the run gets whatever the vault has enabled. `Some(&[])` is
+/// not the same thing — a record that declared a connector list and named
+/// nothing has asked for no connectors, and reading that as "all of them"
+/// would make the most restrictive declaration the most permissive.
+///
+/// It can only subtract. A name that is not an enabled connector in this vault
+/// is dropped rather than conjured: the agent record is a request, and the
+/// vault's config is the authority on what exists.
+fn narrow(servers: Map<String, Value>, allow: Option<&[String]>) -> Map<String, Value> {
+    match allow {
+        None => servers,
+        Some(names) => servers
+            .into_iter()
+            .filter(|(name, _)| names.iter().any(|n| n == name))
+            .collect(),
     }
 }
 
@@ -313,7 +338,7 @@ mod tests {
     #[test]
     fn no_config_keeps_the_legacy_open_mode_for_attended_runs() {
         let vault = temp_vault("legacy");
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(servers.is_empty());
         assert!(
             !strict,
@@ -328,7 +353,7 @@ mod tests {
         // read as "no vault-scoped opt-in" — strict, zero extra servers —
         // never as an inheritance of the user's own MCP setup.
         let vault = temp_vault("unattended-legacy");
-        let (servers, strict) = connector_context(&vault, true, false, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, false, &[]);
         assert!(servers.is_empty());
         assert!(strict, "unattended + no explicit list must stay pinned");
     }
@@ -346,7 +371,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, true, false, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, false, &[]);
         assert!(strict);
         assert_eq!(servers.len(), 1, "the vault-scoped opt-in works unattended");
         assert_eq!(servers["jira"]["type"], "http");
@@ -378,7 +403,7 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, false, true, &[]);
+        let (servers, strict) = connector_context(&vault, false, None, true, &[]);
         assert!(servers.is_empty());
         assert!(strict);
     }
@@ -399,13 +424,84 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, true, true, &[linear_key()]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[linear_key()]);
         assert!(strict, "an explicit list pins the run to it");
         assert_eq!(servers.len(), 2, "disabled and url-less entries stay out");
         assert_eq!(servers["jira"]["type"], "http");
         assert_eq!(servers["jira"]["headers"]["Authorization"], "Bearer t");
         assert_eq!(servers["linear"]["command"], "npx");
         assert_eq!(servers["linear"]["args"][1], "@linear/mcp");
+    }
+
+    #[test]
+    fn a_record_can_name_the_connectors_it_needs() {
+        // M18.4. A scoped agent that reaches every connector the vault has is
+        // scoped in one dimension only — the folder it writes to says nothing
+        // about the external systems it can read on your behalf.
+        let vault = temp_vault("connector-allowlist");
+        save_raw(
+            &vault,
+            &json!({"servers": {
+                "jira": {"transport": "http", "url": "https://jira/mcp", "enabled": true},
+                "slack": {"transport": "http", "url": "https://slack/mcp", "enabled": true}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+
+        let allow = vec!["jira".to_string()];
+        let (servers, _) = connector_context(&vault, true, Some(&allow), true, &[]);
+        assert_eq!(servers.len(), 1, "only what the record named");
+        assert!(servers.contains_key("jira"));
+    }
+
+    #[test]
+    fn naming_no_connectors_is_not_naming_all_of_them() {
+        // The same trap `scope: []` sets: an empty declared list is the most
+        // restrictive thing a record can say, and reading it as "everything"
+        // would make the safest-looking declaration the most dangerous one.
+        let vault = temp_vault("connector-allowlist-empty");
+        save_raw(
+            &vault,
+            &json!({"servers": {
+                "jira": {"transport": "http", "url": "https://jira/mcp", "enabled": true}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+
+        let (none, _) = connector_context(&vault, true, Some(&[]), true, &[]);
+        assert!(none.is_empty(), "an empty allowlist grants nothing");
+        let (undeclared, _) = connector_context(&vault, true, None, true, &[]);
+        assert_eq!(
+            undeclared.len(),
+            1,
+            "an ABSENT allowlist grants what is enabled"
+        );
+    }
+
+    #[test]
+    fn an_allowlist_can_never_widen_what_the_vault_enabled() {
+        // The record is a request; connectors.json is the authority. Naming a
+        // disabled server, or one that does not exist, must not conjure it —
+        // otherwise an agent file could grant itself reach the user withdrew.
+        let vault = temp_vault("connector-allowlist-widen");
+        save_raw(
+            &vault,
+            &json!({"servers": {
+                "jira": {"transport": "http", "url": "https://jira/mcp", "enabled": true},
+                "off": {"transport": "http", "url": "https://off/mcp", "enabled": false}
+            }})
+            .to_string(),
+        )
+        .unwrap();
+
+        let allow = vec!["off".to_string(), "never-configured".to_string()];
+        let (servers, _) = connector_context(&vault, true, Some(&allow), true, &[]);
+        assert!(
+            servers.is_empty(),
+            "a name the vault has not enabled stays out"
+        );
     }
 
     #[test]
@@ -424,7 +520,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(strict);
         assert_eq!(servers.len(), 1, "http passes, unapproved stdio is dropped");
         assert!(servers.get("evil").is_none());
@@ -444,7 +540,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, _) = connector_context(&vault, true, true, &[linear_key()]);
+        let (servers, _) = connector_context(&vault, true, None, true, &[linear_key()]);
         assert!(
             servers.is_empty(),
             "an edited spec is a new spec: approval gone"
@@ -469,7 +565,7 @@ mod tests {
             stdio_approval_key("odd-env", "npx", &[], &[]),
             stdio_approval_key("odd-args", "npx", &[], &[]),
         ];
-        let (servers, _) = connector_context(&vault, true, true, &approved);
+        let (servers, _) = connector_context(&vault, true, None, true, &approved);
         assert!(servers.is_empty());
     }
 
@@ -514,7 +610,7 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let (servers, _) = connector_context(&vault, true, true, &[linear_fp()]);
+        let (servers, _) = connector_context(&vault, true, None, true, &[linear_fp()]);
         assert!(servers.is_empty());
     }
 
@@ -526,7 +622,7 @@ mod tests {
         // must NOT be conflated with the file being absent — an explicit
         // list we cannot read must not widen into "everything".
         std::fs::write(vault.join(CONFIG_PATH), [0xff, 0xfe, 0xfd]).unwrap();
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(servers.is_empty());
         assert!(strict);
     }
@@ -536,7 +632,7 @@ mod tests {
         let vault = temp_vault("broken");
         std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
         std::fs::write(vault.join(CONFIG_PATH), "{not json").unwrap();
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(servers.is_empty());
         assert!(
             strict,
@@ -561,7 +657,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, vault.join(".cerebro")).unwrap();
 
         // Reads refuse — and fail CLOSED, not into legacy open mode.
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(
             servers.is_empty(),
             "a config reached through a symlink is never merged"
@@ -592,7 +688,7 @@ mod tests {
         std::fs::create_dir_all(vault.join(".cerebro")).unwrap();
         std::os::unix::fs::symlink(target.join("secrets.json"), vault.join(CONFIG_PATH)).unwrap();
 
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(servers.is_empty());
         assert!(strict);
         assert!(read_raw(&vault).is_none());
@@ -619,12 +715,12 @@ mod tests {
         save_raw(&vault, "{\"servers\":{}}").unwrap();
         // An empty LIST is not legacy — it pins the run to no servers.
         assert!(
-            connector_context(&vault, true, true, &[]).1,
+            connector_context(&vault, true, None, true, &[]).1,
             "empty list stays strict"
         );
         save_raw(&vault, "").unwrap();
         assert!(read_raw(&vault).is_none());
-        let (servers, strict) = connector_context(&vault, true, true, &[]);
+        let (servers, strict) = connector_context(&vault, true, None, true, &[]);
         assert!(servers.is_empty());
         assert!(
             !strict,

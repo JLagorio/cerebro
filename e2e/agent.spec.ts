@@ -270,7 +270,7 @@ test('library: three shelves, no workspace nav, and nothing posing as a type', a
   await expect(cards.filter({ hasText: 'PRD' })).toContainText('fills itself');
 });
 
-test('library: an agent is built in a form, not typed into a file', async ({ page }) => {
+test('library: an agent is built from pickers, not from remembered strings', async ({ page }) => {
   await boot(page);
   await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
   await page.getByTestId('library-tab-agent').click();
@@ -278,19 +278,40 @@ test('library: an agent is built in a form, not typed into a file', async ({ pag
 
   const editor = page.getByTestId('library-editor');
   await expect(editor).toBeVisible();
-  // Not a doc canvas and not a property table: the two fields that decide what
-  // an unattended process may do are on screen with their consequences.
-  await expect(page.getByTestId('agent-scope')).toHaveValue('records/risks');
+  // Not a doc canvas and not a property table: what an unattended process may
+  // do is on screen, as a chip you can see and remove.
+  const scope = page.getByTestId('agent-scope');
+  await expect(scope.getByTestId('picker-chip')).toHaveText(/records\/risks/);
   await expect(editor).toContainText('Nothing fires it');
 
-  // Building a trigger is picking clauses, not remembering YAML — and the
-  // sentence under it is the same one the library prints, so what will fire it
-  // is readable before it ever runs.
+  // Scope is PICKED from folders that exist, with what is in each. Typed, it
+  // accepted a folder that does not exist and scoped the agent to nothing.
+  await scope.getByTestId('picker-add').click();
+  const options = page.getByTestId('picker-option');
+  await expect(options.filter({ hasText: 'records/agents' })).toBeVisible();
+  await expect(options.filter({ hasText: 'knowledge' }).first()).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Tools come from the catalog the server actually serves, in sets — and the
+  // picker says the one thing it owes you: can this change my files?
+  await page.getByText('Restrict this agent to specific tools').click();
+  const tools = page.getByTestId('agent-allowed-tools');
+  await tools.getByTestId('picker-add').click();
+  await page.getByTestId('picker-group').filter({ hasText: 'Read the vault' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('agent-tools-summary')).toContainText('Read-only');
+
+  // A trigger is clauses, not YAML, and the sentence under it is the same one
+  // the library prints — so what will fire it is readable before it ever runs.
   await page.getByRole('button', { name: 'Add trigger' }).click();
   const trigger = page.getByTestId('agent-trigger');
-  await trigger.getByLabel('Trigger 1 folder').fill('records/risks');
-  await trigger.getByLabel('Trigger 1 field').fill('status');
-  await trigger.getByLabel('Trigger 1 value').fill('blocked');
+  await trigger.getByLabel('Trigger 1 field').selectOption('status');
+  // The value list is what the field has ACTUALLY held in this vault. Typed,
+  // `status: blocked` in a vault whose statuses are todo/progress/done fires
+  // never, and nothing anywhere would say so.
+  const value = trigger.getByLabel('Trigger 1 value');
+  await expect(value.locator('option')).toContainText(['any value', 'at-risk']);
+  await value.selectOption('at-risk');
   await expect(trigger).toContainText('status');
   await expect(editor).toContainText('On duty');
 
@@ -301,9 +322,34 @@ test('library: an agent is built in a form, not typed into a file', async ({ pag
   expect(before).not.toContain('when:');
 
   await page.getByRole('button', { name: 'Save' }).click();
+  const after = expect.poll(async () =>
+    page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path),
+  );
+  await after.toContain('at-risk');
+});
+
+test('library: a schedule is built, never typed as a grammar', async ({ page }) => {
+  // An unparseable `schedule:` is not an error — it is silently not a
+  // schedule, so the agent never runs and nothing anywhere would say why.
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('library-tab-agent').click();
+  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+
+  await page.getByLabel('Repeat').selectOption('weekly');
+  await page.getByLabel('Day').selectOption('5');
+  await page.getByTestId('schedule-time').fill('17:30');
+  await expect(page.getByTestId('library-editor')).toContainText('On duty');
+
+  await page.getByRole('button', { name: 'Save' }).click();
   await expect
-    .poll(async () => page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path))
-    .toContain('blocked');
+    .poll(async () =>
+      page.evaluate(
+        (p) => window.__cerebroMockFs.get(p as string) ?? '',
+        'records/agents/release-scout.md',
+      ),
+    )
+    .toContain('weekly fri 17:30');
 });
 
 test('editor: selecting prose shows AI controls, and a rewrite is a decision', async ({ page }) => {

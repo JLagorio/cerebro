@@ -1,49 +1,89 @@
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Select } from '@/components/ui/Select';
-import { formatList, parseList, type AgentDraft } from '@/engine/libraryDraft';
-import { parseSchedule } from '@/engine/skills';
+import type { AgentDraft } from '@/engine/libraryDraft';
+import { matchedToolset, TOOLSETS, writesAnything } from '@/engine/tools';
 import { describeTrigger, type Trigger } from '@/engine/triggers';
 import { slugify } from '@/lib/slug';
 import { BodyField, EditorSection, Field, GuardRow, TextField } from './chrome';
+import { Picker, type PickerOption } from './Picker';
+import { ScheduleField } from './ScheduleField';
 
 /**
- * The agent builder (M18).
+ * The agent builder (M18, rebuilt in M18.4).
  *
  * Building an agent used to be writing a markdown file and knowing the
- * frontmatter grammar by heart — which meant the two halves that actually make
- * an agent safe, `scope:` and `when:`, were the two nobody wrote. This is the
- * five-axis model the category converged on (instructions, triggers, tools,
- * knowledge, memory), with one deliberate difference:
+ * frontmatter grammar by heart, which meant the two halves that actually make
+ * an agent safe — `scope:` and `when:` — were the two nobody wrote. The first
+ * pass gave them a form; this one gives them PICKERS, because a form made of
+ * comma-separated text boxes has the same defect the property table had: it
+ * asks you to hold the vault's folder list and thirteen tool identifiers in
+ * your head, and it fails silently when you get one wrong.
  *
- * **The boundaries are edited beside the instructions, not in a settings page.**
- * `scope:` is not a preference. It is the answer to "what can this thing damage",
- * it is enforced in Rust before a write reaches disk, and it belongs on the same
- * screen as the prose that decides what the agent will try to do.
+ * Four axes, each answered from something real:
  *
- * ## The trigger builder
+ * - **Scope** — folders that exist in this vault, with the count in each.
+ * - **Tools** — the catalog the MCP server actually serves (engine/tools,
+ *   parity-tested against mcp.rs).
+ * - **Connectors** — the servers `.cerebro/connectors.json` has enabled.
+ * - **Triggers** — events, folders and field values from the vault's schema.
  *
- * Structured rows rather than a text box, because layer one of a trigger is
- * deliberately a small deterministic grammar — event, folder, field, value —
- * and a person should be able to read what will fire it without running it. The
- * one free-text field is `ask:`, which is layer two and is prose on purpose.
+ * The boundaries live beside the instructions rather than in a settings page,
+ * and that is deliberate: `scope:` is not a preference. It is the answer to
+ * "what can this thing damage", it is enforced in Rust before a write reaches
+ * disk, and it belongs on the same screen as the prose that decides what the
+ * agent will try to do.
  */
 export function AgentEditor({
   draft,
   title,
   folders,
+  fields,
+  valuesFor,
+  connectors,
   onChange,
 }: {
   draft: AgentDraft;
   title: string;
-  /** Real folders in the vault, so scope is picked rather than typed. */
-  folders: string[];
+  /** Real folders in the vault, with how many notes each holds. */
+  folders: { path: string; count: number }[];
+  /** Property names records actually carry, for a trigger's `field`. */
+  fields: string[];
+  /** Values seen for one field, for a trigger's `to`. */
+  valuesFor: (field: string) => string[];
+  /** Connectors this vault has enabled, from .cerebro/connectors.json. */
+  connectors: { name: string; transport: string }[];
   onChange: (next: AgentDraft) => void;
 }) {
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) =>
     onChange({ ...draft, [key]: value });
   const derived = slugify(title);
-  const scheduleValid = draft.schedule.trim() === '' || parseSchedule(draft.schedule) !== null;
+
+  const folderOptions: PickerOption[] = folders.map((f) => ({
+    value: f.path,
+    label: f.path,
+    icon: 'folder',
+    meta: `${f.count}`,
+  }));
+
+  const toolOptions: PickerOption[] = TOOLSETS.flatMap((set_) =>
+    set_.tools.map((tool) => ({
+      value: tool.name,
+      label: tool.name,
+      hint: tool.summary,
+      group: set_.label,
+      icon: tool.writes ? 'pencil' : 'eye',
+    })),
+  );
+  const toolGroupHints = Object.fromEntries(TOOLSETS.map((s) => [s.label, s.hint]));
+  const preset = draft.allowedTools === null ? null : matchedToolset(draft.allowedTools);
+
+  const connectorOptions: PickerOption[] = connectors.map((c) => ({
+    value: c.name,
+    label: c.name,
+    hint: c.transport === 'stdio' ? 'Runs a command on this machine' : 'Reaches a server over HTTP',
+    icon: 'plug',
+  }));
 
   const setTrigger = (i: number, patch: Partial<Trigger>) =>
     set(
@@ -125,110 +165,26 @@ export function AgentEditor({
           </Button>
         }
       >
-        <Field
-          label="Schedule"
-          htmlFor="agent-schedule"
-          hint="hourly · daily 09:00 · weekdays 08:30 · weekly fri 17:00."
-        >
-          <TextField
-            id="agent-schedule"
-            testId="agent-schedule"
-            value={draft.schedule}
-            onChange={(v) => set('schedule', v)}
-            placeholder="weekdays 08:30"
-          />
+        <Field label="Schedule">
+          <ScheduleField value={draft.schedule} onChange={(v) => set('schedule', v)} />
         </Field>
-        {!scheduleValid && (
-          <p className="m-0 flex items-center gap-1.5 text-2xs text-danger-600" role="alert">
-            <Icon name="triangle-alert" size={12} color="var(--danger-600)" />
-            Not a schedule this app can read — it will not run on a clock.
-          </p>
-        )}
 
         {draft.triggers.map((trigger, i) => (
-          <div
+          <TriggerRow
             key={i}
-            data-testid="agent-trigger"
-            className="rounded-lg border border-n-200 bg-n-25 p-2.5"
-          >
-            <div className="flex flex-wrap items-center gap-1.5 text-xs text-n-600">
-              <span>When a record is</span>
-              <Select
-                size="sm"
-                width={120}
-                value={trigger.event ?? 'any'}
-                aria-label={`Trigger ${i + 1} event`}
-                onChange={(e) =>
-                  setTrigger(i, {
-                    event:
-                      e.target.value === 'any' ? undefined : (e.target.value as Trigger['event']),
-                  })
-                }
-                options={[
-                  { value: 'any', label: 'touched' },
-                  { value: 'created', label: 'created' },
-                  { value: 'changed', label: 'changed' },
-                  { value: 'moved', label: 'moved' },
-                ]}
-              />
-              <span>in</span>
-              <input
-                value={trigger.in ?? ''}
-                aria-label={`Trigger ${i + 1} folder`}
-                placeholder="anywhere"
-                list="library-folders"
-                onChange={(e) => setTrigger(i, { in: e.target.value })}
-                className="w-[150px] rounded-md border border-n-200 bg-n-0 px-2 py-1 font-mono text-2xs text-n-800 outline-none focus-visible:border-cortex-400"
-              />
-              <span className="flex-1" />
-              <button
-                type="button"
-                aria-label={`Remove trigger ${i + 1}`}
-                onClick={() =>
-                  set(
-                    'triggers',
-                    draft.triggers.filter((_, n) => n !== i),
-                  )
-                }
-                className="rounded border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
-              >
-                <Icon name="x" size={13} />
-              </button>
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
-              <span>and its</span>
-              <input
-                value={trigger.field ?? ''}
-                aria-label={`Trigger ${i + 1} field`}
-                placeholder="any field"
-                onChange={(e) => setTrigger(i, { field: e.target.value })}
-                className="w-[110px] rounded-md border border-n-200 bg-n-0 px-2 py-1 font-mono text-2xs text-n-800 outline-none focus-visible:border-cortex-400"
-              />
-              <span>became</span>
-              <input
-                value={trigger.to ?? ''}
-                aria-label={`Trigger ${i + 1} value`}
-                placeholder="any value"
-                onChange={(e) => setTrigger(i, { to: e.target.value })}
-                className="w-[110px] rounded-md border border-n-200 bg-n-0 px-2 py-1 font-mono text-2xs text-n-800 outline-none focus-visible:border-cortex-400"
-              />
-            </div>
-            <div className="mt-1.5">
-              <input
-                value={trigger.ask ?? ''}
-                aria-label={`Trigger ${i + 1} question`}
-                placeholder="…and only if: a yes/no question the agent answers first (optional)"
-                onChange={(e) => setTrigger(i, { ask: e.target.value })}
-                className="w-full rounded-md border border-n-200 bg-n-0 px-2 py-1 text-2xs text-n-800 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
-              />
-            </div>
-            {/* The same sentence the library and the run log print. If the
-                summary does not match what you meant, the trigger does not
-                either — which is the entire value of a deterministic layer. */}
-            <p className="m-0 mt-2 text-2xs leading-[15px] text-n-500">
-              {describeTrigger(trigger)}
-            </p>
-          </div>
+            index={i}
+            trigger={trigger}
+            folders={folderOptions}
+            fields={fields}
+            valuesFor={valuesFor}
+            onChange={(patch) => setTrigger(i, patch)}
+            onRemove={() =>
+              set(
+                'triggers',
+                draft.triggers.filter((_, n) => n !== i),
+              )
+            }
+          />
         ))}
         {draft.triggers.length === 0 && (
           <p className="m-0 text-xs text-n-500">
@@ -248,19 +204,22 @@ export function AgentEditor({
           checked={draft.scope !== null}
           onChange={(on) => set('scope', on ? [] : null)}
         >
-          <TextField
+          <Picker
             testId="agent-scope"
-            ariaLabel="Scope"
-            value={formatList(draft.scope ?? [])}
-            onChange={(v) => set('scope', parseList(v))}
-            placeholder="records/risks, records/decisions"
+            ariaLabel="Folders this agent may write in"
+            addLabel="Add folder"
+            emptyLabel="Nowhere — it can write no file in this vault."
+            options={folderOptions}
+            selected={draft.scope ?? []}
+            onChange={(next) => set('scope', next)}
           />
-          <p className="m-0 mt-1 text-2xs text-n-500">
+          <p className="m-0 mt-1.5 text-2xs text-n-500">
             {draft.scope !== null && draft.scope.length === 0
-              ? 'Empty: this agent can write nowhere in the vault. It can still record findings through the knowledge bundle, which has its own guard.'
-              : `Writes anywhere under ${draft.scope?.join(' or ') ?? ''} and nowhere else.`}
+              ? 'It can still record findings through the knowledge bundle, which has its own guard.'
+              : `Writes anywhere under ${(draft.scope ?? []).join(' or ')} and nowhere else.`}
           </p>
         </GuardRow>
+
         <GuardRow
           label="Restrict this agent to specific tools"
           hint="A narrowing of the policy the run already has. Never a widening."
@@ -268,14 +227,51 @@ export function AgentEditor({
           checked={draft.allowedTools !== null}
           onChange={(on) => set('allowedTools', on ? [] : null)}
         >
-          <TextField
+          <Picker
             testId="agent-allowed-tools"
-            ariaLabel="Allowed tools"
-            value={formatList(draft.allowedTools ?? [])}
-            onChange={(v) => set('allowedTools', parseList(v))}
-            placeholder="search_notes, get_note, write_concept"
+            ariaLabel="Tools this agent may use"
+            addLabel="Add tools"
+            emptyLabel="No tools at all — it can read nothing and write nothing."
+            options={toolOptions}
+            groupHint={toolGroupHints}
+            selected={draft.allowedTools ?? []}
+            onChange={(next) => set('allowedTools', next)}
           />
+          {draft.allowedTools !== null && draft.allowedTools.length > 0 && (
+            <p className="m-0 mt-1.5 text-2xs text-n-500" data-testid="agent-tools-summary">
+              {preset !== null ? `${preset.label}. ` : ''}
+              {writesAnything(draft.allowedTools)
+                ? 'This selection can change files in your vault.'
+                : 'Read-only: nothing in this selection changes a file.'}
+            </p>
+          )}
         </GuardRow>
+
+        <GuardRow
+          label="Limit which connectors this agent can reach"
+          hint="What it may read from the outside world on your behalf. A tightly scoped agent that can still query every connected system is only half-bounded."
+          tone="warn"
+          checked={draft.connectors !== null}
+          onChange={(on) => set('connectors', on ? [] : null)}
+        >
+          {connectors.length === 0 ? (
+            <p className="m-0 text-2xs text-n-500">
+              This vault has no connectors enabled. Add them in Settings; an empty list here means
+              this agent reaches none of them either way.
+            </p>
+          ) : (
+            <Picker
+              testId="agent-connectors"
+              ariaLabel="Connectors this agent may reach"
+              addLabel="Add connector"
+              emptyLabel="None — it reaches no external system."
+              options={connectorOptions}
+              selected={draft.connectors ?? []}
+              onChange={(next) => set('connectors', next)}
+            />
+          )}
+        </GuardRow>
+
         <GuardRow
           label="Let this agent run shell commands"
           hint="The host tools, still capped by the ceiling in Settings. Unattended runs with shell access can do anything your account can."
@@ -316,12 +312,140 @@ export function AgentEditor({
           </p>
         </Field>
       </EditorSection>
-
-      <datalist id="library-folders">
-        {folders.map((folder) => (
-          <option key={folder} value={folder} />
-        ))}
-      </datalist>
     </>
+  );
+}
+
+/**
+ * One trigger, built from clauses rather than typed.
+ *
+ * Layer one is deliberately a small deterministic grammar — event, folder,
+ * field, value — because a person should be able to say what will fire an agent
+ * WITHOUT running it. Every clause is therefore a picker over something real:
+ * the folders in this vault, the property names its records carry, the values
+ * that property has actually held. The one free-text field is `ask:`, which is
+ * layer two, is answered by a model, and is prose on purpose.
+ */
+function TriggerRow({
+  index,
+  trigger,
+  folders,
+  fields,
+  valuesFor,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  trigger: Trigger;
+  folders: PickerOption[];
+  fields: string[];
+  valuesFor: (field: string) => string[];
+  onChange: (patch: Partial<Trigger>) => void;
+  onRemove: () => void;
+}) {
+  const values = trigger.field === undefined ? [] : valuesFor(trigger.field);
+  return (
+    <div data-testid="agent-trigger" className="rounded-lg border border-n-200 bg-n-25 p-3">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-n-600">
+        <span>When a record is</span>
+        <Select
+          size="sm"
+          width={116}
+          value={trigger.event ?? 'any'}
+          ariaLabel={`Trigger ${index + 1} event`}
+          onChange={(e) =>
+            onChange({
+              event: e.target.value === 'any' ? undefined : (e.target.value as Trigger['event']),
+            })
+          }
+          options={[
+            { value: 'any', label: 'touched' },
+            { value: 'created', label: 'created' },
+            { value: 'changed', label: 'changed' },
+            { value: 'moved', label: 'moved' },
+          ]}
+        />
+        <span className="flex-1" />
+        <button
+          type="button"
+          aria-label={`Remove trigger ${index + 1}`}
+          onClick={onRemove}
+          className="rounded border-0 bg-transparent p-1 text-n-400 hover:bg-n-50 hover:text-n-700"
+        >
+          <Icon name="x" size={13} />
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
+        <span className="w-9">in</span>
+        <Picker
+          testId={`trigger-folder-${index}`}
+          ariaLabel="Folder to watch"
+          addLabel="Pick a folder"
+          emptyLabel="Anywhere in the vault"
+          options={folders}
+          // One folder, but the same picker: `in:` is a single prefix in the
+          // grammar, so the last one picked wins rather than silently
+          // dropping the choice.
+          selected={trigger.in === undefined ? [] : [trigger.in]}
+          onChange={(next) => onChange({ in: next.at(-1) ?? undefined })}
+        />
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-n-600">
+        <span className="w-9">and its</span>
+        <Select
+          size="sm"
+          width={150}
+          value={trigger.field ?? ''}
+          ariaLabel={`Trigger ${index + 1} field`}
+          onChange={(e) => onChange({ field: e.target.value, to: undefined })}
+          options={[
+            { value: '', label: 'any field' },
+            ...fields.map((f) => ({ value: f, label: f })),
+          ]}
+        />
+        <span>became</span>
+        {values.length > 0 ? (
+          <Select
+            size="sm"
+            width={150}
+            value={trigger.to ?? ''}
+            ariaLabel={`Trigger ${index + 1} value`}
+            onChange={(e) => onChange({ to: e.target.value })}
+            options={[
+              { value: '', label: 'any value' },
+              ...values.map((v) => ({ value: v, label: v })),
+            ]}
+          />
+        ) : (
+          <input
+            value={trigger.to ?? ''}
+            aria-label={`Trigger ${index + 1} value`}
+            placeholder="any value"
+            onChange={(e) => onChange({ to: e.target.value })}
+            className="w-[150px] rounded-md border border-n-200 bg-n-0 px-2 py-1 font-mono text-2xs text-n-800 outline-none focus-visible:border-cortex-400"
+          />
+        )}
+      </div>
+
+      <div className="mt-2">
+        <input
+          value={trigger.ask ?? ''}
+          aria-label={`Trigger ${index + 1} question`}
+          placeholder="…and only if: a yes/no question the agent answers first (optional)"
+          onChange={(e) => onChange({ ask: e.target.value })}
+          className="w-full rounded-md border border-n-200 bg-n-0 px-2 py-1.5 text-2xs text-n-800 outline-none placeholder:text-n-400 focus-visible:border-cortex-400"
+        />
+      </div>
+
+      {/* The same sentence the library and the run log print. If the summary
+          does not match what you meant, the trigger does not either — which is
+          the entire value of a deterministic layer. */}
+      <p className="m-0 mt-2 flex items-start gap-1.5 text-2xs leading-[15px] text-n-500">
+        <Icon name="zap" size={11} color="var(--synapse-500)" />
+        {describeTrigger(trigger)}
+      </p>
+    </div>
   );
 }

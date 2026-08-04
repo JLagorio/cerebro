@@ -38,7 +38,7 @@ export function TemplateEditor({
             size="sm"
             width={240}
             value={draft.type}
-            aria-label="Type"
+            ariaLabel="Type"
             onChange={(e) => set('type', e.target.value)}
             options={[
               { value: '', label: 'A document' },

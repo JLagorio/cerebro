@@ -54,6 +54,20 @@ export interface AgentRef {
   /** Tools this agent may use, intersected with the granted policy (M17.8). */
   allowedTools: string[] | null;
   /**
+   * Connectors this agent may reach (M18.4).
+   *
+   * Null when the record names none — the run gets whatever the vault has
+   * enabled, which is what every agent had before. An empty list is the
+   * opposite: named, and named nothing.
+   *
+   * Worth having as its own axis rather than folding into `scope:`, because
+   * they bound different things. `scope:` says what the agent may CHANGE in
+   * your vault; this says what it may READ from the outside world on your
+   * behalf — and a tightly scoped agent that can still query every connected
+   * system is only half-bounded.
+   */
+  connectors: string[] | null;
+  /**
    * What this agent carries between runs (M17.14).
    *
    * ClickUp's three tiers, and only two of them are fields — which is the
@@ -139,6 +153,7 @@ export function agentRef(entry: Entry): AgentRef {
     shell: entry.properties.tools === 'shell',
     scope: parseScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
+    connectors: parseAllowedTools(entry.properties.connectors),
     memory: parseMemory(entry),
   };
 }
