@@ -26,11 +26,19 @@ vi.mock('./agentIpc', () => ({
 }));
 
 import * as agentIpc from './agentIpc';
-import { useAgentChat } from './useAgentChat';
+import { useAgentChat, type TurnContext } from './useAgentChat';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 afterEach(cleanup);
+
+/** A turn's context (M17.6/M17.7). Most tests care only about the prompt. */
+const turnOf = (systemPrompt: string): TurnContext => ({
+  systemPrompt,
+  place: null,
+  conversationId: 'c-1',
+});
+const turn = (systemPrompt: string) => () => turnOf(systemPrompt);
 
 /**
  * The seam that makes skills real (M13.1): the transcript shows what was
@@ -57,7 +65,7 @@ describe('useAgentChat send expansion', () => {
     const expansion = new Promise<string>((resolve) => {
       release = resolve;
     });
-    const { result } = renderHook(() => useAgentChat(() => context, opts, null));
+    const { result } = renderHook(() => useAgentChat(() => turnOf(context), opts, null));
 
     act(() => result.current.send('revise this', () => expansion));
     // The user walks somewhere else while the expansion is still in flight.
@@ -76,7 +84,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('shows the typed text but runs the expanded message', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/weekly-review', () => Promise.resolve('EXPANDED BODY')));
     expect(result.current.messages[0].text).toBe('/weekly-review');
     await vi.waitFor(() =>
@@ -88,7 +96,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('falls back to sending the typed text when the expansion rejects', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/gone', () => Promise.reject(new Error('unreadable'))));
     await vi.waitFor(() =>
       expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
@@ -99,7 +107,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('appends the turn synchronously — a pending expansion leaves no window to interleave', () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('/slow', () => new Promise<string>(() => undefined)));
     // Both bubbles exist and streaming is up before the expansion resolves,
     // so a second send sees a busy conversation rather than an idle one.
@@ -108,7 +116,7 @@ describe('useAgentChat send expansion', () => {
   });
 
   it('still accepts a plain pre-expanded string', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('shown', 'sent'));
     expect(result.current.messages[0].text).toBe('shown');
     await vi.waitFor(() =>
@@ -123,7 +131,7 @@ describe('useAgentChat send expansion', () => {
     // `attended` gates connector_context's absent-file branch (PR #5
     // security review): a person typed this turn and is watching it, which
     // is what makes inheriting their global MCP config defensible at all.
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('hello'));
     await vi.waitFor(() =>
       expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledWith(
@@ -139,7 +147,7 @@ describe('useAgentChat send expansion', () => {
     // it would resume, re-claim the stream, and spawn a child the user
     // already cancelled (PR #5 review).
     let release: (body: string) => void = () => undefined;
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() =>
       result.current.send(
         '/slow',
@@ -166,7 +174,7 @@ describe('useAgentChat send expansion', () => {
 
   it('a cancelled send does not wedge the next one', async () => {
     let release: (body: string) => void = () => undefined;
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() =>
       result.current.send(
         '/slow',
@@ -211,21 +219,34 @@ describe('useAgentChat runs beside the background runner', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('starts immediately while a background job runs, and kills nothing', async () => {
     // The runner owns a job. The chat used to stop that child and wait up to
     // five seconds for the single slot to be handed over; now both simply run.
-    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    useUiStore.setState({
+      runs: [
+        {
+          id: 'job-1',
+          owner: 'job',
+          label: 'reading',
+          place: null,
+          path: 'notes/reading.md',
+          conversationId: null,
+          run: 7,
+          startedAt: 0,
+        },
+      ],
+    });
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
 
   it('never sees another run’s events, including its terminal Done', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
 
@@ -245,7 +266,7 @@ describe('useAgentChat runs beside the background runner', () => {
   });
 
   it('stops its OWN run by id, not whatever happens to be running', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
 
@@ -255,7 +276,7 @@ describe('useAgentChat runs beside the background runner', () => {
   });
 
   it('unsubscribes when the turn ends, so a later run cannot reach it', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
     act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
@@ -280,11 +301,11 @@ describe('useAgentChat one turn at a time', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('drops a send fired while a turn is in flight', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => {
       result.current.send('first');
       // Same tick: `streaming` render state is still stale here, which is
@@ -303,7 +324,7 @@ describe('useAgentChat one turn at a time', () => {
 
   it('a turn that fails to start releases the guard for the next send', async () => {
     vi.mocked(agentIpc.runAgent).mockRejectedValueOnce(new Error('spawn failed'));
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('doomed'));
     await vi.waitFor(() => expect(result.current.streaming).toBe(false));
     act(() => result.current.send('retry'));
@@ -312,7 +333,7 @@ describe('useAgentChat one turn at a time', () => {
   });
 
   it('stop() releases the guard for the next send', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('first'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledOnce());
     act(() => result.current.stop());
@@ -337,22 +358,31 @@ describe('useAgentChat unmounted mid-turn', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
-  it('stops the run and releases the shared busy flag', async () => {
-    const { result, unmount } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+  it('stops the run and takes it out of the registry', async () => {
+    const { result, unmount } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    expect(useUiStore.getState().agentBusy).toBe(true);
+    // M17.7: a task exists from the moment Send is pressed, and carries the
+    // question as its label — a run list saying "Assistant working" and
+    // nothing else was the thing that could not answer "working on what?".
+    const task = useUiStore.getState().runs[0];
+    expect(task.owner).toBe('chat');
+    expect(task.label).toBe('question');
+    expect(task.run).toBe(8);
 
     unmount();
     expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled();
-    expect(useUiStore.getState().agentBusy).toBe(false);
+    // The registry is what the status bar reads. A run left in it after its
+    // child died is a spinner that never stops — which is exactly what the
+    // old `agentBusy` did when the panel was closed mid-turn (M15).
+    expect(useUiStore.getState().runs).toEqual([]);
   });
 
   it('leaves an idle agent alone', () => {
-    const { unmount } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { unmount } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     unmount();
     expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
   });
@@ -372,11 +402,11 @@ describe('useAgentChat and a redelivered ToolStart', () => {
     vi.mocked(agentIpc.runAgent).mockClear();
     vi.mocked(agentIpc.stopAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('keeps a finished tool finished', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
 
@@ -403,7 +433,7 @@ describe('useAgentChat and a redelivered ToolStart', () => {
   });
 
   it('still collapses a redelivery that arrives before the tool finishes', async () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() => result.current.send('question'));
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
 
@@ -434,11 +464,11 @@ describe('useAgentChat message ids', () => {
     handlers.length = 0;
     vi.mocked(agentIpc.runAgent).mockClear();
     useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
+    useUiStore.setState({ runs: [] });
   });
 
   it('mints ids that a restored transcript cannot already hold', () => {
-    const { result } = renderHook(() => useAgentChat(() => 'sys', opts, null));
+    const { result } = renderHook(() => useAgentChat(turn('sys'), opts, null));
     act(() =>
       result.current.restore(
         [

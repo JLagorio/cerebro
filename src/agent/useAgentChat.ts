@@ -1,8 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAgentEvent, runAgent, startMcp, stopAgent } from './agentIpc';
+import { newRunId } from './runs';
 import type { AgentEvent, ChatMessage, McpInfo } from './types';
+import type { Place } from '@/engine/place';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+
+/**
+ * Everything about a turn that comes from OUTSIDE this hook (M17.6, M17.7).
+ *
+ * Read once, synchronously, at the top of each send, and it has to be a getter
+ * rather than values for two reasons. The panel builds the prompt from the
+ * conversation's context chips, and the conversation list is built on top of
+ * this hook — so none of this exists yet when the hook is called. And a send
+ * parks on a skill expansion and the MCP handshake before it spawns, so
+ * reading afterwards would describe the context the user drifted INTO.
+ */
+export interface TurnContext {
+  systemPrompt: string;
+  /** Where this turn is happening, for the run list. */
+  place: Place | null;
+  /** Which conversation, so the run list can open it. */
+  conversationId: string | null;
+}
 
 /**
  * Message ids are unique per HOOK INSTANCE, not per sequence (M15).
@@ -59,17 +79,8 @@ export interface AgentChat {
  * brand-new bubble the moment a question was asked.
  */
 export function useAgentChat(
-  /**
-   * Read once, synchronously, at the top of each send (M17.6).
-   *
-   * A getter rather than a string for two reasons. The panel has to build the
-   * prompt from the CONVERSATION's context chips, and the conversation list is
-   * built on top of this hook — so the string does not exist yet when this is
-   * called. And a send parks on a skill expansion and the MCP handshake before
-   * it spawns; reading the prompt after those awaits would send whatever the
-   * context had drifted to by then, which is the opposite of freezing it.
-   */
-  getSystemPrompt: () => string,
+  /** This turn's context — see TurnContext for why it is a getter. */
+  getTurn: () => TurnContext,
   { shell, connectors }: { shell: boolean; connectors: boolean },
   model: string | null,
   /** Fires after a turn that wrote files, with a one-line summary (M9.5). */
@@ -78,10 +89,13 @@ export function useAgentChat(
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
-  // Still raised while a typed turn is in flight, but no longer a lock: the
-  // background runner yields to it as a courtesy (don't start a distill while
-  // someone is waiting on an answer), not because the two would collide.
-  const setAgentBusy = useUiStore((s) => s.setAgentBusy);
+  // M17.7: a turn REGISTERS itself rather than raising a shared flag. The
+  // background runner still yields to an attended run as a courtesy — don't
+  // start a distill while someone is waiting on an answer — but that is now
+  // read off the registry rather than off a boolean anybody could set.
+  const startRun = useUiStore((s) => s.startRun);
+  const attachChild = useUiStore((s) => s.attachChild);
+  const endRun = useUiStore((s) => s.endRun);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const idPrefix = useRef<string>('');
@@ -102,6 +116,9 @@ export function useAgentChat(
   // what stopAgent needs, and the unsubscribe is what guarantees a finished
   // turn stops listening.
   const runRef = useRef<number | null>(null);
+  // This turn's entry in the run registry, which exists from the moment Send
+  // is pressed — before the child does.
+  const taskRef = useRef<string | null>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
   // One turn at a time PER CONVERSATION (PR #5 review). Not a global lock any
   // more — other conversations and the background runner have their own runs.
@@ -132,8 +149,11 @@ export function useAgentChat(
     releaseRun();
     turnInFlight.current = false;
     setStreaming(false);
-    setAgentBusy(false);
-  }, [releaseRun, setAgentBusy]);
+    if (taskRef.current !== null) {
+      endRun(taskRef.current);
+      taskRef.current = null;
+    }
+  }, [endRun, releaseRun]);
 
   /** Kill THIS conversation's run, if it has one. Fire-and-forget: callers
    * end the turn synchronously, and a run that already finished answers
@@ -250,7 +270,7 @@ export function useAgentChat(
       turnInFlight.current = true;
       // Frozen here, before anything can await: this turn's context is the
       // context the question was asked in.
-      const systemPrompt = getSystemPrompt();
+      const turn = getTurn();
       const assistantId = nextId();
       lastPrompt.current = trimmed;
       setMessages((prev) => [
@@ -259,7 +279,22 @@ export function useAgentChat(
         { id: assistantId, role: 'assistant', text: '', tools: [], streaming: true },
       ]);
       setStreaming(true);
-      setAgentBusy(true);
+      // The task exists from now, not from when the child does: a first send
+      // spends a whole MCP handshake before it has a run id, and a task list
+      // that showed nothing for that window would be reporting "idle" while
+      // the user waits.
+      const taskId = newRunId();
+      taskRef.current = taskId;
+      startRun({
+        id: taskId,
+        owner: 'chat',
+        label: trimmed,
+        place: turn.place,
+        path: null,
+        conversationId: turn.conversationId,
+        run: null,
+        startedAt: Date.now(),
+      });
 
       const epoch = sendEpoch.current;
       void (async () => {
@@ -279,7 +314,7 @@ export function useAgentChat(
           if (cancelled()) return;
           const run = await runAgent(vaultPath, {
             message: outgoing,
-            systemPrompt,
+            systemPrompt: turn.systemPrompt,
             sessionId: sessionRef.current,
             model,
             shell,
@@ -295,9 +330,7 @@ export function useAgentChat(
           // to be killed by id rather than abandoned.
           if (cancelled()) {
             void stopAgent(run).catch(() => undefined);
-            turnInFlight.current = false;
-            setStreaming(false);
-            setAgentBusy(false);
+            endTurn();
             return;
           }
           // The subscription is scoped to THIS run, so no event from any other
@@ -305,6 +338,7 @@ export function useAgentChat(
           // The mock and the Rust reader both emit asynchronously, so the id
           // is always in hand before the first event.
           runRef.current = run;
+          attachChild(taskId, run);
           unsubscribe.current = onAgentEvent((event) => handleEvent(assistantId, event), run);
         } catch (err) {
           const failure = err instanceof Error ? err.message : String(err);
@@ -315,15 +349,16 @@ export function useAgentChat(
       })();
     },
     [
+      attachChild,
       connectors,
       endTurn,
-      getSystemPrompt,
+      getTurn,
       handleEvent,
       model,
       nextId,
       patchMessage,
-      setAgentBusy,
       shell,
+      startRun,
       toast,
       vaultPath,
     ],
@@ -351,7 +386,10 @@ export function useAgentChat(
       killRun();
       releaseRun();
       turnInFlight.current = false;
-      useUiStore.getState().setAgentBusy(false);
+      if (taskRef.current !== null) {
+        useUiStore.getState().endRun(taskRef.current);
+        taskRef.current = null;
+      }
     };
   }, [killRun, releaseRun]);
 

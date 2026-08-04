@@ -53,13 +53,16 @@ async function startJob(): Promise<void> {
 }
 
 /**
- * Ownership of the shared event stream when chat preempts on TIMEOUT (PR #5
- * review). streamReleased clears learningPath and the chat proceeds without
- * the runner ever running finish(); the takeover transition itself drops the
- * runner's claim. The killed child's terminal Done may arrive later,
- * mid-chat-turn — it must not clear agentBusy (the runner would read the
- * agent as idle and start a run that replaces the chat's child mid-answer) —
- * or it may never arrive at all, and the runner must not stay wedged on it.
+ * Whose events are whose.
+ *
+ * This describe once covered a preempt handshake: the chat killed this
+ * runner's child, waited up to five seconds for `learningPath` to clear, and
+ * took the single shared slot — with three tests for the ways that went wrong
+ * (a late Done arriving mid-chat-turn, a Done that never arrived, a takeover
+ * landing while start-up was parked on an await). M17.3 deleted the whole
+ * mechanism by giving every run an id, and M17.7 deleted the flags it
+ * coordinated through. What is left is the property that made all of it
+ * unnecessary: a job ends on ITS terminal event and no other.
  */
 describe('useJobRunner stream ownership', () => {
   beforeEach(() => {
@@ -76,8 +79,7 @@ describe('useJobRunner stream ownership', () => {
       filedForLearning: ['items/note.md'],
       learnAttempts: {},
       skillRuns: {},
-      agentBusy: false,
-      learningPath: null,
+      runs: [],
       agentShellAccess: false,
       agentConnectors: false,
       stdioApprovals: {},
@@ -93,12 +95,14 @@ describe('useJobRunner stream ownership', () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
-    expect(useUiStore.getState().learningPath).toBe('items/note.md');
-    expect(useUiStore.getState().agentBusy).toBe(true);
+    // M17.7: the job is a RUN in the registry, carrying the note it reads and
+    // the child it spawned — not a boolean plus a path anybody could set.
+    const job = () => useUiStore.getState().runs.find((r) => r.owner === 'job') ?? null;
+    expect(job()?.path).toBe('items/note.md');
+    expect(job()?.run).toBe(JOB_RUN);
 
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
-    expect(useUiStore.getState().learningPath).toBeNull();
-    expect(useUiStore.getState().agentBusy).toBe(false);
+    expect(useUiStore.getState().runs).toEqual([]);
   });
 
   it('a chat turn no longer takes the stream, so a job runs to its own end', async () => {
@@ -110,19 +114,30 @@ describe('useJobRunner stream ownership', () => {
     // own run and never touches this one.
     renderHook(() => useJobRunner());
     await startJob();
-    expect(useUiStore.getState().learningPath).toBe('items/note.md');
+    const reading = () => useUiStore.getState().runs.find((r) => r.owner === 'job')?.path ?? null;
+    expect(reading()).toBe('items/note.md');
 
-    // A chat turn starts beside it and raises the shared busy flag.
-    act(() => useUiStore.getState().setAgentBusy(true));
+    // A chat turn starts beside it and registers its own run.
+    act(() =>
+      useUiStore.getState().startRun({
+        id: 'chat-1',
+        owner: 'chat',
+        label: 'what is at risk',
+        place: null,
+        path: null,
+        conversationId: 'c-1',
+        run: 99,
+        startedAt: 0,
+      }),
+    );
 
     // The chat's own run finishes. Its Done is not this job's business.
     act(() => handlers.forEach((h) => h({ run: 99, kind: 'Done' })));
-    expect(useUiStore.getState().learningPath).toBe('items/note.md');
+    expect(reading()).toBe('items/note.md');
 
     // The job ends on ITS terminal event, and releases what it claimed.
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
-    expect(useUiStore.getState().learningPath).toBeNull();
-    expect(useUiStore.getState().agentBusy).toBe(false);
+    expect(reading()).toBeNull();
   });
 
   it('stops listening once its job is done', async () => {
@@ -170,8 +185,7 @@ describe('useJobRunner scheduled runs', () => {
       filedForLearning: [],
       learnAttempts: {},
       skillRuns: {},
-      agentBusy: false,
-      learningPath: null,
+      runs: [],
       agentShellAccess: false,
       agentConnectors: false,
       stdioApprovals: {},
@@ -192,7 +206,7 @@ describe('useJobRunner scheduled runs', () => {
     });
 
     act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
-    expect(useUiStore.getState().agentBusy).toBe(false);
+    expect(useUiStore.getState().runs).toEqual([]);
   });
 
   it('a failed read leaves the fire key unconsumed and steps past to the next job', async () => {
@@ -242,7 +256,7 @@ describe('useJobRunner scheduled runs', () => {
     );
     renderHook(() => useJobRunner());
     await startJob();
-    expect(useUiStore.getState().learningPath).toBe('records/skills/digest.md');
+    expect(useUiStore.getState().runs[0]?.path).toBe('records/skills/digest.md');
     // Parked on the read: no child, and no key spent on a run that has not
     // happened.
     expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
@@ -315,8 +329,7 @@ describe('useJobRunner shell gating', () => {
       filedForLearning: [],
       learnAttempts: {},
       skillRuns: {},
-      agentBusy: false,
-      learningPath: null,
+      runs: [],
       agentShellAccess: true, // the ceiling is OPEN in every case below
       agentConnectors: false,
       stdioApprovals: {},

@@ -334,6 +334,27 @@ and `learningPath` become `Record<runId, { owner, place, label, status }>`.
 — which *is* the "I started a task and walked away" surface: running work is
 visible, attributable to a place, and clickable back to its thread.
 
+**Landed (`agent/runs.ts`, `agent/RunList.tsx`).** An array, in start order,
+rather than a map: the list is rendered far more often than it is looked up.
+
+Two things the shape had to get right. A task is keyed by a **UI-side id, not
+the backend run id**, because a task exists from the moment Send is pressed and
+the child does not exist until a skill body has been read and the MCP handshake
+has completed — keying on the child would leave that whole window invisible,
+which is exactly the window a first send spends in. And the child is recorded
+onto the task when it arrives (`attachChild`), because that is what Stop needs;
+Stop is disabled until then rather than pretending.
+
+One thing that only showed up once the tests ran: `agentBusy` flipping back to
+false was, by accident, the re-render that told the background runner it was
+free again. Deriving `shouldYield(runs)` from the store restores that on
+purpose — and states the rule, which is now two rules in one answer (do not
+make someone wait behind a distill; the unattended queue drains one at a time
+because there is nothing to gain by draining more).
+
+`learningPath` is gone as a global: KnowledgeCommit asks `isBeingRead(runs,
+path)`, so only the run actually reading a note can claim to be reading it.
+
 ---
 
 ## Phase 2 — The library

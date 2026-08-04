@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { RunRecord } from '@/agent/runs';
 import type { OrganizeProposal } from '@/agent/types';
 import { scrubStdioApprovals } from '@/engine/connectors';
 import type { InboxPeriod } from '@/engine/inbox';
@@ -250,12 +251,18 @@ interface UiState {
    */
   skillRuns: Record<string, Record<string, string>>;
   recordSkillRun(vault: string, path: string, fireKey: string): void;
-  /** True while ANY agent turn is in flight — the chat's or the runner's. */
-  agentBusy: boolean;
-  setAgentBusy(v: boolean): void;
-  /** The note the background distiller is reading right now, if any. */
-  learningPath: string | null;
-  setLearningPath(v: string | null): void;
+  /**
+   * Everything the assistant is doing, in start order (M17.7).
+   *
+   * Was `agentBusy` (a boolean) plus `learningPath` (a string), both unowned
+   * and both written from whichever hook felt like it. See agent/runs.ts for
+   * why a flag stopped being able to answer the question.
+   */
+  runs: RunRecord[];
+  startRun(record: RunRecord): void;
+  /** Record the child once it exists, so Stop has something to kill. */
+  attachChild(id: string, run: number): void;
+  endRun(id: string): void;
   /**
    * Home insight cards the user has waved away (M8.3), by concept path.
    * Persisted, because a card you dismissed and that came back tomorrow is
@@ -768,10 +775,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(SKILL_RUNS_KEY, JSON.stringify(next));
       return { skillRuns: next };
     }),
-  agentBusy: false,
-  setAgentBusy: (v) => set({ agentBusy: v }),
-  learningPath: null,
-  setLearningPath: (v) => set({ learningPath: v }),
+  runs: [],
+  startRun: (record) => set((s) => ({ runs: [...s.runs, record] })),
+  attachChild: (id, run) =>
+    set((s) => ({ runs: s.runs.map((r) => (r.id === id ? { ...r, run } : r)) })),
+  // Idempotent: a turn can end through Done, through Error, through the panel
+  // unmounting, or through Stop, and more than one of those routinely happens
+  // for the same run.
+  endRun: (id) => set((s) => ({ runs: s.runs.filter((r) => r.id !== id) })),
 
   dismissedInsights: loadStringList(DISMISSED_INSIGHTS_KEY),
   dismissInsight: (path) =>

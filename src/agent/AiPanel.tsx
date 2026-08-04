@@ -16,7 +16,7 @@ import {
 } from '@/agent/contextChips';
 import { ConversationSwitcher } from '@/agent/ConversationSwitcher';
 import { useConversations } from '@/agent/useConversations';
-import { useAgentChat } from '@/agent/useAgentChat';
+import { useAgentChat, type TurnContext } from '@/agent/useAgentChat';
 import { type AgentStatus, type ChatMessage } from '@/agent/types';
 import {
   listSkills,
@@ -254,17 +254,13 @@ export function AiPanel() {
   // one is invoked, so the vault can hold many skills at no per-turn cost.
   const skills = useMemo(() => listSkills(entries), [entries]);
 
-  // The prompt is read through a ref at send (M17.6). It has to be built from
-  // the CONVERSATION's chips, and the conversation list is built on top of the
-  // chat hook — so it does not exist yet at this point in the render.
-  const promptRef = useRef('');
-  const getSystemPrompt = useCallback(() => promptRef.current, []);
-  const chat = useAgentChat(
-    getSystemPrompt,
-    { shell, connectors },
-    null,
-    isRepo ? checkpoint : undefined,
-  );
+  // The turn's context is read through a ref at send (M17.6). It has to be
+  // built from the CONVERSATION's chips, and the conversation list is built on
+  // top of the chat hook — so none of it exists yet at this point in the
+  // render. Assigned below, once it does.
+  const turnRef = useRef<TurnContext>({ systemPrompt: '', place: null, conversationId: null });
+  const getTurn = useCallback(() => turnRef.current, []);
+  const chat = useAgentChat(getTurn, { shell, connectors }, null, isRepo ? checkpoint : undefined);
   // M17.5: the SUBJECT of the current selection, with its lenses stripped —
   // the board tab and the table tab of one List are one place. A thread is
   // stamped with it at its first turn, which is what lets a thread be found
@@ -390,9 +386,11 @@ export function AiPanel() {
     recordChips,
   ]);
   // Handed to the chat hook through a ref rather than an argument — see
-  // getSystemPrompt above. Assigned during render, like every other
-  // latest-value ref in this codebase.
-  promptRef.current = systemPrompt;
+  // getTurn above. Assigned during render, like every other latest-value ref
+  // in this codebase. `place` is the CONVERSATION's, so the run list files a
+  // task under what it is about rather than under wherever the agent's own
+  // `open_note` left the user by the time it finished.
+  turnRef.current = { systemPrompt, place: threadPlace, conversationId: conversations.activeId };
 
   // Every send goes through here so no path can leave a thread unanchored —
   // there are three (the composer, a suggestion chip, and a retry) plus the

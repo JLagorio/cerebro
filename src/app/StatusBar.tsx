@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { RunList } from '@/agent/RunList';
 import { isFailure } from '@/engine/git';
 import { useGit } from '@/git/useGit';
 import * as git from '@/lib/gitIpc';
@@ -87,7 +88,6 @@ export function StatusBar() {
   const rescan = useVaultStore((s) => s.rescan);
   const toast = useUiStore((s) => s.toast);
   const navigate = useNavStore((s) => s.navigate);
-  const agentBusy = useUiStore((s) => s.agentBusy);
   const { isRepo, ready, modified, conflicts, remote, refresh } = useGit();
   // M15: `lastSync` is set ONLY by a completed sync (see `sync` below). An
   // effect that stamped it the moment a repo was detected made the strip read
@@ -221,10 +221,10 @@ export function StatusBar() {
       <span className="flex-1" />
 
       {/* The assistant runs turns of its own in the background (M8.6); this
-          is the only place that says so without interrupting anything. */}
-      {agentBusy && (
-        <Segment icon="sparkles" label="Assistant working" tone="accent" testId="status-agent" />
-      )}
+          is the only place that says so without interrupting anything. M17.7
+          made it a LIST — a light with no switch behind it could not say what
+          was running, what it was about, or how to get back to it. */}
+      <RunList />
       {/* M15: no "Settings" segment either. The rail owns it, and the vault
           name and "No remote" segments here are already settings shortcuts
           that say what they will configure. */}

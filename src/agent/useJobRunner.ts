@@ -4,6 +4,7 @@ import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
 import { jobQueue, unlearnableFiled, type AgentJob } from '@/engine/jobs';
+import { newRunId, shouldYield } from './runs';
 import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
 import { readNote } from '@/lib/ipc';
@@ -31,9 +32,13 @@ import { useVaultStore } from '@/stores/vaultStore';
  *    output is notes and concepts, visible where they are relevant. A
  *    scheduled skill that wants to say something writes it into the vault.
  *
- * 2. **There is one agent.** `AgentState` holds a single child process, so a
- *    background turn and a typed question cannot both be in flight. The runner
- *    yields: it starts only when nothing else is running.
+ * 2. **It yields.** This was once forced: `AgentState` held a single child, so
+ *    a background turn and a typed question could not both be in flight. Since
+ *    M17.3 they can, and the runner still holds off while anything else is
+ *    running — for a better reason. Someone waiting on a reply should not be
+ *    made to wait behind a distill, and the queue itself is unattended work,
+ *    so there is nothing to gain by draining more than one job at a time.
+ *    `runs.shouldYield` is the whole rule.
  *
  * 3. **It must not spin.** Every job is recorded in its ledger BEFORE the run
  *    — learn jobs by note version, scheduled runs by fire key — so a run that
@@ -60,7 +65,10 @@ export function useJobRunner(): void {
   const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const skillRuns = useUiStore((s) => s.skillRuns);
-  const agentBusy = useUiStore((s) => s.agentBusy);
+  // M17.7: read off the run registry rather than off a shared boolean anybody
+  // could set. Also the signal that this runner is free again — `agentBusy`
+  // flipping back to false was what re-ran the effect below, by accident.
+  const yielding = useUiStore((s) => shouldYield(s.runs));
   const shell = useUiStore((s) => s.agentShellAccess);
   const connectors = useUiStore((s) => s.agentConnectors);
   const issuePrefixes = useUiStore((s) => s.issuePrefixes);
@@ -137,6 +145,10 @@ export function useJobRunner(): void {
   // now, not by two hooks agreeing to take turns — this ref only tracks
   // whether a job is in flight, so a second is not started on top of it.
   const running = useRef(false);
+  /** This job's entry in the run registry (M17.7). It carries the note being
+   * read, which is what `learningPath` was — now attached to the run doing the
+   * reading rather than to a global anybody could set. */
+  const task = useRef<string | null>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
   const mcp = useRef<McpInfo | null>(null);
 
@@ -145,9 +157,10 @@ export function useJobRunner(): void {
     running.current = false;
     unsubscribe.current?.();
     unsubscribe.current = null;
-    const ui = useUiStore.getState();
-    ui.setLearningPath(null);
-    ui.setAgentBusy(false);
+    if (task.current !== null) {
+      useUiStore.getState().endRun(task.current);
+      task.current = null;
+    }
     // Whatever it just wrote is on disk and nowhere else until this runs.
     void rescan();
   }, [rescan]);
@@ -165,14 +178,26 @@ export function useJobRunner(): void {
   // finishing on either is harmless because finish() is idempotent.
 
   useEffect(() => {
-    if (next === null || vaultPath === null || agentBusy || running.current) return;
+    if (next === null || vaultPath === null || yielding || running.current) return;
     const job = next;
     const timer = setTimeout(() => {
       if (running.current) return;
       running.current = true;
       const ui = useUiStore.getState();
-      ui.setAgentBusy(true);
-      ui.setLearningPath(job.path);
+      const taskId = newRunId();
+      task.current = taskId;
+      ui.startRun({
+        id: taskId,
+        owner: 'job',
+        label: job.title,
+        // A background job is not standing anywhere — see the systemPrompt
+        // below, which tells it the same thing. What it IS about is the note.
+        place: null,
+        path: job.path,
+        conversationId: null,
+        run: null,
+        startedAt: Date.now(),
+      });
       // Recorded first, on purpose — see the header. The job SAYS which
       // ledger gates it (jobs.ts decides both sides); re-deriving that here
       // is how agent runs briefly looped forever. Fire-key jobs are the one
@@ -267,6 +292,7 @@ export function useJobRunner(): void {
           // Scoped to THIS job's run (M17.3). The old subscription saw every
           // event in the app and guessed with `running.current`, which is how
           // a chat turn's Done could end a background job — and vice versa.
+          useUiStore.getState().attachChild(taskId, runId);
           unsubscribe.current = onAgentEvent((event) => {
             if (event.kind === 'Done' || event.kind === 'Error') finish();
           }, runId);
@@ -285,7 +311,7 @@ export function useJobRunner(): void {
       })();
     }, SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [agentBusy, connectors, finish, issuePrefixes, next, shell, vaultPath]);
+  }, [connectors, finish, issuePrefixes, next, shell, vaultPath, yielding]);
 }
 
 /** Mounts the runner where its minute tick re-renders nothing but itself. */
