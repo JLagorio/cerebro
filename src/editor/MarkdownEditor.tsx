@@ -11,6 +11,7 @@ import { SideMenuExtension } from '@blocknote/core/extensions';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startMcp } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
+import { SelectionToolbar, useSelectionAnchor, type Preset } from '@/editor/SelectionToolbar';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
   AddBlockButton,
@@ -203,7 +204,33 @@ export function MarkdownEditor({
    * editor selection the moment focus leaves. Holding the string is also what
    * lets the rewrite be diffed against exactly what was shown.
    */
-  const [asking, setAsking] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [asking, setAsking] = useState<{
+    text: string;
+    x: number;
+    y: number;
+    preset?: string;
+  } | null>(null);
+  /**
+   * The floating toolbar's anchor (M18).
+   *
+   * Held on state rather than a plain ref so the toolbar re-renders as the
+   * selection moves. It is suppressed while the popover is open: the popover
+   * has already captured the text, and leaving the bar up over a selection the
+   * user is no longer editing is two surfaces claiming the same words.
+   */
+  const [surface, setSurface] = useState<HTMLDivElement | null>(null);
+  const anchor = useSelectionAnchor(surface, !readOnly && asking === null);
+  /**
+   * The range the rewrite will replace, cloned when the popover OPENS.
+   *
+   * Not read back at apply time. Opening the popover moves focus into its
+   * input, which collapses the document selection — so by the time there is a
+   * decision to apply, `window.getSelection()` describes the text box the user
+   * typed the instruction into, not the passage they picked. A cloned Range
+   * keeps live node references, so it survives the editor re-rendering around
+   * an untouched passage.
+   */
+  const target = useRef<Range | null>(null);
   // Assign-task popover (M2.x feedback): opened from the checklist row's
   // side-menu button, floats NEXT TO the task line (not a modal); writes
   // assignee/due chips into that block.
@@ -596,11 +623,33 @@ export function MarkdownEditor({
     // worse than not binding it.
     if (text.trim() === '') return;
     e.preventDefault();
-    const rect = window.getSelection()?.getRangeAt(0).getBoundingClientRect();
+    const live = window.getSelection()?.getRangeAt(0);
+    target.current = live?.cloneRange() ?? null;
+    const rect = live?.getBoundingClientRect();
     setAsking({
       text,
       x: Math.min(rect?.left ?? 80, window.innerWidth - 440),
       y: (rect?.bottom ?? 80) + 6,
+    });
+  };
+
+  /**
+   * Open the rewrite surface from the toolbar.
+   *
+   * The DOM range is saved into `asking` here, while it still exists: clicking
+   * the bar moves focus, and by the time the popover mounts the selection the
+   * user made is gone. Same reason Cmd-K captures the string rather than
+   * reading it back later.
+   */
+  const askFromToolbar = (preset?: Preset) => {
+    if (anchor === null) return;
+    const live = window.getSelection();
+    target.current = live !== null && live.rangeCount > 0 ? live.getRangeAt(0).cloneRange() : null;
+    setAsking({
+      text: anchor.text,
+      x: Math.min(anchor.left, window.innerWidth - 440),
+      y: anchor.bottom + 8,
+      preset: preset?.instruction,
     });
   };
 
@@ -614,16 +663,20 @@ export function MarkdownEditor({
    * the rewrite is not streamed in.
    */
   const replaceSelection = (text: string) => {
-    const range = window.getSelection()?.getRangeAt(0);
-    if (range === undefined) return;
+    const range = target.current;
+    if (range === null) return;
     range.deleteContents();
     range.insertNode(document.createTextNode(text));
+    // The range now describes the text just inserted; dropping it stops a
+    // second Apply — from a stale popover — writing into it again.
+    target.current = null;
     scheduleEmit();
   };
 
   return (
     <div
       data-testid="markdown-editor"
+      ref={setSurface}
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}
     >
@@ -687,6 +740,9 @@ export function MarkdownEditor({
           />
         </BlockNoteView>
       )}
+      {anchor !== null && (
+        <SelectionToolbar anchor={anchor} onAsk={askFromToolbar} onPreset={askFromToolbar} />
+      )}
       {asking !== null && (
         <div
           className="fixed inset-0 z-40"
@@ -702,6 +758,7 @@ export function MarkdownEditor({
           >
             <AskAiPopover
               selection={asking.text}
+              preset={asking.preset}
               onReplace={replaceSelection}
               onClose={() => setAsking(null)}
             />

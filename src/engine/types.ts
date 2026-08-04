@@ -163,6 +163,15 @@ export type KnowledgeNav =
   | { tab: 'section'; folder: string }
   | { tab: 'entity'; key: string };
 
+/**
+ * Which shelf of the library is open (M18).
+ *
+ * Declared here rather than in engine/library so the Selection union stays
+ * dependency-free — every module in the app reads this file, and few of them
+ * have any business knowing what a skill is.
+ */
+export type LibraryTab = 'skill' | 'agent' | 'template';
+
 export type Selection =
   | { kind: 'home' }
   | { kind: 'inbox' } // capture queue: unorganized notes (M4)
@@ -190,7 +199,10 @@ export type Selection =
   | { kind: 'pulse' }
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
-  | { kind: 'library' }
+  // M18 — `tab` names which shelf is open and `path` the item being edited, so
+  // "the release scout's triggers" is a place the back button can return to
+  // rather than component state that a re-render forgets.
+  | { kind: 'library'; tab?: LibraryTab; path?: string }
   | { kind: 'settings' };
 
 /**

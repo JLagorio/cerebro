@@ -38,11 +38,18 @@ import { useVaultStore } from '@/stores/vaultStore';
  */
 export function AskAiPopover({
   selection,
+  preset,
   onReplace,
   onClose,
 }: {
   /** The exact text the user selected. */
   selection: string;
+  /**
+   * An instruction to run straight away, from the selection toolbar's presets
+   * (M18). It goes through the same `ask()` as a typed one — a preset is a
+   * pre-written instruction, never a shortcut past the decision surface.
+   */
+  preset?: string;
   /** Apply the decided text. Called once, with the final passage. */
   onReplace: (text: string) => void;
   onClose: () => void;
@@ -50,8 +57,14 @@ export function AskAiPopover({
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const entries = useVaultStore((s) => s.entries);
   const toast = useUiStore((s) => s.toast);
-  const [instruction, setInstruction] = useState('');
-  const [state, setState] = useState<'asking' | 'running' | 'deciding'>('asking');
+  // Seeded with the preset so Retry re-runs what was actually asked, and so
+  // the box shows the instruction rather than going blank on a retry.
+  const [instruction, setInstruction] = useState(preset ?? '');
+  const [state, setState] = useState<'asking' | 'running' | 'deciding'>(
+    // Straight to 'running': the effect below fires after the first paint, and
+    // starting at 'asking' would flash an empty prompt box for one frame.
+    preset !== undefined && preset.trim() !== '' ? 'running' : 'asking',
+  );
   const [result, setResult] = useState('');
   const [accepted, setAccepted] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
@@ -121,15 +134,23 @@ export function AskAiPopover({
     })();
   };
 
-  const ask = () =>
+  const ask = (override?: string) =>
     run(
       [
-        `Rewrite this passage from the user's document. Instruction: ${instruction.trim()}`,
+        `Rewrite this passage from the user's document. Instruction: ${(override ?? instruction).trim()}`,
         '',
         'Passage:',
         selection,
       ].join('\n'),
     );
+
+  useEffect(() => {
+    // A preset arrives already decided, so the run starts on mount and the
+    // input never appears. Runs once: `run` closes over state that changes
+    // during the run, and re-firing on it would start a second one mid-answer.
+    if (preset !== undefined && preset.trim() !== '') ask(preset);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const runSkill = (skill: SkillRef) => {
     if (vaultPath === null) return;

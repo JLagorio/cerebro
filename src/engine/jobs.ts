@@ -44,6 +44,24 @@ export type JobKind = 'filed' | 'scheduled' | 'agent' | 'behind' | 'refresh' | '
  */
 export const TRIGGER_COOLDOWN_MS = 15 * 60 * 1000;
 
+/**
+ * Off duty without being dismantled (M18).
+ *
+ * Activation is DERIVED — an agent runs exactly when it has a schedule or a
+ * trigger — which is the right rule and left no way to stop one temporarily.
+ * The only "off" available was deleting the thing that fires it, so turning an
+ * agent off for an afternoon meant destroying the configuration and rebuilding
+ * it from memory afterwards. `paused: true` is the pause; the trigger stays on
+ * the record, readable, and comes back on when the switch does.
+ *
+ * Deliberately NOT the inverse (`enabled: true`): a record with no schedule and
+ * no trigger is already inert, and a second flag that also has to say so would
+ * give "is this running?" two answers that can disagree.
+ */
+export function isPaused(entry: Entry): boolean {
+  return entry.properties.paused === true;
+}
+
 export interface AgentJob {
   kind: JobKind;
   path: string;
@@ -222,7 +240,7 @@ export function jobQueue(
       : isAgentEntry(entry)
         ? 'agent'
         : null;
-    if (kind === null) continue;
+    if (kind === null || isPaused(entry)) continue;
     const schedule = parseSchedule(entry.properties.schedule);
     if (schedule === null) continue;
     const key = lastFireKey(schedule, now);
@@ -245,7 +263,7 @@ export function jobQueue(
   // happens inside the run, in the prompt the runner builds.
   if (events.length > 0) {
     for (const entry of entries) {
-      if (!isAgentEntry(entry)) continue;
+      if (!isAgentEntry(entry) || isPaused(entry)) continue;
       const triggers = parseTriggers(entry.properties.when);
       if (triggers.length === 0) continue;
       const key = recordIdentity(entry);

@@ -120,6 +120,40 @@ describe('AskAiPopover', () => {
     expect(await screen.findByText(/left the passage as it was/)).toBeTruthy();
   });
 
+  it('runs a preset straight away, without showing the prompt box', async () => {
+    // M18: the toolbar's one-click actions. A preset arrives already decided,
+    // so making the user press Enter on a prefilled box would be theatre.
+    render(
+      <AskAiPopover
+        selection={PASSAGE}
+        preset="Make it monthly"
+        onReplace={onReplace}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.runAgent).mock.calls[0][1].message).toContain('Make it monthly');
+  });
+
+  it('sends a preset through the same decision surface as a typed instruction', async () => {
+    // The safeguard that matters: a preset is a pre-written instruction, never
+    // a shortcut that applies a rewrite without a decision.
+    render(
+      <AskAiPopover
+        selection={PASSAGE}
+        preset="Make it monthly"
+        onReplace={onReplace}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    reply(REWRITE);
+    await screen.findByTestId('ask-ai-hunks');
+    expect(onReplace).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(onReplace).toHaveBeenCalledWith(REWRITE);
+  });
+
   it('strips a code fence the model wrapped the answer in', async () => {
     open();
     await ask();

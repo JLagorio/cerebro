@@ -10,6 +10,7 @@
  */
 
 import { isTemplate } from '@/lib/templates';
+import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
 import type { Entry, FieldDef, FieldOption, Presentation, Schema, ViewDefinition } from './types';
@@ -75,6 +76,12 @@ export function listTypes(entries: Entry[], schema: Schema): TypeListing[] {
   for (const e of entries) {
     if (e.type !== null && e.type !== '' && !isTemplate(e) && !isConcept(e)) names.add(e.type);
   }
+  // M18: Skill and Agent are the library's, not the schema's. Filtered by NAME
+  // rather than only by entry so that a vault carrying a leftover
+  // `types/skill.md` from an older build stops showing the row immediately —
+  // the Type doc is harmless, and demanding the user delete a file to fix
+  // their sidebar would be the app blaming them for its own migration.
+  for (const name of names) if (isLibraryType(name)) names.delete(name);
 
   // Templates carry a `type:` so pages created from them inherit it — they
   // are scaffolding, never records, and must not inflate counts (M3.1: the
@@ -135,6 +142,9 @@ export function isRecordEntry(entry: Entry): boolean {
     entry.type !== null &&
     entry.type !== '' &&
     entry.type !== 'Type' &&
+    // M18: skills and agents are how the vault works, not what it is about.
+    // They keep their file and lose the record surfaces — see engine/library.
+    !isLibraryEntry(entry) &&
     !isTemplate(entry) &&
     !isKnowledgePath(entry.path)
   );

@@ -1,7 +1,7 @@
 import { splitFrontmatter } from '@/lib/mockParse';
 import { slugify } from '@/lib/slug';
 import { declaredSlug, recordIdentity } from './identity';
-import { isRecordEntry } from './typeCatalog';
+import { libraryKind, SKILL_TYPE } from './library';
 import type { Entry } from './types';
 
 /**
@@ -20,7 +20,9 @@ import type { Entry } from './types';
  *   reads the note itself with get_note. Same file either way.
  */
 
-export const SKILL_TYPE = 'Skill';
+// The name moved to engine/library when skills stopped being a record type
+// (M18); re-exported here so every existing import keeps working.
+export { SKILL_TYPE };
 
 /**
  * One declared input for a skill (M17.8).
@@ -112,7 +114,12 @@ export function parseAllowedTools(raw: unknown): string[] | null {
 }
 
 export function isSkillEntry(entry: Entry): boolean {
-  return isRecordEntry(entry) && entry.type === SKILL_TYPE && entry.parseError === null;
+  // Was `isRecordEntry(entry) && …`, which stopped being true of a skill the
+  // moment skills stopped being records (M18). Both exclusions that clause was
+  // actually buying now live in libraryKind, as one rule rather than two
+  // copies: a template stamps `type: Skill` on the page it makes and is not
+  // one itself, and a knowledge-bundle file must never become invocable.
+  return libraryKind(entry) === 'skill' && entry.parseError === null;
 }
 
 /**

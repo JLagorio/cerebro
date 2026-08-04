@@ -237,33 +237,106 @@ test('agent: organizing AI-written work records who signed off', async ({ page }
     .toContain('human:me');
 });
 
-test('library: skills and agents are findable, and say what they will do', async ({ page }) => {
+test('library: three shelves, no workspace nav, and nothing posing as a type', async ({ page }) => {
   await boot(page);
+
+  // The types sidebar is the vault's SUBJECT MATTER. Skill and Agent are how
+  // the vault works, and listing them here gave both a type screen, a place in
+  // every List, and a generic property table for editing a security boundary.
+  const types = page.getByTestId('sidebar-type');
+  await expect(types.filter({ hasText: 'Risk' }).first()).toBeVisible();
+  await expect(types.filter({ hasText: 'Skill' })).toHaveCount(0);
+  await expect(types.filter({ hasText: 'Agent' })).toHaveCount(0);
+
   await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
   await expect(page.getByTestId('library-page')).toBeVisible();
 
-  // Both kinds are here. They were reachable only by knowing which folder they
-  // lived in — a capability nobody can find is a capability nobody has.
-  const rows = page.getByTestId('library-row');
-  await expect(rows.filter({ hasText: 'Weekly review' })).toBeVisible();
-  await expect(rows.filter({ hasText: 'Release scout' })).toBeVisible();
+  // Collections and Types describe the vault; the library holds the machinery
+  // that acts on it. Beside each other, the tree implied a skill lives in a
+  // Collection and left a type row highlighted while you edited a trigger.
+  await expect(types.first()).toHaveCount(0);
 
-  // The narrowing is stated where it can be seen: weekly-review declares four
-  // read tools and no writer, and that is enforced rather than requested.
-  await expect(rows.filter({ hasText: 'Weekly review' })).toContainText('4 tools only');
+  const cards = page.getByTestId('library-card');
+  await expect(cards.filter({ hasText: 'Weekly review' })).toBeVisible();
+  await expect(cards.filter({ hasText: 'Weekly review' })).toContainText('4 tools only');
 
-  // Activation is DERIVED from the record — an agent is active exactly when it
-  // has something that fires it. The demo's scout ships unscheduled.
-  const scout = rows.filter({ hasText: 'Release scout' });
-  await expect(scout).toContainText('Not activated');
+  await page.getByTestId('library-tab-agent').click();
+  const scout = cards.filter({ hasText: 'Release scout' });
   await expect(scout).toContainText('writes records/risks');
 
-  await page.getByLabel('Search the library').fill('release');
-  await expect(rows.filter({ hasText: 'Weekly review' })).toHaveCount(0);
-  await expect(scout).toBeVisible();
+  // Templates are library too — stationery is machinery, not subject matter.
+  await page.getByTestId('library-tab-template').click();
+  await expect(cards.filter({ hasText: 'PRD' })).toBeVisible();
+  await expect(cards.filter({ hasText: 'PRD' })).toContainText('fills itself');
+});
 
-  // A row opens the record, which is where it is actually edited — the screen
-  // deliberately owns discovery and activation, not a second frontmatter form.
-  await scout.click();
-  await expect(page.getByTestId('detail-panel').or(page.getByTestId('doc-title'))).toBeVisible();
+test('library: an agent is built in a form, not typed into a file', async ({ page }) => {
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await page.getByTestId('library-tab-agent').click();
+  await page.getByTestId('library-card').filter({ hasText: 'Release scout' }).click();
+
+  const editor = page.getByTestId('library-editor');
+  await expect(editor).toBeVisible();
+  // Not a doc canvas and not a property table: the two fields that decide what
+  // an unattended process may do are on screen with their consequences.
+  await expect(page.getByTestId('agent-scope')).toHaveValue('records/risks');
+  await expect(editor).toContainText('Nothing fires it');
+
+  // Building a trigger is picking clauses, not remembering YAML — and the
+  // sentence under it is the same one the library prints, so what will fire it
+  // is readable before it ever runs.
+  await page.getByRole('button', { name: 'Add trigger' }).click();
+  const trigger = page.getByTestId('agent-trigger');
+  await trigger.getByLabel('Trigger 1 folder').fill('records/risks');
+  await trigger.getByLabel('Trigger 1 field').fill('status');
+  await trigger.getByLabel('Trigger 1 value').fill('blocked');
+  await expect(trigger).toContainText('status');
+  await expect(editor).toContainText('On duty');
+
+  // Nothing has been written yet: a half-typed boundary is a wrong boundary,
+  // and a background runner does not wait for you to finish typing.
+  const path = 'records/agents/release-scout.md';
+  const before = await page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path);
+  expect(before).not.toContain('when:');
+
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect
+    .poll(async () => page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path))
+    .toContain('blocked');
+});
+
+test('editor: selecting prose shows AI controls, and a rewrite is a decision', async ({ page }) => {
+  await boot(page);
+
+  // Any doc with a paragraph in it. The point of this test is the AFFORDANCE:
+  // M17.16 built the rewrite surface and bound it to Cmd-K, and nothing on
+  // screen said so — selecting text looked exactly as it had before the
+  // assistant existed.
+  await page.getByTestId('rail').getByRole('button', { name: 'Docs' }).click();
+  await page.getByRole('button', { name: 'New page', exact: true }).first().click();
+  await page.getByPlaceholder('Page name').fill('Selection test');
+  await page.getByRole('button', { name: 'Create' }).click();
+
+  const editor = page.locator('[data-testid="markdown-editor"] .bn-editor');
+  await expect(editor).toBeVisible({ timeout: 10_000 });
+  await editor.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('The pricing is annual and the trial is short.');
+
+  // Nothing selected, nothing floating: a toolbar that hangs around while you
+  // type is chrome, not an affordance.
+  await expect(page.getByTestId('selection-toolbar')).toHaveCount(0);
+
+  await page.getByText('The pricing is annual').click({ clickCount: 3 });
+  const toolbar = page.getByTestId('selection-toolbar');
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByTestId('selection-ask-ai')).toBeVisible();
+
+  await toolbar.getByTestId('selection-ask-ai').click();
+  await expect(page.getByTestId('ask-ai')).toBeVisible();
+  // The passage travelled with the click. Reading the DOM selection at apply
+  // time would find the popover's own input instead.
+  await expect(page.getByLabel(/What should the assistant do/)).toBeVisible();
 });

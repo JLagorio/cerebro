@@ -20,7 +20,7 @@ import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
 import { PulsePage } from '@/pages/PulsePage';
-import { LibraryPage } from '@/pages/LibraryPage';
+import { LibraryPage } from '@/library/LibraryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';

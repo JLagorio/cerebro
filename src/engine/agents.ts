@@ -1,7 +1,7 @@
 import { slugify } from '@/lib/slug';
 import { declaredSlug, recordIdentity } from './identity';
+import { AGENT_TYPE, libraryKind } from './library';
 import { parseAllowedTools } from './skills';
-import { isRecordEntry } from './typeCatalog';
 import type { Entry } from './types';
 
 /**
@@ -20,7 +20,8 @@ import type { Entry } from './types';
  * description, not a daemon.
  */
 
-export const AGENT_TYPE = 'Agent';
+// Moved to engine/library with M18; re-exported so imports keep working.
+export { AGENT_TYPE };
 
 export interface AgentRef {
   /** `process:<slug>` — how this agent's writes are attributed. */
@@ -117,7 +118,8 @@ export function parseScope(entry: Entry): string[] | null {
 }
 
 export function isAgentEntry(entry: Entry): boolean {
-  return isRecordEntry(entry) && entry.type === AGENT_TYPE && entry.parseError === null;
+  // See isSkillEntry — one rule, in libraryKind.
+  return libraryKind(entry) === 'agent' && entry.parseError === null;
 }
 
 export function agentRef(entry: Entry): AgentRef {

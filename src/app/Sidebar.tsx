@@ -46,8 +46,14 @@ export interface SidebarProps {
  * queue with its own two-pane layout. Rendering Collections + 15 Types beside
  * them put ~25% of the window under navigation unrelated to what is in view,
  * and left a Collection highlighted as though it scoped the page.
+ *
+ * M18 adds the Library for a sharper reason than width: it lists nothing the
+ * Workspace tree contains. Collections and Types describe the vault's subject
+ * matter; the library holds the machinery that acts on it. Showing them side
+ * by side implied a skill lives in a Collection, which it does not, and left a
+ * type row highlighted while you edited a trigger.
  */
-const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox']);
+const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library']);
 
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 
