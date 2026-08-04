@@ -29,13 +29,25 @@ export function asThemeMode(v: unknown): ThemeMode {
 
 interface UiState {
   /**
-   * The record showing in the RIGHT-HAND SLOT, or null.
+   * The record showing in the right-hand area, or null.
    *
-   * M15: `detailPath` and `aiPanelOpen` are the two occupants of ONE slot, and
-   * the store — not the call sites — is what makes them mutually exclusive.
-   * As independent booleans they stacked: a record panel plus the assistant
-   * beside a 264px sidebar left a ~20px canvas on a 1280px window, with three
-   * separate close buttons in three chromes as the only way out.
+   * M15 made `detailPath` and `aiPanelOpen` the two occupants of ONE slot,
+   * mutually exclusive in the store rather than at the call sites, because as
+   * independent booleans they stacked: a record panel plus the assistant
+   * beside a 264px sidebar left a ~20px canvas on a 1280px window.
+   *
+   * M17.2 undoes the exclusivity and keeps the width discipline, because the
+   * exclusivity had a consequence nobody costed. The assistant's system prompt
+   * tells it to call `open_note`; `open_note` routes to `openDetail`;
+   * `openDetail` closed the assistant; the panel is rendered conditionally, so
+   * closing it UNMOUNTED it; and its unmount cleanup kills the in-flight run.
+   * The agent could not show you a note without killing its own answer
+   * mid-sentence — and neither could you, by clicking a [[wikilink]] in one.
+   *
+   * So they are independent again, and the width problem is solved where it
+   * actually lives: in the layout (see SHELL_TWO_PANEL_MIN in App.tsx), which
+   * draws both when there is room and hides one WITHOUT unmounting when there
+   * is not. A hidden panel keeps streaming; a closed one still stops.
    */
   detailPath: string | null;
   openDetail(path: string): void;
@@ -477,13 +489,12 @@ let nextToastId = 1;
 
 export const useUiStore = create<UiState>((set, get) => ({
   detailPath: null,
-  // One slot (M15): a record takes it from the assistant rather than stacking
-  // beside it. The persisted flag follows, or the assistant would come back on
-  // the next launch having been closed here.
-  openDetail: (path) => {
-    if (get().aiPanelOpen) storeString(AI_PANEL_KEY, 'false');
-    set({ detailPath: path, aiPanelOpen: false });
-  },
+  // M17.2: opening a record no longer closes the assistant. This line WAS the
+  // bug — `open_note` is the tool the system prompt tells the agent to call,
+  // and it landed here, where closing the panel unmounted it and killed the
+  // run that was mid-answer. Showing you something must never end the sentence
+  // that referred to it.
+  openDetail: (path) => set({ detailPath: path }),
   closeDetail: () => set({ detailPath: null }),
 
   detailSiblings: [],
@@ -655,10 +666,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   aiPanelOpen: loadString(AI_PANEL_KEY, 'false') === 'true',
   setAiPanelOpen: (v) => {
     storeString(AI_PANEL_KEY, String(v));
-    // The other half of the one-slot rule: opening the assistant vacates the
-    // slot rather than stacking on top of the record panel. Closing it leaves
-    // `detailPath` alone — there is nothing to displace.
-    set(v ? { aiPanelOpen: true, detailPath: null } : { aiPanelOpen: false });
+    // M17.2: the other half of the one-slot rule, and the other half of the
+    // damage. Opening the assistant used to null `detailPath`, which is why
+    // every "Ask the agent about this" button threw away the record it was
+    // asking about — the snapshot's activeNote is derived from detailPath,
+    // so only whatever was baked into the prompt string survived.
+    set({ aiPanelOpen: v });
   },
   // Defaults off: shell access is a choice the user makes, never one they
   // inherit. Everything else the agent can do follows from the folder model.

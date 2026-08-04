@@ -29,7 +29,12 @@ import { DARK_QUERY, resolveTheme, useTheme } from '@/hooks/useTheme';
 import { captureNote } from '@/lib/capture';
 import { getLastVault, openDemoVault, pickVault } from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
-import { CANVAS_MIN_WIDTH, RIGHT_PANEL_MIN_WIDTH, useUiStore } from '@/stores/uiStore';
+import {
+  CANVAS_MIN_WIDTH,
+  RIGHT_PANEL_MIN_WIDTH,
+  SIDEBAR_WIDTH_MIN,
+  useUiStore,
+} from '@/stores/uiStore';
 import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
@@ -63,6 +68,22 @@ function useMediaQuery(query: string): boolean {
  * (panel floor) = 1040, with slack for the window chrome.
  */
 const SHELL_NARROW_MAX = 1120;
+
+/**
+ * Above this BOTH right-hand panels are drawn at once (M17.2).
+ *
+ * Derived rather than picked, from the same floors the layout already
+ * enforces: 56 (rail) + 180 (sidebar at its MINIMUM — flex takes the shortfall
+ * out of the sidebar first) + 400 (canvas floor) + 2 x 320 (panel floors) =
+ * 1276. Below it the record wins the space and the assistant is parked, still
+ * mounted and still streaming.
+ *
+ * The 264px sidebar in M15's "~20px canvas at 1280" complaint is the DEFAULT
+ * width, not the floor; at the floor the arithmetic clears 1280 with room to
+ * spare, which is why the old rule over-corrected into mutual exclusion.
+ */
+export const SHELL_TWO_PANEL_MIN =
+  56 + SIDEBAR_WIDTH_MIN + CANVAS_MIN_WIDTH + 2 * RIGHT_PANEL_MIN_WIDTH;
 
 function CanvasOutlet() {
   const selection = useNavStore((s) => s.selection);
@@ -163,13 +184,18 @@ function App() {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const detailPath = useUiStore((s) => s.detailPath);
   const narrow = useMediaQuery(`(max-width: ${SHELL_NARROW_MAX}px)`);
-  // ONE right-hand slot (M15). The store keeps these two mutually exclusive;
-  // this is only which of them is drawn.
-  const rightPanel: 'assistant' | 'detail' | null = aiPanelOpen
-    ? 'assistant'
-    : detailPath !== null
-      ? 'detail'
-      : null;
+  // M17.2: the record panel and the assistant are independent again, so both
+  // can be open at once. `roomForTwo` decides whether both are DRAWN — the one
+  // that loses is hidden, never unmounted, because unmounting the assistant is
+  // what killed its run mid-answer (see uiStore's detailPath comment).
+  const roomForTwo = useMediaQuery(`(min-width: ${SHELL_TWO_PANEL_MIN}px)`);
+  const detailOpen = detailPath !== null;
+  // When only one fits, the RECORD wins: something just asked for it to be
+  // seen — the agent's open_note, or a wikilink the user clicked — and that
+  // request is the newer intent. The assistant keeps streaming behind it and
+  // ⌘J brings it back with its transcript intact.
+  const showAssistant = aiPanelOpen && (roomForTwo || !detailOpen);
+  const drawnPanels = (showAssistant ? 1 : 0) + (detailOpen ? 1 : 0);
   // M3.5: the sidebar's + opens the view builder — "New project" is gone,
   // because a project is just a saved view over Work items.
   // M10: null = the dialog is shut. Otherwise it holds the Collection folder the
@@ -289,7 +315,7 @@ function App() {
       <div
         className="flex min-w-0 flex-1 flex-col"
         style={{
-          minWidth: CANVAS_MIN_WIDTH + (rightPanel !== null ? RIGHT_PANEL_MIN_WIDTH : 0),
+          minWidth: CANVAS_MIN_WIDTH + drawnPanels * RIGHT_PANEL_MIN_WIDTH,
         }}
       >
         <Topbar />
@@ -314,16 +340,31 @@ function App() {
           >
             <CanvasOutlet />
           </main>
-          {/* ONE slot, and it is capped against the CANVAS ROW rather than the
-              viewport — a vw cap resolves against a box the panel does not live
-              in, so it never engaged. */}
-          {rightPanel !== null && (
+          {/* Capped against the CANVAS ROW rather than the viewport — a vw cap
+              resolves against a box the panel does not live in, so it never
+              engaged. M17.2: the record sits inboard of the assistant, so a
+              turn that opens a note slides the record in beside the answer
+              instead of on top of it. */}
+          {drawnPanels > 0 && (
             <div
               data-testid="right-panel-slot"
               className="flex min-w-0 flex-none overflow-hidden"
               style={{ maxWidth: `calc(100% - ${CANVAS_MIN_WIDTH}px)` }}
             >
-              {rightPanel === 'assistant' ? <AiPanel /> : <DetailPanel />}
+              {detailOpen && <DetailPanel />}
+              {showAssistant && <AiPanel />}
+            </div>
+          )}
+          {/* Open but not drawn: kept MOUNTED, clipped to zero width (M17.2).
+              Unmounting is what kills the run — that is the whole bug — so a
+              panel that cannot fit is parked, not destroyed. Clipped rather
+              than display:none because the transcript keeps its scroll metrics
+              this way and comes back where the user left it. `inert` (React 19)
+              takes it out of the tab order and the a11y tree, which
+              `aria-hidden` alone would not do. */}
+          {aiPanelOpen && !showAssistant && (
+            <div inert data-testid="ai-panel-parked" className="w-0 flex-none overflow-hidden">
+              <AiPanel />
             </div>
           )}
         </div>

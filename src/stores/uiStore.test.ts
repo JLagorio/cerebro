@@ -22,27 +22,42 @@ describe('uiStore', () => {
 
   // M15: one right-hand slot. As independent flags they stacked, and two
   // panels beside the sidebar left a ~20px canvas on a 1280px window.
-  describe('the right-hand slot holds one occupant', () => {
-    it('opening a record closes the assistant', () => {
+  // M17.2 reverses M15's rule. These three used to assert that each occupant
+  // evicted the other; the eviction is what let `open_note` kill the agent's
+  // own answer, because a closed panel is an unmounted panel and an unmounted
+  // panel kills its run. Which of them is DRAWN is now a layout question
+  // (App.test.tsx); the store just holds two independent facts.
+  describe('the record panel and the assistant are independent (M17.2)', () => {
+    const BET = 'records/bets/office-hours.md';
+
+    it('opening a record leaves the assistant open', () => {
       useUiStore.getState().setAiPanelOpen(true);
-      useUiStore.getState().openDetail('records/bets/office-hours.md');
-      expect(useUiStore.getState().aiPanelOpen).toBe(false);
-      expect(useUiStore.getState().detailPath).toBe('records/bets/office-hours.md');
+      useUiStore.getState().openDetail(BET);
+      expect(useUiStore.getState().aiPanelOpen).toBe(true);
+      expect(useUiStore.getState().detailPath).toBe(BET);
     });
 
-    it('opening the assistant closes the record panel', () => {
-      useUiStore.getState().openDetail('records/bets/office-hours.md');
+    it('opening the assistant keeps the record it is being asked about', () => {
+      // Every "Ask the agent about this" button opens the panel, and the
+      // context snapshot derives activeNote from detailPath — so nulling it
+      // here threw away the very record the question was about.
+      useUiStore.getState().openDetail(BET);
       useUiStore.getState().setAiPanelOpen(true);
-      expect(useUiStore.getState().detailPath).toBeNull();
+      expect(useUiStore.getState().detailPath).toBe(BET);
       expect(useUiStore.getState().aiPanelOpen).toBe(true);
     });
 
-    it('closing the assistant leaves the slot empty rather than reviving a record', () => {
-      useUiStore.getState().openDetail('records/bets/office-hours.md');
+    it('closing one leaves the other alone', () => {
+      useUiStore.getState().openDetail(BET);
       useUiStore.getState().setAiPanelOpen(true);
       useUiStore.getState().setAiPanelOpen(false);
-      expect(useUiStore.getState().detailPath).toBeNull();
+      expect(useUiStore.getState().detailPath).toBe(BET);
       expect(useUiStore.getState().aiPanelOpen).toBe(false);
+
+      useUiStore.getState().setAiPanelOpen(true);
+      useUiStore.getState().closeDetail();
+      expect(useUiStore.getState().detailPath).toBeNull();
+      expect(useUiStore.getState().aiPanelOpen).toBe(true);
     });
   });
 

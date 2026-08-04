@@ -15,12 +15,43 @@ vi.mock('@/lib/ipc', async (importOriginal) => {
   };
 });
 
-import App from '@/App';
+import App, { SHELL_TWO_PANEL_MIN } from '@/App';
 import * as ipc from '@/lib/ipc';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
+
+const BET = 'records/bets/office-hours.md';
+/** A path fixtureVault actually holds, so DetailPanel has something to draw. */
+const ITEM = 'projects/onboarding/items/fld-1.md';
+
+/**
+ * Report the shell as at least `px` wide (M17.2).
+ *
+ * setup.ts stubs matchMedia to answer false to everything, which reads as the
+ * NARROW shell — fine as a default, useless for the case this milestone is
+ * about. Only `min-width` queries are answered here; `max-width` ones keep
+ * saying false, so widening the window does not also turn the narrow-shell
+ * behaviour on. useMediaQuery caches the MediaQueryList in a ref on first
+ * render, so this must be called BEFORE render().
+ */
+function widthAtLeast(px: number): void {
+  const min = /\(min-width:\s*(\d+)px\)/;
+  vi.stubGlobal('matchMedia', (query: string) => {
+    const match = min.exec(query);
+    return {
+      matches: match !== null && px >= Number(match[1]),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    };
+  });
+}
 
 describe('App boot flow', () => {
   beforeEach(() => {
@@ -49,7 +80,12 @@ describe('App boot flow', () => {
     });
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    // widthAtLeast stubs matchMedia globally; leaving it stubbed would make
+    // every later test in this file think the window is wide.
+    vi.unstubAllGlobals();
+  });
 
   it('opens the last vault on boot and shows the sidebar', async () => {
     render(<App />);
@@ -109,12 +145,12 @@ describe('App boot flow', () => {
       expect(row?.className).toContain('@container/canvas');
     });
 
-    it('holds the right-hand panel in ONE slot, inside the canvas row', async () => {
+    it('holds the right-hand panels beside the canvas, capped against its row', async () => {
       render(<App />);
       const main = await screen.findByRole('main');
       expect(screen.queryByTestId('right-panel-slot')).toBeNull();
 
-      act(() => useUiStore.getState().openDetail('records/bets/office-hours.md'));
+      act(() => useUiStore.getState().openDetail(BET));
       const slot = await screen.findByTestId('right-panel-slot');
       // Beside the canvas — NOT beside the whole main column, which is what
       // let the assistant steal width from the Topbar and StatusBar as well.
@@ -123,13 +159,43 @@ describe('App boot flow', () => {
       // resolved against the viewport, a box the panel does not live in.
       expect(slot.style.maxWidth).toBe('calc(100% - 400px)');
 
-      // Never two: the store displaces rather than stacks, so at most one
-      // occupant is ever drawn. (The exclusion rule itself is covered in
-      // uiStore.test.ts, where the assistant need not be mounted.)
-      act(() => useUiStore.getState().setAiPanelOpen(true));
-      expect(useUiStore.getState().detailPath).toBeNull();
-      act(() => useUiStore.getState().setAiPanelOpen(false));
+      act(() => useUiStore.getState().closeDetail());
       expect(screen.queryByTestId('right-panel-slot')).toBeNull();
+    });
+
+    it('draws the record and the assistant together when there is room (M17.2)', async () => {
+      widthAtLeast(SHELL_TWO_PANEL_MIN);
+      // A real entry, because DetailPanel renders null for a path the vault
+      // does not hold — which would make this pass for the wrong reason.
+      vi.mocked(ipc.scanVault).mockResolvedValueOnce(fixtureVault());
+      render(<App />);
+      await screen.findByRole('navigation', { name: 'Sidebar' });
+      act(() => useUiStore.getState().setAiPanelOpen(true));
+      await screen.findByTestId('ai-panel');
+
+      act(() => useUiStore.getState().openDetail(ITEM));
+      // Both drawn, neither parked — and the record the assistant is being
+      // asked about is still there to be asked about.
+      expect(await screen.findByTestId('detail-panel')).toBeTruthy();
+      expect(screen.getByTestId('ai-panel')).toBeTruthy();
+      expect(screen.queryByTestId('ai-panel-parked')).toBeNull();
+      expect(useUiStore.getState().detailPath).toBe(ITEM);
+    });
+
+    it('parks the assistant rather than unmounting it when one panel fits (M17.2)', async () => {
+      // The default stub reports every query false, i.e. the narrow shell.
+      render(<App />);
+      act(() => useUiStore.getState().setAiPanelOpen(true));
+      await screen.findByTestId('ai-panel');
+
+      act(() => useUiStore.getState().openDetail(BET));
+      // The record takes the visible slot, because something just asked for it
+      // to be seen. The assistant is STILL MOUNTED inside the parking box —
+      // unmounting it is what killed the run mid-answer, and a narrow window
+      // must not be a way back into that bug.
+      const parked = await screen.findByTestId('ai-panel-parked');
+      expect(parked.querySelector('[data-testid="ai-panel"]')).not.toBeNull();
+      expect(useUiStore.getState().aiPanelOpen).toBe(true);
     });
 
     it('drops the record panel when the surface changes', async () => {
