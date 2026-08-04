@@ -8,6 +8,7 @@ import { RunList } from './RunList';
 import type { RunRecord } from './runs';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
+import { appendRunLog, describeRun, writtenPath } from '@/engine/runLog';
 
 afterEach(cleanup);
 
@@ -107,5 +108,71 @@ describe('RunList', () => {
     expect(useNavStore.getState().selection).toEqual({ kind: 'doc', path: 'notes/beta.md' });
     // A background job is not a conversation, so it does not open the panel.
     expect(useUiStore.getState().aiPanelOpen).toBe(false);
+  });
+});
+
+describe('the run log (M17.15)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    useUiStore.setState({ runs: [] });
+  });
+
+  it('shows what it did after there is nothing left running', () => {
+    // The gap this closes: an unattended agent could write into the vault for
+    // a month and leave no record that it had run at all.
+    appendRunLog({
+      id: 'r-1',
+      at: '2026-08-03T10:00:00Z',
+      owner: 'job',
+      label: 'Release scout',
+      source: 'records/agents/scout.md',
+      trigger: 'schedule',
+      scope: ['records/risks'],
+      files: ['records/risks/a.md'],
+      status: 'ok',
+    });
+    render(<RunList />);
+    fireEvent.click(screen.getByTestId('status-agent'));
+    const row = screen.getByTestId('run-log-row');
+    expect(row.textContent).toContain('Release scout');
+    expect(row.textContent).toContain('Wrote records/risks/a.md');
+  });
+
+  it('says "wrote nothing" rather than leaving a blank', () => {
+    // An agent that correctly decides to do nothing has run successfully, and
+    // that is the outcome the ask: gate is designed to produce most of the time.
+    expect(
+      describeRun({
+        id: 'r',
+        at: '',
+        owner: 'job',
+        label: 'x',
+        source: null,
+        trigger: 'event',
+        scope: null,
+        files: [],
+        status: 'ok',
+      }),
+    ).toBe('Wrote nothing');
+  });
+
+  it('stays out of the status bar entirely when nothing has ever run', () => {
+    render(<RunList />);
+    expect(screen.queryByTestId('status-agent')).toBeNull();
+  });
+});
+
+describe('writtenPath', () => {
+  it('reads the path a write tool is aimed at', () => {
+    expect(writtenPath('mcp__cerebro__update_frontmatter', '{"path":"a/b.md"}')).toBe('a/b.md');
+    expect(writtenPath('create_note', '{"folder":"records/risks","title":"X"}')).toBe(
+      'records/risks',
+    );
+  });
+
+  it('reports nothing for a read, and survives input that is not JSON', () => {
+    expect(writtenPath('search_notes', '{"query":"x"}')).toBeNull();
+    expect(writtenPath('update_frontmatter', 'not json')).toBeNull();
+    expect(writtenPath('update_frontmatter', null)).toBeNull();
   });
 });

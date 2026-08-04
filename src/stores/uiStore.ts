@@ -252,6 +252,16 @@ interface UiState {
   skillRuns: Record<string, Record<string, string>>;
   recordSkillRun(vault: string, path: string, fireKey: string): void;
   /**
+   * Vault → agent identity → when it last ran from an EVENT trigger, ISO
+   * (M17.12). Separate from skillRuns because it answers a different question:
+   * skillRuns says "has this exact fire been answered", this says "how long
+   * ago did this agent last wake at all". Only the second can break the loop
+   * an agent creates by writing into the folder it watches, because every such
+   * write mints a genuinely new fire key.
+   */
+  triggerRuns: Record<string, Record<string, string>>;
+  recordTriggerRun(vault: string, agent: string, at: string): void;
+  /**
    * Everything the assistant is doing, in start order (M17.7).
    *
    * Was `agentBusy` (a boolean) plus `learningPath` (a string), both unowned
@@ -300,6 +310,7 @@ const FILED_LEARN_KEY = 'cerebro.filedForLearning';
 const STDIO_APPROVALS_KEY = 'cerebro.stdioApprovals';
 const LEARN_ATTEMPTS_KEY = 'cerebro.learnAttempts';
 const SKILL_RUNS_KEY = 'cerebro.skillRuns';
+const TRIGGER_RUNS_KEY = 'cerebro.triggerRuns';
 const AUTO_CHECKPOINT_KEY = 'cerebro.autoCheckpoint';
 const DETAIL_WIDTH_KEY = 'cerebro.detailWidth';
 const SIDEBAR_WIDTH_KEY = 'cerebro.sidebarWidth';
@@ -766,6 +777,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       storeString(LEARN_ATTEMPTS_KEY, JSON.stringify(next));
       storeString(FILED_LEARN_KEY, JSON.stringify(filed));
       return { learnAttempts: next, filedForLearning: filed };
+    }),
+  triggerRuns: loadNestedStringMap(TRIGGER_RUNS_KEY),
+  recordTriggerRun: (vault, agent, at) =>
+    set((s) => {
+      const scoped = { ...(s.triggerRuns[vault] ?? {}), [agent]: at };
+      const next = { ...s.triggerRuns, [vault]: scoped };
+      storeString(TRIGGER_RUNS_KEY, JSON.stringify(next));
+      return { triggerRuns: next };
     }),
   skillRuns: loadNestedStringMap(SKILL_RUNS_KEY),
   recordSkillRun: (vault, path, fireKey) =>

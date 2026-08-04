@@ -140,10 +140,37 @@ export function agentRunPrompt(
   actor: string,
   memory: string,
   body: string,
+  /** What woke this run, when an event did (M17.12) — layer TWO of the
+   * trigger. Layer one already passed deterministically; this is the model
+   * gate, and it comes with an explicit permission to do nothing. */
+  trigger?: { subject: string; because: string; ask?: string } | null,
+  /** Folders this run may write inside (M17.13). Stated so the agent plans
+   * inside its boundary rather than discovering it as a tool error. */
+  scope?: readonly string[] | null,
 ): string {
   return [
-    `You are "${title}", the agent defined at ${path} in this vault, on an unattended scheduled run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
+    `You are "${title}", the agent defined at ${path} in this vault, on an unattended ${trigger == null ? 'scheduled' : 'event-triggered'} run. Your writes are attributed to ${actor}. Nobody is watching and no chat reply will be read — everything you produce must land in the vault through the tools.`,
     '',
+    ...(trigger == null
+      ? []
+      : [
+          `You were woken because ${trigger.because}: ${trigger.subject}. Read it first.`,
+          ...(trigger.ask === undefined
+            ? []
+            : [
+                `Before doing anything else, answer this for yourself: ${trigger.ask}`,
+                'If the answer is no, write nothing and stop. A run that correctly does nothing is a success, and this question exists precisely so that most wakings end here.',
+              ]),
+          '',
+        ]),
+    ...(scope == null
+      ? []
+      : [
+          scope.length === 0
+            ? 'You are scoped to no folder at all: every write to a record will be refused. Say so in your memory and stop.'
+            : `You may write records only inside: ${scope.join(', ')}. This is enforced — a write anywhere else is refused before it reaches disk, so plan inside it rather than discovering it as an error. (The knowledge bundle is reached through write_concept and is not affected.)`,
+          '',
+        ]),
     'Rules for unattended runs, which override anything your instructions say:',
     '- Additive only: create notes and write or revise knowledge concepts, but never delete, deprecate, or rewrite a note a person wrote.',
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',

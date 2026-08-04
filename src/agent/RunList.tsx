@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import { stopAgent } from '@/agent/agentIpc';
 import { placeLabel } from '@/engine/place';
+import { describeRun, loadRunLog } from '@/engine/runLog';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -29,8 +30,14 @@ export function RunList() {
   const collections = useVaultStore((s) => s.collections);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement | null>(null);
+  // M17.15: what it did, under what it is doing. Read when the popover opens
+  // rather than subscribed to — the log is append-only and nothing else in the
+  // app writes it while this is on screen.
+  const history = useMemo(() => (open ? loadRunLog().slice(0, 8) : []), [open]);
 
-  if (runs.length === 0) return null;
+  // Nothing running and nothing ever run: the status bar stays quiet. A
+  // segment that is always there is chrome, which the bar has a rule against.
+  if (runs.length === 0 && loadRunLog().length === 0) return null;
   const lookup = { entries, views, collections };
 
   return (
@@ -43,9 +50,17 @@ export function RunList() {
         onClick={() => setOpen(!open)}
         className="inline-flex h-6 items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 text-xs hover:bg-n-100"
       >
-        <Icon name="sparkles" size={11} color="var(--cortex-600)" />
-        <span className="text-cortex-600">
-          {runs.length === 1 ? 'Assistant working' : `${runs.length} running`}
+        <Icon
+          name="sparkles"
+          size={11}
+          color={runs.length === 0 ? 'var(--n-500)' : 'var(--cortex-600)'}
+        />
+        <span className={runs.length === 0 ? 'text-n-500' : 'text-cortex-600'}>
+          {runs.length === 0
+            ? 'Assistant idle'
+            : runs.length === 1
+              ? 'Assistant working'
+              : `${runs.length} running`}
         </span>
       </button>
       {open && (
@@ -103,6 +118,33 @@ export function RunList() {
               </button>
             </div>
           ))}
+          {history.length > 0 && (
+            <>
+              <div className="mt-1 border-t border-n-100 px-2 pb-0.5 pt-1.5 text-2xs font-medium uppercase tracking-wide text-n-400">
+                Recently
+              </div>
+              {history.map((entry) => (
+                <div
+                  key={entry.id}
+                  data-testid="run-log-row"
+                  className="flex items-baseline gap-2 rounded-md px-2 py-1"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs text-n-700">{entry.label}</span>
+                    {/* What it did, not what it said. The log is deliberately
+                        not a transcript — see engine/runLog.ts. */}
+                    <span
+                      className={`block truncate text-2xs ${
+                        entry.status === 'failed' ? 'text-danger-600' : 'text-n-400'
+                      }`}
+                    >
+                      {describeRun(entry)} · {entry.trigger}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
         </Popover>
       )}
     </>

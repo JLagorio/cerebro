@@ -3,7 +3,11 @@ import { onAgentEvent, runAgent, startMcp } from './agentIpc';
 import { buildSystemPrompt } from './AiPanel';
 import type { McpInfo } from './types';
 import { agentRef, isAgentEntry } from '@/engine/agents';
+import { diffEntries, type VaultEvent } from '@/engine/events';
 import { jobQueue, unlearnableFiled, type AgentJob } from '@/engine/jobs';
+import { appendRunLog, writtenPath, type RunLogEntry } from '@/engine/runLog';
+import { describeTrigger, firstMatch, parseTriggers } from '@/engine/triggers';
+import type { Entry } from '@/engine/types';
 import { newRunId, shouldYield } from './runs';
 import { isSkillEntry, parseSchedule } from '@/engine/skills';
 import { listConcepts } from '@/engine/okf';
@@ -65,6 +69,7 @@ export function useJobRunner(): void {
   const filed = useUiStore((s) => s.filedForLearning);
   const attempts = useUiStore((s) => s.learnAttempts);
   const skillRuns = useUiStore((s) => s.skillRuns);
+  const triggerRuns = useUiStore((s) => s.triggerRuns);
   // M17.7: read off the run registry rather than off a shared boolean anybody
   // could set. Also the signal that this runner is free again — `agentBusy`
   // flipping back to false was what re-ran the effect below, by accident.
@@ -113,6 +118,26 @@ export function useJobRunner(): void {
   // proceed.
   const [failedReads, setFailedReads] = useState<Record<string, Record<string, string>>>({});
 
+  /**
+   * What changed since the last scan (M17.12) — the trigger event source.
+   *
+   * The runner's own memory of what it has already looked at, rather than
+   * store state, and `null` until the first corpus arrives: a first scan must
+   * produce NOTHING, or launching the app reads as "every note in the vault
+   * was just created" and fires every trigger at once.
+   */
+  const seen = useRef<Entry[] | null>(null);
+  const [events, setEvents] = useState<VaultEvent[]>([]);
+  useEffect(() => {
+    if (entries.length === 0) return;
+    const next = diffEntries(seen.current, entries);
+    seen.current = entries;
+    // Replaced, never appended. An event the queue has already been offered
+    // and declined will not become interesting later, and a growing list would
+    // re-offer it on every scan for the rest of the session.
+    if (next.length > 0) setEvents(next);
+  }, [entries]);
+
   const today = todayIso();
   const next: AgentJob | null = useMemo(() => {
     if (!autoLearn || vaultPath === null) return null;
@@ -126,6 +151,8 @@ export function useJobRunner(): void {
         skillRuns: skillRuns[vaultPath] ?? {},
         now,
         connectors,
+        events,
+        triggerRuns: triggerRuns[vaultPath] ?? {},
       }).find((j) => failedReads[vaultPath]?.[j.path] !== j.runKey) ?? null
     );
   }, [
@@ -134,10 +161,12 @@ export function useJobRunner(): void {
     connectors,
     entries,
     failedReads,
+    events,
     filed,
     now,
     skillRuns,
     today,
+    triggerRuns,
     vaultPath,
   ]);
 
@@ -149,8 +178,16 @@ export function useJobRunner(): void {
    * read, which is what `learningPath` was — now attached to the run doing the
    * reading rather than to a global anybody could set. */
   const task = useRef<string | null>(null);
+  /** What this run has written, for the run log (M17.15). Collected from the
+   * event stream rather than guessed from the prompt: "wrote nothing" is a
+   * real and common outcome and has to be distinguishable from "we did not
+   * look". */
+  const wrote = useRef<string[]>([]);
+  const logged = useRef<Omit<RunLogEntry, 'files' | 'status' | 'at' | 'id'> | null>(null);
   const unsubscribe = useRef<(() => void) | null>(null);
   const mcp = useRef<McpInfo | null>(null);
+
+  const failure = useRef<string | null>(null);
 
   const finish = useCallback(() => {
     if (!running.current) return;
@@ -160,6 +197,21 @@ export function useJobRunner(): void {
     if (task.current !== null) {
       useUiStore.getState().endRun(task.current);
       task.current = null;
+    }
+    // Recorded on the way out, once, whatever ended the run. A log that only
+    // captured successes would be a log of the runs that did not need one.
+    if (logged.current !== null) {
+      appendRunLog({
+        ...logged.current,
+        id: `rl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        at: new Date().toISOString(),
+        files: [...wrote.current],
+        status: failure.current === null ? 'ok' : 'failed',
+        ...(failure.current === null ? {} : { error: failure.current }),
+      });
+      logged.current = null;
+      wrote.current = [];
+      failure.current = null;
     }
     // Whatever it just wrote is on disk and nowhere else until this runs.
     void rescan();
@@ -219,6 +271,32 @@ export function useJobRunner(): void {
       void (async () => {
         let recorded = job.ledger === 'attempts';
         try {
+          // M17.12: an event run says what woke it and carries the trigger's
+          // `ask:` — layer two, reached only because layer one already passed
+          // deterministically, with no model consulted.
+          const event = job.runKey.startsWith('event:')
+            ? (events.find((e) => job.runKey.endsWith(`:${e.path}@${e.entry.modifiedAt}`)) ?? null)
+            : null;
+          const trigger =
+            event === null
+              ? null
+              : firstMatch(
+                  parseTriggers(
+                    useVaultStore.getState().entries.find((e) => e.path === job.path)?.properties
+                      .when,
+                  ),
+                  event,
+                );
+          const woken =
+            event === null || trigger === null
+              ? null
+              : {
+                  subject: event.path,
+                  because: describeTrigger(trigger)
+                    .replace(/^When /, '')
+                    .replace(/\.$/, ''),
+                  ...(trigger.ask === undefined ? {} : { ask: trigger.ask }),
+                };
           const message =
             job.kind === 'agent'
               ? agentRunPrompt(
@@ -227,6 +305,8 @@ export function useJobRunner(): void {
                   agent?.actor ?? 'process:agent',
                   agent?.memory ?? '',
                   splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
+                  woken,
+                  agent?.scope ?? null,
                 )
               : job.kind === 'scheduled'
                 ? scheduledSkillPrompt(
@@ -256,6 +336,12 @@ export function useJobRunner(): void {
           // of eating the whole period (PR #5 review).
           if (job.ledger === 'skillRuns') {
             useUiStore.getState().recordSkillRun(vaultPath, job.key, job.runKey);
+            // The cooldown clock starts at the RUN, not at its end: an agent
+            // that watches a folder it also writes to would otherwise re-fire
+            // on its own output the moment it finished (M17.12).
+            if (job.runKey.startsWith('event:')) {
+              useUiStore.getState().recordTriggerRun(vaultPath, job.key, new Date().toISOString());
+            }
             recorded = true;
           }
           const runId = await runAgent(vaultPath, {
@@ -297,7 +383,24 @@ export function useJobRunner(): void {
           // event in the app and guessed with `running.current`, which is how
           // a chat turn's Done could end a background job — and vice versa.
           useUiStore.getState().attachChild(taskId, runId);
+          logged.current = {
+            owner: 'job',
+            label: job.title,
+            source: job.path,
+            trigger:
+              woken === null
+                ? job.kind === 'agent' || job.kind === 'scheduled'
+                  ? 'schedule'
+                  : job.kind
+                : `event: ${woken.because}`,
+            scope: agent?.scope ?? null,
+          };
           unsubscribe.current = onAgentEvent((event) => {
+            if (event.kind === 'ToolStart') {
+              const path = writtenPath(event.tool_name, event.input ?? null);
+              if (path !== null && !wrote.current.includes(path)) wrote.current.push(path);
+            }
+            if (event.kind === 'Error') failure.current = event.message;
             if (event.kind === 'Done' || event.kind === 'Error') finish();
           }, runId);
         } catch {
@@ -315,7 +418,10 @@ export function useJobRunner(): void {
       })();
     }, SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [connectors, finish, issuePrefixes, next, shell, vaultPath, yielding]);
+    // `events` is read inside the timer to describe what woke a run. Listed
+    // because it is genuinely read — and harmless as a dep: it only changes
+    // when a scan produced something new, which is also when `next` changes.
+  }, [connectors, events, finish, issuePrefixes, next, shell, vaultPath, yielding]);
 }
 
 /** Mounts the runner where its minute tick re-renders nothing but itself. */
