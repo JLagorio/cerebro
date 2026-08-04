@@ -278,6 +278,10 @@ export function useJobRunner(): void {
             // a schedule is an Agent record declaring `tools: shell`, and
             // no record can grant itself what Settings denies.
             shell: job.kind === 'agent' && shell && (agent?.shell ?? false),
+            // M17.13/M17.8: the record's own declarations, enforced in Rust.
+            // Both are narrowings — neither can widen what Settings granted.
+            scope: agent?.scope ?? null,
+            allowedTools: agent?.allowedTools ?? null,
             connectors,
             // Unattended, and it matters beyond bookkeeping: with connectors
             // on but no connectors.json, an attended turn falls back to the

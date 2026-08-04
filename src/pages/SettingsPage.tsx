@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { CliWorkspaceRow } from '@/pages/CliWorkspaceRow';
 import { Input } from '@/components/ui/Input';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Switch } from '@/components/ui/Switch';
@@ -201,6 +202,7 @@ export function SettingsPage() {
             onChange={setConnectors}
           />
           {connectors && <ConnectorSettings />}
+          <CliWorkspaceRow />
           <div className={`flex items-start gap-3 py-2 ${connectors ? '' : 'opacity-50'}`}>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-n-800">Issue keys</div>

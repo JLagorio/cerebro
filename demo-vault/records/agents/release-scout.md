@@ -3,6 +3,8 @@ type: Agent
 slug: release-scout
 description: Watches open risks and slipping work for anything that threatens a release, and keeps a short brief current.
 tools: safe
+scope:
+  - records/risks
 ---
 
 # Release scout
@@ -18,6 +20,12 @@ Keep a running brief on what threatens the next release.
    the projects they threaten and citing the records that show them.
 4. When a threat has no Risk record, create one and relate the objective it
    threatens via `affects`. Never edit existing records — flag, don't fix.
+
+`scope:` above is not advice. This agent can write inside `records/risks/`
+and nowhere else in the vault; a write anywhere else is refused by cerebro
+before it reaches disk, whatever this page says. The knowledge bundle is
+reached through `write_concept`, which has its own guard — recording what it
+found is a different permission from editing your records.
 
 Set `schedule: weekdays 08:30` on this record to put the scout on duty; the
 demo vault ships it off so the background agent stays predictable.

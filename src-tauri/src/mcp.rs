@@ -48,17 +48,62 @@ fn normalize_actor(actor: Option<&str>) -> &str {
         .unwrap_or(DEFAULT_ACTOR)
 }
 
+/// What a run's bearer token buys it (M13.4 actor, M17.13 scope).
+///
+/// Both ride the token rather than shared "current run" state, for the reason
+/// PR #5 gave about attribution and which applies twice over to scope: a child
+/// killed while a write is in flight can only present the token it was spawned
+/// with, so its trailing writes are stamped as ITS actor and confined to ITS
+/// scope, never to the incoming run's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RunGrant {
+    pub actor: String,
+    /// Vault-relative folders this run may write inside. `None` is unrestricted
+    /// — the panel's own turns, which the user is watching.
+    ///
+    /// FOLDERS, deliberately, and it is the only scope primitive offered.
+    /// A folder prefix is something Rust can check without knowing anything
+    /// about the vault's schema, so the refusal is structural. "Only records of
+    /// type Risk" is not: it would have to be re-derived per write, would go
+    /// wrong the moment a type is renamed (which already does not rewrite
+    /// ListSource.type), and the honest version of it is a sentence in a
+    /// prompt — which is exactly the thing this milestone exists to replace.
+    /// A Collection is a folder, so "the Product collection" is expressible;
+    /// its empty entry set (surface.ts) is not consulted and does not matter.
+    pub scope: Option<Vec<String>>,
+}
+
+impl RunGrant {
+    fn unrestricted(actor: &str) -> Self {
+        Self {
+            actor: actor.to_string(),
+            scope: None,
+        }
+    }
+
+    /// Is this run allowed to write here? Prefix containment on vault-relative
+    /// paths, matched at a path SEPARATOR so that a scope of `work` cannot be
+    /// escaped into `workspace/` — the classic prefix bug, and the reason this
+    /// is a function rather than `starts_with`.
+    pub fn may_write(&self, path: &str) -> bool {
+        let Some(scope) = &self.scope else {
+            return true;
+        };
+        let target = path.trim_start_matches("./").trim_start_matches('/');
+        scope.iter().any(|folder| {
+            let folder = folder.trim_matches('/');
+            folder.is_empty() || target == folder || target.starts_with(&format!("{folder}/"))
+        })
+    }
+}
+
 #[derive(Clone)]
 struct Running {
     port: u16,
     token: String,
     vault: Arc<Mutex<PathBuf>>,
-    /// token → actor for recent runs (M13.4). Attribution rides the bearer
-    /// each request PRESENTS rather than shared "current actor" state
-    /// (PR #5 security review): a child killed while a write is in flight
-    /// can only present the token it was spawned with, so its trailing
-    /// writes stamp as ITS actor and never as the incoming run's.
-    run_actors: Arc<Mutex<Vec<(String, String)>>>,
+    /// token → grant for recent runs. See RunGrant.
+    run_actors: Arc<Mutex<Vec<(String, RunGrant)>>>,
 }
 
 /// How many run tokens stay valid at once. A killed child's writes can still
@@ -78,23 +123,23 @@ pub fn run_token_window() -> usize {
     RUN_TOKEN_WINDOW
 }
 
-fn push_run_token(runs: &mut Vec<(String, String)>, token: String, actor: String) {
-    runs.push((token, actor));
+fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunGrant) {
+    runs.push((token, grant));
     let excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
     runs.drain(..excess);
 }
 
-/// The actor a presented bearer resolves to: the endpoint's own token (from
-/// `ensure`) is the default actor, a minted run token is its run's actor,
-/// and anything else is unauthorized.
-fn resolve_actor(presented: &str, base: &str, runs: &[(String, String)]) -> Option<String> {
+/// What a presented bearer resolves to: the endpoint's own token (from
+/// `ensure`) is the default actor with no scope, a minted run token is its
+/// run's grant, and anything else is unauthorized.
+fn resolve_grant(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<RunGrant> {
     if presented == base {
-        return Some(DEFAULT_ACTOR.to_string());
+        return Some(RunGrant::unrestricted(DEFAULT_ACTOR));
     }
     runs.iter()
         .rev()
         .find(|(t, _)| t == presented)
-        .map(|(_, a)| a.clone())
+        .map(|(_, g)| g.clone())
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -147,24 +192,24 @@ impl McpState {
                 // Authorization and attribution are one act: the bearer the
                 // request presents names the run it came from, and that
                 // run's actor stamps its writes (PR #5 security review).
-                let actor = request.headers().iter().find_map(|h| {
+                let grant = request.headers().iter().find_map(|h| {
                     if !h.field.equiv("Authorization") {
                         return None;
                     }
                     let presented = h.value.as_str().strip_prefix("Bearer ")?;
                     let runs = handler.run_actors.lock().ok()?;
-                    resolve_actor(presented, &handler.token, &runs)
+                    resolve_grant(presented, &handler.token, &runs)
                 });
                 // JSON-RPC notifications carry no id and take no response
                 // body. Verified against the real CLI: it sends
                 // `notifications/initialized` right after `initialize` and is
                 // happy with a bodyless 202.
-                if actor.is_some() && is_notification(&body) {
+                if grant.is_some() && is_notification(&body) {
                     let _ = request.respond(tiny_http::Response::empty(202));
                     continue;
                 }
-                let response = if let Some(actor) = actor.as_deref() {
-                    handle_rpc(&app, &handler, actor, &body)
+                let response = if let Some(grant) = grant.as_ref() {
+                    handle_rpc(&app, &handler, grant, &body)
                 } else {
                     json!({
                         "jsonrpc": "2.0", "id": Value::Null,
@@ -191,7 +236,11 @@ impl McpState {
     /// Mint a bearer token for ONE run, bound to that run's actor (M13.4).
     /// None reads as the default actor. Written into that run's private MCP
     /// config and nowhere else; only the last few run tokens stay valid.
-    pub fn run_token(&self, actor: Option<&str>) -> Result<String, String> {
+    pub fn run_token(
+        &self,
+        actor: Option<&str>,
+        scope: Option<Vec<String>>,
+    ) -> Result<String, String> {
         let guard = self.inner.lock().map_err(|_| "mcp state poisoned")?;
         let running = guard.as_ref().ok_or("the MCP endpoint is not running")?;
         let token = random_token();
@@ -199,7 +248,17 @@ impl McpState {
             .run_actors
             .lock()
             .map_err(|_| "run token lock poisoned")?;
-        push_run_token(&mut runs, token.clone(), normalize_actor(actor).to_string());
+        push_run_token(
+            &mut runs,
+            token.clone(),
+            RunGrant {
+                actor: normalize_actor(actor).to_string(),
+                // An empty declaration is not "everywhere" — a record that
+                // declares `scope:` and lists nothing has scoped itself to
+                // nothing, and the only safe reading of that is no writes.
+                scope,
+            },
+        );
         Ok(token)
     }
 
@@ -224,7 +283,7 @@ fn is_notification(body: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn handle_rpc(app: &AppHandle, running: &Running, actor: &str, body: &str) -> Value {
+fn handle_rpc(app: &AppHandle, running: &Running, grant: &RunGrant, body: &str) -> Value {
     let request: Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => {
@@ -255,7 +314,7 @@ fn handle_rpc(app: &AppHandle, running: &Running, actor: &str, body: &str) -> Va
                 .and_then(Value::as_object)
                 .cloned()
                 .unwrap_or_default();
-            call_tool(app, running, actor, name, &args)
+            call_tool(app, running, grant, name, &args)
         }
         other => Err(format!("unknown method: {other}")),
     };
@@ -423,10 +482,26 @@ fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
     args.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
+/// The vault path a write tool is aimed at, for the scope check (M17.13).
+///
+/// Centralised here rather than inside each tool so that adding a write tool
+/// cannot accidentally add an unscoped one: a name this does not recognise
+/// falls through to the read/UI arm, and any future WRITE must be listed or it
+/// will be caught by `no_write_tool_escapes_the_scope_check`.
+fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
+    match name {
+        // create_note names a folder and a title; the file lands inside the
+        // folder, so the folder is what has to be in scope.
+        "create_note" => Some(arg_str(args, "folder").unwrap_or_default()),
+        "update_frontmatter" | "append_to_note" => arg_str(args, "path"),
+        _ => None,
+    }
+}
+
 fn call_tool(
     app: &AppHandle,
     running: &Running,
-    actor: &str,
+    grant: &RunGrant,
     name: &str,
     args: &Map<String, Value>,
 ) -> Result<Value, String> {
@@ -436,6 +511,31 @@ fn call_tool(
         .map_err(|_| "vault lock poisoned")?
         .clone();
 
+    // M17.13 — scope is enforced HERE, before the tool runs, and it is a
+    // refusal rather than a request. An agent bound to `projects/atlas` cannot
+    // write outside it even if its instructions, or a note it just read, tell
+    // it to. `write_concept` and `cache_source` are deliberately exempt: the
+    // knowledge bundle and the source cache have their own guards (M17.1) and
+    // an agent's whole job may be to record what it found, which is not the
+    // same permission as editing the user's records.
+    if let Some(target) = write_target(name, args) {
+        if !grant.may_write(&target) {
+            return Ok(error_result(format!(
+                "This run is scoped to {} and cannot write to {target}.",
+                grant
+                    .scope
+                    .as_ref()
+                    .map(|s| if s.is_empty() {
+                        "nothing".to_string()
+                    } else {
+                        s.join(", ")
+                    })
+                    .unwrap_or_default()
+            )));
+        }
+    }
+
+    let actor = grant.actor.as_str();
     let outcome = match name {
         "get_vault_context" => tool_vault_context(&vault),
         "search_notes" => tool_search(&vault, args),
@@ -1081,6 +1181,14 @@ mod tests {
         assert_eq!(normalize_actor(Some("process:scout")), "process:scout");
     }
 
+    fn grant(actor: &str) -> RunGrant {
+        RunGrant::unrestricted(actor)
+    }
+
+    fn actor_of(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<String> {
+        resolve_grant(presented, base, runs).map(|g| g.actor)
+    }
+
     #[test]
     fn an_actor_rides_its_runs_token_never_shared_state() {
         // The race this retires (PR #5 review): with one shared "current
@@ -1088,24 +1196,24 @@ mod tests {
         // as whatever run was being spawned. Bound to the token, the killed
         // run can only ever present its own identity.
         let mut runs = Vec::new();
-        push_run_token(&mut runs, "tok-agent".into(), "process:scout".into());
-        push_run_token(&mut runs, "tok-chat".into(), DEFAULT_ACTOR.into());
+        push_run_token(&mut runs, "tok-agent".into(), grant("process:scout"));
+        push_run_token(&mut runs, "tok-chat".into(), grant(DEFAULT_ACTOR));
         assert_eq!(
-            resolve_actor("tok-agent", "base", &runs).as_deref(),
+            actor_of("tok-agent", "base", &runs).as_deref(),
             Some("process:scout"),
             "the outgoing run's trailing write still stamps as the outgoing run"
         );
         assert_eq!(
-            resolve_actor("tok-chat", "base", &runs).as_deref(),
+            actor_of("tok-chat", "base", &runs).as_deref(),
             Some(DEFAULT_ACTOR)
         );
         assert_eq!(
-            resolve_actor("base", "base", &runs).as_deref(),
+            actor_of("base", "base", &runs).as_deref(),
             Some(DEFAULT_ACTOR),
             "the endpoint's own token is the default actor"
         );
         assert_eq!(
-            resolve_actor("unknown", "base", &runs),
+            actor_of("unknown", "base", &runs),
             None,
             "unminted tokens are refused"
         );
@@ -1115,7 +1223,7 @@ mod tests {
     fn run_tokens_expire_beyond_the_window() {
         let mut runs = Vec::new();
         for i in 0..(RUN_TOKEN_WINDOW + 2) {
-            push_run_token(&mut runs, format!("tok-{i}"), format!("actor-{i}"));
+            push_run_token(&mut runs, format!("tok-{i}"), grant(&format!("actor-{i}")));
         }
         assert_eq!(
             runs.len(),
@@ -1123,12 +1231,95 @@ mod tests {
             "the ledger never grows unboundedly"
         );
         assert_eq!(
-            resolve_actor("tok-0", "base", &runs),
+            actor_of("tok-0", "base", &runs),
             None,
             "old credentials retire"
         );
         let newest = format!("tok-{}", RUN_TOKEN_WINDOW + 1);
-        assert!(resolve_actor(&newest, "base", &runs).is_some());
+        assert!(actor_of(&newest, "base", &runs).is_some());
+    }
+
+    /// M17.13 — scope is structural, and these are the property.
+    ///
+    /// The point is not that an agent is ASKED to stay inside its folder; it
+    /// is that it cannot leave, and the refusal is here rather than in a
+    /// sentence a model can be talked out of.
+    fn scoped(folders: &[&str]) -> RunGrant {
+        RunGrant {
+            actor: "process:scout".into(),
+            scope: Some(folders.iter().map(|f| f.to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn a_scoped_run_writes_inside_its_folder_and_nowhere_else() {
+        let g = scoped(&["projects/atlas"]);
+        assert!(g.may_write("projects/atlas/items/a.md"));
+        assert!(g.may_write("projects/atlas"));
+        assert!(!g.may_write("projects/beta/items/a.md"));
+        assert!(!g.may_write("inbox/capture.md"));
+    }
+
+    #[test]
+    fn a_scope_cannot_be_escaped_by_a_prefix_that_merely_starts_the_same() {
+        // The classic one: `work` must not reach `workspace/`. Matching at a
+        // separator is why `may_write` exists rather than `starts_with`.
+        let g = scoped(&["work"]);
+        assert!(g.may_write("work/a.md"));
+        assert!(!g.may_write("workspace/a.md"));
+        assert!(!g.may_write("workshop.md"));
+    }
+
+    #[test]
+    fn a_scope_that_lists_nothing_permits_nothing() {
+        // A record that declares `scope:` and lists none has scoped itself to
+        // nothing. Reading that as "everywhere" would make the safest-looking
+        // declaration the most dangerous one.
+        let g = scoped(&[]);
+        assert!(!g.may_write("anything.md"));
+    }
+
+    #[test]
+    fn an_unscoped_run_is_unrestricted() {
+        // The panel's own turns, which a person is watching.
+        assert!(RunGrant::unrestricted(DEFAULT_ACTOR).may_write("anywhere/at/all.md"));
+    }
+
+    #[test]
+    fn a_leading_slash_or_dot_cannot_slip_past_the_check() {
+        let g = scoped(&["projects/atlas"]);
+        assert!(g.may_write("./projects/atlas/a.md"));
+        assert!(g.may_write("/projects/atlas/a.md"));
+        assert!(!g.may_write("/projects/beta/a.md"));
+    }
+
+    #[test]
+    fn no_write_tool_escapes_the_scope_check() {
+        // The list in `write_target` is the enforcement surface, so a new write
+        // tool that is not listed there is silently unscoped. This test is the
+        // tripwire: every tool the policy grants that can change a note must
+        // resolve to a target.
+        let args: Map<String, Value> = serde_json::from_value(json!({
+            "path": "projects/atlas/a.md",
+            "folder": "projects/atlas"
+        }))
+        .unwrap();
+        for tool in ["create_note", "update_frontmatter", "append_to_note"] {
+            assert!(
+                write_target(tool, &args).is_some(),
+                "{tool} must be scope-checked"
+            );
+        }
+        // Exempt on purpose, and the exemption is the documented one: these
+        // two have their own guards, and recording what an agent found is not
+        // the same permission as editing the user's records.
+        for tool in ["write_concept", "cache_source"] {
+            assert!(write_target(tool, &args).is_none());
+        }
+        // Reads and UI actions change nothing.
+        for tool in ["search_notes", "get_note", "open_note", "navigate"] {
+            assert!(write_target(tool, &args).is_none());
+        }
     }
 
     #[test]

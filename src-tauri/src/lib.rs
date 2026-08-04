@@ -215,6 +215,17 @@ fn check_agent() -> agent::AgentStatus {
     agent::status()
 }
 
+/// What the CLI has stored about this vault OUTSIDE it (M17.14).
+#[tauri::command(async)]
+fn agent_workspace(vault: String) -> agent::CliWorkspace {
+    agent::cli_workspace(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn purge_agent_workspace(vault: String) -> Result<usize, String> {
+    agent::purge_cli_workspace(Path::new(&vault))
+}
+
 /// Start (or retarget) the loopback MCP endpoint and return its address. The
 /// token is handed to the CLI through a private config file; the frontend
 /// carries it only to pass it back into `run_agent`.
@@ -243,7 +254,10 @@ fn run_agent(
     // child was gone — where the outgoing run's trailing writes stamped as
     // the incoming run (PR #5 security review).
     let mut request = request;
-    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref())?);
+    // M17.13: the scope rides the same token. It is taken from the REQUEST,
+    // which the app builds from the Agent record — the CLI never sees it and
+    // therefore cannot argue with it.
+    request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref(), request.scope.clone())?);
     let dir = config_dir(&app)?;
     agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
 }
@@ -324,6 +338,8 @@ pub fn run() {
             read_connectors,
             save_connectors,
             check_agent,
+            agent_workspace,
+            purge_agent_workspace,
             start_mcp,
             run_agent,
             stop_agent,

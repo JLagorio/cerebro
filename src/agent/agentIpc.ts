@@ -1,5 +1,5 @@
 import { runMockAgent, type MockRun } from './mockAgent';
-import type { AgentEvent, AgentStatus, McpInfo, UiAction } from './types';
+import type { AgentEvent, AgentStatus, CliWorkspace, McpInfo, UiAction } from './types';
 
 /**
  * Agent IPC facade (M6), same shape as lib/ipc.ts: inside Tauri these invoke
@@ -22,6 +22,31 @@ export function checkAgent(): Promise<AgentStatus> {
     : // The mock stands in for a working install so the panel is usable in
       // `pnpm dev`; the version string says plainly that it is not real.
       Promise.resolve({ installed: true, version: 'mock (browser)', path: null });
+}
+
+/** What the CLI has stored about this vault outside it (M17.14). */
+export function agentWorkspace(vault: string): Promise<CliWorkspace> {
+  return inTauri()
+    ? invokeTauri<{
+        path: string;
+        exists: boolean;
+        sessions: number;
+        bytes: number;
+        memory_files: number;
+      }>('agent_workspace', { vault }).then((w) => ({
+        path: w.path,
+        exists: w.exists,
+        sessions: w.sessions,
+        bytes: w.bytes,
+        memoryFiles: w.memory_files,
+      }))
+    : // Browser mode spawns no CLI, so there is nothing outside the vault to
+      // report. Saying "0 files" would be a claim about a real directory.
+      Promise.resolve({ path: '', exists: false, sessions: 0, bytes: 0, memoryFiles: 0 });
+}
+
+export function purgeAgentWorkspace(vault: string): Promise<number> {
+  return inTauri() ? invokeTauri<number>('purge_agent_workspace', { vault }) : Promise.resolve(0);
 }
 
 export function startMcp(vault: string): Promise<McpInfo> {
@@ -57,6 +82,10 @@ export interface RunOptions {
    * file may subtract from what Settings granted and can never add to it.
    * Absent means "do not narrow"; [] means "narrow to nothing". */
   allowedTools?: string[] | null;
+  /** Vault-relative folders this run may WRITE inside (M17.13). Absent is
+   * unrestricted. Enforced in Rust against the bearer the child presents, so
+   * an agent cannot talk its way out of it. */
+  scope?: string[] | null;
   mcp: McpInfo | null;
 }
 
@@ -100,6 +129,7 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
       actor: options.actor ?? null,
       approved_stdio: options.approvedStdio ?? [],
       allowed_tools: options.allowedTools ?? null,
+      scope: options.scope ?? null,
       mcp_url: options.mcp?.url ?? null,
       mcp_token: options.mcp?.token ?? null,
     },

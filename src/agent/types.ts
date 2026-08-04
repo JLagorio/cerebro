@@ -37,6 +37,29 @@ export interface McpInfo {
   token: string;
 }
 
+/**
+ * What the Claude Code CLI has stored about this vault OUTSIDE it (M17.14).
+ *
+ * Cerebro spawns the CLI with cwd = the vault, and it files its own session
+ * transcripts — and its auto-memory — under a slug derived from that path, in
+ * the user's home directory. Vault content therefore accumulates outside the
+ * vault: outside its git, outside its backups, outside every guard in
+ * knowledge.rs.
+ *
+ * It cannot be switched off without breaking the product: `--bare` is the only
+ * flag that skips auto-memory and it also stops the CLI reading the keychain,
+ * which is how the user is signed in at all. So the app names the directory
+ * and offers to empty it. A leak you can see and clear is a different thing
+ * from one nobody mentions.
+ */
+export interface CliWorkspace {
+  path: string;
+  exists: boolean;
+  sessions: number;
+  bytes: number;
+  memoryFiles: number;
+}
+
 /** What the agent did, shown inline in the transcript as an action card. */
 export interface ToolCall {
   id: string;

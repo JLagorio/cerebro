@@ -105,6 +105,13 @@ pub struct AgentRequest {
     /// Absent reads as none approved: a missing field must never widen
     /// access, least of all to executing commands a vault file names.
     pub approved_stdio: Option<Vec<String>>,
+    /// Vault-relative folders this run may WRITE inside (M17.13).
+    ///
+    /// Absent is unrestricted — a panel turn the user is watching. Present and
+    /// empty means scoped to nothing, which is the only safe reading of a
+    /// record that declares `scope:` and lists none. Enforced in mcp.rs at
+    /// dispatch, against the bearer the request presents.
+    pub scope: Option<Vec<String>>,
     /// A NARROWING of this run's tools, declared by the vault file that
     /// started it (M17.8 `allowed-tools:`, M17.13 agent scope).
     ///
@@ -113,6 +120,136 @@ pub struct AgentRequest {
     /// is a thing a read-only skill is allowed to ask for. The distinction is
     /// the whole reason this is an Option<Vec> rather than a Vec.
     pub allowed_tools: Option<Vec<String>>,
+}
+
+/// Where the CLI keeps ITS OWN state for a vault (M17.14).
+///
+/// Cerebro spawns Claude Code with cwd = the vault, and the CLI files its
+/// session transcripts — and its auto-memory — under a slug derived from that
+/// cwd, in the user's home directory. So a vault's contents accumulate
+/// verbatim OUTSIDE the vault: outside its git, outside its backups, and
+/// outside every guard in knowledge.rs.
+///
+/// This cannot simply be switched off. `--bare` is the only flag that skips
+/// auto-memory, and it also stops the CLI reading the keychain — verified
+/// against the real binary, which answers "Not logged in · Please run /login".
+/// Cerebro's entire premise is that the assistant is the user's own signed-in
+/// CLI and no API key ever enters the app, so `--bare` would trade a privacy
+/// leak for a product that cannot authenticate. `--no-session-persistence`
+/// costs `--resume`, which is how a conversation survives a reload.
+///
+/// What is left is honesty: name the directory, count what is in it, and give
+/// the user a button. A leak you can see and empty is a different thing from
+/// one nobody mentions.
+fn slugify_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct CliWorkspace {
+    /// Absolute path, shown to the user verbatim. There is no version of this
+    /// feature where the app knows and the user does not.
+    pub path: String,
+    pub exists: bool,
+    /// Session transcripts — what `--resume` needs, and what holds the
+    /// verbatim note content the run read.
+    pub sessions: usize,
+    pub bytes: u64,
+    /// Auto-memory files. The directory is created on the first run and is
+    /// usually empty; a non-zero count here means the CLI has written durable
+    /// conclusions about this vault outside it.
+    pub memory_files: usize,
+}
+
+fn home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+pub fn cli_workspace(vault: &Path) -> CliWorkspace {
+    let Some(dir) = home().map(|h| h.join(".claude/projects").join(slugify_path(vault))) else {
+        return CliWorkspace {
+            path: String::new(),
+            exists: false,
+            sessions: 0,
+            bytes: 0,
+            memory_files: 0,
+        };
+    };
+    let mut sessions = 0usize;
+    let mut bytes = 0u64;
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.is_file() && entry.path().extension().is_some_and(|e| e == "jsonl") {
+                sessions += 1;
+                bytes += meta.len();
+            }
+        }
+    }
+    let memory_files = std::fs::read_dir(dir.join("memory"))
+        .map(|d| d.flatten().filter(|e| e.path().is_file()).count())
+        .unwrap_or(0);
+    CliWorkspace {
+        path: dir.to_string_lossy().to_string(),
+        exists: dir.is_dir(),
+        sessions,
+        bytes,
+        memory_files,
+    }
+}
+
+/// Delete the CLI's stored state for this vault. Returns what was removed.
+///
+/// Refuses to touch anything that is not exactly `<home>/.claude/projects/<slug>`
+/// — a purge is the one operation here that destroys data, so the path it
+/// deletes is re-derived rather than accepted from the caller, and checked
+/// against the directory it must live in.
+pub fn purge_cli_workspace(vault: &Path) -> Result<usize, String> {
+    let home = home().ok_or("no home directory")?;
+    let projects = home.join(".claude/projects");
+    let slug = slugify_path(vault);
+    if slug.is_empty() || slug.contains("..") {
+        return Err("refusing to purge: unusable vault path".into());
+    }
+    let dir = projects.join(&slug);
+    if !dir.starts_with(&projects) {
+        return Err("refusing to purge outside the CLI's project directory".into());
+    }
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
+        let path = entry.path();
+        let is_session = path.extension().is_some_and(|e| e == "jsonl");
+        let is_memory = path.is_dir() && path.file_name().is_some_and(|n| n == "memory");
+        if is_session {
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+            removed += 1;
+        } else if is_memory {
+            let count = std::fs::read_dir(&path)
+                .map(|d| d.flatten().filter(|e| e.path().is_file()).count())
+                .unwrap_or(0);
+            std::fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+            removed += count;
+        }
+    }
+    Ok(removed)
 }
 
 /// How many CLI children may be alive at once (M17.3).
@@ -841,6 +978,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                scope: None,
                 allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
@@ -1010,6 +1148,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                scope: None,
                 allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
@@ -1037,6 +1176,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                scope: None,
                 allowed_tools: declared
                     .map(|d| d.into_iter().map(String::from).collect::<Vec<String>>()),
             },
@@ -1048,6 +1188,38 @@ mod tests {
             .filter(|t| !t.is_empty())
             .map(String::from)
             .collect()
+    }
+
+    #[test]
+    fn the_cli_workspace_slug_matches_what_the_cli_actually_writes() {
+        // Derived from the real directories on this machine: every character
+        // that is not alphanumeric or a hyphen becomes a hyphen, including the
+        // leading slash and the dot in a hidden directory.
+        assert_eq!(
+            slugify_path(Path::new("/Users/me/Development/cerebro")),
+            "-Users-me-Development-cerebro"
+        );
+        assert_eq!(
+            slugify_path(Path::new("/Users/me/Documents/Cerebro Demo Vault")),
+            "-Users-me-Documents-Cerebro-Demo-Vault"
+        );
+        assert_eq!(
+            slugify_path(Path::new("/Users/me/dev/cerebro/.claude/worktrees/m14")),
+            "-Users-me-dev-cerebro--claude-worktrees-m14"
+        );
+    }
+
+    #[test]
+    fn a_purge_reports_zero_rather_than_failing_when_there_is_nothing_there() {
+        // A vault the CLI has never run against. Not an error: "nothing to
+        // clear" is the answer, and an error would read as "clearing failed".
+        let dir = std::env::temp_dir().join("cerebro-never-run-vault-xyzzy");
+        assert_eq!(purge_cli_workspace(&dir), Ok(0));
+    }
+
+    #[test]
+    fn a_purge_refuses_a_vault_path_that_could_escape_the_projects_directory() {
+        assert!(purge_cli_workspace(Path::new("")).is_err());
     }
 
     #[test]
@@ -1157,6 +1329,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                scope: None,
                 allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
@@ -1192,6 +1365,7 @@ mod tests {
                 mcp_token: None,
                 actor: None,
                 approved_stdio: None,
+                scope: None,
                 allowed_tools: None,
             },
             Path::new("/tmp/mcp.json"),
