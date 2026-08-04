@@ -11,6 +11,8 @@ import { createFolder, deleteNote, readNote, renameNote, setNoteTitle } from '@/
 import { humanizeSlug, slugify } from '@/lib/slug';
 import {
   applyTemplateBody,
+  templateFill,
+  templateFillPrompt,
   applyTemplateFrontmatter,
   isTemplate,
   listTemplates,
@@ -205,6 +207,7 @@ export function FileTree({
   const treeOrder = useUiStore((s) => s.treeOrder);
   const setTreeOrder = useUiStore((s) => s.setTreeOrder);
   const toast = useUiStore((s) => s.toast);
+  const askAgent = useUiStore((s) => s.askAgent);
 
   const templates = useMemo(() => listTemplates(entries), [entries]);
   // M3: typed files carry their type's icon/color in the tree.
@@ -403,6 +406,16 @@ export function FileTree({
         revealAncestors(path);
         closeDialog();
         onOpen(path);
+        // M17.10: a template that declares `fill:` hands the assistant the
+        // page it just made. AFTER opening it, and through the ordinary panel
+        // handoff rather than a silent background run — the page is the thing
+        // the user is about to read, and watching it get written is most of
+        // the value. The scaffolding is already on disk either way, so a
+        // declined or failed fill leaves an ordinary templated page.
+        if (template !== null) {
+          const fill = templateFill(template);
+          if (fill !== '') askAgent(templateFillPrompt(path, trimmed, fill), path);
+        }
         return;
       }
       if (dialog.mode === 'new-folder') {

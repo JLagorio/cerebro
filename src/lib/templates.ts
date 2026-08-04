@@ -50,6 +50,10 @@ export function applyTemplateFrontmatter(
   const frontmatter: Record<string, unknown> = {};
   if (template.type !== null) frontmatter.type = template.type;
   for (const [key, value] of Object.entries(template.properties)) {
+    // `fill:` is an instruction to the APP about this template, not a property
+    // of the pages made from it — copying it forward would make every page
+    // look like a template and re-fill itself the next time anyone looked.
+    if (key === 'fill') continue;
     frontmatter[key] =
       typeof value === 'string' ? substitute(value, vars) : (value as Scalar | Scalar[]);
   }
@@ -57,6 +61,48 @@ export function applyTemplateFrontmatter(
     frontmatter[key] = targets.map((t) => `[[${t}]]`);
   }
   return frontmatter;
+}
+
+/**
+ * A template that knows how to fill itself (M17.10).
+ *
+ * `fill:` on a template's frontmatter is an instruction the assistant follows
+ * once the page exists — "a PRD, drafted from the record this was created
+ * under and what the base already believes about it". It is a declared PROMPT,
+ * not a new artifact type: the template is still an ordinary markdown file you
+ * can open and edit, and a template without `fill:` behaves exactly as every
+ * template did before.
+ *
+ * Why the prompt lives on the template rather than in the app: the useful
+ * version of "AI-assisted PRD" is one the person can change. A built-in
+ * generator is a black box that produces someone else's idea of a PRD, and the
+ * only way to disagree with it is to stop using it.
+ */
+export function templateFill(template: Entry): string {
+  const raw = template.properties.fill;
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+/**
+ * The instruction handed to the assistant for a filled template.
+ *
+ * The new page is named as the thing to write INTO — it already exists on disk
+ * with the template's scaffolding — and the context it should draw on is
+ * whatever the panel already assembles (M17.6 chips, M17.20 knowledge). The
+ * prompt does not re-describe the vault, because a template author writing
+ * `fill:` should be able to say "draft the risks section from what we know"
+ * without also explaining what a vault is.
+ */
+export function templateFillPrompt(path: string, title: string, instruction: string): string {
+  return [
+    `The page ${path} ("${title}") was just created from a template and is waiting to be filled in.`,
+    '',
+    `The template asks for: ${instruction}`,
+    '',
+    'Read the page first — its scaffolding says what shape the result should take, and the headings it already has are the ones to fill rather than replace.',
+    'Draw on the records and knowledge in context. Where the base holds nothing on a section, write one line saying so instead of inventing content — a template filled with plausible fiction is worse than one left blank.',
+    'Write it with append_to_note or update_frontmatter. Do not create a second page.',
+  ].join('\n');
 }
 
 /** Today as YYYY-MM-DD in local time (template `{{date}}` and due chips). */
