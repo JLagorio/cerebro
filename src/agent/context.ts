@@ -33,6 +33,16 @@ export interface ContextSnapshot {
    * where I am standing" is a thing they are allowed to say, and an empty
    * object here would say it badly. */
   selection?: Record<string, unknown>;
+  /**
+   * Where this conversation started, when the user has since moved.
+   *
+   * A fact, not a UI decision. The panel briefly answered "you walked away" by
+   * asking the user to start a new thread — the app making its own bookkeeping
+   * their problem, and unnecessary, because the model can hold two facts at
+   * once. Tell it where the conversation began and where the user is now, and
+   * it reconciles them the way a person would.
+   */
+  startedIn?: string;
   activeNote?: RecordSummary & { body?: string };
   linkedNotes?: { path: string; title: string; type: string | null }[];
   visibleRecords?: RecordSummary[];
@@ -91,6 +101,8 @@ export interface SnapshotInput {
   /** Vault paths attached as context chips (M17.6). Resolved by exact path,
    * unlike `references`, which are wikilink targets matched by stem or title. */
   attached?: string[];
+  /** Where the conversation began, when that is not where the user is now. */
+  startedIn?: string | null;
 }
 
 export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
@@ -104,10 +116,12 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     filters,
     references,
     attached,
+    startedIn,
   } = input;
 
   const snapshot: ContextSnapshot = {
     ...(selection === undefined ? {} : { selection: describeSelection(selection) }),
+    ...(startedIn == null ? {} : { startedIn }),
     vault: {
       types: [...schema.types.keys()],
       projects: entries.filter((e) => e.type === 'Project').length,

@@ -266,9 +266,29 @@ walk into a place, get that place's thread — loses the answer you are reading
 the moment you click a `[[wikilink]]` in it, because that click is a
 navigation. Notion does not do this either: its chat is global with a visible
 context chip, which is M17.6. So a thread is stamped at its **first turn**
-(never at creation — an empty thread is not about anywhere), the switcher
-**groups** by place with "here" on top, and a thread anchored elsewhere says so
-above the composer with a one-click "New one here". Said, never acted on.
+(never at creation — an empty thread is not about anywhere), and the switcher
+**groups** by place with "here" on top.
+
+**Reversed (M17.7b), on the user's call.** This first shipped with a third
+piece: the place chip showed the thread's *anchor*, so walking to the Inbox
+left the context saying "Home", and the panel offered a "You've moved to X —
+New one here" row to fix it. That was the app handing its own bookkeeping to
+the user, and the anchor-as-context premise it rested on was wrong anyway:
+
+- A turn's context is **frozen at send** (M17.6), so the agent moving you
+  mid-answer already cannot rewrite what that turn was given. The only case
+  left is "between turns you walked somewhere" — and there the honest answer
+  is that you *are* somewhere else. The chip follows you.
+- Where the conversation **started** goes to the agent as a fact (`startedIn`
+  in the snapshot) instead of being pinned into the chip. It has the
+  transcript and both places; "we began on the Roadmap, you are now in the
+  Inbox" is not a hard sentence for it. It only looked stupid because we were
+  showing it one of the two facts and hiding the other.
+
+The anchor keeps its real job — labelling and grouping threads in the switcher,
+so a conversation stays findable by what it was about. It just stopped being
+allowed to decide what the agent sees. Net: one row of chrome, one store field
+and two tests deleted; nothing gained them.
 
 Persistence: `MAX_KEPT = 30` with a whole-array localStorage rewrite per save
 (`conversations.ts:18`) does not survive place-multiplied thread counts.

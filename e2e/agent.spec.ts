@@ -54,7 +54,7 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
   await expect(reply.getByRole('button', { name: /scanner/i })).toBeVisible();
 });
 
-test('agent: a thread says where it was had, and does not follow you around', async ({ page }) => {
+test('agent: walking away keeps the thread, and moves the context with you', async ({ page }) => {
   await boot(page);
 
   await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
@@ -64,34 +64,31 @@ test('agent: a thread says where it was had, and does not follow you around', as
   await expect(
     panel.getByTestId('chat-message').filter({ hasText: 'Two risks are open' }),
   ).toBeVisible({ timeout: 10_000 });
-
-  // Nothing to say while you are where the conversation happened.
-  await expect(panel.getByTestId('thread-elsewhere')).toBeHidden();
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
 
   await page
     .getByTestId('rail')
     .getByRole('button', { name: /^Inbox/ })
     .click();
 
-  // M17.5: walking away says so instead of silently swapping threads — the
-  // assistant navigates you around by design, so a panel that re-threaded on
-  // navigation would lose the answer you were reading. The transcript is
-  // still here; only the offer of a new thread is new.
-  await expect(panel.getByTestId('thread-elsewhere')).toContainText('Inbox');
-  // The context chip still names what the thread is ABOUT — the two lines say
-  // different things on purpose (M17.6).
-  await expect(panel.getByTestId('context-chip').first()).toContainText('Home');
+  // The transcript stays put — the assistant navigates you around by design,
+  // so a panel that re-threaded on navigation would lose the answer you were
+  // reading (M17.2's bug, one layer up).
   await expect(
     panel.getByTestId('chat-message').filter({ hasText: 'Two risks are open' }),
   ).toBeVisible();
 
-  await panel.getByTestId('new-conversation-here').click();
-  await expect(panel.getByTestId('thread-elsewhere')).toBeHidden();
-  await expect(panel.getByTestId('chat-message')).toHaveCount(0);
+  // …and the context follows you, because you ARE somewhere else. It briefly
+  // did the opposite: the chip kept naming the thread's anchor, so the context
+  // was wrong and the only cure on offer was "start a new conversation" — the
+  // app handing its own bookkeeping to the user. Where the conversation began
+  // is told to the agent as a fact instead (`startedIn`), never as a chore.
+  await expect(panel.getByTestId('context-chip').first()).toContainText('Inbox');
+  await expect(panel.getByTestId('thread-elsewhere')).toHaveCount(0);
 
-  // …and the one you left is filed under where it happened, not lost.
+  // The thread is still filed under where it happened, which is what the
+  // anchor is actually for.
   await panel.getByTestId('conversation-switcher').click();
-  await expect(page.getByTestId('conversation-group').first()).toHaveText('Inbox');
   await expect(page.getByTestId('conversation-row').filter({ hasText: 'Home' })).toBeVisible();
 });
 

@@ -285,18 +285,24 @@ export function AiPanel() {
     setAdded([]);
   }, [activeId]);
 
-  // The thread's own place, not wherever the user has since walked. This is
-  // the "confuses the AI" half of the reported bug: a resumed conversation
-  // used to be handed today's surface as what it was looking at.
-  const threadPlace = conversations.active?.place ?? place;
+  // Where you are NOW, and it follows you.
+  //
+  // This chip briefly showed the thread's anchor instead, which meant walking
+  // to the Inbox left the context saying "Home" — wrong, and the only cure on
+  // offer was "start a new conversation". That was the app handing its own
+  // bookkeeping to the user. Two things make the simple answer the right one:
+  // a turn's context is frozen at send (so the agent moving you mid-answer
+  // cannot rewrite it), and where the conversation STARTED is told to the
+  // agent as a fact (`startedIn`) rather than pinned into the chip. It has the
+  // transcript and both places; reconciling them is not a hard problem for it.
   const autoChips = useMemo(() => {
-    const list = [placeChip(threadPlace, placeLookup)];
+    const list = [placeChip(place, placeLookup)];
     // The open record. Not part of the PLACE (see engine/place.ts) — the agent
     // opens records itself — but very much part of the context.
     const open = detailPath === null ? null : recordChip(detailPath, entries);
     if (open !== null) list.push(open);
     return list;
-  }, [threadPlace, placeLookup, detailPath, entries]);
+  }, [place, placeLookup, detailPath, entries]);
 
   const chips = useMemo(
     () => resolveChips(autoChips, dismissed, added),
@@ -368,6 +374,11 @@ export function AiPanel() {
             ).filters,
       references: extractReferences(draft),
       attached: recordChips.map((c) => c.path),
+      // Where this conversation began, when the user has since walked. Given
+      // to the agent as a FACT rather than turned into a question for the
+      // user — it already has the transcript, so "we were on the Roadmap and
+      // you are now in the Inbox" is a sentence it can act on.
+      startedIn: conversations.startedElsewhere,
     });
     return `${base}${renderSnapshot(snapshot)}`;
     // `draft` is deliberately excluded: rebuilding the prompt on every
@@ -384,13 +395,18 @@ export function AiPanel() {
     collection?.entries,
     activeView,
     recordChips,
+    conversations.startedElsewhere,
   ]);
   // Handed to the chat hook through a ref rather than an argument — see
   // getTurn above. Assigned during render, like every other latest-value ref
-  // in this codebase. `place` is the CONVERSATION's, so the run list files a
-  // task under what it is about rather than under wherever the agent's own
-  // `open_note` left the user by the time it finished.
-  turnRef.current = { systemPrompt, place: threadPlace, conversationId: conversations.activeId };
+  // in this codebase. The run list files a task under where the CONVERSATION
+  // started, so it stays findable under what it was about rather than moving
+  // to wherever the agent's own `open_note` left the user.
+  turnRef.current = {
+    systemPrompt,
+    place: conversations.active?.place ?? place,
+    conversationId: conversations.activeId,
+  };
 
   // Every send goes through here so no path can leave a thread unanchored —
   // there are three (the composer, a suggestion chip, and a retry) plus the
@@ -610,33 +626,6 @@ export function AiPanel() {
           >
             Jump to latest
           </button>
-        )}
-        {/* M17.5: the open thread was had somewhere else. Said, not acted on:
-            the assistant navigates you around by design, so a panel that
-            swapped threads under a navigation would be M17.2's bug one layer
-            up — you would lose the answer you were reading because the agent
-            opened the note it was about. The offer is one click either way. */}
-        {conversations.elsewhere && (
-          <div
-            data-testid="thread-elsewhere"
-            className="mb-1.5 flex items-center gap-1.5 text-2xs text-n-500"
-          >
-            <Icon name="corner-down-right" size={11} color="var(--n-400)" />
-            {/* Says what CHANGED, not what the chip above already says: the
-                place chip names the thread's subject, this names where you
-                have walked to. The button is the point of the row. */}
-            <span className="min-w-0 flex-1 truncate">
-              You’ve moved to {conversations.hereLabel}.
-            </span>
-            <button
-              type="button"
-              data-testid="new-conversation-here"
-              onClick={conversations.start}
-              className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-2xs text-cortex-600 underline hover:bg-n-50"
-            >
-              New one here
-            </button>
-          </div>
         )}
         {/* M17.6: what the agent is being told about, as things rather than as
             a derivation. Removable, because the most useful thing a context

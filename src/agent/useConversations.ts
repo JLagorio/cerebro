@@ -22,13 +22,14 @@ export interface ConversationState {
   here: Place;
   hereLabel: string;
   /**
-   * True when the open thread was had somewhere else and is idle.
+   * Where the active thread STARTED, when that is somewhere else.
    *
-   * The panel says so rather than silently swapping threads: the assistant
-   * navigates you around by design (`open_note`), so a thread that changed
-   * itself under a navigation would be the M17.2 bug one layer up.
+   * Not a prompt to do anything about it — the panel briefly asked the user to
+   * start a new conversation when they walked away, which was the app making
+   * its own bookkeeping their problem. It is a fact the agent is told (see
+   * `startedIn` in the snapshot), and a label in the switcher. Nothing else.
    */
-  elsewhere: boolean;
+  startedElsewhere: string | null;
   /** Stamp the active thread with the current place if it has none. Called at
    * SEND, never after: a turn navigates, so anchoring when it ends would
    * record wherever the agent left you. */
@@ -126,27 +127,23 @@ export function useConversations(
     };
   }, []);
 
-  // Read at call time, not closed over: `anchorNow` fires from inside a send
-  // that may have been queued a render earlier, and the place it stamps has to
-  // be where the user is now.
-  const hereRef = useRef(here);
-  hereRef.current = here;
-  const lookupRef = useRef(lookup);
-  lookupRef.current = lookup;
-
+  // Closed over directly rather than read through a latest-value ref. The refs
+  // were there to guard against a send queued a render earlier stamping a
+  // stale place — but `here` and `lookup` are this hook's own arguments, so
+  // every caller of `anchorNow` is recreated when they change and there is no
+  // stale version to call. A render-phase ref write also defeats the compiler
+  // (react-hooks/preserve-manual-memoization) for a guarantee already held.
   const anchorNow = useCallback(() => {
     setConversations((prev) => {
       const current = prev.find((c) => c.id === activeId);
       // Already anchored: where a thread STARTED is a fact about the thread,
       // and walking somewhere else mid-conversation does not change it.
       if (current === undefined || current.place != null) return prev;
-      const next = prev.map((c) =>
-        c.id === activeId ? anchor(c, hereRef.current, lookupRef.current) : c,
-      );
+      const next = prev.map((c) => (c.id === activeId ? anchor(c, here, lookup) : c));
       saveConversations(next);
       return next;
     });
-  }, [activeId]);
+  }, [activeId, here, lookup]);
 
   const start = useCallback(() => {
     const created = newConversation();
@@ -208,10 +205,12 @@ export function useConversations(
     active,
     here,
     hereLabel: placeLabel(here, lookup),
-    // An unanchored thread is not "elsewhere" — it is about to become here.
-    // Nor is a streaming one: an answer in flight is where you are, whatever
-    // the sidebar says (M17.2's whole point).
-    elsewhere: active?.place != null && !samePlace(active.place, here) && !chat.streaming,
+    // Null for an unanchored thread: it has not started anywhere yet, so
+    // there is nothing to say about where it started.
+    startedElsewhere:
+      active?.place != null && !samePlace(active.place, here)
+        ? (active.placeLabel ?? placeLabel(active.place, lookup))
+        : null,
     anchorNow,
     start,
     select,

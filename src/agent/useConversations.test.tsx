@@ -177,28 +177,20 @@ describe('useConversations — where a thread happened', () => {
     expect(result.current.active?.place).toEqual(INBOX);
   });
 
-  it('says a thread is elsewhere, and stays quiet when it is not', () => {
+  it('reports where a thread started once you have walked somewhere else', () => {
+    // A FACT, handed to the agent (`startedIn` in the snapshot) and used as a
+    // label in the switcher. It was briefly a prompt — "you've moved to X,
+    // start a new one here" — which made the app's bookkeeping the user's
+    // problem, and was unnecessary: the model holds both places at once.
     const { result, rerender } = renderHook(({ place }) => useConversations(chat, place), {
       initialProps: { place: ROADMAP as Place },
     });
-    expect(result.current.elsewhere).toBe(false); // unanchored: about to be here
+    // Unanchored: it has not started anywhere yet, so there is nothing to say.
+    expect(result.current.startedElsewhere).toBeNull();
     act(() => result.current.anchorNow());
-    expect(result.current.elsewhere).toBe(false);
+    expect(result.current.startedElsewhere).toBeNull();
     rerender({ place: INBOX });
-    expect(result.current.elsewhere).toBe(true);
-  });
-
-  it('is not "elsewhere" while an answer is streaming', () => {
-    // An answer in flight is where you are, whatever the sidebar says — and
-    // the agent itself is what moved the sidebar (open_note). Nagging about
-    // it mid-turn would be the panel arguing with its own assistant.
-    const streamingChat = stubChat({ streaming: true });
-    const { result, rerender } = renderHook(({ place }) => useConversations(streamingChat, place), {
-      initialProps: { place: ROADMAP as Place },
-    });
-    act(() => result.current.anchorNow());
-    rerender({ place: INBOX });
-    expect(result.current.elsewhere).toBe(false);
+    expect(result.current.startedElsewhere).toBe('roadmap');
   });
 
   it('reads a thread anchored to a deleted List by the name it had', () => {

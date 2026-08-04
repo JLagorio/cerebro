@@ -120,6 +120,28 @@ describe('buildSnapshot', () => {
     expect(snap.activeNote?.path).toBe('a.md');
   });
 
+  it('tells the agent where the conversation started when the user has moved', () => {
+    // The alternative was asking the USER to do something about having walked
+    // away. The model can hold "we started on the Roadmap" and "you are now in
+    // the Inbox" at the same time; it only looked stupid when we showed it one
+    // and hid the other.
+    const snap = buildSnapshot({
+      selection: { kind: 'inbox' },
+      entries,
+      schema,
+      startedIn: 'Roadmap',
+    });
+    expect(snap.startedIn).toBe('Roadmap');
+    expect(snap.selection).toEqual({ kind: 'inbox' });
+  });
+
+  it('stays quiet about it while the user is still where they started', () => {
+    // The caller passes null rather than the current place, so the snapshot
+    // never carries a line that says the same thing twice.
+    const snap = buildSnapshot({ selection: { kind: 'inbox' }, entries, schema, startedIn: null });
+    expect('startedIn' in snap).toBe(false);
+  });
+
   it('says nothing about where the user is when the place chip was removed', () => {
     // "Do not tell it where I am standing" is a thing the user is allowed to
     // say. An empty object would say it badly — the key is simply absent.
