@@ -67,7 +67,8 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
 
 // The write commands below are the HUMAN path — every one of them is
 // reachable from the UI, so each guards the knowledge/ bundle (M5). The
-// agent's MCP tools call vault::write directly and are not gated here.
+// agent's MCP tools have their own, narrower boundary (M17.1): they reach
+// the bundle through `write_concept` alone. See mcp.rs.
 #[tauri::command(async)]
 fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
     knowledge::guard_human_write(&path)?;
@@ -160,6 +161,11 @@ fn rename_note(vault: String, from: String, to: String) -> Result<(), String> {
 
 #[tauri::command(async)]
 fn delete_note(vault: String, path: String) -> Result<(), String> {
+    // The one write command that never had this guard (M17.1). Read-only
+    // that a delete can empty is not read-only: every other door into the
+    // bundle was shut while this one let a concept — and its provenance —
+    // be thrown away outright.
+    knowledge::guard_human_write(&path)?;
     vault::write::delete_note(Path::new(&vault), &path)
 }
 

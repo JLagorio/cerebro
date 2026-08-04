@@ -422,6 +422,9 @@ export async function renameNote(_vault: string, from: string, to: string): Prom
 
 /** Delete a note or folder (the real backend moves it to the OS trash). */
 export async function deleteNote(_vault: string, path: string): Promise<void> {
+  // Mirrors lib.rs delete_note (M17.1). This was the one write path with no
+  // guard on either backend — parity here is the point of this file.
+  guardHumanWrite(path);
   const prefix = `${path}/`;
   const hadFile = files.delete(path);
   times.delete(path);

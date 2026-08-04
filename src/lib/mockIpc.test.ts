@@ -311,6 +311,15 @@ describe('mockIpc', () => {
       await expect(mock.createFolder('/demo-vault', 'knowledge/new')).rejects.toThrow(/read-only/);
     });
 
+    it('refuses a delete (M17.1)', async () => {
+      // Read-only that a delete can empty is not read-only. This was the one
+      // write command with no guard on EITHER backend.
+      await expect(mock.deleteNote('/demo-vault', CONCEPT)).rejects.toThrow(/read-only/);
+      await expect(mock.deleteNote('/demo-vault', 'knowledge')).rejects.toThrow(/read-only/);
+      // …and the concept is still there.
+      await expect(mock.readNote('/demo-vault', CONCEPT)).resolves.toContain('#');
+    });
+
     it('refuses moves in both directions', async () => {
       // Out: would strip the concept of its boundary.
       await expect(mock.renameNote('/demo-vault', CONCEPT, 'docs/stolen.md')).rejects.toThrow(

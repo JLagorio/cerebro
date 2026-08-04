@@ -12,9 +12,14 @@
 //! `--mcp-config` file and nothing else, and `--strict-mcp-config` keeps the
 //! agent from loading any other server.
 //!
-//! The agent's tools call `vault::write` directly, so they are NOT subject to
-//! the `knowledge/` guard in knowledge.rs. That asymmetry is the design: the
-//! bundle is the agent's to write and the human's to verify.
+//! The bundle is the agent's to write and the human's to verify — but the
+//! agent writes it through `write_concept` and nothing else (M17.1). That tool
+//! refuses a `verified` field and stamps `generated` from the run's actor, so
+//! it is where provenance comes from; `create_note`, `update_frontmatter` and
+//! `append_to_note` therefore call `knowledge::guard_agent_write` and refuse
+//! the bundle outright. This module used to say the agent's tools were "NOT
+//! subject to the knowledge/ guard" and treat that as the design — it was the
+//! hole that let a model stamp the user's own review onto its own output.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -658,6 +663,10 @@ fn tool_create_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, St
     if declares_type_doc(&frontmatter) {
         return Err(TYPE_DOC_REFUSAL.into());
     }
+    // The folder is what decides where this lands, so it is what gets checked
+    // (M17.1). A concept authored here would arrive with whatever provenance
+    // the model chose to type, including a `verified` stamp it may not make.
+    crate::knowledge::guard_agent_write(&folder)?;
     let path = vault::write::create_note(vault, &folder, &slug, &frontmatter, &body)?;
     Ok(text_result(format!("Created {path}")))
 }
@@ -674,6 +683,9 @@ fn tool_update_frontmatter(vault: &Path, args: &Map<String, Value>) -> Result<Va
     if is_type_doc(vault, &path) || declares_type_doc(&patch) {
         return Err(TYPE_DOC_REFUSAL.into());
     }
+    // The self-certification hole (M17.1): this tool could patch `verified`
+    // onto any concept, which is exactly what write_concept refuses to do.
+    crate::knowledge::guard_agent_write(&path)?;
     vault::write::update_frontmatter(vault, &path, &patch)?;
     Ok(text_result(format!("Updated frontmatter on {path}")))
 }
@@ -684,6 +696,9 @@ fn tool_append(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
     if is_type_doc(vault, &path) {
         return Err(TYPE_DOC_REFUSAL.into());
     }
+    // Least severe of the three, still a bypass (M17.1): a concept body grown
+    // here carries no `sources`, no updated `generated`, and no dedup check.
+    crate::knowledge::guard_agent_write(&path)?;
     let existing = vault::write::read_note(vault, &path)?;
     let joined = format!("{}\n\n{}\n", existing.trim_end(), content.trim());
     vault::write::save_note(vault, &path, &joined)?;
@@ -1082,6 +1097,72 @@ mod tests {
         );
         let newest = format!("tok-{}", RUN_TOKEN_WINDOW + 1);
         assert!(resolve_actor(&newest, "base", &runs).is_some());
+    }
+
+    #[test]
+    fn the_agent_cannot_route_around_write_concept() {
+        // M17.1. `write_concept` refuses `verified` and stamps `generated`
+        // server-side — but three other tools reached the same files with no
+        // check at all, so the refusal was a formality. The worst of them:
+        // update_frontmatter could patch the human's own stamp onto a concept.
+        let dir = std::env::temp_dir().join("cerebro-agent-knowledge-guard");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("knowledge/metrics")).unwrap();
+        std::fs::create_dir_all(dir.join("records/decisions")).unwrap();
+        let concept = "---\ntype: Metric\nlifecycle: active\n---\n\n# Onboarding\n";
+        let at = dir.join("knowledge/metrics/onboarding.md");
+        std::fs::write(&at, concept).unwrap();
+
+        // Self-certification, the hole this closes.
+        let mut verify = Map::new();
+        verify.insert("path".into(), json!("knowledge/metrics/onboarding.md"));
+        verify.insert(
+            "patch".into(),
+            json!({ "verified": { "by": "human:josef", "at": "2026-08-03" } }),
+        );
+        assert!(tool_update_frontmatter(&dir, &verify).is_err());
+
+        // Authoring a pre-stamped concept from the side door.
+        let mut create = Map::new();
+        create.insert("folder".into(), json!("knowledge/metrics"));
+        create.insert("slug".into(), json!("smuggled"));
+        create.insert("body".into(), json!("# Smuggled"));
+        create.insert(
+            "frontmatter".into(),
+            json!({ "type": "Metric", "verified": { "by": "human:josef" } }),
+        );
+        assert!(tool_create_note(&dir, &create).is_err());
+
+        // Growing a body with no sources and no refreshed provenance.
+        let mut append = Map::new();
+        append.insert("path".into(), json!("knowledge/metrics/onboarding.md"));
+        append.insert("content".into(), json!("Actually it is 99%."));
+        assert!(tool_append(&dir, &append).is_err());
+
+        // The concept is untouched, and nothing was smuggled in beside it.
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), concept);
+        assert!(!dir.join("knowledge/metrics/smuggled.md").exists());
+
+        // Outside the bundle every one of them still works — this is a
+        // boundary, not a lockdown.
+        let mut ok_create = Map::new();
+        ok_create.insert("folder".into(), json!("records/decisions"));
+        ok_create.insert("slug".into(), json!("d-2"));
+        ok_create.insert("body".into(), json!("# D-2"));
+        ok_create.insert("frontmatter".into(), json!({ "type": "Decision" }));
+        assert!(tool_create_note(&dir, &ok_create).is_ok());
+        let mut ok_patch = Map::new();
+        ok_patch.insert("path".into(), json!("records/decisions/d-2.md"));
+        ok_patch.insert("patch".into(), json!({ "status": "done" }));
+        assert!(tool_update_frontmatter(&dir, &ok_patch).is_ok());
+
+        // And write_concept — the sanctioned door — is still open.
+        let mut wc = Map::new();
+        wc.insert("path".into(), json!("knowledge/metrics/onboarding.md"));
+        wc.insert("type".into(), json!("Metric"));
+        wc.insert("title".into(), json!("Onboarding"));
+        wc.insert("body".into(), json!("Completion sits at 62%."));
+        assert!(tool_write_concept(&dir, &wc, DEFAULT_ACTOR).is_ok());
     }
 
     #[test]
