@@ -236,3 +236,34 @@ test('agent: organizing AI-written work records who signed off', async ({ page }
     .poll(async () => page.evaluate((p) => window.__cerebroMockFs.get(p as string) ?? '', path))
     .toContain('human:me');
 });
+
+test('library: skills and agents are findable, and say what they will do', async ({ page }) => {
+  await boot(page);
+  await page.getByTestId('rail').getByRole('button', { name: 'Library' }).click();
+  await expect(page.getByTestId('library-page')).toBeVisible();
+
+  // Both kinds are here. They were reachable only by knowing which folder they
+  // lived in — a capability nobody can find is a capability nobody has.
+  const rows = page.getByTestId('library-row');
+  await expect(rows.filter({ hasText: 'Weekly review' })).toBeVisible();
+  await expect(rows.filter({ hasText: 'Release scout' })).toBeVisible();
+
+  // The narrowing is stated where it can be seen: weekly-review declares four
+  // read tools and no writer, and that is enforced rather than requested.
+  await expect(rows.filter({ hasText: 'Weekly review' })).toContainText('4 tools only');
+
+  // Activation is DERIVED from the record — an agent is active exactly when it
+  // has something that fires it. The demo's scout ships unscheduled.
+  const scout = rows.filter({ hasText: 'Release scout' });
+  await expect(scout).toContainText('Not activated');
+  await expect(scout).toContainText('writes records/risks');
+
+  await page.getByLabel('Search the library').fill('release');
+  await expect(rows.filter({ hasText: 'Weekly review' })).toHaveCount(0);
+  await expect(scout).toBeVisible();
+
+  // A row opens the record, which is where it is actually edited — the screen
+  // deliberately owns discovery and activation, not a second frontmatter form.
+  await scout.click();
+  await expect(page.getByTestId('detail-panel').or(page.getByTestId('doc-title'))).toBeVisible();
+});

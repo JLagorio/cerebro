@@ -20,6 +20,7 @@ import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
 import { KnowledgePage } from '@/pages/KnowledgePage';
 import { PulsePage } from '@/pages/PulsePage';
+import { LibraryPage } from '@/pages/LibraryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { TypePage } from '@/pages/TypePage';
 import { Topbar } from '@/app/Topbar';
@@ -111,6 +112,8 @@ function CanvasOutlet() {
       return <ChangesPage />;
     case 'pulse':
       return <PulsePage />;
+    case 'library':
+      return <LibraryPage />;
     case 'settings':
       return <SettingsPage />;
   }

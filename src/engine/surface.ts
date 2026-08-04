@@ -234,6 +234,11 @@ export function resolveSurface(
       return { title: 'Changes', entries: [], presentation: defaultPresentation() };
     case 'pulse':
       return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
+    // Neither holds records. Listed rather than defaulted so that the next
+    // surface added to Selection breaks the compiler here instead of silently
+    // rendering an empty table.
+    case 'library':
+      return { title: 'Library', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }

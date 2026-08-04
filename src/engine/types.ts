@@ -188,6 +188,9 @@ export type Selection =
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
   | { kind: 'pulse' }
+  // M17.9/M17.11 — skills and agents, which were reachable only by knowing
+  // which folder they lived in. A capability nobody can find is one nobody has.
+  | { kind: 'library' }
   | { kind: 'settings' };
 
 /**

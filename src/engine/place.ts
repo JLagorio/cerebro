@@ -147,6 +147,8 @@ export function placeLabel(
       return 'Changes';
     case 'pulse':
       return 'Pulse';
+    case 'library':
+      return 'Library';
     case 'settings':
       return 'Settings';
     case 'knowledge': {
@@ -192,6 +194,7 @@ export function isPlace(raw: unknown): raw is Place {
     case 'docs':
     case 'changes':
     case 'pulse':
+    case 'library':
     case 'settings':
       return true;
     case 'knowledge': {
