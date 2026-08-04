@@ -306,6 +306,7 @@ export function AiPanel() {
     () => resolveChips(autoChips, dismissed, added),
     [autoChips, dismissed, added],
   );
+  const attachedIds = useMemo(() => chips.map(chipId), [chips]);
   const removeChip = (chip: ContextChip) => {
     const id = chipId(chip);
     setAdded((prev) => prev.filter((c) => chipId(c) !== id));
@@ -678,7 +679,20 @@ export function AiPanel() {
         {/* M9.5: `[[` completes against the vault, and the note you name
             travels into the snapshot with its content rather than as a word
             the agent has to go searching for. */}
-        <ChatInput autoFocus value={draft} onChange={setDraft} onSubmit={submit} />
+        <ChatInput
+          autoFocus
+          value={draft}
+          onChange={setDraft}
+          onSubmit={submit}
+          // M17.6b: `@` attaches. A chip re-added on purpose beats an earlier
+          // dismissal — see resolveChips.
+          onAttach={(chip) => {
+            const id = chipId(chip);
+            setDismissed((prev) => prev.filter((d) => d !== id));
+            setAdded((prev) => (prev.some((c) => chipId(c) === id) ? prev : [...prev, chip]));
+          }}
+          attached={attachedIds}
+        />
         <div className="mt-1.5 flex items-center gap-2">
           <span className="flex-1 text-2xs text-n-400">
             {chat.streaming ? 'Working…' : 'Enter to send · [[ to reference a note'}

@@ -309,10 +309,22 @@ ignored the collection, so with two Collections each holding a `roadmap` the
 agent got the wrong List's filters. Matched on `(collection, id)` now, the way
 `ListPage` has always resolved it.
 
-**Deferred to M17.6b**: `@` completion, and with it the only way to attach the
-place you are *currently* standing in to a thread anchored elsewhere. Until
-then that case is served by "New one here" — one click, a fresh thread anchored
-where you are.
+**M17.6b — `@` attaches.** Three tokens, three jobs, and the division is the
+point: `[[note]]` **mentions** (text stays in the message), `/skill`
+**invokes**, `@thing` **attaches** and leaves no text behind. It completes
+against records and surfaces — a List has no `[[ ]]` that names it, which is
+why surfaces sort first. Attaching the place you are currently standing in to a
+thread anchored elsewhere is now one keystroke, which was the gap M17.6 left.
+
+All three menus were hand-rolled with their own copy of the arrow / Enter / Tab
+/ Escape handling; adding a third would have been a third copy of the same
+forty lines. They are one driver now — a menu is a list of items with a `run`,
+and the keyboard is written once.
+
+**Still deferred: `@agent`.** Mentioning an agent means "run this turn as that
+agent", which is M17.11's job. A menu row that does nothing is worse than no
+row, so agents are absent until there is something for them to do — the same
+rule that makes `@` itself inert when the host passes no `onAttach`.
 
 ### M17.7 — A run registry, and a task list
 

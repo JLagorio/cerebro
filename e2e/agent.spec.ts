@@ -131,6 +131,15 @@ test('agent: context is shown as chips you can take away', async ({ page }) => {
   // The record is still open — removing it from context is about what the
   // agent is told, not about what the user is reading.
   await expect(page.getByTestId('detail-panel')).toBeVisible();
+
+  // M17.6b: `@` puts it back, and leaves no text behind — a chip is not a
+  // mention. (`[[` is the mention; the two tokens do different jobs.)
+  const composer = panel.getByLabel('Message the assistant');
+  await composer.fill('what about @');
+  await expect(panel.getByTestId('attach-menu')).toBeVisible();
+  await panel.getByTestId('attach-menu').getByRole('button').first().click();
+  await expect(panel.getByTestId('context-chip')).toHaveCount(2);
+  await expect(composer).toHaveValue('what about ');
 });
 
 test('agent: shell access is one persisted ceiling in Settings, not a per-chat mode', async ({

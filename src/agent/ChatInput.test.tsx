@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { ChatInput } from './ChatInput';
+import { chipId, type ContextChip } from './contextChips';
 import { makeEntry } from '@/engine/testHelpers';
 import { useVaultStore } from '@/stores/vaultStore';
 
@@ -20,9 +21,25 @@ const skillEntry = (title: string) => {
   });
 };
 
-function Harness({ onSubmit = () => undefined }: { onSubmit?: () => void }) {
+function Harness({
+  onSubmit = () => undefined,
+  onAttach,
+  attached,
+}: {
+  onSubmit?: () => void;
+  onAttach?: (chip: ContextChip) => void;
+  attached?: string[];
+}) {
   const [value, setValue] = useState('');
-  return <ChatInput value={value} onChange={setValue} onSubmit={onSubmit} />;
+  return (
+    <ChatInput
+      value={value}
+      onChange={setValue}
+      onSubmit={onSubmit}
+      onAttach={onAttach}
+      attached={attached}
+    />
+  );
 }
 
 const box = () => screen.getByLabelText('Message the assistant') as HTMLTextAreaElement;
@@ -79,6 +96,13 @@ describe('ChatInput slash completion (M13.1)', () => {
     expect(screen.getByTestId('wikilink-menu')).toBeTruthy();
   });
 
+  it('an @ menu is not offered when there is nowhere for a chip to go', () => {
+    // A menu whose choices do nothing is worse than no menu.
+    render(<Harness />);
+    fireEvent.change(box(), { target: { value: '@risk' } });
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
   it('a highlight arrowed in the slash menu cannot leak into the wikilink menu', () => {
     render(<Harness />);
     fireEvent.change(box(), { target: { value: '/' } });
@@ -89,5 +113,99 @@ describe('ChatInput slash completion (M13.1)', () => {
     // the wikilink menu had fewer rows than the slash menu had.
     fireEvent.keyDown(box(), { key: 'Enter' });
     expect(box().value).toBe('[[Risk sweep]]');
+  });
+});
+
+/**
+ * `@` attaches (M17.6b) — the explicit control M17.6's chips were missing.
+ *
+ * Different in kind from the other two tokens, which is the whole reason it
+ * exists: `[[` and `/` put something in the MESSAGE, `@` puts something in the
+ * CONTEXT and leaves no text behind.
+ */
+describe('ChatInput @ attachment (M17.6b)', () => {
+  const record = makeEntry({
+    path: 'work/ship-beta.md',
+    filename: 'ship-beta.md',
+    folder: 'work',
+    title: 'Ship the beta',
+    type: 'Work item',
+  });
+
+  beforeEach(() => {
+    useVaultStore.setState({ entries: [record], views: [], collections: [] });
+  });
+
+  it('attaches the record and takes the token back out of the draft', () => {
+    const onAttach = vi.fn();
+    render(<Harness onAttach={onAttach} />);
+    fireEvent.change(box(), { target: { value: 'summarise @ship' } });
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    fireEvent.keyDown(box(), { key: 'Enter' });
+
+    expect(onAttach).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'record', path: 'work/ship-beta.md' }),
+    );
+    // What `@` produces is a chip. Leaving `@ship` in the prose would say the
+    // same thing twice, and the second copy is the one the agent misreads.
+    expect(box().value).toBe('summarise ');
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
+  it('ignores an @ inside a word, so an email address is not a context menu', () => {
+    render(<Harness onAttach={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: 'mail josef@ship' } });
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
+  it('does not offer something already attached', () => {
+    const chip: ContextChip = {
+      kind: 'record',
+      path: 'work/ship-beta.md',
+      label: 'Ship the beta',
+      type: 'Work item',
+    };
+    render(<Harness onAttach={vi.fn()} attached={[chipId(chip)]} />);
+    fireEvent.change(box(), { target: { value: '@ship' } });
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
+  it('Escape closes it without touching the draft', () => {
+    render(<Harness onAttach={vi.fn()} />);
+    fireEvent.change(box(), { target: { value: '@ship' } });
+    expect(screen.getByTestId('attach-menu')).toBeTruthy();
+    fireEvent.keyDown(box(), { key: 'Escape' });
+    expect(box().value).toBe('@ship');
+    expect(screen.queryByTestId('attach-menu')).toBeNull();
+  });
+
+  it('offers surfaces as well as records — a List has no [[ ]] to name it with', () => {
+    useVaultStore.setState({
+      entries: [record],
+      collections: [],
+      views: [
+        {
+          id: 'roadmap',
+          collection: null,
+          project: null,
+          path: 'roadmap.list.yml',
+          definition: {
+            name: 'Roadmap',
+            icon: null,
+            color: null,
+            order: null,
+            source: { type: null, project: null },
+            views: [],
+          },
+        },
+      ],
+    });
+    const onAttach = vi.fn();
+    render(<Harness onAttach={onAttach} />);
+    fireEvent.change(box(), { target: { value: '@road' } });
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(onAttach).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'place', label: 'Roadmap' }),
+    );
   });
 });
