@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeEntry } from '@/engine/testHelpers';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -120,5 +121,114 @@ describe('NoteBodyEditor', () => {
     render(<NoteBodyEditor path="nope/missing.md" debounceMs={20} />);
     await waitFor(() => expect(screen.getByText("This page couldn't be loaded.")).toBeTruthy());
     expect(useUiStore.getState().toasts.some((t) => t.message === "Couldn't load page")).toBe(true);
+  });
+});
+
+/**
+ * Reconciling with the disk (M17.4).
+ *
+ * The agent writes straight to disk through its MCP tools while you have the
+ * file open. Nothing reloaded the editor, the watcher suppresses own-writes
+ * for four seconds, and the next keystroke's debounce saved the stale buffer
+ * back over the agent's work — the guaranteed outcome of asking the assistant
+ * to revise a note you are looking at, not a narrow race.
+ */
+describe('NoteBodyEditor when the file changes underneath it', () => {
+  const at = (iso: string) =>
+    useVaultStore.setState({
+      entries: [makeEntry({ path: PAGE, filename: 'test-page.md', modifiedAt: iso })],
+    });
+
+  beforeEach(() => {
+    resetMockFs();
+    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nBody line here.\n');
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entries: [],
+      views: [],
+      folders: [],
+      status: 'ready',
+      error: null,
+      // Stubbed so a save's rescan does not replace the seeded entries with a
+      // scan of the mock disk mid-assertion.
+      rescan: vi.fn(async () => undefined),
+    });
+    useUiStore.setState({ toasts: [] });
+    at('2026-08-03T10:00:00Z');
+  });
+  afterEach(cleanup);
+
+  /** Every editor instance this component mounts, newest last — a reload is a
+   *  remount, so the new body arrives as a new onReady. */
+  async function renderTracking(debounceMs: number): Promise<ReadyInfo[]> {
+    const seen: ReadyInfo[] = [];
+    render(
+      <NoteBodyEditor path={PAGE} debounceMs={debounceMs} onReady={(i) => void seen.push(i)} />,
+    );
+    await waitFor(() => expect(seen.length).toBe(1), { timeout: 5_000 });
+    return seen;
+  }
+
+  const bodyOf = (info: ReadyInfo) => JSON.stringify(info.editor.document);
+
+  it('reloads a clean buffer instead of letting it overwrite the new version', async () => {
+    const seen = await renderTracking(20);
+    expect(bodyOf(seen[0])).toContain('Body line here');
+
+    // The agent rewrites the file and the rescan lands.
+    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
+    at('2026-08-03T10:05:00Z');
+
+    await waitFor(() => expect(seen.length).toBe(2), { timeout: 5_000 });
+    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
+    // Silently — a dialog on every agent write would be its own bug.
+    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+  });
+
+  it('asks before discarding edits the user has typed', async () => {
+    // A debounce long enough that the edit is still UNSAVED when the agent's
+    // write lands. That is the whole conflict: settle it first and the buffer
+    // is clean, and a clean buffer has nothing to protect.
+    const seen = await renderTracking(10_000);
+    appendParagraph(seen[0].editor, 'my unsaved sentence');
+
+    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
+    at('2026-08-03T10:05:00Z');
+
+    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
+    // Nothing was taken away while the question was open.
+    expect(seen.length).toBe(1);
+    expect(bodyOf(seen[0])).toContain('my unsaved sentence');
+
+    fireEvent.click(screen.getByTestId('external-change-reload'));
+    await waitFor(() => expect(seen.length).toBe(2), { timeout: 5_000 });
+    expect(bodyOf(seen[1])).toContain('Rewritten by the agent');
+  });
+
+  it('lets the user keep theirs, and stops asking once they have answered', async () => {
+    const seen = await renderTracking(10_000);
+    appendParagraph(seen[0].editor, 'my unsaved sentence');
+    fs().set(PAGE, '---\ntype: Doc\n---\n\n# Test page\n\nRewritten by the agent.\n');
+    at('2026-08-03T10:05:00Z');
+    await waitFor(() => expect(screen.getByTestId('external-change-banner')).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId('external-change-keep'));
+    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+    // A later rescan reporting the SAME mtime must not re-ask a question the
+    // user has already answered.
+    at('2026-08-03T10:05:00Z');
+    await settle();
+    expect(screen.queryByTestId('external-change-banner')).toBeNull();
+    expect(seen.length).toBe(1);
+  });
+
+  it('does not mistake the user’s own save for someone else’s write', async () => {
+    const info = await renderReady(PAGE);
+    appendParagraph(info.editor, 'typed by me');
+    await settle();
+    // The save landed and the rescan moved the file's mtime.
+    at('2026-08-03T10:05:00Z');
+    await settle();
+    expect(screen.queryByTestId('external-change-banner')).toBeNull();
   });
 });
