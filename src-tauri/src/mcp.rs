@@ -1227,6 +1227,21 @@ mod tests {
     }
 
     #[test]
+    fn no_tool_deletes() {
+        // Agents do not delete (M17.1). Cerebro's tools can create, revise and
+        // append; removing something a person may not have finished with is
+        // not a capability the catalog offers, and the absence is the design
+        // rather than an omission — assert it so nobody adds one casually.
+        for tool in tool_catalog() {
+            let name = tool["name"].as_str().unwrap_or_default().to_string();
+            assert!(
+                !name.contains("delete") && !name.contains("remove") && !name.contains("trash"),
+                "the agent has no delete capability; `{name}` would be the first"
+            );
+        }
+    }
+
+    #[test]
     fn write_concept_is_not_offered_a_verified_field() {
         let concept = tool_catalog()
             .into_iter()

@@ -873,6 +873,27 @@ mod tests {
     }
 
     #[test]
+    fn a_safe_run_is_granted_nothing_that_can_destroy() {
+        // Agents do not delete (M17.1). The MCP catalog offers no delete tool
+        // (see mcp.rs::no_tool_deletes); this pins the other half — the safe
+        // policy hands over no HOST tool that could do it anyway.
+        //
+        // Deliberately not extended to shell runs: `tools: shell` on an Agent
+        // record, capped by the Settings ceiling, is a grant the user makes
+        // knowingly, and Bash/Write/Edit are the point of it. "Agents don't
+        // delete" is a property of the default, not of a run someone has
+        // explicitly widened.
+        let safe = tool_policy(false);
+        for tool in ["Bash", "Write", "Edit"] {
+            assert!(
+                !safe.contains(&tool),
+                "a safe run must not be handed `{tool}` — it is a delete by another name"
+            );
+        }
+        assert!(safe.iter().all(|t| t.starts_with("mcp__cerebro__")));
+    }
+
+    #[test]
     fn a_vault_cannot_ship_standing_instructions_into_every_turn() {
         // M17.1. The child's cwd is the vault and the CLI walks up from cwd
         // for `.claude/` and `CLAUDE.md`, so before this flag a vault could
