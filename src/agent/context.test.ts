@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSnapshot, extractReferences } from '@/agent/context';
+import { listConcepts } from '@/engine/okf';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 
@@ -159,5 +160,129 @@ describe('buildSnapshot', () => {
     // The knowledge bundle is the agent's output; counting it back would
     // report its own work to it as the user's.
     expect(snap.vault.notes).toBe(3);
+  });
+});
+
+/**
+ * M17.20 — the bundle reaches the turn.
+ *
+ * Every `about:` wikilink written since M8 paid off in the UI and never in the
+ * agent's reasoning: the prompt said the bundle existed and the snapshot
+ * carried zero concepts, so a conversation about a project could not see what
+ * the base had already concluded about that project.
+ */
+describe('knowledge in the snapshot', () => {
+  // Wikilink-valued fields arrive from the scanner bracket-stripped in
+  // `relationships`, never in `properties` — the fixture has to use the shape
+  // the Rust scanner actually produces or it tests a vault that cannot exist.
+  const concept = (
+    path: string,
+    title: string,
+    about: string,
+    links: Record<string, string[]> = {},
+    props: Record<string, unknown> = {},
+  ) =>
+    makeEntry({
+      path: `knowledge/concepts/${path}`,
+      title,
+      properties: {
+        type: 'concept',
+        description: `${title} claim.`,
+        ...props,
+      } as unknown as Record<string, never>,
+      relationships: { about: [about], ...links },
+    });
+
+  const project = makeEntry({ path: 'projects/atlas/project.md', title: 'Atlas' });
+
+  const build = (entries: ReturnType<typeof makeEntry>[], input = {}) =>
+    buildSnapshot({
+      selection: { kind: 'home' },
+      entries: [...entries, project],
+      schema,
+      activePath: 'projects/atlas/project.md',
+      concepts: listConcepts([...entries, project], '2026-08-03'),
+      ...input,
+    });
+
+  it('reaches concepts by about: anchor, not by looking similar', () => {
+    const snap = build([concept('a.md', 'Pricing is annual', 'Atlas')]);
+    expect(snap.knowledge?.map((k) => k.title)).toEqual(['Pricing is annual']);
+    expect(snap.knowledge?.[0].about).toBe('projects/atlas/project.md');
+  });
+
+  it('carries nothing at all when the caller derived no bundle', () => {
+    // Absent must not read as "the base is empty" — that is a claim, and a
+    // wrong one whenever the caller simply did not pass concepts.
+    const snap = buildSnapshot({
+      selection: { kind: 'home' },
+      entries: [project],
+      schema,
+      activePath: 'projects/atlas/project.md',
+    });
+    expect(snap.knowledge).toBeUndefined();
+  });
+
+  it('ignores a concept anchored somewhere else', () => {
+    const other = makeEntry({ path: 'projects/beta/project.md', title: 'Beta' });
+    const snap = build([concept('a.md', 'About Beta', 'Beta'), other]);
+    expect(snap.knowledge).toBeUndefined();
+  });
+
+  it('leads with what could change the answer, not with what is settled', () => {
+    // A contradiction is the most useful thing a base can say; a superseded
+    // claim is the most dangerous thing to quote as current.
+    const snap = build([
+      concept(
+        'settled.md',
+        'Settled',
+        'Atlas',
+        {},
+        {
+          verified: [{ by: 'human:me', at: '2026-07-01' }],
+        },
+      ),
+      concept('fresh.md', 'Unverified', 'Atlas'),
+      concept('fight.md', 'Contested', 'Atlas', { contradicts: ['Settled'] }),
+    ]);
+    expect(snap.knowledge?.map((k) => k.title)).toEqual(['Contested', 'Unverified', 'Settled']);
+  });
+
+  it('says a claim was replaced rather than quoting it as current', () => {
+    const snap = build([
+      concept('old.md', 'Old belief', 'Atlas'),
+      concept('new.md', 'New belief', 'Atlas', { supersedes: ['Old belief'] }),
+    ]);
+    const old = snap.knowledge?.find((k) => k.title === 'Old belief');
+    expect(old?.supersededBy).toBe('knowledge/concepts/new.md');
+    // …and it sorts first, so the agent reads the warning before the claim.
+    expect(snap.knowledge?.[0].title).toBe('Old belief');
+  });
+
+  it('counts one belief once however many records in view it is about', () => {
+    const beta = makeEntry({ path: 'projects/beta/project.md', title: 'Beta' });
+    const shared = makeEntry({
+      path: 'knowledge/concepts/shared.md',
+      title: 'Shared',
+      properties: { type: 'concept', description: 'One belief.' } as unknown as Record<
+        string,
+        never
+      >,
+      relationships: { about: ['Atlas', 'Beta'] },
+    });
+    const entries = [shared, beta, project];
+    const snap = buildSnapshot({
+      selection: { kind: 'home' },
+      entries,
+      schema,
+      visible: [project, beta],
+      concepts: listConcepts(entries, '2026-08-03'),
+    });
+    expect(snap.knowledge).toHaveLength(1);
+  });
+
+  it('is capped, so background belief cannot crowd out the question', () => {
+    const many = Array.from({ length: 30 }, (_, i) => concept(`c${i}.md`, `Claim ${i}`, 'Atlas'));
+    expect(build(many).knowledge?.length).toBe(8);
   });
 });

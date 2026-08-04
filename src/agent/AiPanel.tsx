@@ -25,10 +25,12 @@ import {
   skillPrompt,
   type SkillRef,
 } from '@/engine/skills';
+import { listConcepts } from '@/engine/okf';
 import { placeOf, samePlace } from '@/engine/place';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { readNote } from '@/lib/ipc';
+import { todayIso } from '@/lib/templates';
 import { useAgentCheckpoint, useGit } from '@/git/useGit';
 import { useSchema } from '@/stores/vaultStore';
 import { parseIssuePrefixes, SOURCES_DIR } from '@/engine/ingest';
@@ -253,6 +255,8 @@ export function AiPanel() {
   // M13.1: the skill catalog — names and descriptions only; a body loads when
   // one is invoked, so the vault can hold many skills at no per-turn cost.
   const skills = useMemo(() => listSkills(entries), [entries]);
+  // M17.20: the knowledge bundle, for the `about:` lookup in the snapshot.
+  const concepts = useMemo(() => listConcepts(entries, todayIso()), [entries]);
 
   // The turn's context is read through a ref at send (M17.6). It has to be
   // built from the CONVERSATION's chips, and the conversation list is built on
@@ -379,6 +383,10 @@ export function AiPanel() {
       // user — it already has the transcript, so "we were on the Roadmap and
       // you are now in the Inbox" is a sentence it can act on.
       startedIn: conversations.startedElsewhere,
+      // M17.20: the bundle reaches the turn, by `about:` anchor. Derived here
+      // rather than inside buildSnapshot so the O(entries) pass is memoized
+      // with the rest of the prompt instead of running per render.
+      concepts,
     });
     return `${base}${renderSnapshot(snapshot)}`;
     // `draft` is deliberately excluded: rebuilding the prompt on every
@@ -396,6 +404,7 @@ export function AiPanel() {
     activeView,
     recordChips,
     conversations.startedElsewhere,
+    concepts,
   ]);
   // Handed to the chat hook through a ref rather than an argument — see
   // getTurn above. Assigned during render, like every other latest-value ref
@@ -715,6 +724,11 @@ export function buildSystemPrompt(
     'Use the cerebro MCP tools: get_vault_context to orient, search_notes and get_note to read, and the write tools to change things. Call open_note so the user sees what you are referring to.',
     'When you mention a note, write it as [[note-name]] so it is clickable.',
     "You maintain the knowledge/ bundle in Open Knowledge Format. Record where every claim came from in `sources`, and anchor every concept to the entities it is about with `about` wikilinks — an unanchored concept is unreachable from the work it describes. Never write `verified` — that is the user's stamp, and claiming it would defeat the review model.",
+    // M17.20. The snapshot now SHOWS what the base believes about the records
+    // in context, so the prompt has to say how to read it — a claim's trust
+    // and its contradictions are the whole reason it is worth carrying, and a
+    // superseded belief quoted as current is worse than no belief at all.
+    "The context snapshot may carry a `knowledge` list: what this vault's base already believes about the records in view, reached by `about:` anchor. Use it before searching for the same thing again. Weigh it by `trust` — `human-reviewed` means a person stood behind it, `unverified` means only you have. Never present a claim marked `supersededBy` as current, and when a claim carries `contradictedBy`, say that the base disagrees with itself rather than picking a side.",
     'To file an Inbox capture, use propose_organize so the user can accept or reject it. Do not edit captures directly.',
     "Never create or modify `type: Type` docs on your own — schema is the user's to change. When a vault clearly needs a new type or field, describe the change and why, and let them make it (the Types screen and the adoption wizard are the human path).",
     'Be concise.',

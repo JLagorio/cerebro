@@ -1,4 +1,4 @@
-import { isKnowledgePath } from '@/engine/okf';
+import { conceptsAbout, isKnowledgePath, type Concept, type TrustTier } from '@/engine/okf';
 import type { Entry, Schema, Selection } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 
@@ -20,6 +20,11 @@ import { resolveTarget } from '@/engine/wikilink';
 const MAX_RECORDS = 40;
 const MAX_LINKED = 12;
 const MAX_BODY = 4000;
+/** Concepts per turn (M17.20). Small on purpose: this is the precise,
+ * anchor-reached subset, and a turn that spends its budget on background
+ * belief has less room for the question. The agent can always read more with
+ * its own tools — which is the tier-two half of the same idea as skills. */
+const MAX_CONCEPTS = 8;
 
 export interface RecordSummary {
   path: string;
@@ -53,7 +58,44 @@ export interface ContextSnapshot {
    * `referencedNotes` because those are `[[links]]` found in the prompt — a
    * guess about what was meant — while these were put there on purpose. */
   attachedNotes?: (RecordSummary & { body?: string })[];
+  /**
+   * What the knowledge bundle believes about the records already in context
+   * (M17.20).
+   *
+   * Reached by `about:` ANCHOR, never by similarity. That is the whole design
+   * decision: retrieval by embedding would hand the turn semantically-adjacent
+   * distractors, which hurt an answer more than sheer length does, while an
+   * anchor is a claim someone made that this concept is knowledge OF this
+   * record. Every `about:` wikilink written since M8 pays off here and nowhere
+   * else — until now the bundle was mentioned to the agent and never shown to
+   * it, so a conversation about a project could not see what the base had
+   * already concluded about that project.
+   *
+   * Contradictions and unverified claims lead, because the useful thing to
+   * say is rarely the settled thing.
+   */
+  knowledge?: KnowledgeNote[];
   vault: { types: string[]; projects: number; notes: number };
+}
+
+export interface KnowledgeNote {
+  path: string;
+  title: string;
+  /** The claim itself — a concept's description is the whole of its content
+   * for this purpose; the body is elaboration. */
+  claim: string;
+  /** unverified | machine-confirmed | human-reviewed. The agent must be able
+   * to weight a claim by whether a person has actually stood behind it. */
+  trust: TrustTier;
+  /** Which record in context this is knowledge OF. */
+  about: string;
+  /** Set when another concept contradicts this one — the single most useful
+   * thing the bundle can say, and useless if it does not travel. */
+  contradictedBy?: string[];
+  /** Set when this claim has been replaced. Carried so the agent does not
+   * quote a retired belief as current. */
+  supersededBy?: string;
+  stale?: boolean;
 }
 
 function summarize(entry: Entry, schema: Schema, fields?: string[]): RecordSummary {
@@ -103,6 +145,10 @@ export interface SnapshotInput {
   attached?: string[];
   /** Where the conversation began, when that is not where the user is now. */
   startedIn?: string | null;
+  /** The knowledge bundle, for the `about:` lookup (M17.20). Absent means the
+   * caller has not derived it — the snapshot then carries no knowledge at all
+   * rather than silently claiming the base is empty. */
+  concepts?: Concept[];
 }
 
 export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
@@ -175,6 +221,15 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
     if (resolved.length > 0) snapshot.attachedNotes = resolved;
   }
 
+  // M17.20 — what the base believes about what is already in context.
+  const subjects = [
+    ...(active === null ? [] : [active.path]),
+    ...(attached ?? []),
+    ...(visible ?? []).slice(0, MAX_RECORDS).map((e) => e.path),
+  ];
+  const knowledge = knowledgeFor(subjects, input.concepts ?? [], entries);
+  if (knowledge.length > 0) snapshot.knowledge = knowledge;
+
   if (references !== undefined && references.length > 0) {
     const resolved = references
       .map((target) => resolveTarget(target, entries))
@@ -184,6 +239,53 @@ export function buildSnapshot(input: SnapshotInput): ContextSnapshot {
   }
 
   return snapshot;
+}
+
+/**
+ * What the base believes about the records in context (M17.20).
+ *
+ * Ordered by how much the agent needs to know it, not by how confident the
+ * base is: a contradiction is the single most useful thing a knowledge base
+ * can say, and a superseded claim is the most dangerous thing to quote as
+ * current. Verified-and-settled sorts last precisely because it is least
+ * likely to change an answer.
+ */
+function knowledgeFor(
+  subjects: readonly string[],
+  concepts: readonly Concept[],
+  entries: Entry[],
+): KnowledgeNote[] {
+  if (concepts.length === 0 || subjects.length === 0) return [];
+  const seen = new Set<string>();
+  const notes: KnowledgeNote[] = [];
+  // Deduped across subjects: one concept anchored to three records in the same
+  // view is one belief, not three.
+  for (const path of [...new Set(subjects)]) {
+    for (const concept of conceptsAbout(path, concepts as Concept[], entries)) {
+      if (seen.has(concept.entry.path)) continue;
+      seen.add(concept.entry.path);
+      const contradicted = concept.relations.contradicts;
+      notes.push({
+        path: concept.entry.path,
+        title: concept.title,
+        claim: concept.description ?? concept.entry.snippet,
+        trust: concept.trust,
+        about: path,
+        ...(contradicted.length > 0 ? { contradictedBy: contradicted } : {}),
+        ...(concept.supersededBy === null ? {} : { supersededBy: concept.supersededBy }),
+        ...(concept.stale ? { stale: true } : {}),
+      });
+    }
+  }
+  const weight = (n: KnowledgeNote): number => {
+    if (n.supersededBy !== undefined) return 0;
+    if (n.contradictedBy !== undefined) return 1;
+    if (n.stale === true) return 2;
+    if (n.trust === 'unverified') return 3;
+    if (n.trust === 'machine-confirmed') return 4;
+    return 5;
+  };
+  return notes.sort((a, b) => weight(a) - weight(b)).slice(0, MAX_CONCEPTS);
 }
 
 /** The snapshot as a system-prompt suffix. */
