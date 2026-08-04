@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  anchor,
   DEFAULT_TITLE,
   loadConversations,
   newConversation,
@@ -110,11 +111,62 @@ describe('ordered', () => {
 });
 
 describe('newConversation', () => {
-  it('starts untitled and unsessioned', () => {
+  it('starts untitled, unsessioned and unanchored', () => {
     const c = newConversation();
     expect(c.title).toBe(DEFAULT_TITLE);
     expect(c.usesDefaultTitle).toBe(true);
     expect(c.sessionId).toBeNull();
+    expect(c.place).toBeNull();
+  });
+});
+
+describe('anchor (M17.5)', () => {
+  it('stamps the place and the name it had at the time', () => {
+    const c = anchor(newConversation(), { kind: 'inbox' });
+    expect(c.place).toEqual({ kind: 'inbox' });
+    expect(c.placeLabel).toBe('Inbox');
+  });
+
+  it('refuses to re-anchor, so it is safe to call on every send', () => {
+    const first = anchor(newConversation(), { kind: 'inbox' });
+    const again = anchor(first, { kind: 'docs' });
+    expect(again).toBe(first);
+  });
+});
+
+describe('a stored place this build cannot read (M17.5)', () => {
+  const write = (place: unknown, placeLabel?: unknown) =>
+    window.localStorage.setItem(
+      'cerebro.conversations',
+      JSON.stringify([
+        { id: 'c-1', title: 'x', usesDefaultTitle: true, messages: [], place, placeLabel },
+      ]),
+    );
+
+  it('drops an anchor written by a build whose Selection shape is gone', () => {
+    // M12.5 retired `project` as a selection kind. The next such change must
+    // cost a label, not a transcript.
+    write({ kind: 'project', id: 'onboarding' }, 'Onboarding');
+    const [c] = loadConversations();
+    expect(c.place).toBeNull();
+    expect(c.placeLabel).toBeUndefined();
+    expect(c.title).toBe('x');
+  });
+
+  it('rebuilds a label that went missing rather than dropping the anchor', () => {
+    write({ kind: 'inbox' });
+    const [c] = loadConversations();
+    expect(c.place).toEqual({ kind: 'inbox' });
+    expect(c.placeLabel).toBe('Inbox');
+  });
+
+  it('leaves a readable anchor alone', () => {
+    write({ kind: 'list', id: 'roadmap', collection: 'product' }, 'Roadmap');
+    const [c] = loadConversations();
+    expect(c.place).toEqual({ kind: 'list', id: 'roadmap', collection: 'product' });
+    // The name it HAD, not the one re-derived from a vault that no longer
+    // holds the List.
+    expect(c.placeLabel).toBe('Roadmap');
   });
 });
 

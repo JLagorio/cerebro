@@ -54,6 +54,44 @@ test('agent: the panel streams a reply and shows what it did', async ({ page }) 
   await expect(reply.getByRole('button', { name: /scanner/i })).toBeVisible();
 });
 
+test('agent: a thread says where it was had, and does not follow you around', async ({ page }) => {
+  await boot(page);
+
+  await page.getByTestId('rail').getByRole('button', { name: 'Assistant' }).click();
+  const panel = page.getByTestId('ai-panel');
+  await panel.getByLabel('Message the assistant').fill('What is at risk right now?');
+  await panel.getByRole('button', { name: 'Send' }).click();
+  await expect(
+    panel.getByTestId('chat-message').filter({ hasText: 'Two risks are open' }),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // Nothing to say while you are where the conversation happened.
+  await expect(panel.getByTestId('thread-elsewhere')).toBeHidden();
+
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
+
+  // M17.5: walking away says so instead of silently swapping threads — the
+  // assistant navigates you around by design, so a panel that re-threaded on
+  // navigation would lose the answer you were reading. The transcript is
+  // still here; only the offer of a new thread is new.
+  await expect(panel.getByTestId('thread-elsewhere')).toContainText('Home');
+  await expect(
+    panel.getByTestId('chat-message').filter({ hasText: 'Two risks are open' }),
+  ).toBeVisible();
+
+  await panel.getByTestId('new-conversation-here').click();
+  await expect(panel.getByTestId('thread-elsewhere')).toBeHidden();
+  await expect(panel.getByTestId('chat-message')).toHaveCount(0);
+
+  // …and the one you left is filed under where it happened, not lost.
+  await panel.getByTestId('conversation-switcher').click();
+  await expect(page.getByTestId('conversation-group').first()).toHaveText('Inbox');
+  await expect(page.getByTestId('conversation-row').filter({ hasText: 'Home' })).toBeVisible();
+});
+
 test('agent: shell access is one persisted ceiling in Settings, not a per-chat mode', async ({
   page,
 }) => {

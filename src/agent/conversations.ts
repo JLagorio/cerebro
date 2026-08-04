@@ -1,3 +1,4 @@
+import { isPlace, placeLabel, type Place } from '@/engine/place';
 import type { ChatMessage, Conversation } from '@/agent/types';
 
 /**
@@ -33,7 +34,29 @@ export function newConversation(): Conversation {
     messages: [],
     createdAt: new Date().toISOString(),
     archived: false,
+    // Deliberately unanchored. A thread is stamped at its first TURN (M17.5),
+    // not at creation: an empty thread is not about anywhere, and anchoring it
+    // on open would file every thread under whatever surface the panel was
+    // opened from — including the surface the agent had just navigated to.
+    place: null,
   };
+}
+
+/**
+ * Stamp a conversation with the place its first turn happened in (M17.5).
+ *
+ * Idempotent by design: an already-anchored thread keeps its anchor even if
+ * the user walks somewhere else and keeps typing. Where a conversation STARTED
+ * is a fact about it; following the user's feet would make it a fact about the
+ * user instead, and the thread would be un-findable by what it was about.
+ */
+export function anchor(
+  conversation: Conversation,
+  place: Place,
+  lookup?: Parameters<typeof placeLabel>[1],
+): Conversation {
+  if (conversation.place != null) return conversation;
+  return { ...conversation, place, placeLabel: placeLabel(place, lookup) };
 }
 
 /**
@@ -97,6 +120,23 @@ function healToolIds(conversation: Conversation): Conversation {
   return changed ? { ...conversation, messages } : conversation;
 }
 
+/**
+ * Drop a stored place this build cannot read (M17.5).
+ *
+ * localStorage holds whatever an older — or newer — build wrote, and a place
+ * is a Selection, which the app has already reshaped once (M12.5 retired
+ * `project`). An unreadable anchor reads as "not anchored", which renders as
+ * nothing; the transcript itself is never at risk over it.
+ */
+function healPlace(conversation: Conversation): Conversation {
+  const { place } = conversation;
+  if (place == null) return conversation;
+  if (isPlace(place) && typeof conversation.placeLabel === 'string') return conversation;
+  // A valid place whose label went missing is worth keeping — re-derive it.
+  if (isPlace(place)) return { ...conversation, placeLabel: placeLabel(place) };
+  return { ...conversation, place: null, placeLabel: undefined };
+}
+
 export function loadConversations(): Conversation[] {
   try {
     const raw = window.localStorage.getItem(KEY);
@@ -104,7 +144,7 @@ export function loadConversations(): Conversation[] {
     if (!Array.isArray(parsed)) return [];
     // Tolerant like every other load path: one malformed record must not
     // take the whole history with it.
-    return parsed.filter(isConversation).map(healToolIds);
+    return parsed.filter(isConversation).map(healToolIds).map(healPlace);
   } catch {
     return [];
   }

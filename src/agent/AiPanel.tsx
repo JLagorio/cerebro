@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { IconButton } from '@/components/ui/IconButton';
@@ -18,6 +18,7 @@ import {
   skillPrompt,
   type SkillRef,
 } from '@/engine/skills';
+import { placeOf } from '@/engine/place';
 import { resolveSurface } from '@/engine/surface';
 import { resolveView } from '@/engine/views';
 import { readNote } from '@/lib/ipc';
@@ -219,6 +220,7 @@ export function AiPanel() {
   const entries = useVaultStore((s) => s.entries);
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const views = useVaultStore((s) => s.views);
+  const collections = useVaultStore((s) => s.collections);
   const schema = useSchema();
   const openPath = useOpenPath();
   const openDiff = useUiStore((s) => s.openDiff);
@@ -297,7 +299,30 @@ export function AiPanel() {
     null,
     isRepo ? checkpoint : undefined,
   );
-  const conversations = useConversations(chat);
+  // M17.5: the SUBJECT of the current selection, with its lenses stripped —
+  // the board tab and the table tab of one List are one place. A thread is
+  // stamped with it at its first turn, which is what lets a thread be found
+  // again by what it was about instead of by when it happened.
+  const place = useMemo(() => placeOf(selection), [selection]);
+  const placeLookup = useMemo(
+    () => ({ entries, views, collections }),
+    [entries, views, collections],
+  );
+  const conversations = useConversations(chat, place, placeLookup);
+
+  // Every send goes through here so no path can leave a thread unanchored —
+  // there are three (the composer, a suggestion chip, and a retry) plus the
+  // handoff below, and "remember to call anchorNow" at four call sites is a
+  // convention, not a guarantee.
+  const anchorNow = conversations.anchorNow;
+  const chatSend = chat.send;
+  const ask = useCallback(
+    (text: string, message?: string | (() => Promise<string>)) => {
+      anchorNow();
+      chatSend(text, message);
+    },
+    [anchorNow, chatSend],
+  );
 
   useEffect(() => {
     void checkAgent()
@@ -320,13 +345,12 @@ export function AiPanel() {
   // revise" on a concept) is sent once and then cleared. Held while a turn
   // is streaming — sending mid-turn would be dropped by the hook's
   // one-turn guard — and delivered when the stream ends (PR #5 review).
-  const send = chat.send;
   const streaming = chat.streaming;
   useEffect(() => {
     if (pendingPrompt === null || streaming) return;
     setPendingPrompt(null);
-    send(pendingPrompt);
-  }, [pendingPrompt, send, setPendingPrompt, streaming]);
+    ask(pendingPrompt);
+  }, [ask, pendingPrompt, setPendingPrompt, streaming]);
 
   const submit = () => {
     // Mid-turn, Enter is a no-op: the Send button is already replaced by
@@ -345,11 +369,11 @@ export function AiPanel() {
     const invocation = literal ? null : matchSkillInvocation(trimmed, skills);
     setDraft('');
     if (invocation === null || vaultPath === null) {
-      chat.send(trimmed);
+      ask(trimmed);
       return;
     }
     const { skill, request } = invocation;
-    chat.send(trimmed, () =>
+    ask(trimmed, () =>
       readNote(vaultPath, skill.path).then((raw) => skillPrompt(skill, raw, request)),
     );
   };
@@ -374,7 +398,7 @@ export function AiPanel() {
     const index = chat.messages.findIndex((m) => m.id === assistantId);
     const question = index > 0 ? chat.messages[index - 1] : undefined;
     if (question === undefined || question.role !== 'user') return;
-    chat.send(question.text);
+    ask(question.text);
   };
 
   const onListScroll = () => {
@@ -452,7 +476,7 @@ export function AiPanel() {
                 <button
                   key={suggestion}
                   type="button"
-                  onClick={() => chat.send(suggestion)}
+                  onClick={() => ask(suggestion)}
                   className="rounded-lg border border-n-200 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:border-n-300 hover:bg-n-25"
                 >
                   {suggestion}
@@ -485,6 +509,30 @@ export function AiPanel() {
           >
             Jump to latest
           </button>
+        )}
+        {/* M17.5: the open thread was had somewhere else. Said, not acted on:
+            the assistant navigates you around by design, so a panel that
+            swapped threads under a navigation would be M17.2's bug one layer
+            up — you would lose the answer you were reading because the agent
+            opened the note it was about. The offer is one click either way. */}
+        {conversations.elsewhere && (
+          <div
+            data-testid="thread-elsewhere"
+            className="mb-1.5 flex items-center gap-1.5 text-2xs text-n-500"
+          >
+            <Icon name="map-pin" size={11} color="var(--n-400)" />
+            <span className="min-w-0 flex-1 truncate">
+              This conversation is about {conversations.active?.placeLabel}
+            </span>
+            <button
+              type="button"
+              data-testid="new-conversation-here"
+              onClick={conversations.start}
+              className="flex-none rounded border-0 bg-transparent px-1 py-0.5 text-2xs text-cortex-600 underline hover:bg-n-50"
+            >
+              New one here
+            </button>
+          </div>
         )}
         {/* M9.5: `[[` completes against the vault, and the note you name
             travels into the snapshot with its content rather than as a word

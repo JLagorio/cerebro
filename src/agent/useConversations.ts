@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  anchor,
   loadActiveId,
   loadConversations,
   newConversation,
@@ -8,6 +9,7 @@ import {
   saveActiveId,
   saveConversations,
 } from '@/agent/conversations';
+import { placeLabel, samePlace, type Place } from '@/engine/place';
 import type { AgentChat } from '@/agent/useAgentChat';
 import type { Conversation } from '@/agent/types';
 
@@ -15,11 +17,30 @@ export interface ConversationState {
   conversations: Conversation[];
   activeId: string;
   active: Conversation | null;
+  /** Where the user is standing right now (M17.5) — what an unanchored thread
+   * will be stamped with, and what "here" means in the switcher. */
+  here: Place;
+  hereLabel: string;
+  /**
+   * True when the open thread was had somewhere else and is idle.
+   *
+   * The panel says so rather than silently swapping threads: the assistant
+   * navigates you around by design (`open_note`), so a thread that changed
+   * itself under a navigation would be the M17.2 bug one layer up.
+   */
+  elsewhere: boolean;
+  /** Stamp the active thread with the current place if it has none. Called at
+   * SEND, never after: a turn navigates, so anchoring when it ends would
+   * record wherever the agent left you. */
+  anchorNow(): void;
   start(): void;
   select(id: string): void;
   rename(id: string, title: string): void;
   remove(id: string): void;
 }
+
+/** What `placeLabel` resolves names against — the vault, when the caller has it. */
+export type PlaceLookup = Parameters<typeof placeLabel>[1];
 
 /**
  * Many named conversations instead of one ephemeral thread (M9.5).
@@ -29,7 +50,13 @@ export interface ConversationState {
  * lets switching conversations be a `restore` call rather than a rebuild of
  * the streaming machinery.
  */
-export function useConversations(chat: AgentChat): ConversationState {
+export function useConversations(
+  chat: AgentChat,
+  /** Where the panel is standing. Threads are stamped with it at their first
+   * turn (M17.5) so a thread can be found again by what it was about. */
+  here: Place = { kind: 'home' },
+  lookup?: PlaceLookup,
+): ConversationState {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const stored = loadConversations();
     return stored.length > 0 ? stored : [newConversation()];
@@ -99,6 +126,28 @@ export function useConversations(chat: AgentChat): ConversationState {
     };
   }, []);
 
+  // Read at call time, not closed over: `anchorNow` fires from inside a send
+  // that may have been queued a render earlier, and the place it stamps has to
+  // be where the user is now.
+  const hereRef = useRef(here);
+  hereRef.current = here;
+  const lookupRef = useRef(lookup);
+  lookupRef.current = lookup;
+
+  const anchorNow = useCallback(() => {
+    setConversations((prev) => {
+      const current = prev.find((c) => c.id === activeId);
+      // Already anchored: where a thread STARTED is a fact about the thread,
+      // and walking somewhere else mid-conversation does not change it.
+      if (current === undefined || current.place != null) return prev;
+      const next = prev.map((c) =>
+        c.id === activeId ? anchor(c, hereRef.current, lookupRef.current) : c,
+      );
+      saveConversations(next);
+      return next;
+    });
+  }, [activeId]);
+
   const start = useCallback(() => {
     const created = newConversation();
     setConversations((prev) => {
@@ -152,10 +201,18 @@ export function useConversations(chat: AgentChat): ConversationState {
     [activeId, chat],
   );
 
+  const active = conversations.find((c) => c.id === activeId) ?? null;
   return {
     conversations: ordered(conversations),
     activeId,
-    active: conversations.find((c) => c.id === activeId) ?? null,
+    active,
+    here,
+    hereLabel: placeLabel(here, lookup),
+    // An unanchored thread is not "elsewhere" — it is about to become here.
+    // Nor is a streaming one: an answer in flight is where you are, whatever
+    // the sidebar says (M17.2's whole point).
+    elsewhere: active?.place != null && !samePlace(active.place, here) && !chat.streaming,
+    anchorNow,
     start,
     select,
     rename,

@@ -1,3 +1,5 @@
+import type { Place } from '@/engine/place';
+
 /**
  * Local agent types (M6). Mirrors the normalized events emitted by
  * src-tauri/src/agent.rs — the CLI's own wire format is richer and changes
@@ -63,6 +65,25 @@ export interface Conversation {
   messages: ChatMessage[];
   createdAt: string;
   archived: boolean;
+  /**
+   * Where this conversation was had (M17.5), stamped at its FIRST turn — a
+   * thread with nothing in it is not about anywhere yet, and anchoring an
+   * empty one would file it under whatever surface happened to be open when
+   * the panel was.
+   *
+   * Null on every thread written before M17.5, and on any whose stored place
+   * this build cannot read (`engine/place.isPlace`).
+   */
+  place?: Place | null;
+  /**
+   * What that place was CALLED when the thread was anchored.
+   *
+   * Stored rather than re-derived because a thread outlives the List it was
+   * about: re-resolving a deleted List gives its id, while the label recorded
+   * at the time still says "Roadmap". The place itself stays the identity —
+   * this is only what to print.
+   */
+  placeLabel?: string;
 }
 
 export interface ChatMessage {

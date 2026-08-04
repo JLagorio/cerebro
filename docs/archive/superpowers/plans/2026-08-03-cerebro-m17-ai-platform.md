@@ -245,8 +245,36 @@ Decide and write down: is a List+view one place or two? Is `knowledge.nav` part
 of the key? A view tab minting its own thread is a defensible answer; an
 accidental one is not.
 
+**Decided (`engine/place.ts`, and the module doc is the record).**
+
+*A place is a **subject**, not a lens.* A List is one place whichever view tab
+is open; a type screen is one place whichever saved view is open; Knowledge's
+all/review/log tabs collapse to one place, while a section or an entity dossier
+does not — a dossier IS a subject. `placeOf` returns a `Selection` with the
+lens fields stripped, so a place round-trips back to something navigable and
+nothing has to be parsed out of a key.
+
+*The open record is deliberately NOT part of the place.* The agent opens
+records constantly — `open_note` is how it shows you what it means. If the open
+record moved the place, the assistant's own answer would re-anchor the thread
+it was answering in: M17.2's bug one layer up. The open record is **context**
+(M17.6's chip) — visible and removable. A place is where you stand, and only
+the user moves that.
+
+**Also decided: navigation does not switch threads.** The tempting version —
+walk into a place, get that place's thread — loses the answer you are reading
+the moment you click a `[[wikilink]]` in it, because that click is a
+navigation. Notion does not do this either: its chat is global with a visible
+context chip, which is M17.6. So a thread is stamped at its **first turn**
+(never at creation — an empty thread is not about anywhere), the switcher
+**groups** by place with "here" on top, and a thread anchored elsewhere says so
+above the composer with a one-click "New one here". Said, never acted on.
+
 Persistence: `MAX_KEPT = 30` with a whole-array localStorage rewrite per save
 (`conversations.ts:18`) does not survive place-multiplied thread counts.
+Deferred, and it is now a smaller problem than the plan assumed: threads are
+not auto-minted per place, so the count still tracks conversations a person
+actually had.
 
 ### M17.6 — Context is an object, not a guess
 
