@@ -340,3 +340,25 @@ test('editor: selecting prose shows AI controls, and a rewrite is a decision', a
   // time would find the popover's own input instead.
   await expect(page.getByLabel(/What should the assistant do/)).toBeVisible();
 });
+
+test('editor: the same AI controls appear on a record, not only in Docs', async ({ page }) => {
+  // Records and docs are deliberately different surfaces, but the body of a
+  // record is prose in the same editor — so "highlight text, get AI" must not
+  // be a thing that only works in one of them.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await boot(page);
+  await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
+  const row = page.getByTestId('table-row').first();
+  await row.hover();
+  await row.getByRole('button', { name: /^Open / }).click();
+  const panel = page.getByTestId('detail-panel');
+  await expect(panel).toBeVisible();
+
+  const body = panel.locator('[data-testid="markdown-editor"] .bn-editor');
+  await expect(body).toBeVisible({ timeout: 10_000 });
+  await body.click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' The pricing is annual.');
+  await page.getByText('The pricing is annual').click({ clickCount: 3 });
+  await expect(page.getByTestId('selection-toolbar')).toBeVisible();
+});
