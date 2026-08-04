@@ -265,8 +265,20 @@ fn save_connectors(vault: String, json: String) -> Result<(), String> {
 /// Returns the killed run's id (if anything was running) so the frontend can
 /// recognize and drop that run's trailing events (PR #5 review).
 #[tauri::command(async)]
-fn stop_agent(state: tauri::State<'_, agent::AgentState>) -> Result<Option<u64>, String> {
-    state.stop()
+/// Stop ONE run (M17.3). `false` means it had already finished — a race, not
+/// an error. Taking a run id is the point: a global kill was safe only while
+/// there could be one child, and it is how closing the assistant used to
+/// abort a background distill that had nothing to do with it.
+fn stop_agent(state: tauri::State<'_, agent::AgentState>, run: u64) -> Result<bool, String> {
+    state.stop(run)
+}
+
+/// Stop everything, reporting what died. For shutdown and vault switches: a
+/// child left pointed at the vault you just closed is worse than one
+/// interrupted.
+#[tauri::command(async)]
+fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64>, String> {
+    state.stop_all()
 }
 
 #[tauri::command(async)]
@@ -314,6 +326,7 @@ pub fn run() {
             start_mcp,
             run_agent,
             stop_agent,
+            stop_all_agents,
             // M9.4 — git tracking. Every command resolves the workspace
             // first, so a vault nested in a larger repo scopes correctly.
             git_commands::git_workspace_info,

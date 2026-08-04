@@ -2,14 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook } from '@testing-library/react';
 
 const handlers: Array<(event: unknown) => void> = [];
+/** The run id the mocked runAgent hands back for every job. */
+const JOB_RUN = 8;
 vi.mock('./agentIpc', () => ({
-  runAgent: vi.fn(async () => undefined),
+  runAgent: vi.fn(async () => JOB_RUN),
   startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
-  stopAgent: vi.fn(async () => undefined),
-  onAgentEvent: vi.fn((handler: (event: unknown) => void) => {
-    handlers.push(handler);
+  stopAgent: vi.fn(async () => true),
+  // Honours the run filter, like the real fan-out (M17.3): a job hears its
+  // own run and nothing else.
+  onAgentEvent: vi.fn((handler: (event: unknown) => void, run?: number) => {
+    const scoped =
+      run === undefined
+        ? handler
+        : (event: unknown) => {
+            if ((event as { run?: number }).run === run) handler(event);
+          };
+    handlers.push(scoped);
     return () => {
-      const i = handlers.indexOf(handler);
+      const i = handlers.indexOf(scoped);
       if (i >= 0) handlers.splice(i, 1);
     };
   }),
@@ -86,89 +96,41 @@ describe('useJobRunner stream ownership', () => {
     expect(useUiStore.getState().learningPath).toBe('items/note.md');
     expect(useUiStore.getState().agentBusy).toBe(true);
 
-    act(() => handlers.forEach((h) => h({ kind: 'Done' })));
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
     expect(useUiStore.getState().learningPath).toBeNull();
     expect(useUiStore.getState().agentBusy).toBe(false);
   });
 
-  it("a late Done after a timeout takeover drops the claim without touching the chat's busy flag", async () => {
+  it('a chat turn no longer takes the stream, so a job runs to its own end', async () => {
+    // M17.3 deleted the takeover entirely. Three tests lived here for the
+    // window where the chat killed this runner's child and waited up to five
+    // seconds for the single slot: a late Done arriving mid-chat-turn, a Done
+    // that never arrived at all, and a takeover landing while start-up was
+    // parked on an await. None of them is reachable now — the chat has its
+    // own run and never touches this one.
     renderHook(() => useJobRunner());
     await startJob();
     expect(useUiStore.getState().learningPath).toBe('items/note.md');
 
-    // The chat's streamReleased timed out: it cleared learningPath and took
-    // the stream; its send() holds agentBusy for the turn now in flight.
-    act(() => useUiStore.getState().setLearningPath(null));
-    expect(useUiStore.getState().agentBusy).toBe(true);
+    // A chat turn starts beside it and raises the shared busy flag.
+    act(() => useUiStore.getState().setAgentBusy(true));
 
-    // The killed background child's terminal Done lands mid-chat-turn.
-    act(() => handlers.forEach((h) => h({ kind: 'Done' })));
+    // The chat's own run finishes. Its Done is not this job's business.
+    act(() => handlers.forEach((h) => h({ run: 99, kind: 'Done' })));
+    expect(useUiStore.getState().learningPath).toBe('items/note.md');
 
-    // Busy is the chat's — the runner must not clear it and start a run
-    // that replaces the chat's child mid-answer.
-    expect(useUiStore.getState().agentBusy).toBe(true);
-
-    // But the claim IS dropped: once the chat's turn ends, the runner can
-    // pick up the next job rather than sitting wedged on a stale flag.
-    act(() => {
-      useUiStore.getState().setAgentBusy(false);
-      // The first attempt consumed the filing and recorded the ledger; put
-      // both back so the same note derives a fresh job.
-      useUiStore.setState({ learnAttempts: {}, filedForLearning: ['items/note.md'] });
-    });
-    await startJob();
-    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
+    // The job ends on ITS terminal event, and releases what it claimed.
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+    expect(useUiStore.getState().learningPath).toBeNull();
+    expect(useUiStore.getState().agentBusy).toBe(false);
   });
 
-  it('a takeover whose killed child never emits Done still frees the runner', async () => {
+  it('stops listening once its job is done', async () => {
     renderHook(() => useJobRunner());
     await startJob();
-    expect(useUiStore.getState().learningPath).toBe('items/note.md');
-
-    // The chat's streamReleased timed out BECAUSE the killed child's terminal
-    // Done was lost — so no terminal event for this run will ever arrive.
-    // The takeover transition alone must drop the runner's claim.
-    act(() => useUiStore.getState().setLearningPath(null));
-
-    // The chat's turn ends; the note is refiled. If the runner were still
-    // waiting on the lost Done to clear `running`, no job would ever be
-    // scheduled again this session.
-    act(() => {
-      useUiStore.getState().setAgentBusy(false);
-      useUiStore.setState({ learnAttempts: {}, filedForLearning: ['items/note.md'] });
-    });
-    await startJob();
-    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2);
-  });
-
-  it('a takeover while start-up is parked on an await never spawns the stale job', async () => {
-    // Between claiming the stream and runAgent, start-up awaits readNote and
-    // startMcp. A chat takeover in that window drops the claim — and the
-    // resumed start-up must quit, because a spawn now would replace the
-    // chat's child mid-answer through the single shared AgentState (PR #5
-    // review).
-    let releaseMcp: (value: Awaited<ReturnType<typeof agentIpc.startMcp>>) => void = () =>
-      undefined;
-    vi.mocked(agentIpc.startMcp).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          releaseMcp = resolve;
-        }),
-    );
-    renderHook(() => useJobRunner());
-    await startJob();
-    // The claim is up but no child exists yet — start-up is parked.
-    expect(useUiStore.getState().learningPath).toBe('items/note.md');
-    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
-
-    // The chat takes the stream by timeout; the subscriber drops the claim.
-    act(() => useUiStore.getState().setLearningPath(null));
-
-    await act(async () => {
-      releaseMcp({ url: 'mock://cerebro', token: 't' });
-      await Promise.resolve();
-    });
-    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(handlers.length).toBeGreaterThan(0);
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
+    expect(handlers.length).toBe(0);
   });
 });
 
@@ -229,7 +191,7 @@ describe('useJobRunner scheduled runs', () => {
       '/vault': { 'records/skills/digest.md': FIRE_KEY },
     });
 
-    act(() => handlers.forEach((h) => h({ kind: 'Done' })));
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
     expect(useUiStore.getState().agentBusy).toBe(false);
   });
 
@@ -265,11 +227,12 @@ describe('useJobRunner scheduled runs', () => {
     expect(brokenReads).toHaveLength(1);
   });
 
-  it('a preempted scheduled job keeps its fire key — a takeover is not a run', async () => {
-    // The key is consumed after the read AND only while the runner still
-    // owns the stream (PR #5 review): a job whose start-up was preempted
-    // mid-read never ran, so it must retry when the agent is next idle
-    // rather than silently skipping the whole period.
+  it('a parked read resumes and consumes its fire key exactly once', async () => {
+    // This asserted a chat TAKEOVER landing mid-read, and that the abandoned
+    // job kept its fire key for a retry. M17.3 removed takeovers — a chat turn
+    // is its own run and never reaches into this one — so what is left to pin
+    // is the ordering the takeover case was built on: the key is consumed
+    // after the body is in hand, and only once.
     let releaseRead: (body: string) => void = () => undefined;
     vi.mocked(ipc.readNote).mockImplementation(
       () =>
@@ -280,16 +243,18 @@ describe('useJobRunner scheduled runs', () => {
     renderHook(() => useJobRunner());
     await startJob();
     expect(useUiStore.getState().learningPath).toBe('records/skills/digest.md');
+    // Parked on the read: no child, and no key spent on a run that has not
+    // happened.
+    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
+    expect(useUiStore.getState().skillRuns).toEqual({});
 
-    // Chat takeover lands while the record's body is still being read.
-    act(() => useUiStore.getState().setLearningPath(null));
     await act(async () => {
       releaseRead('---\ntype: Skill\n---\nplaybook');
       await Promise.resolve();
     });
 
-    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
-    expect(useUiStore.getState().skillRuns).toEqual({});
+    expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(1);
+    expect(useUiStore.getState().skillRuns['/vault']).toBeDefined();
   });
 
   it('a failed read in one vault never suppresses the same path in another', async () => {
@@ -392,7 +357,7 @@ describe('useJobRunner shell gating', () => {
     renderHook(() => useJobRunner());
 
     await startJob();
-    act(() => handlers.forEach((h) => h({ kind: 'Done' })));
+    act(() => handlers.forEach((h) => h({ run: JOB_RUN, kind: 'Done' })));
     await startJob();
 
     const calls = vi.mocked(agentIpc.runAgent).mock.calls;

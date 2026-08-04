@@ -55,23 +55,31 @@ export interface RunOptions {
   mcp: McpInfo | null;
 }
 
-let mockRun: MockRun | null = null;
+/** Live mock runs by id (M17.3) — a Map for the same reason AgentState is one:
+ * three module singletons could only ever describe a single child, so the mock
+ * could not reproduce the concurrency the real backend now has. */
+const mockRuns = new Map<number, MockRun>();
 let mockRunSeq = 0;
-let mockRunId: number | null = null;
 
 /** Start a run. Resolves to the RUN ID whose tag every event of this run
  * carries — the same id stopAgent reports back when the run is killed. */
 export async function runAgent(vault: string, options: RunOptions): Promise<number> {
   if (!inTauri()) {
     const run = ++mockRunSeq;
-    mockRunId = run;
     // The mock drives the UI-action channel through the same fan-out the
     // Tauri listener uses, so browser mode exercises the real subscriber.
     // Tagging happens here for the same reason it happens in agent.rs: the
     // script only knows its own stream, the runtime knows which run it is.
-    mockRun = runMockAgent(options.message, (event) => emitLocal({ ...event, run }), {
-      onUiAction: emitUiAction,
-    });
+    const mock = runMockAgent(
+      options.message,
+      (event) => {
+        emitLocal({ ...event, run });
+        // Reap at the terminal event, mirroring the reader thread's finish().
+        if (event.kind === 'Done') mockRuns.delete(run);
+      },
+      { onUiAction: emitUiAction },
+    );
+    mockRuns.set(run, mock);
     return run;
   }
   return invokeTauri<number>('run_agent', {
@@ -92,18 +100,35 @@ export async function runAgent(vault: string, options: RunOptions): Promise<numb
   });
 }
 
-/** Kill the current run. Resolves to the killed run's id (null when nothing
- * was running) so the caller can drop that run's trailing events — its
- * terminal Done arrives AFTER the kill (PR #5 review). */
-export async function stopAgent(): Promise<number | null> {
+/**
+ * Kill ONE run (M17.3). `false` means it had already finished — a race, not a
+ * failure.
+ *
+ * This used to take no argument and kill whatever child existed, which was
+ * only ever safe because there could be one. It is why closing the assistant
+ * aborted a background distill, and why opening a stored conversation did too.
+ */
+export async function stopAgent(run: number): Promise<boolean> {
   if (!inTauri()) {
-    mockRun?.cancel();
-    mockRun = null;
-    const dead = mockRunId;
-    mockRunId = null;
+    const mock = mockRuns.get(run);
+    if (mock === undefined) return false;
+    mock.cancel();
+    mockRuns.delete(run);
+    return true;
+  }
+  return invokeTauri<boolean>('stop_agent', { run });
+}
+
+/** Kill everything. For shutdown and vault switches — never for "I am done
+ * with this turn", which is what stopAgent(run) is for. */
+export async function stopAllAgents(): Promise<number[]> {
+  if (!inTauri()) {
+    const dead = [...mockRuns.keys()];
+    for (const mock of mockRuns.values()) mock.cancel();
+    mockRuns.clear();
     return dead;
   }
-  return invokeTauri<number | null>('stop_agent');
+  return invokeTauri<number[]>('stop_all_agents');
 }
 
 // --- Event fan-out ---------------------------------------------------------
@@ -120,9 +145,22 @@ function emitLocal(event: AgentEvent): void {
  * Subscribe to the agent stream. The Tauri listener is bound once for the
  * app's lifetime and fanned out here — re-binding per subscriber would
  * deliver each event as many times as the panel had mounted.
+ *
+ * With no `run`, every event is delivered and the subscriber self-filters —
+ * how the whole app worked before M17.3, and still what the UI-action bridge
+ * and any future task list want. Passing a run makes the subscription belong
+ * to that run: the reason `deadRuns` had to exist was that a listener could
+ * not say which stream was its own, so it had to recognise other runs'
+ * terminal events and refuse them by hand.
  */
-export function onAgentEvent(listener: Listener): () => void {
-  listeners.add(listener);
+export function onAgentEvent(listener: Listener, run?: number): () => void {
+  const scoped: Listener =
+    run === undefined
+      ? listener
+      : (event) => {
+          if (event.run === run) listener(event);
+        };
+  listeners.add(scoped);
   if (inTauri() && !bound) {
     bound = true;
     void (async () => {
@@ -133,7 +171,7 @@ export function onAgentEvent(listener: Listener): () => void {
       bound = false;
     });
   }
-  return () => listeners.delete(listener);
+  return () => listeners.delete(scoped);
 }
 
 type UiListener = (action: UiAction) => void;

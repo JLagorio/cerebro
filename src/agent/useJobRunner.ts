@@ -133,14 +133,18 @@ export function useJobRunner(): void {
     vaultPath,
   ]);
 
-  // Owns the run: the event stream is shared with the chat, so both sides need
-  // to know whose turn the events belong to.
+  // Owns the run. M17.3: "whose events are these" is answered by the run id
+  // now, not by two hooks agreeing to take turns — this ref only tracks
+  // whether a job is in flight, so a second is not started on top of it.
   const running = useRef(false);
+  const unsubscribe = useRef<(() => void) | null>(null);
   const mcp = useRef<McpInfo | null>(null);
 
   const finish = useCallback(() => {
     if (!running.current) return;
     running.current = false;
+    unsubscribe.current?.();
+    unsubscribe.current = null;
     const ui = useUiStore.getState();
     ui.setLearningPath(null);
     ui.setAgentBusy(false);
@@ -148,38 +152,17 @@ export function useJobRunner(): void {
     void rescan();
   }, [rescan]);
 
-  // The chat's release wait can take the stream by TIMEOUT: streamReleased
-  // clears learningPath itself when the killed child's terminal Done is lost
-  // (useAgentChat). That lost Done is the very event finish() rides, so
-  // waiting for a terminal event to drop this claim could wedge the runner
-  // for the session — `running` stuck true, no job ever scheduled again
-  // (PR #5 review). The takeover transition itself is the signal: the path
-  // going null while the claim is still held can only be the chat's timeout,
-  // because finish() drops the claim BEFORE clearing the path. Drop the
-  // claim and rescan; the busy flag is the chat's now — clearing it would
-  // let this runner read the agent as idle and start a run that replaces
-  // the chat's child mid-answer.
-  useEffect(
-    () =>
-      useUiStore.subscribe((state, prev) => {
-        if (prev.learningPath === null || state.learningPath !== null) return;
-        if (!running.current) return;
-        running.current = false;
-        void rescan().catch(() => undefined);
-      }),
-    [rescan],
-  );
-
-  useEffect(
-    () =>
-      onAgentEvent((event) => {
-        if (!running.current) return;
-        // `Error` is terminal for the turn but is followed by `Done`; ending on
-        // either is harmless because finish() is idempotent.
-        if (event.kind === 'Done' || event.kind === 'Error') finish();
-      }),
-    [finish],
-  );
+  // M17.3 deleted two whole mechanisms here. The chat used to PREEMPT this
+  // runner — kill its child, wait up to 5s for `learningPath` to clear, then
+  // take the single shared slot — and this hook needed a store subscriber to
+  // notice when that wait timed out and took the stream anyway, or it would
+  // wedge `running` true for the session. Both existed because there was one
+  // child. A background job and a typed question are now two runs, so neither
+  // has anything to hand over.
+  //
+  // The terminal-event subscription moved into the run itself (see below),
+  // scoped to its id: `Error` is terminal but is followed by `Done`, and
+  // finishing on either is harmless because finish() is idempotent.
 
   useEffect(() => {
     if (next === null || vaultPath === null || agentBusy || running.current) return;
@@ -250,7 +233,7 @@ export function useJobRunner(): void {
             useUiStore.getState().recordSkillRun(vaultPath, job.path, job.runKey);
             recorded = true;
           }
-          await runAgent(vaultPath, {
+          const runId = await runAgent(vaultPath, {
             message,
             actor: agent?.actor ?? null,
             // The same rules the panel's agent gets — the conventions about
@@ -281,6 +264,12 @@ export function useJobRunner(): void {
             approvedStdio: useUiStore.getState().stdioApprovals[vaultPath] ?? [],
             mcp: mcp.current,
           });
+          // Scoped to THIS job's run (M17.3). The old subscription saw every
+          // event in the app and guessed with `running.current`, which is how
+          // a chat turn's Done could end a background job — and vice versa.
+          unsubscribe.current = onAgentEvent((event) => {
+            if (event.kind === 'Done' || event.kind === 'Error') finish();
+          }, runId);
         } catch {
           // Silent by construction. A background runner that could raise a
           // toast would be a notification, which is the one thing this whole

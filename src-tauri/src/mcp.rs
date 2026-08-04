@@ -64,7 +64,19 @@ struct Running {
 /// How many run tokens stay valid at once. A killed child's writes can still
 /// be in flight when the next run is minted, so its token must outlive the
 /// mint — briefly, and never unboundedly.
-const RUN_TOKEN_WINDOW: usize = 4;
+///
+/// M17.3 raised this from 4. It was sized for one live child plus a little
+/// slack; with up to `MAX_CONCURRENT_RUNS` alive at once, four would evict a
+/// RUNNING run's token as soon as a fifth was minted, and that run's next
+/// write would come back `-32001 unauthorized` mid-task. The window now holds
+/// every live run several times over, so eviction can only ever reach tokens
+/// whose children are long gone.
+const RUN_TOKEN_WINDOW: usize = 4 * crate::agent::MAX_CONCURRENT_RUNS;
+
+/// Exposed so agent.rs can assert the window outlasts the run cap.
+pub fn run_token_window() -> usize {
+    RUN_TOKEN_WINDOW
+}
 
 fn push_run_token(runs: &mut Vec<(String, String)>, token: String, actor: String) {
     runs.push((token, actor));

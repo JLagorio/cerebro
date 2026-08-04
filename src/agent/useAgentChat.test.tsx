@@ -5,11 +5,21 @@ const handlers: Array<(event: unknown) => void> = [];
 vi.mock('./agentIpc', () => ({
   runAgent: vi.fn(async () => 8),
   startMcp: vi.fn(async () => ({ port: 1, token: 't' })),
-  stopAgent: vi.fn(async () => null),
-  onAgentEvent: vi.fn((handler: (event: unknown) => void) => {
-    handlers.push(handler);
+  stopAgent: vi.fn(async () => true),
+  // Mirrors the real fan-out (M17.3): a subscriber that names a run sees only
+  // that run's events. Wrapping here rather than filtering in each test is
+  // the point — the scoping is the behaviour under test, so the harness must
+  // not be more permissive than production.
+  onAgentEvent: vi.fn((handler: (event: unknown) => void, run?: number) => {
+    const scoped =
+      run === undefined
+        ? handler
+        : (event: unknown) => {
+            if ((event as { run?: number }).run === run) handler(event);
+          };
+    handlers.push(scoped);
     return () => {
-      const i = handlers.indexOf(handler);
+      const i = handlers.indexOf(scoped);
       if (i >= 0) handlers.splice(i, 1);
     };
   }),
@@ -155,63 +165,16 @@ describe('useAgentChat send expansion', () => {
 });
 
 /**
- * Preempting the background runner (PR #5 review). Two races lived here:
- * send() fired runAgent before the runner's finish() released the stream
- * (the new turn's events were dropped while learningPath was set — empty
- * bubble), and finish() dropped agentBusy on its way out, letting the
- * runner read the agent as idle and schedule a background run that would
- * replace the chat's child mid-answer.
+ * Concurrency (M17.3).
+ *
+ * Two describes used to live here — one for the preempt handshake, one for
+ * recognising a killed run's trailing events — and both described the same
+ * underlying fact: the backend held ONE child, so a turn could have its
+ * process taken out from under it and had to refuse other runs' events by
+ * hand. Children are keyed by run id now, and a turn subscribes to its own,
+ * so neither situation can arise.
  */
-describe('useAgentChat preempting the background runner', () => {
-  const opts = { shell: false, connectors: false };
-
-  beforeEach(() => {
-    vi.mocked(agentIpc.runAgent).mockClear();
-    vi.mocked(agentIpc.stopAgent).mockClear();
-    useVaultStore.setState({ vaultPath: '/vault' });
-    useUiStore.setState({ learningPath: null, agentBusy: false });
-  });
-
-  it('waits for the runner to release the stream, then re-claims the busy flag', async () => {
-    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => result.current.send('question'));
-
-    // The kill was issued…
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-    // …but the runner still owns the stream, so the new child must not
-    // start: its events would land while the handler is ignoring them.
-    expect(vi.mocked(agentIpc.runAgent)).not.toHaveBeenCalled();
-
-    // The killed child's terminal Done lands: the runner's finish()
-    // releases the stream and drops agentBusy on its way out.
-    act(() => {
-      useUiStore.getState().setLearningPath(null);
-      useUiStore.getState().setAgentBusy(false);
-    });
-
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    // The chat re-claimed the agent — the runner cannot read it as idle
-    // and schedule a background run over this turn.
-    expect(useUiStore.getState().agentBusy).toBe(true);
-  });
-
-  it('starts immediately when no background run owns the stream', async () => {
-    const { result } = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
-  });
-});
-
-/**
- * The killed child's terminal Done (PR #5 review, round four). Events are
- * tagged with their run and stopAgent names the run it killed, so the chat
- * drops a dead run's trailing events by IDENTITY. Timing cannot do it: the
- * stray Done can land in the same dispatch that released the stream — before
- * the new turn even starts — or seconds after a timeout takeover, mid-answer.
- */
-describe('useAgentChat and the killed run’s trailing events', () => {
+describe('useAgentChat runs beside the background runner', () => {
   const opts = { shell: false, connectors: false };
 
   beforeEach(() => {
@@ -222,84 +185,52 @@ describe('useAgentChat and the killed run’s trailing events', () => {
     useUiStore.setState({ learningPath: null, agentBusy: false });
   });
 
-  it('drops the dead run’s late Done instead of ending the new turn', async () => {
+  it('starts immediately while a background job runs, and kills nothing', async () => {
+    // The runner owns a job. The chat used to stop that child and wait up to
+    // five seconds for the single slot to be handed over; now both simply run.
     useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(7);
     const { result } = renderHook(() => useAgentChat('sys', opts, null));
     act(() => result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-
-    // The runner's finish() releases the stream; the new turn starts.
-    act(() => {
-      useUiStore.getState().setLearningPath(null);
-      useUiStore.getState().setAgentBusy(false);
-    });
     await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
+    expect(vi.mocked(agentIpc.stopAgent)).not.toHaveBeenCalled();
+  });
 
-    // The killed child's Done lands late — after the new turn claimed the
-    // stream. It belongs to dead history, not to this turn.
-    act(() => handlers.forEach((h) => h({ run: 7, kind: 'Done' })));
+  it('never sees another run’s events, including its terminal Done', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+
+    // A foreign run reports finished — a background distill, another
+    // conversation, or a child killed a moment ago. None of it is this turn's
+    // business, and no bookkeeping is needed to know that.
+    act(() => handlers.forEach((h) => h({ run: 999, kind: 'Done' })));
     expect(result.current.streaming).toBe(true);
-    expect(useUiStore.getState().agentBusy).toBe(true);
+    act(() => handlers.forEach((h) => h({ run: 999, kind: 'TextDelta', text: 'not mine' })));
+    expect(result.current.messages[1].text).toBe('');
 
-    // The live run's events still land, and its own Done still ends it.
+    // Its own run still drives it.
     act(() => handlers.forEach((h) => h({ run: 8, kind: 'TextDelta', text: 'answer' })));
     expect(result.current.messages[1].text).toBe('answer');
     act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
     expect(result.current.streaming).toBe(false);
   });
 
-  // The kill that outlives the hook that made it (PR #7 review). Closing the
-  // assistant mid-answer kills the run from an unmount, and that hook is gone
-  // long before the dead Done arrives — so the record of the kill has to
-  // outlive it too, or the next panel adopts the stray as its own.
-  it('remembers a run killed by unmount, so its Done cannot end the next panel’s turn', async () => {
-    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(42);
-    const first = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => first.result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-
-    // ⌘J closes the panel mid-answer: the hook tears down and kills run 42.
-    first.unmount();
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
-
-    // Reopening builds a FRESH hook — the one a per-instance dead-run set
-    // left with an empty filter — and a new question claims the stream.
-    const second = renderHook(() => useAgentChat('sys', opts, null));
-    act(() => second.result.current.send('next question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalledTimes(2));
-
-    // The killed child's terminal Done lands now. It is dead history, not
-    // the end of a turn whose child has not said a word yet.
-    act(() => handlers.forEach((h) => h({ run: 42, kind: 'Done' })));
-    expect(second.result.current.streaming).toBe(true);
-    expect(second.result.current.messages[1].streaming).toBe(true);
-
-    // The live run still ends its own turn.
-    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
-    expect(second.result.current.streaming).toBe(false);
-    second.unmount();
-  });
-
-  it('ignores a stray Done delivered before the new turn claims the stream', async () => {
-    useUiStore.setState({ learningPath: 'notes/reading.md', agentBusy: true });
-    vi.mocked(agentIpc.stopAgent).mockResolvedValueOnce(7);
+  it('stops its OWN run by id, not whatever happens to be running', async () => {
     const { result } = renderHook(() => useAgentChat('sys', opts, null));
     act(() => result.current.send('question'));
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalled());
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
 
-    // The runner's listener ran FIRST for the killed child's Done, so the
-    // stream is already released when the chat's listener sees the same
-    // event — the ordering that used to adopt it as the new turn's Done.
-    act(() => {
-      useUiStore.getState().setLearningPath(null);
-      useUiStore.getState().setAgentBusy(false);
-    });
-    act(() => handlers.forEach((h) => h({ run: 7, kind: 'Done' })));
+    act(() => result.current.stop());
+    expect(vi.mocked(agentIpc.stopAgent)).toHaveBeenCalledWith(8);
+    expect(result.current.streaming).toBe(false);
+  });
 
-    await vi.waitFor(() => expect(vi.mocked(agentIpc.runAgent)).toHaveBeenCalled());
-    expect(result.current.streaming).toBe(true);
-    expect(result.current.messages[1].streaming).toBe(true);
+  it('unsubscribes when the turn ends, so a later run cannot reach it', async () => {
+    const { result } = renderHook(() => useAgentChat('sys', opts, null));
+    act(() => result.current.send('question'));
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0));
+    act(() => handlers.forEach((h) => h({ run: 8, kind: 'Done' })));
+    expect(handlers.length).toBe(0);
   });
 });
 

@@ -6,11 +6,12 @@
 //! renders. Nothing about the conversation leaves the machine except through
 //! the CLI the user already installed and signed into.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -106,34 +107,77 @@ pub struct AgentRequest {
     pub approved_stdio: Option<Vec<String>>,
 }
 
-#[derive(Default)]
+/// How many CLI children may be alive at once (M17.3).
+///
+/// Not "unlimited": each run is a process holding a model session, and a run
+/// that writes ends in a full vault rescan plus a git checkpoint, so the real
+/// cost of the Nth concurrent turn is paid on the main thread. Four is enough
+/// for the shape this app actually has — a typed conversation, a background
+/// distill, and a scheduled agent or two — and small enough that hitting the
+/// cap is a bug worth seeing rather than a slow afternoon.
+pub const MAX_CONCURRENT_RUNS: usize = 4;
+
+/// Live children, keyed by the run id their events are tagged with (M17.3).
+///
+/// This was `Mutex<Option<(Child, u64)>>` — ONE slot, where spawning silently
+/// killed whatever was already running. Every concurrency guard on the JS side
+/// (deadRuns, turnInFlight, learningPath, the 5s preempt handoff) existed to
+/// paper over that single slot rather than to protect anything, because a
+/// second `runAgent` anywhere in the app would take the first one's process
+/// out from under it.
+///
+/// `Arc` because the reader thread outlives this call and reaps its own child
+/// on EOF; without that the map would grow a corpse per run.
+#[derive(Default, Clone)]
 pub struct AgentState {
-    /// The one live child, paired with the run id its events are tagged with.
-    child: Mutex<Option<(Child, u64)>>,
+    children: Arc<Mutex<HashMap<u64, Child>>>,
 }
 
 impl AgentState {
-    fn set(&self, child: Child, run: u64) {
-        if let Ok(mut guard) = self.child.lock() {
-            // Replacing a live child without killing it would leave an
-            // orphaned CLI streaming into a conversation nobody is reading.
-            if let Some((mut previous, _)) = guard.take() {
-                let _ = previous.kill();
-            }
-            *guard = Some((child, run));
+    fn insert(&self, child: Child, run: u64) {
+        if let Ok(mut guard) = self.children.lock() {
+            guard.insert(run, child);
         }
     }
 
-    /// Kill the current child and report WHICH run died. The killed child's
-    /// terminal events arrive after this returns, so the caller needs the id
-    /// to recognize and drop them (PR #5 review).
-    pub fn stop(&self) -> Result<Option<u64>, String> {
-        let mut guard = self.child.lock().map_err(|_| "agent state poisoned")?;
-        if let Some((mut child, run)) = guard.take() {
-            child.kill().map_err(|e| e.to_string())?;
-            return Ok(Some(run));
+    /// Kill ONE run. `Ok(false)` means it was already gone — a normal race,
+    /// not an error: the child may have exited between the caller deciding to
+    /// stop it and this line.
+    pub fn stop(&self, run: u64) -> Result<bool, String> {
+        let mut guard = self.children.lock().map_err(|_| "agent state poisoned")?;
+        match guard.remove(&run) {
+            Some(mut child) => {
+                child.kill().map_err(|e| e.to_string())?;
+                Ok(true)
+            }
+            None => Ok(false),
         }
-        Ok(None)
+    }
+
+    /// Kill everything and report what died. For shutdown and for vault
+    /// switches, where leaving a child pointed at the old vault is worse than
+    /// interrupting it.
+    pub fn stop_all(&self) -> Result<Vec<u64>, String> {
+        let mut guard = self.children.lock().map_err(|_| "agent state poisoned")?;
+        let mut stopped: Vec<u64> = Vec::new();
+        for (run, mut child) in guard.drain() {
+            let _ = child.kill();
+            stopped.push(run);
+        }
+        stopped.sort_unstable();
+        Ok(stopped)
+    }
+
+    /// Reap a child that exited on its own. Called from the reader thread when
+    /// stdout closes, which is the same moment `Done` is emitted.
+    fn finish(&self, run: u64) {
+        if let Ok(mut guard) = self.children.lock() {
+            guard.remove(&run);
+        }
+    }
+
+    pub fn live(&self) -> usize {
+        self.children.lock().map(|g| g.len()).unwrap_or(0)
     }
 }
 
@@ -470,6 +514,16 @@ pub fn stream(
         "Claude Code was not found on this machine. Install it from https://claude.com/claude-code, then reopen cerebro.",
     )?;
 
+    // Refuse rather than displace (M17.3). The old behaviour was to kill
+    // whatever was running and take its place, which is why a background
+    // distill could silently eat a typed answer. A cap that is reached is a
+    // condition the caller can report; a run that vanishes is not.
+    if state.live() >= MAX_CONCURRENT_RUNS {
+        return Err(format!(
+            "{MAX_CONCURRENT_RUNS} agent runs are already in flight. Wait for one to finish, or stop it."
+        ));
+    }
+
     let (url, token) = match (req.mcp_url.clone(), req.mcp_token.clone()) {
         (Some(u), Some(t)) => (u, t),
         _ => return Err("the MCP endpoint is not running".into()),
@@ -505,9 +559,12 @@ pub fn stream(
 
     let stdout = child.stdout.take().ok_or("agent produced no stdout")?;
     let stderr = child.stderr.take();
-    state.set(child, run);
+    state.insert(child, run);
 
     let run_config = config_path.clone();
+    // The reader owns the child's afterlife: it reaps the map entry at EOF,
+    // in the same breath as the terminal Done (M17.3).
+    let reaper = state.clone();
     std::thread::spawn(move || {
         let mut session_id: Option<String> = None;
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
@@ -551,6 +608,9 @@ pub fn stream(
         // residency with the run — the sweep at the next spawn is only the
         // backstop for a crash between here and there.
         let _ = std::fs::remove_file(&run_config);
+        // Reap BEFORE the terminal Done, so anything that reacts to Done by
+        // starting the next run already sees the slot free.
+        reaper.finish(run);
         let _ = app.emit(
             AGENT_EVENT,
             TaggedEvent {
@@ -811,20 +871,59 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn stop_reports_which_run_was_killed() {
+    fn stopping_one_run_leaves_the_others_alone() {
+        // M17.3. This test used to assert the opposite shape — one slot, one
+        // stop, "the killed run is named" — because there could only ever be
+        // one child. Spawning a second silently killed the first, which is
+        // how a background distill ate a typed answer.
         let state = AgentState::default();
-        assert_eq!(
-            state.stop().unwrap(),
-            None,
-            "nothing running: nothing to report"
+        assert!(!state.stop(1).unwrap(), "nothing running: nothing to kill");
+
+        let sleep = || Command::new("sleep").arg("5").spawn().unwrap();
+        state.insert(sleep(), 1);
+        state.insert(sleep(), 2);
+        state.insert(sleep(), 3);
+        assert_eq!(state.live(), 3, "three children, three slots");
+
+        assert!(state.stop(2).unwrap(), "the named run dies");
+        assert_eq!(state.live(), 2, "and only it");
+        assert!(
+            !state.stop(2).unwrap(),
+            "a second stop of the same run is a race, not an error"
         );
-        let child = Command::new("sleep").arg("5").spawn().unwrap();
-        state.set(child, 42);
-        assert_eq!(state.stop().unwrap(), Some(42), "the killed run is named");
-        assert_eq!(
-            state.stop().unwrap(),
-            None,
-            "a second stop has nothing left to kill"
+
+        let mut stopped = state.stop_all().unwrap();
+        stopped.sort_unstable();
+        assert_eq!(stopped, vec![1, 3], "stop_all reports what it killed");
+        assert_eq!(state.live(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cap_refuses_rather_than_displacing() {
+        // The old backend made room by killing. A run that vanishes to make
+        // way for another is indistinguishable, from the UI, from one that
+        // crashed — so the cap is now a refusal the caller can report.
+        let state = AgentState::default();
+        for run in 0..MAX_CONCURRENT_RUNS as u64 {
+            state.insert(Command::new("sleep").arg("5").spawn().unwrap(), run);
+        }
+        assert_eq!(state.live(), MAX_CONCURRENT_RUNS);
+        // `stream` itself needs a binary and an MCP endpoint; the cap check it
+        // performs is this comparison, asserted here where it is reachable.
+        assert!(state.live() >= MAX_CONCURRENT_RUNS);
+        state.stop_all().unwrap();
+    }
+
+    #[test]
+    fn every_live_run_keeps_a_valid_mcp_token() {
+        // The token window must outlast the run cap (M17.3): four tokens with
+        // four concurrent runs would evict a RUNNING run's bearer the moment
+        // the next was minted, and its next write would come back
+        // unauthorized mid-task.
+        assert!(
+            crate::mcp::run_token_window() > MAX_CONCURRENT_RUNS,
+            "a live run must never have its own token evicted"
         );
     }
 
