@@ -11,7 +11,7 @@ import { SideMenuExtension } from '@blocknote/core/extensions';
 import { codeBlockOptions } from '@blocknote/code-block';
 import { onAgentEvent, runAgent, startMcp } from '@/agent/agentIpc';
 import { AskAiPopover } from '@/editor/AskAiPopover';
-import { SelectionToolbar, useSelectionAnchor, type Preset } from '@/editor/SelectionToolbar';
+import { AiFormattingToolbar, type Preset } from '@/editor/SelectionToolbar';
 import { BlockNoteView } from '@blocknote/mantine';
 import {
   AddBlockButton,
@@ -210,16 +210,6 @@ export function MarkdownEditor({
     y: number;
     preset?: string;
   } | null>(null);
-  /**
-   * The floating toolbar's anchor (M18).
-   *
-   * Held on state rather than a plain ref so the toolbar re-renders as the
-   * selection moves. It is suppressed while the popover is open: the popover
-   * has already captured the text, and leaving the bar up over a selection the
-   * user is no longer editing is two surfaces claiming the same words.
-   */
-  const [surface, setSurface] = useState<HTMLDivElement | null>(null);
-  const anchor = useSelectionAnchor(surface, !readOnly && asking === null);
   /**
    * The range the rewrite will replace, cloned when the popover OPENS.
    *
@@ -642,13 +632,17 @@ export function MarkdownEditor({
    * reading it back later.
    */
   const askFromToolbar = (preset?: Preset) => {
-    if (anchor === null) return;
     const live = window.getSelection();
-    target.current = live !== null && live.rangeCount > 0 ? live.getRangeAt(0).cloneRange() : null;
+    if (live === null || live.rangeCount === 0 || live.isCollapsed) return;
+    const text = live.toString();
+    if (text.trim() === '') return;
+    const range = live.getRangeAt(0);
+    target.current = range.cloneRange();
+    const rect = range.getBoundingClientRect();
     setAsking({
-      text: anchor.text,
-      x: Math.min(anchor.left, window.innerWidth - 440),
-      y: anchor.bottom + 8,
+      text,
+      x: Math.min(rect.left, window.innerWidth - 440),
+      y: rect.bottom + 8,
       preset: preset?.instruction,
     });
   };
@@ -676,7 +670,6 @@ export function MarkdownEditor({
   return (
     <div
       data-testid="markdown-editor"
-      ref={setSurface}
       className="cerebro-editor min-h-0 flex-1"
       onKeyDown={onEditorKeyDown}
     >
@@ -688,6 +681,10 @@ export function MarkdownEditor({
           onChange={scheduleEmit}
           sideMenu={false}
           slashMenu={false}
+          // M18: ours replaces it (AI first, then everything it would have
+          // rendered). Left on, BlockNote mounts a SECOND controller and two
+          // toolbars stack on the same selection.
+          formattingToolbar={false}
         >
           <SuggestionMenuController
             triggerCharacter="@"
@@ -729,6 +726,10 @@ export function MarkdownEditor({
               )
             }
           />
+          {/* M18: AI at the head of the editor's OWN formatting toolbar. A
+              second floating bar beside BlockNote's fought it for the same few
+              pixels on every selection. */}
+          {!readOnly && <AiFormattingToolbar onAsk={askFromToolbar} />}
           <SideMenuController
             sideMenu={(props) => (
               <SideMenu {...props}>
@@ -739,9 +740,6 @@ export function MarkdownEditor({
             )}
           />
         </BlockNoteView>
-      )}
-      {anchor !== null && (
-        <SelectionToolbar anchor={anchor} onAsk={askFromToolbar} onPreset={askFromToolbar} />
       )}
       {asking !== null && (
         <div

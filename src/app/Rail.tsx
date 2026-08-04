@@ -162,11 +162,15 @@ export function Rail() {
         active={aiPanelOpen}
         onClick={() => setAiPanelOpen(!aiPanelOpen)}
       />
-      {/* Skills and agents. Below the fold with Settings rather than beside
-          Home, because it is where you go to CHANGE how the assistant works
-          rather than somewhere you work. */}
+      {/* Skills, agents and templates. Below the fold with Settings rather
+          than beside Home, because it is where you go to CHANGE how the
+          assistant works rather than somewhere you work.
+
+          `blocks`, not `library` — Docs already owns that glyph, and two rail
+          buttons drawn identically is the rail failing at the one job it has
+          (M18). */}
       <RailButton
-        icon="library"
+        icon="blocks"
         label="Library"
         active={libraryActive}
         onClick={() => navigate({ kind: 'library' })}

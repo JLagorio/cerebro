@@ -327,14 +327,20 @@ test('editor: selecting prose shows AI controls, and a rewrite is a decision', a
 
   // Nothing selected, nothing floating: a toolbar that hangs around while you
   // type is chrome, not an affordance.
-  await expect(page.getByTestId('selection-toolbar')).toHaveCount(0);
+  await expect(page.getByTestId('selection-ask-ai')).toHaveCount(0);
 
+  // ONE toolbar — the editor's own, with AI at its head. The first attempt
+  // floated a second bar of its own and the two fought for the same pixels
+  // on every selection.
   await page.getByText('The pricing is annual').click({ clickCount: 3 });
-  const toolbar = page.getByTestId('selection-toolbar');
-  await expect(toolbar).toBeVisible();
-  await expect(toolbar.getByTestId('selection-ask-ai')).toBeVisible();
+  await expect(page.locator('.bn-formatting-toolbar')).toHaveCount(1);
+  const askAi = page.getByTestId('selection-ask-ai');
+  await expect(askAi).toBeVisible();
+  // Bold is still one click away: this adds to the toolbar, it does not
+  // replace it.
+  await expect(page.locator('.bn-formatting-toolbar').getByLabel('Bold')).toBeVisible();
 
-  await toolbar.getByTestId('selection-ask-ai').click();
+  await askAi.click();
   await expect(page.getByTestId('ask-ai')).toBeVisible();
   // The passage travelled with the click. Reading the DOM selection at apply
   // time would find the popover's own input instead.
@@ -360,5 +366,5 @@ test('editor: the same AI controls appear on a record, not only in Docs', async 
   await page.keyboard.press('End');
   await page.keyboard.type(' The pricing is annual.');
   await page.getByText('The pricing is annual').click({ clickCount: 3 });
-  await expect(page.getByTestId('selection-toolbar')).toBeVisible();
+  await expect(page.getByTestId('selection-ask-ai')).toBeVisible();
 });
