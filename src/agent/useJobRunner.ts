@@ -303,7 +303,7 @@ export function useJobRunner(): void {
                   job.path,
                   job.title,
                   agent?.actor ?? 'process:agent',
-                  agent?.memory ?? '',
+                  agent?.memory ?? { recent: '', preferences: '' },
                   splitFrontmatter(await readNote(vaultPath, job.path)).body.trim(),
                   woken,
                   agent?.scope ?? null,

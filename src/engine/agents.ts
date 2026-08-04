@@ -52,8 +52,49 @@ export interface AgentRef {
   scope: string[] | null;
   /** Tools this agent may use, intersected with the granted policy (M17.8). */
   allowedTools: string[] | null;
-  /** Carried memory, '' on a first run. */
-  memory: string;
+  /**
+   * What this agent carries between runs (M17.14).
+   *
+   * ClickUp's three tiers, and only two of them are fields — which is the
+   * finding rather than a shortcut:
+   *
+   * - **Recent** is `recent:` (or the pre-M17 `memory:`): the agent's own
+   *   working notes, rewritten at the end of every run. Volatile by design.
+   * - **Preferences** is `preferences:`: what the HUMAN corrected. Durable,
+   *   higher priority than anything the agent concluded itself, and an agent
+   *   run is refused if it tries to write the key (mcp.rs) — an agent that can
+   *   edit the corrections made to it does not have preferences, it has notes.
+   * - **Intelligence** — what the agent inferred — is not a field at all. It is
+   *   the knowledge bundle, which already stores inferences with provenance,
+   *   already requires a human stamp to become verified, and since M17.20
+   *   already reaches the turn. A third frontmatter blob would be a second,
+   *   worse copy of a thing this app spent M8 building properly.
+   */
+  memory: AgentMemory;
+}
+
+export interface AgentMemory {
+  /** The agent's own working notes, rewritten each run. */
+  recent: string;
+  /** What the human told it. The agent may read this and never write it. */
+  preferences: string;
+}
+
+/** The tier names, for the builder and for the prompt. */
+export const MEMORY_TIERS = ['recent', 'preferences'] as const;
+
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function parseMemory(entry: Entry): AgentMemory {
+  return {
+    // `memory:` is the pre-M17.14 name and is still read, because a vault
+    // written against the old shape must not silently forget everything its
+    // agents had learned. A record carrying both prefers the new key.
+    recent: textOf(entry.properties.recent) || textOf(entry.properties.memory),
+    preferences: textOf(entry.properties.preferences),
+  };
 }
 
 /** `scope:` frontmatter — a folder, or a list of them. */
@@ -96,7 +137,7 @@ export function agentRef(entry: Entry): AgentRef {
     shell: entry.properties.tools === 'shell',
     scope: parseScope(entry),
     allowedTools: parseAllowedTools(entry.properties['allowed-tools']),
-    memory: typeof entry.properties.memory === 'string' ? entry.properties.memory : '',
+    memory: parseMemory(entry),
   };
 }
 

@@ -138,7 +138,7 @@ export function agentRunPrompt(
   path: string,
   title: string,
   actor: string,
-  memory: string,
+  memory: { recent: string; preferences: string },
   body: string,
   /** What woke this run, when an event did (M17.12) — layer TWO of the
    * trigger. Layer one already passed deterministically; this is the model
@@ -176,11 +176,22 @@ export function agentRunPrompt(
     '- When you find a genuine disagreement, record it with `contradicts` — resolving it is a judgement for the person who owns the work.',
     '- If a step would be destructive or needs an answer only the user has, skip it and note that in what you write.',
     '',
-    memory === ''
-      ? 'This is your first run — you have no memory yet.'
-      : `Your memory from previous runs:\n${memory}`,
+    // M17.14 — two tiers, in priority order, and the order is the point. What
+    // a person corrected outranks what the agent concluded about itself, every
+    // time; presenting them as one blob is how the second quietly overwrites
+    // the first.
+    ...(memory.preferences === ''
+      ? []
+      : [
+          `What the person you work for has told you. This outranks your own notes and anything you infer, and you cannot change it — a write to \`preferences\` from this run is refused:\n${memory.preferences}`,
+          '',
+        ]),
+    memory.recent === ''
+      ? 'This is your first run — you have no working notes yet.'
+      : `Your working notes from previous runs:\n${memory.recent}`,
     '',
-    `Before you finish, rewrite your memory with update_frontmatter on ${path}, patching the \`memory\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+    `Before you finish, rewrite your working notes with update_frontmatter on ${path}, patching the \`recent\` key: at most 30 lines, only what your next run genuinely needs. A memory that merely grows is a log, not a memory.`,
+    'What you have LEARNED — anything durable about the work rather than about your own progress — belongs in the knowledge bundle through write_concept, where it carries provenance and a person can verify it. Working notes are for you; concepts are for everyone.',
     '',
     'Your instructions:',
     '',

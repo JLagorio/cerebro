@@ -498,6 +498,26 @@ fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
     }
 }
 
+const PREFERENCES_REFUSAL: &str =
+    "`preferences` is the user's memory for this agent and cannot be written by a run. Put what \
+you learned in `recent`, or record it as a concept with write_concept.";
+
+/// M17.14 — may this run write the `preferences` tier?
+///
+/// It may not, if it carries a process identity — which is exactly the set of
+/// runs a vault file started. An agent that can rewrite the corrections made to
+/// it does not have preferences, it has notes, and the tier only means anything
+/// if the run it governs cannot reach it. A person editing the same field in
+/// the record panel goes through the human write path and never touches this.
+fn writes_preferences(actor: &str, name: &str, args: &Map<String, Value>) -> bool {
+    if name != "update_frontmatter" || actor == DEFAULT_ACTOR {
+        return false;
+    }
+    args.get("patch")
+        .and_then(Value::as_object)
+        .is_some_and(|patch| patch.contains_key("preferences"))
+}
+
 fn call_tool(
     app: &AppHandle,
     running: &Running,
@@ -533,6 +553,10 @@ fn call_tool(
                     .unwrap_or_default()
             )));
         }
+    }
+
+    if writes_preferences(&grant.actor, name, args) {
+        return Ok(error_result(PREFERENCES_REFUSAL.to_string()));
     }
 
     let actor = grant.actor.as_str();
@@ -1249,6 +1273,47 @@ mod tests {
             actor: "process:scout".into(),
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
         }
+    }
+
+    #[test]
+    fn an_agent_run_cannot_rewrite_the_corrections_made_to_it() {
+        // M17.14. An agent that can edit its own `preferences` does not have
+        // preferences, it has notes.
+        let patch: Map<String, Value> =
+            serde_json::from_value(json!({ "path": "records/agents/a.md",
+                "patch": { "preferences": "be terser" } }))
+            .unwrap();
+        assert!(writes_preferences(
+            "process:scout",
+            "update_frontmatter",
+            &patch
+        ));
+    }
+
+    #[test]
+    fn the_person_can_still_write_their_own_preferences() {
+        // The record panel writes through the human path, which carries the
+        // default actor. Refusing that too would make the tier unwritable.
+        let patch: Map<String, Value> =
+            serde_json::from_value(json!({ "patch": { "preferences": "be terser" } })).unwrap();
+        assert!(!writes_preferences(
+            DEFAULT_ACTOR,
+            "update_frontmatter",
+            &patch
+        ));
+    }
+
+    #[test]
+    fn an_agent_may_still_write_its_own_working_notes() {
+        // `recent` is the agent's tier and rewriting it every run is the whole
+        // mechanism — refusing it would leave an agent with no memory at all.
+        let patch: Map<String, Value> =
+            serde_json::from_value(json!({ "patch": { "recent": "saw three risks" } })).unwrap();
+        assert!(!writes_preferences(
+            "process:scout",
+            "update_frontmatter",
+            &patch
+        ));
     }
 
     #[test]

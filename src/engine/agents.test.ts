@@ -30,9 +30,11 @@ describe('listAgents', () => {
     const wide = refs.find((r) => r.title === 'Wide');
     const bare = refs.find((r) => r.title === 'Bare');
     expect(wide?.shell).toBe(true);
-    expect(wide?.memory).toBe('knows a thing');
+    // M17.14 split memory into tiers; the pre-M17 flat `memory:` reads as the
+    // agent's working notes so an existing vault forgets nothing.
+    expect(wide?.memory.recent).toBe('knows a thing');
     expect(bare?.shell).toBe(false);
-    expect(bare?.memory).toBe('');
+    expect(bare?.memory).toEqual({ recent: '', preferences: '' });
   });
 
   it('skips unparseable records', () => {
@@ -118,5 +120,44 @@ describe('an agent’s identity survives a rename', () => {
       type: 'Agent',
     });
     expect(agentRef(plain).actor).toBe('process:release-scout');
+  });
+});
+
+/**
+ * M17.14 — memory tiers.
+ *
+ * Two fields, not three: "Intelligence" — what the agent inferred — is the
+ * knowledge bundle, which already stores inferences with provenance and needs
+ * a human stamp to become verified. A third frontmatter blob would be a
+ * second, worse copy of what M8 built properly.
+ */
+describe('memory tiers', () => {
+  const withProps = (properties: Record<string, unknown>) =>
+    agentRef(
+      makeEntry({
+        path: 'records/agents/scout.md',
+        title: 'Scout',
+        type: 'Agent',
+        properties: properties as never,
+      }),
+    );
+
+  it('reads the agent’s working notes and the human’s corrections apart', () => {
+    const memory = withProps({ recent: 'saw three risks', preferences: 'be terser' }).memory;
+    expect(memory).toEqual({ recent: 'saw three risks', preferences: 'be terser' });
+  });
+
+  it('still reads a pre-M17.14 vault’s flat memory as working notes', () => {
+    // A vault written against the old shape must not silently forget
+    // everything its agents had learned.
+    expect(withProps({ memory: 'old notes' }).memory.recent).toBe('old notes');
+  });
+
+  it('prefers the new key when a record carries both', () => {
+    expect(withProps({ memory: 'old', recent: 'new' }).memory.recent).toBe('new');
+  });
+
+  it('is empty rather than absent on a first run', () => {
+    expect(withProps({}).memory).toEqual({ recent: '', preferences: '' });
   });
 });
