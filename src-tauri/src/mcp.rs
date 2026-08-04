@@ -518,7 +518,6 @@ fn is_capture(entry: &vault::entry::Entry) -> bool {
 
 fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {
     let query = arg_str(args, "query").ok_or("search_notes needs a query")?;
-    let needle = query.to_lowercase();
     let type_filter = arg_str(args, "type");
     let limit = args
         .get("limit")
@@ -526,52 +525,73 @@ fn tool_search(vault: &Path, args: &Map<String, Value>) -> Result<Value, String>
         .unwrap_or(20)
         .min(100) as usize;
 
-    let entries = vault::scan::scan_vault(vault)?;
-    let mut hits = Vec::new();
-    for entry in entries {
-        if let Some(wanted) = &type_filter {
-            if entry.entry_type.as_deref() != Some(wanted.as_str()) {
-                continue;
-            }
-        }
-        let body = vault::write::read_note(vault, &entry.path).unwrap_or_default();
-        let haystack = format!("{} {}", entry.title, body).to_lowercase();
-        if !haystack.contains(&needle) {
-            continue;
-        }
-        let excerpt = body
-            .lines()
-            .find(|l| l.to_lowercase().contains(&needle))
-            .unwrap_or(&entry.snippet)
-            .trim()
-            .chars()
-            .take(180)
-            .collect::<String>();
-        hits.push(format!(
-            "- {} — {}{}\n  {}",
-            entry.path,
-            entry.title,
-            entry
-                .entry_type
-                .map(|t| format!(" [{t}]"))
-                .unwrap_or_default(),
-            excerpt
-        ));
-        if hits.len() >= limit {
-            break;
-        }
+    // Every body is read either way — the old substring search did the same —
+    // so ranking costs arithmetic over data already in hand and no index
+    // (M17.19). Kept as one materialised corpus because `Doc` borrows it.
+    let entries: Vec<vault::entry::Entry> = vault::scan::scan_vault(vault)?
+        .into_iter()
+        .filter(|e| match &type_filter {
+            Some(wanted) => e.entry_type.as_deref() == Some(wanted.as_str()),
+            None => true,
+        })
+        .collect();
+    let bodies: Vec<String> = entries
+        .iter()
+        .map(|e| vault::write::read_note(vault, &e.path).unwrap_or_default())
+        .collect();
+    let docs: Vec<crate::search::Doc> = entries
+        .iter()
+        .zip(bodies.iter())
+        .map(|(e, body)| crate::search::Doc {
+            path: &e.path,
+            title: &e.title,
+            kind: e.entry_type.as_deref(),
+            body,
+        })
+        .collect();
+
+    let ranked = crate::search::rank(&query, &docs, limit);
+    if ranked.hits.is_empty() {
+        return Ok(text_result(format!("No notes matched \"{query}\".")));
     }
 
-    Ok(text_result(if hits.is_empty() {
-        format!("No notes matched \"{query}\".")
-    } else {
-        format!(
-            "{} match(es) for \"{}\":\n{}",
-            hits.len(),
-            query,
-            hits.join("\n")
-        )
-    }))
+    let lines: Vec<String> = ranked
+        .hits
+        .iter()
+        .map(|hit| {
+            let entry = &entries[hit.index];
+            let excerpt = if hit.excerpt.is_empty() {
+                entry.snippet.clone()
+            } else {
+                hit.excerpt.clone()
+            };
+            format!(
+                "- {} — {}{}\n  {}",
+                entry.path,
+                entry.title,
+                entry
+                    .entry_type
+                    .as_deref()
+                    .map(|t| format!(" [{t}]"))
+                    .unwrap_or_default(),
+                excerpt
+            )
+        })
+        .collect();
+
+    Ok(text_result(format!(
+        "{} match(es) for \"{}\"{}:\n{}",
+        lines.len(),
+        query,
+        // Said out loud: an agent handed loose matches as if they were tight
+        // ones will report them to the user as the answer.
+        if ranked.widened {
+            " (no note contained every term — closest matches, best first)"
+        } else {
+            " (best first)"
+        },
+        lines.join("\n")
+    )))
 }
 
 fn tool_get_note(vault: &Path, args: &Map<String, Value>) -> Result<Value, String> {

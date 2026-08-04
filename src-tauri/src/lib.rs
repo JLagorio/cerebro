@@ -6,6 +6,7 @@ pub mod git;
 pub mod git_commands;
 pub mod knowledge;
 pub mod mcp;
+pub mod search;
 pub mod vault;
 
 use std::path::{Path, PathBuf};
