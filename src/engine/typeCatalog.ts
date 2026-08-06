@@ -14,6 +14,7 @@ import { isLibraryEntry, isLibraryType } from './library';
 import { isConcept, isKnowledgePath } from './okf';
 import { humanize } from './schema';
 import type { Entry, FieldDef, FieldOption, Presentation, Schema, ViewDefinition } from './types';
+import { defaultColumnsFor, hasStatusField } from './columns';
 import { DEFAULT_PRESENTATION } from './views';
 
 export interface SystemTypeSpec {
@@ -221,19 +222,23 @@ export function serializeFields(fields: FieldDef[]): Record<string, unknown> {
  * M10: this defaulted to the `split` browser, which no longer exists — the
  * open-in-place detail panel gives every view the doc-beside-properties reading
  * that split was added for, so the type screen opens on the grid instead.
+ *
+ * M19.1: a type that declares NOTHING gets no columns, rather than borrowing
+ * `DEFAULT_PRESENTATION`'s. That fallback dated from when every type was
+ * work-tracking, and it made a fresh type open on a grid of Key, Status,
+ * Priority, Assignee, Due and Estimate — six columns for properties that did
+ * not exist, on records whose own detail panel correctly showed none of them.
+ * A table must not invent a schema the vault does not have; Notion opens a new
+ * database on Name and an Add-property button, and so does this.
  */
 export function typePresentation(typeName: string, schema: Schema): Presentation {
   const def = schema.types.get(typeName);
   const fields = def?.fields ?? [];
-  const hasStatus = fields.some((f) => f.kind === 'status');
   return {
     type: 'table',
-    group: hasStatus ? [{ field: 'status' }] : [],
+    group: hasStatusField(fields) ? [{ field: 'status' }] : [],
     sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
-    columns:
-      fields.length > 0
-        ? fields.slice(0, 6).map((f) => ({ field: f.name }))
-        : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
+    columns: defaultColumnsFor(fields),
   };
 }
 

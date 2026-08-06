@@ -13,18 +13,16 @@ import {
 } from './views';
 import type { FilterGroup, ListDefinition, ListFile, Presentation, SortSpec } from './types';
 
+// M19.1: `group` and `columns` are empty here on purpose. A default
+// presentation is what a view looks like before anything is known about its
+// source, and both of those name FIELDS — which is why this fixture used to
+// carry a Jira issue's six (key/status/priority/assignee/due/estimate) and a
+// status band, and why a fresh type opened on six columns nothing declared.
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
-  group: [{ field: 'status' }],
+  group: [],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
-  columns: [
-    { field: 'key' },
-    { field: 'status' },
-    { field: 'priority' },
-    { field: 'assignee' },
-    { field: 'due' },
-    { field: 'estimate' },
-  ],
+  columns: [],
   rowHeight: undefined,
 };
 
@@ -154,20 +152,7 @@ describe('parseListYaml', () => {
 
   it('missing presentation fields fall back individually', () => {
     const view = parseListYaml('partial', 'name: Partial\npresentation:\n  type: board\n');
-    expect(presentationOf(view)).toEqual({
-      type: 'board',
-      group: [{ field: 'status' }],
-      sort: [{ field: 'modifiedAt', dir: 'desc' }],
-      columns: [
-        { field: 'key' },
-        { field: 'status' },
-        { field: 'priority' },
-        { field: 'assignee' },
-        { field: 'due' },
-        { field: 'estimate' },
-      ],
-      rowHeight: undefined,
-    });
+    expect(presentationOf(view)).toEqual({ ...DEFAULT_LIST_PRESENTATION, type: 'board' });
   });
 
   it('an explicit groupBy null stays flat', () => {

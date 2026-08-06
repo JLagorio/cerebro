@@ -135,4 +135,20 @@ describe('typePresentation', () => {
     expect(p.group).toEqual([]);
     expect(p.columns).toEqual([{ field: 'role' }]);
   });
+
+  // M19.1: a type that declares nothing used to borrow DEFAULT_PRESENTATION's
+  // columns, so a brand-new type opened on a grid of Key, Status, Priority,
+  // Assignee, Due and Estimate — six headers for properties no record had and
+  // the record's own detail panel correctly showed none of.
+  it('invents no columns for a type that declares no fields', () => {
+    const entries = [typeDoc('Project')];
+    const p = typePresentation('Project', buildSchema(entries));
+    expect(p.columns).toEqual([]);
+    expect(p.group).toEqual([]);
+  });
+
+  it('invents no columns for a type that has no Type doc at all', () => {
+    const p = typePresentation('Nothing declared this', buildSchema([]));
+    expect(p.columns).toEqual([]);
+  });
 });

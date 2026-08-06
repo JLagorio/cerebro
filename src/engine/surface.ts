@@ -1,4 +1,5 @@
 import { isTemplate } from '@/lib/templates';
+import { columnUniverse, defaultColumnsFor } from './columns';
 import { inboxEntries } from './inbox';
 import { isKnowledgePath } from './okf';
 import type {
@@ -167,16 +168,34 @@ export function resolveSurface(
       // decides both what the surface holds and how it draws.
       const active = resolveView(view.definition, sel.view);
       const { filters, presentation } = active;
+      const inSource = selectSource(entries, source);
       return {
         title: name,
         entries: sortEntries(
-          selectSource(entries, source).filter(
-            (e) => filters === null || evaluateFilters(e, filters, schema),
-          ),
+          inSource.filter((e) => filters === null || evaluateFilters(e, filters, schema)),
           presentation.sort,
           schema,
         ),
-        presentation,
+        // "No columns stated" means this source's properties, never "no
+        // properties" (M19.1). A `.list.yml` with no `columns:` key parses to
+        // `[]`, and this is the only place that holds both the source and the
+        // schema needed to say what it should show. Nothing is written to
+        // disk: the derived columns only materialise into YAML if the user
+        // then edits the view.
+        //
+        // Safe to key on emptiness because no UI can produce an empty array —
+        // hiding a column writes `hidden: true` and `toggleColumn` never
+        // removes a spec — so `[]` can only mean "the file never said".
+        //
+        // Derived against the UNFILTERED source: a default that changed as
+        // you filtered the view would drop columns out from under you.
+        presentation:
+          presentation.columns.length === 0
+            ? {
+                ...presentation,
+                columns: defaultColumnsFor(columnUniverse(source, inSource, schema)),
+              }
+            : presentation,
       };
     }
     case 'type': {

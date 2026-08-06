@@ -5,6 +5,32 @@ import type { ColumnSpec, Entry, FieldDef, Schema, ListSource } from './types';
 export const DEFAULT_COL_W = 150;
 export const MIN_COL_W = 60;
 
+/** How many of a source's properties a view opens showing. Past this the
+ * table is wider than the window before anyone has configured anything. */
+export const DEFAULT_COLUMN_COUNT = 6;
+
+/**
+ * The columns a view opens with, given what its source actually declares
+ * (M19.1).
+ *
+ * One implementation, because there were three: `typePresentation`, the view
+ * settings dialog's seed, and its source-changed handler each sliced the
+ * fields themselves — and two of them fell back to a hardcoded
+ * `key/status/priority/assignee/due/estimate` when the type declared nothing,
+ * so a brand-new type opened on six columns for properties that did not
+ * exist. A source that declares nothing gets NO columns: Notion opens a new
+ * database on Name and an Add-property button, and so does this.
+ */
+export function defaultColumnsFor(fields: FieldDef[]): ColumnSpec[] {
+  return fields.slice(0, DEFAULT_COLUMN_COUNT).map((f) => ({ field: f.name }));
+}
+
+/** Whether a source can be grouped into status bands — the same question the
+ * two seed paths were each answering inline. */
+export function hasStatusField(fields: FieldDef[]): boolean {
+  return fields.some((f) => f.kind === 'status');
+}
+
 /**
  * A column's field definition plus whether the records under it agree on
  * what kind it is. A typeless ("Everything") view can put a `status` from

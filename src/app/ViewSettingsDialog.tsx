@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Dialog } from '@/components/ui/Dialog';
 import { Dropdown } from '@/components/ui/Dropdown';
 import { Input } from '@/components/ui/Input';
+import { defaultColumnsFor, hasStatusField } from '@/engine/columns';
 import { listTypes } from '@/engine/typeCatalog';
 import type { Entry, Presentation, Schema, ListDefinition, ViewDefinition } from '@/engine/types';
 import { DEFAULT_PRESENTATION, layoutLabel } from '@/engine/views';
@@ -15,12 +16,12 @@ function seedPresentation(typeName: string | null, schema: Schema): Presentation
   const fields = typeName === null ? [] : (schema.types.get(typeName)?.fields ?? []);
   return {
     type: 'table',
-    group: fields.some((f) => f.kind === 'status') ? [{ field: 'status' }] : [],
+    group: hasStatusField(fields) ? [{ field: 'status' }] : [],
     sort: DEFAULT_PRESENTATION.sort.map((s) => ({ ...s })),
-    columns:
-      fields.length > 0
-        ? fields.slice(0, 6).map((f) => ({ field: f.name }))
-        : DEFAULT_PRESENTATION.columns.map((c) => ({ ...c })),
+    // M19.1: a List over "anything", or over a type declaring no fields, opens
+    // on Name and the "+" — it used to inherit six Jira columns from
+    // DEFAULT_PRESENTATION and write them into the new *.list.yml.
+    columns: defaultColumnsFor(fields),
   };
 }
 
@@ -148,7 +149,7 @@ export function ViewSettingsDialog({
                       // Columns belong to the source type — reset them with it.
                       presentation: {
                         ...firstView(def).presentation,
-                        columns: fields.slice(0, 6).map((f) => ({ field: f.name })),
+                        columns: defaultColumnsFor(fields),
                         // The grouping chain names properties and relations of
                         // the OLD type; none of it survives a source change.
                         group: [],

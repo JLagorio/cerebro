@@ -95,10 +95,12 @@ describe('grouping chain parse', () => {
     expect(bandLevels(p.group)).toEqual([]);
   });
 
-  it('still applies default bands when nothing at all is stated', () => {
-    expect(bandLevels(parse('presentation:\n  type: list\n').group).map((g) => g.field)).toEqual([
-      'status',
-    ]);
+  // M19.1: nothing stated means NO bands. It used to mean a `status` band,
+  // while an explicit `groupBy: null` meant none — two spellings of "I said
+  // nothing about grouping" that behaved differently, and a band over a field
+  // the source may not even declare.
+  it('adds no bands when nothing at all is stated', () => {
+    expect(bandLevels(parse('presentation:\n  type: list\n').group)).toEqual([]);
   });
 
   it('does not duplicate a level already present in both shapes', () => {
