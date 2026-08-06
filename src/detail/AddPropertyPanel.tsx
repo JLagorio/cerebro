@@ -75,6 +75,13 @@ export interface AddPropertyPanelProps {
    * anchored surface there would point at the trigger of the first.
    */
   anchorRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * Extra content below the type catalog (M19.4). The table header fills it
+   * with the columns it is hiding, so its "+" is ONE surface — declare a new
+   * property or bring a hidden one back — rather than a menu whose first item
+   * opened this panel.
+   */
+  footer?: React.ReactNode;
 }
 
 /**
@@ -97,6 +104,7 @@ export function AddPropertyPanel({
   onAdd,
   onCancel,
   anchorRef,
+  footer,
 }: AddPropertyPanelProps) {
   const schema = useSchema();
   const [name, setName] = useState('');
@@ -395,6 +403,7 @@ export function AddPropertyPanel({
           Select, Status, Date, Person, Checkbox, Files or Relation.
         </p>
       )}
+      {footer}
       {/* No Cancel in the anchored variant: picking a type commits and
           clicking away dismisses, which is Notion's shape. The inline variant
           is a wizard page inside another popover, where clicking away closes

@@ -230,6 +230,7 @@ export function FieldEditor({
         <button
           type="button"
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
+          data-cell-primary
           onClick={() => setOpen(true)}
           className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
@@ -298,6 +299,7 @@ export function FieldEditor({
         <button
           type="button"
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
+          data-cell-primary
           onClick={() => setOpen(true)}
           className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
@@ -373,6 +375,7 @@ export function FieldEditor({
           type="button"
           data-testid="relation-field"
           aria-label={`Edit ${humanize(def.name)}`}
+          data-cell-primary
           onClick={() => setOpen(true)}
           className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
@@ -447,6 +450,7 @@ export function FieldEditor({
         <button
           type="button"
           aria-label={humanize(def.name)}
+          data-cell-primary
           onClick={() => setOpen(true)}
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
@@ -652,6 +656,7 @@ export function FieldEditor({
       // property does the naming instead — blank means "draws no glyph", not
       // "is invisible to a screen reader or a click" (M16.35).
       {...(blank ? { 'aria-label': humanize(def.name) } : {})}
+      data-cell-primary
       // Seed the draft from the RAW value, never the formatted display: a
       // percent field opened holding "76%" and a currency field "$1,840",
       // and commit then rejected the app's own display string as not a

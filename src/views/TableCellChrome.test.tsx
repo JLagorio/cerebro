@@ -225,4 +225,51 @@ describe('detail panel chrome is deliberately untouched (M16.35)', () => {
     expect(calendar).not.toBeNull();
     expect(vis(calendar)).toBe('visible');
   });
+
+  /**
+   * Mechanical, rather than a comment asking the next author to remember.
+   *
+   * `FieldEditor` is shared by the table, the record panel and the doc info
+   * panel, so a rule in this file that forgets `.cb-row` silently restyles two
+   * surfaces it was never about. The prose above has said so since M16.35; a
+   * grep says it every time the suite runs.
+   */
+  it('every rule in table-chrome.css is scoped to a table row', () => {
+    const css = readFileSync(CHROME_CSS_PATH, 'utf8');
+    const selectors = css
+      .replace(/\/\*[\s\S]*?\*\//g, '') // comments mention .cb-cell-chrome in prose
+      .split('}')
+      .map((block) => block.split('{')[0].trim())
+      .filter((sel) => sel !== '');
+
+    // Split on the commas that separate whole selectors, NOT the ones inside
+    // `:is(…)` — the rules above are written as `:is(.cb-row:hover, …) :is(…)`,
+    // and a naive split would tear a scoped selector into unscoped halves.
+    const branches = (selector: string): string[] => {
+      const out: string[] = [];
+      let depth = 0;
+      let current = '';
+      for (const ch of selector) {
+        if (ch === '(') depth += 1;
+        if (ch === ')') depth -= 1;
+        if (ch === ',' && depth === 0) {
+          out.push(current);
+          current = '';
+          continue;
+        }
+        current += ch;
+      }
+      out.push(current);
+      return out;
+    };
+
+    expect(selectors.length).toBeGreaterThan(0);
+    for (const selector of selectors) {
+      // Every alternative, not just the first: a rule is only as scoped as its
+      // loosest branch.
+      for (const branch of branches(selector)) {
+        expect(branch).toContain('.cb-row');
+      }
+    }
+  });
 });

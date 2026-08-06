@@ -58,3 +58,51 @@
   ) {
   visibility: visible;
 }
+
+/* No hover fill on the value trigger itself (M19.2).
+ *
+ * `FieldEditor`'s triggers carry `rounded-md px-2 py-[3px] hover:bg-n-50` —
+ * correct in the DETAIL PANEL, where each property is a standalone row and
+ * that pill is the only thing saying it can be clicked. In a table cell the
+ * same pill is a box floating INSIDE the cell: inset by the cell's own
+ * padding horizontally and short of the row height vertically, so hovering a
+ * 36px row lit a 22px rectangle in the middle of it. Notion's table gives the
+ * ROW a fill and the cell none, and the whole cell is the target — which
+ * TableCell's click forwarding now makes true, so a fill marking out the part
+ * that used to be clickable would be describing something that no longer
+ * exists.
+ *
+ * `[data-cell-primary]`, not every button: the SMALL controls that share a
+ * cell are not the cell and must keep their own hover — the url and
+ * email/phone pencils, and a files cell's "+ Add" and per-chip "Remove". They
+ * are discrete targets you aim at, so feedback on them is the only thing
+ * saying which one you are about to hit.
+ *
+ * Scoped to `.cb-row` like every rule above it: the panel keeps its pill. */
+.cb-row .cb-cell-chrome [data-cell-primary]:hover {
+  background-color: transparent;
+}
+
+/* The row's Open pill (M19.3).
+ *
+ * Deliberately NOT in the `visibility` group above. That group hides inert
+ * glyphs, and dropping them out of hit-testing is the point. This is a real
+ * button and the row's only opener — a `visibility: hidden` control cannot be
+ * focused, so hiding it that way would take the record back out of the tab
+ * order, which is the exact M15 defect that made the title the opener and
+ * cost the name its editability. `opacity` keeps it focusable;
+ * `pointer-events: none` at rest keeps the other half of the group's intent,
+ * that nothing invisible sits between the pointer and the cell.
+ *
+ * `:focus-visible` is its own hook because a keyboard user tabbing to it
+ * lands before `:focus-within` has resolved on the row. */
+.cb-row-open {
+  opacity: 0;
+  pointer-events: none;
+}
+
+:is(.cb-row:hover, .cb-row:focus-within, .cb-row[data-focused='true']) .cb-row-open,
+.cb-row-open:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}

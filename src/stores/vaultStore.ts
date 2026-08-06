@@ -21,6 +21,16 @@ export interface VaultState {
   openVault(path: string): Promise<void>;
   rescan(): Promise<void>;
   patchFrontmatter(path: string, patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Rename a record by rewriting its body's first H1 — which IS its title
+   * (M19.3). Returns whether the write landed.
+   *
+   * Deliberately NOT `renameNote`: that moves the file, and `resolveTarget`
+   * matches a wikilink on the filename stem FIRST, so moving the file would
+   * dangle every link that names it. This is the same write the detail panel
+   * has always made, now reachable from a table cell.
+   */
+  setTitle(path: string, title: string): Promise<boolean>;
   createItem(args: {
     folder: string;
     slug: string;
@@ -172,6 +182,35 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       useUiStore.getState().toast(`Couldn't save changes to ${path}`);
       await get().rescan(); // disk truth wins: revert the optimistic update
     }
+  },
+
+  async setTitle(path, title) {
+    const vault = get().vaultPath;
+    const target = get().entries.find((e) => e.path === path);
+    const trimmed = title.trim();
+    // A blank title would leave the record with nothing to be called, and an
+    // unchanged one is a write with no content — both are "nothing happened",
+    // not failures, so neither toasts.
+    if (vault === null || target === undefined || trimmed === '' || trimmed === target.title) {
+      return false;
+    }
+    // Optimistic, like patchFrontmatter: `title` is a top-level Entry field
+    // rather than frontmatter, so applyPatch is not involved.
+    set({ entries: get().entries.map((e) => (e.path === path ? { ...e, title: trimmed } : e)) });
+    try {
+      await ipc.setNoteTitle(vault, path, trimmed);
+    } catch {
+      useUiStore.getState().toast("Couldn't rename record");
+      await get().rescan(); // disk truth wins: revert the optimistic update
+      return false;
+    }
+    // Unconditionally, unlike patchFrontmatter's `!inTauri()` guard: a title
+    // feeds derived state the optimistic update does not reach — wikilink
+    // resolution and the dossiers keyed off it. `rescan` catches and toasts
+    // its own failure, so a refresh that fails must not report the rename
+    // as failed; it already landed on disk.
+    await get().rescan();
+    return true;
   },
 
   // The documented EXCEPTION to the never-throw invariant (M14.8): callers

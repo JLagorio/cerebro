@@ -55,9 +55,34 @@ export type RowKeyboardRowProps = ReturnType<RowKeyboard['rowProps']>;
 /** What a cell must spread to take part in the cell cursor (M16.17). */
 export type RowKeyboardCellProps = ReturnType<RowKeyboard['cellProps']>;
 
-/** The control Enter hands the cell over to. */
-const CELL_CONTROL =
+/**
+ * The control Enter hands the cell over to.
+ *
+ * Exported since M19.2, when a POINTER click on the cell's own padding started
+ * doing the same thing. Two spellings of "what counts as this cell's editor"
+ * would eventually disagree about which gesture opens what.
+ */
+export const CELL_CONTROL =
   'input:not([disabled]),textarea:not([disabled]),select:not([disabled]),button:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * The one control in a cell that a gesture on the CELL means (M19.3).
+ *
+ * DOM order is not good enough, and the two places it is wrong are both
+ * damaging. A files cell renders `Remove <file>` before `+ Add`, so the first
+ * focusable is destructive — activating a populated files cell deleted an
+ * attachment. A name cell leads with the nesting expander, so Enter collapsed
+ * the row instead of editing the title beside it. `data-cell-primary` lets a
+ * cell say which control it means; DOM order remains the fallback, so a cell
+ * that marks nothing behaves exactly as it did.
+ */
+export function primaryControl(cell: HTMLElement | null | undefined): HTMLElement | null {
+  return (
+    cell?.querySelector<HTMLElement>('[data-cell-primary]') ??
+    cell?.querySelector<HTMLElement>(CELL_CONTROL) ??
+    null
+  );
+}
 
 /** True while the keystroke belongs to an editor rather than to the cursor. */
 function inEditor(target: HTMLElement): boolean {
@@ -147,10 +172,8 @@ export function useRowKeyboard(options: {
   /** Hand the cell over to whatever control it holds. */
   const openCell = useCallback(
     (r: number, c: number) => {
-      const control = document
-        .getElementById(cellId(r, c))
-        ?.querySelector<HTMLElement>(CELL_CONTROL);
-      if (control === null || control === undefined) return;
+      const control = primaryControl(document.getElementById(cellId(r, c)));
+      if (control === null) return;
       control.focus();
       // A control that is not a text field OPENS on click — a select chip, a
       // date, a relation picker. Focusing one only puts a ring on it, which

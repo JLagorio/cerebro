@@ -134,6 +134,11 @@ export function FilesField({
           ref={addRef}
           type="button"
           aria-label={`Add file to ${label}`}
+          // The one control a gesture on the whole CELL means. The chips'
+          // `Remove <file>` buttons render before this one, so resolving by
+          // DOM order made Enter — and, once a table cell forwarded clicks,
+          // the pointer too — delete an attachment.
+          data-cell-primary
           disabled={busy}
           onClick={() => setMenu((v) => !v)}
           className="rounded-md border-0 bg-transparent px-1 py-px text-xs text-n-400 hover:bg-n-50 hover:text-n-700 disabled:opacity-50"
