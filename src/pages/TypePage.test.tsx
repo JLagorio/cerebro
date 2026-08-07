@@ -18,6 +18,7 @@ beforeEach(() => {
     status: 'ready',
     patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
       patches.push({ path, patch });
+      return true;
     }),
   });
   useUiStore.setState({ detailPath: null });

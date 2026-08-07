@@ -197,8 +197,14 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     if (sourceType === null) return;
     void (async () => {
       const ok =
-        kind === 'relation' && relation !== undefined
-          ? await addRelationProperty(sourceType, name, relation)
+        // M20.3: `person` too. A person field IS a relation with an avatar
+        // renderer (M16.13b), and the picker that declares one offers a target
+        // — which this dropped on the floor, silently, because only `relation`
+        // reached `addRelationProperty`. The new field arrived pointing at
+        // nothing and there was no sign anything had been discarded. The
+        // table's own header "+" already got this right.
+        (kind === 'relation' || kind === 'person') && relation !== undefined
+          ? await addRelationProperty(sourceType, name, relation, kind)
           : await addFieldToType(sourceType, name, kind);
       if (ok) {
         changePresentation({

@@ -124,7 +124,7 @@ export function handleDragEnd(
     /** Every column on the board, across every lane. */
     columns: BoardColumnNode[];
     schema: Schema;
-    patchFrontmatter: (path: string, patch: Record<string, unknown>) => Promise<void>;
+    patchFrontmatter: (path: string, patch: Record<string, unknown>) => Promise<unknown>;
     toast: (message: string) => void;
   },
 ): void {

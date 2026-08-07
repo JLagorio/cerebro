@@ -705,6 +705,7 @@ describe('TableView header settings (M16.18)', () => {
       entries: fixtureVault(),
       patchFrontmatter: vi.fn(async (path: string) => {
         written.push(path);
+        return true;
       }),
     });
     const { onColumnsChange } = grid();

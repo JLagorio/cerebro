@@ -20,7 +20,13 @@ export interface VaultState {
   error: string | null;
   openVault(path: string): Promise<void>;
   rescan(): Promise<void>;
-  patchFrontmatter(path: string, patch: Record<string, unknown>): Promise<void>;
+  /**
+   * Writes a frontmatter patch, or `false` when it was refused or failed —
+   * never throws (store-layer invariant). The boolean exists so an inline
+   * editor can keep the text it was given rather than discarding a draft the
+   * schema turned away (M20.3); callers with nothing to undo still `void` it.
+   */
+  patchFrontmatter(path: string, patch: Record<string, unknown>): Promise<boolean>;
   /**
    * Rename a record by rewriting its body's first H1 — which IS its title
    * (M19.3). Returns whether the write landed.
@@ -148,7 +154,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
 
   async patchFrontmatter(path, patch) {
     const vault = get().vaultPath;
-    if (vault === null) return;
+    if (vault === null) return false;
     // Normalize once for both the optimistic update and the disk write:
     // undefined means delete, but JSON serialization to Tauri drops
     // undefined keys silently and the mock's yaml doc.set would write
@@ -163,7 +169,7 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       const errors = validatePatch(getSchema(get().entries), target, normalized);
       if (errors.length > 0) {
         useUiStore.getState().toast(errors[0]);
-        return;
+        return false;
       }
     }
     // Optimistic: local state updates synchronously, before the disk write.
@@ -181,7 +187,9 @@ export const useVaultStore = create<VaultState>()((set, get) => ({
       // review): surface silent write failures to the user via a toast.
       useUiStore.getState().toast(`Couldn't save changes to ${path}`);
       await get().rescan(); // disk truth wins: revert the optimistic update
+      return false;
     }
+    return true;
   },
 
   async setTitle(path, title) {

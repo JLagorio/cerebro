@@ -10,8 +10,10 @@ import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
 import {
   findOptionByLabel,
+  normalizeUrl,
   optionId,
   peopleTypes,
+  progressRatio,
   personCandidates,
   relationTargetFor,
 } from '@/engine/properties';
@@ -129,6 +131,16 @@ export function FieldEditor({
   const resolved = schema.resolveField(entry, def.name);
 
   const patch = (value: unknown) => void patchFrontmatter(entry.path, { [def.name]: value });
+  /**
+   * A multi-value field emptied back to nothing drops its KEY (M20.3).
+   *
+   * It used to write `field: []`, which is not what "unset" looks like
+   * anywhere else in the vault: `files` and `relation` already patch `null`,
+   * every read path treats an absent key and an empty list identically, and
+   * the difference is a line of YAML that only ever accumulates. `null` is the
+   * one delete spelling every backend honours (see vaultStore.patchFrontmatter).
+   */
+  const patchList = (next: unknown[]) => patch(next.length === 0 ? null : next);
 
   if (def.kind === 'status' || def.kind === 'select' || def.kind === 'multiselect') {
     const statuses = schema.statusSetFor(entry);
@@ -284,7 +296,17 @@ export function FieldEditor({
                   : 'Add options from the property menu.'
             }
             {...(multi ? { activeIds: values } : { activeId: values[0] ?? null })}
-            onPick={(id) => patch(multi ? toggle(values, id) : id)}
+            {...(values.length > 0 ? { onClear: () => patch(null) } : {})}
+            // Picking the option already chosen CLEARS it (M20.3). A
+            // single-select had no route back to empty: the popover offered
+            // the declared options and nothing else, and clicking the active
+            // one re-wrote the same value. Demo-vault's Priority declares a
+            // literal "None" option, which masked this; Estimate (XS/S/M/L/XL)
+            // is the honest case, and it was a one-way door. Multi already
+            // toggles, which is the same gesture meaning the same thing.
+            onPick={(id) =>
+              multi ? patchList(toggle(values, id)) : patch(values[0] === id ? null : id)
+            }
             onClose={() => setOpen(false)}
           />
         )}
@@ -299,14 +321,28 @@ export function FieldEditor({
     // Candidates came from `e.type === 'Person'` until M16.13b, which is the
     // type-name routing AGENTS.md forbids: a vault whose people are
     // `Teammate`s got an empty picker with no control anywhere to fix it.
-    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry).map(
-      (c) => ({
+    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry).map((c) => {
+      // M20.3: every row drew the same grey dot, so a Project and a person
+      // were indistinguishable in a picker whose whole job is telling them
+      // apart. The relation CHIPS already carry the target type's icon.
+      const style = typeStyle(c.type, schema);
+      return {
         id: pathStem(c.path),
         label: c.title,
         color: null,
-      }),
-    );
+        icon: style.icon,
+        iconColor: style.color,
+      };
+    });
     const values = asList(resolved.raw).map(stripWikilink);
+    /**
+     * M20.3: `limit: 1` means one person, and this branch ignored it in both
+     * halves — the picker toggled and stayed open, and `validateValue`'s
+     * person case never checked the cardinality its relation case enforces.
+     * A person field IS a relation with an avatar renderer (M16.13b), so it
+     * answers this the same way: picking replaces, and the popover closes.
+     */
+    const single = def.limit === 1;
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
     const blank = placeholder === 'blank' && values.length === 0;
 
@@ -347,7 +383,8 @@ export function FieldEditor({
                   body: `# ${name}\n`,
                 });
                 // By the stem it LANDED on — create_note may deduplicate.
-                patch(toggle(values, pathStem(path)).map(formatWikilink));
+                const stem = pathStem(path);
+                patch(single ? [formatWikilink(stem)] : toggle(values, stem).map(formatWikilink));
               } catch {
                 useUiStore.getState().toast(`Couldn't create "${name}"`);
               }
@@ -375,7 +412,8 @@ export function FieldEditor({
           <FieldPopover
             searchable
             options={options}
-            activeIds={values}
+            {...(single ? { activeId: values[0] ?? null } : { activeIds: values })}
+            {...(values.length > 0 ? { onClear: () => patch(null) } : {})}
             {...(createPerson !== undefined ? { onCreate: createPerson } : {})}
             emptyHint={
               createPerson === undefined
@@ -384,7 +422,11 @@ export function FieldEditor({
                     createType === null ? '' : ` as a new ${createType}`
                   }.`
             }
-            onPick={(id) => patch(toggle(values, id).map(formatWikilink))}
+            onPick={(id) =>
+              single
+                ? patch(values[0] === id ? null : [formatWikilink(id)])
+                : patchList(toggle(values, id).map(formatWikilink))
+            }
             onClose={() => setOpen(false)}
           />
         )}
@@ -410,7 +452,7 @@ export function FieldEditor({
       if (derived === null) return;
       const current = new Set(values);
       const wanted = new Set(next);
-      const jobs: Promise<void>[] = [];
+      const jobs: Promise<boolean>[] = [];
       for (const id of next) {
         if (current.has(id)) continue;
         const other = targetOf(id);
@@ -666,6 +708,20 @@ export function FieldEditor({
 
   // text | number — inline input on click
   if (draft !== null) {
+    /**
+     * A refused write keeps the draft (M20.3).
+     *
+     * `setDraft(null)` ran unconditionally, so a value the schema turned away
+     * took the text with it: type `example.com` into a URL cell and you got a
+     * toast, the old value back, and nothing left to correct. The write path
+     * reports refusals now (vaultStore.patchFrontmatter), so the editor can
+     * stay open on exactly what was typed.
+     */
+    const commitValue = (value: unknown) => {
+      void (async () => {
+        if (await patchFrontmatter(entry.path, { [def.name]: value })) setDraft(null);
+      })();
+    };
     const commit = () => {
       const trimmed = draft.trim();
       // A number field's display carries its format ("$1,840", "76%"). The
@@ -677,16 +733,17 @@ export function FieldEditor({
       // (M1.x): refuse the commit instead of poisoning the frontmatter.
       if (def.kind === 'number' && numeric !== '' && Number.isNaN(Number(numeric))) {
         useUiStore.getState().toast('Enter a number');
-        setDraft(null);
         return;
       }
       if (def.kind === 'number') {
-        patch(numeric === '' ? null : Number(numeric));
-        setDraft(null);
+        commitValue(numeric === '' ? null : Number(numeric));
         return;
       }
-      patch(trimmed === '' ? null : trimmed);
-      setDraft(null);
+      // M20.3: the scheme people leave off. The renderer already prepends one
+      // when it draws the anchor, so refusing `example.com` on the way in held
+      // the value to a stricter standard than the way out.
+      const text = def.kind === 'url' ? normalizeUrl(trimmed) : trimmed;
+      commitValue(text === '' ? null : text);
     };
     return (
       <input
@@ -702,6 +759,8 @@ export function FieldEditor({
         onKeyDown={(e) => {
           if (e.key === 'Enter') commit();
           if (e.key === 'Escape') {
+            // Abandoning is still one keystroke — keeping a refused draft is
+            // about not LOSING work, not about trapping anyone in the cell.
             e.stopPropagation();
             setDraft(null);
           }
@@ -711,6 +770,9 @@ export function FieldEditor({
     );
   }
   const blank = placeholder === 'blank' && resolved.display === '';
+  // A progress-formatted number draws its bar as the resting state (M20.3).
+  const ratio =
+    def.kind === 'number' && def.format === 'progress' ? progressRatio(resolved.display) : null;
   return (
     // max-w-full + truncate keep long text on one line inside a table cell;
     // the full value stays readable in the title and the detail panel.
@@ -741,8 +803,28 @@ export function FieldEditor({
         blank ? null : (
           <span className="text-n-400">Empty</span>
         )
-      ) : (
+      ) : ratio === null ? (
         <span className="min-w-0 truncate">{resolved.display}</span>
+      ) : (
+        // M20.3: a format is a DISPLAY, not a permission. The bar used to be
+        // drawn by the table, which then had to render the cell read-only to
+        // draw it — so the same property was editable in the panel and not in
+        // the grid. Drawn here, it is the resting state of an ordinary number
+        // editor and clicking it opens the input in both surfaces.
+        <span className="flex w-full min-w-0 items-center gap-2">
+          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-n-100">
+            <span
+              className="block h-full rounded-full"
+              style={{
+                width: `${ratio}%`,
+                background: ratio >= 100 ? 'var(--success-500)' : 'var(--cortex-500)',
+              }}
+            />
+          </span>
+          <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-600">
+            {resolved.display}
+          </span>
+        </span>
       )}
     </button>
   );

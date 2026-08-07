@@ -189,7 +189,7 @@ describe('CalendarView grid settings', () => {
  */
 describe('CalendarView drag to reschedule', () => {
   const patched = () => {
-    const patchFrontmatter = vi.fn(async () => {});
+    const patchFrontmatter = vi.fn(async () => true);
     useVaultStore.setState({ patchFrontmatter });
     return patchFrontmatter;
   };

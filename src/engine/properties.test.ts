@@ -7,6 +7,7 @@ import {
   inferKindFromValue,
   moveOption,
   optionId,
+  normalizeUrl,
   peopleTypes,
   personCandidates,
   relationTargetFor,
@@ -588,5 +589,53 @@ describe('personCandidates', () => {
       task,
     );
     expect(got.map((e) => e.title)).toEqual(['Ana']);
+  });
+});
+
+/**
+ * M20.3. `example.com` is what people type, and it was refused outright: a
+ * toast, the cell reverted, and the typed text was gone. The renderer already
+ * prepends `https://` to a bare `www.` when it draws the anchor, so the value
+ * was held to a stricter standard on the way in than on the way out.
+ */
+describe('normalizeUrl', () => {
+  it('gives a bare host the scheme its author left off', () => {
+    expect(normalizeUrl('example.com')).toBe('https://example.com');
+    expect(normalizeUrl('www.example.com/a?b=c')).toBe('https://www.example.com/a?b=c');
+    expect(normalizeUrl('  example.co.uk  ')).toBe('https://example.co.uk');
+  });
+
+  it('leaves anything that already names a scheme alone', () => {
+    expect(normalizeUrl('https://example.com')).toBe('https://example.com');
+    expect(normalizeUrl('mailto:a@b.com')).toBe('mailto:a@b.com');
+    expect(normalizeUrl('ftp://files')).toBe('ftp://files');
+  });
+
+  // Prefixing anything at all would turn every rejection into an acceptance
+  // and delete the validation this exists beside.
+  it('does not invent a URL out of something that is not one', () => {
+    expect(normalizeUrl('not a url')).toBe('not a url');
+    expect(normalizeUrl('hello')).toBe('hello');
+    expect(validateValue(def('url', { name: 'site' }), 'not a url')).not.toBeNull();
+    expect(validateValue(def('url', { name: 'site' }), normalizeUrl('example.com'))).toBeNull();
+  });
+
+  it('passes an empty value through, which is how a URL is unset', () => {
+    expect(normalizeUrl('   ')).toBe('');
+  });
+});
+
+// M20.3: a person field IS a relation with an avatar renderer (M16.13b), so it
+// answers cardinality the same way. This checked the shape and not the limit,
+// so `limit: 1` was declared, shown in the config editor, and enforced nowhere.
+describe('person cardinality', () => {
+  it('refuses a second person on a single-person field', () => {
+    const single = def('person', { name: 'lead', limit: 1 });
+    expect(validateValue(single, ['[[ana]]'])).toBeNull();
+    expect(validateValue(single, ['[[ana]]', '[[bo]]'])).toBe('lead names a single person');
+  });
+
+  it('leaves an unlimited person field alone', () => {
+    expect(validateValue(def('person', { name: 'lead' }), ['[[ana]]', '[[bo]]'])).toBeNull();
   });
 });

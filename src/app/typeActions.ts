@@ -205,11 +205,26 @@ export async function changeFieldKind(
     conversions.push({ path: record.path, value: next });
   }
 
-  // The new spec keeps only what the new kind understands. Options survive a
-  // move within the select family; everything else kind-specific is dropped.
-  const keep = new Set(KIND_KEYS[kind] ?? []);
+  /**
+   * The new spec keeps only what the new kind understands.
+   *
+   * `KIND_KEYS` says exactly that, and only its `options` row was ever read
+   * (M20.3) — every other entry in the table was dead. So a relation converted
+   * to a person lost `target`, `limit` and `from` and came back pointing at
+   * nothing; a rollup lost its `relation`/`property`/`calculate` wiring and
+   * computed nothing; a number lost its `format` and `precision`; a date lost
+   * its display formats. Each of those is silent, and none of them is
+   * recoverable from the value data — the declaration is where it lived.
+   *
+   * Copied from the OLD spec, so a key the previous kind never had cannot
+   * appear: the table is an allowlist of what the new kind can read, not a
+   * promise that it holds any of it.
+   */
+  const keep = KIND_KEYS[kind] ?? [];
   const spec: Record<string, unknown> = { kind };
-  if (keep.has('options') && Array.isArray(oldSpec.options)) spec.options = oldSpec.options;
+  for (const key of keep) {
+    if (oldSpec[key] !== undefined) spec[key] = oldSpec[key];
+  }
   if ((kind === 'select' || kind === 'multiselect') && !Array.isArray(spec.options)) {
     const distinct = [
       ...new Set(

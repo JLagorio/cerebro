@@ -43,7 +43,7 @@ export function useScheduleDrag({
   schema: Schema;
   zoom: Zoom;
   /** The store action. It never throws — it toasts and returns (M15 invariant). */
-  patchFrontmatter: (path: string, patch: Record<string, unknown>) => Promise<void>;
+  patchFrontmatter: (path: string, patch: Record<string, unknown>) => Promise<unknown>;
 }): ScheduleDrag {
   const handle = useTimeDrag({
     pxPerDay: PX_PER_DAY[zoom],

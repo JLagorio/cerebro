@@ -198,8 +198,18 @@ const TableCell = memo(function TableCell({
    */
   const cellDef = resolved.def ?? def;
   const readOnly = !owned || READ_ONLY.has(cellDef.kind);
-  const isProgress = owned && cellDef.format === 'progress';
-  const editable = !readOnly && !isProgress;
+  /**
+   * A progress bar is what a read-only kind LOOKS like here, not what makes a
+   * cell read-only (M20.3).
+   *
+   * `format: 'progress'` used to be part of the read-only test, so a number
+   * the record panel let you edit could not be edited in the grid — the format
+   * had become a permission. The bar is now the resting state of the ordinary
+   * number editor (`FieldEditor`), and this branch draws it only for the kinds
+   * that are genuinely computed: a rollup that formats as progress.
+   */
+  const isProgress = cellDef.format === 'progress';
+  const editable = !readOnly;
 
   /**
    * The whole cell is the hit target (M19.2).
@@ -249,7 +259,7 @@ const TableCell = memo(function TableCell({
       ].join(' ')}
       style={{ width: `var(${widthVar(index)})`, ...freeze }}
     >
-      {readOnly || isProgress ? (
+      {readOnly ? (
         isProgress ? (
           <ProgressCell display={resolved.display} />
         ) : (

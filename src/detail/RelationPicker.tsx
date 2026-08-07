@@ -300,9 +300,15 @@ export function RelationPicker({
             })}
             {results.length === 0 && !canCreate && (
               <p className="m-0 px-2 py-4 text-center text-sm text-n-400">
-                {candidates.length === 0
-                  ? `Nothing of type ${targetType ?? 'any'} exists yet.`
-                  : 'Everything that matches is already linked.'}
+                {candidates.length > 0
+                  ? 'Everything that matches is already linked.'
+                  : targetType === null
+                    ? 'This vault has no records to link to yet.'
+                    : // M20.3: `canCreate` needs typed text, so the one state
+                      // where creating is the ONLY way forward was the one
+                      // that reported a fact and offered nothing. The create
+                      // row is a keystroke away — say so.
+                      `No ${targetType} exists yet — type a name to create the first one.`}
               </p>
             )}
             {canCreate && (

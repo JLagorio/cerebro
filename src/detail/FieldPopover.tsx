@@ -106,6 +106,16 @@ export interface FieldPopoverOption {
   label: string;
   color: string | null;
   hollow?: boolean;
+  /**
+   * Draw this glyph instead of the colour dot (M20.3).
+   *
+   * A person or relation picker has no option colours, so every row rendered
+   * the same grey dot and a Project looked exactly like a person. The relation
+   * CHIPS already carry the target type's icon; the picker they are chosen
+   * from did not.
+   */
+  icon?: string;
+  iconColor?: string | null;
 }
 
 export interface FieldPopoverProps {
@@ -128,6 +138,17 @@ export interface FieldPopoverProps {
    * a status set a project overrides — always has options in it.
    */
   unavailableHint?: string;
+  /**
+   * Unset the field (M20.3). Rendered as the last stop, below the options, and
+   * only while something is selected.
+   *
+   * A single-select had no way back to empty at all: the popover offered the
+   * declared options and nothing else, and clicking the one already chosen
+   * re-wrote the same value. Demo-vault's Priority happens to declare a
+   * literal "None" OPTION, which masked it — Estimate (XS/S/M/L/XL) is the
+   * honest case, and it was a one-way door.
+   */
+  onClear?: () => void;
   onPick: (id: string) => void;
   onClose: () => void;
 }
@@ -141,6 +162,7 @@ export function FieldPopover({
   onCreate,
   emptyHint,
   unavailableHint,
+  onClear,
   onPick,
   onClose,
 }: FieldPopoverProps) {
@@ -172,20 +194,30 @@ export function FieldPopover({
   // popover showing "No matches" with no create row — a hard dead end on a
   // value that already exists. Show the option instead.
   const rows = visible.length === 0 && clash !== undefined ? [clash] : visible;
+  // Nothing to clear when nothing is set, and nothing to clear back TO while a
+  // filter is narrowing the list — the row would sit under matches it has no
+  // relationship to.
+  const canClear = onClear !== undefined && selected.size > 0 && trimmed === '';
 
-  // The Create row is the last stop on the same route as the options, which is
-  // how it reads on screen — arrowing past the final match lands on it.
-  const stops = rows.length + (canCreate ? 1 : 0);
+  // Create and Clear are the last stops on the same route as the options,
+  // which is how they read on screen — arrowing past the final match lands on
+  // them, in that order.
+  const createIndex = canCreate ? rows.length : -1;
+  const clearIndex = canClear ? rows.length + (canCreate ? 1 : 0) : -1;
+  const stops = rows.length + (canCreate ? 1 : 0) + (canClear ? 1 : 0);
   // Clamped rather than reset from an effect: filtering shrinks `rows` during
   // the same render that draws them, and a cursor pointing past the end would
   // paint nothing highlighted and make Enter a no-op for one keystroke.
   const active = stops === 0 ? -1 : Math.min(highlight, stops - 1);
-  const createActive = canCreate && active === rows.length;
+  const createActive = active === createIndex && createIndex >= 0;
+  const clearActive = active === clearIndex && clearIndex >= 0;
   const activeDescendant = createActive
     ? `${listId}-create`
-    : active >= 0
-      ? `${listId}-${rows[active]?.id}`
-      : undefined;
+    : clearActive
+      ? `${listId}-clear`
+      : active >= 0
+        ? `${listId}-${rows[active]?.id}`
+        : undefined;
 
   // Without a search box nothing inside the popover is focusable, so no
   // keystroke would ever reach the handler below. The surface takes focus
@@ -201,9 +233,18 @@ export function FieldPopover({
     if (!multi) onClose();
   };
 
+  const clear = () => {
+    onClear?.();
+    onClose();
+  };
+
   const pickAt = (i: number) => {
-    if (canCreate && i === rows.length) {
+    if (i === createIndex && createIndex >= 0) {
       create();
+      return;
+    }
+    if (i === clearIndex && clearIndex >= 0) {
+      clear();
       return;
     }
     const o = rows[i];
@@ -300,18 +341,24 @@ export function FieldPopover({
                   i === active ? 'bg-n-50' : ''
                 }`}
               >
-                <span
-                  className="box-border h-2 w-2 flex-none rounded-full"
-                  style={
-                    o.hollow || !o.color
-                      ? {
-                          border: `1.5px solid ${
-                            o.color === null ? 'var(--n-400)' : resolveOptionColor(o.color).solid
-                          }`,
-                        }
-                      : { background: resolveOptionColor(o.color).solid }
-                  }
-                />
+                {o.icon === undefined ? (
+                  <span
+                    className="box-border h-2 w-2 flex-none rounded-full"
+                    style={
+                      o.hollow || !o.color
+                        ? {
+                            border: `1.5px solid ${
+                              o.color === null ? 'var(--n-400)' : resolveOptionColor(o.color).solid
+                            }`,
+                          }
+                        : { background: resolveOptionColor(o.color).solid }
+                    }
+                  />
+                ) : (
+                  <span className="flex flex-none">
+                    <Icon name={o.icon} size={13} color={o.iconColor ?? 'var(--n-400)'} />
+                  </span>
+                )}
                 <span className="min-w-0 flex-1 truncate">{o.label}</span>
                 {selected.has(o.id) && <Icon name="check" size={14} color="var(--cortex-600)" />}
               </button>
@@ -344,6 +391,20 @@ export function FieldPopover({
                 <span className="min-w-0 flex-1 truncate">
                   Create <span className="font-medium text-n-900">{trimmed}</span>
                 </span>
+              </button>
+            )}
+            {canClear && (
+              <button
+                id={`${listId}-clear`}
+                type="button"
+                onMouseEnter={() => setHighlight(clearIndex)}
+                onClick={clear}
+                className={`mt-0.5 flex w-full items-center gap-2 rounded-md border-t border-n-100 px-2 py-[7px] text-left text-sm text-n-600 hover:bg-n-50 ${
+                  clearActive ? 'bg-n-50' : ''
+                }`}
+              >
+                <Icon name="circle-slash" size={13} color="var(--n-400)" />
+                <span className="min-w-0 flex-1 truncate">Clear</span>
               </button>
             )}
           </div>

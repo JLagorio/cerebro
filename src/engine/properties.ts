@@ -681,6 +681,29 @@ function readEndpoint(text: string): string | null {
   return m === null ? null : m[1];
 }
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
+/** A scheme, per RFC 3986's `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`. */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+/** Something with a dot in it and no spaces — `example.com`, `a.b.co/x?y`. */
+const BARE_HOST = /^[\w-]+(\.[\w-]+)+([/:?#]|$)/;
+
+/**
+ * Give a URL the scheme its author left off (M20.3).
+ *
+ * `example.com` is what people type, and it was refused outright: a toast, the
+ * cell reverted, and the text they had typed was gone. The app's own renderer
+ * already prepends `https://` to a bare `www.` when it draws the anchor, so
+ * the value was being held to a stricter standard on the way IN than on the
+ * way out.
+ *
+ * Deliberately narrow. Prefixing anything at all would turn every rejection
+ * into an acceptance and delete the validation entirely — "not a url" has no
+ * dot and stays refused, which is the case the message is for.
+ */
+export function normalizeUrl(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '' || HAS_SCHEME.test(trimmed)) return trimmed;
+  return BARE_HOST.test(trimmed) ? `https://${trimmed}` : trimmed;
+}
 /** Only for INFERRING a kind from a loose value — never for validation. */
 const EMAIL_SHAPE = /^(mailto:)?[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -766,9 +789,17 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
         ? null
         : `${label} must be a list of options`;
     case 'person':
-      return isScalarString(value) || isStringArray(value)
-        ? null
-        : `${label} must reference other pages`;
+      // M20.3: a person field IS a relation with an avatar renderer (M16.13b),
+      // so it answers cardinality the same way. This case checked the shape and
+      // not the limit, so `limit: 1` was declared, shown in the config editor,
+      // and enforced nowhere — the picker toggled a second person in and the
+      // write went through.
+      if (!(isScalarString(value) || isStringArray(value))) {
+        return `${label} must reference other pages`;
+      }
+      return def.limit === 1 && Array.isArray(value) && value.length > 1
+        ? `${label} names a single person`
+        : null;
     case 'relation': {
       // The reciprocal of a two-way pair is derived — writing it here would
       // store a mirror that the owning side immediately contradicts (M12.4).
