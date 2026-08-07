@@ -8,8 +8,10 @@
 //!
 //! The acknowledgement rule (M21 rule one), verbatim:
 //!
-//!     write frame → flush userspace buffers → fsync open segment
-//!     → only then return committed {event_id, seq} to the caller
+//! ```text
+//! write frame → flush userspace buffers → fsync open segment
+//! → only then return committed {event_id, seq} to the caller
+//! ```
 //!
 //! Sealing is a SEPARATE operation (rotation) and is never the transaction
 //! boundary.

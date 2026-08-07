@@ -19,6 +19,7 @@
 //! acknowledgement wants. Re-verify on toolchain bumps.
 
 pub mod frame;
+pub mod index;
 pub mod recovery;
 pub mod segment;
 pub mod store;
