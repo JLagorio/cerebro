@@ -7,6 +7,7 @@ import {
   inferKindFromValue,
   moveOption,
   optionId,
+  normalizeUrl,
   peopleTypes,
   personCandidates,
   relationTargetFor,
@@ -528,30 +529,113 @@ describe('personCandidates', () => {
   ];
   const schema = buildSchema(entries);
 
+  const task = makeEntry({ path: 'tasks/t1.md', title: 'T1', type: 'Task' });
+
   it('offers records of the declared target', () => {
     const got = personCandidates(
       def('person', { name: 'owner', target: 'Teammate' }),
       schema,
       entries,
-      'Task',
+      task,
     );
     expect(got.map((e) => e.title)).toEqual(['Ana']);
   });
 
   it('falls back to the vault’s people when the field names no target', () => {
-    const got = personCandidates(def('person', { name: 'lead' }), schema, entries, 'Task');
+    const got = personCandidates(def('person', { name: 'lead' }), schema, entries, task);
     expect(got.map((e) => e.title)).toEqual(['Ana']);
   });
 
-  // A long picker is merely long. The empty one this used to produce was a
-  // dead end with no way out of it.
-  it('offers every record rather than nothing when the vault has no people', () => {
+  /**
+   * FLIPPED in M20.1. This used to assert that a vault with no people offers
+   * every record, on the reasoning that a long picker beats a dead end. It is
+   * not merely long: `relationTargetFor` INFERS an untargeted person field's
+   * target from what it holds, so one pick made the field point at Task
+   * permanently, and `peopleTypes` then reported Task as one of the vault's
+   * people types everywhere. An empty set is the answer `peopleTypes` already
+   * documents; the dead end is closed by a create row instead (see
+   * PersonField.test.tsx).
+   */
+  it('offers nothing when the vault has no notion of people', () => {
     const bare = [
       makeEntry({ path: 'types/task.md', title: 'Task', type: 'Type' }),
       makeEntry({ path: 'tasks/t1.md', title: 'T1', type: 'Task' }),
     ];
-    const got = personCandidates(def('person', { name: 'lead' }), buildSchema(bare), bare, 'Task');
-    // Type docs are schema, never candidates.
-    expect(got.map((e) => e.title)).toEqual(['T1']);
+    const got = personCandidates(def('person', { name: 'lead' }), buildSchema(bare), bare, task);
+    expect(got).toEqual([]);
+  });
+
+  // A record is not its own owner — the same exclusion `type: 'Type'` gets.
+  it('excludes the record being edited', () => {
+    const ana = entries.find((e) => e.title === 'Ana')!;
+    const got = personCandidates(
+      def('person', { name: 'owner', target: 'Teammate' }),
+      schema,
+      entries,
+      ana,
+    );
+    expect(got).toEqual([]);
+  });
+
+  // An untyped doc has no type, so no people type can hold it. Falls out of
+  // the rule rather than needing its own clause — but it is the case the old
+  // whole-vault fallback swept in, so it is pinned.
+  it('never offers an untyped doc', () => {
+    const withDoc = [...entries, makeEntry({ path: 'notes/n.md', title: 'A note', type: null })];
+    const got = personCandidates(
+      def('person', { name: 'lead' }),
+      buildSchema(withDoc),
+      withDoc,
+      task,
+    );
+    expect(got.map((e) => e.title)).toEqual(['Ana']);
+  });
+});
+
+/**
+ * M20.3. `example.com` is what people type, and it was refused outright: a
+ * toast, the cell reverted, and the typed text was gone. The renderer already
+ * prepends `https://` to a bare `www.` when it draws the anchor, so the value
+ * was held to a stricter standard on the way in than on the way out.
+ */
+describe('normalizeUrl', () => {
+  it('gives a bare host the scheme its author left off', () => {
+    expect(normalizeUrl('example.com')).toBe('https://example.com');
+    expect(normalizeUrl('www.example.com/a?b=c')).toBe('https://www.example.com/a?b=c');
+    expect(normalizeUrl('  example.co.uk  ')).toBe('https://example.co.uk');
+  });
+
+  it('leaves anything that already names a scheme alone', () => {
+    expect(normalizeUrl('https://example.com')).toBe('https://example.com');
+    expect(normalizeUrl('mailto:a@b.com')).toBe('mailto:a@b.com');
+    expect(normalizeUrl('ftp://files')).toBe('ftp://files');
+  });
+
+  // Prefixing anything at all would turn every rejection into an acceptance
+  // and delete the validation this exists beside.
+  it('does not invent a URL out of something that is not one', () => {
+    expect(normalizeUrl('not a url')).toBe('not a url');
+    expect(normalizeUrl('hello')).toBe('hello');
+    expect(validateValue(def('url', { name: 'site' }), 'not a url')).not.toBeNull();
+    expect(validateValue(def('url', { name: 'site' }), normalizeUrl('example.com'))).toBeNull();
+  });
+
+  it('passes an empty value through, which is how a URL is unset', () => {
+    expect(normalizeUrl('   ')).toBe('');
+  });
+});
+
+// M20.3: a person field IS a relation with an avatar renderer (M16.13b), so it
+// answers cardinality the same way. This checked the shape and not the limit,
+// so `limit: 1` was declared, shown in the config editor, and enforced nowhere.
+describe('person cardinality', () => {
+  it('refuses a second person on a single-person field', () => {
+    const single = def('person', { name: 'lead', limit: 1 });
+    expect(validateValue(single, ['[[ana]]'])).toBeNull();
+    expect(validateValue(single, ['[[ana]]', '[[bo]]'])).toBe('lead names a single person');
+  });
+
+  it('leaves an unlimited person field alone', () => {
+    expect(validateValue(def('person', { name: 'lead' }), ['[[ana]]', '[[bo]]'])).toBeNull();
   });
 });

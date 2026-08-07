@@ -70,7 +70,7 @@ const ranged = (slug: string, start: string, end: string, status = 'Live') =>
   });
 
 const patched = () => {
-  const patchFrontmatter = vi.fn(async () => {});
+  const patchFrontmatter = vi.fn(async () => true);
   useVaultStore.setState({ patchFrontmatter });
   return patchFrontmatter;
 };

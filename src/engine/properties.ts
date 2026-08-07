@@ -112,9 +112,19 @@ export function applyFormat(display: string, def: FieldDef): string {
   return Number.isFinite(n) ? formatNumber(n, def) : display;
 }
 
-/** 0–100 clamp for progress bars; null when the value isn't numeric. */
+/**
+ * 0–100 clamp for progress bars; null when the value isn't numeric.
+ *
+ * A BLANK value is not zero (M20.1). `Number('')` is `0` and `0` is finite, so
+ * every record with no value under a progress-formatted column drew a full
+ * empty track — which reads as "0% done" rather than as "nothing recorded",
+ * and contradicted the em-dash the neighbouring read-only kinds show for the
+ * same absence.
+ */
 export function progressRatio(display: string): number | null {
-  const n = Number(String(display).replace(/[%$,]/g, ''));
+  const text = String(display).replace(/[%$,]/g, '').trim();
+  if (text === '') return null;
+  const n = Number(text);
   if (!Number.isFinite(n)) return null;
   return Math.max(0, Math.min(100, n));
 }
@@ -506,23 +516,44 @@ export function peopleTypes(schema: Schema, entries: Entry[]): ReadonlySet<strin
  * The records a person field may pick from.
  *
  * Most specific answer first: the field's declared target, then the majority
- * type of the people it already holds (both via `relationTargetFor`), then
- * the vault's people types, and finally every record — an over-long picker
- * is merely long, while the empty one this used to produce was a dead end.
+ * type of the people it already holds (both via `relationTargetFor`), then the
+ * vault's people types. There is no fourth answer (M20.1).
+ *
+ * It used to end in "…and finally every record", on the reasoning that an
+ * over-long picker is merely long while an empty one is a dead end. It is not
+ * merely long: it is a one-click way to retype the vault. `relationTargetFor`
+ * INFERS a person field's target from the values it already holds, so picking
+ * a Project into an untargeted `Lead` makes that field decide it points at
+ * Project — permanently, with no control anywhere that says so. `peopleTypes`
+ * then collects those inferred targets, so Project becomes one of the vault's
+ * people types and leaks into every other untargeted person field and the
+ * editor's `@` menu. One mis-click, and the vault's notion of "person" is
+ * whatever was nearest to hand.
+ *
+ * `peopleTypes`' own rule is the right one and this was the function that did
+ * not obey it: an empty set is a real answer. The dead end it was avoiding is
+ * closed properly instead — the picker can now CREATE a person (M20.1), and
+ * creating the first one is what establishes what a person is here.
+ *
+ * `owner` is the record being edited: its type narrows the inference (a field
+ * name is not unique across types), and it is excluded from its own picker for
+ * the same reason `type: 'Type'` is — a record is not its own owner.
  */
 export function personCandidates(
   def: FieldDef,
   schema: Schema,
   entries: Entry[],
-  ownerType?: string | null,
+  owner?: Entry | null,
 ): Entry[] {
-  const target = relationTargetFor(def, entries, ownerType);
-  if (target !== null) return entries.filter((e) => e.type === target);
+  const target = relationTargetFor(def, entries, owner?.type);
+  const notSelf = (e: Entry) => e.path !== owner?.path;
+  if (target !== null) return entries.filter((e) => e.type === target && notSelf(e));
   const people = peopleTypes(schema, entries);
+  if (people.size === 0) return [];
   // Type docs are schema, never candidates — the same exclusion RelationPicker
-  // applies to an unenforced relation.
-  const records = entries.filter((e) => e.type !== 'Type');
-  return people.size === 0 ? records : records.filter((e) => people.has(e.type ?? ''));
+  // applies to an unenforced relation. An UNTYPED doc is excluded by the same
+  // rule that admits the rest: `people` holds type names, and a doc has none.
+  return entries.filter((e) => e.type !== 'Type' && people.has(e.type ?? '') && notSelf(e));
 }
 
 // --- Option identity and order (M16.12) ------------------------------------
@@ -650,6 +681,29 @@ function readEndpoint(text: string): string | null {
   return m === null ? null : m[1];
 }
 const URL_SHAPE = /^(https?:\/\/|mailto:|www\.)/i;
+/** A scheme, per RFC 3986's `scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`. */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+/** Something with a dot in it and no spaces — `example.com`, `a.b.co/x?y`. */
+const BARE_HOST = /^[\w-]+(\.[\w-]+)+([/:?#]|$)/;
+
+/**
+ * Give a URL the scheme its author left off (M20.3).
+ *
+ * `example.com` is what people type, and it was refused outright: a toast, the
+ * cell reverted, and the text they had typed was gone. The app's own renderer
+ * already prepends `https://` to a bare `www.` when it draws the anchor, so
+ * the value was being held to a stricter standard on the way IN than on the
+ * way out.
+ *
+ * Deliberately narrow. Prefixing anything at all would turn every rejection
+ * into an acceptance and delete the validation entirely — "not a url" has no
+ * dot and stays refused, which is the case the message is for.
+ */
+export function normalizeUrl(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '' || HAS_SCHEME.test(trimmed)) return trimmed;
+  return BARE_HOST.test(trimmed) ? `https://${trimmed}` : trimmed;
+}
 /** Only for INFERRING a kind from a loose value — never for validation. */
 const EMAIL_SHAPE = /^(mailto:)?[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
@@ -735,9 +789,17 @@ export function validateValue(def: FieldDef, value: unknown): string | null {
         ? null
         : `${label} must be a list of options`;
     case 'person':
-      return isScalarString(value) || isStringArray(value)
-        ? null
-        : `${label} must reference other pages`;
+      // M20.3: a person field IS a relation with an avatar renderer (M16.13b),
+      // so it answers cardinality the same way. This case checked the shape and
+      // not the limit, so `limit: 1` was declared, shown in the config editor,
+      // and enforced nowhere — the picker toggled a second person in and the
+      // write went through.
+      if (!(isScalarString(value) || isStringArray(value))) {
+        return `${label} must reference other pages`;
+      }
+      return def.limit === 1 && Array.isArray(value) && value.length > 1
+        ? `${label} names a single person`
+        : null;
     case 'relation': {
       // The reciprocal of a two-way pair is derived — writing it here would
       // store a mirror that the owning side immediately contradicts (M12.4).

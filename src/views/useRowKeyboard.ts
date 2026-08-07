@@ -55,9 +55,34 @@ export type RowKeyboardRowProps = ReturnType<RowKeyboard['rowProps']>;
 /** What a cell must spread to take part in the cell cursor (M16.17). */
 export type RowKeyboardCellProps = ReturnType<RowKeyboard['cellProps']>;
 
-/** The control Enter hands the cell over to. */
-const CELL_CONTROL =
+/**
+ * The control Enter hands the cell over to.
+ *
+ * Exported since M19.2, when a POINTER click on the cell's own padding started
+ * doing the same thing. Two spellings of "what counts as this cell's editor"
+ * would eventually disagree about which gesture opens what.
+ */
+export const CELL_CONTROL =
   'input:not([disabled]),textarea:not([disabled]),select:not([disabled]),button:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * The one control in a cell that a gesture on the CELL means (M19.3).
+ *
+ * DOM order is not good enough, and the two places it is wrong are both
+ * damaging. A files cell renders `Remove <file>` before `+ Add`, so the first
+ * focusable is destructive — activating a populated files cell deleted an
+ * attachment. A name cell leads with the nesting expander, so Enter collapsed
+ * the row instead of editing the title beside it. `data-cell-primary` lets a
+ * cell say which control it means; DOM order remains the fallback, so a cell
+ * that marks nothing behaves exactly as it did.
+ */
+export function primaryControl(cell: HTMLElement | null | undefined): HTMLElement | null {
+  return (
+    cell?.querySelector<HTMLElement>('[data-cell-primary]') ??
+    cell?.querySelector<HTMLElement>(CELL_CONTROL) ??
+    null
+  );
+}
 
 /** True while the keystroke belongs to an editor rather than to the cursor. */
 function inEditor(target: HTMLElement): boolean {
@@ -147,17 +172,21 @@ export function useRowKeyboard(options: {
   /** Hand the cell over to whatever control it holds. */
   const openCell = useCallback(
     (r: number, c: number) => {
-      const control = document
-        .getElementById(cellId(r, c))
-        ?.querySelector<HTMLElement>(CELL_CONTROL);
-      if (control === null || control === undefined) return;
+      const control = primaryControl(document.getElementById(cellId(r, c)));
+      if (control === null) return;
       control.focus();
       // A control that is not a text field OPENS on click — a select chip, a
       // date, a relation picker. Focusing one only puts a ring on it, which
       // is not what Enter promised.
-      if (!(control instanceof HTMLInputElement) && !(control instanceof HTMLTextAreaElement)) {
-        control.click();
-      }
+      //
+      // M20.4: a checkbox is an `<input>` and so was excluded, but it is not a
+      // TEXT field — there is nothing to type into it, so Enter left a ring on
+      // a control that then needed Space to actually do anything. The test is
+      // "does typing mean something here", not "is this an input".
+      const typeable =
+        control instanceof HTMLTextAreaElement ||
+        (control instanceof HTMLInputElement && control.type !== 'checkbox');
+      if (!typeable) control.click();
     },
     [cellId],
   );
@@ -195,16 +224,39 @@ export function useRowKeyboard(options: {
     (e: React.KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const container = e.currentTarget as HTMLElement;
-      if (inEditor(target)) {
-        // Never steal keys from an editor inside a cell — except the one key
-        // whose whole job is leaving it. Without this there is no way back to
-        // the cursor from an editor the cursor itself opened.
-        if (e.key === 'Escape' && col >= 0) {
-          e.preventDefault();
-          e.stopPropagation();
-          target.blur();
-          container.focus();
-        }
+      /**
+       * A keystroke that started on a real control belongs to that control
+       * (M20.4).
+       *
+       * The grid drives itself with `aria-activedescendant`: focus never
+       * leaves the container, so every key the cursor cares about arrives with
+       * `target === currentTarget`. Anything else reached a focusable element
+       * INSIDE the grid — an Open pill, a band header, a row checkbox, a
+       * column menu — and this handler ran on top of it anyway.
+       *
+       * Reproduced: cursor on row 1, Tab to row 5's Open pill, press Enter →
+       * the panel opens record 1 of 45. `preventDefault` then suppressed the
+       * button's own activation, so the control you were standing on did
+       * nothing and a different row opened instead. Space on a band header had
+       * the same shape.
+       *
+       * This replaces an `inEditor` test that asked the same question too
+       * narrowly: it caught inputs, textareas and contenteditables — which is
+       * why typing into a cell worked — and a BUTTON is not an editor, so
+       * every other control fell straight through.
+       *
+       * Escape is the exception, because it is the one key that means "give me
+       * the grid back" wherever it was pressed. FieldEditor's own Escape
+       * handler stops propagation and unmounts its input, and removing a
+       * focused element fires no blur — which is what `onKeyDownCapture` above
+       * exists to recover from.
+       */
+      if (target !== container) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopPropagation();
+        target.blur();
+        container.focus();
         return;
       }
       switch (e.key) {
@@ -238,13 +290,17 @@ export function useRowKeyboard(options: {
           e.preventDefault();
           stepCell(e.shiftKey ? -1 : 1);
           break;
+        // M20.4: these set the index and nothing else, so on any list longer
+        // than the viewport the cursor jumped to a row nobody could see and
+        // the next arrow press appeared to teleport. Every other move goes
+        // through `move`, which scrolls; these two were the exceptions.
         case 'Home':
           e.preventDefault();
-          setIndex(0);
+          move(-count);
           break;
         case 'End':
           e.preventDefault();
-          setIndex(count - 1);
+          move(count);
           break;
         case 'Enter':
           if (index < 0) break;

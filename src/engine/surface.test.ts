@@ -4,18 +4,13 @@ import { buildSchema } from './schema';
 import { makeEntry } from './testHelpers';
 import type { FilterGroup, ListFile, Presentation } from './types';
 
+// M19.1: no columns and no bands. Both name fields, and nothing is known
+// about the source of a surface that resolved to no view at all.
 const DEFAULT_LIST_PRESENTATION = {
   type: 'list',
-  group: [{ field: 'status' }],
+  group: [],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
-  columns: [
-    { field: 'key' },
-    { field: 'status' },
-    { field: 'priority' },
-    { field: 'assignee' },
-    { field: 'due' },
-    { field: 'estimate' },
-  ],
+  columns: [],
 };
 
 const FOUNDATIONS = 'projects/foundations/project.md';

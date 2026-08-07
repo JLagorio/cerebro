@@ -1,3 +1,4 @@
+import { bandKind, bandValueFor, NO_VALUE_KEY } from './grouping';
 import { nextItemKey } from './itemKeys';
 import type { ChildrenSpec, Entry, Schema } from './types';
 
@@ -21,12 +22,15 @@ export function createTarget(
     /** The project.md path when creating inside a project. */
     project: Entry | null;
     entries: Entry[];
+    /** Required so a band's key can be coerced into what the field stores —
+     * see the `groupBy` branch below. */
+    schema: Schema;
     /** Group value to preset, from the band the affordance sits in. */
     groupBy?: string | null;
     groupValue?: string | null;
   },
 ): CreateTarget {
-  const { project, entries, groupBy, groupValue } = options;
+  const { project, entries, schema, groupBy, groupValue } = options;
   const frontmatter: Record<string, unknown> = { type: typeName };
 
   // M12.2: containment is a property of the CONTEXT, not of the type. Any
@@ -40,14 +44,23 @@ export function createTarget(
 
   // The band's value, unless it is the synthetic no-value or all-items group
   // — presetting `field: ''` there would write a property nobody asked for.
+  //
+  // Coerced through `bandValueFor` (M20.1), because a band KEY is not a stored
+  // VALUE: the key is what `groupEntries` bucketed on, which for a relation or
+  // person is the wikilink stem and for a checkbox is `String(true)`. Writing
+  // it verbatim produced `epic: Bonsai` — filed under `properties` rather than
+  // `relationships`, so the link did not exist and the record did not come back
+  // to the band it was created in. `undefined` means the band cannot be
+  // expressed as one write (multi-select), so nothing is seeded.
   if (
     groupBy != null &&
     groupBy !== '' &&
     groupValue != null &&
     groupValue !== '' &&
-    groupValue !== '__none__'
+    groupValue !== NO_VALUE_KEY
   ) {
-    frontmatter[groupBy] = groupValue;
+    const value = bandValueFor(groupValue, bandKind(entries, groupBy, schema));
+    if (value !== undefined && value !== null) frontmatter[groupBy] = value;
   }
 
   const folder =

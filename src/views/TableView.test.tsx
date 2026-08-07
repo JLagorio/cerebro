@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
 import { buildSchema } from '@/engine/schema';
+import { columnUniverse } from '@/engine/columns';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -112,7 +113,9 @@ describe('TableView keyboard access (M15)', () => {
     const { items } = setup();
     const grid = screen.getByTestId('table-view');
     expect(grid.getAttribute('aria-label')).toBeTruthy();
-    expect(grid.getAttribute('aria-rowcount')).toBe(String(items.length));
+    // M20.4: every row in the DOM, header included — bands and the create row
+    // are rows too, and counting only records told a screen reader "row 9 of 4".
+    expect(grid.getAttribute('aria-rowcount')).toBe(String(items.length + 1));
     // The native ring is no longer suppressed with nothing in its place.
     expect(grid.className).not.toContain('outline-none ');
   });
@@ -216,10 +219,32 @@ describe('TableView column resizing (M11)', () => {
     expect(onPresentationChange.mock.calls[0][0].titleWidth).toBe(380);
   });
 
-  it('resizes from the keyboard, so the affordance is not pointer-only', () => {
+  /**
+   * M20.5: two-phase, like the pointer. Each arrow used to call the commit,
+   * which writes the view file and rescans the vault — so holding the key down
+   * ran one full write-and-rescan per repeat, the exact failure the pointer
+   * path was rewritten to avoid. The arrows paint; leaving the handle persists.
+   */
+  it('resizes from the keyboard, persisting once when the handle is left', () => {
     const { onColumnsChange } = grid();
-    fireEvent.keyDown(screen.getByLabelText('Resize Status column'), { key: 'ArrowRight' });
-    expect(onColumnsChange.mock.calls[0][0]).toContainEqual({ field: 'status', width: 158 });
+    const handle = screen.getByLabelText('Resize Status column');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    fireEvent.blur(handle);
+    expect(onColumnsChange).toHaveBeenCalledTimes(1);
+    // Two 8px steps from the 150 default, accumulated rather than each one
+    // starting over from the last persisted width.
+    expect(onColumnsChange.mock.calls[0][0]).toContainEqual({ field: 'status', width: 166 });
+  });
+
+  it('abandons an unpersisted keyboard resize on Escape', () => {
+    const { onColumnsChange } = grid();
+    const handle = screen.getByLabelText('Resize Status column');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    fireEvent.blur(handle);
+    expect(onColumnsChange).not.toHaveBeenCalled();
   });
 
   it('offers no resizer on a surface with no view file to write to', () => {
@@ -270,7 +295,11 @@ describe('TableView cell cursor (M16.17)', () => {
         entries={entries.filter((e) => e.type === 'Work item')}
         presentation={{ ...presentation, columns: [{ field: 'status' }, { field: 'notes' }] }}
         schema={schema}
-        fields={[...(schema.types.get('Work item')?.fields ?? []), { name: 'notes', kind: 'text' }]}
+        // `notes` is deliberately NOT in the field universe: a view file may
+        // name a column no type declares, and `resolveColumns` synthesizes a
+        // text def for it — which is what production does here, and what
+        // M20.1's ownership check reads to keep such a column editable.
+        fields={schema.types.get('Work item')?.fields ?? []}
       />,
     );
     return screen.getByTestId('table-view');
@@ -279,10 +308,16 @@ describe('TableView cell cursor (M16.17)', () => {
   it('numbers its columns, so a screen reader can say where the cursor is', () => {
     setup();
     const grid = screen.getByTestId('table-view');
-    // Name + the two data columns.
-    expect(grid.getAttribute('aria-colcount')).toBe('3');
+    // M20.4: the gutter + name + the two data columns. The gutter holds the
+    // row's checkbox, insert and menu, so it IS a cell and now says which one —
+    // before this it declared no index, and a cell without one takes its
+    // position from the DOM, so the gutter and the name cell were both
+    // column 1 and every row had one more cell than the grid admitted to.
+    expect(grid.getAttribute('aria-colcount')).toBe('4');
     const cells = screen.getAllByRole('gridcell');
-    expect(cells.some((c) => c.getAttribute('aria-colindex') === '1')).toBe(true);
+    expect(cells.filter((c) => c.getAttribute('aria-colindex') === '1')).toHaveLength(
+      screen.getAllByTestId('table-row').length,
+    );
   });
 
   it('the row cursor stays column-less until you arrow sideways', () => {
@@ -301,11 +336,13 @@ describe('TableView cell cursor (M16.17)', () => {
     const grid = screen.getByTestId('table-view');
     fireEvent.focus(grid, { target: grid });
     fireEvent.keyDown(grid, { key: 'ArrowRight' });
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
-    fireEvent.keyDown(grid, { key: 'Tab' });
+    // Display slot 0 is the name column, at aria-colindex 2 — the gutter is
+    // column 1 (M20.4).
     expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('3');
     fireEvent.keyDown(grid, { key: 'ArrowLeft' });
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
     // ArrowLeft off the first cell hands the ROW back rather than wrapping
     // onto the row above: the row cursor is where Enter opens the record.
     fireEvent.keyDown(grid, { key: 'ArrowLeft' });
@@ -331,10 +368,10 @@ describe('TableView cell cursor (M16.17)', () => {
     fireEvent.keyDown(grid, { key: 'Tab' });
     fireEvent.keyDown(grid, { key: 'Tab' });
     expect(rows[0].contains(cursorCell())).toBe(true);
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('3');
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('4');
     fireEvent.keyDown(grid, { key: 'Tab' });
     expect(rows[1].contains(cursorCell())).toBe(true);
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
   });
 
   it('points aria-activedescendant at the CELL once one is picked out', () => {
@@ -354,7 +391,7 @@ describe('TableView cell cursor (M16.17)', () => {
     // control opens the record rather than editing a value.
     for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grid, { key: 'ArrowRight' });
     const cell = cursorCell();
-    expect(cell?.getAttribute('aria-colindex')).toBe('3');
+    expect(cell?.getAttribute('aria-colindex')).toBe('4');
     fireEvent.keyDown(grid, { key: 'Enter' });
     expect(cell?.contains(document.activeElement)).toBe(true);
     // FieldEditor's own Escape stops propagation and unmounts the input, and
@@ -515,13 +552,18 @@ describe('TableView row gutter (M16.16)', () => {
 });
 
 /**
- * The calculation footer (M16.15).
+ * Calculations (M16.15, retriggered M19.5).
  *
  * There was no footer element at all and no aggregate module in the engine, so
  * the single most-used question about a column of numbers — what do they add
  * up to — could not be asked anywhere in the app.
+ *
+ * M16.15 then put the OFFER in the footer, revealed on hover, which made the
+ * commonest state of the row a rule under the grid advertising a feature
+ * nobody had used. The offer now lives in the column header menu beside every
+ * other per-column setting, and the footer only reports.
  */
-describe('TableView calculation footer (M16.15)', () => {
+describe('TableView calculations (M16.15, M19.5)', () => {
   beforeEach(() => {
     useVaultStore.setState({ entries: fixtureVault() });
   });
@@ -547,12 +589,21 @@ describe('TableView calculation footer (M16.15)', () => {
     return { onColumnsChange, onPresentationChange };
   }
 
-  it('shows a footer cell per column, blank until one is configured', () => {
+  /** Open a column's header menu and expand its Calculate list. */
+  async function calcMenu(user: ReturnType<typeof userEvent.setup>, column: string) {
+    await user.click(screen.getByLabelText(`${column} column menu`));
+    await user.click(screen.getByTestId('calculate'));
+  }
+
+  it('nothing offers a calculation until a header menu is opened', async () => {
+    const user = userEvent.setup();
     footer([{ field: 'status' }, { field: 'priority' }]);
-    expect(screen.getByTestId('table-footer')).toBeTruthy();
-    // Notion's resting state: the offer is there, the number is not. A table
-    // that volunteers nine totals nobody asked for is noise.
-    expect(screen.getByTestId('calc-status').textContent).toBe('Calculate');
+    // The defect this replaces: a footer that existed on every table with a
+    // row in it, lighting up a ghost "Calculate" per column on hover.
+    expect(screen.queryByTestId('table-footer')).toBeNull();
+    expect(screen.queryByText('Calculate')).toBeNull();
+    await calcMenu(user, 'Status');
+    expect(screen.queryByTestId('calc-option-count_all')).not.toBeNull();
   });
 
   it('computes the configured calculation over the rows on screen', () => {
@@ -562,10 +613,16 @@ describe('TableView calculation footer (M16.15)', () => {
     expect(onColumnsChange).not.toHaveBeenCalled();
   });
 
+  it('keeps a slot for the columns that calculate nothing, so results stay under their column', () => {
+    footer([{ field: 'status', calc: 'count_all' }, { field: 'priority' }]);
+    expect(screen.getByTestId('table-footer')).toBeTruthy();
+    expect(screen.getByTestId('calc-priority').textContent).toBe('');
+  });
+
   it('persists the choice to the column, not to component state', async () => {
     const user = userEvent.setup();
     const { onColumnsChange } = footer([{ field: 'status' }]);
-    await user.click(screen.getByTestId('calc-status'));
+    await calcMenu(user, 'Status');
     await user.click(screen.getByTestId('calc-option-count_empty'));
     expect(onColumnsChange.mock.calls[0][0]).toContainEqual({
       field: 'status',
@@ -573,10 +630,17 @@ describe('TableView calculation footer (M16.15)', () => {
     });
   });
 
+  it('says what a column already calculates without opening the list', async () => {
+    const user = userEvent.setup();
+    footer([{ field: 'status', calc: 'count_all' }]);
+    await user.click(screen.getByLabelText('Status column menu'));
+    expect(screen.getByTestId('calculate').textContent).toContain('Count all');
+  });
+
   it('None clears the key rather than storing a "none" calculation', async () => {
     const user = userEvent.setup();
     const { onColumnsChange } = footer([{ field: 'status', calc: 'count_all' }]);
-    await user.click(screen.getByTestId('calc-status'));
+    await calcMenu(user, 'Status');
     await user.click(screen.getByTestId('calc-option-none'));
     expect(onColumnsChange.mock.calls[0][0]).toEqual([{ field: 'status' }]);
   });
@@ -584,10 +648,10 @@ describe('TableView calculation footer (M16.15)', () => {
   it('offers Sum on a number column and withholds it from a select', async () => {
     const user = userEvent.setup();
     footer([{ field: 'estimate' }, { field: 'status' }]);
-    await user.click(screen.getByTestId('calc-estimate'));
+    await calcMenu(user, 'Estimate');
     expect(screen.queryByTestId('calc-option-sum')).not.toBeNull();
     await user.keyboard('{Escape}');
-    await user.click(screen.getByTestId('calc-status'));
+    await calcMenu(user, 'Status');
     // Capability-gated on the KIND, so a status column cannot be asked for a
     // total it has no numbers to produce.
     expect(screen.queryByTestId('calc-option-sum')).toBeNull();
@@ -596,7 +660,7 @@ describe('TableView calculation footer (M16.15)', () => {
   it('the name column calculates too, and writes to the presentation', async () => {
     const user = userEvent.setup();
     const { onPresentationChange } = footer([{ field: 'status' }]);
-    await user.click(screen.getByTestId('calc-title'));
+    await calcMenu(user, 'Name');
     await user.click(screen.getByTestId('calc-option-count_all'));
     // The name column has been a peer of the data columns since M12.8, but it
     // has no ColumnSpec to carry a calc on.
@@ -609,7 +673,9 @@ describe('TableView calculation footer (M16.15)', () => {
     render(
       <TableView
         entries={[]}
-        presentation={presentation}
+        // A calculation IS set — so the footer is absent because there are no
+        // rows, which is what this test claims to be about.
+        presentation={{ ...presentation, titleCalc: 'count_all' }}
         schema={schema}
         fields={schema.types.get('Work item')?.fields ?? []}
       />,
@@ -641,7 +707,13 @@ describe('TableView header settings (M16.18)', () => {
         entries={entries.filter((e) => e.type === 'Work item')}
         presentation={{ ...presentation, ...over }}
         schema={schema}
-        fields={[...(schema.types.get('Work item')?.fields ?? []), ...extraFields]}
+        // Through `columnUniverse`, as every page does — it is what tags a def
+        // with the type that OWNS it, and the header's schema operations write
+        // to that type rather than to the view's source (M20.2).
+        fields={[
+          ...columnUniverse({ type: 'Work item', project: null }, entries, schema),
+          ...extraFields,
+        ]}
         sourceType="Work item"
         onColumnsChange={onColumnsChange}
         onPresentationChange={onPresentationChange}
@@ -665,6 +737,7 @@ describe('TableView header settings (M16.18)', () => {
       entries: fixtureVault(),
       patchFrontmatter: vi.fn(async (path: string) => {
         written.push(path);
+        return true;
       }),
     });
     const { onColumnsChange } = grid();
@@ -725,6 +798,40 @@ describe('TableView header settings (M16.18)', () => {
       { field: 'status' },
       { field: 'priority', hidden: false },
     ]);
+  });
+
+  // M19.4: the "+" used to open a menu whose only creation command was "New
+  // property", which opened this panel — a click spent on an indirection,
+  // while the detail panel's own "+ Add property" had always gone straight to
+  // the same surface.
+  it('the "+" opens the property panel itself, not a menu that opens it', async () => {
+    const user = userEvent.setup();
+    grid();
+    await user.click(screen.getByTestId('add-column'));
+    expect(screen.getByTestId('add-property-panel')).toBeTruthy();
+    expect(screen.queryByTestId('add-column-new')).toBeNull();
+    expect(screen.getByLabelText('Property name')).toBeTruthy();
+  });
+
+  it('a typeless view can only re-show, because it has no schema to declare on', async () => {
+    const user = userEvent.setup();
+    const entries = fixtureVault();
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{
+          ...presentation,
+          columns: [{ field: 'status' }, { field: 'priority', hidden: true }],
+        }}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+        onColumnsChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByTestId('add-column'));
+    expect(screen.queryByTestId('add-property-panel')).toBeNull();
+    expect(screen.getByTestId('show-column-priority')).toBeTruthy();
   });
 
   it('defaults its rows to the default height', () => {
@@ -793,6 +900,174 @@ describe('TableView header settings (M16.18)', () => {
     expect(onColumnsChange).not.toHaveBeenCalled();
     fireEvent.doubleClick(screen.getByLabelText('Resize Status column'));
     expect(onColumnsChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The name cell and the whole-cell hit target (M19.2, M19.3).
+ *
+ * The affordance used to be inverted: the title WAS the opener, so the name
+ * was the one cell in the grid that could not be edited, and the `maximize-2`
+ * glyph beside it was `aria-hidden` decoration that answered no click at all.
+ * Every other cell had the mirror-image problem — its editor was a button
+ * sized to its value, so most of the column answered no click either, and the
+ * part that did painted an inset hover box that read as a floating pill.
+ */
+describe('TableView name cell and cell hit target (M19.2, M19.3)', () => {
+  beforeEach(() => {
+    useVaultStore.setState({ entries: fixtureVault() });
+    useUiStore.setState({ detailPath: null });
+  });
+
+  it('the name is an editable cell, and the pill is what opens the record', async () => {
+    const user = userEvent.setup();
+    const { items } = setup();
+    const item = items[0];
+
+    await user.click(screen.getByRole('button', { name: item.title }));
+    // Clicking the name edits it in place — it does not navigate.
+    expect(screen.getByLabelText('Title')).toBeTruthy();
+    expect(useUiStore.getState().detailPath).toBeNull();
+
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByLabelText(`Open ${item.title}`));
+    expect(useUiStore.getState().detailPath).toBe(item.path);
+  });
+
+  it('commits a renamed title through the store, which never throws', async () => {
+    const user = userEvent.setup();
+    const setTitle = vi.fn().mockResolvedValue(true);
+    useVaultStore.setState({ setTitle });
+    const { items } = setup();
+
+    await user.click(screen.getByRole('button', { name: items[0].title }));
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Renamed in place');
+    await user.keyboard('{Enter}');
+
+    expect(setTitle).toHaveBeenCalledWith(items[0].path, 'Renamed in place');
+  });
+
+  it('Escape discards the draft rather than writing it', async () => {
+    const user = userEvent.setup();
+    const setTitle = vi.fn().mockResolvedValue(true);
+    useVaultStore.setState({ setTitle });
+    const { items } = setup();
+
+    await user.click(screen.getByRole('button', { name: items[0].title }));
+    await user.type(screen.getByLabelText('Title'), ' and more');
+    await user.keyboard('{Escape}');
+
+    expect(setTitle).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Title')).toBeNull();
+  });
+
+  it('the open affordance is a real focusable control, not a hidden glyph', () => {
+    const { items } = setup();
+    const pill = screen.getAllByTestId('row-open-affordance')[0];
+    // The M15 defect this must not recreate: an opener that CSS keeps out of
+    // hit-testing is an opener no keyboard user can reach. `cb-row-open` fades
+    // with opacity for exactly this reason.
+    expect(pill.className).toContain('cb-row-open');
+    expect(pill.getAttribute('aria-label')).toBe(`Open ${items[0].title}`);
+    pill.focus();
+    expect(document.activeElement).toBe(pill);
+  });
+
+  /**
+   * A table over a type declaring the two kinds whose cells hold a control
+   * that must NOT be what a gesture on the CELL activates. Declared locally
+   * rather than in `fixtureVault`, whose field list eight other tests assert
+   * exactly.
+   */
+  function riskyKinds(properties: Entry['properties']) {
+    const base = fixtureVault();
+    const entries = base.map((e) =>
+      e.path === 'types/work-item.md'
+        ? {
+            ...e,
+            properties: {
+              ...e.properties,
+              fields: {
+                blocked: { kind: 'checkbox' },
+                attachments: { kind: 'files' },
+              },
+            } as unknown as Entry['properties'],
+          }
+        : e,
+    );
+    const item = { ...entries.find((e) => e.type === 'Work item')!, properties };
+    const schema = buildSchema(entries);
+    useVaultStore.setState({ entries });
+    render(
+      <TableView
+        entries={[item]}
+        presentation={{
+          ...presentation,
+          columns: [{ field: 'blocked' }, { field: 'attachments' }],
+        }}
+        schema={schema}
+        fields={schema.types.get('Work item')?.fields ?? []}
+      />,
+    );
+  }
+
+  // The forwarder resolves the cell's PRIMARY control, not the first focusable
+  // in DOM order. A files chip renders `Remove <file>` before `+ Add`, so
+  // resolving by DOM order made a click on the cell's padding — and Enter,
+  // which had the same bug before this — delete an attachment.
+  it('a click on a files cell never reaches the chip’s Remove button', async () => {
+    const user = userEvent.setup();
+    riskyKinds({ attachments: ['notes/spec.pdf'] });
+    const remove = screen.getByLabelText('Remove notes/spec.pdf');
+    const removed = vi.fn();
+    remove.addEventListener('click', removed);
+
+    const cell = screen
+      .getAllByRole('gridcell')
+      .find((c) => c.querySelector('[aria-label^="Remove "]') !== null)!;
+    await user.click(cell);
+
+    expect(removed).not.toHaveBeenCalled();
+  });
+
+  // Switch is a <label> around a hidden input, so the browser fires its OWN
+  // click on that input after the one that bubbled up here. Forwarding as well
+  // wrote true and then false — two disk writes ending where they started, so
+  // the checkbox looked inert.
+  it('a checkbox cell toggles once per click, not twice', async () => {
+    const user = userEvent.setup();
+    riskyKinds({ blocked: false });
+    // `role="switch"`, not `checkbox` — the row gutter's select box is the
+    // only thing in this grid with the checkbox role.
+    const box = screen.getByRole('switch');
+    const toggles = vi.fn();
+    box.addEventListener('click', toggles);
+
+    await user.click(box.closest('label')!);
+    expect(toggles).toHaveBeenCalledTimes(1);
+  });
+
+  it('a click on the cell padding reaches the editor, and only once', async () => {
+    const user = userEvent.setup();
+    setup();
+    const cell = screen
+      .getAllByRole('gridcell')
+      .find((c) => c.querySelector('.cb-cell-chrome button') !== null);
+    expect(cell).toBeTruthy();
+    const trigger = cell!.querySelector<HTMLButtonElement>('.cb-cell-chrome button')!;
+    const clicks = vi.fn();
+    trigger.addEventListener('click', clicks);
+
+    // The cell itself, not the button inside it — the padding and the unused
+    // width of the column used to answer nothing.
+    await user.click(cell!);
+    expect(clicks).toHaveBeenCalledTimes(1);
+
+    // And a click that already landed on the control is not forwarded again.
+    clicks.mockClear();
+    await user.click(trigger);
+    expect(clicks).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -868,5 +1143,395 @@ describe('TableView relation chips (M11)', () => {
   it('defaults to plain chips', () => {
     withRelation(undefined);
     expect(screen.getByTestId('relation-chip').querySelector('svg')).toBeNull();
+  });
+});
+
+/**
+ * A grid holding rows of more than one type (M20.1).
+ *
+ * The grouping chain can DESCEND a relation (M10 nesting), which puts records
+ * of foreign types in one grid — the demo vault's OKR tree holds Objectives
+ * with Key results and Work items nested beneath them. `buildRows` builds rows
+ * from the source type plus every relation the chain descends into;
+ * `columnUniverse` builds columns from the source type ALONE. Everything below
+ * comes from that mismatch.
+ */
+describe('TableView nested rows of a foreign type (M20.1)', () => {
+  function okrGrid() {
+    const entries = [
+      makeEntry({
+        path: 'types/objective.md',
+        title: 'Objective',
+        type: 'Type',
+        properties: {
+          fields: {
+            owner: { kind: 'person' },
+            progress: { kind: 'number', format: 'progress' },
+          },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'types/key-result.md',
+        title: 'Key result',
+        type: 'Type',
+        // Deliberately declares NEITHER owner NOR progress: it has its own
+        // `lead`, which the Objective-sourced grid has no column for.
+        properties: {
+          fields: { lead: { kind: 'person' }, objective: { kind: 'relation' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type' }),
+      makeEntry({ path: 'people/ana-rios.md', title: 'Ana Rios', type: 'Person' }),
+      makeEntry({
+        path: 'records/objectives/o1.md',
+        title: 'Grow EU revenue',
+        type: 'Objective',
+        properties: { progress: 40 },
+      }),
+      makeEntry({
+        path: 'records/key-results/kr1.md',
+        title: 'Signups up 20%',
+        type: 'Key result',
+        relationships: { objective: ['Grow EU revenue'] },
+      }),
+    ];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const objectives = entries.filter((e) => e.type === 'Objective');
+    render(
+      <TableView
+        entries={objectives}
+        allEntries={entries}
+        presentation={{
+          ...presentation,
+          group: [
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+          ],
+          columns: [{ field: 'owner' }, { field: 'progress' }],
+        }}
+        schema={schema}
+        fields={schema.types.get('Objective')?.fields ?? []}
+        onCreate={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+    const rows = screen.getAllByTestId('table-row');
+    return {
+      parent: rows.find((r) => r.getAttribute('data-depth') === '0')!,
+      child: rows.find((r) => r.getAttribute('data-depth') === '1')!,
+    };
+  }
+
+  const cell = (row: HTMLElement, colIndex: string) =>
+    row.querySelector<HTMLElement>(`[role="gridcell"][aria-colindex="${colIndex}"]`)!;
+
+  /**
+   * The hole, exactly. `validatePatch` looks a field up on the record's own
+   * type, so grafting a parent's SELECT onto a child's number field of the
+   * same name was already refused. What sailed through was the case with no
+   * def to validate against at all — undeclared keys are legal by design — so
+   * picking a person in the Objective's Owner column wrote `owner: [[…]]` onto
+   * a Key result that has never heard of `owner`.
+   */
+  it('a nested row of another type offers no editor in a column it does not declare', async () => {
+    const user = userEvent.setup();
+    const { parent, child } = okrGrid();
+
+    // The parent owns Owner and is editable in it.
+    await user.click(cell(parent, '3'));
+    expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    await user.keyboard('{Escape}');
+
+    // The child does not, so there is nothing to click into.
+    await user.click(cell(child, '3'));
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(cell(child, '3').querySelector('button')).toBeNull();
+  });
+
+  // The neighbouring read-only kinds show an em-dash for the same absence, so
+  // an empty grey track on every nested row was two read-only branches
+  // contradicting each other about what "no value" looks like.
+  it('draws no progress bar for a row with no such property', () => {
+    const { parent, child } = okrGrid();
+    expect(cell(parent, '4').textContent).toContain('40');
+    expect(cell(child, '4').textContent).toBe('—');
+  });
+
+  /**
+   * `onCreate` is bound to the SURFACE's type, so "insert a record after this
+   * one" on a nested Key result created an Objective — the wrong type, in the
+   * wrong folder, at depth 0. Creating the type at that depth has to link the
+   * new record back through the relation that produced the level, which for a
+   * forward descent the child cannot express at all; until that exists,
+   * offering nothing beats offering the wrong thing.
+   */
+  it('offers no insert affordance on a nested row', () => {
+    const { parent, child } = okrGrid();
+    expect(parent.querySelector('[data-testid="row-insert"]')).not.toBeNull();
+    expect(child.querySelector('[data-testid="row-insert"]')).toBeNull();
+  });
+});
+
+/**
+ * The nesting model (M20.2): the grid's columns come from its CHAIN, and each
+ * cell renders by its OWN row's declaration.
+ */
+describe('TableView union columns across the chain (M20.2)', () => {
+  function chainGrid(columns: { field: string }[]) {
+    const entries = [
+      makeEntry({
+        path: 'types/objective.md',
+        title: 'Objective',
+        type: 'Type',
+        properties: {
+          fields: { owner: { kind: 'person' }, size: { kind: 'number' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'types/key-result.md',
+        title: 'Key result',
+        type: 'Type',
+        properties: {
+          fields: {
+            objective: { kind: 'relation', target: 'Objective' },
+            // Same NAME as Objective's, a different KIND — what `heterogeneous`
+            // marks, and what used to take the whole column read-only.
+            size: { kind: 'select', options: [{ id: 's' }, { id: 'l' }] },
+          },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type' }),
+      makeEntry({
+        path: 'records/objectives/o1.md',
+        title: 'Grow EU revenue',
+        type: 'Objective',
+        properties: { size: 3 },
+      }),
+      makeEntry({
+        path: 'records/key-results/kr1.md',
+        title: 'Signups up 20%',
+        type: 'Key result',
+        properties: { size: 'l' },
+        relationships: { objective: ['Grow EU revenue'] },
+      }),
+    ];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const group = [
+      {
+        field: 'objective',
+        descend: { direction: 'reverse' as const, type: 'Key result', field: 'objective' },
+      },
+    ];
+    const fields = columnUniverse({ type: 'Objective', project: null }, entries, schema, group);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Objective')}
+        allEntries={entries}
+        presentation={{ ...presentation, group, columns }}
+        schema={schema}
+        fields={fields}
+        sourceType="Objective"
+        onColumnsChange={vi.fn()}
+      />,
+    );
+    const rows = screen.getAllByTestId('table-row');
+    return {
+      fields,
+      parent: rows.find((r) => r.getAttribute('data-depth') === '0')!,
+      child: rows.find((r) => r.getAttribute('data-depth') === '1')!,
+    };
+  }
+
+  // The Phase 1 fix made a child blank in a column it does not declare. This
+  // is the other half: the columns it DOES declare now exist to be blank in.
+  it('the descended type’s own properties are available as columns', () => {
+    const { fields } = chainGrid([{ field: 'size' }]);
+    expect(fields.map((f) => f.name)).toContain('objective');
+    expect(fields.find((f) => f.name === 'objective')?.owners).toEqual(['Key result']);
+  });
+
+  /**
+   * The header shows one kind and the cells disagree with it, correctly.
+   * Rendering every row through the COLUMN's def gave the Key result a number
+   * input for a select — the wrong editor over the wrong value — which is what
+   * `heterogeneous` used to suppress by taking the column read-only for
+   * everyone, including the rows that were right.
+   */
+  it('each row renders its own type’s declaration of a shared name', async () => {
+    const user = userEvent.setup();
+    const { parent, child } = chainGrid([{ field: 'size' }]);
+    const cell = (row: HTMLElement) =>
+      row.querySelector<HTMLElement>('[role="gridcell"][aria-colindex="3"]')!;
+
+    // Objective's `size` is a number: its editor is a textbox.
+    await user.click(cell(parent));
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(cell(parent).querySelector('input')).not.toBeNull();
+
+    // Key result's is a select: its editor is an option list, and it is not
+    // read-only the way the old heterogeneous guard would have left it.
+    await user.click(cell(child));
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['S', 'L']);
+  });
+});
+
+/**
+ * Keyboard and screen reader (M20.4).
+ */
+describe('TableView keyboard ownership (M20.4)', () => {
+  /**
+   * The grid's key handler ran on top of every focusable control inside it.
+   *
+   * Reproduced before the fix: cursor on row 1, focus row 5's Open pill, press
+   * Enter → the panel opens record 1. `preventDefault` then suppressed the
+   * button's own activation, so the control you were standing on did nothing
+   * and a different row opened instead. `inEditor` asked the right question
+   * too narrowly — it caught inputs, and a button is not an editor.
+   */
+  it('Enter on a row’s Open pill opens THAT row, not the one under the cursor', async () => {
+    const user = userEvent.setup();
+    const { items } = setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    expect(useUiStore.getState().detailPath).toBeNull();
+
+    // The last row, so it is unambiguously not the one the cursor is on.
+    const target = items[items.length - 1];
+    const pill = screen.getByLabelText(`Open ${target.title}`);
+    pill.focus();
+    await user.keyboard('{Enter}');
+
+    expect(useUiStore.getState().detailPath).toBe(target.path);
+  });
+
+  // Same shape: Space on a band header toggled it AND ran the grid's own
+  // Space, which toggles the row under the cursor.
+  it('a band header announces whether it is open, and holds a real button', () => {
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, group: [{ field: 'status' }] }}
+        schema={schema}
+        fields={columnUniverse({ type: 'Work item', project: null }, entries, schema)}
+      />,
+    );
+    const band = screen.getAllByTestId('table-group-header')[0];
+    expect(band.getAttribute('role')).toBe('row');
+    // A row with no cell in it is malformed; ListView has had this right since
+    // M10 and the table was the surface that disagreed.
+    expect(band.querySelector('[role="gridcell"]')).not.toBeNull();
+    const toggle = band.querySelector('button')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  // The hook has exported `setCell` for this since M16.17 and nothing had ever
+  // called it, so clicking a cell and then arrowing moved a cursor that was
+  // somewhere else entirely.
+  it('clicking a cell moves the cell cursor to it', async () => {
+    const user = userEvent.setup();
+    setup();
+    const rows = screen.getAllByTestId('table-row');
+    const cell = rows[1].querySelector<HTMLElement>('[role="gridcell"][aria-colindex="3"]')!;
+    await user.click(cell);
+    expect(cell.getAttribute('data-cursor')).toBe('true');
+  });
+});
+
+describe('TableView polish (M20.5)', () => {
+  /**
+   * A nesting chain can draw one record at two positions — a Work item that
+   * serves two key results is a row under each. Selection counted ROWS, so one
+   * tick reported "2 selected", the delete removed the file once and reported
+   * a failure for the second attempt, and Select all never read as checked.
+   */
+  it('counts a record once however many places it is drawn', async () => {
+    const user = userEvent.setup();
+    const entries = [
+      makeEntry({
+        path: 'types/objective.md',
+        title: 'Objective',
+        type: 'Type',
+        properties: { fields: { owner: { kind: 'person' } } } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'types/key-result.md',
+        title: 'Key result',
+        type: 'Type',
+        properties: {
+          fields: { objective: { kind: 'relation', target: 'Objective' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({ path: 'records/objectives/a.md', title: 'A', type: 'Objective' }),
+      makeEntry({ path: 'records/objectives/b.md', title: 'B', type: 'Objective' }),
+      // Points at BOTH objectives, so it is nested under each of them.
+      makeEntry({
+        path: 'records/key-results/kr.md',
+        title: 'Shared KR',
+        type: 'Key result',
+        relationships: { objective: ['A', 'B'] },
+      }),
+    ];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Objective')}
+        allEntries={entries}
+        presentation={{
+          ...presentation,
+          columns: [{ field: 'owner' }],
+          group: [
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+          ],
+        }}
+        schema={schema}
+        fields={columnUniverse({ type: 'Objective', project: null }, entries, schema)}
+      />,
+    );
+    // Four rows, three records: the KR is drawn under both objectives.
+    expect(screen.getAllByTestId('table-row')).toHaveLength(4);
+
+    await user.click(screen.getAllByLabelText('Select Shared KR')[0]);
+    expect(screen.getByTestId('bulk-bar').textContent).toContain('1 selected');
+
+    // And Select all can now actually read as checked: `allChecked` compared
+    // a Set of distinct paths against a row count that included the duplicate,
+    // so the box could never reach it.
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('select-all').getAttribute('aria-label')).toBe('Clear selection');
+    expect(screen.getByTestId('bulk-bar').textContent).toContain('3 selected');
+  });
+
+  // The one cell M19.2's hit-target work missed, and the one with the most
+  // dead space in it — the indent, the gaps around the type icon, and the
+  // strip beside the Open pill all answered no click at all.
+  it('a click on the name cell’s padding edits the title', async () => {
+    const user = userEvent.setup();
+    setup();
+    const cell = screen
+      .getAllByTestId('table-row')[0]
+      .querySelector<HTMLElement>('[role="gridcell"][aria-colindex="2"]')!;
+    await user.click(cell);
+    expect(cell.querySelector('input')).not.toBeNull();
+  });
+
+  // Escape clears every other transient state in the app; the hook has
+  // accepted `onEscape` since M9.6 and the table never passed it.
+  it('Escape clears a bulk selection', async () => {
+    const user = userEvent.setup();
+    const { items } = setup();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.getByTestId('bulk-bar')).toBeTruthy();
+    fireEvent.keyDown(screen.getByTestId('table-view'), { key: 'Escape' });
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
   });
 });

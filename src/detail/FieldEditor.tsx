@@ -8,8 +8,18 @@ import { Switch } from '@/components/ui/Switch';
 import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
-import { findOptionByLabel, optionId, personCandidates } from '@/engine/properties';
+import {
+  findOptionByLabel,
+  normalizeUrl,
+  optionId,
+  peopleTypes,
+  progressRatio,
+  personCandidates,
+  relationTargetFor,
+} from '@/engine/properties';
+import { createTarget } from '@/engine/createRecord';
 import { RelationPicker } from '@/detail/RelationPicker';
+import { slugify } from '@/lib/slug';
 import {
   DEFAULT_TIME_FORMAT,
   makeDateValue,
@@ -115,9 +125,22 @@ export function FieldEditor({
   const [draft, setDraft] = useState<string | null>(null);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const entries = useVaultStore((s) => s.entries);
+  // M20.1: the person branch can create a person. Hooks cannot live inside it —
+  // this component is a chain of early returns keyed on `def.kind`.
+  const createItem = useVaultStore((s) => s.createItem);
   const resolved = schema.resolveField(entry, def.name);
 
   const patch = (value: unknown) => void patchFrontmatter(entry.path, { [def.name]: value });
+  /**
+   * A multi-value field emptied back to nothing drops its KEY (M20.3).
+   *
+   * It used to write `field: []`, which is not what "unset" looks like
+   * anywhere else in the vault: `files` and `relation` already patch `null`,
+   * every read path treats an absent key and an empty list identically, and
+   * the difference is a line of YAML that only ever accumulates. `null` is the
+   * one delete spelling every backend honours (see vaultStore.patchFrontmatter).
+   */
+  const patchList = (next: unknown[]) => patch(next.length === 0 ? null : next);
 
   if (def.kind === 'status' || def.kind === 'select' || def.kind === 'multiselect') {
     const statuses = schema.statusSetFor(entry);
@@ -230,6 +253,7 @@ export function FieldEditor({
         <button
           type="button"
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
+          data-cell-primary
           onClick={() => setOpen(true)}
           className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
@@ -272,7 +296,17 @@ export function FieldEditor({
                   : 'Add options from the property menu.'
             }
             {...(multi ? { activeIds: values } : { activeId: values[0] ?? null })}
-            onPick={(id) => patch(multi ? toggle(values, id) : id)}
+            {...(values.length > 0 ? { onClear: () => patch(null) } : {})}
+            // Picking the option already chosen CLEARS it (M20.3). A
+            // single-select had no route back to empty: the popover offered
+            // the declared options and nothing else, and clicking the active
+            // one re-wrote the same value. Demo-vault's Priority declares a
+            // literal "None" option, which masked this; Estimate (XS/S/M/L/XL)
+            // is the honest case, and it was a one-way door. Multi already
+            // toggles, which is the same gesture meaning the same thing.
+            onPick={(id) =>
+              multi ? patchList(toggle(values, id)) : patch(values[0] === id ? null : id)
+            }
             onClose={() => setOpen(false)}
           />
         )}
@@ -287,17 +321,81 @@ export function FieldEditor({
     // Candidates came from `e.type === 'Person'` until M16.13b, which is the
     // type-name routing AGENTS.md forbids: a vault whose people are
     // `Teammate`s got an empty picker with no control anywhere to fix it.
-    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry.type).map(
-      (c) => ({ id: pathStem(c.path), label: c.title, color: null }),
-    );
+    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry).map((c) => {
+      // M20.3: every row drew the same grey dot, so a Project and a person
+      // were indistinguishable in a picker whose whole job is telling them
+      // apart. The relation CHIPS already carry the target type's icon.
+      const style = typeStyle(c.type, schema);
+      return {
+        id: pathStem(c.path),
+        label: c.title,
+        color: null,
+        icon: style.icon,
+        iconColor: style.color,
+      };
+    });
     const values = asList(resolved.raw).map(stripWikilink);
+    /**
+     * M20.3: `limit: 1` means one person, and this branch ignored it in both
+     * halves — the picker toggled and stayed open, and `validateValue`'s
+     * person case never checked the cardinality its relation case enforces.
+     * A person field IS a relation with an avatar renderer (M16.13b), so it
+     * answers this the same way: picking replaces, and the popover closes.
+     */
+    const single = def.limit === 1;
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
     const blank = placeholder === 'blank' && values.length === 0;
+
+    /**
+     * Typing a name that does not exist creates that person (M20.1).
+     *
+     * Every other picker in the app could do this and only the person branch
+     * could not: a select cell offers "Create Blocker", a relation cell offers
+     * "Link or create a …" and writes a real record, and a person cell said
+     * "No matches" and stopped. Which is why `personCandidates` used to fall
+     * back to listing the whole vault — the dead end was real, but the answer
+     * was a create affordance, not a picker full of Projects.
+     *
+     * Which type to create is the same question the picker answers, in the
+     * same order: the field's declared or inferred target, then the vault's
+     * one people type. With no notion of people at all it is `Person` — the
+     * last-resort convention `peopleTypes` already documents, and creating the
+     * first one is what ESTABLISHES the vault's people type, because
+     * `relationTargetFor` then infers it back off the value just written. With
+     * two or more people types and no target the answer is genuinely ambiguous,
+     * so nothing is offered; the picker still lists all of them.
+     */
+    const known = peopleTypes(schema, entries);
+    const createType =
+      relationTargetFor(def, entries, entry.type) ??
+      (known.size === 1 ? [...known][0] : known.size === 0 ? 'Person' : null);
+    const createPerson =
+      createType === null
+        ? undefined
+        : (name: string) => {
+            void (async () => {
+              const target = createTarget(createType, { project: null, entries, schema });
+              try {
+                const path = await createItem({
+                  folder: target.folder,
+                  slug: slugify(name) || `person-${Date.now().toString(36)}`,
+                  frontmatter: target.frontmatter,
+                  body: `# ${name}\n`,
+                });
+                // By the stem it LANDED on — create_note may deduplicate.
+                const stem = pathStem(path);
+                patch(single ? [formatWikilink(stem)] : toggle(values, stem).map(formatWikilink));
+              } catch {
+                useUiStore.getState().toast(`Couldn't create "${name}"`);
+              }
+            })();
+          };
     return (
       <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
           type="button"
           {...(blank ? { 'aria-label': humanize(def.name) } : {})}
+          data-cell-primary
           onClick={() => setOpen(true)}
           className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
@@ -314,8 +412,21 @@ export function FieldEditor({
           <FieldPopover
             searchable
             options={options}
-            activeIds={values}
-            onPick={(id) => patch(toggle(values, id).map(formatWikilink))}
+            {...(single ? { activeId: values[0] ?? null } : { activeIds: values })}
+            {...(values.length > 0 ? { onClear: () => patch(null) } : {})}
+            {...(createPerson !== undefined ? { onCreate: createPerson } : {})}
+            emptyHint={
+              createPerson === undefined
+                ? 'This vault has no people yet.'
+                : `No people yet — type a name to add one${
+                    createType === null ? '' : ` as a new ${createType}`
+                  }.`
+            }
+            onPick={(id) =>
+              single
+                ? patch(values[0] === id ? null : [formatWikilink(id)])
+                : patchList(toggle(values, id).map(formatWikilink))
+            }
             onClose={() => setOpen(false)}
           />
         )}
@@ -341,7 +452,7 @@ export function FieldEditor({
       if (derived === null) return;
       const current = new Set(values);
       const wanted = new Set(next);
-      const jobs: Promise<void>[] = [];
+      const jobs: Promise<boolean>[] = [];
       for (const id of next) {
         if (current.has(id)) continue;
         const other = targetOf(id);
@@ -373,6 +484,7 @@ export function FieldEditor({
           type="button"
           data-testid="relation-field"
           aria-label={`Edit ${humanize(def.name)}`}
+          data-cell-primary
           onClick={() => setOpen(true)}
           className={`inline-flex min-w-0 max-w-full ${wrapClass} ${blank ? BLANK_FILL : ''} items-center gap-1 rounded-md px-2 py-[3px] text-left text-sm text-n-800 hover:bg-n-50`}
         >
@@ -447,6 +559,7 @@ export function FieldEditor({
         <button
           type="button"
           aria-label={humanize(def.name)}
+          data-cell-primary
           onClick={() => setOpen(true)}
           // whitespace-nowrap: a date range is two dates and an arrow, which
           // wrapped onto a second line inside a fixed-height table row and
@@ -595,6 +708,20 @@ export function FieldEditor({
 
   // text | number — inline input on click
   if (draft !== null) {
+    /**
+     * A refused write keeps the draft (M20.3).
+     *
+     * `setDraft(null)` ran unconditionally, so a value the schema turned away
+     * took the text with it: type `example.com` into a URL cell and you got a
+     * toast, the old value back, and nothing left to correct. The write path
+     * reports refusals now (vaultStore.patchFrontmatter), so the editor can
+     * stay open on exactly what was typed.
+     */
+    const commitValue = (value: unknown) => {
+      void (async () => {
+        if (await patchFrontmatter(entry.path, { [def.name]: value })) setDraft(null);
+      })();
+    };
     const commit = () => {
       const trimmed = draft.trim();
       // A number field's display carries its format ("$1,840", "76%"). The
@@ -606,16 +733,17 @@ export function FieldEditor({
       // (M1.x): refuse the commit instead of poisoning the frontmatter.
       if (def.kind === 'number' && numeric !== '' && Number.isNaN(Number(numeric))) {
         useUiStore.getState().toast('Enter a number');
-        setDraft(null);
         return;
       }
       if (def.kind === 'number') {
-        patch(numeric === '' ? null : Number(numeric));
-        setDraft(null);
+        commitValue(numeric === '' ? null : Number(numeric));
         return;
       }
-      patch(trimmed === '' ? null : trimmed);
-      setDraft(null);
+      // M20.3: the scheme people leave off. The renderer already prepends one
+      // when it draws the anchor, so refusing `example.com` on the way in held
+      // the value to a stricter standard than the way out.
+      const text = def.kind === 'url' ? normalizeUrl(trimmed) : trimmed;
+      commitValue(text === '' ? null : text);
     };
     return (
       <input
@@ -631,6 +759,8 @@ export function FieldEditor({
         onKeyDown={(e) => {
           if (e.key === 'Enter') commit();
           if (e.key === 'Escape') {
+            // Abandoning is still one keystroke — keeping a refused draft is
+            // about not LOSING work, not about trapping anyone in the cell.
             e.stopPropagation();
             setDraft(null);
           }
@@ -640,6 +770,9 @@ export function FieldEditor({
     );
   }
   const blank = placeholder === 'blank' && resolved.display === '';
+  // A progress-formatted number draws its bar as the resting state (M20.3).
+  const ratio =
+    def.kind === 'number' && def.format === 'progress' ? progressRatio(resolved.display) : null;
   return (
     // max-w-full + truncate keep long text on one line inside a table cell;
     // the full value stays readable in the title and the detail panel.
@@ -652,6 +785,7 @@ export function FieldEditor({
       // property does the naming instead — blank means "draws no glyph", not
       // "is invisible to a screen reader or a click" (M16.35).
       {...(blank ? { 'aria-label': humanize(def.name) } : {})}
+      data-cell-primary
       // Seed the draft from the RAW value, never the formatted display: a
       // percent field opened holding "76%" and a currency field "$1,840",
       // and commit then rejected the app's own display string as not a
@@ -669,8 +803,28 @@ export function FieldEditor({
         blank ? null : (
           <span className="text-n-400">Empty</span>
         )
-      ) : (
+      ) : ratio === null ? (
         <span className="min-w-0 truncate">{resolved.display}</span>
+      ) : (
+        // M20.3: a format is a DISPLAY, not a permission. The bar used to be
+        // drawn by the table, which then had to render the cell read-only to
+        // draw it — so the same property was editable in the panel and not in
+        // the grid. Drawn here, it is the resting state of an ordinary number
+        // editor and clicking it opens the input in both surfaces.
+        <span className="flex w-full min-w-0 items-center gap-2">
+          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-n-100">
+            <span
+              className="block h-full rounded-full"
+              style={{
+                width: `${ratio}%`,
+                background: ratio >= 100 ? 'var(--success-500)' : 'var(--cortex-500)',
+              }}
+            />
+          </span>
+          <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-600">
+            {resolved.display}
+          </span>
+        </span>
       )}
     </button>
   );

@@ -90,7 +90,7 @@ describe('GanttView', () => {
   });
 
   it('writes the dates when a bar is dragged', () => {
-    const write = vi.fn(async () => {});
+    const write = vi.fn(async () => true);
     useVaultStore.setState({ patchFrontmatter: write });
     setup([task('spec', '2026-08-03', '2026-08-07')], { zoom: 'day' });
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chainTypes,
+  columnOwner,
   columnUniverse,
   hiddenColumns,
   insertColumn,
@@ -116,10 +118,16 @@ describe('column specs', () => {
     expect(setColumnWidth(sized, 'a', undefined)).toEqual(columns);
   });
 
+  // `undeclared` is what tells a cell this column belongs to no TYPE, so no
+  // row is trespassing on another type's property by editing it (M20.1).
   it('resolves an undeclared column as text rather than dropping it', () => {
     const resolved = resolveColumns([{ field: 'mystery' }], []);
     expect(resolved).toEqual([
-      { spec: { field: 'mystery' }, def: { name: 'mystery', kind: 'text' }, width: 150 },
+      {
+        spec: { field: 'mystery' },
+        def: { name: 'mystery', kind: 'text', undeclared: true },
+        width: 150,
+      },
     ]);
   });
 
@@ -184,5 +192,122 @@ describe('insertColumn', () => {
       'c',
       'x',
     ]);
+  });
+});
+
+/**
+ * A grid's columns come from its CHAIN, not just its source (M20.2).
+ *
+ * A grouping level that descends a relation nests foreign types under the
+ * source, so a Work item sat under Objective's columns carrying Status,
+ * Priority, Due and Estimate — none of which the grid could show, while
+ * offering it six columns it does not have.
+ */
+describe('chainTypes', () => {
+  const schema = buildSchema([
+    typeDoc('Objective', { owner: { kind: 'person' } }),
+    typeDoc('Key result', {
+      objective: { kind: 'relation', target: 'Objective' },
+      deliverables: { kind: 'relation', target: 'Work item' },
+    }),
+    typeDoc('Work item', { estimate: { kind: 'select' } }),
+  ]);
+  const source = { type: 'Objective', project: null };
+
+  it('is the source alone when the chain never descends', () => {
+    expect(chainTypes(source, [], schema)).toEqual(['Objective']);
+    expect(chainTypes(source, [{ field: 'status' }], schema)).toEqual(['Objective']);
+  });
+
+  // Each level's type comes from the level BEFORE it: a reverse descent names
+  // its own type, a forward one takes the target of the field above.
+  it('walks a chain of both descent directions', () => {
+    expect(
+      chainTypes(
+        source,
+        [
+          {
+            field: 'objective',
+            descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+          },
+          { field: 'deliverables', descend: { direction: 'forward', field: 'deliverables' } },
+        ],
+        schema,
+      ),
+    ).toEqual(['Objective', 'Key result', 'Work item']);
+  });
+
+  // A relation with no declared target cannot say what it descends into, so
+  // the walk stops rather than guessing.
+  it('stops where a forward descent names no target', () => {
+    expect(
+      chainTypes(
+        source,
+        [{ field: 'mystery', descend: { direction: 'forward', field: 'mystery' } }],
+        schema,
+      ),
+    ).toEqual(['Objective']);
+  });
+
+  it('is empty for a typeless source, which has no chain to walk', () => {
+    expect(chainTypes({ type: null, project: null }, [], schema)).toEqual([]);
+  });
+});
+
+describe('columnUniverse over a chain (M20.2)', () => {
+  const schema = buildSchema([
+    typeDoc('Objective', { owner: { kind: 'person' }, size: { kind: 'number' } }),
+    typeDoc('Key result', {
+      objective: { kind: 'relation', target: 'Objective' },
+      size: { kind: 'select' },
+      lead: { kind: 'person' },
+    }),
+  ]);
+  const nest = [
+    {
+      field: 'objective',
+      descend: { direction: 'reverse' as const, type: 'Key result', field: 'objective' },
+    },
+  ];
+  const source = { type: 'Objective', project: null };
+
+  it('adds the descended type’s own properties, after the source’s', () => {
+    const names = columnUniverse(source, [], schema, nest).map((f) => f.name);
+    expect(names).toEqual(['owner', 'size', 'objective', 'lead']);
+  });
+
+  it('leaves the source alone when no level descends', () => {
+    expect(columnUniverse(source, [], schema).map((f) => f.name)).toEqual(['owner', 'size']);
+  });
+
+  // What makes a per-column schema op answerable: renaming `lead` has to write
+  // to Key result, not to the view's source.
+  it('records which type declares each column', () => {
+    const byName = new Map(columnUniverse(source, [], schema, nest).map((f) => [f.name, f]));
+    expect(byName.get('owner')?.owners).toEqual(['Objective']);
+    expect(byName.get('lead')?.owners).toEqual(['Key result']);
+    expect(byName.get('size')?.owners).toEqual(['Objective', 'Key result']);
+  });
+
+  it('flags a name the chain declares with two different kinds', () => {
+    const size = columnUniverse(source, [], schema, nest).find((f) => f.name === 'size');
+    expect(size?.heterogeneous).toBe(true);
+    // The first declaration wins the header; the cells resolve their own.
+    expect(size?.kind).toBe('number');
+  });
+});
+
+describe('columnOwner', () => {
+  it('answers the one type that declares a column', () => {
+    expect(columnOwner({ name: 'a', kind: 'text', owners: ['Risk'] })).toBe('Risk');
+  });
+
+  // Two declarations, two possible writes, and no way to tell which was meant.
+  it('answers null when several types declare it', () => {
+    expect(columnOwner({ name: 'a', kind: 'text', owners: ['Risk', 'Bet'] })).toBeNull();
+  });
+
+  it('answers null for a column no type declares', () => {
+    expect(columnOwner({ name: 'a', kind: 'text', undeclared: true })).toBeNull();
   });
 });

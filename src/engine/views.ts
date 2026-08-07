@@ -34,19 +34,25 @@ import {
   VIEW_TYPES,
 } from './types';
 
-/** Project default: list grouped by status, modified desc (spec "Collections and views"). */
+/**
+ * What a view looks like before anything is known about its source.
+ *
+ * Only `type` and `sort` can be decided without a schema. `columns` and
+ * `group` both name FIELDS, and no field name can be defaulted from nothing —
+ * so both are "nothing decided yet", and the surface that DOES know the source
+ * fills them in via `defaultColumnsFor`/`hasStatusField`.
+ *
+ * M19.1: this used to assert a Jira issue — `group: [{ field: 'status' }]` and
+ * columns `key, status, priority, assignee, due, estimate` — as the app-wide
+ * default, which is how a fresh type with no fields at all opened on six
+ * headers for properties nothing in the vault had. Do not put field names back
+ * here; a default that names a field is a default that has guessed a domain.
+ */
 export const DEFAULT_PRESENTATION: Presentation = {
   type: 'list',
-  group: [{ field: 'status' }],
+  group: [],
   sort: [{ field: 'modifiedAt', dir: 'desc' }],
-  columns: [
-    { field: 'key' },
-    { field: 'status' },
-    { field: 'priority' },
-    { field: 'assignee' },
-    { field: 'due' },
-    { field: 'estimate' },
-  ],
+  columns: [],
 };
 
 /** Deep copy — presentations are edited in component state and must not
@@ -426,12 +432,12 @@ function parseGroupChain(obj: Record<string, unknown>): GroupSpec[] {
     }
   } else if (typeof obj.groupBy === 'string' && obj.groupBy.trim() !== '') {
     levels.push({ field: obj.groupBy.trim() });
-  } else if (obj.groupBy !== null && obj.hierarchy === undefined && obj.childrenVia === undefined) {
-    // No grouping stated at all — the default. An explicit `groupBy: null`,
-    // or a file that only declared a hierarchy, means "no bands" rather than
-    // "give me the default bands".
-    levels.push(...DEFAULT_PRESENTATION.group.map((g) => ({ ...g })));
   }
+  // M19.1: no grouping stated means NO BANDS, the same as an explicit
+  // `groupBy: null`. There used to be a third branch here that spread
+  // `DEFAULT_PRESENTATION.group` — a hardcoded `status` band — so a file that
+  // said nothing got bands, and one that said `groupBy: null` did not, for
+  // reasons no reader of the file could see.
 
   // M9.1 `hierarchy:` and v1 `childrenVia:` become relation levels.
   const legacy: ChildrenSpec[] = Array.isArray(obj.hierarchy)

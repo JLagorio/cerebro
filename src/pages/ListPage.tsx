@@ -96,9 +96,19 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   // M9.2: one resolution for every surface. A typeless view used to get [],
   // so an "Everything" view had no columns at all; columnUniverse unions the
   // properties its records actually carry.
+  // M20.2: the CHAIN, not just the source. A grouping level that descends a
+  // relation nests foreign types in this grid, and they get their own columns.
   const fields = useMemo(
-    () => (list === null ? [] : columnUniverse(list.definition.source, surface.entries, schema)),
-    [schema, list, surface.entries],
+    () =>
+      list === null
+        ? []
+        : columnUniverse(
+            list.definition.source,
+            surface.entries,
+            schema,
+            surface.presentation.group,
+          ),
+    [schema, list, surface.entries, surface.presentation.group],
   );
 
   const sourceType = list?.definition.source.type ?? null;
@@ -187,8 +197,14 @@ export function ListPage({ selection }: { selection: ListSelection }) {
     if (sourceType === null) return;
     void (async () => {
       const ok =
-        kind === 'relation' && relation !== undefined
-          ? await addRelationProperty(sourceType, name, relation)
+        // M20.3: `person` too. A person field IS a relation with an avatar
+        // renderer (M16.13b), and the picker that declares one offers a target
+        // — which this dropped on the floor, silently, because only `relation`
+        // reached `addRelationProperty`. The new field arrived pointing at
+        // nothing and there was no sign anything had been discarded. The
+        // table's own header "+" already got this right.
+        (kind === 'relation' || kind === 'person') && relation !== undefined
+          ? await addRelationProperty(sourceType, name, relation, kind)
           : await addFieldToType(sourceType, name, kind);
       if (ok) {
         changePresentation({

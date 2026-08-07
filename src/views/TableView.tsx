@@ -15,6 +15,7 @@ import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
   MIN_COL_W,
+  columnOwner,
   hiddenColumns,
   insertColumn,
   moveColumn,
@@ -25,7 +26,12 @@ import {
   type ColumnDef,
 } from '@/engine/columns';
 import { buildRows, entryRows } from '@/engine/rows';
-import { CREATABLE_PROPERTY_KINDS, kindMeta, progressRatio } from '@/engine/properties';
+import {
+  CREATABLE_PROPERTY_KINDS,
+  GROUPABLE_KINDS,
+  kindMeta,
+  progressRatio,
+} from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
@@ -52,8 +58,11 @@ import {
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { ConfirmDeleteProperty, ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
+import { duplicateRecord } from '@/app/recordActions';
 import { QuickAddInline } from '@/views/QuickAdd';
 import {
+  CELL_CONTROL,
+  primaryControl,
   useRowKeyboard,
   type RowKeyboardCellProps,
   type RowKeyboardRowProps,
@@ -62,7 +71,14 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 
 const TITLE_W = 280;
-const MIN_TITLE_W = 140;
+/**
+ * M19.3 raised this from 140. The name cell's fixed chrome is the indent, the
+ * nesting expander, the type icon, the gaps and the Open pill — about 117px —
+ * so at the old floor a title had roughly 23px to render in. The floor has to
+ * clear the chrome the cell always lays out, or the column can be dragged to a
+ * width where the one thing it exists to show is the one thing not visible.
+ */
+const MIN_TITLE_W = 200;
 
 /** CSS custom property carrying a column's width. Index-based, because a
  * frontmatter key is not guaranteed to be a legal custom-property name. */
@@ -78,7 +94,9 @@ const READ_ONLY = new Set(['rollup', 'created_time', 'last_edited_time']);
  */
 function ProgressCell({ display }: { display: string }) {
   const ratio = progressRatio(display);
-  if (ratio === null) return <span className="truncate text-sm">{display}</span>;
+  // The same em-dash the read-only branch draws: one absence, one rendering.
+  if (ratio === null)
+    return <span className="truncate text-sm">{display === '' ? '—' : display}</span>;
   return (
     // w-full: the bar is flex-1, so without a sized parent it collapses to
     // zero inside a content-width cell.
@@ -137,14 +155,112 @@ const TableCell = memo(function TableCell({
   fill: string;
 }) {
   const resolved = schema.resolveField(entry, def.name);
-  const readOnly = READ_ONLY.has(def.kind);
-  const isProgress = def.format === 'progress';
+
+  /**
+   * Does THIS ROW's own type declare the property this column names (M20.1)?
+   *
+   * A grouping chain can descend a relation, which puts records of foreign
+   * types in one grid — the OKR tree nests Key results and Work items under
+   * Objectives. `buildRows` builds rows from the source type plus every
+   * relation the chain descends into; `columnUniverse` builds columns from the
+   * source type ALONE. So a Work item was laid out under Objective's columns
+   * and every one of them offered a full editor.
+   *
+   * `validatePatch` looks a field up on the record's own type, so grafting a
+   * parent's *select* onto a child's *number* field of the same name was
+   * already refused. What sailed through was the case with no def to validate
+   * against at all: undeclared keys are legal by design (advisory schema), so
+   * picking a person in an Objective's "Owner" column wrote `owner: [[…]]`
+   * onto a Work item that has never heard of `owner` — beneath the `assignee`
+   * it actually declares, which the grid had no column for.
+   *
+   * `resolveField` already answers this exactly: `def` is the row's own type's
+   * declaration, or null. A column the row does not own renders as the
+   * resolved display, read-only — no editor, and no click to forward into one.
+   * `ListView` has done this per row since M9.6; the table was the surface
+   * that disagreed.
+   *
+   * `undeclared` is the other way a row can fail to declare a column, and it
+   * is not this one: a column NO type declares — a hand-written view column, a
+   * frontmatter key the advisory schema surfaced — belongs to no type in
+   * particular, so no row is trespassing on another's by editing it.
+   */
+  const owned = resolved.def !== null || def.undeclared === true;
+
+  /**
+   * The declaration this CELL renders by (M20.2).
+   *
+   * `def` is the COLUMN's, which is the first declaration `columnUniverse`
+   * found across the types in the grid — and on a chain that descends a
+   * relation, or in a typeless view, that is routinely another type's. Two
+   * types can each declare `estimate` and mean a select on one and a number on
+   * the other; `size` can be a number here and a select there. Rendering every
+   * row through the column's def gave those rows the wrong editor, the wrong
+   * options, and the wrong format, which is what `heterogeneous` used to
+   * suppress by taking the whole column read-only.
+   *
+   * A row's own declaration is a better answer than refusing: the header still
+   * shows one kind (with the warning beside it), and each cell is right.
+   */
+  const cellDef = resolved.def ?? def;
+  const readOnly = !owned || READ_ONLY.has(cellDef.kind);
+  /**
+   * A progress bar is what a read-only kind LOOKS like here, not what makes a
+   * cell read-only (M20.3).
+   *
+   * `format: 'progress'` used to be part of the read-only test, so a number
+   * the record panel let you edit could not be edited in the grid — the format
+   * had become a permission. The bar is now the resting state of the ordinary
+   * number editor (`FieldEditor`), and this branch draws it only for the kinds
+   * that are genuinely computed: a rollup that formats as progress.
+   */
+  const isProgress = cellDef.format === 'progress';
+  const editable = !readOnly;
+
+  /**
+   * The whole cell is the hit target (M19.2).
+   *
+   * The editor is a button sized to its VALUE, so in a 150px column with the
+   * word "Todo" in it roughly 100px of cell answered no click at all — and
+   * the part that did answer painted its own inset hover fill, which read as
+   * a floating box rather than as the cell. Notion's cell is one target from
+   * border to border.
+   *
+   * Only when the click landed on the cell's own padding: a click that
+   * already reached the editor — or a link, or a chip's remove button — must
+   * not be delivered to it a second time.
+   *
+   * The containment check is load-bearing, not defensive. `closest` walks up
+   * past this cell, and the grid's scroll container carries `tabIndex={0}`
+   * from `useRowKeyboard` — which the last clause of CELL_CONTROL matches. So
+   * an unbounded `closest` reports a hit for EVERY click in the table and
+   * forwards none of them.
+   *
+   * `label` is in the guard but deliberately NOT in CELL_CONTROL, which would
+   * change what Enter targets. A checkbox cell is a `Switch`: a `<label>`
+   * around a hidden input. Clicking its track fires on a `<span>` that
+   * matches no control, so an unguarded forward clicked the input — and then
+   * the label's own activation behaviour clicked it AGAIN. Two writes to
+   * disk, ending exactly where they started, so the checkbox looked inert.
+   */
+  const openEditor = (e: React.MouseEvent<HTMLDivElement>) => {
+    // `a[href]` joins the guard and NOT `CELL_CONTROL` (M20.5), the same
+    // distinction the `label` note above draws: a URL, email or phone cell
+    // renders an anchor plus a pencil, and following the link also flipped the
+    // cell into edit mode behind the page you had just opened. Adding it to
+    // CELL_CONTROL instead would change what ENTER targets — the anchor is not
+    // the control the cell means, the pencil is.
+    const hit = (e.target as HTMLElement).closest(`a[href],label,${CELL_CONTROL}`);
+    if (hit !== null && e.currentTarget.contains(hit)) return;
+    primaryControl(e.currentTarget)?.click();
+  };
 
   return (
     <div
       role="gridcell"
       {...cellProps}
-      aria-colindex={colIndex + 1}
+      {...(editable ? { onClick: openEditor } : {})}
+      aria-colindex={colIndex + 2}
       className={[
         'flex flex-none overflow-hidden border-r border-n-100 px-2',
         wrap ? 'items-start py-1.5' : 'items-center',
@@ -155,7 +271,7 @@ const TableCell = memo(function TableCell({
       ].join(' ')}
       style={{ width: `var(${widthVar(index)})`, ...freeze }}
     >
-      {readOnly || isProgress ? (
+      {readOnly ? (
         isProgress ? (
           <ProgressCell display={resolved.display} />
         ) : (
@@ -195,7 +311,7 @@ const TableCell = memo(function TableCell({
               change what an empty cell looks like. */}
           <FieldEditor
             entry={entry}
-            def={def}
+            def={cellDef}
             schema={schema}
             compact={!wrap}
             chips={chips}
@@ -206,6 +322,83 @@ const TableCell = memo(function TableCell({
     </div>
   );
 });
+
+/**
+ * The name cell's value: an ordinary editable cell (M19.3).
+ *
+ * The title used to BE the opener — a button that navigated on click — which
+ * made the name the one cell in the grid you could not edit, and left the
+ * `maximize-2` glyph beside it as `aria-hidden` decoration that answered no
+ * click at all. That shape came from M15 and fixed a real defect the honest
+ * way round would also have fixed: the previous opener was `display:none`
+ * until hover, so it was absent from the DOM and from the tab order and there
+ * was no keyboard path into a record. Making the title the button removed the
+ * affordance instead of making it focusable. The Open pill beside this is
+ * focusable, so both can be true now.
+ *
+ * Modelled on FieldEditor's text branch, minus its `w-40`: a fixed width blows
+ * the flex line inside a fixed-width sticky cell.
+ */
+function TitleCell({
+  entry,
+  onCommit,
+}: {
+  entry: Entry;
+  onCommit: (title: string) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  // Rows are memoized and reordered by the view's sort chain, and the rename
+  // itself triggers a rescan — so without a path-keyed reset a mounted input
+  // could survive onto a different record and commit the draft onto it.
+  useEffect(() => setDraft(null), [entry.path]);
+
+  if (draft === null) {
+    return (
+      <button
+        type="button"
+        // The accessible name is the title itself, so no aria-label: "Open X"
+        // moved to the pill, which is the thing that now opens.
+        data-cell-primary
+        onClick={(e) => {
+          e.stopPropagation();
+          setDraft(entry.title);
+        }}
+        className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-900 focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
+      >
+        {entry.title}
+      </button>
+    );
+  }
+
+  const commit = () => {
+    const next = draft.trim();
+    setDraft(null);
+    void onCommit(next);
+  };
+
+  return (
+    <input
+      autoFocus
+      type="text"
+      aria-label="Title"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+        // stopPropagation, like FieldEditor's text branch — useRowKeyboard's
+        // capture-phase recovery is written against exactly that behaviour.
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          setDraft(null);
+        }
+      }}
+      className="h-[26px] min-w-0 flex-1 rounded-md border border-cortex-500 px-1.5 text-sm text-n-900 shadow-[var(--ring)] outline-none"
+    />
+  );
+}
 
 /** Indent per nesting level, matching the group-band step. */
 const INDENT = 16;
@@ -293,6 +486,11 @@ function RowGutter({
   return (
     <div
       role="gridcell"
+      // M20.4: it holds the row's checkbox, insert and menu, so it IS a cell —
+      // but it declared no index, and a cell without one takes its position
+      // from the DOM, which made the gutter and the first data cell both
+      // column 1. Every data slot is offset by it.
+      aria-colindex={1}
       className={[
         frozen ? 'sticky left-0 z-10' : '',
         'flex flex-none items-center justify-end gap-0.5 pl-1 pr-1',
@@ -485,6 +683,7 @@ const TableRow = memo(function TableRow({
   onCheck,
   onInsert,
   onAction,
+  onRename,
   cellProps,
 }: {
   entry: Entry;
@@ -507,7 +706,8 @@ const TableRow = memo(function TableRow({
   chips: ChipStyle;
   onToggle: () => void;
   selected: boolean;
-  onSelect: () => void;
+  /** The display slot clicked, or -1 for "the row itself". */
+  onSelect: (col: number) => void;
   /** Roving-tabindex bookkeeping from useRowKeyboard — id, aria-selected and
    * the ref the cursor scrolls into view. */
   rowProps: RowKeyboardRowProps;
@@ -518,6 +718,10 @@ const TableRow = memo(function TableRow({
   onCheck: (range: boolean) => void;
   onInsert?: () => void;
   onAction: (action: RowAction, entry: Entry) => void;
+  /** M19.3: commit an in-place title edit. Its own prop rather than a
+   * `RowAction`, because `onAction`'s `(action, entry)` shape has no slot to
+   * carry the new title. */
+  onRename: (entry: Entry, title: string) => Promise<boolean>;
   /** M16.17: the cursor's bookkeeping for one cell of THIS row, by display
    * slot. Bound to the row so the cells never have to know their row index. */
   cellProps: (col: number) => RowKeyboardCellProps;
@@ -539,7 +743,18 @@ const TableRow = memo(function TableRow({
       data-testid="table-row"
       data-path={entry.path}
       data-depth={depth}
-      onClick={onSelect}
+      // M20.4: a click puts the cursor on the CELL it landed in, not just on
+      // the row. `useRowKeyboard` has exported `setCell` for exactly this since
+      // M16.17 and nothing had ever called it, so clicking a cell and then
+      // pressing an arrow moved a cursor that was somewhere else entirely —
+      // usually back at the top of the grid.
+      onClick={(e) => {
+        const cell = (e.target as HTMLElement).closest<HTMLElement>('[role="gridcell"]');
+        const index = cell?.getAttribute('aria-colindex');
+        // The gutter is column 1 and holds the row's own controls, so a click
+        // there means the row, not a cell (it stops propagation anyway).
+        onSelect(index == null || index === '1' ? -1 : Number(index) - 2);
+      }}
       // `group` sits on the ROW so hovering anywhere reveals Open, not only
       // over the name cell.
       //
@@ -592,7 +807,23 @@ const TableRow = memo(function TableRow({
       <div
         role="gridcell"
         {...cellProps(titlePos)}
-        aria-colindex={titlePos + 1}
+        aria-colindex={titlePos + 2}
+        /**
+         * The whole cell is the hit target here too (M20.5).
+         *
+         * M19.2 made every DATA cell one target from border to border and this
+         * is the cell it missed — which is the one with the most dead space in
+         * it: the depth indent, the gaps either side of the type icon, and the
+         * strip between the title and the Open pill all answered no click at
+         * all. Same forwarder, same guard, and `primaryControl` already knows
+         * the name cell leads with its nesting expander and that the title
+         * beside it is what a gesture on the cell means (`data-cell-primary`).
+         */
+        onClick={(e) => {
+          const hit = (e.target as HTMLElement).closest(`a[href],label,${CELL_CONTROL}`);
+          if (hit !== null && e.currentTarget.contains(hit)) return;
+          primaryControl(e.currentTarget)?.click();
+        }}
         className={[
           titleFrozen ? 'z-10' : '',
           'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
@@ -627,37 +858,34 @@ const TableRow = memo(function TableRow({
           <span className="h-4 w-4 flex-none" />
         )}
         <Icon name={style.icon} size={13} color={style.color ?? 'var(--n-400)'} />
-        {/* The title IS the opener. It used to be an inert <span> beside a
-            chip that was `display:none` until hover — so the only way into a
-            record was a control absent from the DOM and from the tab order,
-            and hovering it stole ~62px from the title you were reading. */}
-        <button
-          type="button"
-          aria-label={`Open ${entry.title}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            openPath(entry.path);
-          }}
-          className="min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-left text-sm text-n-900 hover:underline focus-visible:rounded-sm focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
-        >
-          {entry.title}
-        </button>
+        <TitleCell entry={entry} onCommit={(title) => onRename(entry, title)} />
         {childCount > 0 && (
           <span className="flex-none [font-family:var(--font-mono)] text-2xs text-n-400">
             {childCount}
           </span>
         )}
-        {/* Reserved space, not inserted space: the glyph is always laid out
-            and only its VISIBILITY changes, so the title never reflows under
-            the pointer.
-            M16.35: `cb-row-chrome` rather than `opacity-0
-            group-hover:opacity-100`, because group-hover is the pointer and
-            nothing else — an arrow-key user sat on this row and never saw the
-            glyph at all. The shared rule adds the keyboard cursor and
-            focus-within. */}
-        <span aria-hidden className="cb-row-chrome flex-none text-n-400">
-          <Icon name="maximize-2" size={11} />
-        </span>
+        {/* Reserved space, not inserted space: the pill is always laid out and
+            only its opacity changes, so the title never reflows under the
+            pointer — hover-INSERTED chrome stealing ~62px from the name you
+            are reading is the defect the reserved slot exists to prevent.
+            M19.3: a real control, where an `aria-hidden` glyph used to sit.
+            `cb-row-open` fades with OPACITY rather than the `visibility` the
+            inert chrome uses, because a `visibility: hidden` button cannot be
+            focused — and this is the row's only opener, so hiding it from the
+            tab order would recreate exactly the M15 defect that made the
+            title the opener in the first place. */}
+        <button
+          type="button"
+          data-testid="row-open-affordance"
+          aria-label={`Open ${entry.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            openPath(entry.path);
+          }}
+          className="cb-row-open flex-none rounded-sm border border-n-200 bg-n-0 px-1.5 py-0.5 text-2xs font-medium uppercase tracking-[0.04em] text-n-500 hover:bg-n-50 hover:text-n-800"
+        >
+          Open
+        </button>
       </div>
       {cells.slice(titlePos).map(({ def, wrap }, i) => (
         <TableCell
@@ -714,6 +942,24 @@ function ColumnResizer({
 }) {
   const start = useRef({ x: 0, w: 0 });
   const [active, setActive] = useState(false);
+  /**
+   * The width an arrow key is building, before it is persisted (M20.5).
+   *
+   * Each arrow press called `onCommit`, which writes the view file and
+   * rescans the vault — so holding the key down ran one full write-and-rescan
+   * per repeat, which is the exact failure the POINTER path was rewritten to
+   * avoid (paint on move, persist on up). `null` means "nothing pending".
+   */
+  const pending = useRef<number | null>(null);
+  const nudge = (next: number) => {
+    pending.current = next;
+    onDrag(next);
+  };
+  const settle = () => {
+    if (pending.current === null) return;
+    onCommit(pending.current);
+    pending.current = null;
+  };
 
   const begin = (clientX: number) => {
     start.current = { x: clientX, w: width };
@@ -754,20 +1000,33 @@ function ColumnResizer({
         e.stopPropagation();
         onFit?.();
       }}
+      // Blur is the keyboard's pointerup: the arrows paint, leaving the handle
+      // persists. Enter also settles first, so a nudge-then-fit does not lose
+      // the nudge (M20.5).
+      onBlur={settle}
       onKeyDown={(e) => {
         // Keyboard resize: a pointer-only affordance is unreachable without one.
         const step = e.shiftKey ? 40 : 8;
+        const from = pending.current ?? width;
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
-          onCommit(Math.max(min, width - step));
+          nudge(Math.max(min, from - step));
         }
         if (e.key === 'ArrowRight') {
           e.preventDefault();
-          onCommit(width + step);
+          nudge(from + step);
         }
         if (e.key === 'Enter') {
           e.preventDefault();
+          settle();
           onFit?.();
+        }
+        // Committing on Escape would be the opposite of what it means
+        // everywhere else in this app, so it abandons what the arrows built.
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          pending.current = null;
+          onDrag(width);
         }
       }}
       // A 1px target was most of the problem: the pointer had to land on a
@@ -835,22 +1094,44 @@ function BandHeader({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
+    /**
+     * A `role="row"` with cells in it, holding a real button (M20.4).
+     *
+     * This was a `<button role="row">` with no cells and no `aria-expanded`:
+     * a row that contains no gridcell is malformed to a screen reader, the
+     * grid's `aria-rowcount` did not count it, and nothing announced whether
+     * it was open or shut — the one fact a band header exists to carry.
+     * `ListView` has had this right since M10; this mirrors it.
+     */
+    <div
       role="row"
       data-testid="table-group-header"
       data-depth={node.depth}
-      onClick={onToggle}
-      className="flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
+      // M20.5: sticky under the column header, offset by depth so a nested
+      // band parks below its parent instead of on top of it — ListView has
+      // done this since M10, and without it you scroll into a run of rows with
+      // nothing on screen saying which band you are in. `top-8` is the header
+      // row's own height.
+      className="sticky z-[15] flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
+      style={{ top: 32 + node.depth * 32 }}
     >
       {/* The band spans the full scroll width, so the band itself cannot be
           sticky (a sticky box as wide as its container has no room to shift).
           The label cluster is the sticky part instead. */}
       <span
+        role="gridcell"
         className="sticky left-0 flex items-center gap-2 pr-3"
         style={{ paddingLeft: GUTTER + node.depth * INDENT }}
       >
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.label}`}
+          onClick={onToggle}
+          className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
+        >
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+        </button>
         <span
           className="box-border h-[10px] w-[10px] flex-none rounded-full"
           style={
@@ -871,104 +1152,94 @@ function BandHeader({
         </span>
         <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{node.count}</span>
       </span>
-    </button>
+    </div>
   );
 }
 
 /**
- * One footer cell of the calculation row (M16.15).
+ * The Calculate picker (M19.5), shown inline inside a column's header menu.
  *
- * Notion's shape, and the reason the row is not a wall of numbers: a column
- * with no calculation set shows nothing until the footer is hovered, and then
- * offers "Calculate". Only what someone asked for is on screen.
+ * Deliberately the shape "Change type" already uses — an expanding sub-list in
+ * the same `MenuSurface` — rather than the `MenuBack` drill-in "Edit property"
+ * uses. Both are bounded single-selects with a checkmark; MenuBack replaces the
+ * whole surface and belongs to a titled FORM. Inline also inherits
+ * MenuSurface's arrow-key walker for free, which queries the whole subtree.
+ *
+ * One component, two callers: a data column's menu and the name column's. Two
+ * copies of the same picker would eventually disagree about which aggregates a
+ * kind offers.
+ */
+function CalcSubmenu({
+  kind,
+  calc,
+  onPick,
+}: {
+  kind: FieldKind;
+  calc: AggregateCalc | undefined;
+  onPick: (next: AggregateCalc | null) => void;
+}) {
+  return (
+    <div className="mb-1 max-h-[180px] overflow-y-auto rounded-md bg-n-25 p-0.5">
+      <MenuItem
+        label="None"
+        icon="minus"
+        checked={calc === undefined}
+        testId="calc-option-none"
+        onSelect={() => onPick(null)}
+      />
+      <MenuSeparator />
+      {aggregatesFor(kind).map((a) => (
+        <MenuItem
+          key={a.calc}
+          label={a.label}
+          checked={calc === a.calc}
+          testId={`calc-option-${a.calc}`}
+          onSelect={() => onPick(a.calc)}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One footer cell of the calculation row (M16.15, retriggered M19.5).
+ *
+ * It REPORTS; it does not offer. M16.15 read Notion's footer as "hover it to
+ * be offered a calculation", so every column grew a ghost "Calculate" the
+ * moment the pointer crossed the last row — N affordances nobody asked for,
+ * the same "the affordances outnumber the data" problem `table-chrome.css`
+ * was written to fix one row further up. Notion's footer shows results that
+ * have been set, and the OFFER lives in the column header menu beside filter,
+ * sort, group, freeze, wrap and hide — which is where Calculate now is, and
+ * where it was the only per-column setting missing.
  */
 function CalcCell({
   field,
-  label,
-  kind,
   calc,
   result,
-  onChange,
   className,
   style,
 }: {
   field: string;
-  label: string;
-  kind: FieldKind;
   calc: AggregateCalc | undefined;
   /** Already computed by the table — one pass over the rows, not one per cell. */
   result: string;
-  /** Absent on a surface with no view file to persist the choice to. */
-  onChange?: (next: AggregateCalc | null) => void;
   className: string;
   style: React.CSSProperties;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLButtonElement | null>(null);
   const meta = calc === undefined ? null : aggregateMeta(calc);
-
-  const body =
-    meta === null ? (
-      <span className="text-n-400 opacity-0 group-hover/footer:opacity-100">Calculate</span>
-    ) : (
-      <>
-        <span className="truncate text-n-400">{meta.short}</span>
-        <span className="flex-none font-medium text-n-700 [font-variant-numeric:tabular-nums]">
-          {result === '' ? '—' : result}
-        </span>
-      </>
-    );
-
   return (
-    <div role="gridcell" className={className} style={style}>
-      {onChange === undefined ? (
-        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">{body}</span>
-      ) : (
-        <button
-          ref={ref}
-          type="button"
-          data-testid={`calc-${field}`}
-          aria-label={`${label} calculation`}
-          onClick={() => setOpen(!open)}
-          className="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-sm border-0 bg-transparent px-1 py-0.5 text-xs hover:bg-n-100 focus-visible:shadow-[var(--ring)] focus-visible:outline-none"
-        >
-          {body}
-        </button>
-      )}
-      {open && onChange !== undefined && (
-        <Popover
-          anchorRef={ref}
-          onClose={() => setOpen(false)}
-          role="menu"
-          ariaLabel={`${label} calculation`}
-        >
-          <MenuSurface width={200}>
-            <MenuLabel>Calculate</MenuLabel>
-            <MenuItem
-              label="None"
-              icon="minus"
-              checked={calc === undefined}
-              testId="calc-option-none"
-              onSelect={() => {
-                setOpen(false);
-                onChange(null);
-              }}
-            />
-            <MenuSeparator />
-            {aggregatesFor(kind).map((a) => (
-              <MenuItem
-                key={a.calc}
-                label={a.label}
-                checked={calc === a.calc}
-                testId={`calc-option-${a.calc}`}
-                onSelect={() => {
-                  setOpen(false);
-                  onChange(a.calc);
-                }}
-              />
-            ))}
-          </MenuSurface>
-        </Popover>
+    // A cell per column even when that column calculates nothing: the footer
+    // repeats the grid's widths, and skipping the empty ones would slide every
+    // result out from under the column it belongs to.
+    <div role="gridcell" data-testid={`calc-${field}`} className={className} style={style}>
+      {meta !== null && (
+        <span className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+          <span className="truncate text-n-400">{meta.short}</span>
+          <span className="flex-none font-medium text-n-700 [font-variant-numeric:tabular-nums]">
+            {result === '' ? '—' : result}
+          </span>
+        </span>
       )}
     </div>
   );
@@ -1008,6 +1279,14 @@ function SortMark({ presentation, field }: { presentation: Presentation; field: 
  * exported from `engine/columns.ts` since M9.2 with no call site in the app —
  * so a column hidden from the table could only be brought back through the
  * view settings panel, three clicks away from the header it belongs to.
+ *
+ * M19.4: the "+" opens the property panel ITSELF, not a menu whose first item
+ * opens it. The three-state machine here made adding a column a two-click
+ * errand through a menu that had exactly one command on a type with nothing
+ * hidden — and the detail panel's own "+ Add property" has always gone
+ * straight to the same panel, so the table was the surface disagreeing. The
+ * hidden columns ride along inside it, because this is still the only place
+ * in the header that can bring one back.
  */
 function AddColumnButton({
   columns,
@@ -1020,12 +1299,12 @@ function AddColumnButton({
   sourceType: string | null;
   onColumnsChange: (next: ColumnSpec[]) => void;
 }) {
-  const [step, setStep] = useState<'closed' | 'menu' | 'new'>('closed');
+  const [open, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement | null>(null);
   const hidden = useMemo(() => hiddenColumns(columns, fields), [columns, fields]);
 
   const declare = (name: string, kind: FieldKind, relation?: RelationConfig) => {
-    setStep('closed');
+    setOpen(false);
     if (sourceType === null) return;
     void (async () => {
       const ok =
@@ -1044,6 +1323,38 @@ function AddColumnButton({
     })();
   };
 
+  const showColumn = (field: string) => {
+    setOpen(false);
+    // toggleColumn re-shows in place when the view already holds a hidden
+    // spec, and appends when it does not.
+    onColumnsChange(toggleColumn(columns, field));
+  };
+
+  /** The hidden columns, styled as the panel's other lists are so the one
+   * surface reads as one surface. */
+  const hiddenSection =
+    hidden.length === 0 ? null : (
+      <>
+        <span className="px-1 pt-0.5 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
+          Hidden
+        </span>
+        <div className="max-h-[140px] overflow-y-auto">
+          {hidden.map((f) => (
+            <button
+              key={f.name}
+              type="button"
+              data-testid={`show-column-${f.name}`}
+              onClick={() => showColumn(f.name)}
+              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-1.5 py-[5px] text-left text-sm text-n-800 hover:bg-n-50"
+            >
+              <Icon name={kindMeta(f.kind).icon} size={13} color="var(--n-500)" />
+              <span className="min-w-0 flex-1 truncate">{humanize(f.name)}</span>
+            </button>
+          ))}
+        </div>
+      </>
+    );
+
   return (
     <div
       className="relative flex flex-none items-center justify-center border-r border-n-100"
@@ -1054,32 +1365,27 @@ function AddColumnButton({
         type="button"
         data-testid="add-column"
         aria-label="Add a column"
-        aria-haspopup="menu"
-        onClick={() => setStep(step === 'closed' ? 'menu' : 'closed')}
+        aria-haspopup={sourceType === null ? 'menu' : 'dialog'}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
         className="flex h-5 w-5 items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
       >
         <Icon name="plus" size={13} />
       </button>
-      {step === 'menu' && (
+      {/* A typeless ("Everything") view has no schema to declare a property
+          ON — `declare` would return without writing — so there the "+" can
+          only offer the hidden columns back, and says so when there are
+          none. */}
+      {open && sourceType === null && (
         <Popover
           anchorRef={ref}
-          onClose={() => setStep('closed')}
+          onClose={() => setOpen(false)}
           role="menu"
           ariaLabel="Add a column"
-          trapFocus
         >
           <MenuSurface width={232}>
-            {sourceType !== null && (
-              <MenuItem
-                icon="plus"
-                label="New property"
-                testId="add-column-new"
-                onSelect={() => setStep('new')}
-              />
-            )}
-            {hidden.length > 0 && (
+            {hidden.length > 0 ? (
               <>
-                {sourceType !== null && <MenuSeparator />}
                 <MenuLabel>Hidden</MenuLabel>
                 {hidden.map((f) => (
                   <MenuItem
@@ -1087,17 +1393,11 @@ function AddColumnButton({
                     icon={kindMeta(f.kind).icon}
                     label={humanize(f.name)}
                     testId={`show-column-${f.name}`}
-                    onSelect={() => {
-                      setStep('closed');
-                      // toggleColumn re-shows in place when the view already
-                      // holds a hidden spec, and appends when it does not.
-                      onColumnsChange(toggleColumn(columns, f.name));
-                    }}
+                    onSelect={() => showColumn(f.name)}
                   />
                 ))}
               </>
-            )}
-            {hidden.length === 0 && sourceType === null && (
+            ) : (
               <MenuItem
                 icon="info"
                 label="No properties left to show"
@@ -1108,13 +1408,18 @@ function AddColumnButton({
           </MenuSurface>
         </Popover>
       )}
-      {step === 'new' && sourceType !== null && (
+      {open && sourceType !== null && (
         <AddPropertyPanel
           anchorRef={ref}
-          existingNames={fields.map((f) => f.name)}
+          // Humanized, like both detail panels pass (RecordProperties,
+          // DocProperties). Raw names meant the panel's duplicate guard never
+          // fired for a multi-word field: typing "Due date" against an
+          // existing `due_date` sailed past it and failed at the write.
+          existingNames={fields.map((f) => humanize(f.name))}
           ownerType={sourceType}
           onAdd={declare}
-          onCancel={() => setStep('closed')}
+          onCancel={() => setOpen(false)}
+          footer={hiddenSection}
         />
       )}
     </div>
@@ -1130,6 +1435,51 @@ interface HeaderItem {
   active?: boolean;
   /** Starts a new visual section. */
   section?: boolean;
+  /** Right-aligned current value, e.g. the calculation a column already runs. */
+  hint?: string;
+  /** Draws the chevron that says this opens another surface. */
+  submenu?: boolean;
+  testId?: string;
+  /**
+   * This item toggles the sub-list below rather than acting — closing the menu
+   * on select would close the very thing the click just opened.
+   */
+  keepOpen?: boolean;
+  /** The expanded sub-list, rendered directly beneath the item. */
+  sub?: React.ReactNode;
+}
+
+/**
+ * Both header menus' item list, rendered once (M19.5).
+ *
+ * The two menus carried byte-identical maps, so `keepOpen`/`sub` would have
+ * had to be taught twice — and the name column would have been the copy that
+ * quietly missed the next thing added to the other.
+ */
+function HeaderItems({ items, onClose }: { items: HeaderItem[]; onClose: () => void }) {
+  return (
+    <>
+      {items.map((item) => (
+        <Fragment key={item.label}>
+          {item.section === true && <MenuSeparator />}
+          <MenuItem
+            icon={item.icon}
+            label={item.label}
+            hint={item.hint}
+            submenu={item.submenu}
+            testId={item.testId}
+            danger={item.danger}
+            checked={item.active}
+            onSelect={() => {
+              item.run();
+              if (item.keepOpen !== true) onClose();
+            }}
+          />
+          {item.sub}
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
 /**
@@ -1156,6 +1506,8 @@ function HeaderMenu({
   frozen,
   onFreeze,
   onFit,
+  calc,
+  onCalcChange,
 }: {
   def: ColumnDef;
   wrap: boolean;
@@ -1172,10 +1524,15 @@ function HeaderMenu({
   frozen: boolean;
   onFreeze?: () => void;
   onFit: () => void;
+  /** M19.5: what this column already calculates, and how to change it. */
+  calc?: AggregateCalc;
+  /** Absent on a surface with no view file to persist the choice to. */
+  onCalcChange?: (next: AggregateCalc | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [changingKind, setChangingKind] = useState(false);
+  const [calcOpen, setCalcOpen] = useState(false);
   const [pendingKind, setPendingKind] = useState<FieldDef['kind'] | null>(null);
   // The third unguarded delete. `PropertyMenu` and `PropertyEditor` were
   // guarded; this menu has its OWN "Delete property" item that called
@@ -1188,13 +1545,26 @@ function HeaderMenu({
   const [draft, setDraft] = useState(humanize(def.name));
   const allEntriesForCount = useVaultStore((s) => s.entries);
   const name = humanize(def.name);
-  // Schema operations need one agreed-on declaration to edit.
-  const canEditSchema = sourceType !== null && def.heterogeneous !== true;
+  /**
+   * Schema operations need one agreed-on declaration to edit — and they need
+   * to edit the type that HOLDS it (M20.2).
+   *
+   * This used to pass the view's SOURCE type to every one of them, which is
+   * right only while every column belongs to the source. Under a chain that
+   * descends a relation it routinely does not: the OKR tree's grid now carries
+   * Work item's `estimate`, and renaming that column would have written
+   * `estimate` onto Objective — a field on a type that never had one, with the
+   * column it was renamed from left exactly as it was. `columnOwner` answers
+   * null when several types declare the name, which is the same case the
+   * warning triangle beside the header marks.
+   */
+  const ownerType = columnOwner(def) ?? (def.undeclared === true ? sourceType : null);
 
   useEffect(() => {
     if (open) {
       setDraft(humanize(def.name));
       setChangingKind(false);
+      setCalcOpen(false);
       setEditing(false);
       setConfirmDelete(false);
     }
@@ -1204,9 +1574,9 @@ function HeaderMenu({
 
   const commitRename = () => {
     const next = draft.trim();
-    if (!canEditSchema || sourceType === null || next === '' || humanize(def.name) === next) return;
+    if (ownerType === null || next === '' || humanize(def.name) === next) return;
     void (async () => {
-      if (await renameFieldOnType(sourceType, def.name, next)) {
+      if (await renameFieldOnType(ownerType, def.name, next)) {
         // The view addresses the column by field name — follow the rename.
         onColumnsChange?.(
           columns.map((c) =>
@@ -1233,13 +1603,46 @@ function HeaderMenu({
         icon: 'arrow-down',
         run: () => onPresentationChange(sortBy(presentation, def.name, 'desc')),
       },
-      {
+    );
+    // M20.5: the toolbar filters its Group menu to GROUPABLE_KINDS and this
+    // menu offered the item on anything, so a date or a number column could
+    // band a table by a value with no buckets in it — and creating inside one
+    // of those bands is what seeded the malformed writes M20.1e had to coerce.
+    // Two spellings of "can this be grouped" will always drift; there is one.
+    if (GROUPABLE_KINDS.has(def.kind)) {
+      items.push({
         label: 'Group by',
         icon: 'rows-3',
         active: presentation.group.some((g) => g.descend === undefined && g.field === def.name),
         run: () => onPresentationChange(groupByField(presentation, def.name)),
-      },
-    );
+      });
+    }
+  }
+  // Last of the "what does this column tell me" cluster, before the Freeze
+  // section break — where Notion's own column menu carries it. Gated on
+  // `onCalcChange` and NOT on `canEditSchema`: a calculation is a VIEW setting
+  // like Filter and Sort, so a heterogeneous column in an "Everything" view
+  // gets one too even though nothing there may edit a schema.
+  if (onCalcChange !== undefined) {
+    items.push({
+      label: 'Calculate',
+      icon: 'sigma',
+      testId: 'calculate',
+      submenu: true,
+      keepOpen: true,
+      hint: calc === undefined ? undefined : aggregateMeta(calc).label,
+      run: () => setCalcOpen(!calcOpen),
+      sub: calcOpen ? (
+        <CalcSubmenu
+          kind={def.kind}
+          calc={calc}
+          onPick={(next) => {
+            onCalcChange(next);
+            close();
+          }}
+        />
+      ) : undefined,
+    });
   }
   if (onFreeze !== undefined) {
     items.push({
@@ -1285,10 +1688,10 @@ function HeaderMenu({
             : onColumnsChange(moveColumn(columns, def.name, 1)),
       },
     );
-    if (canEditSchema && sourceType !== null) {
+    if (ownerType !== null) {
       const insert = (side: 'left' | 'right') => {
         void (async () => {
-          const created = await insertFieldOnType(sourceType, def.name, side);
+          const created = await insertFieldOnType(ownerType, def.name, side);
           if (created !== null) onColumnsChange(insertColumn(columns, created, def.name, side));
         })();
       };
@@ -1305,7 +1708,7 @@ function HeaderMenu({
           icon: 'copy',
           run: () => {
             void (async () => {
-              const copy = await duplicateFieldOnType(sourceType, def.name);
+              const copy = await duplicateFieldOnType(ownerType, def.name);
               if (copy !== null) onColumnsChange(insertColumn(columns, copy, def.name, 'right'));
             })();
           },
@@ -1350,7 +1753,7 @@ function HeaderMenu({
             autoFocus={!editing}
             className={editing ? 'p-2' : ''}
           >
-            {editing && canEditSchema && sourceType !== null && onColumnsChange !== undefined ? (
+            {editing && ownerType !== null && onColumnsChange !== undefined ? (
               // The Notion flyout: the menu becomes the property editor,
               // anchored where the column is (M12.8).
               <div className="cb-panel-in">
@@ -1358,7 +1761,7 @@ function HeaderMenu({
                 <PropertyEditor
                   key={def.name}
                   def={def}
-                  sourceType={sourceType}
+                  sourceType={ownerType}
                   schema={schema}
                   columns={columns}
                   onColumnsChange={onColumnsChange}
@@ -1367,7 +1770,7 @@ function HeaderMenu({
               </div>
             ) : (
               <>
-                {canEditSchema && sourceType !== null ? (
+                {ownerType !== null ? (
                   <div className="px-1 pb-1 pt-0.5">
                     <Input
                       size="sm"
@@ -1385,7 +1788,7 @@ function HeaderMenu({
                 ) : (
                   <div className="px-2 pb-1 pt-1 text-xs font-medium text-n-800">{name}</div>
                 )}
-                {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
+                {ownerType !== null && onColumnsChange !== undefined && (
                   <MenuItem
                     icon="settings-2"
                     label="Edit property"
@@ -1394,7 +1797,7 @@ function HeaderMenu({
                     onSelect={() => setEditing(true)}
                   />
                 )}
-                {canEditSchema && sourceType !== null && (
+                {ownerType !== null && (
                   <MenuItem
                     icon="repeat-2"
                     label="Change type"
@@ -1404,7 +1807,7 @@ function HeaderMenu({
                     onSelect={() => setChangingKind(!changingKind)}
                   />
                 )}
-                {changingKind && sourceType !== null && (
+                {changingKind && ownerType !== null && (
                   <div className="mb-1 max-h-[180px] overflow-y-auto rounded-md bg-n-25 p-0.5">
                     {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
                       <MenuItem
@@ -1418,54 +1821,40 @@ function HeaderMenu({
                     ))}
                   </div>
                 )}
-                {items.map((item) => (
-                  <Fragment key={item.label}>
-                    {item.section === true && <MenuSeparator />}
-                    <MenuItem
-                      icon={item.icon}
-                      label={item.label}
-                      danger={item.danger}
-                      checked={item.active}
-                      onSelect={() => {
-                        item.run();
-                        close();
-                      }}
-                    />
-                  </Fragment>
-                ))}
+                <HeaderItems items={items} onClose={close} />
               </>
             )}
           </MenuSurface>
         </Popover>
       )}
-      {confirmDelete && sourceType !== null && onColumnsChange !== undefined && (
+      {confirmDelete && ownerType !== null && onColumnsChange !== undefined && (
         <ConfirmDeleteProperty
           name={name}
           kind={def.kind}
-          sourceType={sourceType}
-          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          sourceType={ownerType}
+          count={allEntriesForCount.filter((e) => e.type === ownerType).length}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => {
             setConfirmDelete(false);
             void (async () => {
-              if (await removeFieldFromType(sourceType, def.name)) {
+              if (await removeFieldFromType(ownerType, def.name)) {
                 onColumnsChange(columns.filter((c) => c.field !== def.name));
               }
             })();
           }}
         />
       )}
-      {pendingKind !== null && sourceType !== null && (
+      {pendingKind !== null && ownerType !== null && (
         <ConfirmKindChange
           name={name}
           from={def.kind}
           to={pendingKind}
-          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          count={allEntriesForCount.filter((e) => e.type === ownerType).length}
           onCancel={() => setPendingKind(null)}
           onConfirm={() => {
             setPendingKind(null);
             close();
-            void changeFieldKind(sourceType, def.name, pendingKind);
+            void changeFieldKind(ownerType, def.name, pendingKind);
           }}
         />
       )}
@@ -1488,6 +1877,7 @@ function TitleHeaderMenu({
   onFilterField,
   onMove,
   onFreeze,
+  onCalcChange,
 }: {
   presentation: Presentation;
   frozen: boolean;
@@ -1497,10 +1887,18 @@ function TitleHeaderMenu({
   onFilterField?: (field: string) => void;
   onMove: (delta: -1 | 1) => void;
   onFreeze: () => void;
+  /** M19.5: the name column calculates too — into `presentation.titleCalc`. */
+  onCalcChange?: (next: AggregateCalc | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const close = () => setOpen(false);
+  const [calcOpen, setCalcOpen] = useState(false);
+  // This menu has no open-reset effect and stays mounted, so the sub-list
+  // would otherwise be pre-expanded the next time it opens.
+  const close = () => {
+    setOpen(false);
+    setCalcOpen(false);
+  };
 
   const items: HeaderItem[] = [];
   if (onFilterField !== undefined) {
@@ -1518,15 +1916,41 @@ function TitleHeaderMenu({
         icon: 'arrow-down',
         run: () => onPresentationChange(sortBy(presentation, 'title', 'desc')),
       },
-      {
-        // Freezing means "up to here" now, so it is offered wherever the name
-        // column sits rather than only while it leads (M16.18).
-        label: frozen ? 'Unfreeze up to here' : 'Freeze up to this column',
-        icon: frozen ? 'pin-off' : 'pin',
-        section: true,
-        run: onFreeze,
-      },
     );
+    if (onCalcChange !== undefined) {
+      items.push({
+        label: 'Calculate',
+        icon: 'sigma',
+        testId: 'calculate',
+        submenu: true,
+        keepOpen: true,
+        hint:
+          presentation.titleCalc === undefined
+            ? undefined
+            : aggregateMeta(presentation.titleCalc).label,
+        run: () => setCalcOpen(!calcOpen),
+        // The name column holds titles: text, so the numeric calculations are
+        // correctly absent from what `aggregatesFor` offers here.
+        sub: calcOpen ? (
+          <CalcSubmenu
+            kind="text"
+            calc={presentation.titleCalc}
+            onPick={(next) => {
+              onCalcChange(next);
+              close();
+            }}
+          />
+        ) : undefined,
+      });
+    }
+    items.push({
+      // Freezing means "up to here" now, so it is offered wherever the name
+      // column sits rather than only while it leads (M16.18).
+      label: frozen ? 'Unfreeze up to here' : 'Freeze up to this column',
+      icon: frozen ? 'pin-off' : 'pin',
+      section: true,
+      run: onFreeze,
+    });
     if (!atStart) items.push({ label: 'Move left', icon: 'arrow-left', run: () => onMove(-1) });
     if (!atEnd) items.push({ label: 'Move right', icon: 'arrow-right', run: () => onMove(1) });
   }
@@ -1566,20 +1990,7 @@ function TitleHeaderMenu({
               beside every other setting for the whole view. */}
           <MenuSurface width={224}>
             <MenuLabel>Name</MenuLabel>
-            {items.map((item) => (
-              <Fragment key={item.label}>
-                {item.section === true && <MenuSeparator />}
-                <MenuItem
-                  icon={item.icon}
-                  label={item.label}
-                  checked={item.active}
-                  onSelect={() => {
-                    item.run();
-                    close();
-                  }}
-                />
-              </Fragment>
-            ))}
+            <HeaderItems items={items} onClose={close} />
           </MenuSurface>
         </Popover>
       )}
@@ -1710,7 +2121,13 @@ export function TableView({
     // trailing "+" (M16.18): leave either out and the slack calculation hands
     // the columns pixels that are already spoken for, so the last column runs
     // off the right edge.
-    const content = GUTTER + ADD_W + titleWidth + base.reduce((sum, w) => sum + w, 0);
+    // M20.5: only when the "+" is actually rendered. `AddColumnButton` is
+    // gated on `onColumnsChange`, so on a read-only surface — a dashboard
+    // block, a table with no view file to write to — 34px of the width was
+    // reserved for a control that is not there, and the last column stopped
+    // that far short of the right edge.
+    const addSlot = onColumnsChange === undefined ? 0 : ADD_W;
+    const content = GUTTER + addSlot + titleWidth + base.reduce((sum, w) => sum + w, 0);
     const slack = available - content;
     if (slack <= 0 || base.length === 0) {
       return { title: titleWidth, columns: base, total: content };
@@ -1722,7 +2139,7 @@ export function TableView({
       i === base.length - 1 ? w + slack - share * (base.length - 1) : w + share,
     );
     return { title: titleWidth, columns, total: available };
-  }, [resolved, titleWidth, available]);
+  }, [resolved, titleWidth, available, onColumnsChange]);
 
   /** Paint a width mid-drag: straight to the DOM, so no row re-renders. */
   const paint = useCallback(
@@ -1765,9 +2182,28 @@ export function TableView({
       if (node === null) return;
       let widest = 0;
       for (const cell of node.querySelectorAll<HTMLElement>(
-        `[aria-colindex="${displayIndex + 1}"]`,
+        `[aria-colindex="${displayIndex + 2}"]`,
       )) {
+        /**
+         * The cell's own `scrollWidth` is the clipped width (M20.5).
+         *
+         * A cell is `overflow-hidden` around an inner `truncate` span, and a
+         * truncating child shrinks to its parent — so the parent never
+         * overflows and `scrollWidth` reports exactly the width the column
+         * already has. "Fit to content" therefore widened a clipped column by
+         * the +4 padding below and nothing else, which is the one case anyone
+         * reaches for it.
+         *
+         * Measured against each descendant's own scroll width, offset by where
+         * it starts inside the cell — the name cell's indent, expander and
+         * type icon are real width the title has to clear.
+         */
+        const left = cell.getBoundingClientRect().left;
         widest = Math.max(widest, cell.scrollWidth);
+        for (const child of cell.querySelectorAll<HTMLElement>('*')) {
+          const offset = child.getBoundingClientRect().left - left;
+          widest = Math.max(widest, offset + child.scrollWidth);
+        }
       }
       // Nothing measurable (an unlaid-out grid) is not a reason to slam the
       // column to its minimum.
@@ -1782,12 +2218,21 @@ export function TableView({
   // Keyboard traverses the record rows only — bands and the create row are not
   // records, so Enter on them has nothing to open.
   const flatRows = useMemo(() => entryRows(rows), [rows]);
+  /** Row key → its position among the RECORD rows, which is what the keyboard
+   * cursor counts. */
+  const rowIndex = useMemo(() => new Map(flatRows.map((r, i) => [r.key, i])), [flatRows]);
   const keyboard = useRowKeyboard({
     count: flatRows.length,
     onOpen: (i) => openPath(flatRows[i].entry.path),
     onToggle: (i) => {
       if (flatRows[i].childCount > 0) toggleCollapsed(scope, flatRows[i].key);
     },
+    // M20.5: the hook has accepted this since M9.6 and the table never passed
+    // it, so a bulk selection could only be dismissed by finding the × on a
+    // floating bar — Escape, which clears every other transient state in the
+    // app, did nothing at all. Last in the one-press-one-step-out chain the
+    // hook already documents: cell → row → selection.
+    onEscape: () => setCheckedPaths(new Set()),
     // M16.17: +1 for the name column, which is a display slot with no
     // ColumnSpec behind it.
     colCount: resolved.length + 1,
@@ -1819,10 +2264,29 @@ export function TableView({
     });
   }, [rowPaths]);
 
-  const checked = useMemo(
-    () => flatRows.filter((r) => checkedPaths.has(r.entry.path)).map((r) => r.entry),
-    [flatRows, checkedPaths],
-  );
+  /**
+   * The selected records, de-duplicated by path (M20.5).
+   *
+   * A nesting chain can draw one record at two positions — a Work item that
+   * serves two key results is a row under each — and this counted ROWS. So
+   * ticking one box reported "2 selected", the bulk delete removed the file
+   * once and reported a failure for the second attempt, and `allChecked`
+   * compared a Set of distinct paths against a row count that included the
+   * duplicate, so Select all never read as checked.
+   */
+  const checked = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Entry[] = [];
+    for (const r of flatRows) {
+      if (!checkedPaths.has(r.entry.path) || seen.has(r.entry.path)) continue;
+      seen.add(r.entry.path);
+      out.push(r.entry);
+    }
+    return out;
+  }, [flatRows, checkedPaths]);
+
+  /** Distinct records on screen — what "all" means when a row can repeat. */
+  const distinctPaths = useMemo(() => new Set(rowPaths).size, [rowPaths]);
 
   const toggleChecked = useCallback(
     (index: number, range: boolean) => {
@@ -1845,7 +2309,27 @@ export function TableView({
   );
 
   const clearChecked = useCallback(() => setCheckedPaths(new Set()), []);
-  const allChecked = flatRows.length > 0 && checkedPaths.size >= flatRows.length;
+
+  /**
+   * M20.5: the bulk bar could delete twenty records and duplicate none — the
+   * only Duplicate in the app was in the record panel's header, so copying one
+   * meant opening it first. The write itself lives in `app/recordActions`,
+   * shared with that header rather than written twice.
+   */
+  const duplicateChecked = useCallback(() => {
+    const targets = checked;
+    void (async () => {
+      let made = 0;
+      for (const entry of targets) {
+        if ((await duplicateRecord(entry)) !== null) made += 1;
+      }
+      // The copies are new records; keeping the originals ticked would leave a
+      // selection that no longer describes what is on screen.
+      clearChecked();
+      if (made > 0) toast(`Duplicated ${made} ${made === 1 ? 'record' : 'records'}`);
+    })();
+  }, [checked, clearChecked, toast]);
+  const allChecked = distinctPaths > 0 && checkedPaths.size >= distinctPaths;
 
   const copyLinks = useCallback(() => {
     const text = checked.map((e) => `[[${e.title}]]`).join('\n');
@@ -1929,6 +2413,14 @@ export function TableView({
       }
     },
     [openPath, toast],
+  );
+
+  /** Commit an in-place title edit (M19.3). The store action never throws —
+   * it toasts and returns false — so this hands the result straight back to
+   * the cell rather than wrapping it in a try/catch of its own. */
+  const renameRow = useCallback(
+    (entry: Entry, title: string) => useVaultStore.getState().setTitle(entry.path, title),
+    [],
   );
 
   /** The row an inline create is open under — its key, and the band it
@@ -2147,6 +2639,13 @@ export function TableView({
     return out;
   }, [flatRows, resolved, schema, presentation.titleCalc]);
 
+  /** A footer is a place to READ results, so it exists only once there are
+   * results to read (M19.5). Gated on `resolved`, which already drops hidden
+   * columns: a calculation on a column you then hide takes the footer with
+   * it rather than leaving a 32px rule under a table that totals nothing. */
+  const anyCalc =
+    presentation.titleCalc !== undefined || resolved.some((r) => r.spec.calc !== undefined);
+
   const setColumnCalc = useCallback(
     (field: string, next: AggregateCalc | null) => {
       if (field === 'title') {
@@ -2207,16 +2706,32 @@ export function TableView({
         // big it is; `outline-none` with nothing replacing it meant Tabbing in
         // changed nothing on screen at all.
         aria-label={sourceType === null ? 'Records' : `${sourceType} records`}
-        aria-rowcount={flatRows.length}
+        // M20.4: every row in the DOM, which is what `aria-rowcount` names.
+        // It counted only the RECORD rows, so on a grouped table a screen
+        // reader was told "row 9 of 4" — bands and the create row are rows,
+        // and so is the header.
+        aria-rowcount={rows.length + 1}
         // M16.17: a grid whose cells carry aria-colindex has to say how many
         // there are, or a screen reader reports "column 3 of ?".
-        aria-colcount={displayKeys.length}
+        // M20.4: +1 for the gutter, which is a cell and now says so.
+        aria-colcount={displayKeys.length + 1}
         className="min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
         {...keyboard.containerProps}
       >
         <div
           ref={gridRef}
-          style={{ width: layout.total, minWidth: '100%', ...widthVars } as React.CSSProperties}
+          style={
+            {
+              width: layout.total,
+              minWidth: '100%',
+              // M20.5: the bulk bar floats rather than docking, which is right
+              // — docking shifts the table you are reading by 40px — but it
+              // then sat on top of the last two rows with no way to scroll
+              // them clear. Room appears only while it is on screen.
+              ...(checked.length > 0 ? { paddingBottom: 72 } : {}),
+              ...widthVars,
+            } as React.CSSProperties
+          }
         >
           <div
             ref={headerRowRef}
@@ -2261,7 +2776,7 @@ export function TableView({
                     role="columnheader"
                     onPointerDown={startHeaderDrag('title')}
                     onClickCapture={swallowDraggedClick}
-                    aria-colindex={d + 1}
+                    aria-colindex={d + 2}
                     className={[
                       titleFrozen ? 'z-30' : 'relative',
                       'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-xs font-semibold text-n-600',
@@ -2283,6 +2798,11 @@ export function TableView({
                       onFilterField={onFilterField}
                       onMove={(delta) => moveDisplay('title', delta)}
                       onFreeze={() => freezeThrough(d)}
+                      onCalcChange={
+                        onPresentationChange === undefined
+                          ? undefined
+                          : (next) => setColumnCalc('title', next)
+                      }
                     />
                     <SortMark presentation={presentation} field="title" />
                     <Icon
@@ -2314,7 +2834,7 @@ export function TableView({
                   role="columnheader"
                   onPointerDown={startHeaderDrag(def.name)}
                   onClickCapture={swallowDraggedClick}
-                  aria-colindex={d + 1}
+                  aria-colindex={d + 2}
                   className={[
                     'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-xs font-medium text-n-600',
                     d < frozenCount ? 'z-30 bg-n-25' : 'relative',
@@ -2341,6 +2861,12 @@ export function TableView({
                       onPresentationChange === undefined ? undefined : () => freezeThrough(d)
                     }
                     onFit={() => fitColumn(def.name, d)}
+                    calc={spec.calc}
+                    onCalcChange={
+                      onColumnsChange === undefined
+                        ? undefined
+                        : (next) => setColumnCalc(def.name, next)
+                    }
                   />
                   {def.heterogeneous === true && (
                     <Tooltip label="Declared with different kinds across the types in this view">
@@ -2381,6 +2907,26 @@ export function TableView({
               />
             )}
           </div>
+
+          {/* M20.5: ABOVE the create row, which is what "below" refers to.
+              `buildRows` emits the add row even for an empty source, and this
+              block sat after it — so the one instruction on screen pointed at
+              a control that was already above it. */}
+          {entries.length === 0 && (
+            <div role="row" className="sticky left-0 px-3 py-8">
+              {/* An empty that only reports emptiness occupies the space where
+                the next action belongs (M9.6). */}
+              <EmptyState
+                icon="table-2"
+                title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
+                description={
+                  filtered === true
+                    ? 'Adjust the filters in view settings to widen the query.'
+                    : 'Create the first one below.'
+                }
+              />
+            </div>
+          )}
 
           {rows.map((row) => {
             if (row.kind === 'band') {
@@ -2423,7 +2969,10 @@ export function TableView({
                 </div>
               );
             }
-            const index = flatRows.indexOf(row);
+            // M20.5: `flatRows.indexOf(row)` — a linear scan per row, so a
+            // 1,000-row grid ran ~500,000 comparisons per render just to
+            // discover a number the loop could have carried. Built once.
+            const index = rowIndex.get(row.key) ?? 0;
             const rowBand = bandForRow.get(row.key) ?? null;
             return (
               <Fragment key={row.key}>
@@ -2442,7 +2991,9 @@ export function TableView({
                   chips={chips}
                   onToggle={() => toggleCollapsed(scope, row.key)}
                   selected={index === keyboard.index}
-                  onSelect={() => keyboard.setIndex(index)}
+                  onSelect={(col) =>
+                    col < 0 ? keyboard.setIndex(index) : keyboard.setCell(index, col)
+                  }
                   // Without this the hook's `rows` ref stayed empty, so arrowing
                   // past the fold moved an invisible cursor off-screen and the
                   // scroller never followed it.
@@ -2450,8 +3001,19 @@ export function TableView({
                   checked={checkedPaths.has(row.entry.path)}
                   selecting={checkedPaths.size > 0}
                   onCheck={(range) => toggleChecked(index, range)}
+                  // Nested rows get no insert affordance (M20.1). `onCreate` is
+                  // bound to the SURFACE's type, so "insert a record after this
+                  // one" on a depth-2 Work item in the OKR tree created an
+                  // Objective at depth 0 — a record of the wrong type, in the
+                  // wrong folder, that jumped to the top of the grid. Creating
+                  // the type at that depth also has to link the new record back
+                  // through the relation that produced the level, and for a
+                  // FORWARD descent (`deliverables`) the parent holds the link,
+                  // so the child cannot express it at all and the parent needs
+                  // patching too. That belongs with the nesting model; until it
+                  // exists, offering nothing beats offering the wrong thing.
                   onInsert={
-                    onCreate === undefined
+                    onCreate === undefined || row.depth > 0
                       ? undefined
                       : () =>
                           setInserting({
@@ -2463,6 +3025,7 @@ export function TableView({
                           })
                   }
                   onAction={onRowAction}
+                  onRename={renameRow}
                   cellProps={(c) => keyboard.cellProps(index, c)}
                 />
                 {inserting?.key === row.key && onCreate !== undefined && (
@@ -2484,12 +3047,17 @@ export function TableView({
 
           {/* M16.15: the calculation footer. Pinned to the bottom of the
               scroller, because a total you have to scroll to is a total you
-              do not read. */}
-          {flatRows.length > 0 && (
+              do not read.
+              M19.5: it REPORTS what the column header menus were asked for.
+              It used to be present on every table with a row in it, offering
+              a ghost "Calculate" per column on hover — so the commonest state
+              of this row was a rule under the grid advertising a feature
+              nobody had used. */}
+          {flatRows.length > 0 && anyCalc && (
             <div
               role="row"
               data-testid="table-footer"
-              className="group/footer sticky bottom-0 z-20 flex h-8 border-t border-n-200 bg-n-25"
+              className="sticky bottom-0 z-20 flex h-8 border-t border-n-200 bg-n-25"
             >
               <span
                 className={[frozenCount > 0 ? 'sticky left-0 z-10 bg-n-25' : '', 'flex-none'].join(
@@ -2500,20 +3068,12 @@ export function TableView({
               {displayKeys.map((key, d) => {
                 const i = d < titlePos ? d : d - 1;
                 const column = key === 'title' ? null : resolved[i];
-                const persists = column === null ? onPresentationChange : onColumnsChange;
                 return (
                   <CalcCell
                     key={key}
                     field={key}
-                    label={column === null ? 'Name' : humanize(column.def.name)}
-                    // The name column holds titles: text, so the numeric
-                    // calculations are correctly absent from its menu.
-                    kind={column === null ? 'text' : column.def.kind}
                     calc={column === null ? presentation.titleCalc : column.spec.calc}
                     result={calcResults[key] ?? ''}
-                    onChange={
-                      persists === undefined ? undefined : (next) => setColumnCalc(key, next)
-                    }
                     className={[
                       d < frozenCount ? 'z-10 bg-n-25' : '',
                       'flex flex-none items-center border-r border-n-100 px-2 text-xs',
@@ -2526,22 +3086,6 @@ export function TableView({
                 );
               })}
               <span aria-hidden className="flex-1" />
-            </div>
-          )}
-
-          {entries.length === 0 && (
-            <div role="row" className="sticky left-0 px-3 py-8">
-              {/* An empty that only reports emptiness occupies the space where
-                the next action belongs (M9.6). */}
-              <EmptyState
-                icon="table-2"
-                title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
-                description={
-                  filtered === true
-                    ? 'Adjust the filters in view settings to widen the query.'
-                    : 'Create the first one below.'
-                }
-              />
             </div>
           )}
         </div>
@@ -2568,6 +3112,9 @@ export function TableView({
           <span className="h-4 w-px bg-n-200" />
           <Button size="sm" variant="ghost" icon="link" onClick={copyLinks}>
             Copy links
+          </Button>
+          <Button size="sm" variant="ghost" icon="copy" onClick={duplicateChecked}>
+            Duplicate
           </Button>
           <Button
             size="sm"

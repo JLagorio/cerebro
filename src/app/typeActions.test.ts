@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addFieldToType,
   addPropertyToEntry,
+  changeFieldKind,
   findTypeDoc,
   normalizeFieldName,
   removeFieldFromType,
@@ -36,6 +37,7 @@ beforeEach(() => {
     status: 'ready',
     patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
       patches.push({ path, patch });
+      return true;
     }),
     createItem: vi.fn(async (args: Record<string, unknown>) => {
       created.push(args);
@@ -191,5 +193,66 @@ describe('addPropertyToEntry', () => {
     const doc = makeEntry({ path: 'notes/loose.md', title: 'Loose' });
     expect(await addPropertyToEntry(doc, 'age', 'rollup')).toBe(false);
     expect(toasts[0]).toMatch(/Computed/);
+  });
+});
+
+/**
+ * M20.3. `KIND_KEYS` — the table naming what each kind's spec may carry — had
+ * exactly one row consulted (`options`); every other entry in it was dead. So
+ * changing a field's kind silently destroyed the wiring the declaration was
+ * for, and none of it is recoverable from the value data.
+ */
+describe('changeFieldKind keeps the wiring the new kind understands', () => {
+  const withField = (spec: Record<string, unknown>) =>
+    makeEntry({
+      path: 'types/task.md',
+      title: 'Task',
+      type: 'Type',
+      properties: { fields: { rel: spec } } as unknown as Record<string, never>,
+    });
+
+  const specAfter = async (
+    from: Record<string, unknown>,
+    to: Parameters<typeof changeFieldKind>[2],
+  ) => {
+    const patches: { path: string; patch: Record<string, unknown> }[] = [];
+    useVaultStore.setState({
+      vaultPath: '/v',
+      entries: [withField(from)],
+      status: 'ready',
+      patchFrontmatter: vi.fn(async (path: string, patch: Record<string, unknown>) => {
+        patches.push({ path, patch });
+        return true;
+      }),
+    });
+    await changeFieldKind('Task', 'rel', to);
+    const fields = patches[0].patch.fields as Record<string, Record<string, unknown>>;
+    return fields.rel;
+  };
+
+  // A person field IS a relation with an avatar renderer (M16.13b), so the
+  // conversion between them must not leave the picker pointing at nothing.
+  it('carries target and limit across relation ⇄ person', async () => {
+    expect(await specAfter({ kind: 'relation', target: 'Person', limit: 1 }, 'person')).toEqual({
+      kind: 'person',
+      target: 'Person',
+      limit: 1,
+    });
+  });
+
+  it('keeps a number’s format and precision', async () => {
+    expect(await specAfter({ kind: 'text', format: 'percent', precision: 2 }, 'number')).toEqual({
+      kind: 'number',
+      format: 'percent',
+      precision: 2,
+    });
+  });
+
+  // The allowlist is what the NEW kind can read, so a key it cannot is still
+  // dropped rather than carried along as dead YAML.
+  it('drops what the new kind has no reading for', async () => {
+    expect(await specAfter({ kind: 'relation', target: 'Person', limit: 1 }, 'text')).toEqual({
+      kind: 'text',
+    });
   });
 });
