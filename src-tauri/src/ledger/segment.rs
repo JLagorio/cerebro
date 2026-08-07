@@ -42,7 +42,7 @@ impl SegmentName {
     }
 }
 
-fn is_hex128(s: &str) -> bool {
+pub(crate) fn is_hex128(s: &str) -> bool {
     s.len() == 32
         && s.bytes()
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
@@ -105,6 +105,7 @@ pub fn segment_hash<'a>(record_hashes: impl Iterator<Item = &'a str>) -> String 
 /// `append` writes, `sync` makes durable — the M21.3 append API owns the
 /// acknowledgement rule (write frame → fsync → only then ack). `seal`
 /// consumes the writer; nothing can append to a sealed segment.
+#[derive(Debug)]
 pub struct SegmentWriter {
     file: std::fs::File,
     dir: PathBuf,
@@ -144,6 +145,42 @@ impl SegmentWriter {
             last_hash: anchor.to_string(),
             next_seq: start_seq,
             record_hashes: Vec::new(),
+        })
+    }
+
+    /// Reopen an existing OPEN segment for further appends, reconstructing
+    /// writer state from a verified read whose tail is `Clean` (a torn tail
+    /// must be truncated by recovery first). `anchor` is what the segment
+    /// was created against — it becomes the head again when the segment is
+    /// empty. pub(crate) on purpose: only the ledger writer's open path may
+    /// resume, only for `.open` files — there is no open-sealed-for-write
+    /// anywhere in this codebase.
+    pub(crate) fn resume(
+        dir: &Path,
+        name: &SegmentName,
+        read: &SegmentRead,
+        anchor: &str,
+    ) -> Result<SegmentWriter, String> {
+        if name.sealed {
+            return Err("a sealed segment can never be reopened for writing".to_string());
+        }
+        let path = dir.join(name.file_name());
+        let file = std::fs::File::options()
+            .append(true)
+            .open(&path)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let last_hash = read
+            .frames
+            .last()
+            .map(|f| f.hash.clone())
+            .unwrap_or_else(|| anchor.to_string());
+        Ok(SegmentWriter {
+            file,
+            dir: dir.to_path_buf(),
+            name: name.clone(),
+            last_hash,
+            next_seq: name.start_seq + read.frames.len() as u64,
+            record_hashes: read.frames.iter().map(|f| f.hash.clone()).collect(),
         })
     }
 

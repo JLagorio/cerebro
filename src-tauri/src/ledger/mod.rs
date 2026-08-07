@@ -21,6 +21,7 @@
 pub mod frame;
 pub mod segment;
 pub mod store;
+pub mod writer;
 
 use std::path::{Path, PathBuf};
 
