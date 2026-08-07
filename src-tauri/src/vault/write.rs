@@ -115,8 +115,10 @@ fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Resu
     file.sync_all().map_err(|e| e.to_string())?;
     crate::crash::crash_point("temp-written");
     // Register BEFORE the rename: the suppression entry must exist by the
-    // time the OS can deliver a change event for the destination path.
-    super::watcher::note_own_write(abs);
+    // time the OS can deliver a change event for the destination path. With
+    // the content hash (M21.6), so the echo is recognized by bytes, not by
+    // clock.
+    super::watcher::note_own_write_hashed(abs, crate::ledger::sha256_hex(content.as_bytes()));
     std::fs::rename(temp, abs).map_err(|e| e.to_string())?;
     crate::crash::crash_point("renamed-pre-dirsync");
     // The rename is durable only once the directory entry itself is on disk.
@@ -1592,6 +1594,20 @@ mod tests {
         backdate(&orphans[0], 120);
         clean_orphan_temps(&vault);
         assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M21.6: the funnel registers WHAT it wrote, so the watcher recognizes
+    // the echo by content — and only the echo.
+    #[test]
+    fn the_write_funnel_registers_its_content_hash_with_the_watcher() {
+        let vault = vault_with_note("wfm-hashed-own-write");
+        save_note(&vault, "items/atl-1.md", "\n# Ship the scanner\n\nMine.\n").unwrap();
+        let path = vault.join("items/atl-1.md");
+        assert!(crate::vault::watcher::is_suppressed(&path));
+        // A foreign edit right afterwards is not ours, window or no window.
+        std::fs::write(&path, "someone else's bytes").unwrap();
+        assert!(!crate::vault::watcher::is_suppressed(&path));
         let _ = std::fs::remove_dir_all(&vault);
     }
 
