@@ -6,6 +6,7 @@ pub mod demo;
 pub mod git;
 pub mod git_commands;
 pub mod knowledge;
+pub mod ledger;
 pub mod mcp;
 pub mod roots;
 pub mod roots_commands;
