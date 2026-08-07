@@ -380,6 +380,13 @@ export async function startWatcher(_vault: string): Promise<void> {
   // No-op: the mock has no file watcher; writers trigger rescans directly.
 }
 
+// The browser mock has no ledger (M21.7): the tamper-evident chain is a Rust
+// substrate, and mirroring it here would be guard logic the mock must not
+// grow. Parity is only that the command exists on both sides.
+export async function ledgerHead(_vault: string): Promise<null> {
+  return null;
+}
+
 // --- Connectors (M13.3) ----------------------------------------------------
 // Mirrors src-tauri/src/connectors.rs: raw JSON string, object-validated on
 // save, empty when absent. Lives outside the files map — it is config, not a

@@ -339,6 +339,14 @@ fn stop_all_agents(state: tauri::State<'_, agent::AgentState>) -> Result<Vec<u64
     state.stop_all()
 }
 
+/// The ledger chain head for git cross-attestation trailers (M21.7).
+/// Best-effort by design: any absent or unreadable ledger is `None`, never
+/// an error — checkpoints are periodic anchoring, not a ledger dependency.
+#[tauri::command(async)]
+fn ledger_head(vault: String) -> Option<ledger::LedgerHead> {
+    ledger::head(Path::new(&vault))
+}
+
 #[tauri::command(async)]
 fn start_watcher(
     app: tauri::AppHandle,
@@ -379,6 +387,7 @@ pub fn run() {
             import_attachment,
             write_text_file,
             export_png,
+            ledger_head,
             start_watcher,
             read_connectors,
             save_connectors,

@@ -77,6 +77,28 @@ pub struct LedgerRead {
     pub tail: segment::Tail,
 }
 
+/// The current chain head, as git cross-attestation consumes it (M21.7).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct LedgerHead {
+    /// None when the ledger exists but holds no records yet.
+    pub seq: Option<u64>,
+    /// Hash of the last committed record; the store id when none exist.
+    pub hash: String,
+}
+
+/// Best-effort read of the vault ledger's committed head — for checkpoint
+/// trailers, which are PERIODIC ANCHORING (D2), never a dependency: an
+/// absent, locked-out-of-nothing, torn-tailed (the committed prefix still
+/// anchors) or outright faulted ledger yields None and the checkpoint
+/// proceeds identically. Ledger correctness must not depend on git, and
+/// git behavior must not depend on the ledger.
+pub fn head(vault: &Path) -> Option<LedgerHead> {
+    read_ledger(&ledger_dir(vault)).ok().map(|read| LedgerHead {
+        seq: read.head_seq,
+        hash: read.head_hash,
+    })
+}
+
 /// Why a ledger cannot be read as one coherent committed history. Typed so
 /// M21.4's `recovery::classify` can name each state instead of collapsing
 /// them into a string — a torn tail on the final open segment is NOT here
@@ -402,6 +424,61 @@ mod tests {
         assert_eq!(read.head_seq, Some(1));
         assert_eq!(read.records, 1);
         assert!(matches!(read.tail, segment::Tail::Torn { .. }));
+        // The anchoring head still names the committed prefix (M21.7).
+        assert_eq!(
+            head(&vault),
+            Some(LedgerHead {
+                seq: Some(1),
+                hash: frames[0].hash.clone()
+            })
+        );
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M21.7: the head read is best-effort BY DESIGN — checkpoints are
+    // periodic anchoring, never a ledger dependency.
+    #[test]
+    fn the_anchoring_head_is_best_effort_never_an_error() {
+        // No ledger at all → None, no error.
+        let bare = crate::vault::testutil::temp_vault("ledger-head-none");
+        assert_eq!(head(&bare), None);
+        // A healthy ledger → the committed head.
+        let (vault, store, frames) = minted("ledger-head-ok", 2);
+        let dir = ledger_dir(&vault);
+        let mut writer = segment::SegmentWriter::create(&dir, WRITER, 1, &store.store_id).unwrap();
+        for frame in &frames {
+            writer.append(frame).unwrap();
+        }
+        writer.sync().unwrap();
+        assert_eq!(
+            head(&vault),
+            Some(LedgerHead {
+                seq: Some(2),
+                hash: frames[1].hash.clone()
+            })
+        );
+        // An empty ledger anchors its store identity.
+        let (empty, empty_store, _) = minted("ledger-head-empty", 0);
+        assert_eq!(
+            head(&empty),
+            Some(LedgerHead {
+                seq: None,
+                hash: empty_store.store_id
+            })
+        );
+        // A corrupted ledger → None, never an error into the checkpoint path.
+        let corrupt_path = dir.join(
+            segment::SegmentName {
+                writer_id: WRITER.to_string(),
+                start_seq: 1,
+                sealed: false,
+            }
+            .file_name(),
+        );
+        std::fs::write(&corrupt_path, "terminated garbage\n").unwrap();
+        assert_eq!(head(&vault), None);
+        for v in [bare, vault, empty] {
+            let _ = std::fs::remove_dir_all(&v);
+        }
     }
 }

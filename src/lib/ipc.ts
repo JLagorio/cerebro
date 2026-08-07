@@ -244,3 +244,15 @@ export function exportPng(defaultName: string, bytes: Uint8Array): Promise<strin
     ? invokeTauri('export_png', { defaultName, bytesBase64 })
     : mock.exportPng(defaultName, bytes);
 }
+
+/** The ledger chain head, as `{ seq, hash }` — or null when the vault has no
+ * readable ledger. Best-effort by design (M21.7): checkpoint trailers are
+ * periodic anchoring, and a missing head must change nothing about a commit. */
+export interface LedgerHead {
+  seq: number | null;
+  hash: string;
+}
+
+export function ledgerHead(vault: string): Promise<LedgerHead | null> {
+  return inTauri() ? invokeTauri('ledger_head', { vault }) : mock.ledgerHead(vault);
+}

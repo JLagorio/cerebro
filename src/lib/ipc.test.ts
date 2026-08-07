@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unknown) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
 
-import { canPickFiles, importAttachment, scanVault, updateFrontmatter } from './ipc';
+import { canPickFiles, importAttachment, ledgerHead, scanVault, updateFrontmatter } from './ipc';
 
 afterEach(() => {
   invokeSpy.mockClear();
@@ -52,5 +52,20 @@ describe('attachment IPC', () => {
       vault: '/my-vault',
       source: '/Users/me/report.pdf',
     });
+  });
+});
+
+// M21.7 parity: the command exists on both sides; the browser mock has no
+// ledger and says so with null — never with guard logic.
+describe('ledger head IPC', () => {
+  it('returns null from the mock outside Tauri', async () => {
+    expect(await ledgerHead('/demo-vault')).toBeNull();
+    expect(invokeSpy).not.toHaveBeenCalled();
+  });
+
+  it('invokes ledger_head inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await ledgerHead('/my-vault');
+    expect(invokeSpy).toHaveBeenCalledWith('ledger_head', { vault: '/my-vault' });
   });
 });

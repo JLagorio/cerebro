@@ -14,12 +14,39 @@ vi.mock('@/lib/gitIpc', async (importOriginal) => {
   };
 });
 
-import { checkpointMessage, resetGitState, useGit } from '@/git/useGit';
+vi.mock('@/lib/ipc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ipc')>();
+  return { ...actual, ledgerHead: vi.fn(async () => null) };
+});
+
+import { checkpointMessage, resetGitState, useGit, withLedgerTrailer } from '@/git/useGit';
+import { ledgerHead } from '@/lib/ipc';
 import * as gitIpc from '@/lib/gitIpc';
 import { useVaultStore } from '@/stores/vaultStore';
 import type { ModifiedFile } from '@/engine/git';
 
 const file = (path: string): ModifiedFile => ({ path, status: 'modified', staged: false });
+
+// M21.7: the trailer is periodic anchoring — appended when a ledger head
+// exists, and NOTHING about a checkpoint changes when one does not.
+describe('withLedgerTrailer', () => {
+  it('appends the chain head as a trailer when the vault has a ledger', async () => {
+    vi.mocked(ledgerHead).mockResolvedValueOnce({ seq: 7, hash: 'abc123' });
+    expect(await withLedgerTrailer('/v', 'Update note')).toBe(
+      'Update note\n\nCerebro-Ledger-Head: abc123',
+    );
+  });
+
+  it('leaves the message untouched when there is no ledger', async () => {
+    vi.mocked(ledgerHead).mockResolvedValueOnce(null);
+    expect(await withLedgerTrailer('/v', 'Update note')).toBe('Update note');
+  });
+
+  it('leaves the message untouched when the head read fails', async () => {
+    vi.mocked(ledgerHead).mockRejectedValueOnce(new Error('no backend'));
+    expect(await withLedgerTrailer('/v', 'Update note')).toBe('Update note');
+  });
+});
 
 describe('checkpointMessage', () => {
   it('names the note when there is only one', () => {
