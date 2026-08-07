@@ -19,6 +19,7 @@
 //! acknowledgement wants. Re-verify on toolchain bumps.
 
 pub mod frame;
+pub mod recovery;
 pub mod segment;
 pub mod store;
 pub mod writer;
@@ -75,18 +76,90 @@ pub struct LedgerRead {
     pub tail: segment::Tail,
 }
 
-/// Read and chain-verify the whole ledger. `Err` is corruption or a state
-/// this layer refuses to guess about (missing store.json, multiple writer
-/// ids, seq discontinuity between segments, more than one open segment…);
-/// a torn tail on the final open segment is NOT an error — it is a state,
-/// reported in `tail`, recovered by M21.4.
-pub fn read_ledger(dir: &Path) -> Result<LedgerRead, String> {
-    let store = store::load(dir)?.ok_or_else(|| format!("no store.json in {}", dir.display()))?;
+/// Why a ledger cannot be read as one coherent committed history. Typed so
+/// M21.4's `recovery::classify` can name each state instead of collapsing
+/// them into a string — a torn tail on the final open segment is NOT here
+/// (it is a recoverable state, reported in `LedgerRead::tail`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum LedgerFault {
+    /// No store.json — nothing has ever been recorded here.
+    NoStore,
+    /// store.json exists but cannot be trusted (torn, alien format).
+    StoreUnreadable(String),
+    /// Segments from more than one writer id sit in one ledger — a foreign
+    /// fork on disk (a second Mac's sync debris). Diagnosable, never merged.
+    MultipleWriters(Vec<String>),
+    /// An open segment followed by later segments — a shape the single
+    /// writer can never produce.
+    OpenSegmentNotLast { file: String },
+    /// A seq range is missing between segments.
+    SeqGap {
+        file: String,
+        expected: u64,
+        found: u64,
+    },
+    /// Two segments claim overlapping seq ranges — a fork.
+    SeqOverlap {
+        file: String,
+        expected: u64,
+        found: u64,
+    },
+    /// Damage inside a segment: bad hash, broken link, malformed terminated
+    /// line, seal mismatch, torn SEALED segment… Integrity state, never
+    /// silently truncated.
+    SegmentCorrupt { file: String, detail: String },
+}
+
+impl std::fmt::Display for LedgerFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LedgerFault::NoStore => write!(f, "no store.json — no ledger exists here"),
+            LedgerFault::StoreUnreadable(detail) => write!(f, "{detail}"),
+            LedgerFault::MultipleWriters(ids) => write!(
+                f,
+                "segments from multiple writers ({}) — foreign fork, never merged",
+                ids.join(", ")
+            ),
+            LedgerFault::OpenSegmentNotLast { file } => {
+                write!(f, "open segment {file} is not the last segment")
+            }
+            LedgerFault::SeqGap {
+                file,
+                expected,
+                found,
+            } => write!(
+                f,
+                "segment {file} starts at seq {found} where {expected} was expected — a gap"
+            ),
+            LedgerFault::SeqOverlap {
+                file,
+                expected,
+                found,
+            } => write!(
+                f,
+                "segment {file} starts at seq {found} where {expected} was expected — a fork"
+            ),
+            LedgerFault::SegmentCorrupt { file, detail } => write!(f, "{file}: {detail}"),
+        }
+    }
+}
+
+/// Read and chain-verify the whole ledger. `Err` is a typed fault this
+/// layer refuses to guess about; a torn tail on the final open segment is
+/// NOT an error — it is a state, reported in `tail`, recovered at
+/// writer-open and classified by `recovery::classify`.
+pub fn read_ledger(dir: &Path) -> Result<LedgerRead, LedgerFault> {
+    let store = match store::load(dir) {
+        Ok(Some(store)) => store,
+        Ok(None) => return Err(LedgerFault::NoStore),
+        Err(detail) => return Err(LedgerFault::StoreUnreadable(detail)),
+    };
 
     let mut names: Vec<segment::SegmentName> = Vec::new();
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| LedgerFault::StoreUnreadable(format!("{}: {e}", dir.display())))?;
     for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
+        let entry = entry.map_err(|e| LedgerFault::StoreUnreadable(e.to_string()))?;
         let file_name = entry.file_name();
         let Some(name) = file_name.to_str() else {
             continue;
@@ -95,7 +168,7 @@ pub fn read_ledger(dir: &Path) -> Result<LedgerRead, String> {
             names.push(parsed);
         }
         // Anything else (store.json, lock, temps, foreign debris) is not a
-        // segment; M21.4 learns to DIAGNOSE debris, this layer skips it.
+        // segment; recovery::classify names debris states, this layer skips.
     }
     names.sort_by_key(|n| n.start_seq);
 
@@ -104,9 +177,8 @@ pub fn read_ledger(dir: &Path) -> Result<LedgerRead, String> {
     let writer_ids: std::collections::BTreeSet<&str> =
         names.iter().map(|n| n.writer_id.as_str()).collect();
     if writer_ids.len() > 1 {
-        return Err(format!(
-            "segments from multiple writers ({}) — foreign fork, never merged",
-            writer_ids.into_iter().collect::<Vec<_>>().join(", ")
+        return Err(LedgerFault::MultipleWriters(
+            writer_ids.into_iter().map(str::to_string).collect(),
         ));
     }
 
@@ -118,23 +190,32 @@ pub fn read_ledger(dir: &Path) -> Result<LedgerRead, String> {
     for (i, name) in names.iter().enumerate() {
         let last = i + 1 == names.len();
         if !last && !name.sealed {
-            return Err(format!(
-                "open segment {} is not the last segment",
-                name.file_name()
-            ));
+            return Err(LedgerFault::OpenSegmentNotLast {
+                file: name.file_name(),
+            });
         }
         if let Some(expected) = next_seq {
-            if name.start_seq != expected {
-                return Err(format!(
-                    "segment {} starts at seq {} where {} was expected",
-                    name.file_name(),
-                    name.start_seq,
-                    expected
-                ));
+            if name.start_seq > expected {
+                return Err(LedgerFault::SeqGap {
+                    file: name.file_name(),
+                    expected,
+                    found: name.start_seq,
+                });
+            }
+            if name.start_seq < expected {
+                return Err(LedgerFault::SeqOverlap {
+                    file: name.file_name(),
+                    expected,
+                    found: name.start_seq,
+                });
             }
         }
         let read =
-            segment::read_segment(&dir.join(name.file_name()), name, &anchor, name.start_seq)?;
+            segment::read_segment(&dir.join(name.file_name()), name, &anchor, name.start_seq)
+                .map_err(|detail| LedgerFault::SegmentCorrupt {
+                    file: name.file_name(),
+                    detail,
+                })?;
         if let Some(frame) = read.frames.last() {
             anchor = frame.hash.clone();
         }
@@ -227,7 +308,7 @@ mod tests {
         let mut writer = segment::SegmentWriter::create(&dir, WRITER, 4, "0000forged").unwrap();
         writer.append(&forged).unwrap();
         writer.sync().unwrap();
-        let err = read_ledger(&dir).unwrap_err();
+        let err = read_ledger(&dir).unwrap_err().to_string();
         assert!(err.contains("broken chain link at seq 4"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -244,7 +325,7 @@ mod tests {
         writer.seal().unwrap();
         // Next segment claims to start at 5 — seq 4 is missing.
         segment::SegmentWriter::create(&dir, WRITER, 5, &frames[2].hash).unwrap();
-        let err = read_ledger(&dir).unwrap_err();
+        let err = read_ledger(&dir).unwrap_err().to_string();
         assert!(err.contains("starts at seq 5 where 4"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -260,7 +341,7 @@ mod tests {
         // The same vault synced from a second Mac: same store, different
         // writer — diagnosable, never merged (D2).
         segment::SegmentWriter::create(&dir, OTHER_WRITER, 2, &frames[0].hash).unwrap();
-        let err = read_ledger(&dir).unwrap_err();
+        let err = read_ledger(&dir).unwrap_err().to_string();
         assert!(err.contains("multiple writers"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -279,7 +360,7 @@ mod tests {
         writer.append(&frames[2]).unwrap();
         writer.sync().unwrap();
         writer.seal().unwrap();
-        let err = read_ledger(&dir).unwrap_err();
+        let err = read_ledger(&dir).unwrap_err().to_string();
         assert!(err.contains("not the last segment"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
@@ -289,7 +370,10 @@ mod tests {
         let vault = crate::vault::testutil::temp_vault("ledger-nostore");
         let dir = ledger_dir(&vault);
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(read_ledger(&dir).unwrap_err().contains("no store.json"));
+        assert!(read_ledger(&dir)
+            .unwrap_err()
+            .to_string()
+            .contains("no store.json"));
         let _ = std::fs::remove_dir_all(&vault);
     }
 

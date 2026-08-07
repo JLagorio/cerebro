@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use super::frame::{Frame, FRAME_VERSION};
 use super::segment::{self, SegmentName, SegmentWriter, Tail};
-use super::{ledger_dir, new_id128, read_ledger, store};
+use super::{ledger_dir, new_id128, store};
 
 /// Records per segment before rotation seals it and opens the next. Any
 /// value works; this one keeps segments small enough that recovery scans
@@ -97,20 +97,25 @@ impl LedgerWriter {
         let dir = ledger_dir(vault);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let lock = acquire_lock(&dir)?;
-        // Mint the identity when the ledger is new; read_ledger reloads it.
+        // Mint the identity when the ledger is new; classify reloads it.
         store::load_or_mint(&dir)?;
-        let read = read_ledger(&dir)?;
 
-        if let Some(foreign) = read.segments.iter().find(|n| n.writer_id != writer_id) {
-            // The M21.4 matrix names this state; v1 refuses it. A wiped
-            // app-data dir (new writer id, old segments) lands here too —
-            // adopt-and-reingest is a later milestone, never a guess.
-            return Err(format!(
-                "ledger segments belong to writer {}; this installation is {} — \
-                 foreign ledger, never merged",
-                foreign.writer_id, writer_id
-            ));
+        // One classification authority (M21.4): the writer proceeds only on
+        // the verdicts whose recovery actions it owns; every other state —
+        // corruption, gaps, forks, a foreign writer's or wiped-app-data
+        // ledger — is refused with the verdict's own words, never guessed
+        // around. (No remembered head here: that arrives with the M21.5
+        // index, wired at startup in M21.8.)
+        let recovery = super::recovery::classify(&dir, Some(writer_id), None);
+        match recovery.verdict {
+            super::recovery::Verdict::Valid
+            | super::recovery::Verdict::TornTail { .. }
+            | super::recovery::Verdict::SealPending => {}
+            verdict => return Err(verdict.to_string()),
         }
+        let read = recovery
+            .read
+            .ok_or("a recoverable verdict without a readable prefix")?;
 
         let next_start = read.head_seq.map_or(1, |seq| seq + 1);
         let last_open = read.segments.last().filter(|n| !n.sealed).cloned();
@@ -293,6 +298,7 @@ fn wall_clock_regressed(now: &str, prev: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::read_ledger;
     use super::*;
     use crate::vault::testutil;
 
