@@ -193,7 +193,9 @@ export function resolveSurface(
           presentation.columns.length === 0
             ? {
                 ...presentation,
-                columns: defaultColumnsFor(columnUniverse(source, inSource, schema)),
+                columns: defaultColumnsFor(
+                  columnUniverse(source, inSource, schema, presentation.group),
+                ),
               }
             : presentation,
       };

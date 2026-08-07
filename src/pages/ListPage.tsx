@@ -96,9 +96,19 @@ export function ListPage({ selection }: { selection: ListSelection }) {
   // M9.2: one resolution for every surface. A typeless view used to get [],
   // so an "Everything" view had no columns at all; columnUniverse unions the
   // properties its records actually carry.
+  // M20.2: the CHAIN, not just the source. A grouping level that descends a
+  // relation nests foreign types in this grid, and they get their own columns.
   const fields = useMemo(
-    () => (list === null ? [] : columnUniverse(list.definition.source, surface.entries, schema)),
-    [schema, list, surface.entries],
+    () =>
+      list === null
+        ? []
+        : columnUniverse(
+            list.definition.source,
+            surface.entries,
+            schema,
+            surface.presentation.group,
+          ),
+    [schema, list, surface.entries, surface.presentation.group],
   );
 
   const sourceType = list?.definition.source.type ?? null;

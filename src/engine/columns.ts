@@ -1,5 +1,7 @@
+import { childTypeOf } from './createRecord';
 import { isSystemProperty } from './properties';
-import type { ColumnSpec, Entry, FieldDef, Schema, ListSource } from './types';
+import { nestLevels } from './types';
+import type { ColumnSpec, Entry, FieldDef, GroupSpec, Schema, ListSource } from './types';
 
 /** Default column width; a ColumnSpec without one renders at this. */
 export const DEFAULT_COL_W = 150;
@@ -32,12 +34,36 @@ export function hasStatusField(fields: FieldDef[]): boolean {
 }
 
 /**
- * A column's field definition plus whether the records under it agree on
- * what kind it is. A typeless ("Everything") view can put a `status` from
- * one type beside a `status` from another; `heterogeneous` marks that so a
- * cell can refuse to offer an editor that would write the wrong shape.
+ * A column's field definition plus who it belongs to.
+ *
+ * One grid can hold records of several types — a typeless ("Everything") view
+ * holds whatever is in the collection, and a grouping chain that descends a
+ * relation nests foreign types under the source (M10). So a column is not
+ * automatically every row's, and a column's field is not automatically one
+ * declaration: `status` may be a `status` on one type and a `select` on
+ * another.
  */
 export interface ColumnDef extends FieldDef {
+  /**
+   * The types that declare this field, in the order the chain reaches them.
+   * Absent when `undeclared`.
+   *
+   * What makes a per-column schema operation answerable (M20.2): rename,
+   * change kind and delete all write to a TYPE, and before this the table
+   * wrote them to the view's source — which under a descent is routinely not
+   * the type that declares the column. Exactly one owner is the only case with
+   * an unambiguous answer.
+   */
+  owners?: string[];
+  /**
+   * Two or more owners declare it with different KINDS.
+   *
+   * The display keeps the first declaration; each cell resolves its own row's
+   * declaration instead of this one, so the flag no longer decides whether a
+   * cell may be edited (M20.2) — it says the HEADER is showing one of several
+   * answers, which is what the warning beside it means and why per-column
+   * schema ops are off.
+   */
   heterogeneous?: boolean;
   /**
    * NO type declares this field (M20.1). The column exists because a view file
@@ -55,6 +81,58 @@ export interface ColumnDef extends FieldDef {
 }
 
 /**
+ * The types a grid can actually hold, in the order its chain reaches them
+ * (M20.2).
+ *
+ * A grouping level that DESCENDS a relation nests records of another type
+ * under the source — the demo vault's OKR tree is Objective → Key result →
+ * Work item — so "the type of this view" stops being one answer the moment a
+ * chain has a descent in it. Each level's type comes from the level before:
+ * a `reverse` descent names its own type, and a `forward` descent takes the
+ * target of the relation the level above declares.
+ *
+ * A cycle (A descends into B, B back into A) terminates on the `includes`
+ * check rather than on depth, because a type contributes its fields once
+ * however many times the walk reaches it.
+ *
+ * Empty for a typeless source: there is no chain to walk from, and the types
+ * present are whatever the entries turn out to be.
+ */
+export function chainTypes(source: ListSource, group: GroupSpec[], schema: Schema): string[] {
+  if (source.type === null) return [];
+  const out = [source.type];
+  let current: string | null = source.type;
+  for (const spec of nestLevels(group)) {
+    const next: string | null = childTypeOf(spec, current, schema);
+    if (next === null) break;
+    if (!out.includes(next)) out.push(next);
+    current = next;
+  }
+  return out;
+}
+
+/** Union one set of types' declared fields, recording who declares what. */
+function unionDeclared(typeNames: Iterable<string>, schema: Schema): Map<string, ColumnDef> {
+  const byName = new Map<string, ColumnDef>();
+  for (const typeName of typeNames) {
+    for (const f of schema.types.get(typeName)?.fields ?? []) {
+      const existing = byName.get(f.name);
+      if (existing === undefined) {
+        byName.set(f.name, { ...f, owners: [typeName] });
+        continue;
+      }
+      existing.owners = [...(existing.owners ?? []), typeName];
+      // Same name, different kinds. The first declaration wins the display;
+      // each CELL resolves its own row's declaration (M20.2), so the flag
+      // reports that the header is showing one of several answers rather than
+      // taking every cell read-only.
+      if (existing.kind !== f.kind) existing.heterogeneous = true;
+    }
+  }
+  return byName;
+}
+
+/**
  * Every property a view could show (M9.2).
  *
  * Replaces three ad-hoc resolutions that disagreed: ProjectPage hardcoded
@@ -62,34 +140,32 @@ export interface ColumnDef extends FieldDef {
  * typeless views to `[]` (so an "Everything" view had no columns at all),
  * and TypePage used its own lookup.
  *
- * - Typed source → that type's declared fields, in declared order.
+ * - Typed source → the union across its CHAIN: the source type's declared
+ *   fields, then whatever each descended type declares and the ones above it
+ *   do not (M20.2). It used to be the source type alone, which is what left a
+ *   nested Work item under Objective's columns with no column of its own — it
+ *   carries Status, Priority, Assignee, Due, Window and Estimate and the grid
+ *   could show none of them, while offering it six columns it does not have.
  * - Typeless source → the union of declared fields across the types actually
  *   present, then undeclared frontmatter keys observed on those records. A
  *   mixed view gets the columns its records really have rather than none.
  */
-export function columnUniverse(source: ListSource, entries: Entry[], schema: Schema): ColumnDef[] {
-  if (source.type !== null) {
-    return schema.types.get(source.type)?.fields ?? [];
-  }
+export function columnUniverse(
+  source: ListSource,
+  entries: Entry[],
+  schema: Schema,
+  /** The view's grouping chain; only its relation levels are read. Omitted by
+   * callers with no chain to offer, which then get the source type alone. */
+  group: GroupSpec[] = [],
+): ColumnDef[] {
+  const chain = chainTypes(source, group, schema);
+  if (chain.length > 0) return [...unionDeclared(chain, schema).values()];
 
-  const byName = new Map<string, ColumnDef>();
-  const seenTypes = new Set<string>();
-
+  const present: string[] = [];
   for (const e of entries) {
-    if (e.type === null || seenTypes.has(e.type)) continue;
-    seenTypes.add(e.type);
-    for (const f of schema.types.get(e.type)?.fields ?? []) {
-      const existing = byName.get(f.name);
-      if (existing === undefined) {
-        byName.set(f.name, { ...f });
-      } else if (existing.kind !== f.kind) {
-        // Same name, different kinds across types. First declaration wins the
-        // display; the flag tells cells to fall back to read-only rather than
-        // graft one type's editor onto another type's value.
-        existing.heterogeneous = true;
-      }
-    }
+    if (e.type !== null && !present.includes(e.type)) present.push(e.type);
   }
+  const byName = unionDeclared(present, schema);
 
   // Undeclared frontmatter keys still deserve a column — that is the advisory
   // schema rule the detail panel already follows.
@@ -105,6 +181,22 @@ export function columnUniverse(source: ListSource, entries: Entry[], schema: Sch
   }
 
   return [...byName.values()];
+}
+
+/**
+ * The type a per-column schema operation writes to, or null when there is no
+ * unambiguous one (M20.2).
+ *
+ * Rename, change kind, insert, duplicate and delete all edit a TYPE doc. The
+ * table used to pass the view's SOURCE type to all of them and gate on
+ * `sourceType !== null && !heterogeneous` — which is right only while every
+ * column belongs to the source. Under a descent it is routinely not: renaming
+ * the Work item column `estimate` would have written `estimate` onto
+ * Objective, creating a field on a type that never had one and leaving the
+ * column it was renamed from untouched.
+ */
+export function columnOwner(def: ColumnDef): string | null {
+  return def.owners?.length === 1 ? def.owners[0] : null;
 }
 
 /**

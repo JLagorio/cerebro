@@ -169,7 +169,12 @@ function ViewBlock({ block }: { block: Extract<DashboardBlock, { kind: 'view' }>
     schema,
     lists,
   );
-  const fields = columnUniverse(list.definition.source, surface.entries, schema);
+  const fields = columnUniverse(
+    list.definition.source,
+    surface.entries,
+    schema,
+    active.presentation.group,
+  );
 
   return (
     <BlockShell

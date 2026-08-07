@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { TableView } from '@/views/TableView';
 import { buildSchema } from '@/engine/schema';
+import { columnUniverse } from '@/engine/columns';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -674,7 +675,13 @@ describe('TableView header settings (M16.18)', () => {
         entries={entries.filter((e) => e.type === 'Work item')}
         presentation={{ ...presentation, ...over }}
         schema={schema}
-        fields={[...(schema.types.get('Work item')?.fields ?? []), ...extraFields]}
+        // Through `columnUniverse`, as every page does — it is what tags a def
+        // with the type that OWNS it, and the header's schema operations write
+        // to that type rather than to the view's source (M20.2).
+        fields={[
+          ...columnUniverse({ type: 'Work item', project: null }, entries, schema),
+          ...extraFields,
+        ]}
         sourceType="Work item"
         onColumnsChange={onColumnsChange}
         onPresentationChange={onPresentationChange}
@@ -1231,5 +1238,109 @@ describe('TableView nested rows of a foreign type (M20.1)', () => {
     const { parent, child } = okrGrid();
     expect(parent.querySelector('[data-testid="row-insert"]')).not.toBeNull();
     expect(child.querySelector('[data-testid="row-insert"]')).toBeNull();
+  });
+});
+
+/**
+ * The nesting model (M20.2): the grid's columns come from its CHAIN, and each
+ * cell renders by its OWN row's declaration.
+ */
+describe('TableView union columns across the chain (M20.2)', () => {
+  function chainGrid(columns: { field: string }[]) {
+    const entries = [
+      makeEntry({
+        path: 'types/objective.md',
+        title: 'Objective',
+        type: 'Type',
+        properties: {
+          fields: { owner: { kind: 'person' }, size: { kind: 'number' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'types/key-result.md',
+        title: 'Key result',
+        type: 'Type',
+        properties: {
+          fields: {
+            objective: { kind: 'relation', target: 'Objective' },
+            // Same NAME as Objective's, a different KIND — what `heterogeneous`
+            // marks, and what used to take the whole column read-only.
+            size: { kind: 'select', options: [{ id: 's' }, { id: 'l' }] },
+          },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type' }),
+      makeEntry({
+        path: 'records/objectives/o1.md',
+        title: 'Grow EU revenue',
+        type: 'Objective',
+        properties: { size: 3 },
+      }),
+      makeEntry({
+        path: 'records/key-results/kr1.md',
+        title: 'Signups up 20%',
+        type: 'Key result',
+        properties: { size: 'l' },
+        relationships: { objective: ['Grow EU revenue'] },
+      }),
+    ];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const group = [
+      {
+        field: 'objective',
+        descend: { direction: 'reverse' as const, type: 'Key result', field: 'objective' },
+      },
+    ];
+    const fields = columnUniverse({ type: 'Objective', project: null }, entries, schema, group);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Objective')}
+        allEntries={entries}
+        presentation={{ ...presentation, group, columns }}
+        schema={schema}
+        fields={fields}
+        sourceType="Objective"
+        onColumnsChange={vi.fn()}
+      />,
+    );
+    const rows = screen.getAllByTestId('table-row');
+    return {
+      fields,
+      parent: rows.find((r) => r.getAttribute('data-depth') === '0')!,
+      child: rows.find((r) => r.getAttribute('data-depth') === '1')!,
+    };
+  }
+
+  // The Phase 1 fix made a child blank in a column it does not declare. This
+  // is the other half: the columns it DOES declare now exist to be blank in.
+  it('the descended type’s own properties are available as columns', () => {
+    const { fields } = chainGrid([{ field: 'size' }]);
+    expect(fields.map((f) => f.name)).toContain('objective');
+    expect(fields.find((f) => f.name === 'objective')?.owners).toEqual(['Key result']);
+  });
+
+  /**
+   * The header shows one kind and the cells disagree with it, correctly.
+   * Rendering every row through the COLUMN's def gave the Key result a number
+   * input for a select — the wrong editor over the wrong value — which is what
+   * `heterogeneous` used to suppress by taking the column read-only for
+   * everyone, including the rows that were right.
+   */
+  it('each row renders its own type’s declaration of a shared name', async () => {
+    const user = userEvent.setup();
+    const { parent, child } = chainGrid([{ field: 'size' }]);
+    const cell = (row: HTMLElement) =>
+      row.querySelector<HTMLElement>('[role="gridcell"][aria-colindex="2"]')!;
+
+    // Objective's `size` is a number: its editor is a textbox.
+    await user.click(cell(parent));
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(cell(parent).querySelector('input')).not.toBeNull();
+
+    // Key result's is a select: its editor is an option list, and it is not
+    // read-only the way the old heterogeneous guard would have left it.
+    await user.click(cell(child));
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['S', 'L']);
   });
 });

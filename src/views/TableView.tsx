@@ -15,6 +15,7 @@ import { deleteNote } from '@/lib/ipc';
 import { aggregate, aggregateMeta, aggregatesFor, type AggregateCalc } from '@/engine/aggregate';
 import {
   MIN_COL_W,
+  columnOwner,
   hiddenColumns,
   insertColumn,
   moveColumn,
@@ -179,8 +180,25 @@ const TableCell = memo(function TableCell({
    * particular, so no row is trespassing on another's by editing it.
    */
   const owned = resolved.def !== null || def.undeclared === true;
-  const readOnly = !owned || READ_ONLY.has(def.kind);
-  const isProgress = owned && def.format === 'progress';
+
+  /**
+   * The declaration this CELL renders by (M20.2).
+   *
+   * `def` is the COLUMN's, which is the first declaration `columnUniverse`
+   * found across the types in the grid — and on a chain that descends a
+   * relation, or in a typeless view, that is routinely another type's. Two
+   * types can each declare `estimate` and mean a select on one and a number on
+   * the other; `size` can be a number here and a select there. Rendering every
+   * row through the column's def gave those rows the wrong editor, the wrong
+   * options, and the wrong format, which is what `heterogeneous` used to
+   * suppress by taking the whole column read-only.
+   *
+   * A row's own declaration is a better answer than refusing: the header still
+   * shows one kind (with the warning beside it), and each cell is right.
+   */
+  const cellDef = resolved.def ?? def;
+  const readOnly = !owned || READ_ONLY.has(cellDef.kind);
+  const isProgress = owned && cellDef.format === 'progress';
   const editable = !readOnly && !isProgress;
 
   /**
@@ -271,7 +289,7 @@ const TableCell = memo(function TableCell({
               change what an empty cell looks like. */}
           <FieldEditor
             entry={entry}
-            def={def}
+            def={cellDef}
             schema={schema}
             compact={!wrap}
             chips={chips}
@@ -1419,8 +1437,20 @@ function HeaderMenu({
   const [draft, setDraft] = useState(humanize(def.name));
   const allEntriesForCount = useVaultStore((s) => s.entries);
   const name = humanize(def.name);
-  // Schema operations need one agreed-on declaration to edit.
-  const canEditSchema = sourceType !== null && def.heterogeneous !== true;
+  /**
+   * Schema operations need one agreed-on declaration to edit — and they need
+   * to edit the type that HOLDS it (M20.2).
+   *
+   * This used to pass the view's SOURCE type to every one of them, which is
+   * right only while every column belongs to the source. Under a chain that
+   * descends a relation it routinely does not: the OKR tree's grid now carries
+   * Work item's `estimate`, and renaming that column would have written
+   * `estimate` onto Objective — a field on a type that never had one, with the
+   * column it was renamed from left exactly as it was. `columnOwner` answers
+   * null when several types declare the name, which is the same case the
+   * warning triangle beside the header marks.
+   */
+  const ownerType = columnOwner(def) ?? (def.undeclared === true ? sourceType : null);
 
   useEffect(() => {
     if (open) {
@@ -1436,9 +1466,9 @@ function HeaderMenu({
 
   const commitRename = () => {
     const next = draft.trim();
-    if (!canEditSchema || sourceType === null || next === '' || humanize(def.name) === next) return;
+    if (ownerType === null || next === '' || humanize(def.name) === next) return;
     void (async () => {
-      if (await renameFieldOnType(sourceType, def.name, next)) {
+      if (await renameFieldOnType(ownerType, def.name, next)) {
         // The view addresses the column by field name — follow the rename.
         onColumnsChange?.(
           columns.map((c) =>
@@ -1543,10 +1573,10 @@ function HeaderMenu({
             : onColumnsChange(moveColumn(columns, def.name, 1)),
       },
     );
-    if (canEditSchema && sourceType !== null) {
+    if (ownerType !== null) {
       const insert = (side: 'left' | 'right') => {
         void (async () => {
-          const created = await insertFieldOnType(sourceType, def.name, side);
+          const created = await insertFieldOnType(ownerType, def.name, side);
           if (created !== null) onColumnsChange(insertColumn(columns, created, def.name, side));
         })();
       };
@@ -1563,7 +1593,7 @@ function HeaderMenu({
           icon: 'copy',
           run: () => {
             void (async () => {
-              const copy = await duplicateFieldOnType(sourceType, def.name);
+              const copy = await duplicateFieldOnType(ownerType, def.name);
               if (copy !== null) onColumnsChange(insertColumn(columns, copy, def.name, 'right'));
             })();
           },
@@ -1608,7 +1638,7 @@ function HeaderMenu({
             autoFocus={!editing}
             className={editing ? 'p-2' : ''}
           >
-            {editing && canEditSchema && sourceType !== null && onColumnsChange !== undefined ? (
+            {editing && ownerType !== null && onColumnsChange !== undefined ? (
               // The Notion flyout: the menu becomes the property editor,
               // anchored where the column is (M12.8).
               <div className="cb-panel-in">
@@ -1616,7 +1646,7 @@ function HeaderMenu({
                 <PropertyEditor
                   key={def.name}
                   def={def}
-                  sourceType={sourceType}
+                  sourceType={ownerType}
                   schema={schema}
                   columns={columns}
                   onColumnsChange={onColumnsChange}
@@ -1625,7 +1655,7 @@ function HeaderMenu({
               </div>
             ) : (
               <>
-                {canEditSchema && sourceType !== null ? (
+                {ownerType !== null ? (
                   <div className="px-1 pb-1 pt-0.5">
                     <Input
                       size="sm"
@@ -1643,7 +1673,7 @@ function HeaderMenu({
                 ) : (
                   <div className="px-2 pb-1 pt-1 text-xs font-medium text-n-800">{name}</div>
                 )}
-                {canEditSchema && sourceType !== null && onColumnsChange !== undefined && (
+                {ownerType !== null && onColumnsChange !== undefined && (
                   <MenuItem
                     icon="settings-2"
                     label="Edit property"
@@ -1652,7 +1682,7 @@ function HeaderMenu({
                     onSelect={() => setEditing(true)}
                   />
                 )}
-                {canEditSchema && sourceType !== null && (
+                {ownerType !== null && (
                   <MenuItem
                     icon="repeat-2"
                     label="Change type"
@@ -1662,7 +1692,7 @@ function HeaderMenu({
                     onSelect={() => setChangingKind(!changingKind)}
                   />
                 )}
-                {changingKind && sourceType !== null && (
+                {changingKind && ownerType !== null && (
                   <div className="mb-1 max-h-[180px] overflow-y-auto rounded-md bg-n-25 p-0.5">
                     {CREATABLE_PROPERTY_KINDS.filter((k) => !k.computed).map((k) => (
                       <MenuItem
@@ -1682,34 +1712,34 @@ function HeaderMenu({
           </MenuSurface>
         </Popover>
       )}
-      {confirmDelete && sourceType !== null && onColumnsChange !== undefined && (
+      {confirmDelete && ownerType !== null && onColumnsChange !== undefined && (
         <ConfirmDeleteProperty
           name={name}
           kind={def.kind}
-          sourceType={sourceType}
-          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          sourceType={ownerType}
+          count={allEntriesForCount.filter((e) => e.type === ownerType).length}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={() => {
             setConfirmDelete(false);
             void (async () => {
-              if (await removeFieldFromType(sourceType, def.name)) {
+              if (await removeFieldFromType(ownerType, def.name)) {
                 onColumnsChange(columns.filter((c) => c.field !== def.name));
               }
             })();
           }}
         />
       )}
-      {pendingKind !== null && sourceType !== null && (
+      {pendingKind !== null && ownerType !== null && (
         <ConfirmKindChange
           name={name}
           from={def.kind}
           to={pendingKind}
-          count={allEntriesForCount.filter((e) => e.type === sourceType).length}
+          count={allEntriesForCount.filter((e) => e.type === ownerType).length}
           onCancel={() => setPendingKind(null)}
           onConfirm={() => {
             setPendingKind(null);
             close();
-            void changeFieldKind(sourceType, def.name, pendingKind);
+            void changeFieldKind(ownerType, def.name, pendingKind);
           }}
         />
       )}

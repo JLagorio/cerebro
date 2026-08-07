@@ -57,11 +57,6 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     [selection, entries, schema, views],
   );
 
-  // M9.2: one resolution path shared with every other surface.
-  const typeFields = useMemo(
-    () => columnUniverse({ type: listing.name, project: null }, collection.entries, schema),
-    [schema, listing.name, collection.entries],
-  );
   const scope = `type:${listing.name}`;
   // M9.6: the type screen could only list; now it can create.
   const quickAdd = useQuickAdd(listing.name, null);
@@ -92,6 +87,21 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
     setSearch('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection.name, activeId]);
+
+  // M9.2: one resolution path shared with every other surface.
+  // M20.2: reads the CHAIN, so a tab whose grouping descends a relation gets
+  // the nested types' columns too — which is why it lives below the
+  // presentation state rather than beside the surface it came from.
+  const typeFields = useMemo(
+    () =>
+      columnUniverse(
+        { type: listing.name, project: null },
+        collection.entries,
+        schema,
+        presentation.group,
+      ),
+    [schema, listing.name, collection.entries, presentation.group],
+  );
 
   const openTab = (id: string) => navigate({ kind: 'type', name: selection.name, view: id });
 
