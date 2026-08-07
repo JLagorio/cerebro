@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { invokeSpy } = vi.hoisted(() => ({ invokeSpy: vi.fn(async () => [] as unknown) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeSpy }));
 
-import { canPickFiles, importAttachment, ledgerHead, scanVault, updateFrontmatter } from './ipc';
+import {
+  canPickFiles,
+  importAttachment,
+  ledgerHead,
+  ledgerStatus,
+  scanVault,
+  updateFrontmatter,
+} from './ipc';
 
 afterEach(() => {
   invokeSpy.mockClear();
@@ -67,5 +74,22 @@ describe('ledger head IPC', () => {
     (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
     await ledgerHead('/my-vault');
     expect(invokeSpy).toHaveBeenCalledWith('ledger_head', { vault: '/my-vault' });
+  });
+});
+
+// M21.8 parity: same rule as ledger_head — the command exists on both
+// sides; the mock's answer is the fixed no-ledger verdict.
+describe('ledger status IPC', () => {
+  it('returns the fixed no-ledger verdict from the mock outside Tauri', async () => {
+    const status = await ledgerStatus('/demo-vault');
+    expect(status.verdict).toBe('no-ledger');
+    expect(status.seq).toBeNull();
+    expect(invokeSpy).not.toHaveBeenCalled();
+  });
+
+  it('invokes ledger_status inside Tauri', async () => {
+    (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'] = {};
+    await ledgerStatus('/my-vault');
+    expect(invokeSpy).toHaveBeenCalledWith('ledger_status', { vault: '/my-vault' });
   });
 });

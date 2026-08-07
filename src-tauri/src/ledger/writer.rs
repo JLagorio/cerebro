@@ -40,6 +40,14 @@ pub struct Committed {
     pub seq: u64,
 }
 
+/// Read the writer identity WITHOUT minting — for read-only diagnostics
+/// (`ledger_status` must not leave an id behind as a side effect).
+pub fn existing_writer_id(config_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config_dir.join(WRITER_ID_FILE)).ok()?;
+    let id = raw.trim();
+    segment::is_hex128(id).then(|| id.to_string())
+}
+
 /// This installation's writer identity, minted once in APP-DATA — never the
 /// vault: two Macs syncing one vault must present different writer ids. A
 /// corrupt id file is an error, never a silent re-mint (a fresh id would
@@ -88,6 +96,9 @@ pub struct LedgerWriter {
     /// `ingested_at` of the newest record, for wall-clock-anomaly stamping.
     prev_wall_clock: Option<String>,
     segment_limit: u64,
+    /// Seq of the newest committed record — with the chain hash, the head
+    /// that shadow mode remembers into the index after each append.
+    head_seq: Option<u64>,
 }
 
 impl LedgerWriter {
@@ -161,6 +172,15 @@ impl LedgerWriter {
             segment: Some(segment),
             prev_wall_clock: read.frames.last().map(|f| f.ingested_at.clone()),
             segment_limit: limit.max(1),
+            head_seq: read.head_seq,
+        })
+    }
+
+    /// The committed head as this writer knows it — no disk read.
+    pub fn head(&self) -> Option<super::LedgerHead> {
+        self.segment.as_ref().map(|segment| super::LedgerHead {
+            seq: self.head_seq,
+            hash: segment.last_hash().to_string(),
         })
     }
 
@@ -209,6 +229,7 @@ impl LedgerWriter {
         segment.sync()?;
         crate::crash::crash_point("ledger-frame-synced");
         self.prev_wall_clock = Some(now);
+        self.head_seq = Some(frame.seq);
         Ok(Committed {
             event_id: frame.event_id,
             seq: frame.seq,

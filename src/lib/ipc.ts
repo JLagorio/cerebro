@@ -256,3 +256,19 @@ export interface LedgerHead {
 export function ledgerHead(vault: string): Promise<LedgerHead | null> {
   return inTauri() ? invokeTauri('ledger_head', { vault }) : mock.ledgerHead(vault);
 }
+
+/** Shadow-mode diagnostics (M21.8): the live verdict on a vault's ledger.
+ * Verdict tags are the Rust recovery states (kebab-case); no UI consumes
+ * this yet — it exists so a human can ask. */
+export interface LedgerStatus {
+  verdict: string;
+  detail: string;
+  head: string | null;
+  seq: number | null;
+  segments: number;
+  anomalies: number;
+}
+
+export function ledgerStatus(vault: string): Promise<LedgerStatus> {
+  return inTauri() ? invokeTauri('ledger_status', { vault }) : mock.ledgerStatus(vault);
+}

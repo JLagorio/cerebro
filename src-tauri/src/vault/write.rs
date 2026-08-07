@@ -231,20 +231,27 @@ fn json_to_yaml(value: &serde_json::Value) -> serde_yaml::Value {
     }
 }
 
-/// Apply a JSON patch to a note's frontmatter. `null` deletes a key; existing
-/// keys keep their position; new keys append; unknown keys and the body are
-/// untouched.
-///
-/// CRLF/BOM/trailing-whitespace-fence files (see the round-trip caveat at the
-/// top of parse.rs) are normalized: the frontmatter block is reserialized and
-/// the fences rewritten in LF form. The body is preserved byte-for-byte.
-/// YAML comments and the original scalar quoting style inside the frontmatter
-/// block are not preserved through reserialization.
-pub fn update_frontmatter(
+/// Shadow-record one committed write (M21.8). Best-effort and invisible:
+/// shadow mode observes writes, it never gates them — see ledger::shadow.
+fn shadow_write(vault: &Path, rel: &str, content: &str, kind: &str, actor: Option<&str>) {
+    let mut body = serde_json::json!({
+        "path": rel,
+        "content_hash": crate::ledger::sha256_hex(content.as_bytes()),
+    });
+    if let Some(actor) = actor {
+        body["actor"] = serde_json::Value::String(actor.to_string());
+    }
+    crate::ledger::shadow::record(vault, kind, body);
+}
+
+/// The shared patch → composed-file step behind `update_frontmatter` and
+/// `verify_frontmatter` — same bytes on disk either way; only the shadow
+/// event kind differs.
+fn patched_frontmatter(
     vault: &Path,
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     // A .mmd has NO frontmatter to patch (M29.23): its leading `---` block is
     // mermaid config — valid YAML, so without this guard a patch (including
     // the agent's MCP update_frontmatter) would merge into the diagram's
@@ -271,10 +278,42 @@ pub fn update_frontmatter(
         }
     }
     let new_block = serialize_mapping(&mapping)?;
-    write_file(
-        &safe_join(vault, rel)?,
-        &compose(new_block.as_deref(), body),
-    )
+    Ok(compose(new_block.as_deref(), body))
+}
+
+/// Apply a JSON patch to a note's frontmatter. `null` deletes a key; existing
+/// keys keep their position; new keys append; unknown keys and the body are
+/// untouched.
+///
+/// CRLF/BOM/trailing-whitespace-fence files (see the round-trip caveat at the
+/// top of parse.rs) are normalized: the frontmatter block is reserialized and
+/// the fences rewritten in LF form. The body is preserved byte-for-byte.
+/// YAML comments and the original scalar quoting style inside the frontmatter
+/// block are not preserved through reserialization.
+pub fn update_frontmatter(
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let content = patched_frontmatter(vault, rel, patch)?;
+    write_file(&safe_join(vault, rel)?, &content)?;
+    shadow_write(vault, rel, &content, "vault.write", None);
+    Ok(())
+}
+
+/// The verify path (M21.8): byte-identical writes to `update_frontmatter`,
+/// but the shadow event says what actually happened — a human confirmed a
+/// concept — instead of "a file changed". The lib.rs `verify_concept`
+/// command is the only caller.
+pub fn verify_frontmatter(
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let content = patched_frontmatter(vault, rel, patch)?;
+    write_file(&safe_join(vault, rel)?, &content)?;
+    shadow_write(vault, rel, &content, "knowledge.verify", None);
+    Ok(())
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
@@ -288,7 +327,10 @@ pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
     }
     let content = read_file(vault, rel)?;
     let (block, _) = parse::split_frontmatter(&content);
-    write_file(&safe_join(vault, rel)?, &compose(block, body))
+    let composed = compose(block, body);
+    write_file(&safe_join(vault, rel)?, &composed)?;
+    shadow_write(vault, rel, &composed, "vault.write", None);
+    Ok(())
 }
 
 /// The `type` a note's frontmatter declares, if the file exists and parses.
@@ -482,6 +524,7 @@ pub fn create_note(
         None => body,
     };
     write_file(&vault.join(&rel), &content)?;
+    shadow_write(vault, &rel, &content, "vault.write", None);
     Ok(rel)
 }
 
@@ -497,6 +540,26 @@ pub fn write_concept(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<(), String> {
+    let content = concept_write(vault, rel, frontmatter, body)?;
+    // "Actor where the call site knows it" (M21.8): the MCP layer already
+    // server-stamps `generated.by` into the frontmatter it passes here, so
+    // the actor rides the data — no new plumbing, and nothing an agent can
+    // separately claim.
+    let actor = frontmatter
+        .get("generated")
+        .and_then(|g| g.get("by"))
+        .and_then(|by| by.as_str());
+    shadow_write(vault, rel, &content, "knowledge.write_concept", actor);
+    Ok(())
+}
+
+/// The shared exact-path writer behind `write_concept` and `write_source`.
+fn concept_write(
+    vault: &Path,
+    rel: &str,
+    frontmatter: &serde_json::Map<String, serde_json::Value>,
+    body: &str,
+) -> Result<String, String> {
     let target = safe_join(vault, rel)?;
     if !rel.ends_with(".md") {
         return Err(format!("a concept path must end in .md: {rel}"));
@@ -517,7 +580,8 @@ pub fn write_concept(
         Some(b) => format!("---\n{b}---\n\n{body}\n"),
         None => format!("{body}\n"),
     };
-    write_file(&target, &content)
+    write_file(&target, &content)?;
+    Ok(content)
 }
 
 /// Cached copies of fetched external material. Mirrors SOURCES_DIR in
@@ -538,7 +602,11 @@ pub fn write_source(
             "cache_source only writes into {SOURCES_DIR}/; {rel} is outside it"
         ));
     }
-    write_concept(vault, rel, frontmatter, body)
+    // A cached source is a vault write, not a knowledge event — the five
+    // M21.8 kinds reserve knowledge.* for the bundle.
+    let content = concept_write(vault, rel, frontmatter, body)?;
+    shadow_write(vault, rel, &content, "vault.write", None);
+    Ok(())
 }
 
 /// Does a concept already live at this path? Read BEFORE writing, so the log
@@ -564,7 +632,15 @@ pub fn append_knowledge_log(
         title,
         rel,
     );
-    write_file(&target, &next)
+    write_file(&target, &next)?;
+    shadow_write(
+        vault,
+        crate::knowledge::LOG_PATH,
+        &next,
+        "vault.write",
+        None,
+    );
+    Ok(())
 }
 
 /// Replace the H1 line that `parse::extract_h1_title` would read the title
@@ -593,7 +669,10 @@ pub fn set_note_title(vault: &Path, rel: &str, title: &str) -> Result<(), String
     let content = read_file(vault, rel)?;
     let (block, body) = parse::split_frontmatter(&content);
     let new_body = replace_h1(body, title);
-    write_file(&safe_join(vault, rel)?, &compose(block, &new_body))
+    let composed = compose(block, &new_body);
+    write_file(&safe_join(vault, rel)?, &composed)?;
+    shadow_write(vault, rel, &composed, "vault.write", None);
+    Ok(())
 }
 
 fn collect_views_dir(
@@ -735,7 +814,10 @@ pub fn list_views(vault: &Path) -> Result<Vec<ViewYaml>, String> {
 /// is rejected: the vault root is not a Collection.
 pub fn save_collection(vault: &Path, folder: &str, yaml: &str) -> Result<(), String> {
     let dir = safe_join(vault, folder)?;
-    write_file(&dir.join(COLLECTION_MARKER), yaml)
+    write_file(&dir.join(COLLECTION_MARKER), yaml)?;
+    let rel = format!("{folder}/{COLLECTION_MARKER}");
+    shadow_write(vault, &rel, yaml, "vault.write", None);
+    Ok(())
 }
 
 /// Write a List. `folder` empty means the vault root (a top-level List);
@@ -747,7 +829,14 @@ pub fn save_list(vault: &Path, folder: &str, id: &str, yaml: &str) -> Result<(),
     } else {
         safe_join(vault, folder)?
     };
-    write_file(&base.join(format!("{id}{LIST_SUFFIX}")), yaml)
+    write_file(&base.join(format!("{id}{LIST_SUFFIX}")), yaml)?;
+    let rel = if folder.is_empty() {
+        format!("{id}{LIST_SUFFIX}")
+    } else {
+        format!("{folder}/{id}{LIST_SUFFIX}")
+    };
+    shadow_write(vault, &rel, yaml, "vault.write", None);
+    Ok(())
 }
 
 /// Write `<folder>/views/<id>.yml` verbatim (vault-root `views/` when folder
@@ -759,7 +848,13 @@ pub fn save_view(vault: &Path, id: &str, yaml: &str, folder: Option<&str>) -> Re
         Some(f) => safe_join(vault, f)?,
         None => vault.to_path_buf(),
     };
-    write_file(&base.join("views").join(format!("{id}.yml")), yaml)
+    write_file(&base.join("views").join(format!("{id}.yml")), yaml)?;
+    let rel = match folder {
+        Some(f) => format!("{f}/views/{id}.yml"),
+        None => format!("views/{id}.yml"),
+    };
+    shadow_write(vault, &rel, yaml, "vault.write", None);
+    Ok(())
 }
 
 // --- Vault format v2 file operations (M2 Task 3) ---
@@ -785,6 +880,11 @@ pub fn rename_note(vault: &Path, from: &str, to: &str) -> Result<(), String> {
     std::fs::rename(&src, &dst).map_err(|e| format!("{from}: {e}"))?;
     super::watcher::note_own_write(&src);
     super::watcher::note_own_write(&dst);
+    crate::ledger::shadow::record(
+        vault,
+        "vault.rename",
+        serde_json::json!({ "from": from, "to": to }),
+    );
     Ok(())
 }
 
@@ -797,6 +897,7 @@ pub fn delete_note(vault: &Path, rel: &str) -> Result<(), String> {
     }
     trash::delete(&abs).map_err(|e| e.to_string())?;
     super::watcher::note_own_write(&abs);
+    crate::ledger::shadow::record(vault, "vault.delete", serde_json::json!({ "path": rel }));
     Ok(())
 }
 

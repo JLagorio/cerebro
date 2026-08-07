@@ -174,6 +174,30 @@ impl Index {
         Ok(index)
     }
 
+    /// Update only the remembered head — the cheap per-append path (shadow
+    /// mode calls it after every commit). The events table catches up on
+    /// the next activate replay; a briefly stale events table is fine in a
+    /// cache whose meta is the anchor that matters.
+    pub fn remember(&mut self, remembered: &Remembered, writer_id: &str) -> Result<(), String> {
+        let head_seq = remembered
+            .head_seq
+            .map_or_else(String::new, |s| s.to_string());
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        for (key, value) in [
+            ("store_id", remembered.store_id.as_str()),
+            ("writer_id", writer_id),
+            ("head_seq", head_seq.as_str()),
+            ("head_hash", remembered.head_hash.as_str()),
+        ] {
+            tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                [key, value],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())
+    }
+
     /// The head this machine last saw, for divergence classification.
     pub fn remembered(&self) -> Result<Option<Remembered>, String> {
         let get = |key: &str| -> Result<Option<String>, String> {

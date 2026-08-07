@@ -103,7 +103,9 @@ fn verify_concept(
     patch: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
     knowledge::guard_verify(&path, &patch)?;
-    vault::write::update_frontmatter(Path::new(&vault), &path, &patch)
+    // Byte-identical writes to update_frontmatter; the shadow event says
+    // what actually happened (knowledge.verify, M21.8).
+    vault::write::verify_frontmatter(Path::new(&vault), &path, &patch)
 }
 
 #[tauri::command(async)]
@@ -347,13 +349,27 @@ fn ledger_head(vault: String) -> Option<ledger::LedgerHead> {
     ledger::head(Path::new(&vault))
 }
 
+/// Shadow-mode diagnostics (M21.8): a live classification of the vault's
+/// ledger. Read-only — no minting, no side effects, no UI.
+#[tauri::command(async)]
+fn ledger_status(app: tauri::AppHandle, vault: String) -> ledger::shadow::LedgerStatus {
+    ledger::shadow::status(config_dir(&app).ok().as_deref(), Path::new(&vault))
+}
+
 #[tauri::command(async)]
 fn start_watcher(
     app: tauri::AppHandle,
     state: tauri::State<'_, WatcherState>,
     vault: String,
 ) -> Result<(), String> {
-    vault::watcher::start(app, state.inner(), PathBuf::from(vault))
+    let vault_path = PathBuf::from(&vault);
+    // M21.8 startup: run the M21.4 verification, record the verdict, start
+    // shadow recording for this vault. Never blocks watching — a refused
+    // ledger records nothing and says why through ledger_status.
+    if let Ok(dir) = config_dir(&app) {
+        let _ = ledger::shadow::activate(&dir, &vault_path);
+    }
+    vault::watcher::start(app, state.inner(), vault_path)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -388,6 +404,7 @@ pub fn run() {
             write_text_file,
             export_png,
             ledger_head,
+            ledger_status,
             start_watcher,
             read_connectors,
             save_connectors,

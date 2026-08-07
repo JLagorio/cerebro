@@ -387,6 +387,26 @@ export async function ledgerHead(_vault: string): Promise<null> {
   return null;
 }
 
+/** Fixed no-ledger status (M21.8): the browser mock has no ledger, and the
+ * parity test asserts only that the command exists on both sides. */
+export async function ledgerStatus(_vault: string): Promise<{
+  verdict: string;
+  detail: string;
+  head: null;
+  seq: null;
+  segments: number;
+  anomalies: number;
+}> {
+  return {
+    verdict: 'no-ledger',
+    detail: 'no ledger exists here yet',
+    head: null,
+    seq: null,
+    segments: 0,
+    anomalies: 0,
+  };
+}
+
 // --- Connectors (M13.3) ----------------------------------------------------
 // Mirrors src-tauri/src/connectors.rs: raw JSON string, object-validated on
 // save, empty when absent. Lives outside the files map — it is config, not a

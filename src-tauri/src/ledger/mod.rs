@@ -22,6 +22,7 @@ pub mod frame;
 pub mod index;
 pub mod recovery;
 pub mod segment;
+pub mod shadow;
 pub mod store;
 pub mod writer;
 
