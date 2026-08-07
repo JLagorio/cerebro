@@ -54,15 +54,105 @@ fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
         .join("/"))
 }
 
+/// Marker every atomic-write temp file carries: `.{name}.cerebro-tmp-{hex}`.
+/// Dot-prefixed and non-`.md`, so the scanner and the watcher never see one.
+const TEMP_MARKER: &str = ".cerebro-tmp-";
+
+/// How old a temp must be before `clean_orphan_temps` may reap it. The engine
+/// is stateless and concurrent commands re-scan constantly, so an in-flight
+/// write's temp must never be reaped — age is the only guard.
+const ORPHAN_TEMP_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Single funnel for all vault file writes; registers each write with the
 /// watcher so our own saves don't bounce back as `vault-changed` events.
+///
+/// Atomic since M21.1: content lands in a same-directory temp, is fsynced,
+/// then renamed over the destination, and the parent directory is fsynced so
+/// the rename itself is durable. A crash at any point leaves either the old
+/// bytes or the new bytes at the destination, never a truncated mix. Known
+/// limitations (the same trade-off every atomic-save editor makes): xattrs
+/// are not preserved across the rename, and a symlinked destination is
+/// replaced by a regular file; plain permissions are preserved.
 fn write_file(abs: &Path, content: &str) -> Result<(), String> {
-    if let Some(parent) = abs.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let parent = abs
+        .parent()
+        .ok_or_else(|| format!("no parent directory: {}", abs.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let name = abs
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("unusable file name: {}", abs.display()))?;
+    let temp = parent.join(format!(
+        ".{name}{TEMP_MARKER}{:016x}",
+        rand::random::<u64>()
+    ));
+    let result = write_via_temp(abs, parent, &temp, content);
+    if result.is_err() {
+        // Best-effort: after a successful rename the temp no longer exists,
+        // and a failure here still gets reaped by clean_orphan_temps later.
+        let _ = std::fs::remove_file(&temp);
     }
-    std::fs::write(abs, content).map_err(|e| e.to_string())?;
+    result
+}
+
+/// The commit sequence for one atomic write. Split out so `write_file` owns
+/// exactly one job: cleaning up the temp on any error path.
+fn write_via_temp(abs: &Path, parent: &Path, temp: &Path, content: &str) -> Result<(), String> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(temp).map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())?;
+    // Re-point permissions at the temp BEFORE the rename, so replacing the
+    // destination cannot widen a user-tightened mode (chmod 600 stays 600).
+    match std::fs::metadata(abs) {
+        Ok(meta) => file
+            .set_permissions(meta.permissions())
+            .map_err(|e| e.to_string())?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    file.sync_all().map_err(|e| e.to_string())?;
+    crate::crash::crash_point("temp-written");
+    // Register BEFORE the rename: the suppression entry must exist by the
+    // time the OS can deliver a change event for the destination path.
     super::watcher::note_own_write(abs);
-    Ok(())
+    std::fs::rename(temp, abs).map_err(|e| e.to_string())?;
+    crate::crash::crash_point("renamed-pre-dirsync");
+    // The rename is durable only once the directory entry itself is on disk.
+    std::fs::File::open(parent)
+        .and_then(|dir| dir.sync_all())
+        .map_err(|e| e.to_string())
+}
+
+/// Reap atomic-write temps abandoned by a crash, anywhere in the vault
+/// (skipping dot-directories, where `write_file` never writes). Best-effort
+/// janitor run once per `scan_vault` command; temps younger than
+/// [`ORPHAN_TEMP_MAX_AGE`] are spared — they may belong to a write in flight.
+pub fn clean_orphan_temps(vault: &Path) {
+    let walker = walkdir::WalkDir::new(vault)
+        .into_iter()
+        .filter_entry(|e| {
+            e.depth() == 0
+                || e.file_type().is_file()
+                || !e.file_name().to_string_lossy().starts_with('.')
+        })
+        .filter_map(Result::ok);
+    for item in walker {
+        if !item.file_type().is_file() || !item.file_name().to_string_lossy().contains(TEMP_MARKER)
+        {
+            continue;
+        }
+        let stale = item
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| std::time::SystemTime::now().duration_since(t).ok())
+            .is_some_and(|age| age >= ORPHAN_TEMP_MAX_AGE);
+        if stale {
+            let _ = std::fs::remove_file(item.path());
+        }
+    }
 }
 
 /// Join a vault-relative path onto the vault root, rejecting empty paths,
@@ -1367,5 +1457,158 @@ mod tests {
         assert!(crate::vault::scan::scan_vault(&vault).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&vault);
         let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    }
+
+    // --- Atomic writes (M21.1) ---------------------------------------------
+
+    /// Every atomic-write temp anywhere under the vault, dot-dirs included —
+    /// the assertion net must be wider than the janitor's walk.
+    fn temp_files(vault: &Path) -> Vec<std::path::PathBuf> {
+        walkdir::WalkDir::new(vault)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .filter(|e| e.file_name().to_string_lossy().contains(TEMP_MARKER))
+            .map(|e| e.into_path())
+            .collect()
+    }
+
+    fn backdate(path: &Path, secs: u64) {
+        let then = std::time::SystemTime::now() - std::time::Duration::from_secs(secs);
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_times(
+            std::fs::FileTimes::new()
+                .set_accessed(then)
+                .set_modified(then),
+        )
+        .unwrap();
+    }
+
+    fn assert_aborted(status: std::process::ExitStatus) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            // SIGABRT — the crash point fired. A plain test failure (panic)
+            // exits with a code instead, and must not pass as a crash.
+            assert_eq!(status.signal(), Some(6), "expected SIGABRT, got {status:?}");
+        }
+        #[cfg(not(unix))]
+        assert!(
+            !status.success(),
+            "expected an aborted child, got {status:?}"
+        );
+    }
+
+    #[test]
+    fn writes_leave_no_temp_behind_on_success() {
+        let vault = vault_with_note("wfm-atomic-clean");
+        save_note(
+            &vault,
+            "items/atl-1.md",
+            "\n# Ship the scanner\n\nNew body.\n",
+        )
+        .unwrap();
+        update_frontmatter(
+            &vault,
+            "items/atl-1.md",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap();
+        create_note(&vault, "items", "fresh", &patch(&[]), "# Fresh\n").unwrap();
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_preserve_tightened_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let vault = vault_with_note("wfm-atomic-perms");
+        let path = vault.join("items/atl-1.md");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        save_note(
+            &vault,
+            "items/atl-1.md",
+            "\n# Ship the scanner\n\nPrivate.\n",
+        )
+        .unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn clean_orphan_temps_reaps_stale_and_spares_fresh() {
+        let vault = testutil::temp_vault("wfm-orphans");
+        testutil::write(&vault, "items/keep.md", "# Keep\n");
+        // A crashed write from two minutes ago, nested one level down…
+        let stale = vault.join(format!("items/.a.md{TEMP_MARKER}00000000deadbeef"));
+        // …and a vault-root temp young enough to be a write in flight.
+        let fresh = vault.join(format!(".b.yml{TEMP_MARKER}00000000cafebabe"));
+        std::fs::write(&stale, "half a note").unwrap();
+        std::fs::write(&fresh, "half a view").unwrap();
+        backdate(&stale, 120);
+        clean_orphan_temps(&vault);
+        assert!(!stale.exists(), "stale orphan must be reaped");
+        assert!(
+            fresh.exists(),
+            "a fresh temp may belong to an in-flight write"
+        );
+        assert!(vault.join("items/keep.md").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Child body for the crash tests below: rewrite the fixture note through
+    /// the atomic funnel. Ignored in normal runs — `run_crash_scenario`
+    /// spawns it in a child process with `CEREBRO_CRASH_POINT` armed.
+    #[test]
+    #[ignore = "crash-scenario child body, spawned by the crash tests"]
+    fn crash_scenario_overwrite_note() {
+        let Ok(vault) = std::env::var("CEREBRO_CRASH_VAULT") else {
+            return;
+        };
+        write_file(
+            &Path::new(&vault).join("items/atl-1.md"),
+            "# Rewritten by the crash scenario\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn crash_at_temp_written_leaves_destination_untouched() {
+        let vault = vault_with_note("wfm-crash-temp");
+        let status = testutil::run_crash_scenario(
+            "vault::write::tests::crash_scenario_overwrite_note",
+            "temp-written",
+            &vault,
+        );
+        assert_aborted(status);
+        // Old bytes intact; the half-finished write is only an orphan temp.
+        assert_eq!(read(&vault, "items/atl-1.md"), NOTE);
+        let orphans = temp_files(&vault);
+        assert_eq!(orphans.len(), 1, "{orphans:?}");
+        // The acceptance-matrix row ends "orphan reaped later": age it past
+        // the guard and let the janitor prove that.
+        backdate(&orphans[0], 120);
+        clean_orphan_temps(&vault);
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn crash_after_rename_leaves_new_bytes_and_no_orphan() {
+        let vault = vault_with_note("wfm-crash-rename");
+        let status = testutil::run_crash_scenario(
+            "vault::write::tests::crash_scenario_overwrite_note",
+            "renamed-pre-dirsync",
+            &vault,
+        );
+        assert_aborted(status);
+        assert_eq!(
+            read(&vault, "items/atl-1.md"),
+            "# Rewritten by the crash scenario\n"
+        );
+        assert!(temp_files(&vault).is_empty());
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

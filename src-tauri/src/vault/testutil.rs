@@ -22,3 +22,24 @@ pub fn write(vault: &Path, rel: &str, content: &str) {
     }
     std::fs::write(path, content).expect("write fixture file");
 }
+
+/// Spawn the current test binary as a child running exactly one scenario
+/// test with a crash point armed (M21 crash-injection harness — see
+/// `crate::crash`). `scenario` is the FULL test path
+/// (`module::path::test_name`); the child filters with `--exact`, so the
+/// scenario must be `#[ignore]`d and read `CEREBRO_CRASH_VAULT` to find its
+/// fixture. The caller asserts filesystem post-conditions afterwards.
+pub fn run_crash_scenario(
+    scenario: &str,
+    crash_point: &str,
+    vault: &Path,
+) -> std::process::ExitStatus {
+    std::process::Command::new(std::env::current_exe().expect("current test binary"))
+        .args([scenario, "--exact", "--include-ignored", "--test-threads=1"])
+        .env("CEREBRO_CRASH_POINT", crash_point)
+        .env("CEREBRO_CRASH_VAULT", vault)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .expect("spawn crash-scenario child")
+}

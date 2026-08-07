@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod app_config;
 pub mod connectors;
+pub mod crash;
 pub mod demo;
 pub mod git;
 pub mod git_commands;
@@ -60,6 +61,10 @@ fn get_last_vault(app: tauri::AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command(async)]
 fn scan_vault(vault: String) -> Result<Vec<Entry>, String> {
+    // M21.1 janitor: reap atomic-write temps abandoned by a crash. Here in
+    // the command rather than inside scan::scan_vault so bare library scans
+    // (tests, MCP-forced rescans) stay read-only.
+    vault::write::clean_orphan_temps(Path::new(&vault));
     vault::scan::scan_vault(Path::new(&vault))
 }
 
