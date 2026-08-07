@@ -116,7 +116,7 @@ export function RelationPicker({
     if (targetType === null || busy) return;
     setBusy(true);
     try {
-      const target = createTarget(targetType, { project: null, entries });
+      const target = createTarget(targetType, { project: null, entries, schema });
       const path = await createItem({
         folder: target.folder,
         slug: slugify(trimmed) || `record-${Date.now().toString(36)}`,

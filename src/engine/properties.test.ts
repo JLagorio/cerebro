@@ -528,30 +528,65 @@ describe('personCandidates', () => {
   ];
   const schema = buildSchema(entries);
 
+  const task = makeEntry({ path: 'tasks/t1.md', title: 'T1', type: 'Task' });
+
   it('offers records of the declared target', () => {
     const got = personCandidates(
       def('person', { name: 'owner', target: 'Teammate' }),
       schema,
       entries,
-      'Task',
+      task,
     );
     expect(got.map((e) => e.title)).toEqual(['Ana']);
   });
 
   it('falls back to the vault’s people when the field names no target', () => {
-    const got = personCandidates(def('person', { name: 'lead' }), schema, entries, 'Task');
+    const got = personCandidates(def('person', { name: 'lead' }), schema, entries, task);
     expect(got.map((e) => e.title)).toEqual(['Ana']);
   });
 
-  // A long picker is merely long. The empty one this used to produce was a
-  // dead end with no way out of it.
-  it('offers every record rather than nothing when the vault has no people', () => {
+  /**
+   * FLIPPED in M20.1. This used to assert that a vault with no people offers
+   * every record, on the reasoning that a long picker beats a dead end. It is
+   * not merely long: `relationTargetFor` INFERS an untargeted person field's
+   * target from what it holds, so one pick made the field point at Task
+   * permanently, and `peopleTypes` then reported Task as one of the vault's
+   * people types everywhere. An empty set is the answer `peopleTypes` already
+   * documents; the dead end is closed by a create row instead (see
+   * PersonField.test.tsx).
+   */
+  it('offers nothing when the vault has no notion of people', () => {
     const bare = [
       makeEntry({ path: 'types/task.md', title: 'Task', type: 'Type' }),
       makeEntry({ path: 'tasks/t1.md', title: 'T1', type: 'Task' }),
     ];
-    const got = personCandidates(def('person', { name: 'lead' }), buildSchema(bare), bare, 'Task');
-    // Type docs are schema, never candidates.
-    expect(got.map((e) => e.title)).toEqual(['T1']);
+    const got = personCandidates(def('person', { name: 'lead' }), buildSchema(bare), bare, task);
+    expect(got).toEqual([]);
+  });
+
+  // A record is not its own owner — the same exclusion `type: 'Type'` gets.
+  it('excludes the record being edited', () => {
+    const ana = entries.find((e) => e.title === 'Ana')!;
+    const got = personCandidates(
+      def('person', { name: 'owner', target: 'Teammate' }),
+      schema,
+      entries,
+      ana,
+    );
+    expect(got).toEqual([]);
+  });
+
+  // An untyped doc has no type, so no people type can hold it. Falls out of
+  // the rule rather than needing its own clause — but it is the case the old
+  // whole-vault fallback swept in, so it is pinned.
+  it('never offers an untyped doc', () => {
+    const withDoc = [...entries, makeEntry({ path: 'notes/n.md', title: 'A note', type: null })];
+    const got = personCandidates(
+      def('person', { name: 'lead' }),
+      buildSchema(withDoc),
+      withDoc,
+      task,
+    );
+    expect(got.map((e) => e.title)).toEqual(['Ana']);
   });
 });

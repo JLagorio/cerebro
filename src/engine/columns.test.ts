@@ -116,10 +116,16 @@ describe('column specs', () => {
     expect(setColumnWidth(sized, 'a', undefined)).toEqual(columns);
   });
 
+  // `undeclared` is what tells a cell this column belongs to no TYPE, so no
+  // row is trespassing on another type's property by editing it (M20.1).
   it('resolves an undeclared column as text rather than dropping it', () => {
     const resolved = resolveColumns([{ field: 'mystery' }], []);
     expect(resolved).toEqual([
-      { spec: { field: 'mystery' }, def: { name: 'mystery', kind: 'text' }, width: 150 },
+      {
+        spec: { field: 'mystery' },
+        def: { name: 'mystery', kind: 'text', undeclared: true },
+        width: 150,
+      },
     ]);
   });
 

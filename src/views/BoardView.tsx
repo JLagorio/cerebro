@@ -14,9 +14,8 @@ import { QuickAddInline } from '@/views/QuickAdd';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FieldChip } from '@/views/FieldChip';
 import { Icon } from '@/components/ui/Icon';
-import { groupTree } from '@/engine/grouping';
+import { bandValueFor, groupTree } from '@/engine/grouping';
 import { visibleColumns } from '@/engine/views';
-import { formatWikilink } from '@/engine/wikilink';
 import { bandLevels } from '@/engine/types';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -27,7 +26,6 @@ import type {
   GroupNode,
   GroupSpec,
   Presentation,
-  Scalar,
   Schema,
 } from '@/engine/types';
 
@@ -50,9 +48,6 @@ export interface BoardViewProps {
   /** M9.6: create a card in a column, inheriting its value. */
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }
-
-/** The key `groupEntries` pins the "No <field>" bucket under (see types.ts). */
-const NO_VALUE_KEY = '__none__';
 
 /**
  * What each card size means, in one place (M16.20).
@@ -122,43 +117,6 @@ function toColumns(nodes: GroupNode[], lane: BoardColumnNode['lane']): BoardColu
   }));
 }
 
-/**
- * The kind of the field a band groups by.
- *
- * Resolved the way `groupEntries` resolves it — the FIRST entry that declares
- * the field wins — rather than off `entries[0]`, which is what the board did.
- * On a heterogeneous board (a Collection holds more than one type) the first
- * card is routinely of a type that does not declare the grouped field at all,
- * so the kind came back `undefined` and every write the board made through it
- * took the wrong branch: a person column wrote a bare stem where a wikilink
- * belongs, and the field stopped being a relationship at the next rescan.
- */
-export function bandKind(entries: Entry[], field: string, schema: Schema): FieldKind | undefined {
-  for (const e of entries) {
-    const def = schema.resolveField(e, field).def;
-    if (def !== null) return def.kind;
-  }
-  return undefined;
-}
-
-/**
- * The frontmatter value that moves a record into `key`'s bucket of a field.
- *
- * `null` deletes the key — that is what the "No <field>" column means.
- * `undefined` means a drag cannot express this move at all.
- */
-function bandValue(key: string, kind: FieldKind | undefined): Scalar | undefined {
-  if (key === NO_VALUE_KEY) return null;
-  // A multi-select record sits in several columns at once; writing one scalar
-  // would silently delete every other value it holds. Refuse until a real
-  // add/remove treatment exists (M1.x interim).
-  if (kind === 'multiselect') return undefined;
-  // Person/relation columns key by the wikilink STEM, so a bare-stem write
-  // destroys the link on disk (the field leaves `relationships` after a
-  // rescan). Wrap those back up (execution-log note 18).
-  return kind === 'person' || kind === 'relation' ? formatWikilink(key) : key;
-}
-
 export function handleDragEnd(
   event: DragEndEvent,
   args: {
@@ -184,7 +142,7 @@ export function handleDragEnd(
 
   const patch: Record<string, unknown> = {};
   if (source === undefined || source.key !== target.key) {
-    const value = bandValue(target.key, kindOf(args.groupBy));
+    const value = bandValueFor(target.key, kindOf(args.groupBy));
     if (value === undefined) {
       args.toast("Can't move cards grouped by a multi-select field");
       return;
@@ -196,7 +154,7 @@ export function handleDragEnd(
   // left the card visibly snapping back into the lane it came from.
   const lane = target.lane;
   if (lane !== null && source?.lane?.key !== lane.key) {
-    const value = bandValue(lane.key, kindOf(lane.field));
+    const value = bandValueFor(lane.key, kindOf(lane.field));
     if (value === undefined) {
       args.toast("Can't move cards grouped by a multi-select field");
       return;
@@ -312,7 +270,6 @@ function BoardColumn({
   presentation,
   schema,
   groupBy,
-  groupKind,
   bandFields,
   onCreate,
 }: {
@@ -320,9 +277,6 @@ function BoardColumn({
   presentation: Presentation;
   schema: Schema;
   groupBy: string;
-  /** Kind of the field the columns band by — decides how the column's value is
-   * written when a card is created in it. */
-  groupKind?: FieldKind;
   bandFields: string[];
   onCreate?: (title: string, band: { groupBy: string; groupValue: string }) => Promise<boolean>;
 }) {
@@ -388,16 +342,12 @@ function BoardColumn({
             compact
             label="New"
             ariaLabel={`New record in ${column.label}`}
-            onCreate={(title) => {
-              // The create path writes the band value verbatim, so it needs
-              // the same wikilink wrapping a drop does. The no-value column
-              // and a refused kind both mean "inherit nothing".
-              const value = bandValue(column.key, groupKind);
-              return onCreate(title, {
-                groupBy,
-                groupValue: typeof value === 'string' ? value : '',
-              });
-            }}
+            // The column's RAW key (M20.1). This used to pre-wrap the value
+            // itself, because `createTarget` wrote whatever it was handed
+            // verbatim; that is now the create path's own rule, applied to
+            // every surface rather than to the one that remembered — so
+            // wrapping here as well would write `[[[[stem]]]]`.
+            onCreate={(title) => onCreate(title, { groupBy, groupValue: column.key })}
           />
         )}
       </div>
@@ -504,7 +454,6 @@ export function BoardView({
 
   // One resolution for the whole board: every column bands by the same field,
   // and an empty column has no entry of its own to resolve it from.
-  const groupKind = bandKind(parseable, groupBy, schema);
   const bandFields = laneSpec === undefined ? [groupBy] : [groupBy, laneSpec.field];
 
   return (
@@ -548,7 +497,6 @@ export function BoardView({
                   presentation={presentation}
                   schema={schema}
                   groupBy={groupBy}
-                  groupKind={groupKind}
                   bandFields={bandFields}
                   onCreate={onCreate}
                 />
@@ -571,7 +519,6 @@ export function BoardView({
                       presentation={presentation}
                       schema={schema}
                       groupBy={groupBy}
-                      groupKind={groupKind}
                       bandFields={bandFields}
                       onCreate={onCreate}
                     />

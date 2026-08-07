@@ -270,7 +270,11 @@ describe('TableView cell cursor (M16.17)', () => {
         entries={entries.filter((e) => e.type === 'Work item')}
         presentation={{ ...presentation, columns: [{ field: 'status' }, { field: 'notes' }] }}
         schema={schema}
-        fields={[...(schema.types.get('Work item')?.fields ?? []), { name: 'notes', kind: 'text' }]}
+        // `notes` is deliberately NOT in the field universe: a view file may
+        // name a column no type declares, and `resolveColumns` synthesizes a
+        // text def for it — which is what production does here, and what
+        // M20.1's ownership check reads to keep such a column editable.
+        fields={schema.types.get('Work item')?.fields ?? []}
       />,
     );
     return screen.getByTestId('table-view');
@@ -1099,5 +1103,133 @@ describe('TableView relation chips (M11)', () => {
   it('defaults to plain chips', () => {
     withRelation(undefined);
     expect(screen.getByTestId('relation-chip').querySelector('svg')).toBeNull();
+  });
+});
+
+/**
+ * A grid holding rows of more than one type (M20.1).
+ *
+ * The grouping chain can DESCEND a relation (M10 nesting), which puts records
+ * of foreign types in one grid — the demo vault's OKR tree holds Objectives
+ * with Key results and Work items nested beneath them. `buildRows` builds rows
+ * from the source type plus every relation the chain descends into;
+ * `columnUniverse` builds columns from the source type ALONE. Everything below
+ * comes from that mismatch.
+ */
+describe('TableView nested rows of a foreign type (M20.1)', () => {
+  function okrGrid() {
+    const entries = [
+      makeEntry({
+        path: 'types/objective.md',
+        title: 'Objective',
+        type: 'Type',
+        properties: {
+          fields: {
+            owner: { kind: 'person' },
+            progress: { kind: 'number', format: 'progress' },
+          },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'types/key-result.md',
+        title: 'Key result',
+        type: 'Type',
+        // Deliberately declares NEITHER owner NOR progress: it has its own
+        // `lead`, which the Objective-sourced grid has no column for.
+        properties: {
+          fields: { lead: { kind: 'person' }, objective: { kind: 'relation' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({ path: 'types/person.md', title: 'Person', type: 'Type' }),
+      makeEntry({ path: 'people/ana-rios.md', title: 'Ana Rios', type: 'Person' }),
+      makeEntry({
+        path: 'records/objectives/o1.md',
+        title: 'Grow EU revenue',
+        type: 'Objective',
+        properties: { progress: 40 },
+      }),
+      makeEntry({
+        path: 'records/key-results/kr1.md',
+        title: 'Signups up 20%',
+        type: 'Key result',
+        relationships: { objective: ['Grow EU revenue'] },
+      }),
+    ];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    const objectives = entries.filter((e) => e.type === 'Objective');
+    render(
+      <TableView
+        entries={objectives}
+        allEntries={entries}
+        presentation={{
+          ...presentation,
+          group: [
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+          ],
+          columns: [{ field: 'owner' }, { field: 'progress' }],
+        }}
+        schema={schema}
+        fields={schema.types.get('Objective')?.fields ?? []}
+        onCreate={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+    const rows = screen.getAllByTestId('table-row');
+    return {
+      parent: rows.find((r) => r.getAttribute('data-depth') === '0')!,
+      child: rows.find((r) => r.getAttribute('data-depth') === '1')!,
+    };
+  }
+
+  const cell = (row: HTMLElement, colIndex: string) =>
+    row.querySelector<HTMLElement>(`[role="gridcell"][aria-colindex="${colIndex}"]`)!;
+
+  /**
+   * The hole, exactly. `validatePatch` looks a field up on the record's own
+   * type, so grafting a parent's SELECT onto a child's number field of the
+   * same name was already refused. What sailed through was the case with no
+   * def to validate against at all — undeclared keys are legal by design — so
+   * picking a person in the Objective's Owner column wrote `owner: [[…]]` onto
+   * a Key result that has never heard of `owner`.
+   */
+  it('a nested row of another type offers no editor in a column it does not declare', async () => {
+    const user = userEvent.setup();
+    const { parent, child } = okrGrid();
+
+    // The parent owns Owner and is editable in it.
+    await user.click(cell(parent, '2'));
+    expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
+    await user.keyboard('{Escape}');
+
+    // The child does not, so there is nothing to click into.
+    await user.click(cell(child, '2'));
+    expect(screen.queryAllByRole('option')).toHaveLength(0);
+    expect(cell(child, '2').querySelector('button')).toBeNull();
+  });
+
+  // The neighbouring read-only kinds show an em-dash for the same absence, so
+  // an empty grey track on every nested row was two read-only branches
+  // contradicting each other about what "no value" looks like.
+  it('draws no progress bar for a row with no such property', () => {
+    const { parent, child } = okrGrid();
+    expect(cell(parent, '3').textContent).toContain('40');
+    expect(cell(child, '3').textContent).toBe('—');
+  });
+
+  /**
+   * `onCreate` is bound to the SURFACE's type, so "insert a record after this
+   * one" on a nested Key result created an Objective — the wrong type, in the
+   * wrong folder, at depth 0. Creating the type at that depth has to link the
+   * new record back through the relation that produced the level, which for a
+   * forward descent the child cannot express at all; until that exists,
+   * offering nothing beats offering the wrong thing.
+   */
+  it('offers no insert affordance on a nested row', () => {
+    const { parent, child } = okrGrid();
+    expect(parent.querySelector('[data-testid="row-insert"]')).not.toBeNull();
+    expect(child.querySelector('[data-testid="row-insert"]')).toBeNull();
   });
 });

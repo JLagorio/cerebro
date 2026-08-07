@@ -8,8 +8,16 @@ import { Switch } from '@/components/ui/Switch';
 import { EscapeToClose, FieldPopover, FixedBelowAnchor } from '@/detail/FieldPopover';
 import { FilesField } from '@/detail/FilesField';
 import type { FieldPopoverOption } from '@/detail/FieldPopover';
-import { findOptionByLabel, optionId, personCandidates } from '@/engine/properties';
+import {
+  findOptionByLabel,
+  optionId,
+  peopleTypes,
+  personCandidates,
+  relationTargetFor,
+} from '@/engine/properties';
+import { createTarget } from '@/engine/createRecord';
 import { RelationPicker } from '@/detail/RelationPicker';
+import { slugify } from '@/lib/slug';
 import {
   DEFAULT_TIME_FORMAT,
   makeDateValue,
@@ -115,6 +123,9 @@ export function FieldEditor({
   const [draft, setDraft] = useState<string | null>(null);
   const patchFrontmatter = useVaultStore((s) => s.patchFrontmatter);
   const entries = useVaultStore((s) => s.entries);
+  // M20.1: the person branch can create a person. Hooks cannot live inside it —
+  // this component is a chain of early returns keyed on `def.kind`.
+  const createItem = useVaultStore((s) => s.createItem);
   const resolved = schema.resolveField(entry, def.name);
 
   const patch = (value: unknown) => void patchFrontmatter(entry.path, { [def.name]: value });
@@ -288,12 +299,60 @@ export function FieldEditor({
     // Candidates came from `e.type === 'Person'` until M16.13b, which is the
     // type-name routing AGENTS.md forbids: a vault whose people are
     // `Teammate`s got an empty picker with no control anywhere to fix it.
-    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry.type).map(
-      (c) => ({ id: pathStem(c.path), label: c.title, color: null }),
+    const options: FieldPopoverOption[] = personCandidates(def, schema, entries, entry).map(
+      (c) => ({
+        id: pathStem(c.path),
+        label: c.title,
+        color: null,
+      }),
     );
     const values = asList(resolved.raw).map(stripWikilink);
     const labelOf = (id: string) => options.find((o) => o.id === id)?.label ?? id;
     const blank = placeholder === 'blank' && values.length === 0;
+
+    /**
+     * Typing a name that does not exist creates that person (M20.1).
+     *
+     * Every other picker in the app could do this and only the person branch
+     * could not: a select cell offers "Create Blocker", a relation cell offers
+     * "Link or create a …" and writes a real record, and a person cell said
+     * "No matches" and stopped. Which is why `personCandidates` used to fall
+     * back to listing the whole vault — the dead end was real, but the answer
+     * was a create affordance, not a picker full of Projects.
+     *
+     * Which type to create is the same question the picker answers, in the
+     * same order: the field's declared or inferred target, then the vault's
+     * one people type. With no notion of people at all it is `Person` — the
+     * last-resort convention `peopleTypes` already documents, and creating the
+     * first one is what ESTABLISHES the vault's people type, because
+     * `relationTargetFor` then infers it back off the value just written. With
+     * two or more people types and no target the answer is genuinely ambiguous,
+     * so nothing is offered; the picker still lists all of them.
+     */
+    const known = peopleTypes(schema, entries);
+    const createType =
+      relationTargetFor(def, entries, entry.type) ??
+      (known.size === 1 ? [...known][0] : known.size === 0 ? 'Person' : null);
+    const createPerson =
+      createType === null
+        ? undefined
+        : (name: string) => {
+            void (async () => {
+              const target = createTarget(createType, { project: null, entries, schema });
+              try {
+                const path = await createItem({
+                  folder: target.folder,
+                  slug: slugify(name) || `person-${Date.now().toString(36)}`,
+                  frontmatter: target.frontmatter,
+                  body: `# ${name}\n`,
+                });
+                // By the stem it LANDED on — create_note may deduplicate.
+                patch(toggle(values, pathStem(path)).map(formatWikilink));
+              } catch {
+                useUiStore.getState().toast(`Couldn't create "${name}"`);
+              }
+            })();
+          };
     return (
       <span className={`relative inline-flex min-w-0 max-w-full ${blank ? BLANK_FILL : ''}`}>
         <button
@@ -317,6 +376,14 @@ export function FieldEditor({
             searchable
             options={options}
             activeIds={values}
+            {...(createPerson !== undefined ? { onCreate: createPerson } : {})}
+            emptyHint={
+              createPerson === undefined
+                ? 'This vault has no people yet.'
+                : `No people yet — type a name to add one${
+                    createType === null ? '' : ` as a new ${createType}`
+                  }.`
+            }
             onPick={(id) => patch(toggle(values, id).map(formatWikilink))}
             onClose={() => setOpen(false)}
           />

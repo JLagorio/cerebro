@@ -39,6 +39,19 @@ export function hasStatusField(fields: FieldDef[]): boolean {
  */
 export interface ColumnDef extends FieldDef {
   heterogeneous?: boolean;
+  /**
+   * NO type declares this field (M20.1). The column exists because a view file
+   * names it, or because some record holds the key — the advisory-schema rule
+   * `resolveColumns` documents below.
+   *
+   * It is the difference between the two ways a row can fail to declare a
+   * column. A column that belongs to a TYPE and not to this row's type is that
+   * row's business to stay out of: a Work item nested under an Objective must
+   * not be offered Objective's `owner`. A column that belongs to no type is
+   * nobody's in particular, and every row is equally entitled to it — which is
+   * the only thing that keeps a hand-written view column editable.
+   */
+  undeclared?: boolean;
 }
 
 /**
@@ -83,11 +96,11 @@ export function columnUniverse(source: ListSource, entries: Entry[], schema: Sch
   for (const e of entries) {
     for (const name of Object.keys(e.properties)) {
       if (isSystemProperty(name) || byName.has(name)) continue;
-      byName.set(name, { name, kind: 'text' });
+      byName.set(name, { name, kind: 'text', undeclared: true });
     }
     for (const name of Object.keys(e.relationships)) {
       if (isSystemProperty(name) || byName.has(name)) continue;
-      byName.set(name, { name, kind: 'relation' });
+      byName.set(name, { name, kind: 'relation', undeclared: true });
     }
   }
 
@@ -111,7 +124,11 @@ export function resolveColumns(
     .filter((c) => c.hidden !== true && c.field !== 'title')
     .map((spec) => ({
       spec,
-      def: fields.find((f) => f.name === spec.field) ?? { name: spec.field, kind: 'text' as const },
+      def: fields.find((f) => f.name === spec.field) ?? {
+        name: spec.field,
+        kind: 'text' as const,
+        undeclared: true,
+      },
       width: spec.width ?? DEFAULT_COL_W,
     }));
 }

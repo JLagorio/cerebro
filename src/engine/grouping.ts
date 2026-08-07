@@ -1,4 +1,5 @@
 import { bandLevels } from './types';
+import { formatWikilink } from './wikilink';
 import type {
   Entry,
   FieldDef,
@@ -7,8 +8,12 @@ import type {
   Group,
   GroupNode,
   GroupSpec,
+  Scalar,
   Schema,
 } from './types';
+
+/** The trailing "No <field>" bucket's key. */
+export const NO_VALUE_KEY = '__none__';
 
 function firstValue(raw: unknown): string | null {
   if (raw === undefined || raw === null || raw === '') return null;
@@ -93,7 +98,7 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
 
   if (ungrouped.length > 0) {
     groups.push({
-      key: '__none__',
+      key: NO_VALUE_KEY,
       label: `No ${field}`,
       color: null,
       ghost: false,
@@ -102,6 +107,58 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   }
 
   return groups;
+}
+
+/**
+ * The kind a band is grouping by.
+ *
+ * Resolved the way `groupEntries` resolves it — the FIRST entry that declares
+ * the field wins — rather than off `entries[0]`, which is what the board did.
+ * On a heterogeneous surface (a Collection holds more than one type) the first
+ * record is routinely of a type that does not declare the grouped field at
+ * all, so the kind came back `undefined` and every write made through it took
+ * the wrong branch.
+ *
+ * M20.1 moved this out of BoardView, with `bandValueFor` below: the board was
+ * the only surface that had the rule, and the table's create path — which is
+ * the same question — did not.
+ */
+export function bandKind(entries: Entry[], field: string, schema: Schema): FieldKind | undefined {
+  for (const e of entries) {
+    const def = schema.resolveField(e, field).def;
+    if (def !== null) return def.kind;
+  }
+  return undefined;
+}
+
+/**
+ * The frontmatter value that puts a record in `key`'s band of a field.
+ *
+ * A band KEY is not a stored VALUE, and every path that treated it as one
+ * wrote something the scanner then failed to read back (M20.1). Creating in a
+ * relation band wrote `epic: Bonsai` where `epic: "[[Bonsai]]"` belongs, so
+ * the property landed under `properties` instead of `relationships`, the link
+ * did not exist, and the record did not return to the band it was created in.
+ * A checkbox band wrote the STRING `"true"`.
+ *
+ * `null` means "no value" — the "No <field>" band, which deletes the key on a
+ * move and seeds nothing on a create. `undefined` means the band cannot be
+ * expressed as a single write at all.
+ */
+export function bandValueFor(key: string, kind: FieldKind | undefined): Scalar | undefined {
+  if (key === NO_VALUE_KEY) return null;
+  // A multi-select record sits in several bands at once; writing one scalar
+  // would silently delete every other value it holds. Refuse until a real
+  // add/remove treatment exists.
+  if (kind === 'multiselect') return undefined;
+  // Person/relation bands key by the wikilink STEM, so a bare-stem write
+  // destroys the link on disk (the field leaves `relationships` after a
+  // rescan). Wrap those back up.
+  if (kind === 'person' || kind === 'relation') return formatWikilink(key);
+  // `String(true)` is what put the key in this band; a string is not what the
+  // field holds.
+  if (kind === 'checkbox') return key === 'true';
+  return key;
 }
 
 /**

@@ -5,7 +5,7 @@ import { createTarget } from '@/engine/createRecord';
 import type { Entry } from '@/engine/types';
 import { slugify } from '@/lib/slug';
 import { useUiStore } from '@/stores/uiStore';
-import { useVaultStore } from '@/stores/vaultStore';
+import { useSchema, useVaultStore } from '@/stores/vaultStore';
 
 /**
  * Create a record from wherever you are looking at records (M9.6).
@@ -18,6 +18,9 @@ import { useVaultStore } from '@/stores/vaultStore';
 export function useQuickAdd(typeName: string, project: Entry | null) {
   const createItem = useVaultStore((s) => s.createItem);
   const entries = useVaultStore((s) => s.entries);
+  // M20.1: `createTarget` coerces a band's key into what the field actually
+  // stores, which it cannot do without knowing the field's kind.
+  const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
 
   return async (
@@ -27,7 +30,7 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
   ): Promise<boolean> => {
     const trimmed = title.trim();
     if (trimmed === '') return false;
-    const target = createTarget(typeName, { project, entries, ...band });
+    const target = createTarget(typeName, { project, entries, schema, ...band });
     // slugify('!!!') is '' and create_note rejects an empty name. The
     // record's own key is the meaningful fallback where there is one; a
     // timestamp only when the type carries no key.
@@ -61,11 +64,12 @@ export function useQuickAdd(typeName: string, project: Entry | null) {
 export function useNewRecord(typeName: string) {
   const createItem = useVaultStore((s) => s.createItem);
   const entries = useVaultStore((s) => s.entries);
+  const schema = useSchema();
   const toast = useUiStore((s) => s.toast);
   const openPath = useOpenPath('in-place');
 
   return async () => {
-    const target = createTarget(typeName, { project: null, entries });
+    const target = createTarget(typeName, { project: null, entries, schema });
     const key = target.frontmatter.key;
     const slug =
       typeof key === 'string' && key !== ''

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DragEndEvent } from '@dnd-kit/core';
-import { BoardView, bandKind, handleDragEnd, type BoardColumnNode } from '@/views/BoardView';
+import { BoardView, handleDragEnd, type BoardColumnNode } from '@/views/BoardView';
+import { bandKind } from '@/engine/grouping';
 import { buildSchema } from '@/engine/schema';
 import { groupEntries } from '@/engine/grouping';
 import { useUiStore } from '@/stores/uiStore';
@@ -354,7 +355,7 @@ describe('BoardView keyboard and create (M15)', () => {
     expect(useUiStore.getState().detailPath).toBe('projects/onboarding/items/fld-1.md');
   });
 
-  it('wraps a person column value as a wikilink when creating in it', async () => {
+  it('hands the create path the column’s raw key, not a pre-wrapped one', async () => {
     const user = userEvent.setup();
     const entries = fixtureVault();
     useVaultStore.setState({ entries });
@@ -377,19 +378,25 @@ describe('BoardView keyboard and create (M15)', () => {
       screen.getByRole('textbox', { name: 'New record in Ana Rios' }),
       'Draft{Enter}',
     );
-    // A bare "ana-rios" stops being a relationship after rescan. The stem is
-    // what the group is keyed by, and what handleDragEnd already writes.
+    // M20.1: the board used to wrap this itself, because `createTarget` wrote
+    // whatever it was handed verbatim — which is why the TABLE's create path,
+    // which never wrapped, produced `epic: Bonsai` and a link that did not
+    // exist. The rule now lives in `createTarget` for every surface, so
+    // wrapping here as well would write `[[[[ana-rios]]]]`. See
+    // createRecord.test.ts for the wrapping itself.
     expect(onCreate).toHaveBeenCalledWith('Draft', {
       groupBy: 'assignee',
-      groupValue: '[[ana-rios]]',
+      groupValue: 'ana-rios',
     });
   });
 
   // M16.19: the kind came off `entries[0]`, so one card of a type that does
   // not declare the grouped field — routine on a Collection that holds more
   // than one type — answered "undefined" for the whole board and the wikilink
-  // wrapping above silently stopped happening.
-  it('still wraps the wikilink when the first card cannot resolve the grouped field', async () => {
+  // wrapping silently stopped happening. The wrapping moved to `createTarget`
+  // in M20.1 and `bandKind` still answers the kind; what is pinned here is
+  // that the board's own payload does not vary with card order.
+  it('passes the same key whichever card cannot resolve the grouped field', async () => {
     const user = userEvent.setup();
     const entries = fixtureVault();
     useVaultStore.setState({ entries });
@@ -413,7 +420,7 @@ describe('BoardView keyboard and create (M15)', () => {
     );
     expect(onCreate).toHaveBeenCalledWith('Draft', {
       groupBy: 'assignee',
-      groupValue: '[[ana-rios]]',
+      groupValue: 'ana-rios',
     });
   });
 });

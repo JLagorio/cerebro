@@ -144,7 +144,7 @@ function NewRecordDialog({ onClose }: { onClose: () => void }) {
     setSubmitting(true);
     // One rule for where records land (M12.2): the Type doc's folder, or
     // records/<plural>. The same createTarget every quick-add uses.
-    const target = createTarget(typeName, { project: null, entries });
+    const target = createTarget(typeName, { project: null, entries, schema });
     let path: string;
     try {
       path = await createItem({

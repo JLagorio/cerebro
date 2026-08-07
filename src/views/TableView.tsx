@@ -87,7 +87,9 @@ const READ_ONLY = new Set(['rollup', 'created_time', 'last_edited_time']);
  */
 function ProgressCell({ display }: { display: string }) {
   const ratio = progressRatio(display);
-  if (ratio === null) return <span className="truncate text-sm">{display}</span>;
+  // The same em-dash the read-only branch draws: one absence, one rendering.
+  if (ratio === null)
+    return <span className="truncate text-sm">{display === '' ? '—' : display}</span>;
   return (
     // w-full: the bar is flex-1, so without a sized parent it collapses to
     // zero inside a content-width cell.
@@ -146,8 +148,39 @@ const TableCell = memo(function TableCell({
   fill: string;
 }) {
   const resolved = schema.resolveField(entry, def.name);
-  const readOnly = READ_ONLY.has(def.kind);
-  const isProgress = def.format === 'progress';
+
+  /**
+   * Does THIS ROW's own type declare the property this column names (M20.1)?
+   *
+   * A grouping chain can descend a relation, which puts records of foreign
+   * types in one grid — the OKR tree nests Key results and Work items under
+   * Objectives. `buildRows` builds rows from the source type plus every
+   * relation the chain descends into; `columnUniverse` builds columns from the
+   * source type ALONE. So a Work item was laid out under Objective's columns
+   * and every one of them offered a full editor.
+   *
+   * `validatePatch` looks a field up on the record's own type, so grafting a
+   * parent's *select* onto a child's *number* field of the same name was
+   * already refused. What sailed through was the case with no def to validate
+   * against at all: undeclared keys are legal by design (advisory schema), so
+   * picking a person in an Objective's "Owner" column wrote `owner: [[…]]`
+   * onto a Work item that has never heard of `owner` — beneath the `assignee`
+   * it actually declares, which the grid had no column for.
+   *
+   * `resolveField` already answers this exactly: `def` is the row's own type's
+   * declaration, or null. A column the row does not own renders as the
+   * resolved display, read-only — no editor, and no click to forward into one.
+   * `ListView` has done this per row since M9.6; the table was the surface
+   * that disagreed.
+   *
+   * `undeclared` is the other way a row can fail to declare a column, and it
+   * is not this one: a column NO type declares — a hand-written view column, a
+   * frontmatter key the advisory schema surfaced — belongs to no type in
+   * particular, so no row is trespassing on another's by editing it.
+   */
+  const owned = resolved.def !== null || def.undeclared === true;
+  const readOnly = !owned || READ_ONLY.has(def.kind);
+  const isProgress = owned && def.format === 'progress';
   const editable = !readOnly && !isProgress;
 
   /**
@@ -2709,8 +2742,19 @@ export function TableView({
                   checked={checkedPaths.has(row.entry.path)}
                   selecting={checkedPaths.size > 0}
                   onCheck={(range) => toggleChecked(index, range)}
+                  // Nested rows get no insert affordance (M20.1). `onCreate` is
+                  // bound to the SURFACE's type, so "insert a record after this
+                  // one" on a depth-2 Work item in the OKR tree created an
+                  // Objective at depth 0 — a record of the wrong type, in the
+                  // wrong folder, that jumped to the top of the grid. Creating
+                  // the type at that depth also has to link the new record back
+                  // through the relation that produced the level, and for a
+                  // FORWARD descent (`deliverables`) the parent holds the link,
+                  // so the child cannot express it at all and the parent needs
+                  // patching too. That belongs with the nesting model; until it
+                  // exists, offering nothing beats offering the wrong thing.
                   onInsert={
-                    onCreate === undefined
+                    onCreate === undefined || row.depth > 0
                       ? undefined
                       : () =>
                           setInserting({
