@@ -113,7 +113,9 @@ describe('TableView keyboard access (M15)', () => {
     const { items } = setup();
     const grid = screen.getByTestId('table-view');
     expect(grid.getAttribute('aria-label')).toBeTruthy();
-    expect(grid.getAttribute('aria-rowcount')).toBe(String(items.length));
+    // M20.4: every row in the DOM, header included — bands and the create row
+    // are rows too, and counting only records told a screen reader "row 9 of 4".
+    expect(grid.getAttribute('aria-rowcount')).toBe(String(items.length + 1));
     // The native ring is no longer suppressed with nothing in its place.
     expect(grid.className).not.toContain('outline-none ');
   });
@@ -284,10 +286,16 @@ describe('TableView cell cursor (M16.17)', () => {
   it('numbers its columns, so a screen reader can say where the cursor is', () => {
     setup();
     const grid = screen.getByTestId('table-view');
-    // Name + the two data columns.
-    expect(grid.getAttribute('aria-colcount')).toBe('3');
+    // M20.4: the gutter + name + the two data columns. The gutter holds the
+    // row's checkbox, insert and menu, so it IS a cell and now says which one —
+    // before this it declared no index, and a cell without one takes its
+    // position from the DOM, so the gutter and the name cell were both
+    // column 1 and every row had one more cell than the grid admitted to.
+    expect(grid.getAttribute('aria-colcount')).toBe('4');
     const cells = screen.getAllByRole('gridcell');
-    expect(cells.some((c) => c.getAttribute('aria-colindex') === '1')).toBe(true);
+    expect(cells.filter((c) => c.getAttribute('aria-colindex') === '1')).toHaveLength(
+      screen.getAllByTestId('table-row').length,
+    );
   });
 
   it('the row cursor stays column-less until you arrow sideways', () => {
@@ -306,11 +314,13 @@ describe('TableView cell cursor (M16.17)', () => {
     const grid = screen.getByTestId('table-view');
     fireEvent.focus(grid, { target: grid });
     fireEvent.keyDown(grid, { key: 'ArrowRight' });
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
-    fireEvent.keyDown(grid, { key: 'Tab' });
+    // Display slot 0 is the name column, at aria-colindex 2 — the gutter is
+    // column 1 (M20.4).
     expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
+    fireEvent.keyDown(grid, { key: 'Tab' });
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('3');
     fireEvent.keyDown(grid, { key: 'ArrowLeft' });
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
     // ArrowLeft off the first cell hands the ROW back rather than wrapping
     // onto the row above: the row cursor is where Enter opens the record.
     fireEvent.keyDown(grid, { key: 'ArrowLeft' });
@@ -336,10 +346,10 @@ describe('TableView cell cursor (M16.17)', () => {
     fireEvent.keyDown(grid, { key: 'Tab' });
     fireEvent.keyDown(grid, { key: 'Tab' });
     expect(rows[0].contains(cursorCell())).toBe(true);
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('3');
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('4');
     fireEvent.keyDown(grid, { key: 'Tab' });
     expect(rows[1].contains(cursorCell())).toBe(true);
-    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('1');
+    expect(cursorCell()?.getAttribute('aria-colindex')).toBe('2');
   });
 
   it('points aria-activedescendant at the CELL once one is picked out', () => {
@@ -359,7 +369,7 @@ describe('TableView cell cursor (M16.17)', () => {
     // control opens the record rather than editing a value.
     for (let i = 0; i < 3; i += 1) fireEvent.keyDown(grid, { key: 'ArrowRight' });
     const cell = cursorCell();
-    expect(cell?.getAttribute('aria-colindex')).toBe('3');
+    expect(cell?.getAttribute('aria-colindex')).toBe('4');
     fireEvent.keyDown(grid, { key: 'Enter' });
     expect(cell?.contains(document.activeElement)).toBe(true);
     // FieldEditor's own Escape stops propagation and unmounts the input, and
@@ -1208,14 +1218,14 @@ describe('TableView nested rows of a foreign type (M20.1)', () => {
     const { parent, child } = okrGrid();
 
     // The parent owns Owner and is editable in it.
-    await user.click(cell(parent, '2'));
+    await user.click(cell(parent, '3'));
     expect(screen.getAllByRole('option').length).toBeGreaterThan(0);
     await user.keyboard('{Escape}');
 
     // The child does not, so there is nothing to click into.
-    await user.click(cell(child, '2'));
+    await user.click(cell(child, '3'));
     expect(screen.queryAllByRole('option')).toHaveLength(0);
-    expect(cell(child, '2').querySelector('button')).toBeNull();
+    expect(cell(child, '3').querySelector('button')).toBeNull();
   });
 
   // The neighbouring read-only kinds show an em-dash for the same absence, so
@@ -1223,8 +1233,8 @@ describe('TableView nested rows of a foreign type (M20.1)', () => {
   // contradicting each other about what "no value" looks like.
   it('draws no progress bar for a row with no such property', () => {
     const { parent, child } = okrGrid();
-    expect(cell(parent, '3').textContent).toContain('40');
-    expect(cell(child, '3').textContent).toBe('—');
+    expect(cell(parent, '4').textContent).toContain('40');
+    expect(cell(child, '4').textContent).toBe('—');
   });
 
   /**
@@ -1332,7 +1342,7 @@ describe('TableView union columns across the chain (M20.2)', () => {
     const user = userEvent.setup();
     const { parent, child } = chainGrid([{ field: 'size' }]);
     const cell = (row: HTMLElement) =>
-      row.querySelector<HTMLElement>('[role="gridcell"][aria-colindex="2"]')!;
+      row.querySelector<HTMLElement>('[role="gridcell"][aria-colindex="3"]')!;
 
     // Objective's `size` is a number: its editor is a textbox.
     await user.click(cell(parent));
@@ -1343,5 +1353,70 @@ describe('TableView union columns across the chain (M20.2)', () => {
     // read-only the way the old heterogeneous guard would have left it.
     await user.click(cell(child));
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['S', 'L']);
+  });
+});
+
+/**
+ * Keyboard and screen reader (M20.4).
+ */
+describe('TableView keyboard ownership (M20.4)', () => {
+  /**
+   * The grid's key handler ran on top of every focusable control inside it.
+   *
+   * Reproduced before the fix: cursor on row 1, focus row 5's Open pill, press
+   * Enter → the panel opens record 1. `preventDefault` then suppressed the
+   * button's own activation, so the control you were standing on did nothing
+   * and a different row opened instead. `inEditor` asked the right question
+   * too narrowly — it caught inputs, and a button is not an editor.
+   */
+  it('Enter on a row’s Open pill opens THAT row, not the one under the cursor', async () => {
+    const user = userEvent.setup();
+    const { items } = setup();
+    const grid = screen.getByTestId('table-view');
+    fireEvent.focus(grid, { target: grid });
+    expect(useUiStore.getState().detailPath).toBeNull();
+
+    // The last row, so it is unambiguously not the one the cursor is on.
+    const target = items[items.length - 1];
+    const pill = screen.getByLabelText(`Open ${target.title}`);
+    pill.focus();
+    await user.keyboard('{Enter}');
+
+    expect(useUiStore.getState().detailPath).toBe(target.path);
+  });
+
+  // Same shape: Space on a band header toggled it AND ran the grid's own
+  // Space, which toggles the row under the cursor.
+  it('a band header announces whether it is open, and holds a real button', () => {
+    const entries = fixtureVault();
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Work item')}
+        presentation={{ ...presentation, group: [{ field: 'status' }] }}
+        schema={schema}
+        fields={columnUniverse({ type: 'Work item', project: null }, entries, schema)}
+      />,
+    );
+    const band = screen.getAllByTestId('table-group-header')[0];
+    expect(band.getAttribute('role')).toBe('row');
+    // A row with no cell in it is malformed; ListView has had this right since
+    // M10 and the table was the surface that disagreed.
+    expect(band.querySelector('[role="gridcell"]')).not.toBeNull();
+    const toggle = band.querySelector('button')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  // The hook has exported `setCell` for this since M16.17 and nothing had ever
+  // called it, so clicking a cell and then arrowing moved a cursor that was
+  // somewhere else entirely.
+  it('clicking a cell moves the cell cursor to it', async () => {
+    const user = userEvent.setup();
+    setup();
+    const rows = screen.getAllByTestId('table-row');
+    const cell = rows[1].querySelector<HTMLElement>('[role="gridcell"][aria-colindex="3"]')!;
+    await user.click(cell);
+    expect(cell.getAttribute('data-cursor')).toBe('true');
   });
 });

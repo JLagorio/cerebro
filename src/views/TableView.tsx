@@ -248,7 +248,7 @@ const TableCell = memo(function TableCell({
       role="gridcell"
       {...cellProps}
       {...(editable ? { onClick: openEditor } : {})}
-      aria-colindex={colIndex + 1}
+      aria-colindex={colIndex + 2}
       className={[
         'flex flex-none overflow-hidden border-r border-n-100 px-2',
         wrap ? 'items-start py-1.5' : 'items-center',
@@ -474,6 +474,11 @@ function RowGutter({
   return (
     <div
       role="gridcell"
+      // M20.4: it holds the row's checkbox, insert and menu, so it IS a cell —
+      // but it declared no index, and a cell without one takes its position
+      // from the DOM, which made the gutter and the first data cell both
+      // column 1. Every data slot is offset by it.
+      aria-colindex={1}
       className={[
         frozen ? 'sticky left-0 z-10' : '',
         'flex flex-none items-center justify-end gap-0.5 pl-1 pr-1',
@@ -689,7 +694,8 @@ const TableRow = memo(function TableRow({
   chips: ChipStyle;
   onToggle: () => void;
   selected: boolean;
-  onSelect: () => void;
+  /** The display slot clicked, or -1 for "the row itself". */
+  onSelect: (col: number) => void;
   /** Roving-tabindex bookkeeping from useRowKeyboard — id, aria-selected and
    * the ref the cursor scrolls into view. */
   rowProps: RowKeyboardRowProps;
@@ -725,7 +731,18 @@ const TableRow = memo(function TableRow({
       data-testid="table-row"
       data-path={entry.path}
       data-depth={depth}
-      onClick={onSelect}
+      // M20.4: a click puts the cursor on the CELL it landed in, not just on
+      // the row. `useRowKeyboard` has exported `setCell` for exactly this since
+      // M16.17 and nothing had ever called it, so clicking a cell and then
+      // pressing an arrow moved a cursor that was somewhere else entirely —
+      // usually back at the top of the grid.
+      onClick={(e) => {
+        const cell = (e.target as HTMLElement).closest<HTMLElement>('[role="gridcell"]');
+        const index = cell?.getAttribute('aria-colindex');
+        // The gutter is column 1 and holds the row's own controls, so a click
+        // there means the row, not a cell (it stops propagation anyway).
+        onSelect(index == null || index === '1' ? -1 : Number(index) - 2);
+      }}
       // `group` sits on the ROW so hovering anywhere reveals Open, not only
       // over the name cell.
       //
@@ -778,7 +795,7 @@ const TableRow = memo(function TableRow({
       <div
         role="gridcell"
         {...cellProps(titlePos)}
-        aria-colindex={titlePos + 1}
+        aria-colindex={titlePos + 2}
         className={[
           titleFrozen ? 'z-10' : '',
           'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
@@ -1018,22 +1035,38 @@ function BandHeader({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
+    /**
+     * A `role="row"` with cells in it, holding a real button (M20.4).
+     *
+     * This was a `<button role="row">` with no cells and no `aria-expanded`:
+     * a row that contains no gridcell is malformed to a screen reader, the
+     * grid's `aria-rowcount` did not count it, and nothing announced whether
+     * it was open or shut — the one fact a band header exists to carry.
+     * `ListView` has had this right since M10; this mirrors it.
+     */
+    <div
       role="row"
       data-testid="table-group-header"
       data-depth={node.depth}
-      onClick={onToggle}
       className="flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
     >
       {/* The band spans the full scroll width, so the band itself cannot be
           sticky (a sticky box as wide as its container has no room to shift).
           The label cluster is the sticky part instead. */}
       <span
+        role="gridcell"
         className="sticky left-0 flex items-center gap-2 pr-3"
         style={{ paddingLeft: GUTTER + node.depth * INDENT }}
       >
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} color="var(--n-400)" />
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.label}`}
+          onClick={onToggle}
+          className="flex h-4 w-4 flex-none items-center justify-center rounded border-0 bg-transparent p-0 text-n-400 hover:bg-n-100 hover:text-n-800"
+        >
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+        </button>
         <span
           className="box-border h-[10px] w-[10px] flex-none rounded-full"
           style={
@@ -1054,7 +1087,7 @@ function BandHeader({
         </span>
         <span className="[font-family:var(--font-mono)] text-2xs text-n-400">{node.count}</span>
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -2071,7 +2104,7 @@ export function TableView({
       if (node === null) return;
       let widest = 0;
       for (const cell of node.querySelectorAll<HTMLElement>(
-        `[aria-colindex="${displayIndex + 1}"]`,
+        `[aria-colindex="${displayIndex + 2}"]`,
       )) {
         widest = Math.max(widest, cell.scrollWidth);
       }
@@ -2528,10 +2561,15 @@ export function TableView({
         // big it is; `outline-none` with nothing replacing it meant Tabbing in
         // changed nothing on screen at all.
         aria-label={sourceType === null ? 'Records' : `${sourceType} records`}
-        aria-rowcount={flatRows.length}
+        // M20.4: every row in the DOM, which is what `aria-rowcount` names.
+        // It counted only the RECORD rows, so on a grouped table a screen
+        // reader was told "row 9 of 4" — bands and the create row are rows,
+        // and so is the header.
+        aria-rowcount={rows.length + 1}
         // M16.17: a grid whose cells carry aria-colindex has to say how many
         // there are, or a screen reader reports "column 3 of ?".
-        aria-colcount={displayKeys.length}
+        // M20.4: +1 for the gutter, which is a cell and now says so.
+        aria-colcount={displayKeys.length + 1}
         className="min-h-0 min-w-0 flex-1 overflow-auto focus-visible:shadow-[inset_var(--ring)] focus-visible:outline-none"
         {...keyboard.containerProps}
       >
@@ -2582,7 +2620,7 @@ export function TableView({
                     role="columnheader"
                     onPointerDown={startHeaderDrag('title')}
                     onClickCapture={swallowDraggedClick}
-                    aria-colindex={d + 1}
+                    aria-colindex={d + 2}
                     className={[
                       titleFrozen ? 'z-30' : 'relative',
                       'group/header flex flex-none items-center gap-1.5 border-r border-n-100 bg-n-25 px-3 text-xs font-semibold text-n-600',
@@ -2640,7 +2678,7 @@ export function TableView({
                   role="columnheader"
                   onPointerDown={startHeaderDrag(def.name)}
                   onClickCapture={swallowDraggedClick}
-                  aria-colindex={d + 1}
+                  aria-colindex={d + 2}
                   className={[
                     'group/header flex flex-none items-center gap-1.5 border-r border-n-100 px-2 text-xs font-medium text-n-600',
                     d < frozenCount ? 'z-30 bg-n-25' : 'relative',
@@ -2774,7 +2812,9 @@ export function TableView({
                   chips={chips}
                   onToggle={() => toggleCollapsed(scope, row.key)}
                   selected={index === keyboard.index}
-                  onSelect={() => keyboard.setIndex(index)}
+                  onSelect={(col) =>
+                    col < 0 ? keyboard.setIndex(index) : keyboard.setCell(index, col)
+                  }
                   // Without this the hook's `rows` ref stayed empty, so arrowing
                   // past the fold moved an invisible cursor off-screen and the
                   // scroller never followed it.
