@@ -1,3 +1,4 @@
+import { humanize } from './schema';
 import { bandLevels } from './types';
 import { formatWikilink } from './wikilink';
 import type {
@@ -92,14 +93,27 @@ export function groupEntries(entries: Entry[], field: string, schema: Schema): G
   } else {
     const keys = [...buckets.keys()].sort((a, b) => a.localeCompare(b));
     for (const key of keys) {
-      groups.push({ key, label: key, color: null, ghost: false, entries: buckets.get(key)! });
+      // M20.5: a checkbox band is keyed by `String(true)`, and printing that
+      // raw gave two bands labelled "true" and "false" — the stored value, not
+      // what the field means. The property's own name carries the meaning, the
+      // way a checkbox row in the detail panel does.
+      const label =
+        kind === 'checkbox'
+          ? key === 'true'
+            ? humanize(field)
+            : `Not ${humanize(field).toLowerCase()}`
+          : key;
+      groups.push({ key, label, color: null, ghost: false, entries: buckets.get(key)! });
     }
   }
 
   if (ungrouped.length > 0) {
+    // M20.5: `No due_date`, in a UI that calls the column "Due date"
+    // everywhere else. A band label is read, so it gets the same humanizing
+    // every other label in the app does.
     groups.push({
       key: NO_VALUE_KEY,
-      label: `No ${field}`,
+      label: `No ${humanize(field).toLowerCase()}`,
       color: null,
       ghost: false,
       entries: ungrouped,

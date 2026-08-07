@@ -219,10 +219,32 @@ describe('TableView column resizing (M11)', () => {
     expect(onPresentationChange.mock.calls[0][0].titleWidth).toBe(380);
   });
 
-  it('resizes from the keyboard, so the affordance is not pointer-only', () => {
+  /**
+   * M20.5: two-phase, like the pointer. Each arrow used to call the commit,
+   * which writes the view file and rescans the vault — so holding the key down
+   * ran one full write-and-rescan per repeat, the exact failure the pointer
+   * path was rewritten to avoid. The arrows paint; leaving the handle persists.
+   */
+  it('resizes from the keyboard, persisting once when the handle is left', () => {
     const { onColumnsChange } = grid();
-    fireEvent.keyDown(screen.getByLabelText('Resize Status column'), { key: 'ArrowRight' });
-    expect(onColumnsChange.mock.calls[0][0]).toContainEqual({ field: 'status', width: 158 });
+    const handle = screen.getByLabelText('Resize Status column');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(onColumnsChange).not.toHaveBeenCalled();
+    fireEvent.blur(handle);
+    expect(onColumnsChange).toHaveBeenCalledTimes(1);
+    // Two 8px steps from the 150 default, accumulated rather than each one
+    // starting over from the last persisted width.
+    expect(onColumnsChange.mock.calls[0][0]).toContainEqual({ field: 'status', width: 166 });
+  });
+
+  it('abandons an unpersisted keyboard resize on Escape', () => {
+    const { onColumnsChange } = grid();
+    const handle = screen.getByLabelText('Resize Status column');
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    fireEvent.blur(handle);
+    expect(onColumnsChange).not.toHaveBeenCalled();
   });
 
   it('offers no resizer on a surface with no view file to write to', () => {
@@ -1418,5 +1440,98 @@ describe('TableView keyboard ownership (M20.4)', () => {
     const cell = rows[1].querySelector<HTMLElement>('[role="gridcell"][aria-colindex="3"]')!;
     await user.click(cell);
     expect(cell.getAttribute('data-cursor')).toBe('true');
+  });
+});
+
+describe('TableView polish (M20.5)', () => {
+  /**
+   * A nesting chain can draw one record at two positions — a Work item that
+   * serves two key results is a row under each. Selection counted ROWS, so one
+   * tick reported "2 selected", the delete removed the file once and reported
+   * a failure for the second attempt, and Select all never read as checked.
+   */
+  it('counts a record once however many places it is drawn', async () => {
+    const user = userEvent.setup();
+    const entries = [
+      makeEntry({
+        path: 'types/objective.md',
+        title: 'Objective',
+        type: 'Type',
+        properties: { fields: { owner: { kind: 'person' } } } as unknown as Entry['properties'],
+      }),
+      makeEntry({
+        path: 'types/key-result.md',
+        title: 'Key result',
+        type: 'Type',
+        properties: {
+          fields: { objective: { kind: 'relation', target: 'Objective' } },
+        } as unknown as Entry['properties'],
+      }),
+      makeEntry({ path: 'records/objectives/a.md', title: 'A', type: 'Objective' }),
+      makeEntry({ path: 'records/objectives/b.md', title: 'B', type: 'Objective' }),
+      // Points at BOTH objectives, so it is nested under each of them.
+      makeEntry({
+        path: 'records/key-results/kr.md',
+        title: 'Shared KR',
+        type: 'Key result',
+        relationships: { objective: ['A', 'B'] },
+      }),
+    ];
+    useVaultStore.setState({ entries });
+    const schema = buildSchema(entries);
+    render(
+      <TableView
+        entries={entries.filter((e) => e.type === 'Objective')}
+        allEntries={entries}
+        presentation={{
+          ...presentation,
+          columns: [{ field: 'owner' }],
+          group: [
+            {
+              field: 'objective',
+              descend: { direction: 'reverse', type: 'Key result', field: 'objective' },
+            },
+          ],
+        }}
+        schema={schema}
+        fields={columnUniverse({ type: 'Objective', project: null }, entries, schema)}
+      />,
+    );
+    // Four rows, three records: the KR is drawn under both objectives.
+    expect(screen.getAllByTestId('table-row')).toHaveLength(4);
+
+    await user.click(screen.getAllByLabelText('Select Shared KR')[0]);
+    expect(screen.getByTestId('bulk-bar').textContent).toContain('1 selected');
+
+    // And Select all can now actually read as checked: `allChecked` compared
+    // a Set of distinct paths against a row count that included the duplicate,
+    // so the box could never reach it.
+    await user.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('select-all').getAttribute('aria-label')).toBe('Clear selection');
+    expect(screen.getByTestId('bulk-bar').textContent).toContain('3 selected');
+  });
+
+  // The one cell M19.2's hit-target work missed, and the one with the most
+  // dead space in it — the indent, the gaps around the type icon, and the
+  // strip beside the Open pill all answered no click at all.
+  it('a click on the name cell’s padding edits the title', async () => {
+    const user = userEvent.setup();
+    setup();
+    const cell = screen
+      .getAllByTestId('table-row')[0]
+      .querySelector<HTMLElement>('[role="gridcell"][aria-colindex="2"]')!;
+    await user.click(cell);
+    expect(cell.querySelector('input')).not.toBeNull();
+  });
+
+  // Escape clears every other transient state in the app; the hook has
+  // accepted `onEscape` since M9.6 and the table never passed it.
+  it('Escape clears a bulk selection', async () => {
+    const user = userEvent.setup();
+    const { items } = setup();
+    await user.click(screen.getByLabelText(`Select ${items[0].title}`));
+    expect(screen.getByTestId('bulk-bar')).toBeTruthy();
+    fireEvent.keyDown(screen.getByTestId('table-view'), { key: 'Escape' });
+    expect(screen.queryByTestId('bulk-bar')).toBeNull();
   });
 });

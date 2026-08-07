@@ -4,8 +4,8 @@ import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { deleteNote, readNote } from '@/lib/ipc';
-import { slugify } from '@/lib/slug';
+import { deleteNote } from '@/lib/ipc';
+import { duplicateRecord } from '@/app/recordActions';
 import type { Entry } from '@/engine/types';
 import { DETAIL_WIDTH_DEFAULT, DETAIL_WIDTH_MAX, useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -38,7 +38,6 @@ import { useVaultStore } from '@/stores/vaultStore';
 export function DetailHeaderActions({ entry }: { entry: Entry }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const rescan = useVaultStore((s) => s.rescan);
-  const createItem = useVaultStore((s) => s.createItem);
   const entries = useVaultStore((s) => s.entries);
   const toast = useUiStore((s) => s.toast);
   const closeDetail = useUiStore((s) => s.closeDetail);
@@ -72,31 +71,12 @@ export function DetailHeaderActions({ entry }: { entry: Entry }) {
 
   const duplicate = () => {
     void (async () => {
-      if (vaultPath === null) return;
-      const title = `${entry.title} copy`;
-      try {
-        const body = await readNote(vaultPath, entry.path);
-        // `key` is not copied: it identifies the record (LNC-4), and two
-        // records answering to one key is worse than a copy with none.
-        const { key: _key, ...props } = entry.properties;
-        const frontmatter: Record<string, unknown> = { ...props };
-        if (entry.type !== null) frontmatter.type = entry.type;
-        // Relationships arrive bracket-stripped from the scanner; disk wants
-        // them back as wikilinks.
-        for (const [name, targets] of Object.entries(entry.relationships)) {
-          frontmatter[name] = targets.map((t) => `[[${t}]]`);
-        }
-        const created = await createItem({
-          folder: entry.path.slice(0, Math.max(entry.path.lastIndexOf('/'), 0)),
-          slug: slugify(title) || 'copy',
-          frontmatter,
-          body,
-        });
-        openDetail(created);
-        toast(`Duplicated as "${title}"`);
-      } catch {
-        toast("Couldn't duplicate this record");
-      }
+      // M20.5: the write itself moved to `app/recordActions`, so the bulk bar
+      // can duplicate too rather than making you open a record first.
+      const created = await duplicateRecord(entry);
+      if (created === null) return;
+      openDetail(created);
+      toast(`Duplicated as "${entry.title} copy"`);
     })();
   };
 

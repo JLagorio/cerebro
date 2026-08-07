@@ -26,7 +26,12 @@ import {
   type ColumnDef,
 } from '@/engine/columns';
 import { buildRows, entryRows } from '@/engine/rows';
-import { CREATABLE_PROPERTY_KINDS, kindMeta, progressRatio } from '@/engine/properties';
+import {
+  CREATABLE_PROPERTY_KINDS,
+  GROUPABLE_KINDS,
+  kindMeta,
+  progressRatio,
+} from '@/engine/properties';
 import { humanize } from '@/engine/schema';
 import { typeStyle } from '@/engine/typeCatalog';
 import { groupByField, sortBy } from '@/engine/views';
@@ -53,6 +58,7 @@ import {
 } from '@/app/typeActions';
 import { useOpenPath } from '@/app/useOpenPath';
 import { ConfirmDeleteProperty, ConfirmKindChange, PropertyEditor } from '@/views/PropertyEditor';
+import { duplicateRecord } from '@/app/recordActions';
 import { QuickAddInline } from '@/views/QuickAdd';
 import {
   CELL_CONTROL,
@@ -238,7 +244,13 @@ const TableCell = memo(function TableCell({
    * disk, ending exactly where they started, so the checkbox looked inert.
    */
   const openEditor = (e: React.MouseEvent<HTMLDivElement>) => {
-    const hit = (e.target as HTMLElement).closest(`label,${CELL_CONTROL}`);
+    // `a[href]` joins the guard and NOT `CELL_CONTROL` (M20.5), the same
+    // distinction the `label` note above draws: a URL, email or phone cell
+    // renders an anchor plus a pencil, and following the link also flipped the
+    // cell into edit mode behind the page you had just opened. Adding it to
+    // CELL_CONTROL instead would change what ENTER targets — the anchor is not
+    // the control the cell means, the pencil is.
+    const hit = (e.target as HTMLElement).closest(`a[href],label,${CELL_CONTROL}`);
     if (hit !== null && e.currentTarget.contains(hit)) return;
     primaryControl(e.currentTarget)?.click();
   };
@@ -796,6 +808,22 @@ const TableRow = memo(function TableRow({
         role="gridcell"
         {...cellProps(titlePos)}
         aria-colindex={titlePos + 2}
+        /**
+         * The whole cell is the hit target here too (M20.5).
+         *
+         * M19.2 made every DATA cell one target from border to border and this
+         * is the cell it missed — which is the one with the most dead space in
+         * it: the depth indent, the gaps either side of the type icon, and the
+         * strip between the title and the Open pill all answered no click at
+         * all. Same forwarder, same guard, and `primaryControl` already knows
+         * the name cell leads with its nesting expander and that the title
+         * beside it is what a gesture on the cell means (`data-cell-primary`).
+         */
+        onClick={(e) => {
+          const hit = (e.target as HTMLElement).closest(`a[href],label,${CELL_CONTROL}`);
+          if (hit !== null && e.currentTarget.contains(hit)) return;
+          primaryControl(e.currentTarget)?.click();
+        }}
         className={[
           titleFrozen ? 'z-10' : '',
           'data-[cursor]:shadow-[inset_0_0_0_2px_var(--cortex-500)]',
@@ -914,6 +942,24 @@ function ColumnResizer({
 }) {
   const start = useRef({ x: 0, w: 0 });
   const [active, setActive] = useState(false);
+  /**
+   * The width an arrow key is building, before it is persisted (M20.5).
+   *
+   * Each arrow press called `onCommit`, which writes the view file and
+   * rescans the vault — so holding the key down ran one full write-and-rescan
+   * per repeat, which is the exact failure the POINTER path was rewritten to
+   * avoid (paint on move, persist on up). `null` means "nothing pending".
+   */
+  const pending = useRef<number | null>(null);
+  const nudge = (next: number) => {
+    pending.current = next;
+    onDrag(next);
+  };
+  const settle = () => {
+    if (pending.current === null) return;
+    onCommit(pending.current);
+    pending.current = null;
+  };
 
   const begin = (clientX: number) => {
     start.current = { x: clientX, w: width };
@@ -954,20 +1000,33 @@ function ColumnResizer({
         e.stopPropagation();
         onFit?.();
       }}
+      // Blur is the keyboard's pointerup: the arrows paint, leaving the handle
+      // persists. Enter also settles first, so a nudge-then-fit does not lose
+      // the nudge (M20.5).
+      onBlur={settle}
       onKeyDown={(e) => {
         // Keyboard resize: a pointer-only affordance is unreachable without one.
         const step = e.shiftKey ? 40 : 8;
+        const from = pending.current ?? width;
         if (e.key === 'ArrowLeft') {
           e.preventDefault();
-          onCommit(Math.max(min, width - step));
+          nudge(Math.max(min, from - step));
         }
         if (e.key === 'ArrowRight') {
           e.preventDefault();
-          onCommit(width + step);
+          nudge(from + step);
         }
         if (e.key === 'Enter') {
           e.preventDefault();
+          settle();
           onFit?.();
+        }
+        // Committing on Escape would be the opposite of what it means
+        // everywhere else in this app, so it abandons what the arrows built.
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          pending.current = null;
+          onDrag(width);
         }
       }}
       // A 1px target was most of the problem: the pointer had to land on a
@@ -1048,7 +1107,13 @@ function BandHeader({
       role="row"
       data-testid="table-group-header"
       data-depth={node.depth}
-      className="flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
+      // M20.5: sticky under the column header, offset by depth so a nested
+      // band parks below its parent instead of on top of it — ListView has
+      // done this since M10, and without it you scroll into a run of rows with
+      // nothing on screen saying which band you are in. `top-8` is the header
+      // row's own height.
+      className="sticky z-[15] flex h-8 w-full items-center border-b border-n-100 bg-n-25 text-left"
+      style={{ top: 32 + node.depth * 32 }}
     >
       {/* The band spans the full scroll width, so the band itself cannot be
           sticky (a sticky box as wide as its container has no room to shift).
@@ -1538,13 +1603,20 @@ function HeaderMenu({
         icon: 'arrow-down',
         run: () => onPresentationChange(sortBy(presentation, def.name, 'desc')),
       },
-      {
+    );
+    // M20.5: the toolbar filters its Group menu to GROUPABLE_KINDS and this
+    // menu offered the item on anything, so a date or a number column could
+    // band a table by a value with no buckets in it — and creating inside one
+    // of those bands is what seeded the malformed writes M20.1e had to coerce.
+    // Two spellings of "can this be grouped" will always drift; there is one.
+    if (GROUPABLE_KINDS.has(def.kind)) {
+      items.push({
         label: 'Group by',
         icon: 'rows-3',
         active: presentation.group.some((g) => g.descend === undefined && g.field === def.name),
         run: () => onPresentationChange(groupByField(presentation, def.name)),
-      },
-    );
+      });
+    }
   }
   // Last of the "what does this column tell me" cluster, before the Freeze
   // section break — where Notion's own column menu carries it. Gated on
@@ -2049,7 +2121,13 @@ export function TableView({
     // trailing "+" (M16.18): leave either out and the slack calculation hands
     // the columns pixels that are already spoken for, so the last column runs
     // off the right edge.
-    const content = GUTTER + ADD_W + titleWidth + base.reduce((sum, w) => sum + w, 0);
+    // M20.5: only when the "+" is actually rendered. `AddColumnButton` is
+    // gated on `onColumnsChange`, so on a read-only surface — a dashboard
+    // block, a table with no view file to write to — 34px of the width was
+    // reserved for a control that is not there, and the last column stopped
+    // that far short of the right edge.
+    const addSlot = onColumnsChange === undefined ? 0 : ADD_W;
+    const content = GUTTER + addSlot + titleWidth + base.reduce((sum, w) => sum + w, 0);
     const slack = available - content;
     if (slack <= 0 || base.length === 0) {
       return { title: titleWidth, columns: base, total: content };
@@ -2061,7 +2139,7 @@ export function TableView({
       i === base.length - 1 ? w + slack - share * (base.length - 1) : w + share,
     );
     return { title: titleWidth, columns, total: available };
-  }, [resolved, titleWidth, available]);
+  }, [resolved, titleWidth, available, onColumnsChange]);
 
   /** Paint a width mid-drag: straight to the DOM, so no row re-renders. */
   const paint = useCallback(
@@ -2106,7 +2184,26 @@ export function TableView({
       for (const cell of node.querySelectorAll<HTMLElement>(
         `[aria-colindex="${displayIndex + 2}"]`,
       )) {
+        /**
+         * The cell's own `scrollWidth` is the clipped width (M20.5).
+         *
+         * A cell is `overflow-hidden` around an inner `truncate` span, and a
+         * truncating child shrinks to its parent — so the parent never
+         * overflows and `scrollWidth` reports exactly the width the column
+         * already has. "Fit to content" therefore widened a clipped column by
+         * the +4 padding below and nothing else, which is the one case anyone
+         * reaches for it.
+         *
+         * Measured against each descendant's own scroll width, offset by where
+         * it starts inside the cell — the name cell's indent, expander and
+         * type icon are real width the title has to clear.
+         */
+        const left = cell.getBoundingClientRect().left;
         widest = Math.max(widest, cell.scrollWidth);
+        for (const child of cell.querySelectorAll<HTMLElement>('*')) {
+          const offset = child.getBoundingClientRect().left - left;
+          widest = Math.max(widest, offset + child.scrollWidth);
+        }
       }
       // Nothing measurable (an unlaid-out grid) is not a reason to slam the
       // column to its minimum.
@@ -2121,12 +2218,21 @@ export function TableView({
   // Keyboard traverses the record rows only — bands and the create row are not
   // records, so Enter on them has nothing to open.
   const flatRows = useMemo(() => entryRows(rows), [rows]);
+  /** Row key → its position among the RECORD rows, which is what the keyboard
+   * cursor counts. */
+  const rowIndex = useMemo(() => new Map(flatRows.map((r, i) => [r.key, i])), [flatRows]);
   const keyboard = useRowKeyboard({
     count: flatRows.length,
     onOpen: (i) => openPath(flatRows[i].entry.path),
     onToggle: (i) => {
       if (flatRows[i].childCount > 0) toggleCollapsed(scope, flatRows[i].key);
     },
+    // M20.5: the hook has accepted this since M9.6 and the table never passed
+    // it, so a bulk selection could only be dismissed by finding the × on a
+    // floating bar — Escape, which clears every other transient state in the
+    // app, did nothing at all. Last in the one-press-one-step-out chain the
+    // hook already documents: cell → row → selection.
+    onEscape: () => setCheckedPaths(new Set()),
     // M16.17: +1 for the name column, which is a display slot with no
     // ColumnSpec behind it.
     colCount: resolved.length + 1,
@@ -2158,10 +2264,29 @@ export function TableView({
     });
   }, [rowPaths]);
 
-  const checked = useMemo(
-    () => flatRows.filter((r) => checkedPaths.has(r.entry.path)).map((r) => r.entry),
-    [flatRows, checkedPaths],
-  );
+  /**
+   * The selected records, de-duplicated by path (M20.5).
+   *
+   * A nesting chain can draw one record at two positions — a Work item that
+   * serves two key results is a row under each — and this counted ROWS. So
+   * ticking one box reported "2 selected", the bulk delete removed the file
+   * once and reported a failure for the second attempt, and `allChecked`
+   * compared a Set of distinct paths against a row count that included the
+   * duplicate, so Select all never read as checked.
+   */
+  const checked = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Entry[] = [];
+    for (const r of flatRows) {
+      if (!checkedPaths.has(r.entry.path) || seen.has(r.entry.path)) continue;
+      seen.add(r.entry.path);
+      out.push(r.entry);
+    }
+    return out;
+  }, [flatRows, checkedPaths]);
+
+  /** Distinct records on screen — what "all" means when a row can repeat. */
+  const distinctPaths = useMemo(() => new Set(rowPaths).size, [rowPaths]);
 
   const toggleChecked = useCallback(
     (index: number, range: boolean) => {
@@ -2184,7 +2309,27 @@ export function TableView({
   );
 
   const clearChecked = useCallback(() => setCheckedPaths(new Set()), []);
-  const allChecked = flatRows.length > 0 && checkedPaths.size >= flatRows.length;
+
+  /**
+   * M20.5: the bulk bar could delete twenty records and duplicate none — the
+   * only Duplicate in the app was in the record panel's header, so copying one
+   * meant opening it first. The write itself lives in `app/recordActions`,
+   * shared with that header rather than written twice.
+   */
+  const duplicateChecked = useCallback(() => {
+    const targets = checked;
+    void (async () => {
+      let made = 0;
+      for (const entry of targets) {
+        if ((await duplicateRecord(entry)) !== null) made += 1;
+      }
+      // The copies are new records; keeping the originals ticked would leave a
+      // selection that no longer describes what is on screen.
+      clearChecked();
+      if (made > 0) toast(`Duplicated ${made} ${made === 1 ? 'record' : 'records'}`);
+    })();
+  }, [checked, clearChecked, toast]);
+  const allChecked = distinctPaths > 0 && checkedPaths.size >= distinctPaths;
 
   const copyLinks = useCallback(() => {
     const text = checked.map((e) => `[[${e.title}]]`).join('\n');
@@ -2575,7 +2720,18 @@ export function TableView({
       >
         <div
           ref={gridRef}
-          style={{ width: layout.total, minWidth: '100%', ...widthVars } as React.CSSProperties}
+          style={
+            {
+              width: layout.total,
+              minWidth: '100%',
+              // M20.5: the bulk bar floats rather than docking, which is right
+              // — docking shifts the table you are reading by 40px — but it
+              // then sat on top of the last two rows with no way to scroll
+              // them clear. Room appears only while it is on screen.
+              ...(checked.length > 0 ? { paddingBottom: 72 } : {}),
+              ...widthVars,
+            } as React.CSSProperties
+          }
         >
           <div
             ref={headerRowRef}
@@ -2752,6 +2908,26 @@ export function TableView({
             )}
           </div>
 
+          {/* M20.5: ABOVE the create row, which is what "below" refers to.
+              `buildRows` emits the add row even for an empty source, and this
+              block sat after it — so the one instruction on screen pointed at
+              a control that was already above it. */}
+          {entries.length === 0 && (
+            <div role="row" className="sticky left-0 px-3 py-8">
+              {/* An empty that only reports emptiness occupies the space where
+                the next action belongs (M9.6). */}
+              <EmptyState
+                icon="table-2"
+                title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
+                description={
+                  filtered === true
+                    ? 'Adjust the filters in view settings to widen the query.'
+                    : 'Create the first one below.'
+                }
+              />
+            </div>
+          )}
+
           {rows.map((row) => {
             if (row.kind === 'band') {
               return (
@@ -2793,7 +2969,10 @@ export function TableView({
                 </div>
               );
             }
-            const index = flatRows.indexOf(row);
+            // M20.5: `flatRows.indexOf(row)` — a linear scan per row, so a
+            // 1,000-row grid ran ~500,000 comparisons per render just to
+            // discover a number the loop could have carried. Built once.
+            const index = rowIndex.get(row.key) ?? 0;
             const rowBand = bandForRow.get(row.key) ?? null;
             return (
               <Fragment key={row.key}>
@@ -2909,22 +3088,6 @@ export function TableView({
               <span aria-hidden className="flex-1" />
             </div>
           )}
-
-          {entries.length === 0 && (
-            <div role="row" className="sticky left-0 px-3 py-8">
-              {/* An empty that only reports emptiness occupies the space where
-                the next action belongs (M9.6). */}
-              <EmptyState
-                icon="table-2"
-                title={filtered === true ? 'Nothing matches these filters' : 'No records yet'}
-                description={
-                  filtered === true
-                    ? 'Adjust the filters in view settings to widen the query.'
-                    : 'Create the first one below.'
-                }
-              />
-            </div>
-          )}
         </div>
       </div>
       {moreRight && (
@@ -2949,6 +3112,9 @@ export function TableView({
           <span className="h-4 w-px bg-n-200" />
           <Button size="sm" variant="ghost" icon="link" onClick={copyLinks}>
             Copy links
+          </Button>
+          <Button size="sm" variant="ghost" icon="copy" onClick={duplicateChecked}>
+            Duplicate
           </Button>
           <Button
             size="sm"
