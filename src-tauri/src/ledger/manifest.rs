@@ -493,11 +493,24 @@ mod tests {
 
         // A verified concept: its attestation was appended AFTER creation,
         // so the generating event is the attestation, not the revision.
+        //
+        // Selection is by DESCRIPTOR SHAPE, never by iteration position.
+        // Belief ids are `migrate_id(store_uuid, …)` and the store uuid is
+        // fresh per vault, so `beliefs` is a BTreeMap in an order that
+        // changes every run: `.find(|b| b.attested.is_some())` picked a
+        // different one of the corpus's four verified concepts each time,
+        // and one of them (`systems/offline-guarantee.md`) carries a
+        // `supersedes:` relation. Migration emits relations in phase TWO,
+        // after every attestation, so that one belief's head is its
+        // relation event — a ~25% flake in a gate that must be trustworthy
+        // nine phases in a row. Both shapes are now asserted below.
         let verified = state
             .beliefs
             .values()
-            .find(|b| b.attested.is_some())
-            .expect("the corpus has verified concepts");
+            .find(|b| {
+                b.attested.is_some() && descriptor(&state, b).relation_transition_heads.is_empty()
+            })
+            .expect("the corpus has verified concepts with no outgoing relation");
         let described = descriptor(&state, verified);
         assert!(!described.review_event_ids.is_empty());
         assert_eq!(
@@ -516,6 +529,29 @@ mod tests {
         assert_ne!(
             described.digest().unwrap(),
             without_review.digest().unwrap()
+        );
+
+        // The shape the flake was hiding: a verified concept that ALSO
+        // supersedes another. Phase-two relations outrank the attestation,
+        // so the head is the relation event and the descriptor still
+        // carries the review — head order is by seq, not by importance.
+        let verified_with_relation = state
+            .beliefs
+            .values()
+            .find(|b| {
+                b.attested.is_some() && !descriptor(&state, b).relation_transition_heads.is_empty()
+            })
+            .expect("the corpus has a verified concept that supersedes another");
+        let with_relation = descriptor(&state, verified_with_relation);
+        assert!(!with_relation.review_event_ids.is_empty());
+        assert_eq!(
+            verified_with_relation.projection_head_event,
+            with_relation
+                .relation_transition_heads
+                .last()
+                .unwrap()
+                .event_id,
+            "a relation appended after the attestation is the newer transition"
         );
 
         // An unverified, relation-less, alias-less concept's head IS its
