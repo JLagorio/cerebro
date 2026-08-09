@@ -469,6 +469,9 @@ fn append_output<T: serde::Serialize>(
         outcome.replayed += 1;
     }
     outcome.output_keys.push(key.to_string());
+    // The M22.7 kill matrix: a soak child dies right AFTER the nth output
+    // commits, and the rerun must replay the prefix and append the rest.
+    crate::crash::crash_point(&format!("migrate-output-{}", outcome.output_keys.len()));
     Ok(result.committed().event_id.clone())
 }
 

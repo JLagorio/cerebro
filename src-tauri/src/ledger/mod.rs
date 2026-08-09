@@ -29,6 +29,8 @@ pub mod reduce;
 pub mod schema;
 pub mod segment;
 pub mod shadow;
+#[cfg(test)]
+mod soak;
 pub mod store;
 pub mod writer;
 
