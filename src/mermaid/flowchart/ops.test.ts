@@ -153,3 +153,19 @@ describe('surgical property', () => {
     expect(after[4]).toBe(before[4]);
   });
 });
+
+describe('renameNode and node-meta (M29.29)', () => {
+  it('renames through the meta label when one exists — a bracket edit would render stale', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Old] --> B\n  A@{ shape: cloud, label: Older }')!;
+    const out = serialize(renameNode(m, 'A', 'New'));
+    expect(out).toContain('A@{ shape: cloud, label: New }');
+    expect(out).toContain('A[Old] --> B'); // the bracket site is untouched
+  });
+
+  it('a meta line without a label key still renames through brackets', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Old] --> B\n  A@{ shape: cloud }')!;
+    const out = serialize(renameNode(m, 'A', 'New'));
+    expect(out).toContain('A[New] --> B');
+    expect(out).toContain('A@{ shape: cloud }');
+  });
+});

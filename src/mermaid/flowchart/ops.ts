@@ -1,5 +1,5 @@
 import type { EdgeEntry, FlowchartModel, ModelLine, NodeRef, Shape } from './model';
-import { nodes } from './model';
+import { nodes, withMetaEntry } from './model';
 
 /**
  * Pure flowchart operations (M29.15). Every function returns a new model and
@@ -45,6 +45,17 @@ function findLabelSite(model: FlowchartModel, id: string): { line: number; ref: 
 
 export function renameNode(model: FlowchartModel, id: string, label: string): FlowchartModel {
   const next = clone(model);
+  // A meta `label:` wins over any bracket label at render time, so when one
+  // exists the rename must land THERE — editing brackets would leave the
+  // visible text unchanged and the "rename" silently ineffective.
+  for (let i = next.lines.length - 1; i >= 0; i -= 1) {
+    const parsed = next.lines[i].parsed;
+    if (parsed.kind === 'node-meta' && parsed.id === id && parsed.meta.label !== undefined) {
+      parsed.meta = withMetaEntry(parsed.meta, 'label', label);
+      next.lines[i].dirty = true;
+      return next;
+    }
+  }
   const site = findLabelSite(next, id);
   if (site !== null) {
     site.ref.label = label;

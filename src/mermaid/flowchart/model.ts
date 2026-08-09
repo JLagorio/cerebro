@@ -21,6 +21,100 @@ export interface NodeRef {
   shape: Shape | null;
 }
 
+/**
+ * Metadata carried by an `id@{ … }` line (M29.29) — mermaid v11.3+'s door to
+ * the full shape registry, icons, and (for edge ids) animation.
+ *
+ * `entries` is the emission source of truth: EVERY key in source order,
+ * unknown ones included, values stored unquoted. The typed fields are
+ * derived views over `entries` for the keys we understand — always rebuilt
+ * through `buildMeta`/`withMetaEntry`, never written directly, so they can
+ * never drift from the entries they mirror.
+ */
+export interface NodeMeta {
+  entries: [string, string][];
+  shape?: string;
+  icon?: string;
+  form?: string;
+  pos?: string;
+  label?: string;
+}
+
+const TYPED_META_KEYS = ['shape', 'icon', 'form', 'pos', 'label'] as const;
+
+function buildMeta(entries: [string, string][]): NodeMeta {
+  const meta: NodeMeta = { entries };
+  for (const [key, value] of entries) {
+    if ((TYPED_META_KEYS as readonly string[]).includes(key)) {
+      meta[key as (typeof TYPED_META_KEYS)[number]] = value;
+    }
+  }
+  return meta;
+}
+
+/** New meta with `key` set (replacing in place, order kept) or removed (`null`). */
+export function withMetaEntry(meta: NodeMeta, key: string, value: string | null): NodeMeta {
+  const entries: [string, string][] = [];
+  let replaced = false;
+  for (const [k, v] of meta.entries) {
+    if (k === key) {
+      if (value !== null && !replaced) {
+        entries.push([k, value]);
+        replaced = true;
+      }
+      // value === null → drop; a duplicate key collapses onto its first site
+    } else {
+      entries.push([k, v]);
+    }
+  }
+  if (value !== null && !replaced) entries.push([key, value]);
+  return buildMeta(entries);
+}
+
+/**
+ * Parse a single-line `@{ … }` body — a YAML flow mapping per the v11.16.1
+ * lexer. Bare values may not contain `,` `:` `"` `^` (quote them instead);
+ * `^` is illegal even quoted (lexer class `[^}^"]+`), and nested braces mean
+ * a body we don't own. Any violation → null → the line goes opaque.
+ */
+function parseMetaBody(body: string): NodeMeta | null {
+  if (/[{}^]/.test(body)) return null;
+  const parts: string[] = [];
+  let quote = false;
+  let cur = '';
+  for (const ch of body) {
+    if (ch === '"') quote = !quote;
+    if (ch === ',' && !quote) {
+      parts.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  if (quote) return null;
+  parts.push(cur);
+
+  const entries: [string, string][] = [];
+  for (const part of parts) {
+    const item = part.trim();
+    if (item === '') return null;
+    const colon = item.indexOf(':');
+    if (colon === -1) return null;
+    const key = item.slice(0, colon).trim();
+    let value = item.slice(colon + 1).trim();
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(key)) return null;
+    if (value.startsWith('"')) {
+      if (value.length < 2 || !value.endsWith('"')) return null;
+      value = value.slice(1, -1);
+      if (value.includes('"')) return null;
+    } else if (value === '' || /[:"]/.test(value)) {
+      return null;
+    }
+    entries.push([key, value]);
+  }
+  return buildMeta(entries);
+}
+
 export interface EdgeSegment {
   from: NodeRef[];
   to: NodeRef[];
@@ -31,6 +125,7 @@ export interface EdgeSegment {
 export type ParsedLine =
   | { kind: 'header'; keyword: 'flowchart' | 'graph'; direction: Direction }
   | { kind: 'node'; node: NodeRef }
+  | { kind: 'node-meta'; id: string; meta: NodeMeta }
   | { kind: 'edges'; segments: EdgeSegment[] }
   | { kind: 'subgraph-start'; title: string }
   | { kind: 'subgraph-end' }
@@ -221,6 +316,18 @@ function parseLine(rawLine: string): ParsedLine {
   // (which would otherwise mint a phantom node with id "subgraph").
   if (trimmed === 'subgraph') return { kind: 'opaque' };
 
+  // `id@{ … }` on one line — node metadata, or edge metadata for an edge id
+  // (identical syntax; nodes()/ops tell them apart by what the id names).
+  // Failure to own the body means opaque, never a guess. The bracket+meta
+  // hybrid `A[Label]@{ … }` does not match this pattern (the id charset has
+  // no `[`), falls through, fails the node-token attempt, and lands opaque —
+  // decided and proven in M29.29's tests.
+  const metaMatch = trimmed.match(/^([A-Za-z0-9_.-]+)@\{(.*)\}$/);
+  if (metaMatch !== null) {
+    const meta = parseMetaBody(metaMatch[2]);
+    return meta === null ? { kind: 'opaque' } : { kind: 'node-meta', id: metaMatch[1], meta };
+  }
+
   // An arrow substring inside a node's own label (`A[Contains --> text]`)
   // makes this an unreliable signal on its own — parseEdgeLine is the real
   // arbiter, and when it fails (arrow was inside brackets, not a real edge)
@@ -273,6 +380,17 @@ function quoteLabel(label: string): string {
   return /[|()[\]{}&"]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
 }
 
+/**
+ * Quote a meta value when the flow mapping demands it (`,` `:` braces, `#`,
+ * or edge whitespace/emptiness). `"` and `^` are illegal in `@{ … }` bodies
+ * altogether, so — same last-boundary discipline as setEdgeLabel's pipe —
+ * they are substituted here rather than corrupting the file.
+ */
+function emitMetaValue(value: string): string {
+  const cleaned = value.replaceAll('"', "'").replaceAll('^', '');
+  return /[,:{}#]|^\s|\s$|^$/.test(cleaned) ? `"${cleaned}"` : cleaned;
+}
+
 export function emitNodeRef(ref: NodeRef): string {
   if (ref.label === null) return ref.id;
   const [open, close] = SHAPE_BRACKETS[ref.shape ?? 'rect'];
@@ -287,6 +405,10 @@ function emitLine(line: ModelLine): string {
       return `${indent}${p.keyword} ${p.direction}`;
     case 'node':
       return `${indent}${emitNodeRef(p.node)}`;
+    case 'node-meta':
+      return `${indent}${p.id}@{ ${p.meta.entries
+        .map(([k, v]) => `${k}: ${emitMetaValue(v)}`)
+        .join(', ')} }`;
     case 'edges': {
       // Contiguous chains re-emit as chains; ops splits non-contiguous lines.
       let out = `${indent}${p.segments[0].from.map(emitNodeRef).join(' & ')}`;
@@ -310,9 +432,28 @@ export function serialize(model: FlowchartModel): string {
   return model.lines.map((l) => (l.dirty ? emitLine(l) : l.raw)).join('\n');
 }
 
-/** Resolved view: definition line wins, else first labeled inline site, else the id itself. */
-export function nodes(model: FlowchartModel): Map<string, { label: string; shape: Shape }> {
-  const out = new Map<string, { label: string; shape: Shape }>();
+/** Meta per id — the LAST meta line for an id wins, mirroring mermaid's sequential apply. */
+export function nodeMeta(model: FlowchartModel): Map<string, NodeMeta> {
+  const out = new Map<string, NodeMeta>();
+  for (const line of model.lines) {
+    if (line.parsed.kind === 'node-meta') out.set(line.parsed.id, line.parsed.meta);
+  }
+  return out;
+}
+
+export interface ResolvedNode {
+  label: string;
+  shape: Shape;
+  /** Registry shape from a meta line, when one overrides the brackets. */
+  metaShape?: string;
+}
+
+/**
+ * Resolved view: definition line wins, else first labeled inline site, else
+ * the id; meta overrides both.
+ */
+export function nodes(model: FlowchartModel): Map<string, ResolvedNode> {
+  const out = new Map<string, ResolvedNode>();
   // A label claim is "locked" once a definition line or a labeled inline site
   // has set it — a later bare reference (`A --> B`) must not clobber that
   // label with a placeholder, but a later definition line still wins outright,
@@ -334,6 +475,20 @@ export function nodes(model: FlowchartModel): Map<string, { label: string; shape
       for (const seg of line.parsed.segments) {
         for (const ref of [...seg.from, ...seg.to]) claim(ref, false);
       }
+    }
+  }
+  // Meta lines both declare nodes (a lone `A@{ shape: cyl }` is a real
+  // declaration) and refine already-declared ones: meta label and shape win
+  // at render time, so the resolved view must say so.
+  for (const [id, meta] of nodeMeta(model)) {
+    const existing = out.get(id);
+    if (existing === undefined) {
+      const fresh: ResolvedNode = { label: meta.label ?? id, shape: 'rect' };
+      if (meta.shape !== undefined) fresh.metaShape = meta.shape;
+      out.set(id, fresh);
+    } else {
+      if (meta.label !== undefined) existing.label = meta.label;
+      if (meta.shape !== undefined) existing.metaShape = meta.shape;
     }
   }
   return out;

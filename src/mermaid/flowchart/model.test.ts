@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { edges, emitNodeRef, nodes, parseFlowchart, parseNodeToken, serialize } from './model';
+import {
+  edges,
+  emitNodeRef,
+  nodeMeta,
+  nodes,
+  parseFlowchart,
+  parseNodeToken,
+  serialize,
+  withMetaEntry,
+  type NodeMeta,
+} from './model';
 
 const SIMPLE = ['flowchart TD', '  A[Start] --> B{Choice}', '  B -->|yes| C[Done]'].join('\n');
 
@@ -116,5 +126,120 @@ describe('serialize', () => {
 
   it('emits stadium nodes with valid mermaid syntax', () => {
     expect(emitNodeRef({ id: 'A', label: 'Start', shape: 'stadium' })).toBe('A([Start])');
+  });
+});
+
+describe('node-meta lines (M29.29)', () => {
+  const META = [
+    'flowchart TD',
+    '  A[Start] --> B',
+    '  A@{ shape: cloud }',
+    '  B@{ shape: cyl, label: "Orders, archived", w: 120, foo: bar }',
+  ].join('\n');
+
+  it('parses a single-line meta into ordered entries plus typed keys', () => {
+    const model = parseFlowchart(META)!;
+    const line = model.lines[3].parsed;
+    expect(line.kind).toBe('node-meta');
+    if (line.kind !== 'node-meta') return;
+    expect(line.id).toBe('B');
+    expect(line.meta.entries).toEqual([
+      ['shape', 'cyl'],
+      ['label', 'Orders, archived'],
+      ['w', '120'],
+      ['foo', 'bar'],
+    ]);
+    expect(line.meta.shape).toBe('cyl');
+    expect(line.meta.label).toBe('Orders, archived');
+  });
+
+  it('round-trips meta-rich sources byte-identically', () => {
+    expect(serialize(parseFlowchart(META)!)).toBe(META);
+  });
+
+  it('nodeMeta maps ids to their meta, last line winning', () => {
+    const m = parseFlowchart('flowchart TD\n  A\n  A@{ shape: hex }\n  A@{ shape: cloud }')!;
+    expect(nodeMeta(m).get('A')?.shape).toBe('cloud');
+  });
+
+  it('nodes() merges meta shape and label so the resolved view is truthful', () => {
+    const n = nodes(parseFlowchart(META)!);
+    expect(n.get('A')).toEqual({ label: 'Start', shape: 'rect', metaShape: 'cloud' });
+    expect(n.get('B')).toEqual({ label: 'Orders, archived', shape: 'rect', metaShape: 'cyl' });
+  });
+
+  it('a meta-only line declares its node', () => {
+    const m = parseFlowchart('flowchart TD\n  Cache@{ shape: cyl, label: Store }')!;
+    expect(nodes(m).get('Cache')).toEqual({ label: 'Store', shape: 'rect', metaShape: 'cyl' });
+  });
+
+  it('multi-line meta blocks and bracket+meta hybrids go opaque, not wrong', () => {
+    const src = [
+      'flowchart TD',
+      '  A[Start] --> B',
+      '  B@{',
+      '    shape: circle',
+      '  }',
+      '  A[Start]@{ shape: circle }',
+    ].join('\n');
+    const model = parseFlowchart(src)!;
+    for (const idx of [2, 3, 4, 5]) expect(model.lines[idx].parsed.kind).toBe('opaque');
+    expect(serialize(model)).toBe(src);
+    // The hybrid line is opaque, but A itself stays resolvable via the edge line.
+    expect(nodes(model).get('A')).toEqual({ label: 'Start', shape: 'rect' });
+  });
+
+  it('illegal single-line bodies go opaque: bare commas, colons, carets, quotes', () => {
+    for (const bad of [
+      'A@{ shape: big circle: yes }',
+      'A@{ label: has, comma }',
+      'A@{ shape: a^b }',
+      'A@{ shape: "un"closed }',
+    ]) {
+      const m = parseFlowchart(`flowchart TD\n  ${bad}`)!;
+      expect(m.lines[1].parsed.kind).toBe('opaque');
+      expect(serialize(m)).toBe(`flowchart TD\n  ${bad}`);
+    }
+  });
+
+  it('withMetaEntry adds, replaces, and removes while preserving order', () => {
+    const base: NodeMeta = {
+      entries: [
+        ['shape', 'hex'],
+        ['w', '120'],
+      ],
+      shape: 'hex',
+    };
+    expect(withMetaEntry(base, 'shape', 'cloud').entries).toEqual([
+      ['shape', 'cloud'],
+      ['w', '120'],
+    ]);
+    expect(withMetaEntry(base, 'shape', 'cloud').shape).toBe('cloud');
+    expect(withMetaEntry(base, 'pos', 't').entries).toEqual([
+      ['shape', 'hex'],
+      ['w', '120'],
+      ['pos', 't'],
+    ]);
+    expect(withMetaEntry(base, 'w', null).entries).toEqual([['shape', 'hex']]);
+  });
+
+  it('dirty meta lines re-quote values that need it and sanitize illegal characters', () => {
+    const m = parseFlowchart('flowchart TD\n  A@{ shape: hex }')!;
+    const line = m.lines[1];
+    if (line.parsed.kind !== 'node-meta') throw new Error('expected node-meta');
+    line.parsed.meta = withMetaEntry(line.parsed.meta, 'label', 'a, b: "c" ^d');
+    line.dirty = true;
+    expect(serialize(m)).toBe(`flowchart TD\n  A@{ shape: hex, label: "a, b: 'c' d" }`);
+  });
+
+  it('keys we do not understand survive a dirty re-emit in their original positions', () => {
+    const m = parseFlowchart('flowchart TD\n  A@{ foo: bar, shape: hex, zed: 1 }')!;
+    const line = m.lines[1];
+    if (line.parsed.kind !== 'node-meta') throw new Error('expected node-meta');
+    line.parsed.meta = withMetaEntry(line.parsed.meta, 'shape', 'cloud');
+    line.dirty = true;
+    // `shape` is replaced where it stood — not appended — and `foo`/`zed`
+    // bracket it exactly as the source did.
+    expect(serialize(m)).toBe('flowchart TD\n  A@{ foo: bar, shape: cloud, zed: 1 }');
   });
 });
