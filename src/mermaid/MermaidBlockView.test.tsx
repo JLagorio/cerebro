@@ -42,6 +42,23 @@ describe('MermaidBlockView', () => {
     );
   });
 
+  it('enters editing when the broken diagram is clicked', async () => {
+    renderMock.mockResolvedValue({
+      ok: false,
+      message: 'Parse error on line 2:\nExpecting …',
+      line: 2,
+    });
+    const code = 'graph TD\n  A -->';
+    render(<MermaidBlockView code={code} onChangeCode={() => {}} />);
+    await waitFor(() => screen.getByTestId('mermaid-error'));
+    // The header still has its own "Edit" button, so target the error card
+    // by testid rather than role to avoid an ambiguous query.
+    await userEvent.click(screen.getByTestId('mermaid-error'));
+    const textarea = screen.getByLabelText('Mermaid source');
+    expect(textarea).toBeTruthy();
+    expect((textarea as HTMLTextAreaElement).value).toBe(code);
+  });
+
   it('opens the lightbox from the preview', async () => {
     renderMock.mockResolvedValue({ ok: true, svg: '<svg data-fake="d"></svg>' });
     render(<MermaidBlockView code="graph TD" onChangeCode={() => {}} />);

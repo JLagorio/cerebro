@@ -12,10 +12,12 @@ import { useThemeEpoch } from './useThemeEpoch';
 export function MermaidDiagram({
   code,
   onExpand,
+  onErrorClick,
   collapseHeight = 480,
 }: {
   code: string;
   onExpand?: (svg: string) => void;
+  onErrorClick?: () => void;
   collapseHeight?: number;
 }) {
   const [result, setResult] = useState<RenderResult | null>(null);
@@ -36,15 +38,37 @@ export function MermaidDiagram({
   }
 
   if (!result.ok) {
+    // Button content model forbids block descendants (the <pre> below), so
+    // an interactive error card is a div playing "button" via role +
+    // tabIndex + keydown, not a real <button> wrapping the message.
+    const clickable = onErrorClick !== undefined;
     return (
       <div
         data-testid="mermaid-error"
-        className="w-full rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2"
+        role={clickable ? 'button' : undefined}
+        tabIndex={clickable ? 0 : undefined}
+        onClick={clickable ? onErrorClick : undefined}
+        onKeyDown={
+          clickable
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onErrorClick();
+                }
+              }
+            : undefined
+        }
+        className={`w-full rounded-lg border border-danger-500/40 bg-danger-50 px-3 py-2 ${
+          clickable ? 'cursor-pointer' : ''
+        }`}
       >
         <div className="text-xs text-danger-700">{result.message}</div>
         <pre className="mt-1 overflow-x-auto [font-family:var(--font-mono)] text-xs leading-[18px] text-n-600">
           {code}
         </pre>
+        {clickable && (
+          <div className="mt-1 text-2xs text-danger-600/80">Click to fix the diagram source…</div>
+        )}
       </div>
     );
   }

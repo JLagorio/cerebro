@@ -37,4 +37,19 @@ describe('MermaidDiagram', () => {
     rerender(<MermaidDiagram code="graph TD" />);
     expect(screen.queryByRole('button', { name: 'Expand diagram' })).toBeNull();
   });
+
+  it('makes the error card clickable only when onErrorClick is given', async () => {
+    renderMock.mockResolvedValue({ ok: false, message: 'Parse error on line 2:', line: 2 });
+    const onErrorClick = vi.fn();
+    const { rerender } = render(
+      <MermaidDiagram code={'graph TD\n  A -->'} onErrorClick={onErrorClick} />,
+    );
+    await waitFor(() => expect(screen.getByTestId('mermaid-error')).toBeTruthy());
+    await userEvent.click(screen.getByRole('button'));
+    expect(onErrorClick).toHaveBeenCalled();
+
+    rerender(<MermaidDiagram code={'graph TD\n  A -->'} />);
+    await waitFor(() => expect(screen.getByTestId('mermaid-error')).toBeTruthy());
+    expect(screen.queryByRole('button')).toBeNull();
+  });
 });

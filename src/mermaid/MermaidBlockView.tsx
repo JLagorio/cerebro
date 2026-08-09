@@ -71,7 +71,14 @@ export function MermaidBlockView({
 
       {!editing && code.trim() !== '' && (
         <div className="px-3 py-2">
-          <MermaidDiagram code={code} onExpand={(svg) => setLightboxSvg(svg)} />
+          <MermaidDiagram
+            code={code}
+            onExpand={(svg) => setLightboxSvg(svg)}
+            onErrorClick={() => {
+              setDraft(code);
+              setEditing(true);
+            }}
+          />
         </div>
       )}
 
