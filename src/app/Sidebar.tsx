@@ -58,7 +58,10 @@ export interface SidebarProps {
  * Types describe the vault's subject matter and say nothing about a mounted
  * repository, so beside a repo tree they are pure width.
  */
-const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library', 'workspace']);
+// M29.27 adds `diagram` for a different reason again: the page IS a canvas
+// (spec D1), and an infinite plane beside a tree reads as a pane, not a
+// surface. Navigation back out is the topbar's, same as Settings.
+const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library', 'workspace', 'diagram']);
 
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 

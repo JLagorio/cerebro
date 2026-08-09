@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { writeTextFile } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
@@ -7,6 +8,7 @@ import { useVaultStore } from '@/stores/vaultStore';
 import { detectDiagramType } from './detect';
 import { StructuralEditor } from './flowchart/StructuralEditor';
 import { parseFlowchart } from './flowchart/model';
+import { FullScreenDiagramEditor } from './FullScreenDiagramEditor';
 import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
@@ -61,6 +63,7 @@ export function MermaidBlockView({
   // it happens, so there is never anything uncommitted to hold in state.
   const [draft, setDraft] = useState(code);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
+  const [fullScreen, setFullScreen] = useState(false);
   // Stage C (M29.18): flowcharts get a visual/code toggle; every other
   // diagram type has no structural model to edit, so it never leaves code.
   // `editMode` is LATCHED at each entry point (Edit, template pick, error
@@ -139,6 +142,15 @@ export function MermaidBlockView({
           </button>
         )}
         <span className="flex-1" />
+        {!editing && code.trim() !== '' && (
+          <button
+            type="button"
+            onClick={() => setFullScreen(true)}
+            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
+          >
+            Open full screen
+          </button>
+        )}
         {!editing && code.trim() !== '' && (
           <button
             type="button"
@@ -284,6 +296,21 @@ export function MermaidBlockView({
           title="Diagram"
           onClose={() => setLightboxSvg(null)}
         />
+      )}
+
+      {fullScreen && (
+        /* The block's own onChangeCode is the wire (spec D1): every edit made
+           full-screen lands in BlockNote's prop channel, so history gives
+           undo and the doc's autosave persists it — no new Selection kind,
+           no file, no second save path. */
+        <Dialog
+          open
+          fullscreen
+          title={`${detectDiagramType(code)} — full screen`}
+          onClose={() => setFullScreen(false)}
+        >
+          <FullScreenDiagramEditor code={code} onChangeCode={onChangeCode} />
+        </Dialog>
       )}
     </div>
   );

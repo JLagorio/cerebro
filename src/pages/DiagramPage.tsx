@@ -7,10 +7,7 @@ import type { Selection } from '@/engine/types';
 import { readNote, saveNote } from '@/lib/ipc';
 import { humanize } from '@/lib/mockParse';
 import { detectDiagramType } from '@/mermaid/detect';
-import { parseFlowchart } from '@/mermaid/flowchart/model';
-import { StructuralEditor } from '@/mermaid/flowchart/StructuralEditor';
-import { HighlightedTextarea } from '@/mermaid/HighlightedTextarea';
-import { LivePreview } from '@/mermaid/MermaidBlockView';
+import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useEntry, useVaultStore } from '@/stores/vaultStore';
@@ -32,13 +29,11 @@ const SAVE_DEBOUNCE_MS = 500;
 /**
  * Full-page editor for a standalone `.mmd` file (M29.21).
  *
- * The page IS an editor — no separate view mode. Same latched-mode state
- * machine as MermaidBlockView: a source that parses as a flowchart opens in
- * the structural editor with a "Show code" toggle; everything else opens as
- * side-by-side code + live preview. The mode is chosen when the file loads
- * and only the toggle button promotes code → visual — mid-keystroke source
- * becoming flowchart-shaped must never yank the textarea away. The one
- * automatic flip is the demotion safety net, same as the block's.
+ * The page IS an editor — no separate view mode. Since M29.27 the whole body
+ * is the shared FullScreenDiagramEditor (spec D1): a pan/zoom canvas hosting
+ * the structural editor or a read-only render, with the code panel floating
+ * over it. The latch, the "Show code" toggle and the demotion safety net all
+ * live there now; this page keeps only the chrome and the file.
  *
  * Content is RAW end-to-end: readNote/saveNote pass `.mmd` bytes through
  * verbatim, so mermaid's own `---` config header survives every save.
@@ -64,7 +59,6 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
 
   // null while loading; the editors only mount on real content.
   const [code, setCode] = useState<string | null>(null);
-  const [mode, setMode] = useState<'visual' | 'code'>('code');
   const [saveState, setSaveState] = useState<SaveState>('idle');
   // The read failed — renamed, trashed, or unreadable. The tombstone keys on
   // THIS, not on the entry lookup: the file is the truth in a files-first
@@ -119,9 +113,9 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
     }, SAVE_DEBOUNCE_MS);
   };
 
-  // Load once per mount (the App.tsx key makes a path change a fresh mount);
-  // the entry mode is LATCHED here (visual for flowcharts, code for
-  // everything else) and never auto-promoted after.
+  // Load once per mount (the App.tsx key makes a path change a fresh mount).
+  // The entry mode is latched by FullScreenDiagramEditor, from the source it
+  // mounts with — which is this load's result, so the rule is unchanged.
   useEffect(() => {
     let cancelled = false;
     setCode(null);
@@ -133,7 +127,6 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         if (cancelled) return;
         latest.current = raw;
         setCode(raw);
-        setMode(parseFlowchart(raw) !== null ? 'visual' : 'code');
       })
       .catch(() => {
         if (!cancelled) setLoadFailed(true);
@@ -157,16 +150,6 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
       }
     };
   }, []);
-
-  const flowchartCapable = code !== null && parseFlowchart(code) !== null;
-
-  // Demotion safety net only (parity with MermaidBlockView): source that
-  // stops parsing as a flowchart falls back to code rather than leaving the
-  // structural editor holding a model it cannot build. Never the other
-  // direction — that is the toggle button's job.
-  useEffect(() => {
-    if (mode === 'visual' && code !== null && !flowchartCapable) setMode('code');
-  }, [mode, code, flowchartCapable]);
 
   // Only a FAILED READ tombstones the page (see loadFailed above): an entry
   // the scanner has not adopted yet still opens, and an entry that lingers
@@ -205,15 +188,6 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         <span className="flex-none text-xs uppercase tracking-[0.05em] text-n-500">
           {detectDiagramType(code ?? '')}
         </span>
-        {flowchartCapable && (
-          <button
-            type="button"
-            onClick={() => setMode(mode === 'visual' ? 'code' : 'visual')}
-            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
-          >
-            {mode === 'visual' ? 'Show code' : 'Show diagram'}
-          </button>
-        )}
         <span className="flex-1" />
         {SAVE_LABEL[saveState] !== null && (
           <span
@@ -229,31 +203,12 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         )}
       </div>
 
-      {code !== null && mode === 'visual' && flowchartCapable && (
-        <div className="min-h-0 flex-1 overflow-auto p-3" data-testid="diagram-visual-pane">
-          {/* Every structural op commits through handleChange — the same
-              channel typing uses — so visual edits autosave identically. */}
-          <StructuralEditor code={code} onChangeCode={handleChange} />
-        </div>
-      )}
-
-      {code !== null && (mode === 'code' || !flowchartCapable) && (
-        <div
-          className="flex min-h-0 flex-1 flex-wrap content-start overflow-auto"
-          data-testid="diagram-code-pane"
-        >
-          {/* No draft/commit dance here (unlike the block's code mode): the
-              page autosaves, so the textarea edits `code` directly and the
-              debounce is the commit. Escape has nothing to cancel. */}
-          <HighlightedTextarea
-            ariaLabel="Mermaid source"
-            value={code}
-            placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
-            onChange={handleChange}
-            rows={Math.max(16, code.split('\n').length + 1)}
-          />
-          <LivePreview code={code} />
-        </div>
+      {code !== null && (
+        /* Every edit — structural op, overlay keystroke — commits through
+           handleChange, the same channel the old panes used, so the keyed
+           debounced autosave (M29.23) is untouched. The editor owns no
+           persistence; this page is the only writer. */
+        <FullScreenDiagramEditor code={code} onChangeCode={handleChange} />
       )}
     </div>
   );

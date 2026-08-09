@@ -322,3 +322,28 @@ describe('MermaidBlockView save as file (M29.22)', () => {
     await waitFor(() => expect(toasts()).toContain("Couldn't save diagram: disk full"));
   });
 });
+
+describe('MermaidBlockView full screen (M29.27)', () => {
+  afterEach(cleanup);
+
+  it('opens the full-screen editor from the header, wired to the block channel', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg data-fake="fs"></svg>' });
+    const onChangeCode = vi.fn();
+    render(<MermaidBlockView code={'flowchart TD\n  A --> B'} onChangeCode={onChangeCode} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Open full screen' }));
+    expect(screen.getByTestId('fullscreen-diagram-editor')).toBeTruthy();
+    // The dialog closes back to the block.
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByTestId('fullscreen-diagram-editor')).toBeNull();
+  });
+
+  it('hides Open full screen while editing and on an empty block', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Open full screen' })).toBeNull();
+    cleanup();
+    render(<MermaidBlockView code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.queryByRole('button', { name: 'Open full screen' })).toBeNull();
+  });
+});

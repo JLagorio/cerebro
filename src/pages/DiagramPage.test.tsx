@@ -40,7 +40,8 @@ describe('DiagramPage', () => {
     // Title from the filename stem (the scanner's), type from the source.
     expect(screen.getByTestId('diagram-title').textContent).toBe('Pipeline');
     expect(screen.getByText('Flowchart')).toBeTruthy();
-    expect(screen.queryByTestId('diagram-code-pane')).toBeNull();
+    expect(screen.getByTestId('canvas-plane')).toBeTruthy();
+    expect(screen.queryByTestId('code-overlay')).toBeNull();
   });
 
   it('opens a non-flowchart .mmd in code mode with the source verbatim', async () => {
@@ -48,13 +49,13 @@ describe('DiagramPage', () => {
     await writeTextFile('/demo-vault', 'diagrams/handshake.mmd', raw);
     await useVaultStore.getState().rescan();
     render(<DiagramPage selection={{ kind: 'diagram', path: 'diagrams/handshake.mmd' }} />);
-    expect(await screen.findByTestId('diagram-code-pane')).toBeTruthy();
+    expect(await screen.findByTestId('code-overlay')).toBeTruthy();
     expect((screen.getByLabelText('Mermaid source') as HTMLTextAreaElement).value).toBe(raw);
     expect(screen.queryByTestId('structural-host')).toBeNull();
     expect(screen.getByText('Sequence')).toBeTruthy();
   });
 
-  it('shows the whole file in code mode — the mermaid header is source, not frontmatter', async () => {
+  it('shows the whole file in the overlay — the mermaid header is source, not frontmatter', async () => {
     render(<DiagramPage selection={{ kind: 'diagram', path: PIPELINE }} />);
     await screen.findByTestId('structural-host');
     fireEvent.click(screen.getByRole('button', { name: 'Show code' }));
@@ -63,15 +64,19 @@ describe('DiagramPage', () => {
     expect(textarea.value).toContain('layout: elk');
   });
 
-  it('debounce-saves edits raw, preserving the leading config header', async () => {
+  it('debounce-saves overlay edits raw, preserving the leading config header', async () => {
     render(<DiagramPage selection={{ kind: 'diagram', path: PIPELINE }} />);
     await screen.findByTestId('structural-host');
     fireEvent.click(screen.getByRole('button', { name: 'Show code' }));
     const textarea = (await screen.findByLabelText('Mermaid source')) as HTMLTextAreaElement;
     const edited = `${textarea.value}  D --> E[Ship]\n`;
     fireEvent.change(textarea, { target: { value: edited } });
-    // Dirty immediately; on disk only after the 500ms debounce settles.
-    expect(screen.getByTestId('diagram-save-state').textContent).toBe('Unsaved');
+    // Two debounces now sit in the path (overlay 250ms, page save 500ms), so
+    // 'Unsaved' arrives when the overlay flows the edit out — waitFor, not
+    // an immediate read.
+    await waitFor(() =>
+      expect(screen.getByTestId('diagram-save-state').textContent).toBe('Unsaved'),
+    );
     await waitFor(() => expect(fs().get(PIPELINE)).toContain('E[Ship]'), { timeout: 3000 });
     const raw = fs().get(PIPELINE)!;
     // The raw round-trip: the header survived the save byte-for-byte.
@@ -94,15 +99,15 @@ describe('DiagramPage', () => {
       false,
     );
     render(<DiagramPage selection={{ kind: 'diagram', path: 'diagrams/brand-new.mmd' }} />);
-    expect(await screen.findByTestId('diagram-code-pane')).toBeTruthy();
+    expect(await screen.findByTestId('code-overlay')).toBeTruthy();
     expect(screen.getByTestId('diagram-title').textContent).toBe('Brand new');
   });
 
-  // M29.23 CRITICAL regression: App.tsx keys the page on the path, so a
-  // diagram→diagram navigation is a true unmount and the unmount flush still
-  // belongs to the file it was editing. Unkeyed, the new path's render
-  // re-pointed flushRef BEFORE the old cleanup ran — A's pending edit was
-  // written into B and lost from A.
+  // M29.23 CRITICAL regression net, now one debounce deeper: the overlay's
+  // 250ms buffer flushes on ITS unmount (CodeOverlay cleanup), which feeds
+  // handleChange, whose 500ms timer outlives the unmounted page and still
+  // writes the OLD file's bytes to the OLD path — the App.tsx key guarantees
+  // the whole chain belongs to the dying instance.
   it('a navigation mid-debounce flushes to the OLD file and never touches the new one', async () => {
     const A = 'diagrams/a.mmd';
     const B = 'diagrams/b.mmd';
@@ -118,9 +123,9 @@ describe('DiagramPage', () => {
     const edited = `${A_RAW}  A->>B: edited\n`;
     fireEvent.change(textarea, { target: { value: edited } });
 
-    // Navigate to B inside the 500ms debounce window.
+    // Navigate to B inside BOTH debounce windows.
     rerender(<DiagramPage key={B} selection={{ kind: 'diagram', path: B }} />);
-    await screen.findByTestId('diagram-code-pane');
+    await screen.findByTestId('code-overlay');
 
     // A received its pending edit; B is byte-identical to what was seeded.
     await waitFor(() => expect(fs().get(A)).toBe(edited), { timeout: 3000 });

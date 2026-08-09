@@ -146,4 +146,15 @@ describe('Dialog', () => {
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Create' }));
   });
+
+  it('fullscreen fills the viewport: unpadded scrim, full-height unpadded flex body', () => {
+    render(
+      <Dialog open fullscreen title="Full" onClose={() => {}}>
+        <div data-testid="body-child" />
+      </Dialog>,
+    );
+    const card = screen.getByRole('dialog');
+    expect(card.className).toContain('cb-dlg-full');
+    expect(card.style.maxWidth).toBe('none');
+  });
 });
