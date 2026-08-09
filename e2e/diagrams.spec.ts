@@ -113,11 +113,19 @@ test('authoring: template, live preview, error banner, commit', async ({ page })
   // 'Mermaid diagram' is the slash item's title in MarkdownEditor.tsx.
   await page.getByText('Mermaid diagram', { exact: true }).click();
 
-  // -- Template grid → Flowchart → live preview appears -----------------
+  // -- Template grid → Flowchart → visual editor, then over to code ------
   // A freshly inserted block has empty code, so it opens on the grid (M29.11).
+  // Since Stage C a flowchart template enters the VISUAL editor first
+  // (entryMode in MermaidBlockView.tsx); the Stage-B code loop this test
+  // exercises lives behind 'Show code'.
   const grid = page.getByTestId('mermaid-template-grid');
   await grid.waitFor();
   await grid.getByRole('button', { name: 'Flowchart', exact: true }).click();
+  await page
+    .getByTestId('structural-host')
+    .locator('svg[id^="cerebro-mermaid-"]')
+    .waitFor({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Show code' }).click();
   const livePreview = page.getByTestId('mermaid-live-preview');
   await expect(livePreview.locator('svg[id^="cerebro-mermaid-"]')).toBeVisible({
     timeout: 15_000,
@@ -140,4 +148,84 @@ test('authoring: template, live preview, error banner, commit', async ({ page })
   // sits in the doc.
   const committed = page.getByTestId('mermaid-diagram').filter({ hasText: 'Emerald' });
   await expect(committed.locator('svg[id^="cerebro-mermaid-"]')).toBeVisible({ timeout: 15_000 });
+});
+
+// M29.19: the structural editor round-trips — a double-click rename on the
+// rendered svg becomes a surgical text edit (Idea[Spark], id untouched), shows
+// up verbatim in code view, lands on the (mock) disk through the debounced
+// autosave, and cmd+z through BlockNote history restores the old label in the
+// visual view.
+test('structural editing round-trips to the file', async ({ page }) => {
+  // Same chunk-load headroom as the tests above.
+  test.setTimeout(60_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  // -- Open the corpus doc through quick open ---------------------------
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpenInput = page.getByTestId('quick-open-input');
+  await expect(quickOpenInput).toBeVisible();
+  await quickOpenInput.fill('Systems map');
+  const result = page.getByTestId('quick-open-result').filter({ hasText: 'Systems map' }).first();
+  await expect(result).toBeVisible();
+  await result.click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 20_000 });
+
+  // -- Enter visual editing on the first (flowchart) block ---------------
+  // Edit on a flowchart opens VISUAL mode first (entryMode in
+  // MermaidBlockView.tsx); the structural editor renders mermaid's svg into
+  // the structural-host and binds it.
+  const block = page.getByTestId('mermaid-block').first();
+  await block.getByRole('button', { name: 'Edit', exact: true }).click();
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Rename "Idea" by double-clicking its node -------------------------
+  // Mermaid's group id embeds the node ID, namespaced under the render id
+  // (cerebro-mermaid-N-flowchart-Idea-C), and node IDs never change on
+  // rename — only the label text does. `id*=` because of that prefix.
+  await page.locator('[id*="flowchart-Idea-"]').dblclick();
+  const labelInput = page.getByLabel('Node label');
+  await labelInput.fill('Spark');
+  await labelInput.press('Enter');
+  await expect(host).toContainText('Spark', { timeout: 15_000 });
+
+  // -- The code view shows the surgical edit -----------------------------
+  await page.getByRole('button', { name: 'Show code' }).click();
+  await expect(page.getByLabel('Mermaid source')).toHaveValue(/Idea\[Spark\]/);
+
+  // -- And the mock fs eventually holds it (autosave is debounced) -------
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md')), {
+      timeout: 15_000,
+    })
+    .toContain('Idea[Spark]');
+
+  // -- Undo restores the previous label in the visual view ---------------
+  // Visual ops commit through onChangeCode — the same channel typing uses —
+  // so BlockNote history holds one step per op and cmd+z reverses it. The
+  // keystroke must reach the BlockNote editor, so put focus in a paragraph
+  // first; the block's editing state survives the click (only Escape/Done
+  // close it), and the structural editor renders the `code` prop live, so
+  // the restored label appears without leaving visual mode.
+  await page.getByRole('button', { name: 'Show diagram' }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+  await page.locator('.bn-editor [data-content-type="paragraph"]').first().click();
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(host).toContainText('Idea', { timeout: 15_000 });
 });
