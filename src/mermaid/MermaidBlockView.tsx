@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { writeTextFile } from '@/lib/ipc';
+import { slugify } from '@/lib/slug';
+import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { detectDiagramType } from './detect';
 import { StructuralEditor } from './flowchart/StructuralEditor';
 import { parseFlowchart } from './flowchart/model';
@@ -13,6 +17,28 @@ import { useDebounced } from './useDebounced';
 /** Whichever mode a diagram source would open in, if an edit session started right now. */
 function entryMode(source: string): 'visual' | 'code' {
   return parseFlowchart(source) !== null ? 'visual' : 'code';
+}
+
+/**
+ * Move a block's source out into a standalone `diagrams/<slug>.mmd` (M29.22).
+ *
+ * Auto-named from the detected diagram type — the backend dedupes with `-2`
+ * and returns where it actually landed, and the toast says so; no prompt
+ * dialog on purpose. Store-invariant style: catch, toast, never throw.
+ */
+async function saveAsFile(code: string): Promise<void> {
+  const { vaultPath, rescan } = useVaultStore.getState();
+  const toast = useUiStore.getState().toast;
+  if (vaultPath === null) return;
+  try {
+    const type = detectDiagramType(code);
+    const slug = slugify(type === 'Mermaid' ? 'diagram' : type) || 'diagram';
+    const path = await writeTextFile(vaultPath, `diagrams/${slug}.mmd`, code);
+    await rescan();
+    toast(`Saved to ${path}`);
+  } catch (err) {
+    toast(`Couldn't save diagram: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -113,6 +139,15 @@ export function MermaidBlockView({
           </button>
         )}
         <span className="flex-1" />
+        {!editing && code.trim() !== '' && (
+          <button
+            type="button"
+            onClick={() => void saveAsFile(code)}
+            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
+          >
+            Save as file…
+          </button>
+        )}
         <button
           type="button"
           // Without this the textarea blurs FIRST, commit() flips `editing`
