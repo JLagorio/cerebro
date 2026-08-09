@@ -10,6 +10,8 @@
 //! reducer only through that event (its logical batch included) must
 //! reproduce M's complete identity tuple.
 
+use std::path::Path;
+
 use super::frame::Frame;
 use super::manifest::{ManifestEntry, WriteState};
 use super::reduce::{project_belief, reduce, ProjectionResult};
@@ -171,6 +173,233 @@ pub fn verified_ancestor(frames: &[Frame], store_id: &str, entry: &ManifestEntry
         && projection.generating_event == entry.generating_event
         && projection.projection_state_digest == entry.projection_state_digest
         && projection.content_hash == entry.content_hash
+}
+
+/// What one launch scan did, path by path — recovery actions executed,
+/// out-of-band edits PARKED (M23.7 captures them), divergence recorded.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScanOutcome {
+    pub matches: usize,
+    /// Paths regenerated or created from reducer state — ZERO capture.
+    pub regenerated: Vec<String>,
+    /// Pending entries finalized (the file already held the target bytes).
+    pub finalized: Vec<String>,
+    /// Valid out-of-band edits, parked for the M23.7 capture pass.
+    pub out_of_band: Vec<String>,
+    /// Unproven states, with the classifier's reason.
+    pub divergent: Vec<(String, String)>,
+    /// The detection key of the divergence recorded this scan, if any.
+    pub divergence_recorded: Option<String>,
+    /// Reconciliation mode after the scan.
+    pub reconciliation_open: bool,
+}
+
+/// The fixed mass-mismatch circuit-breaker threshold.
+const MASS_MIN_PROJECTIONS: usize = 8;
+const MASS_MIN_MISMATCHES: usize = 5;
+const MASS_MIN_RATIO: f64 = 0.25;
+
+/// The M23.6 launch scan: after recovery and arming, compare file,
+/// manifest, and reducer projection for EVERY path; execute the safe
+/// branches (match, pending recovery, ledger-ahead — all zero capture);
+/// park valid out-of-band edits; and on any unproven state, migration
+/// refusal, or the mass threshold, record ONE idempotent
+/// `ledger.divergence` and open reconciliation mode. Regular agent writes
+/// stay available while the mode is open; automatic capture does not.
+///
+/// Detection is BEST EFFORT: the remembered app-data head and git anchors
+/// are corroboration, not proof — a coherent restore that rewinds ledger,
+/// manifest, files, and every anchor together may be undetectable, and
+/// nothing here claims otherwise.
+pub fn launch_scan(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+    migration_signal: Option<schema::DivergenceSignal>,
+    remembered_head: Option<&str>,
+) -> Result<ScanOutcome, String> {
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, writer.store_id());
+    let manifest = super::manifest::load(vault)?;
+    let mut outcome = ScanOutcome::default();
+
+    // The path universe: manifest entries ∪ knowledge files ∪ reducer
+    // projections (vault-relative `knowledge/…` keys).
+    let mut paths: std::collections::BTreeSet<String> = state
+        .projection_paths
+        .keys()
+        .map(|krel| format!("knowledge/{krel}"))
+        .collect();
+    if let Some(manifest) = &manifest {
+        paths.extend(manifest.entries.keys().cloned());
+    }
+    let knowledge = vault.join("knowledge");
+    if knowledge.exists() {
+        for entry in walkdir::WalkDir::new(&knowledge).sort_by_file_name() {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.file_type().is_file()
+                && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
+            {
+                let rel = entry
+                    .path()
+                    .strip_prefix(vault)
+                    .map_err(|e| e.to_string())?
+                    .to_str()
+                    .ok_or("non-UTF-8 knowledge path")?
+                    .replace('\\', "/");
+                paths.insert(rel);
+            }
+        }
+    }
+
+    let already_open = state.reconciliation_open();
+    for path in &paths {
+        let krel = path.strip_prefix("knowledge/").unwrap_or(path);
+        let file = match std::fs::read(vault.join(path)) {
+            Ok(bytes) => FileFact {
+                hash: Some(crate::ledger::sha256_hex(&bytes)),
+                parses: super::project::parse_okf(&String::from_utf8_lossy(&bytes)).is_ok()
+                    && String::from_utf8(bytes).is_ok(),
+            },
+            Err(_) => FileFact::missing(),
+        };
+        let entry = manifest.as_ref().and_then(|m| m.entries.get(path));
+        let projection = state
+            .projection_paths
+            .get(krel)
+            .and_then(|belief| project_belief(&state, belief).ok());
+        let ancestor =
+            entry.is_some_and(|entry| verified_ancestor(&read.frames, writer.store_id(), entry));
+        match classify_path(&file, entry, projection.as_ref(), ancestor) {
+            PathClass::Match => outcome.matches += 1,
+            PathClass::InterruptedFinalize => {
+                if !already_open {
+                    super::manifest::complete_entry(vault, path)?;
+                }
+                outcome.finalized.push(path.clone());
+            }
+            PathClass::InterruptedWrite
+            | PathClass::LedgerAheadRegenerate
+            | PathClass::LedgerAheadAdvance
+            | PathClass::LedgerAheadCreate => {
+                if !already_open {
+                    let projection = projection
+                        .as_ref()
+                        .ok_or("a ledger-ahead class always has reducer state")?;
+                    super::manifest::write_projection(vault, path, projection)?;
+                }
+                outcome.regenerated.push(path.clone());
+            }
+            PathClass::OutOfBandEdit => outcome.out_of_band.push(path.clone()),
+            PathClass::Divergence(reason) => {
+                outcome.divergent.push((path.clone(), reason.to_string()))
+            }
+        }
+    }
+
+    // The circuit breaker: signals in canonical (declaration) order.
+    let projection_count = paths.len();
+    let mismatches = outcome.out_of_band.len() + outcome.divergent.len();
+    let mass = projection_count >= MASS_MIN_PROJECTIONS
+        && mismatches >= MASS_MIN_MISMATCHES
+        && (mismatches as f64) >= (projection_count as f64) * MASS_MIN_RATIO;
+    let mut signals: Vec<schema::DivergenceSignal> = Vec::new();
+    if !outcome.divergent.is_empty() {
+        signals.push(schema::DivergenceSignal::ManifestReducerDisagreement);
+    }
+    if mass {
+        signals.push(schema::DivergenceSignal::MassProjectionMismatch);
+    }
+    if let Some(signal) = migration_signal {
+        if !signals.contains(&signal) {
+            signals.push(signal);
+        }
+    }
+    signals.sort();
+
+    if !signals.is_empty() {
+        let empty_digest = crate::ledger::sha256_hex(b"");
+        let manifest_digest = match std::fs::read(super::manifest::manifest_path(vault)) {
+            Ok(bytes) => crate::ledger::sha256_hex(&bytes),
+            Err(_) => empty_digest.clone(),
+        };
+        let reducer_digest = reducer_projection_digest(&state)?;
+        let mut samples: Vec<String> = outcome
+            .divergent
+            .iter()
+            .map(|(path, _)| path)
+            .chain(outcome.out_of_band.iter())
+            .filter_map(|p| p.strip_prefix("knowledge/").map(str::to_string))
+            .collect();
+        samples.sort();
+        samples.dedup();
+        samples.truncate(schema::reconciliation::MAX_SAMPLE_PATHS);
+        // The stable detection key: the condition, not the launch.
+        let condition = serde_json::json!({
+            "signals": signals.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+            "samples": samples,
+            "manifest_digest": manifest_digest,
+            "reducer_digest": reducer_digest,
+        });
+        let detection_key = crate::ledger::sha256_hex(
+            serde_json::to_string(&condition)
+                .map_err(|e| e.to_string())?
+                .as_bytes(),
+        );
+        let already_recorded = state
+            .reconciliation_divergences
+            .contains_key(&detection_key);
+        let body = schema::LedgerDivergence {
+            schema: schema::BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None, // append_once stamps the detection key
+            actor: schema::Actor {
+                id: schema::ACTOR_RECONCILIATION.to_string(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            detection_key: detection_key.clone(),
+            signals,
+            ledger_head: read.head_hash.clone(),
+            git_anchored_head: None, // best-effort: read at M23.7's exits
+            remembered_head: remembered_head.map(str::to_string),
+            manifest_digest,
+            reducer_projection_digest: reducer_digest,
+            mismatch_count: mismatches as u64,
+            projection_count: projection_count as u64,
+            sample_paths: samples,
+        };
+        if !already_recorded {
+            writer.append_once(
+                &detection_key,
+                schema::KIND_LEDGER_DIVERGENCE,
+                serde_json::to_value(&body).map_err(|e| e.to_string())?,
+            )?;
+        }
+        outcome.divergence_recorded = Some(detection_key);
+    }
+
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    outcome.reconciliation_open = reduce(&read.frames, writer.store_id()).reconciliation_open();
+    Ok(outcome)
+}
+
+/// `path_digest` over EVERY reducer projection, path-sorted — the
+/// divergence event's reducer side.
+pub fn reducer_projection_digest(state: &super::reduce::EpistemicState) -> Result<String, String> {
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for (krel, belief) in &state.projection_paths {
+        let projection = project_belief(state, belief)?;
+        entries.push(serde_json::json!({
+            "path": krel,
+            "content_hash": projection.content_hash,
+        }));
+    }
+    Ok(crate::ledger::sha256_hex(
+        serde_json::to_string(&entries)
+            .map_err(|e| e.to_string())?
+            .as_bytes(),
+    ))
 }
 
 #[cfg(test)]
@@ -459,6 +688,278 @@ mod tests {
         // Cutting the prefix at the member alone would show revision 1;
         // the replay must extend through the marker to prove the tuple.
         assert!(verified_ancestor(&read.frames, &store, &entry));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- The M23.6 launch scan + circuit breaker ------------------------
+
+    use super::super::arm::{arm, Arming};
+    use super::super::migrate::tests::corpus_copy;
+    use super::super::{manifest as manifest_mod, LedgerHead};
+
+    fn armed(label: &str) -> (std::path::PathBuf, LedgerWriter) {
+        let vault = corpus_copy(label);
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        assert!(matches!(
+            arm(&mut writer, &vault),
+            Arming::Migrated {
+                manifest_created: true,
+                ..
+            }
+        ));
+        (vault, writer)
+    }
+
+    fn head_of(writer: &LedgerWriter) -> Option<LedgerHead> {
+        writer.head()
+    }
+
+    #[test]
+    fn a_clean_vault_scans_to_all_matches_with_zero_events() {
+        let (vault, mut writer) = armed("scan-clean");
+        let head = head_of(&writer);
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(outcome.matches, 10);
+        assert!(outcome.divergent.is_empty() && outcome.out_of_band.is_empty());
+        assert!(outcome.divergence_recorded.is_none());
+        assert!(!outcome.reconciliation_open);
+        assert_eq!(head_of(&writer), head, "a scan is not an epistemic act");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn ledger_ahead_regenerates_with_zero_capture_and_a_parked_edit_stays_parked() {
+        let (vault, mut writer) = armed("scan-ahead");
+        let store = writer.store_id().to_string();
+        // The ledger moves ahead of file+manifest: a solo revision with no
+        // projection write (the crash shape).
+        const AHEAD: &str = "systems/status-model.md";
+        let mut body = revised_body();
+        body.belief_id = crate::ledger::schema::migrate_id(&store, "belief", AHEAD);
+        body.patch = vec![crate::ledger::schema::PatchOp {
+            field_path: "/fields/lifecycle".into(),
+            before: schema::TypedValue::string("stable"),
+            after: schema::TypedValue::string("deprecated"),
+        }];
+        writer
+            .append(
+                schema::KIND_BELIEF_REVISED,
+                serde_json::to_value(&body).unwrap(),
+            )
+            .unwrap();
+        // And a single genuine out-of-band edit elsewhere.
+        let oob = vault.join("knowledge/metrics/webinar-attendance.md");
+        let original = std::fs::read_to_string(&oob).unwrap();
+        std::fs::write(&oob, format!("{original}\nEdited outside the app.\n")).unwrap();
+
+        let head = head_of(&writer);
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(
+            outcome.regenerated,
+            vec![format!("knowledge/{AHEAD}")],
+            "ledger-ahead regenerated"
+        );
+        assert_eq!(
+            outcome.out_of_band,
+            vec!["knowledge/metrics/webinar-attendance.md".to_string()],
+            "the valid out-of-band edit is PARKED, not captured, until M23.7"
+        );
+        assert!(
+            outcome.divergence_recorded.is_none(),
+            "one edit is no storm"
+        );
+        assert!(!outcome.reconciliation_open);
+        assert_eq!(head_of(&writer), head, "zero events from recovery");
+        // The regenerated file is the exact reducer projection; the parked
+        // edit's bytes were not touched.
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        let belief_id = crate::ledger::schema::migrate_id(&store, "belief", AHEAD);
+        assert_eq!(
+            std::fs::read_to_string(vault.join(format!("knowledge/{AHEAD}"))).unwrap(),
+            project_belief(&state, &belief_id).unwrap().bytes
+        );
+        assert!(std::fs::read_to_string(&oob)
+            .unwrap()
+            .contains("Edited outside the app."));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unproven_state_records_one_divergence_opens_the_mode_and_suspends_capture() {
+        let (vault, mut writer) = armed("scan-divergent");
+        // Forge one manifest entry to pin non-ancestor reducer state.
+        let mut manifest = manifest_mod::load(&vault).unwrap().unwrap();
+        let entry = manifest
+            .entries
+            .get_mut("knowledge/systems/status-model.md")
+            .unwrap();
+        entry.projection_state_digest = crate::ledger::sha256_hex(b"forged");
+        manifest_mod::save(&vault, &manifest).unwrap();
+
+        let first = launch_scan(&mut writer, &vault, None, None).unwrap();
+        let key = first.divergence_recorded.clone().expect("recorded");
+        assert!(first.reconciliation_open, "the named mode opened");
+        assert_eq!(first.divergent.len(), 1);
+
+        // Idempotent across launches: the same condition, one event.
+        let head = head_of(&writer);
+        let second = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert!(second.reconciliation_open);
+        assert_eq!(head_of(&writer), head, "no second event, no storm");
+        let _ = second;
+
+        // Automatic capture is SUSPENDED while the mode is open…
+        let request = crate::ledger::capture::CaptureRequest {
+            path: "knowledge/metrics/webinar-attendance.md".into(),
+            actor_id: "human:owner".into(),
+            fields: vec![crate::ledger::capture::FieldEdit {
+                field_path: "/fields/lifecycle".into(),
+                before: schema::TypedValue::Missing,
+                after: schema::TypedValue::string("stable"),
+                corrects: None,
+                reason: None,
+            }],
+            relations: vec![],
+            alias_adds: vec![],
+            authority: Default::default(),
+            request_id: "req-suspended".into(),
+        };
+        let err = crate::ledger::capture::capture_structured_with(&mut writer, &vault, &request)
+            .unwrap_err();
+        assert!(err.contains("reconciliation is open"), "{err}");
+        // …and the status surface names it.
+        drop(writer);
+        let status = super::super::shadow::status(None, &vault);
+        assert!(status.reconciliation_open);
+        assert_eq!(status.divergences, vec![key]);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_mass_of_out_of_band_edits_trips_the_circuit_breaker() {
+        let (vault, mut writer) = armed("scan-mass");
+        // 5 of 10 projections edited out of band: ≥8 projections, ≥5
+        // mismatches, ≥25% — the restore signature.
+        for rel in [
+            "knowledge/index.md",
+            "knowledge/log.md",
+            "knowledge/metrics/onboarding-completion.md",
+            "knowledge/metrics/sync-error-rate.md",
+            "knowledge/metrics/webinar-attendance.md",
+        ] {
+            let path = vault.join(rel);
+            let original = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(&path, format!("{original}\nRewritten en masse.\n")).unwrap();
+        }
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert!(outcome.divergence_recorded.is_some());
+        assert!(outcome.reconciliation_open);
+        // The event carries the mass signal and honest counts.
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let divergence = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE)
+            .unwrap();
+        assert_eq!(
+            divergence.body["signals"],
+            serde_json::json!(["mass_projection_mismatch"])
+        );
+        assert_eq!(divergence.body["mismatch_count"], serde_json::json!(5));
+        assert_eq!(divergence.body["projection_count"], serde_json::json!(10));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_migration_refusal_rides_the_divergence_as_its_closed_signal() {
+        let (vault, mut writer) = armed("scan-migration-signal");
+        let outcome = launch_scan(
+            &mut writer,
+            &vault,
+            Some(schema::DivergenceSignal::MigrationSourceChanged),
+            Some("feedfacefeedfacefeedfacefeedface"),
+        )
+        .unwrap();
+        assert!(outcome.divergence_recorded.is_some());
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let divergence = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_LEDGER_DIVERGENCE)
+            .unwrap();
+        assert_eq!(
+            divergence.body["signals"],
+            serde_json::json!(["migration_source_changed"])
+        );
+        assert_eq!(
+            divergence.body["remembered_head"],
+            serde_json::json!("feedfacefeedfacefeedfacefeedface"),
+            "best-effort corroboration rides along"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// A COHERENT restore — ledger, manifest, files, and every anchor
+    /// rewound together — is INDISTINGUISHABLE from a vault that simply
+    /// never advanced: this scan (correctly) finds nothing. Detection is
+    /// best effort by design; the product never claims universal restore
+    /// detection, and neither does this suite.
+    #[test]
+    fn a_fully_coherent_state_scans_clean_documenting_the_honest_limit() {
+        let (vault, mut writer) = armed("scan-coherent");
+        let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(outcome.matches, 10);
+        assert!(outcome.divergence_recorded.is_none());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_hundred_file_regeneration_is_byte_identical_with_zero_events() {
+        let vault = testutil::temp_vault("scan-hundred");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        assert!(matches!(arm(&mut writer, &vault), Arming::Migrated { .. }));
+        // A hundred committed Beliefs, no files yet (the ledger-ahead
+        // create shape at scale).
+        for i in 0..100 {
+            let mut body = created_body();
+            body.belief_id = format!("{i:032x}");
+            body.subject = SubjectRef::Resolved {
+                entity_id: format!("{:032x}", 1000 + i),
+                aliases: vec![format!("bulk/concept-{i:03}.md")],
+            };
+            writer
+                .append(
+                    schema::KIND_BELIEF_CREATED,
+                    serde_json::to_value(&body).unwrap(),
+                )
+                .unwrap();
+        }
+        let first = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(first.regenerated.len(), 100);
+        assert!(first.divergence_recorded.is_none());
+        let bytes_before: Vec<(String, Vec<u8>)> = first
+            .regenerated
+            .iter()
+            .map(|p| (p.clone(), std::fs::read(vault.join(p)).unwrap()))
+            .collect();
+
+        // Wipe every projection AND the manifest (the regeneration-burst
+        // shape — a deleted file under a live manifest entry is divergence,
+        // not regeneration); the rescan reproduces IDENTICAL bytes and
+        // appends nothing — regeneration is never an epistemic act.
+        for (path, _) in &bytes_before {
+            std::fs::remove_file(vault.join(path)).unwrap();
+        }
+        std::fs::remove_file(manifest_mod::manifest_path(&vault)).unwrap();
+        let head = head_of(&writer);
+        let second = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(second.regenerated.len(), 100);
+        assert!(second.divergence_recorded.is_none());
+        assert_eq!(head_of(&writer), head, "zero events across 100 files");
+        for (path, before) in &bytes_before {
+            assert_eq!(&std::fs::read(vault.join(path)).unwrap(), before, "{path}");
+        }
         let _ = std::fs::remove_dir_all(&vault);
     }
 

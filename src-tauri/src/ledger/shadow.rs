@@ -88,11 +88,32 @@ pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
     };
 
     // Arm the migrator (M23.0) BEFORE the index replay, so the index sees
-    // the migration events it appends. A typed refusal or failure is a
-    // state, not an error: the writer stays open (agent writes continue)
-    // and M23.6's circuit breaker surfaces the stored signal.
+    // the migration events it appends. A typed refusal becomes the M23.6
+    // circuit breaker's migration signal; the writer stays open either way
+    // (agent writes continue).
     if let Some(writer) = writer.as_mut() {
-        let _ = super::arm::arm(writer, &vault);
+        let arming = super::arm::arm(writer, &vault);
+        let migration_signal = match &arming {
+            super::arm::Arming::Refused(err) => match err.signal() {
+                Some("migration_source_changed") => {
+                    Some(super::schema::DivergenceSignal::MigrationSourceChanged)
+                }
+                Some("migration_idempotency_conflict") => {
+                    Some(super::schema::DivergenceSignal::MigrationIdempotencyConflict)
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        // The M23.6 launch scan: safe recoveries execute, out-of-band edits
+        // park for M23.7, divergence records once and opens the mode. Its
+        // own failure must never block activation.
+        let _ = super::reconcile::launch_scan(
+            writer,
+            &vault,
+            migration_signal,
+            remembered.as_ref().map(|r| r.head_hash.as_str()),
+        );
     }
 
     // Replay the disposable index and remember the (possibly recovered)
@@ -203,6 +224,10 @@ pub struct LedgerStatus {
     /// Wall-clock anomalies recorded across the committed history (D3:
     /// recorded, never smoothed over).
     pub anomalies: u64,
+    /// The M23.6 circuit breaker: is the named reconciliation mode open?
+    pub reconciliation_open: bool,
+    /// Unresolved divergence detection keys while the mode is open.
+    pub divergences: Vec<String>,
 }
 
 pub fn status(config_dir: Option<&Path>, vault: &Path) -> LedgerStatus {
@@ -222,14 +247,19 @@ pub fn status(config_dir: Option<&Path>, vault: &Path) -> LedgerStatus {
         .ok()
         .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(String::from))
         .unwrap_or_else(|| "unknown".to_string());
-    let (head, seq, segments, anomalies) = match &recovery.read {
-        Some(read) => (
-            Some(read.head_hash.clone()),
-            read.head_seq,
-            read.segments.len() as u64,
-            read.frames.iter().filter(|f| f.wall_clock_anomaly).count() as u64,
-        ),
-        None => (None, None, 0, 0),
+    let (head, seq, segments, anomalies, reconciliation_open, divergences) = match &recovery.read {
+        Some(read) => {
+            let state = super::reduce::reduce(&read.frames, &read.store.store_id);
+            (
+                Some(read.head_hash.clone()),
+                read.head_seq,
+                read.segments.len() as u64,
+                read.frames.iter().filter(|f| f.wall_clock_anomaly).count() as u64,
+                state.reconciliation_open(),
+                state.reconciliation_divergences.keys().cloned().collect(),
+            )
+        }
+        None => (None, None, 0, 0, false, Vec::new()),
     };
     LedgerStatus {
         verdict: verdict_tag,
@@ -238,6 +268,8 @@ pub fn status(config_dir: Option<&Path>, vault: &Path) -> LedgerStatus {
         seq,
         segments,
         anomalies,
+        reconciliation_open,
+        divergences,
     }
 }
 

@@ -149,6 +149,10 @@ pub fn capture_from_json(vault: &Path, request: &serde_json::Value) -> Option<Re
     }
 }
 
+/// The suspension refusal while the divergence circuit breaker is open.
+pub const RECONCILIATION_SUSPENDED: &str =
+    "reconciliation is open for this vault — resolve the divergence before capturing edits";
+
 /// The typed alias-removal refusal, shared with the concepts adapter.
 pub use super::concepts::UNSUPPORTED_ALIAS_REMOVAL;
 
@@ -282,7 +286,7 @@ fn human_assertion(
     )
 }
 
-fn capture_structured_with(
+pub(crate) fn capture_structured_with(
     writer: &mut LedgerWriter,
     vault: &Path,
     request: &CaptureRequest,
@@ -299,6 +303,11 @@ fn capture_structured_with(
     }
     let store = writer.store_id().to_string();
     let state = current_state(writer, vault)?;
+    // The circuit breaker: while reconciliation is open, automatic capture
+    // is suspended — resolve the divergence first (agent writes continue).
+    if state.reconciliation_open() {
+        return Err(RECONCILIATION_SUSPENDED.to_string());
+    }
     let belief_id = state
         .projection_paths
         .get(krel)
@@ -616,6 +625,9 @@ fn capture_editorial_with(
     }
     let read = read_ledger(&ledger_dir(vault)).map_err(|e| e.to_string())?;
     let state = reduce(&read.frames, writer.store_id());
+    if state.reconciliation_open() {
+        return Err(RECONCILIATION_SUSPENDED.to_string());
+    }
     let belief_id = state
         .projection_paths
         .get(krel)

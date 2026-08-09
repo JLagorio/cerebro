@@ -481,6 +481,8 @@ export async function ledgerStatus(_vault: string): Promise<{
   seq: null;
   segments: number;
   anomalies: number;
+  reconciliation_open: boolean;
+  divergences: string[];
 }> {
   return {
     verdict: 'no-ledger',
@@ -489,6 +491,8 @@ export async function ledgerStatus(_vault: string): Promise<{
     seq: null,
     segments: 0,
     anomalies: 0,
+    reconciliation_open: false,
+    divergences: [],
   };
 }
 

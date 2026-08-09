@@ -279,6 +279,10 @@ export interface LedgerStatus {
   seq: number | null;
   segments: number;
   anomalies: number;
+  /** The M23.6 circuit breaker: the named reconciliation mode is open. */
+  reconciliation_open: boolean;
+  /** Unresolved divergence detection keys while the mode is open. */
+  divergences: string[];
 }
 
 export function ledgerStatus(vault: string): Promise<LedgerStatus> {
