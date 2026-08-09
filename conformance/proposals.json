@@ -1,0 +1,471 @@
+{
+  "name": "proposals",
+  "description": "The durable proposal lifecycle: submit, queue as an all-or-nothing set, one human decision, apply, and an atomic peer rejection. A duplicate submission, a second decision, and a terminal-state exit are all refused, and every accepted event advances exactly its own proposal target once.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "0a52de734213baac8a7cec8a2eea1e4b9186bbb518c65c64094d658e1489391f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.submitted",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal": {
+          "schema": 1,
+          "proposal_id": "1111111111111111111111111111111a",
+          "run_id": "4444444444444444444444444444444a",
+          "targets": [
+            {
+              "target_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "target_class": "belief",
+              "expected_version": 1
+            }
+          ],
+          "op": {
+            "kind": "archive_belief",
+            "payload": {
+              "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "replacement_id": null
+            }
+          },
+          "intended_use": {
+            "kind": "reversible_work",
+            "stakes": "LOW",
+            "predicate_class": null
+          },
+          "basis": {
+            "transition_cause": "maintenance",
+            "evidence_refs": [],
+            "coverage_refs": [],
+            "authority_refs": [],
+            "authority_route_refs": [],
+            "addressed_contradictions": [],
+            "absence_claim": false
+          },
+          "declared_risk": "HIGH",
+          "reason": "retire the stale record",
+          "candidate_search_receipt": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "0a52de734213baac8a7cec8a2eea1e4b9186bbb518c65c64094d658e1489391f",
+      "hash": "a9cb5a0733dd3213a12f508c8d7615fb78914fb6e40ea60a0f3b12fa57afd49a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.submitted",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal": {
+          "schema": 1,
+          "proposal_id": "1111111111111111111111111111111b",
+          "run_id": "4444444444444444444444444444444a",
+          "targets": [
+            {
+              "target_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "target_class": "belief",
+              "expected_version": 1
+            }
+          ],
+          "op": {
+            "kind": "archive_belief",
+            "payload": {
+              "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "replacement_id": null
+            }
+          },
+          "intended_use": {
+            "kind": "reversible_work",
+            "stakes": "LOW",
+            "predicate_class": null
+          },
+          "basis": {
+            "transition_cause": "maintenance",
+            "evidence_refs": [],
+            "coverage_refs": [],
+            "authority_refs": [],
+            "authority_route_refs": [],
+            "addressed_contradictions": [],
+            "absence_claim": false
+          },
+          "declared_risk": "HIGH",
+          "reason": "retire the stale record",
+          "candidate_search_receipt": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "a9cb5a0733dd3213a12f508c8d7615fb78914fb6e40ea60a0f3b12fa57afd49a",
+      "hash": "0db51ed041e80dffa142cbc70582a4a1702e0e6bc297bc5637872aa1b97db0e9",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.submitted",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal": {
+          "schema": 1,
+          "proposal_id": "1111111111111111111111111111111a",
+          "run_id": "4444444444444444444444444444444a",
+          "targets": [
+            {
+              "target_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "target_class": "belief",
+              "expected_version": 1
+            }
+          ],
+          "op": {
+            "kind": "archive_belief",
+            "payload": {
+              "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "replacement_id": null
+            }
+          },
+          "intended_use": {
+            "kind": "reversible_work",
+            "stakes": "LOW",
+            "predicate_class": null
+          },
+          "basis": {
+            "transition_cause": "maintenance",
+            "evidence_refs": [],
+            "coverage_refs": [],
+            "authority_refs": [],
+            "authority_route_refs": [],
+            "addressed_contradictions": [],
+            "absence_claim": false
+          },
+          "declared_risk": "HIGH",
+          "reason": "retire the stale record",
+          "candidate_search_receipt": null
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "0db51ed041e80dffa142cbc70582a4a1702e0e6bc297bc5637872aa1b97db0e9",
+      "hash": "7d2ff33730e0275e7cf406980749d56c47adcb2bad2a6465faa85632b3ad0d36",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.queued",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal_id": "1111111111111111111111111111111a",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "member_proposal_ids": [
+          "1111111111111111111111111111111a",
+          "1111111111111111111111111111111b"
+        ],
+        "effective_risk": "HIGH",
+        "policy_version": 1,
+        "target_versions": [
+          {
+            "target_class": "belief",
+            "target_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "version": 1
+          }
+        ],
+        "queued_at": "2026-08-07T12:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "7d2ff33730e0275e7cf406980749d56c47adcb2bad2a6465faa85632b3ad0d36",
+      "hash": "ea289de5cf566103779e4f9884e456d192e24f01e4c2f51705ce3a53c766315a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.queued",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal_id": "1111111111111111111111111111111b",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "member_proposal_ids": [
+          "1111111111111111111111111111111a",
+          "1111111111111111111111111111111b"
+        ],
+        "effective_risk": "HIGH",
+        "policy_version": 1,
+        "target_versions": [
+          {
+            "target_class": "belief",
+            "target_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "version": 1
+          }
+        ],
+        "queued_at": "2026-08-07T12:00:00.000Z"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "ea289de5cf566103779e4f9884e456d192e24f01e4c2f51705ce3a53c766315a",
+      "hash": "126bc059c8d8ee55948ae8c26f1cd532dd13866b3dc1cbce17dcee80486bd118",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.decision_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "decision_id": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+        "proposal_id": "1111111111111111111111111111111a",
+        "decision": "approve",
+        "reviewer": "human:josef",
+        "decided_at": "2026-08-07T12:00:00.000Z",
+        "reason": null,
+        "reviewed_target_versions": []
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "126bc059c8d8ee55948ae8c26f1cd532dd13866b3dc1cbce17dcee80486bd118",
+      "hash": "42bd8b15c598a49a40b7ded98d1de2392b6899ca1a92cfce52cf528873ef631a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.decision_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "decision_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+        "proposal_id": "1111111111111111111111111111111a",
+        "decision": "reject",
+        "reviewer": "human:josef",
+        "decided_at": "2026-08-07T12:00:00.000Z",
+        "reason": "changed my mind",
+        "reviewed_target_versions": []
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "42bd8b15c598a49a40b7ded98d1de2392b6899ca1a92cfce52cf528873ef631a",
+      "hash": "ba002e28917f9992fe5f9d06744e91bcc45373957c1bf6c1d282774f4f1e43c8",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.applied",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal_id": "1111111111111111111111111111111a",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "effective_risk": "HIGH",
+        "decision_id": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+        "mutation_event_ids": [
+          "0123456789abcdef0123456789abcdef"
+        ],
+        "resulting_versions": [],
+        "revert_plan": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "ba002e28917f9992fe5f9d06744e91bcc45373957c1bf6c1d282774f4f1e43c8",
+      "hash": "3ee665d9b7be9aa6e547f5caaba6cf5a5f2e4d6e4115ce3d9b51b2ede6cd619d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.rejected",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal_id": "1111111111111111111111111111111a",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "code": "human_rejected",
+        "rule": "human_decision",
+        "expected": {
+          "type": "string",
+          "value": "approve"
+        },
+        "actual": {
+          "type": "string",
+          "value": "reject"
+        },
+        "decision_id": null,
+        "refused_by_proposal_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "3ee665d9b7be9aa6e547f5caaba6cf5a5f2e4d6e4115ce3d9b51b2ede6cd619d",
+      "hash": "9cf677f37ea2292254bc4edcdce0eba385650891e614d5fbd96c09051e28f65d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.rejected",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "proposal_id": "1111111111111111111111111111111b",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "code": "atomic_set_refused",
+        "rule": "commit_set",
+        "expected": {
+          "type": "string",
+          "value": "applied"
+        },
+        "actual": {
+          "type": "string",
+          "value": "refused"
+        },
+        "decision_id": null,
+        "refused_by_proposal_id": "1111111111111111111111111111111a"
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {},
+    "aliases": {},
+    "observations": {},
+    "beliefs": {},
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "proposal:1111111111111111111111111111111a": 4,
+      "proposal:1111111111111111111111111111111b": 3
+    },
+    "batches": [],
+    "proposals": {
+      "1111111111111111111111111111111a": {
+        "state": "applied",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "decision": [
+          "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+          "approve"
+        ],
+        "applied_event_id": "00000000000000000000000000000008",
+        "has_revert_plan": false
+      },
+      "1111111111111111111111111111111b": {
+        "state": "rejected",
+        "commit_set_id": "5e75e75e75e75e75e75e75e75e75e75e",
+        "decision": null,
+        "applied_event_id": null,
+        "has_revert_plan": false
+      }
+    },
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "proposal 1111111111111111111111111111111a is already submitted"
+    },
+    {
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "proposal 1111111111111111111111111111111a already carries a decision"
+    },
+    {
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "proposal 1111111111111111111111111111111a is already Applied — terminal states cannot be left"
+    }
+  ]
+}

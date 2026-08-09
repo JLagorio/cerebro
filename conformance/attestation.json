@@ -244,14 +244,25 @@
         "projection": {
           "path": null,
           "generating_event": "00000000000000000000000000000007",
-          "state_digest": "9e730f79bfe696fbc64fef8f38659e12a348826f108525ad4252f2b2840a79a9",
+          "state_digest": "df2deae5ee30708d9350d5f619240beeed74191c6cf576da1d956884cabefbf5",
           "content_hash": "11843ea779097af8f8dc861ee57a9c7a4cf8daf914d37cb862e7416f75d3381a",
           "review_event_ids": [
             "00000000000000000000000000000003"
           ],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       },
       "ffffffffffffffffffffffffffffffff": {
@@ -272,12 +283,23 @@
         "projection": {
           "path": null,
           "generating_event": "00000000000000000000000000000004",
-          "state_digest": "35f746f48c6bb934706e02da2a2554b023c39140d6766510673f7d0eea92d4c5",
+          "state_digest": "2f4c51910518fc0f6cfc4f547aec0693b01b9b0923fd3f4a655e3566b225541d",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -292,6 +314,7 @@
       "entity:dddddddddddddddddddddddddddddddd": 1
     },
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

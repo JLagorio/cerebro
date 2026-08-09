@@ -586,12 +586,23 @@
         "projection": {
           "path": null,
           "generating_event": "0000000000000000000000000000000c",
-          "state_digest": "2fc10fc6658895a6b15777d5f7c91279203ebda6714cd74f2aec371e4cb5cf95",
+          "state_digest": "70c27adf3c3eaa5050c050403c6066f6275276df7a71a0c9fa74631cab2acaeb",
           "content_hash": "0ca68445f05a61e8c481b45c85be594831563f19d66385120c3596f14d541c7d",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -607,6 +618,7 @@
       "source:c8147897afd510dad9278f297ba49115": 3
     },
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

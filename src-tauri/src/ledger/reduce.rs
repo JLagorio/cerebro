@@ -117,6 +117,24 @@ pub struct BeliefState {
     /// transition, alias addition, and override set/clear, even when the
     /// projected bytes stay identical.
     pub projection_head_event: String,
+    // --- M24 governed state ------------------------------------------------
+    /// Draft until a promotion qualifies it.
+    pub qualification: schema::Qualification,
+    /// Active until superseded, archived, or deprecated.
+    pub lifecycle: schema::Lifecycle,
+    /// Set once, never cleared: tombstoning is terminal by construction, so
+    /// there is no state a `lifecycle_changed` inverse could spell to
+    /// escape it.
+    pub tombstoned_by: Option<String>,
+    /// The open contest event, when one is open.
+    pub open_contest_event: Option<String>,
+    /// The latest qualification / lifecycle / contest transition and every
+    /// merge that touched this Belief — the format-2 projection descriptor
+    /// components (M24.3).
+    pub qualification_head_event: Option<String>,
+    pub lifecycle_head_event: Option<String>,
+    pub contest_head_event: Option<String>,
+    pub entity_merge_event_ids: Vec<String>,
 }
 
 impl BeliefState {
@@ -207,6 +225,18 @@ pub struct ProjectionStateDescriptor {
     pub alias_event_ids: Vec<String>,
     pub active_override_event_ids: Vec<String>,
     pub override_head_event_id: Option<String>,
+    // --- Format 2 (M24.3) --------------------------------------------------
+    // The governed-state heads. They join the descriptor BEFORE any M24
+    // mutation body can emit, so a projection's identity always accounts
+    // for every transition that could have changed what it renders — and
+    // the digest advances even when the rendered bytes do not, which is
+    // what keeps a stale editorial overlay from surviving a lifecycle
+    // change it never saw.
+    pub qualification_head_event_id: Option<String>,
+    pub lifecycle_head_event_id: Option<String>,
+    pub tombstone_event_id: Option<String>,
+    pub contest_head_event_id: Option<String>,
+    pub entity_merge_event_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -253,6 +283,11 @@ pub fn descriptor(state: &EpistemicState, belief: &BeliefState) -> ProjectionSta
             .map(|o| o.event_id.clone())
             .collect(),
         override_head_event_id: belief.override_head_event.clone(),
+        qualification_head_event_id: belief.qualification_head_event.clone(),
+        lifecycle_head_event_id: belief.lifecycle_head_event.clone(),
+        tombstone_event_id: belief.tombstoned_by.clone(),
+        contest_head_event_id: belief.contest_head_event.clone(),
+        entity_merge_event_ids: belief.entity_merge_event_ids.clone(),
     }
 }
 
@@ -344,6 +379,25 @@ struct MigrationEpoch {
     completed: bool,
 }
 
+/// The durable lifecycle of one proposal, folded from `proposal.*` events.
+///
+/// This is REDUCER state, not runtime cache: a queued HIGH proposal
+/// survives a restart, a deleted runtime DB, and a wiped app-data
+/// directory, because the queue is derived from the vault's own ledger.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProposalRow {
+    pub proposal_id: String,
+    pub state: schema::ProposalState,
+    pub commit_set_id: Option<String>,
+    /// The human's answer, once there is one.
+    pub decision: Option<(String, schema::Decision)>,
+    pub applied_event_id: Option<String>,
+    /// Present exactly when the applied op's policy rule said `one_click` —
+    /// which is what the UI keys its Revert action off, never the op name.
+    pub revert_plan: Option<schema::RevertPlan>,
+    pub submitted_event_id: String,
+}
+
 /// One reconciliation resolution, kept as history after the mode closes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReconciliationLogRow {
@@ -371,6 +425,8 @@ pub struct EpistemicState {
     pub belief_revision_events: BTreeMap<String, (String, u64)>,
     pub relations: BTreeMap<String, RelationState>,
     pub relation_add_events: BTreeMap<String, String>,
+    /// The M24 proposal lifecycle — portable, not a runtime cache.
+    pub proposals: BTreeMap<String, ProposalRow>,
     pub resolutions: Vec<ResolutionRow>,
     pub independence: BTreeMap<(String, String), IndependenceRow>,
     pub derived_belief_sources: Vec<(String, String)>,
@@ -674,7 +730,443 @@ fn apply(
         EventBody::ProjectionOverridden(b) => apply_override(state, frame, b),
         EventBody::LedgerDivergence(b) => apply_divergence(state, frame, b),
         EventBody::ReconciliationResolved(b) => apply_reconciliation_resolved(state, frame, b),
+        EventBody::BeliefQualificationChanged(b) => apply_qualification(state, frame, b),
+        EventBody::BeliefLifecycleChanged(b) => apply_lifecycle(state, frame, b),
+        EventBody::BeliefTombstoned(b) => apply_tombstone(state, frame, b),
+        EventBody::BeliefContested(b) => apply_contest(state, frame, b, staged),
+        EventBody::EntityMerged(b) => apply_entity_merge(state, frame, b),
+        EventBody::ProposalSubmitted(b) => apply_proposal_submitted(state, frame, b),
+        EventBody::ProposalQueued(b) => apply_proposal_queued(state, frame, b),
+        EventBody::ProposalDecisionRecorded(b) => apply_proposal_decision(state, frame, b),
+        EventBody::ProposalApplied(b) => apply_proposal_applied(state, frame, b),
+        EventBody::ProposalRejected(b) => apply_proposal_rejected(state, frame, b),
+        EventBody::ProposalReverted(b) => apply_proposal_reverted(state, frame, b),
     }
+}
+
+/// A Belief that can still be governed. Tombstoned is terminal: nothing
+/// mutates it afterwards, which is what "non-reversible" means here rather
+/// than a convention the ops are trusted to observe.
+fn live_belief<'a>(
+    state: &'a mut EpistemicState,
+    belief_id: &str,
+) -> Result<&'a mut BeliefState, Refusal> {
+    let belief = state
+        .beliefs
+        .get_mut(belief_id)
+        .ok_or_else(|| refused(format!("belief {belief_id} does not exist")))?;
+    if belief.tombstoned_by.is_some() {
+        return Err(refused(format!(
+            "belief {belief_id} is tombstoned — a tombstone is terminal, not a state to move out of"
+        )));
+    }
+    Ok(belief)
+}
+
+fn apply_qualification(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefQualificationChanged,
+) -> Result<(), Refusal> {
+    let belief = live_belief(state, &body.belief_id)?;
+    // The event declares where it came FROM; if state disagrees, the
+    // proposal was computed against a snapshot that has moved.
+    if belief.qualification != body.from {
+        return Err(refused(format!(
+            "illegal_transition: belief {} is {:?}, not {:?}",
+            body.belief_id, belief.qualification, body.from
+        )));
+    }
+    belief.qualification = body.to;
+    belief.qualification_head_event = Some(frame.event_id.clone());
+    belief.projection_head_event = frame.event_id.clone();
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_lifecycle(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefLifecycleChanged,
+) -> Result<(), Refusal> {
+    if let Some(replacement) = &body.replacement_id {
+        if !state.beliefs.contains_key(replacement) {
+            return Err(refused(format!(
+                "replacement belief {replacement} does not exist"
+            )));
+        }
+    }
+    let belief = live_belief(state, &body.belief_id)?;
+    if belief.lifecycle != body.from {
+        return Err(refused(format!(
+            "illegal_transition: belief {} is {:?}, not {:?}",
+            body.belief_id, belief.lifecycle, body.from
+        )));
+    }
+    belief.lifecycle = body.to;
+    belief.lifecycle_head_event = Some(frame.event_id.clone());
+    belief.projection_head_event = frame.event_id.clone();
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_tombstone(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefTombstoned,
+) -> Result<(), Refusal> {
+    if let Some(replacement) = &body.replacement_id {
+        if !state.beliefs.contains_key(replacement) {
+            return Err(refused(format!(
+                "replacement belief {replacement} does not exist"
+            )));
+        }
+    }
+    let belief = live_belief(state, &body.belief_id)?;
+    belief.tombstoned_by = Some(frame.event_id.clone());
+    belief.projection_head_event = frame.event_id.clone();
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_contest(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefContested,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    for reference in &body.counterevidence_refs {
+        // Counterevidence must be COMMITTED: same-batch evidence would let
+        // one batch both invent the objection and rest on it.
+        if staged.contains(reference) || !state.observations.contains_key(reference) {
+            return Err(refused(format!(
+                "counterevidence {reference} is not a committed Observation"
+            )));
+        }
+    }
+    let belief = live_belief(state, &body.belief_id)?;
+    match body.action {
+        schema::ContestAction::Open => {
+            if belief.open_contest_event.is_some() {
+                return Err(refused(format!(
+                    "belief {} already has an open contest — a second one would make \
+                     'is this contested?' ambiguous",
+                    body.belief_id
+                )));
+            }
+            belief.open_contest_event = Some(frame.event_id.clone());
+        }
+        schema::ContestAction::Close => {
+            // At most one contest is ever open, so "which one does this
+            // close?" has exactly one answer and needs no second pointer.
+            let Some(open) = belief.open_contest_event.clone() else {
+                return Err(refused(format!(
+                    "belief {} has no open contest to close",
+                    body.belief_id
+                )));
+            };
+            let addressed = body
+                .addressed_by_event_id
+                .as_ref()
+                .expect("schema validation requires an addressing event on close");
+            if addressed == &open {
+                return Err(refused(
+                    "a contest cannot be addressed by its own opening event".to_string(),
+                ));
+            }
+            belief.open_contest_event = None;
+        }
+    }
+    belief.contest_head_event = Some(frame.event_id.clone());
+    belief.projection_head_event = frame.event_id.clone();
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_entity_merge(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::EntityMerged,
+) -> Result<(), Refusal> {
+    let plan = &body.reassignment_plan;
+    if !state.entities.contains_key(&plan.survivor_id) {
+        return Err(refused(format!(
+            "survivor entity {} does not exist",
+            plan.survivor_id
+        )));
+    }
+    for merged in &plan.merged_ids {
+        if !state.entities.contains_key(merged) {
+            return Err(refused(format!("merged entity {merged} does not exist")));
+        }
+    }
+    // The plan must enumerate EXACTLY the beliefs and relations that point
+    // at a merged entity. An omission would leave a dangling identity; an
+    // extra would reassign something the proposal never named — and the CAS
+    // target set is derived from this list, so both are silent otherwise.
+    let mut expected_beliefs: Vec<String> = state
+        .beliefs
+        .values()
+        .filter(|belief| plan.merged_ids.contains(&belief.entity_id))
+        .map(|belief| belief.belief_id.clone())
+        .collect();
+    expected_beliefs.sort();
+    if expected_beliefs != plan.affected_belief_ids {
+        return Err(refused(format!(
+            "reassignment plan lists {:?} beliefs, state has {:?}",
+            plan.affected_belief_ids.len(),
+            expected_beliefs.len()
+        )));
+    }
+    for relation_id in &plan.affected_relation_ids {
+        if !state.relations.contains_key(relation_id) {
+            return Err(refused(format!("relation {relation_id} does not exist")));
+        }
+    }
+    for alias in &plan.live_aliases {
+        match state.alias_registry.get(&alias.normalized_alias) {
+            Some(registered) if registered.entity_id == alias.from_entity_id => {}
+            Some(registered) => {
+                return Err(refused(format!(
+                    "alias {:?} is bound to {}, not {}",
+                    alias.normalized_alias, registered.entity_id, alias.from_entity_id
+                )))
+            }
+            None => {
+                return Err(refused(format!(
+                    "alias {:?} is not registered",
+                    alias.normalized_alias
+                )))
+            }
+        }
+    }
+
+    // One event, every reassignment.
+    for alias in &plan.live_aliases {
+        if let Some(registered) = state.alias_registry.get_mut(&alias.normalized_alias) {
+            registered.entity_id = plan.survivor_id.clone();
+        }
+    }
+    for belief_id in &plan.affected_belief_ids {
+        if let Some(belief) = state.beliefs.get_mut(belief_id) {
+            belief.entity_id = plan.survivor_id.clone();
+            belief.entity_merge_event_ids.push(frame.event_id.clone());
+            belief.projection_head_event = frame.event_id.clone();
+        }
+        state.bump_version("belief", belief_id, &frame.event_id);
+    }
+    for relation_id in &plan.affected_relation_ids {
+        state.bump_version("relation", relation_id, &frame.event_id);
+    }
+    for merged in &plan.merged_ids {
+        state.entities.remove(merged);
+        state.bump_version("entity", merged, &frame.event_id);
+    }
+    state.bump_version("entity", &plan.survivor_id, &frame.event_id);
+    Ok(())
+}
+
+// --- The proposal lifecycle ----------------------------------------------
+
+fn proposal_state(state: &EpistemicState, proposal_id: &str) -> Option<schema::ProposalState> {
+    state.proposals.get(proposal_id).map(|row| row.state)
+}
+
+/// Terminal means terminal. A second terminal event for one proposal is a
+/// refusal, not a state change — otherwise an applied proposal could be
+/// "rejected" afterwards and the durable record would contradict itself.
+fn require_non_terminal(state: &EpistemicState, proposal_id: &str) -> Result<(), Refusal> {
+    match proposal_state(state, proposal_id) {
+        None => Err(refused(format!(
+            "proposal {proposal_id} was never submitted"
+        ))),
+        Some(current) if current.is_terminal() => Err(refused(format!(
+            "proposal {proposal_id} is already {current:?} — terminal states cannot be left"
+        ))),
+        Some(_) => Ok(()),
+    }
+}
+
+fn apply_proposal_submitted(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProposalSubmitted,
+) -> Result<(), Refusal> {
+    let id = body.proposal.proposal_id.clone();
+    if state.proposals.contains_key(&id) {
+        return Err(refused(format!("proposal {id} is already submitted")));
+    }
+    state.proposals.insert(
+        id.clone(),
+        ProposalRow {
+            proposal_id: id.clone(),
+            state: schema::ProposalState::Submitted,
+            commit_set_id: None,
+            decision: None,
+            applied_event_id: None,
+            revert_plan: None,
+            submitted_event_id: frame.event_id.clone(),
+        },
+    );
+    state.create_version("proposal", &id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_proposal_queued(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProposalQueued,
+) -> Result<(), Refusal> {
+    require_non_terminal(state, &body.proposal_id)?;
+    for member in &body.member_proposal_ids {
+        if !state.proposals.contains_key(member) {
+            return Err(refused(format!(
+                "commit set member {member} was never submitted"
+            )));
+        }
+    }
+    let row = state
+        .proposals
+        .get_mut(&body.proposal_id)
+        .expect("require_non_terminal proved it exists");
+    row.state = schema::ProposalState::Queued;
+    row.commit_set_id = Some(body.commit_set_id.clone());
+    state.bump_version("proposal", &body.proposal_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_proposal_decision(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProposalDecisionRecorded,
+) -> Result<(), Refusal> {
+    // A decision is only meaningful on something actually awaiting one.
+    match proposal_state(state, &body.proposal_id) {
+        Some(schema::ProposalState::Queued) => {}
+        Some(other) => {
+            return Err(refused(format!(
+                "proposal {} is {other:?}, not queued — there is nothing to decide",
+                body.proposal_id
+            )))
+        }
+        None => {
+            return Err(refused(format!(
+                "proposal {} was never submitted",
+                body.proposal_id
+            )))
+        }
+    }
+    let row = state
+        .proposals
+        .get_mut(&body.proposal_id)
+        .expect("checked above");
+    if row.decision.is_some() {
+        return Err(refused(format!(
+            "proposal {} already carries a decision",
+            body.proposal_id
+        )));
+    }
+    row.decision = Some((body.decision_id.clone(), body.decision));
+    state.bump_version("proposal", &body.proposal_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_proposal_applied(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProposalApplied,
+) -> Result<(), Refusal> {
+    require_non_terminal(state, &body.proposal_id)?;
+    if let Some(decision_id) = &body.decision_id {
+        let row = state.proposals.get(&body.proposal_id).expect("checked");
+        match &row.decision {
+            Some((recorded, schema::Decision::Approve)) if recorded == decision_id => {}
+            Some((_, schema::Decision::Reject)) => {
+                return Err(refused(format!(
+                    "proposal {} was rejected — an application cannot cite that decision",
+                    body.proposal_id
+                )))
+            }
+            _ => {
+                return Err(refused(format!(
+                    "proposal {} names decision {decision_id}, which is not its recorded approval",
+                    body.proposal_id
+                )))
+            }
+        }
+    }
+    let row = state
+        .proposals
+        .get_mut(&body.proposal_id)
+        .expect("checked above");
+    row.state = schema::ProposalState::Applied;
+    row.applied_event_id = Some(frame.event_id.clone());
+    row.revert_plan = body.revert_plan.clone();
+    if row.commit_set_id.is_none() {
+        row.commit_set_id = Some(body.commit_set_id.clone());
+    }
+    state.bump_version("proposal", &body.proposal_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_proposal_rejected(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProposalRejected,
+) -> Result<(), Refusal> {
+    require_non_terminal(state, &body.proposal_id)?;
+    if let Some(peer) = &body.refused_by_proposal_id {
+        if !state.proposals.contains_key(peer) {
+            return Err(refused(format!(
+                "refused_by proposal {peer} was never submitted"
+            )));
+        }
+    }
+    let row = state
+        .proposals
+        .get_mut(&body.proposal_id)
+        .expect("checked above");
+    row.state = schema::ProposalState::Rejected;
+    state.bump_version("proposal", &body.proposal_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_proposal_reverted(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProposalReverted,
+) -> Result<(), Refusal> {
+    // Only an APPLIED proposal can be reverted, and the reverting proposal
+    // must itself exist — a reversion pointing at nothing is unauditable.
+    match proposal_state(state, &body.proposal_id) {
+        Some(schema::ProposalState::Applied) => {}
+        Some(other) => {
+            return Err(refused(format!(
+                "proposal {} is {other:?} — only an applied proposal can be reverted",
+                body.proposal_id
+            )))
+        }
+        None => {
+            return Err(refused(format!(
+                "proposal {} was never submitted",
+                body.proposal_id
+            )))
+        }
+    }
+    if !state.proposals.contains_key(&body.reverted_by_proposal_id) {
+        return Err(refused(format!(
+            "reverting proposal {} was never submitted",
+            body.reverted_by_proposal_id
+        )));
+    }
+    let row = state
+        .proposals
+        .get_mut(&body.proposal_id)
+        .expect("checked above");
+    row.state = schema::ProposalState::Reverted;
+    // History is never rewound: the original application event id stays.
+    state.bump_version("proposal", &body.proposal_id, &frame.event_id);
+    Ok(())
 }
 
 fn apply_source(
@@ -1426,6 +1918,17 @@ fn apply_belief_created(
             overrides: Vec::new(),
             override_head_event: None,
             projection_head_event: frame.event_id.clone(),
+            // A created Belief is active and draft. Both facts are load
+            // bearing: promotion's only legal source is `draft`, and
+            // supersede's only legal source is `active`.
+            qualification: schema::Qualification::Draft,
+            lifecycle: schema::Lifecycle::Active,
+            tombstoned_by: None,
+            open_contest_event: None,
+            qualification_head_event: None,
+            lifecycle_head_event: None,
+            contest_head_event: None,
+            entity_merge_event_ids: Vec::new(),
         },
     );
     state
@@ -2202,6 +2705,25 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                             .map(|o| o.event_id.clone())
                             .collect::<Vec<_>>(),
                         "override_head": b.override_head_event,
+                        // Format 2 (M24.3): the governed-state heads.
+                        "qualification_head": b.qualification_head_event,
+                        "lifecycle_head": b.lifecycle_head_event,
+                        "tombstone_event": b.tombstoned_by,
+                        "contest_head": b.contest_head_event,
+                        "entity_merge_events": b.entity_merge_event_ids,
+                    },
+                    "governance": {
+                        "qualification": match b.qualification {
+                            schema::Qualification::Draft => "draft",
+                            schema::Qualification::Qualified => "qualified",
+                        },
+                        "lifecycle": match b.lifecycle {
+                            schema::Lifecycle::Active => "active",
+                            schema::Lifecycle::Superseded => "superseded",
+                            schema::Lifecycle::Archived => "archived",
+                        },
+                        "tombstoned": b.tombstoned_by.is_some(),
+                        "open_contest": b.open_contest_event,
                     },
                 }),
             )
@@ -2261,6 +2783,32 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
             .iter()
             .map(|b| serde_json::json!([b.batch_id, b.state, b.member_count]))
             .collect::<Vec<_>>(),
+        "proposals": state
+            .proposals
+            .values()
+            .map(|p| (
+                p.proposal_id.clone(),
+                serde_json::json!({
+                    "state": match p.state {
+                        schema::ProposalState::Submitted => "submitted",
+                        schema::ProposalState::Queued => "queued",
+                        schema::ProposalState::Rejected => "rejected",
+                        schema::ProposalState::Applied => "applied",
+                        schema::ProposalState::Reverted => "reverted",
+                    },
+                    "commit_set_id": p.commit_set_id,
+                    "decision": p.decision.as_ref().map(|(id, decision)| serde_json::json!([
+                        id,
+                        match decision {
+                            schema::Decision::Approve => "approve",
+                            schema::Decision::Reject => "reject",
+                        }
+                    ])),
+                    "applied_event_id": p.applied_event_id,
+                    "has_revert_plan": p.revert_plan.is_some(),
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
         "reconciliation": {
             "open": state.reconciliation_open(),
             "divergences": state
@@ -3441,14 +3989,26 @@ mod tests {
                 serde_json::json!({ "schema": 1, "garbage": true }),
             )
             .unwrap();
+        // M22 reserved `belief.tombstoned` with no body; M24.3 defined it.
+        // A body that claims schema membership and then omits the common
+        // fields is still an anomaly — the point of the test is that a
+        // malformed body is a deterministic refusal and never a panic,
+        // whichever side of the reservation it is on.
         rig.writer
             .append("belief.tombstoned", serde_json::json!({ "schema": 1 }))
             .unwrap();
+        // A kind no build knows is still refused by name.
+        rig.writer
+            .append("belief.teleported", serde_json::json!({ "schema": 1 }))
+            .unwrap();
         let state = rig.state();
         assert!(state.beliefs.is_empty());
-        assert_eq!(state.anomalies.len(), 2);
+        assert_eq!(state.anomalies.len(), 3);
         assert!(state.anomalies.iter().all(|a| a.code == "schema"));
-        assert!(state.anomalies[1].detail.contains("reserved"));
+        assert!(state.anomalies[1].detail.contains("missing field"));
+        assert!(state.anomalies[2]
+            .detail
+            .contains("not in this build's vocabulary"));
     }
 
     #[test]

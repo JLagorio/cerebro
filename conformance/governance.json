@@ -1,0 +1,493 @@
+{
+  "name": "governance",
+  "description": "Qualification and lifecycle move only along their exact edges; a same-state retry, a state mismatch, an un-archive, an uncommitted contest, and any transition after a tombstone are all refused. Each accepted transition advances the Belief once and moves its projection head.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "0569dc66b295cc929a55fd2fa0e7e1fcf4049fd7932d9541f1391bac70b14335",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "0569dc66b295cc929a55fd2fa0e7e1fcf4049fd7932d9541f1391bac70b14335",
+      "hash": "aec0f34a91f73626b307486217fa8e7d7e175c178c89754478b622208f7423ea",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "aec0f34a91f73626b307486217fa8e7d7e175c178c89754478b622208f7423ea",
+      "hash": "a40bca40428886af08a36ce6025a4d5b1c7577c386f22cb9015ea0e4c27a0327",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.qualification_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "draft",
+        "to": "qualified",
+        "qualification_profile": {
+          "type_id": "Metric",
+          "type_schema_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "required_roles": [
+            "evidence",
+            "owner"
+          ]
+        },
+        "cause": "promoted"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "a40bca40428886af08a36ce6025a4d5b1c7577c386f22cb9015ea0e4c27a0327",
+      "hash": "450be27450486a43cbbc70f82e5ec036c464469bebab690aec6c56d182c23fe9",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.qualification_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "draft",
+        "to": "qualified",
+        "qualification_profile": {
+          "type_id": "Metric",
+          "type_schema_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "required_roles": [
+            "evidence",
+            "owner"
+          ]
+        },
+        "cause": "promoted"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "450be27450486a43cbbc70f82e5ec036c464469bebab690aec6c56d182c23fe9",
+      "hash": "c807e01b2b4025142ef8d21c2e7901dc656ea736eeea44c789a2be9a42b459f2",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.qualification_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "qualified",
+        "to": "draft",
+        "qualification_profile": {
+          "type_id": "Metric",
+          "type_schema_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "required_roles": [
+            "evidence",
+            "owner"
+          ]
+        },
+        "cause": "reverted"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "c807e01b2b4025142ef8d21c2e7901dc656ea736eeea44c789a2be9a42b459f2",
+      "hash": "dac95d55eccbf2c9397e98c134057226dfe1ae7c942efbe1fad7684f728dc8d2",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.lifecycle_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "active",
+        "to": "superseded",
+        "cause": "superseded",
+        "replacement_id": "ffffffffffffffffffffffffffffffff"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "dac95d55eccbf2c9397e98c134057226dfe1ae7c942efbe1fad7684f728dc8d2",
+      "hash": "8b35344c774db87b772ebae193abbcbc72ba915ad807ec2d8c1476144bf925d7",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.lifecycle_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "superseded",
+        "to": "active",
+        "cause": "reverted",
+        "replacement_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "8b35344c774db87b772ebae193abbcbc72ba915ad807ec2d8c1476144bf925d7",
+      "hash": "c078bdef030f64b148ab5cd9f4461efc5015eb14798903bc35323ca987f12f7c",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.lifecycle_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "superseded",
+        "to": "active",
+        "cause": "reverted",
+        "replacement_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "c078bdef030f64b148ab5cd9f4461efc5015eb14798903bc35323ca987f12f7c",
+      "hash": "d2ec95b76e5557101187a0311bfa571feb7002294103156584b77c23e7638608",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.lifecycle_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "from": "active",
+        "to": "archived",
+        "cause": "archived",
+        "replacement_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "d2ec95b76e5557101187a0311bfa571feb7002294103156584b77c23e7638608",
+      "hash": "ac9ba5c38e7e25d0042c778ed2aaaa6d5ea5e45f111385ff5da7a64483cd8180",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.contested",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "action": "open",
+        "counterevidence_refs": [
+          "0123456789abcdef0123456789abcdef"
+        ],
+        "addressed_by_event_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "ac9ba5c38e7e25d0042c778ed2aaaa6d5ea5e45f111385ff5da7a64483cd8180",
+      "hash": "33b06599dbb04f04c67d51cc6d49be871d87cc73674d672255d686c79d83093d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.tombstoned",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "replacement_id": null,
+        "reason_code": "invalid"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "33b06599dbb04f04c67d51cc6d49be871d87cc73674d672255d686c79d83093d",
+      "hash": "61c68e22f52e43539b29f0e646ccf04b818120ea1ab36d83a649dd2822d47bd1",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.lifecycle_changed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "from": "active",
+        "to": "archived",
+        "cause": "archived",
+        "replacement_id": null
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000001",
+      "dddddddddddddddddddddddddddddddd": "00000000000000000000000000000002"
+    },
+    "aliases": {},
+    "observations": {},
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000001"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000009",
+          "state_digest": "95d02452d928e91cbf7055806e7298c0ec0adea6cab77467e57039029086fef5",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": "00000000000000000000000000000005",
+          "lifecycle_head": "00000000000000000000000000000009",
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "archived",
+          "tombstoned": false,
+          "open_contest": null
+        }
+      },
+      "ffffffffffffffffffffffffffffffff": {
+        "entity_id": "dddddddddddddddddddddddddddddddd",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000002"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "0000000000000000000000000000000b",
+          "state_digest": "0c736cb485bf40560777302f75d351575b78db1822a5c23a4c6b6a6dbe09a7af",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": "0000000000000000000000000000000b",
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": true,
+          "open_contest": null
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 6,
+      "belief:ffffffffffffffffffffffffffffffff": 2,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "entity:dddddddddddddddddddddddddddddddd": 1
+    },
+    "batches": [],
+    "proposals": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "illegal_transition: belief eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is Qualified, not Draft"
+    },
+    {
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "illegal_transition: belief eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee is Active, not Superseded"
+    },
+    {
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "counterevidence 0123456789abcdef0123456789abcdef is not a committed Observation"
+    },
+    {
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "belief ffffffffffffffffffffffffffffffff is tombstoned — a tombstone is terminal, not a state to move out of"
+    }
+  ]
+}

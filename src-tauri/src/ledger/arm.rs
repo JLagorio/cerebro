@@ -80,6 +80,20 @@ pub fn arm(writer: &mut LedgerWriter, vault: &Path) -> Arming {
     // The initial manifest: create-only, and only when files agree. An
     // existing manifest belongs to the M23.2+ write protocol, not here.
     let manifest_created = match manifest::load(vault) {
+        Ok(Some(existing)) if manifest::needs_format_migration(&existing) => {
+            // M24.3: a manifest an M23 build wrote carries descriptor
+            // digests computed WITHOUT the governed-state heads. Recompute
+            // every one from the committed ledger before anything can emit
+            // a qualification, lifecycle, tombstone, contest, or merge
+            // event — otherwise the first governed transition would leave
+            // the manifest claiming a projection was current when its
+            // identity had already moved.
+            let state = reduce(&read.frames, &store);
+            match manifest::migrate_to_current(vault, &state, &existing) {
+                Ok(_) => false,
+                Err(detail) => return Arming::Failed(detail),
+            }
+        }
         Ok(Some(_)) => false,
         Ok(None) => {
             let state = reduce(&read.frames, &store);

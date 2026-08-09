@@ -93,6 +93,27 @@ interface BeliefState {
   overrideHeadEvent: string | null;
   /** The highest-seq projection-state transition event. */
   projectionHeadEvent: string;
+  // --- M24 governed state -------------------------------------------------
+  qualification: string;
+  lifecycle: string;
+  /** Set once, never cleared: a tombstone is terminal by construction. */
+  tombstonedBy: string | null;
+  openContestEvent: string | null;
+  qualificationHeadEvent: string | null;
+  lifecycleHeadEvent: string | null;
+  contestHeadEvent: string | null;
+  entityMergeEventIds: string[];
+}
+
+/** The durable proposal lifecycle — reducer state, never runtime cache. */
+interface ProposalRow {
+  proposalId: string;
+  state: string;
+  commitSetId: string | null;
+  decision: [string, string] | null;
+  appliedEventId: string | null;
+  revertPlan: Json | null;
+  submittedEventId: string;
 }
 
 interface RelationState {
@@ -147,6 +168,8 @@ export interface EpistemicState {
   beliefRevisionEvents: Map<string, [string, number]>;
   relations: Map<string, RelationState>;
   relationAddEvents: Map<string, string>;
+  /** The M24 proposal lifecycle — portable, not a runtime cache. */
+  proposals: Map<string, ProposalRow>;
   resolutions: ResolutionRow[];
   independence: Map<string, { eventId: string; proofKind: string }>; // "left|right"
   derivedBeliefSources: [string, string][];
@@ -176,6 +199,7 @@ function emptyState(): EpistemicState {
     beliefRevisionEvents: new Map(),
     relations: new Map(),
     relationAddEvents: new Map(),
+    proposals: new Map(),
     resolutions: [],
     independence: new Map(),
     derivedBeliefSources: [],
@@ -396,9 +420,275 @@ function apply(
       return applyDivergence(state, frame, body);
     case 'ledger.reconciliation_resolved':
       return applyReconciliationResolved(state, frame, body);
+    case 'belief.qualification_changed':
+      return applyQualification(state, frame, body);
+    case 'belief.lifecycle_changed':
+      return applyLifecycle(state, frame, body);
+    case 'belief.tombstoned':
+      return applyTombstone(state, frame, body);
+    case 'belief.contested':
+      return applyContest(state, frame, body, staged);
+    case 'entity.merged':
+      return applyEntityMerge(state, frame, body);
+    case 'proposal.submitted':
+      return applyProposalSubmitted(state, frame, body);
+    case 'proposal.queued':
+      return applyProposalQueued(state, frame, body);
+    case 'proposal.decision_recorded':
+      return applyProposalDecision(state, frame, body);
+    case 'proposal.applied':
+      return applyProposalApplied(state, frame, body);
+    case 'proposal.rejected':
+      return applyProposalRejected(state, frame, body);
+    case 'proposal.reverted':
+      return applyProposalReverted(state, frame, body);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
+}
+
+// --- M24 governed mutations -------------------------------------------------
+
+/**
+ * A Belief that can still be governed. Tombstoned is TERMINAL: nothing
+ * mutates it afterwards, which is what "non-reversible" means here rather
+ * than a convention the ops are trusted to observe.
+ */
+function liveBelief(state: EpistemicState, beliefId: string): BeliefState {
+  const belief = state.beliefs.get(beliefId);
+  if (!belief) throw new RefusedError('belief does not exist');
+  if (belief.tombstonedBy !== null) {
+    throw new RefusedError('belief is tombstoned — a tombstone is terminal');
+  }
+  return belief;
+}
+
+function applyQualification(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const belief = liveBelief(state, body.belief_id as string);
+  // The event declares where it came FROM; if state disagrees, the proposal
+  // was computed against a snapshot that has since moved.
+  if (belief.qualification !== body.from) {
+    throw new RefusedError('illegal_transition: qualification source does not match state');
+  }
+  belief.qualification = body.to as string;
+  belief.qualificationHeadEvent = frame.event_id;
+  belief.projectionHeadEvent = frame.event_id;
+  bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
+}
+
+function applyLifecycle(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const replacement = body.replacement_id as string | null;
+  if (replacement !== null && !state.beliefs.has(replacement)) {
+    throw new RefusedError('replacement belief does not exist');
+  }
+  const belief = liveBelief(state, body.belief_id as string);
+  if (belief.lifecycle !== body.from) {
+    throw new RefusedError('illegal_transition: lifecycle source does not match state');
+  }
+  belief.lifecycle = body.to as string;
+  belief.lifecycleHeadEvent = frame.event_id;
+  belief.projectionHeadEvent = frame.event_id;
+  bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
+}
+
+function applyTombstone(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const replacement = body.replacement_id as string | null;
+  if (replacement !== null && !state.beliefs.has(replacement)) {
+    throw new RefusedError('replacement belief does not exist');
+  }
+  const belief = liveBelief(state, body.belief_id as string);
+  belief.tombstonedBy = frame.event_id;
+  belief.projectionHeadEvent = frame.event_id;
+  bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
+}
+
+function applyContest(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  for (const ref of body.counterevidence_refs as string[]) {
+    // Counterevidence must be COMMITTED: same-batch evidence would let one
+    // batch both invent the objection and rest on it.
+    if (staged.has(ref) || !state.observations.has(ref)) {
+      throw new RefusedError('counterevidence is not a committed Observation');
+    }
+  }
+  const belief = liveBelief(state, body.belief_id as string);
+  if (body.action === 'open') {
+    if (belief.openContestEvent !== null) {
+      throw new RefusedError('belief already has an open contest');
+    }
+    belief.openContestEvent = frame.event_id;
+  } else {
+    // At most one contest is ever open, so "which one does this close?" has
+    // exactly one answer and needs no second pointer.
+    if (belief.openContestEvent === null) {
+      throw new RefusedError('belief has no open contest to close');
+    }
+    if (body.addressed_by_event_id === belief.openContestEvent) {
+      throw new RefusedError('a contest cannot be addressed by its own opening event');
+    }
+    belief.openContestEvent = null;
+  }
+  belief.contestHeadEvent = frame.event_id;
+  belief.projectionHeadEvent = frame.event_id;
+  bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
+}
+
+function applyEntityMerge(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const plan = body.reassignment_plan as JsonObject;
+  const survivor = plan.survivor_id as string;
+  const mergedIds = plan.merged_ids as string[];
+  if (!state.entities.has(survivor)) throw new RefusedError('survivor entity does not exist');
+  for (const merged of mergedIds) {
+    if (!state.entities.has(merged)) throw new RefusedError('merged entity does not exist');
+  }
+  // The plan must enumerate EXACTLY the beliefs that point at a merged
+  // entity: an omission leaves a dangling identity, an extra reassigns
+  // something the proposal never named, and the CAS target set is derived
+  // from this list so both are silent otherwise.
+  const expected = [...state.beliefs.values()]
+    .filter((b) => mergedIds.includes(b.entityId))
+    .map((b) => b.beliefId)
+    .sort();
+  const declared = plan.affected_belief_ids as string[];
+  if (expected.join('|') !== declared.join('|')) {
+    throw new RefusedError('reassignment plan does not match state');
+  }
+  const relationIds = plan.affected_relation_ids as string[];
+  for (const relationId of relationIds) {
+    if (!state.relations.has(relationId)) throw new RefusedError('relation does not exist');
+  }
+  const aliases = plan.live_aliases as JsonObject[];
+  for (const alias of aliases) {
+    const registered = state.aliasRegistry.get(alias.normalized_alias as string);
+    if (!registered) throw new RefusedError('alias is not registered');
+    if (registered.entityId !== alias.from_entity_id) {
+      throw new RefusedError('alias is bound to a different entity');
+    }
+  }
+
+  // One event, every reassignment.
+  for (const alias of aliases) {
+    const registered = state.aliasRegistry.get(alias.normalized_alias as string);
+    if (registered) registered.entityId = survivor;
+  }
+  for (const beliefId of declared) {
+    const belief = state.beliefs.get(beliefId);
+    if (belief) {
+      belief.entityId = survivor;
+      belief.entityMergeEventIds.push(frame.event_id);
+      belief.projectionHeadEvent = frame.event_id;
+    }
+    bumpVersion(state, 'belief', beliefId, frame.event_id);
+  }
+  for (const relationId of relationIds) {
+    bumpVersion(state, 'relation', relationId, frame.event_id);
+  }
+  for (const merged of mergedIds) {
+    state.entities.delete(merged);
+    bumpVersion(state, 'entity', merged, frame.event_id);
+  }
+  bumpVersion(state, 'entity', survivor, frame.event_id);
+}
+
+// --- The proposal lifecycle -------------------------------------------------
+
+const TERMINAL_PROPOSAL_STATES = ['rejected', 'applied', 'reverted'];
+
+/**
+ * Terminal means terminal. A second terminal event for one proposal is a
+ * refusal, not a state change — otherwise an applied proposal could be
+ * "rejected" afterwards and the durable record would contradict itself.
+ */
+function requireNonTerminal(state: EpistemicState, proposalId: string): ProposalRow {
+  const row = state.proposals.get(proposalId);
+  if (!row) throw new RefusedError('proposal was never submitted');
+  if (TERMINAL_PROPOSAL_STATES.includes(row.state)) {
+    throw new RefusedError('terminal states cannot be left');
+  }
+  return row;
+}
+
+function applyProposalSubmitted(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const proposal = body.proposal as JsonObject;
+  const id = proposal.proposal_id as string;
+  if (state.proposals.has(id)) throw new RefusedError('proposal is already submitted');
+  state.proposals.set(id, {
+    proposalId: id,
+    state: 'submitted',
+    commitSetId: null,
+    decision: null,
+    appliedEventId: null,
+    revertPlan: null,
+    submittedEventId: frame.event_id,
+  });
+  createVersion(state, 'proposal', id, frame.event_id);
+}
+
+function applyProposalQueued(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const row = requireNonTerminal(state, body.proposal_id as string);
+  for (const member of body.member_proposal_ids as string[]) {
+    if (!state.proposals.has(member)) {
+      throw new RefusedError('commit set member was never submitted');
+    }
+  }
+  row.state = 'queued';
+  row.commitSetId = body.commit_set_id as string;
+  bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
+}
+
+function applyProposalDecision(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const row = state.proposals.get(body.proposal_id as string);
+  if (!row) throw new RefusedError('proposal was never submitted');
+  // A decision is only meaningful on something actually awaiting one.
+  if (row.state !== 'queued') throw new RefusedError('proposal is not queued');
+  if (row.decision !== null) throw new RefusedError('proposal already carries a decision');
+  row.decision = [body.decision_id as string, body.decision as string];
+  bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
+}
+
+function applyProposalApplied(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const row = requireNonTerminal(state, body.proposal_id as string);
+  const decisionId = body.decision_id as string | null;
+  if (decisionId !== null) {
+    if (row.decision === null || row.decision[0] !== decisionId) {
+      throw new RefusedError('applied names a decision that is not its recorded one');
+    }
+    if (row.decision[1] === 'reject') {
+      throw new RefusedError('a rejected proposal cannot cite that decision to apply');
+    }
+  }
+  row.state = 'applied';
+  row.appliedEventId = frame.event_id;
+  row.revertPlan = (body.revert_plan ?? null) as Json | null;
+  if (row.commitSetId === null) row.commitSetId = body.commit_set_id as string;
+  bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
+}
+
+function applyProposalRejected(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const row = requireNonTerminal(state, body.proposal_id as string);
+  const peer = body.refused_by_proposal_id as string | null;
+  if (peer !== null && !state.proposals.has(peer)) {
+    throw new RefusedError('refused_by proposal was never submitted');
+  }
+  row.state = 'rejected';
+  bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
+}
+
+function applyProposalReverted(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const row = state.proposals.get(body.proposal_id as string);
+  if (!row) throw new RefusedError('proposal was never submitted');
+  // Only an APPLIED proposal can be reverted, and the reverting proposal
+  // must itself exist — a reversion pointing at nothing is unauditable.
+  if (row.state !== 'applied') throw new RefusedError('only an applied proposal can be reverted');
+  if (!state.proposals.has(body.reverted_by_proposal_id as string)) {
+    throw new RefusedError('reverting proposal was never submitted');
+  }
+  row.state = 'reverted';
+  bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
 }
 
 function applySource(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
@@ -829,6 +1119,16 @@ function applyBeliefCreated(state: EpistemicState, frame: VectorFrame, body: Jso
     overrides: [],
     overrideHeadEvent: null,
     projectionHeadEvent: frame.event_id,
+    // A created Belief is active and draft: promotion's only legal source
+    // is `draft`, supersede's only legal source is `active`.
+    qualification: 'draft',
+    lifecycle: 'active',
+    tombstonedBy: null,
+    openContestEvent: null,
+    qualificationHeadEvent: null,
+    lifecycleHeadEvent: null,
+    contestHeadEvent: null,
+    entityMergeEventIds: [],
   });
   state.beliefRevisionEvents.set(frame.event_id, [beliefId, 1]);
   createVersion(state, 'belief', beliefId, frame.event_id);
@@ -1137,6 +1437,15 @@ function descriptor(state: EpistemicState, belief: BeliefState): JsonObject {
     alias_event_ids: aliasEvents,
     active_override_event_ids: belief.overrides.map((o) => o.eventId),
     override_head_event_id: belief.overrideHeadEvent,
+    // Format 2 (M24.3): the governed-state heads. They join the descriptor
+    // before any M24 mutation body can emit, so a projection's identity
+    // always accounts for every transition that could change what it
+    // renders — and the digest moves even when the bytes do not.
+    qualification_head_event_id: belief.qualificationHeadEvent,
+    lifecycle_head_event_id: belief.lifecycleHeadEvent,
+    tombstone_event_id: belief.tombstonedBy,
+    contest_head_event_id: belief.contestHeadEvent,
+    entity_merge_event_ids: [...belief.entityMergeEventIds],
   };
 }
 
@@ -1346,6 +1655,18 @@ export function vectorState(state: EpistemicState): Json {
         active_overrides: b.overrides.map((o) => o.eventId),
         stale_overrides: b.overrides.filter((o) => o.stale).map((o) => o.eventId),
         override_head: b.overrideHeadEvent,
+        // Format 2 (M24.3): the governed-state heads.
+        qualification_head: b.qualificationHeadEvent,
+        lifecycle_head: b.lifecycleHeadEvent,
+        tombstone_event: b.tombstonedBy,
+        contest_head: b.contestHeadEvent,
+        entity_merge_events: [...b.entityMergeEventIds],
+      },
+      governance: {
+        qualification: b.qualification,
+        lifecycle: b.lifecycle,
+        tombstoned: b.tombstonedBy !== null,
+        open_contest: b.openContestEvent,
       },
     };
   }
@@ -1377,6 +1698,19 @@ export function vectorState(state: EpistemicState): Json {
     derived_belief_sources: state.derivedBeliefSources.map(([o, r]) => [o, r] as Json[]),
     versions,
     batches: state.batches.map((b) => [b.batchId, b.state, b.memberCount] as Json[]),
+    proposals: (() => {
+      const out: JsonObject = {};
+      for (const [, p] of sorted([...state.proposals.entries()])) {
+        out[p.proposalId] = {
+          state: p.state,
+          commit_set_id: p.commitSetId,
+          decision: p.decision === null ? null : ([p.decision[0], p.decision[1]] as Json[]),
+          applied_event_id: p.appliedEventId,
+          has_revert_plan: p.revertPlan !== null && p.revertPlan !== undefined,
+        };
+      }
+      return out;
+    })(),
     reconciliation: {
       open: state.reconciliationDivergences.size > 0,
       divergences: Object.fromEntries(

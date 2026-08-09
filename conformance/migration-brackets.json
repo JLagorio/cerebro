@@ -118,6 +118,7 @@
     "derived_belief_sources": [],
     "versions": {},
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

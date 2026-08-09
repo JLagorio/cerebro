@@ -291,6 +291,7 @@
       "source:d89318cdd73ee2a9db48ab151c0445eb": 1
     },
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

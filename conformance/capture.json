@@ -1023,12 +1023,23 @@
         "projection": {
           "path": "concepts/acme.md",
           "generating_event": "00000000000000000000000000000012",
-          "state_digest": "92835fad1c089ebf988b242e199e3cc02fc2d0148768da4ad8d1ec59414ae73e",
+          "state_digest": "6bd53f6945df29a4ceb5c0f978acedda15a5d0a813300697c62624cde47be95d",
           "content_hash": "f50f795fa0f6e659feba1cc6334dee058c8b995cdae80efae05231c62e5c900c",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       },
       "ffffffffffffffffffffffffffffffff": {
@@ -1049,12 +1060,23 @@
         "projection": {
           "path": "concepts/other.md",
           "generating_event": "00000000000000000000000000000002",
-          "state_digest": "cd21f91b9d1ccbcacd6b818d267597906b9d664505fb225e3e5ed34ed467dfad",
+          "state_digest": "b98dcd1a32ba123df215e566162b776669c3ced8db605a3efb7c842d80e9e9bd",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -1103,6 +1125,7 @@
         2
       ]
     ],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

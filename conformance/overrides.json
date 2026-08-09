@@ -581,7 +581,7 @@
         "projection": {
           "path": "concepts/acme.md",
           "generating_event": "0000000000000000000000000000000d",
-          "state_digest": "0a5ff5f0ee9dad977d693e8e9860b61acc9e3047fba8d3dedcb43a2385065d39",
+          "state_digest": "f3821744f6fad09e5ca79f4c65954f3d73446b958e7565b5f511c6f7e13d36ff",
           "content_hash": "6de5b5c987a1a2ab8448207e8d4fd61d2b73953be1c1c0d00c809b9a300e3728",
           "review_event_ids": [],
           "active_overrides": [
@@ -590,7 +590,18 @@
           "stale_overrides": [
             "0000000000000000000000000000000c"
           ],
-          "override_head": "0000000000000000000000000000000c"
+          "override_head": "0000000000000000000000000000000c",
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       },
       "ffffffffffffffffffffffffffffffff": {
@@ -611,12 +622,23 @@
         "projection": {
           "path": null,
           "generating_event": "00000000000000000000000000000008",
-          "state_digest": "9b28c54d838c6f47d0f7ba200dc3f6dead9040d0431b77cc59098b1ece4d1189",
+          "state_digest": "d1f24c419e0e9508998211cf89bbb6cd8eb5739f747a1c5335c0b237b0a90885",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -631,6 +653,7 @@
       "entity:dddddddddddddddddddddddddddddddd": 1
     },
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

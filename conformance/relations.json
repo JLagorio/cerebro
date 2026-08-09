@@ -261,12 +261,23 @@
         "projection": {
           "path": null,
           "generating_event": "00000000000000000000000000000007",
-          "state_digest": "8c7c69f2d820744a6fd61625eb69168526dce92d92b2a4edaba97bace9b963eb",
+          "state_digest": "e0d58eba5ead88422e152ef8b1b237f461b67bb300c2c09b7399520b3dc74e86",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       },
       "ffffffffffffffffffffffffffffffff": {
@@ -287,12 +298,23 @@
         "projection": {
           "path": null,
           "generating_event": "00000000000000000000000000000002",
-          "state_digest": "cd21f91b9d1ccbcacd6b818d267597906b9d664505fb225e3e5ed34ed467dfad",
+          "state_digest": "b98dcd1a32ba123df215e566162b776669c3ced8db605a3efb7c842d80e9e9bd",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -315,6 +337,7 @@
       "relation:43265c212f8b9596f5380ada5efa8516": 3
     },
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

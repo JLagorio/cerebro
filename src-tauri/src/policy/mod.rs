@@ -16,6 +16,7 @@ pub mod authority;
 pub mod goldens;
 pub mod rejection;
 pub mod risk;
+pub mod submit;
 pub mod table;
 pub mod verdict;
 
@@ -77,6 +78,57 @@ mod tests {
             Vec::<&&str>::new(),
             "table row(s) for op(s) nothing can construct — dead policy"
         );
+    }
+
+    #[test]
+    fn the_op_union_names_exactly_the_inventory() {
+        // The other half of the tripwire (M24.3). `OP_INVENTORY` is the
+        // list, `ProposalOp` is what the code can actually construct, and
+        // the table is what governs. All three must be the same set: a
+        // variant added without a row would be an ungoverned mutation path,
+        // and a row with no variant is dead policy.
+        use crate::ledger::schema::ProposalOp;
+        let constructible: BTreeSet<&str> = ProposalOp::ALL_KINDS.iter().copied().collect();
+        let inventory: BTreeSet<&str> = OP_INVENTORY.iter().copied().collect();
+        assert_eq!(constructible, inventory);
+    }
+
+    #[test]
+    fn the_target_classes_agree_between_the_schema_and_the_table() {
+        // `TargetClass` is a serde enum (the wire needs a type) and the
+        // table carries the same seven as data. One assertion binds them,
+        // the same way the op tripwire binds the op union.
+        use crate::ledger::schema::TargetClass;
+        let table = PolicyTable::load().unwrap();
+        let declared: Vec<&str> = TargetClass::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(declared, table.target_classes);
+    }
+
+    #[test]
+    fn every_silence_cause_is_a_transition_cause_the_schema_can_spell() {
+        // A cause in the table that no proposal could ever carry would be a
+        // rule that never fires while looking like protection.
+        use crate::ledger::schema::TransitionCause;
+        let table = PolicyTable::load().unwrap();
+        let spellable: BTreeSet<&str> = [
+            TransitionCause::NewEvidence,
+            TransitionCause::HumanCorrection,
+            TransitionCause::QualificationMet,
+            TransitionCause::ConflictResolution,
+            TransitionCause::Maintenance,
+            TransitionCause::Revert,
+            TransitionCause::ElapsedTime,
+            TransitionCause::AbsenceOfObservations,
+        ]
+        .iter()
+        .map(|c| c.as_str())
+        .collect();
+        for cause in &table.silence.causes {
+            assert!(
+                spellable.contains(cause.as_str()),
+                "silence cause {cause} is not a TransitionCause"
+            );
+        }
     }
 
     #[test]

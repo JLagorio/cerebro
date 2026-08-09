@@ -1,6 +1,6 @@
 {
   "name": "plumbing",
-  "description": "Plumbing indexes with zero entity state; schema-claiming garbage and reserved kinds are deterministic anomalies, never panics.",
+  "description": "Plumbing indexes with zero entity state; schema-claiming garbage, an incomplete body under a known kind, and a kind outside the vocabulary are all deterministic anomalies, never panics.",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -92,6 +92,19 @@
       "body": {
         "schema": 1
       }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "2a7896715f488b3a149d706492b10525fd9e5d054acab207a37ba06727464775",
+      "hash": "232875c066b998b5db44f4f652f7554531f56f1fd620b69f86b0a64c4d5ffc84",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.teleported",
+      "body": {
+        "schema": 1
+      }
     }
   ],
   "expected_state": {
@@ -120,12 +133,23 @@
         "projection": {
           "path": null,
           "generating_event": "00000000000000000000000000000002",
-          "state_digest": "cd21f91b9d1ccbcacd6b818d267597906b9d664505fb225e3e5ed34ed467dfad",
+          "state_digest": "b98dcd1a32ba123df215e566162b776669c3ced8db605a3efb7c842d80e9e9bd",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
           "stale_overrides": [],
-          "override_head": null
+          "override_head": null,
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -138,6 +162,7 @@
       "entity:cccccccccccccccccccccccccccccccc": 1
     },
     "batches": [],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},
@@ -157,7 +182,14 @@
       "event_id": "00000000000000000000000000000005",
       "batch_id": null,
       "code": "schema",
-      "detail": "kind proposal.submitted is reserved vocabulary — its body is defined in M24, not here"
+      "detail": "proposal.submitted: missing field `actor`"
+    },
+    {
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "batch_id": null,
+      "code": "schema",
+      "detail": "kind belief.teleported carries a schema-v1 body but is not in this build's vocabulary"
     }
   ]
 }

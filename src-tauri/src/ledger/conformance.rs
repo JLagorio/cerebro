@@ -1669,16 +1669,21 @@ fn scenario_plumbing() -> (&'static str, &'static str, Vec<Frame>) {
         &belief_body(BELIEF, ENTITY, unsupported()),
     );
     b.push("vault.delete", serde_json::json!({ "path": "a.md" }));
-    // Garbage claiming schema membership, and a reserved kind.
+    // Garbage claiming schema membership: an unknown field, a known kind
+    // with a body missing its common fields (M24.3 defined this one, so it
+    // is now a shape refusal rather than a reservation refusal), and a kind
+    // no build has ever heard of.
     b.push(
         KIND_BELIEF_CREATED,
         serde_json::json!({ "schema": 1, "garbage": true }),
     );
     b.push("proposal.submitted", serde_json::json!({ "schema": 1 }));
+    b.push("belief.teleported", serde_json::json!({ "schema": 1 }));
     (
         "plumbing",
-        "Plumbing indexes with zero entity state; schema-claiming garbage and reserved kinds are \
-         deterministic anomalies, never panics.",
+        "Plumbing indexes with zero entity state; schema-claiming garbage, an incomplete body \
+         under a known kind, and a kind outside the vocabulary are all deterministic anomalies, \
+         never panics.",
         b.frames,
     )
 }
@@ -2594,6 +2599,357 @@ fn scenario_capture() -> (&'static str, &'static str, Vec<Frame>) {
 
 // --- Generation ------------------------------------------------------------
 
+/// The M24 governed lifecycle: qualification, lifecycle, contest, and
+/// tombstone, with the illegal edges refused beside the legal ones.
+fn scenario_governance() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
+
+    let profile = schema::QualificationProfileRef {
+        type_id: "Metric".into(),
+        type_schema_hash: "f".repeat(64),
+        required_roles: vec![schema::FieldRole::Evidence, schema::FieldRole::Owner],
+    };
+    let qualification = |belief: &str, from, to, cause| {
+        let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+        schema::BeliefQualificationChanged {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: belief.into(),
+            from,
+            to,
+            qualification_profile: profile.clone(),
+            cause,
+        }
+    };
+    // Promotion, then a same-state retry (refused), then the stored inverse.
+    b.push_body(
+        schema::KIND_BELIEF_QUALIFICATION_CHANGED,
+        &qualification(
+            BELIEF,
+            schema::Qualification::Draft,
+            schema::Qualification::Qualified,
+            schema::QualificationCause::Promoted,
+        ),
+    );
+    b.push_body(
+        schema::KIND_BELIEF_QUALIFICATION_CHANGED,
+        &qualification(
+            BELIEF,
+            schema::Qualification::Draft,
+            schema::Qualification::Qualified,
+            schema::QualificationCause::Promoted,
+        ),
+    );
+    b.push_body(
+        schema::KIND_BELIEF_QUALIFICATION_CHANGED,
+        &qualification(
+            BELIEF,
+            schema::Qualification::Qualified,
+            schema::Qualification::Draft,
+            schema::QualificationCause::Reverted,
+        ),
+    );
+
+    let lifecycle = |belief: &str, from, to, cause, replacement: Option<&str>| {
+        let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+        schema::BeliefLifecycleChanged {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: belief.into(),
+            from,
+            to,
+            cause,
+            replacement_id: replacement.map(str::to_string),
+        }
+    };
+    use schema::Lifecycle as L;
+    use schema::LifecycleCause as C;
+    // Supersede, its stored inverse, then archive.
+    b.push_body(
+        schema::KIND_BELIEF_LIFECYCLE_CHANGED,
+        &lifecycle(
+            BELIEF,
+            L::Active,
+            L::Superseded,
+            C::Superseded,
+            Some(BELIEF_B),
+        ),
+    );
+    b.push_body(
+        schema::KIND_BELIEF_LIFECYCLE_CHANGED,
+        &lifecycle(BELIEF, L::Superseded, L::Active, C::Reverted, None),
+    );
+    // Un-archiving is not a v1 transition, and a state mismatch is refused.
+    b.push_body(
+        schema::KIND_BELIEF_LIFECYCLE_CHANGED,
+        &lifecycle(BELIEF, L::Superseded, L::Active, C::Reverted, None),
+    );
+    b.push_body(
+        schema::KIND_BELIEF_LIFECYCLE_CHANGED,
+        &lifecycle(BELIEF, L::Active, L::Archived, C::Archived, None),
+    );
+
+    // A contest needs committed counterevidence; there is none in this
+    // vector, so the open is refused — an opinion is not a challenge.
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_BELIEF_CONTESTED,
+        &schema::BeliefContested {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF_B.into(),
+            action: schema::ContestAction::Open,
+            counterevidence_refs: vec!["0123456789abcdef0123456789abcdef".into()],
+            addressed_by_event_id: None,
+        },
+    );
+
+    // Tombstone is terminal: the transition after it is refused.
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_BELIEF_TOMBSTONED,
+        &schema::BeliefTombstoned {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF_B.into(),
+            replacement_id: None,
+            reason_code: schema::TombstoneReason::Invalid,
+        },
+    );
+    b.push_body(
+        schema::KIND_BELIEF_LIFECYCLE_CHANGED,
+        &lifecycle(BELIEF_B, L::Active, L::Archived, C::Archived, None),
+    );
+
+    (
+        "governance",
+        "Qualification and lifecycle move only along their exact edges; a same-state retry, a \
+         state mismatch, an un-archive, an uncommitted contest, and any transition after a \
+         tombstone are all refused. Each accepted transition advances the Belief once and moves \
+         its projection head.",
+        b.frames,
+    )
+}
+
+/// The durable proposal lifecycle and its closed version effects.
+fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let proposal_a = "1111111111111111111111111111111a";
+    let proposal_b = "1111111111111111111111111111111b";
+    let commit_set = "5e75e75e75e75e75e75e75e75e75e75e";
+    let decision_id = "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0";
+
+    let submit = |id: &str| {
+        let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
+        schema::ProposalSubmitted {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal: Box::new(schema::ProposalV1 {
+                schema: schema::PROPOSAL_SCHEMA,
+                proposal_id: id.into(),
+                run_id: "4444444444444444444444444444444a".into(),
+                targets: vec![schema::ProposalTarget {
+                    target_id: BELIEF.into(),
+                    target_class: schema::TargetClass::Belief,
+                    expected_version: Some(1),
+                }],
+                op: schema::ProposalOp::ArchiveBelief {
+                    belief_id: BELIEF.into(),
+                    replacement_id: None,
+                },
+                intended_use: schema::IntendedUse {
+                    kind: schema::IntendedUseKind::ReversibleWork,
+                    stakes: schema::Risk::Low,
+                    predicate_class: None,
+                },
+                basis: schema::ProposalBasis {
+                    transition_cause: schema::TransitionCause::Maintenance,
+                    evidence_refs: vec![],
+                    coverage_refs: vec![],
+                    authority_refs: vec![],
+                    authority_route_refs: vec![],
+                    addressed_contradictions: vec![],
+                    absence_claim: false,
+                },
+                declared_risk: schema::Risk::High,
+                reason: "retire the stale record".into(),
+                candidate_search_receipt: None,
+            }),
+        }
+    };
+    b.push_body(schema::KIND_PROPOSAL_SUBMITTED, &submit(proposal_a));
+    b.push_body(schema::KIND_PROPOSAL_SUBMITTED, &submit(proposal_b));
+    // A second submission of the same proposal is refused.
+    b.push_body(schema::KIND_PROPOSAL_SUBMITTED, &submit(proposal_a));
+
+    let queue = |id: &str| {
+        let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+        schema::ProposalQueued {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal_id: id.into(),
+            commit_set_id: commit_set.into(),
+            member_proposal_ids: vec![proposal_a.into(), proposal_b.into()],
+            effective_risk: schema::Risk::High,
+            policy_version: 1,
+            target_versions: vec![schema::TargetVersion {
+                target_class: schema::TargetClass::Belief,
+                target_id: BELIEF.into(),
+                version: 1,
+            }],
+            queued_at: STAMP.into(),
+        }
+    };
+    b.push_body(schema::KIND_PROPOSAL_QUEUED, &queue(proposal_a));
+    b.push_body(schema::KIND_PROPOSAL_QUEUED, &queue(proposal_b));
+
+    let decide = |id: &str, proposal: &str, decision, reason: Option<&str>| {
+        let (schema_v, batch_id, idempotency_key, actor) = common("human:josef");
+        schema::ProposalDecisionRecorded {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            decision_id: id.into(),
+            proposal_id: proposal.into(),
+            decision,
+            reviewer: "human:josef".into(),
+            decided_at: STAMP.into(),
+            reason: reason.map(str::to_string),
+            reviewed_target_versions: vec![],
+        }
+    };
+    b.push_body(
+        schema::KIND_PROPOSAL_DECISION_RECORDED,
+        &decide(decision_id, proposal_a, schema::Decision::Approve, None),
+    );
+    // A second decision on one proposal is refused.
+    b.push_body(
+        schema::KIND_PROPOSAL_DECISION_RECORDED,
+        &decide(
+            "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+            proposal_a,
+            schema::Decision::Reject,
+            Some("changed my mind"),
+        ),
+    );
+
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_PROPOSAL_APPLIED,
+        &schema::ProposalApplied {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal_id: proposal_a.into(),
+            commit_set_id: commit_set.into(),
+            effective_risk: schema::Risk::High,
+            decision_id: Some(decision_id.into()),
+            mutation_event_ids: vec!["0123456789abcdef0123456789abcdef".into()],
+            resulting_versions: vec![],
+            revert_plan: None,
+        },
+    );
+    // Terminal is terminal: a rejection after an application is refused.
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_PROPOSAL_REJECTED,
+        &schema::ProposalRejected {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal_id: proposal_a.into(),
+            commit_set_id: commit_set.into(),
+            code: "human_rejected".into(),
+            rule: "human_decision".into(),
+            expected: schema::TypedValue::string("approve"),
+            actual: schema::TypedValue::string("reject"),
+            decision_id: None,
+            refused_by_proposal_id: None,
+        },
+    );
+    // The peer is rejected as an atomic casualty, naming what failed.
+    let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
+    b.push_body(
+        schema::KIND_PROPOSAL_REJECTED,
+        &schema::ProposalRejected {
+            schema: schema_v,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            proposal_id: proposal_b.into(),
+            commit_set_id: commit_set.into(),
+            code: "atomic_set_refused".into(),
+            rule: "commit_set".into(),
+            expected: schema::TypedValue::string("applied"),
+            actual: schema::TypedValue::string("refused"),
+            decision_id: None,
+            refused_by_proposal_id: Some(proposal_a.into()),
+        },
+    );
+
+    (
+        "proposals",
+        "The durable proposal lifecycle: submit, queue as an all-or-nothing set, one human \
+         decision, apply, and an atomic peer rejection. A duplicate submission, a second \
+         decision, and a terminal-state exit are all refused, and every accepted event advances \
+         exactly its own proposal target once.",
+        b.frames,
+    )
+}
+
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
     vec![
         scenario_sources(),
@@ -2614,6 +2970,8 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_projection_identity(),
         scenario_reconciliation(),
         scenario_capture(),
+        scenario_governance(),
+        scenario_proposals(),
     ]
 }
 

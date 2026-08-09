@@ -23,13 +23,19 @@
 
 pub mod batch;
 pub mod belief;
+pub mod entity_merge;
 pub mod independence;
+pub mod lifecycle;
 pub mod migration;
 pub mod normalize;
 pub mod observation;
+pub mod ops;
 pub mod projection;
+pub mod proposal;
+pub mod proposal_events;
 pub mod reconciliation;
 pub mod resolution;
+pub mod risk;
 pub mod source;
 pub mod subject;
 pub mod value;
@@ -41,7 +47,13 @@ pub use belief::{
     derive_relation_id, BasisLink, BasisRole, BeliefAttested, BeliefBasis, BeliefCreated,
     BeliefRelation, BeliefRevised, EntityAliasAdded, PatchOp, RelationAction, RelationKind,
 };
+pub use entity_merge::{derive_plan_id, EntityMerged, EntityReassignmentPlan, LiveAlias};
 pub use independence::{IndependenceProof, IndependenceRecorded};
+pub use lifecycle::{
+    BeliefContested, BeliefLifecycleChanged, BeliefQualificationChanged, BeliefTombstoned,
+    ContestAction, FieldRole, Lifecycle, LifecycleCause, Qualification, QualificationCause,
+    QualificationProfileRef, TombstoneReason,
+};
 pub use migration::{migrate_id, MigrationCompleted, MigrationStarted};
 pub use normalize::normalize_alias_v1;
 pub use observation::{
@@ -50,15 +62,32 @@ pub use observation::{
     HumanAssertionPayload, ObservationKind, ObservationPayload, ObservationRecorded, Provenance,
     RelationshipToSubject, Scope, SourceSnapshotPayload, Stage, SubjectRole, SystemEventPayload,
 };
+pub use ops::{
+    AgentObservationDraft, ConflictOutcome, EquivalenceReceipt, EvidenceAssignment, ProposalOp,
+    RelationRewrite, RewriteDisposition, RewriteReplacement, SplitOutput, SupersedePair,
+    ValidInterval,
+};
 pub use projection::{
     validate_override_pointer, OverrideChange, OverrideOrigin, OverridePatchOp,
     ProjectionOverridden,
+};
+pub use proposal::{
+    AddressedContradiction, AliasLeg, AuthorityRouteRef, CandidateDecision, CandidateSearchReceipt,
+    ConsideredCandidate, ContestAddressing, ContradictionDisposition, ExactLeg, IntendedUse,
+    IntendedUseKind, PostVersion, ProposalBasis, ProposalTarget, ProposalV1, RevertPlan,
+    RevertStep, ScopedLeg, SemanticLeg, SemanticStatus, TargetClass, TransitionCause,
+    PROPOSAL_SCHEMA,
+};
+pub use proposal_events::{
+    Decision, ProposalApplied, ProposalDecisionRecorded, ProposalQueued, ProposalRejected,
+    ProposalReverted, ProposalState, ProposalSubmitted, TargetVersion,
 };
 pub use reconciliation::{
     DivergenceSignal, LedgerDivergence, ReconciliationAction, ReconciliationResolved,
     ACTOR_RECONCILIATION,
 };
 pub use resolution::{ResolutionChange, ResolverTier, SubjectResolved};
+pub use risk::Risk;
 pub use source::{
     derive_source_id, derive_source_key, AuthorityCapability, SourceRegistered, SourceRegistration,
 };
@@ -86,18 +115,29 @@ pub const KIND_PROJECTION_OVERRIDDEN: &str = "projection.overridden";
 pub const KIND_LEDGER_DIVERGENCE: &str = "ledger.divergence";
 pub const KIND_RECONCILIATION_RESOLVED: &str = "ledger.reconciliation_resolved";
 
-/// Reserved M24 lifecycle vocabulary: the kinds are fixed NOW so nothing
-/// else ever claims the names, but their bodies are deliberately undefined —
-/// a schema-v1 body under one of these is refused, never guessed at.
-pub const RESERVED_KINDS: [&str; 7] = [
-    "belief.tombstoned",
-    "proposal.submitted",
-    "proposal.queued",
-    "proposal.decision_recorded",
-    "proposal.applied",
-    "proposal.rejected",
-    "proposal.reverted",
-];
+// The M24 additions. `belief.tombstoned` was RESERVED by M22 — the name
+// claimed, the body deliberately undefined — and this is that body arriving
+// exactly as promised, additively, with the envelope still `v: 0`.
+pub const KIND_BELIEF_QUALIFICATION_CHANGED: &str = "belief.qualification_changed";
+pub const KIND_BELIEF_LIFECYCLE_CHANGED: &str = "belief.lifecycle_changed";
+pub const KIND_BELIEF_TOMBSTONED: &str = "belief.tombstoned";
+pub const KIND_BELIEF_CONTESTED: &str = "belief.contested";
+pub const KIND_ENTITY_MERGED: &str = "entity.merged";
+pub const KIND_PROPOSAL_SUBMITTED: &str = "proposal.submitted";
+pub const KIND_PROPOSAL_QUEUED: &str = "proposal.queued";
+pub const KIND_PROPOSAL_DECISION_RECORDED: &str = "proposal.decision_recorded";
+pub const KIND_PROPOSAL_APPLIED: &str = "proposal.applied";
+pub const KIND_PROPOSAL_REJECTED: &str = "proposal.rejected";
+pub const KIND_PROPOSAL_REVERTED: &str = "proposal.reverted";
+
+/// Reserved vocabulary: names fixed so nothing else ever claims them, with
+/// bodies deliberately undefined — a schema-v1 body under one of these is
+/// refused, never guessed at.
+///
+/// M22 reserved seven. M24.3 defines `belief.tombstoned` and the six
+/// `proposal.*` kinds, so the list is now empty and the reservation
+/// mechanism stands ready for M27's conflict vocabulary.
+pub const RESERVED_KINDS: [&str; 0] = [];
 
 /// Fixed system actor ids the core stamps itself (never caller-supplied).
 pub const ACTOR_LEDGER: &str = "system:ledger";
@@ -249,6 +289,17 @@ pub enum EventBody {
     ProjectionOverridden(Box<ProjectionOverridden>),
     LedgerDivergence(Box<LedgerDivergence>),
     ReconciliationResolved(Box<ReconciliationResolved>),
+    BeliefQualificationChanged(Box<BeliefQualificationChanged>),
+    BeliefLifecycleChanged(Box<BeliefLifecycleChanged>),
+    BeliefTombstoned(Box<BeliefTombstoned>),
+    BeliefContested(Box<BeliefContested>),
+    EntityMerged(Box<EntityMerged>),
+    ProposalSubmitted(Box<ProposalSubmitted>),
+    ProposalQueued(Box<ProposalQueued>),
+    ProposalDecisionRecorded(Box<ProposalDecisionRecorded>),
+    ProposalApplied(Box<ProposalApplied>),
+    ProposalRejected(Box<ProposalRejected>),
+    ProposalReverted(Box<ProposalReverted>),
 }
 
 impl EventBody {
@@ -269,6 +320,17 @@ impl EventBody {
             EventBody::ProjectionOverridden(_) => KIND_PROJECTION_OVERRIDDEN,
             EventBody::LedgerDivergence(_) => KIND_LEDGER_DIVERGENCE,
             EventBody::ReconciliationResolved(_) => KIND_RECONCILIATION_RESOLVED,
+            EventBody::BeliefQualificationChanged(_) => KIND_BELIEF_QUALIFICATION_CHANGED,
+            EventBody::BeliefLifecycleChanged(_) => KIND_BELIEF_LIFECYCLE_CHANGED,
+            EventBody::BeliefTombstoned(_) => KIND_BELIEF_TOMBSTONED,
+            EventBody::BeliefContested(_) => KIND_BELIEF_CONTESTED,
+            EventBody::EntityMerged(_) => KIND_ENTITY_MERGED,
+            EventBody::ProposalSubmitted(_) => KIND_PROPOSAL_SUBMITTED,
+            EventBody::ProposalQueued(_) => KIND_PROPOSAL_QUEUED,
+            EventBody::ProposalDecisionRecorded(_) => KIND_PROPOSAL_DECISION_RECORDED,
+            EventBody::ProposalApplied(_) => KIND_PROPOSAL_APPLIED,
+            EventBody::ProposalRejected(_) => KIND_PROPOSAL_REJECTED,
+            EventBody::ProposalReverted(_) => KIND_PROPOSAL_REVERTED,
         }
     }
 
@@ -289,6 +351,17 @@ impl EventBody {
             EventBody::ProjectionOverridden(b) => b.batch_id.as_deref(),
             EventBody::LedgerDivergence(b) => b.batch_id.as_deref(),
             EventBody::ReconciliationResolved(b) => b.batch_id.as_deref(),
+            EventBody::BeliefQualificationChanged(b) => b.batch_id.as_deref(),
+            EventBody::BeliefLifecycleChanged(b) => b.batch_id.as_deref(),
+            EventBody::BeliefTombstoned(b) => b.batch_id.as_deref(),
+            EventBody::BeliefContested(b) => b.batch_id.as_deref(),
+            EventBody::EntityMerged(b) => b.batch_id.as_deref(),
+            EventBody::ProposalSubmitted(b) => b.batch_id.as_deref(),
+            EventBody::ProposalQueued(b) => b.batch_id.as_deref(),
+            EventBody::ProposalDecisionRecorded(b) => b.batch_id.as_deref(),
+            EventBody::ProposalApplied(b) => b.batch_id.as_deref(),
+            EventBody::ProposalRejected(b) => b.batch_id.as_deref(),
+            EventBody::ProposalReverted(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -309,6 +382,17 @@ impl EventBody {
             EventBody::ProjectionOverridden(b) => b.idempotency_key.as_deref(),
             EventBody::LedgerDivergence(b) => b.idempotency_key.as_deref(),
             EventBody::ReconciliationResolved(b) => b.idempotency_key.as_deref(),
+            EventBody::BeliefQualificationChanged(b) => b.idempotency_key.as_deref(),
+            EventBody::BeliefLifecycleChanged(b) => b.idempotency_key.as_deref(),
+            EventBody::BeliefTombstoned(b) => b.idempotency_key.as_deref(),
+            EventBody::BeliefContested(b) => b.idempotency_key.as_deref(),
+            EventBody::EntityMerged(b) => b.idempotency_key.as_deref(),
+            EventBody::ProposalSubmitted(b) => b.idempotency_key.as_deref(),
+            EventBody::ProposalQueued(b) => b.idempotency_key.as_deref(),
+            EventBody::ProposalDecisionRecorded(b) => b.idempotency_key.as_deref(),
+            EventBody::ProposalApplied(b) => b.idempotency_key.as_deref(),
+            EventBody::ProposalRejected(b) => b.idempotency_key.as_deref(),
+            EventBody::ProposalReverted(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -333,6 +417,17 @@ impl EventBody {
             EventBody::ProjectionOverridden(b) => b.validate(),
             EventBody::LedgerDivergence(b) => b.validate(),
             EventBody::ReconciliationResolved(b) => b.validate(),
+            EventBody::BeliefQualificationChanged(b) => b.validate(),
+            EventBody::BeliefLifecycleChanged(b) => b.validate(),
+            EventBody::BeliefTombstoned(b) => b.validate(),
+            EventBody::BeliefContested(b) => b.validate(),
+            EventBody::EntityMerged(b) => b.validate(),
+            EventBody::ProposalSubmitted(b) => b.validate(),
+            EventBody::ProposalQueued(b) => b.validate(),
+            EventBody::ProposalDecisionRecorded(b) => b.validate(),
+            EventBody::ProposalApplied(b) => b.validate(),
+            EventBody::ProposalRejected(b) => b.validate(),
+            EventBody::ProposalReverted(b) => b.validate(),
         }
     }
 
@@ -354,6 +449,17 @@ impl EventBody {
             EventBody::ProjectionOverridden(b) => serde_json::to_value(b),
             EventBody::LedgerDivergence(b) => serde_json::to_value(b),
             EventBody::ReconciliationResolved(b) => serde_json::to_value(b),
+            EventBody::BeliefQualificationChanged(b) => serde_json::to_value(b),
+            EventBody::BeliefLifecycleChanged(b) => serde_json::to_value(b),
+            EventBody::BeliefTombstoned(b) => serde_json::to_value(b),
+            EventBody::BeliefContested(b) => serde_json::to_value(b),
+            EventBody::EntityMerged(b) => serde_json::to_value(b),
+            EventBody::ProposalSubmitted(b) => serde_json::to_value(b),
+            EventBody::ProposalQueued(b) => serde_json::to_value(b),
+            EventBody::ProposalDecisionRecorded(b) => serde_json::to_value(b),
+            EventBody::ProposalApplied(b) => serde_json::to_value(b),
+            EventBody::ProposalRejected(b) => serde_json::to_value(b),
+            EventBody::ProposalReverted(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -416,6 +522,23 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_RECONCILIATION_RESOLVED => {
             EventBody::ReconciliationResolved(Box::new(gate(kind, body)?))
         }
+        KIND_BELIEF_QUALIFICATION_CHANGED => {
+            EventBody::BeliefQualificationChanged(Box::new(gate(kind, body)?))
+        }
+        KIND_BELIEF_LIFECYCLE_CHANGED => {
+            EventBody::BeliefLifecycleChanged(Box::new(gate(kind, body)?))
+        }
+        KIND_BELIEF_TOMBSTONED => EventBody::BeliefTombstoned(Box::new(gate(kind, body)?)),
+        KIND_BELIEF_CONTESTED => EventBody::BeliefContested(Box::new(gate(kind, body)?)),
+        KIND_ENTITY_MERGED => EventBody::EntityMerged(Box::new(gate(kind, body)?)),
+        KIND_PROPOSAL_SUBMITTED => EventBody::ProposalSubmitted(Box::new(gate(kind, body)?)),
+        KIND_PROPOSAL_QUEUED => EventBody::ProposalQueued(Box::new(gate(kind, body)?)),
+        KIND_PROPOSAL_DECISION_RECORDED => {
+            EventBody::ProposalDecisionRecorded(Box::new(gate(kind, body)?))
+        }
+        KIND_PROPOSAL_APPLIED => EventBody::ProposalApplied(Box::new(gate(kind, body)?)),
+        KIND_PROPOSAL_REJECTED => EventBody::ProposalRejected(Box::new(gate(kind, body)?)),
+        KIND_PROPOSAL_REVERTED => EventBody::ProposalReverted(Box::new(gate(kind, body)?)),
         other => {
             return Err(format!(
                 "kind {other} carries a schema-v1 body but is not in this build's vocabulary"

@@ -463,14 +463,25 @@
         "projection": {
           "path": "concepts/acme.md",
           "generating_event": "0000000000000000000000000000000a",
-          "state_digest": "16ce5f7f341fdf95ad52f848810db871a22f8c185e959acf0276dfe4d2153e40",
+          "state_digest": "58cd16fce25a81622adad6630c22c76e509deecd071543d927dc8ea52525d848",
           "content_hash": "5df42a3e1b35074caf7d2bf4b9b13d2b9f1cf5db56883136a60c8cac33476ed4",
           "review_event_ids": [],
           "active_overrides": [
             "0000000000000000000000000000000a"
           ],
           "stale_overrides": [],
-          "override_head": "0000000000000000000000000000000a"
+          "override_head": "0000000000000000000000000000000a",
+          "qualification_head": null,
+          "lifecycle_head": null,
+          "tombstone_event": null,
+          "contest_head": null,
+          "entity_merge_events": []
+        },
+        "governance": {
+          "qualification": "draft",
+          "lifecycle": "active",
+          "tombstoned": false,
+          "open_contest": null
         }
       }
     },
@@ -494,6 +505,7 @@
         1
       ]
     ],
+    "proposals": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

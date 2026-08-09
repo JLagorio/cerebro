@@ -23,8 +23,21 @@ use serde::{Deserialize, Serialize};
 
 use super::reduce::{project_belief, EpistemicState};
 
-/// The one manifest format this build reads and writes.
-pub const MANIFEST_FORMAT: u64 = 1;
+/// The one manifest format this build WRITES.
+///
+/// Format 2 (M24.3) exists because the projection-state descriptor grew the
+/// qualification, lifecycle, tombstone, contest, and entity-merge heads. The
+/// bump happens BEFORE any M24 mutation body can emit: a format-1 manifest
+/// carries digests computed without those components, so after the first
+/// governed transition it would claim a projection was current when its
+/// identity had moved.
+pub const MANIFEST_FORMAT: u64 = 2;
+
+/// The format M23 wrote. Still READABLE — a format-1 manifest is migrated
+/// by recomputing every descriptor from the committed ledger, never by
+/// recapturing projection bytes from disk (manifest-first recovery: the
+/// ledger is the truth, the file is the projection).
+pub const MANIFEST_FORMAT_LEGACY: u64 = 1;
 
 /// Vault-relative manifest location.
 pub const MANIFEST_PATH: &str = ".cerebro/projection-manifest.json";
@@ -80,7 +93,7 @@ pub fn load(vault: &Path) -> Result<Option<Manifest>, String> {
     };
     let manifest: Manifest =
         serde_json::from_str(&raw).map_err(|e| format!("{}: {e}", path.display()))?;
-    if manifest.format != MANIFEST_FORMAT {
+    if manifest.format != MANIFEST_FORMAT && manifest.format != MANIFEST_FORMAT_LEGACY {
         return Err(format!(
             "{}: unsupported manifest format {}",
             path.display(),
@@ -88,6 +101,53 @@ pub fn load(vault: &Path) -> Result<Option<Manifest>, String> {
         ));
     }
     Ok(Some(manifest))
+}
+
+/// Is this manifest one an older build wrote?
+pub fn needs_format_migration(manifest: &Manifest) -> bool {
+    manifest.format == MANIFEST_FORMAT_LEGACY
+}
+
+/// Migrate a format-1 manifest to format 2 by RECOMPUTING every descriptor
+/// from committed reducer state.
+///
+/// The projection bytes on disk are never consulted: a format-1 entry's
+/// `projection_state_digest` was computed without the governed-state
+/// components, so it cannot be repaired by inspection — only by projecting
+/// the Belief again from the ledger. Entries whose Belief no longer exists
+/// are dropped, and an entry mid-write stays `pending` so M23's
+/// interrupted-write classification still recognises it.
+///
+/// Nothing here recaptures content: if the file on disk disagrees with the
+/// recomputed projection, that is a DIVERGENCE for reconciliation to
+/// classify, not something a format migration may quietly adopt.
+pub fn migrate_to_current(
+    vault: &Path,
+    state: &EpistemicState,
+    manifest: &Manifest,
+) -> Result<Manifest, String> {
+    let mut migrated = Manifest {
+        format: MANIFEST_FORMAT,
+        entries: BTreeMap::new(),
+    };
+    for (rel, entry) in &manifest.entries {
+        let Ok(projection) = project_belief(state, &entry.belief_id) else {
+            // The Belief is gone from committed state; the manifest row has
+            // nothing left to describe.
+            continue;
+        };
+        migrated.entries.insert(
+            rel.clone(),
+            entry_for(
+                &projection,
+                entry.write_state,
+                entry.previous_content_hash.clone(),
+            ),
+        );
+    }
+    save(vault, &migrated)?;
+    crate::crash::crash_point("projection-manifest-format-2");
+    Ok(migrated)
 }
 
 /// The manifest entry a projection result targets, in the given state.
@@ -473,11 +533,18 @@ mod tests {
         std::fs::write(manifest_path(&vault), raw.to_string()).unwrap();
         assert!(load(&vault).is_err());
 
-        // A future format is refused, never guessed at.
+        // A future format is refused, never guessed at. (Format 1 is the
+        // M23 manifest and stays READABLE so it can be migrated; anything
+        // beyond the current one was written by a newer build whose
+        // descriptor components this one does not know.)
         let mut future = manifest;
-        future.format = 2;
+        future.format = MANIFEST_FORMAT + 1;
         save(&vault, &future).unwrap();
         assert!(load(&vault).unwrap_err().contains("unsupported"));
+        future.format = MANIFEST_FORMAT_LEGACY;
+        save(&vault, &future).unwrap();
+        let legacy = load(&vault).unwrap().expect("format 1 stays readable");
+        assert!(needs_format_migration(&legacy));
         let _ = std::fs::remove_dir_all(&vault);
     }
 

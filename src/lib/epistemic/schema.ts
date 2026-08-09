@@ -24,15 +24,16 @@ export class RefusedError extends Error {}
 
 export type JsonObject = { [key: string]: Json };
 
-export const RESERVED_KINDS = [
-  'belief.tombstoned',
-  'proposal.submitted',
-  'proposal.queued',
-  'proposal.decision_recorded',
-  'proposal.applied',
-  'proposal.rejected',
-  'proposal.reverted',
-];
+/**
+ * Names claimed with deliberately undefined bodies, so nothing else ever
+ * takes them and no build guesses at their shape.
+ *
+ * M22 reserved seven; M24.3 defined `belief.tombstoned` and the six
+ * `proposal.*` kinds, so the list is empty and the mechanism stands ready
+ * for M27's conflict vocabulary. Mirrors `RESERVED_KINDS` in
+ * `src-tauri/src/ledger/schema/mod.rs`.
+ */
+export const RESERVED_KINDS: string[] = [];
 
 export const ACTOR_LEDGER = 'system:ledger';
 export const ACTOR_SOURCE_REGISTRY = 'system:source-registry';
@@ -91,6 +92,246 @@ const oneOf = (v: Json | undefined, allowed: string[], what: string): string => 
 };
 
 // --- shared unions ---------------------------------------------------------
+
+/** M24 closed vocabularies. Mirrors `ledger/schema/{risk,lifecycle}.rs`. */
+export const RISKS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+export const QUALIFICATIONS = ['draft', 'qualified'];
+export const RELATION_KINDS = ['supersedes', 'refines', 'contradicts'];
+export const LIFECYCLES = ['active', 'superseded', 'archived'];
+export const TARGET_CLASSES = [
+  'belief',
+  'comparison',
+  'entity',
+  'observation',
+  'proposal',
+  'relation',
+  'source',
+];
+export const FIELD_ROLES = [
+  'failure_condition',
+  'impact',
+  'evidence',
+  'trigger',
+  'completion_condition',
+  'owner',
+  'verb',
+];
+const TRANSITION_CAUSES = [
+  'new_evidence',
+  'human_correction',
+  'qualification_met',
+  'conflict_resolution',
+  'maintenance',
+  'revert',
+  'elapsed_time',
+  'absence_of_observations',
+];
+const INTENDED_USE_KINDS = [
+  'draft_note',
+  'reversible_work',
+  'operational_decision',
+  'production_release',
+  'safety_or_compliance',
+];
+
+function canonQualificationProfile(v: Json | undefined): JsonObject {
+  const p = asObject(v, 'qualification_profile');
+  return {
+    type_id: asString(p.type_id, 'type_id'),
+    type_schema_hash: asString(p.type_schema_hash, 'type_schema_hash'),
+    required_roles: asArray(p.required_roles, 'required_roles').map((r) =>
+      oneOf(r, FIELD_ROLES, 'field role'),
+    ),
+  };
+}
+
+function canonReassignmentPlan(v: Json | undefined): JsonObject {
+  const p = asObject(v, 'reassignment_plan');
+  return {
+    survivor_id: asString(p.survivor_id, 'survivor_id'),
+    merged_ids: asArray(p.merged_ids, 'merged_ids').map((id) => asString(id, 'merged id')),
+    affected_belief_ids: asArray(p.affected_belief_ids, 'affected beliefs').map((id) =>
+      asString(id, 'affected belief id'),
+    ),
+    live_aliases: asArray(p.live_aliases, 'live_aliases').map((a) => {
+      const alias = asObject(a, 'live alias');
+      return {
+        normalized_alias: asString(alias.normalized_alias, 'normalized_alias'),
+        alias_event_id: asString(alias.alias_event_id, 'alias_event_id'),
+        from_entity_id: asString(alias.from_entity_id, 'from_entity_id'),
+      };
+    }),
+    affected_relation_ids: asArray(p.affected_relation_ids, 'affected relations').map((id) =>
+      asString(id, 'affected relation id'),
+    ),
+    plan_digest: asString(p.plan_digest, 'plan_digest'),
+  };
+}
+
+function canonTargetVersions(v: Json | undefined): JsonObject[] {
+  return asArray(v, 'target_versions').map((entry) => {
+    const t = asObject(entry, 'target version');
+    return {
+      target_class: oneOf(t.target_class, TARGET_CLASSES, 'target_class'),
+      target_id: asString(t.target_id, 'target_id'),
+      version: asU64(t.version, 'version'),
+    };
+  });
+}
+
+function canonRevertPlan(v: Json | undefined): JsonObject {
+  const plan = asObject(v, 'revert_plan');
+  return {
+    source_operation_digest: asString(plan.source_operation_digest, 'source_operation_digest'),
+    expected_post_versions: canonTargetVersions(plan.expected_post_versions),
+    steps: asArray(plan.steps, 'revert steps').map((raw): JsonObject => {
+      const step = asObject(raw, 'revert step');
+      const kind = oneOf(
+        step.kind,
+        [
+          'belief_revised',
+          'lifecycle_restored',
+          'qualification_restored',
+          'relation_restored',
+          'contest_closed',
+        ],
+        'revert step kind',
+      );
+      switch (kind) {
+        case 'belief_revised':
+          return {
+            kind,
+            belief_id: asString(step.belief_id, 'belief_id'),
+            patch: asArray(step.patch, 'patch').map((op) => {
+              const o = asObject(op, 'patch op');
+              return {
+                field_path: asString(o.field_path, 'field_path'),
+                before: canonTypedValue(o.before),
+                after: canonTypedValue(o.after),
+              };
+            }),
+            basis: canonBasis(step.basis),
+          };
+        case 'lifecycle_restored':
+          return {
+            kind,
+            belief_id: asString(step.belief_id, 'belief_id'),
+            from: oneOf(step.from, LIFECYCLES, 'from'),
+            to: oneOf(step.to, LIFECYCLES, 'to'),
+            relation_id: asString(step.relation_id, 'relation_id'),
+            successor_id: asString(step.successor_id, 'successor_id'),
+          };
+        case 'qualification_restored':
+          return {
+            kind,
+            belief_id: asString(step.belief_id, 'belief_id'),
+            from: oneOf(step.from, QUALIFICATIONS, 'from'),
+            to: oneOf(step.to, QUALIFICATIONS, 'to'),
+            qualification_profile: canonQualificationProfile(step.qualification_profile),
+          };
+        case 'relation_restored':
+          return {
+            kind,
+            relation_id: asString(step.relation_id, 'relation_id'),
+            action: oneOf(step.action, ['add', 'remove'], 'action'),
+            from: asString(step.from, 'from'),
+            to: asString(step.to, 'to'),
+            relation: oneOf(step.relation, RELATION_KINDS, 'relation'),
+          };
+        default:
+          return {
+            kind,
+            belief_id: asString(step.belief_id, 'belief_id'),
+            open_contest_event_id: asString(step.open_contest_event_id, 'open_contest_event_id'),
+            addressed_by: oneOf(step.addressed_by, ['revert_application'], 'addressed_by'),
+          };
+      }
+    }),
+  };
+}
+
+/**
+ * `ProposalV1`, stored whole inside `proposal.submitted`.
+ *
+ * The op payload is passed through as an opaque canonical value: the
+ * proposal is a RECORD here, and the closed op union is validated where it
+ * is constructed and interpreted (Rust). Re-deriving twenty payload shapes
+ * in TypeScript would be exactly the twin-code defect M24 forbids — the
+ * mock never constructs a proposal, it only replays ones the vectors carry.
+ */
+function canonProposal(v: Json | undefined): JsonObject {
+  const p = asObject(v, 'proposal');
+  const op = asObject(p.op, 'op');
+  const basis = asObject(p.basis, 'basis');
+  const use = asObject(p.intended_use, 'intended_use');
+  return {
+    schema: asU64(p.schema, 'proposal schema'),
+    proposal_id: asString(p.proposal_id, 'proposal_id'),
+    run_id: asString(p.run_id, 'run_id'),
+    targets: asArray(p.targets, 'targets').map((entry) => {
+      const t = asObject(entry, 'target');
+      return {
+        target_id: asString(t.target_id, 'target_id'),
+        target_class: oneOf(t.target_class, TARGET_CLASSES, 'target_class'),
+        expected_version:
+          t.expected_version === null ? null : asU64(t.expected_version, 'expected_version'),
+      };
+    }),
+    op: { kind: asString(op.kind, 'op kind'), payload: op.payload as Json },
+    intended_use: {
+      kind: oneOf(use.kind, INTENDED_USE_KINDS, 'intended use kind'),
+      stakes: oneOf(use.stakes, RISKS, 'stakes'),
+      predicate_class: asStringOrNull(use.predicate_class, 'predicate_class'),
+    },
+    basis: {
+      transition_cause: oneOf(basis.transition_cause, TRANSITION_CAUSES, 'transition_cause'),
+      evidence_refs: asArray(basis.evidence_refs, 'evidence_refs').map((r) =>
+        asString(r, 'evidence ref'),
+      ),
+      coverage_refs: asArray(basis.coverage_refs, 'coverage_refs').map((r) =>
+        asString(r, 'coverage ref'),
+      ),
+      authority_refs: asArray(basis.authority_refs, 'authority_refs').map((r) =>
+        asString(r, 'authority ref'),
+      ),
+      authority_route_refs: asArray(basis.authority_route_refs, 'authority_route_refs').map((r) => {
+        const route = asObject(r, 'authority route ref');
+        return {
+          authority_route_id: asString(route.authority_route_id, 'authority_route_id'),
+          authority_rule_version: asU64(route.authority_rule_version, 'authority_rule_version'),
+          artifact_hash: asString(route.artifact_hash, 'artifact_hash'),
+        };
+      }),
+      addressed_contradictions: asArray(
+        basis.addressed_contradictions,
+        'addressed_contradictions',
+      ).map((c) => {
+        const edge = asObject(c, 'addressed contradiction');
+        return {
+          edge_id: asString(edge.edge_id, 'edge_id'),
+          comparison_id: asString(edge.comparison_id, 'comparison_id'),
+          disposition: oneOf(
+            edge.disposition,
+            ['resolved_with_evidence', 'superseded_with_addressing'],
+            'disposition',
+          ),
+          evidence_refs: asArray(edge.evidence_refs, 'edge evidence').map((r) =>
+            asString(r, 'edge evidence ref'),
+          ),
+        };
+      }),
+      absence_claim: (() => {
+        if (typeof basis.absence_claim !== 'boolean') {
+          throw new SchemaError('absence_claim is not a boolean');
+        }
+        return basis.absence_claim;
+      })(),
+    },
+    declared_risk: oneOf(p.declared_risk, RISKS, 'declared_risk'),
+    reason: asString(p.reason, 'reason'),
+    candidate_search_receipt: p.candidate_search_receipt as Json,
+  };
+}
 
 /** TypedValue: tag-checked canonical rebuild (recursive). */
 export function canonTypedValue(v: Json | undefined): JsonObject {
@@ -525,7 +766,7 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     action: oneOf(obj.action, ['add', 'remove'], 'action'),
     from: asString(obj.from, 'from'),
     to: asString(obj.to, 'to'),
-    relation: oneOf(obj.relation, ['supersedes', 'refines', 'contradicts'], 'relation'),
+    relation: oneOf(obj.relation, RELATION_KINDS, 'relation'),
   }),
   'belief.attested': (obj) => ({
     ...canonCommon(obj),
@@ -624,6 +865,113 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     ),
     accepted_files_digest: asStringOrNull(obj.accepted_files_digest, 'accepted digest'),
     resulting_projection_digest: asString(obj.resulting_projection_digest, 'resulting digest'),
+  }),
+
+  // --- M24.3: governed mutations -----------------------------------------
+  'belief.qualification_changed': (obj) => ({
+    ...canonCommon(obj),
+    belief_id: asString(obj.belief_id, 'belief_id'),
+    from: oneOf(obj.from, QUALIFICATIONS, 'from'),
+    to: oneOf(obj.to, QUALIFICATIONS, 'to'),
+    qualification_profile: canonQualificationProfile(obj.qualification_profile),
+    cause: oneOf(obj.cause, ['promoted', 'reverted'], 'cause'),
+  }),
+  'belief.lifecycle_changed': (obj) => ({
+    ...canonCommon(obj),
+    belief_id: asString(obj.belief_id, 'belief_id'),
+    from: oneOf(obj.from, LIFECYCLES, 'from'),
+    to: oneOf(obj.to, LIFECYCLES, 'to'),
+    cause: oneOf(obj.cause, ['superseded', 'archived', 'deprecated', 'reverted'], 'cause'),
+    replacement_id: asStringOrNull(obj.replacement_id, 'replacement_id'),
+  }),
+  'belief.tombstoned': (obj) => ({
+    ...canonCommon(obj),
+    belief_id: asString(obj.belief_id, 'belief_id'),
+    replacement_id: asStringOrNull(obj.replacement_id, 'replacement_id'),
+    reason_code: oneOf(
+      obj.reason_code,
+      ['duplicate', 'superseded', 'invalid', 'owner_requested'],
+      'reason_code',
+    ),
+  }),
+  'belief.contested': (obj) => ({
+    ...canonCommon(obj),
+    belief_id: asString(obj.belief_id, 'belief_id'),
+    action: oneOf(obj.action, ['open', 'close'], 'action'),
+    counterevidence_refs: asArray(obj.counterevidence_refs, 'counterevidence').map((r) =>
+      asString(r, 'counterevidence ref'),
+    ),
+    addressed_by_event_id: asStringOrNull(obj.addressed_by_event_id, 'addressed_by_event_id'),
+  }),
+  'entity.merged': (obj) => ({
+    ...canonCommon(obj),
+    survivor_id: asString(obj.survivor_id, 'survivor_id'),
+    merged_ids: asArray(obj.merged_ids, 'merged_ids').map((id) => asString(id, 'merged id')),
+    reassignment_plan: canonReassignmentPlan(obj.reassignment_plan),
+    reassignment_digest: asString(obj.reassignment_digest, 'reassignment_digest'),
+  }),
+
+  // --- M24.3: the proposal lifecycle --------------------------------------
+  'proposal.submitted': (obj) => ({
+    ...canonCommon(obj),
+    proposal: canonProposal(obj.proposal),
+  }),
+  'proposal.queued': (obj) => ({
+    ...canonCommon(obj),
+    proposal_id: asString(obj.proposal_id, 'proposal_id'),
+    commit_set_id: asString(obj.commit_set_id, 'commit_set_id'),
+    member_proposal_ids: asArray(obj.member_proposal_ids, 'members').map((id) =>
+      asString(id, 'member id'),
+    ),
+    effective_risk: oneOf(obj.effective_risk, RISKS, 'effective_risk'),
+    policy_version: asU64(obj.policy_version, 'policy_version'),
+    target_versions: canonTargetVersions(obj.target_versions),
+    queued_at: asString(obj.queued_at, 'queued_at'),
+  }),
+  'proposal.decision_recorded': (obj) => ({
+    ...canonCommon(obj),
+    decision_id: asString(obj.decision_id, 'decision_id'),
+    proposal_id: asString(obj.proposal_id, 'proposal_id'),
+    decision: oneOf(obj.decision, ['approve', 'reject'], 'decision'),
+    reviewer: asString(obj.reviewer, 'reviewer'),
+    decided_at: asString(obj.decided_at, 'decided_at'),
+    reason: asStringOrNull(obj.reason, 'reason'),
+    reviewed_target_versions: canonTargetVersions(obj.reviewed_target_versions),
+  }),
+  'proposal.applied': (obj) => ({
+    ...canonCommon(obj),
+    proposal_id: asString(obj.proposal_id, 'proposal_id'),
+    commit_set_id: asString(obj.commit_set_id, 'commit_set_id'),
+    effective_risk: oneOf(obj.effective_risk, RISKS, 'effective_risk'),
+    decision_id: asStringOrNull(obj.decision_id, 'decision_id'),
+    mutation_event_ids: asArray(obj.mutation_event_ids, 'mutation ids').map((id) =>
+      asString(id, 'mutation event id'),
+    ),
+    resulting_versions: canonTargetVersions(obj.resulting_versions),
+    revert_plan: obj.revert_plan === null ? null : canonRevertPlan(obj.revert_plan),
+  }),
+  'proposal.rejected': (obj) => ({
+    ...canonCommon(obj),
+    proposal_id: asString(obj.proposal_id, 'proposal_id'),
+    commit_set_id: asString(obj.commit_set_id, 'commit_set_id'),
+    code: asString(obj.code, 'code'),
+    rule: asString(obj.rule, 'rule'),
+    expected: canonTypedValue(obj.expected),
+    actual: canonTypedValue(obj.actual),
+    decision_id: asStringOrNull(obj.decision_id, 'decision_id'),
+    refused_by_proposal_id: asStringOrNull(obj.refused_by_proposal_id, 'refused_by'),
+  }),
+  'proposal.reverted': (obj) => ({
+    ...canonCommon(obj),
+    proposal_id: asString(obj.proposal_id, 'proposal_id'),
+    reverted_by_proposal_id: asString(obj.reverted_by_proposal_id, 'reverted_by_proposal_id'),
+    prior_applied_event_ids: asArray(obj.prior_applied_event_ids, 'prior applied').map((id) =>
+      asString(id, 'prior applied event id'),
+    ),
+    forward_event_ids: asArray(obj.forward_event_ids, 'forward events').map((id) =>
+      asString(id, 'forward event id'),
+    ),
+    resulting_versions: canonTargetVersions(obj.resulting_versions),
   }),
 };
 
@@ -743,7 +1091,7 @@ function canonHumanForm(obj: JsonObject): JsonObject {
         action: oneOf(obj.action, ['add', 'remove'], 'action'),
         from: asString(obj.from, 'from'),
         to: asString(obj.to, 'to'),
-        relation: oneOf(obj.relation, ['supersedes', 'refines', 'contradicts'], 'relation'),
+        relation: oneOf(obj.relation, RELATION_KINDS, 'relation'),
         ...trail,
       };
     case 'alias_add':
@@ -1366,7 +1714,208 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       }
       break;
     }
+
+    // --- M24.3: governed mutations ---------------------------------------
+    case 'belief.qualification_changed': {
+      if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
+      validateQualificationProfile(body.qualification_profile as JsonObject);
+      const edge = `${body.from as string}->${body.to as string}:${body.cause as string}`;
+      // The two legal edges: promotion and its stored inverse. A same-state
+      // transition is the shape a buggy retry produces.
+      if (edge !== 'draft->qualified:promoted' && edge !== 'qualified->draft:reverted') {
+        throw new RefusedError(`illegal_transition: qualification ${edge}`);
+      }
+      break;
+    }
+    case 'belief.lifecycle_changed': {
+      if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
+      const replacement = body.replacement_id as string | null;
+      if (replacement !== null) {
+        if (!isId128(replacement)) throw new RefusedError('replacement_id is not a stable id');
+        if (replacement === body.belief_id) {
+          throw new RefusedError('illegal_transition: a Belief cannot replace itself');
+        }
+      }
+      const edge = `${body.from as string}->${body.to as string}:${body.cause as string}`;
+      const has = replacement !== null;
+      const legal =
+        // Supersede names its successor; without one, "superseded by what?"
+        // has no answer and the lineage edge has no other end.
+        (edge === 'active->superseded:superseded' && has) ||
+        // Archive is the deliberate no-replacement retirement.
+        (edge === 'active->archived:archived' && !has) ||
+        // Deprecation may or may not point at what to use instead.
+        edge === 'active->archived:deprecated' ||
+        // The stored one-click inverse of a supersede.
+        (edge === 'superseded->active:reverted' && !has);
+      if (!legal) throw new RefusedError(`illegal_transition: lifecycle ${edge}`);
+      break;
+    }
+    case 'belief.tombstoned': {
+      if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
+      const replacement = body.replacement_id as string | null;
+      if (replacement !== null) {
+        if (!isId128(replacement)) throw new RefusedError('replacement_id is not a stable id');
+        if (replacement === body.belief_id) {
+          throw new RefusedError('illegal_transition: a Belief cannot replace itself');
+        }
+      }
+      break;
+    }
+    case 'belief.contested': {
+      if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
+      sortedUniqueIds(body.counterevidence_refs as string[], 'counterevidence refs');
+      if (body.action === 'open') {
+        if ((body.counterevidence_refs as string[]).length === 0) {
+          throw new RefusedError('a contest with no counterevidence is an opinion');
+        }
+        if (body.addressed_by_event_id !== null) {
+          throw new RefusedError('an opening contest cannot already be addressed');
+        }
+      } else if (!isId128(body.addressed_by_event_id)) {
+        throw new RefusedError('closing a contest requires the event that addressed it');
+      }
+      break;
+    }
+    case 'entity.merged': {
+      const plan = body.reassignment_plan as JsonObject;
+      if (!isId128(plan.survivor_id)) throw new RefusedError('survivor_id is not a stable id');
+      const merged = plan.merged_ids as string[];
+      if (merged.length === 0) throw new RefusedError('a merge with nothing to merge');
+      sortedUniqueIds(merged, 'merged_ids');
+      if (merged.includes(plan.survivor_id as string)) {
+        throw new RefusedError('an entity cannot absorb itself');
+      }
+      sortedUniqueIds(plan.affected_belief_ids as string[], 'affected_belief_ids');
+      sortedUniqueIds(plan.affected_relation_ids as string[], 'affected_relation_ids');
+      if (body.survivor_id !== plan.survivor_id) {
+        throw new RefusedError('entity.merged survivor_id disagrees with its plan');
+      }
+      if ((body.merged_ids as string[]).join('|') !== merged.join('|')) {
+        throw new RefusedError('entity.merged merged_ids disagree with its plan');
+      }
+      if (body.reassignment_digest !== plan.plan_digest) {
+        throw new RefusedError("reassignment_digest disagrees with the plan's own seal");
+      }
+      break;
+    }
+
+    // --- M24.3: the proposal lifecycle ------------------------------------
+    case 'proposal.submitted': {
+      const proposal = body.proposal as JsonObject;
+      if (!isId128(proposal.proposal_id) || !isId128(proposal.run_id)) {
+        throw new RefusedError('proposal ids are not stable ids');
+      }
+      if ((proposal.targets as JsonObject[]).length === 0) {
+        throw new RefusedError('a proposal with no targets mutates nothing');
+      }
+      break;
+    }
+    case 'proposal.queued': {
+      if (!isId128(body.proposal_id) || !isId128(body.commit_set_id)) {
+        throw new RefusedError('proposal/commit set ids are not stable ids');
+      }
+      const members = body.member_proposal_ids as string[];
+      sortedUniqueIds(members, 'member_proposal_ids');
+      if (!members.includes(body.proposal_id as string)) {
+        throw new RefusedError('a queued proposal must be a member of its own commit set');
+      }
+      if ((body.policy_version as number) === 0) {
+        throw new RefusedError('policy_version must be positive');
+      }
+      break;
+    }
+    case 'proposal.decision_recorded': {
+      if (!isId128(body.decision_id) || !isId128(body.proposal_id)) {
+        throw new RefusedError('decision/proposal ids are not stable ids');
+      }
+      if ((body.reviewer as string).trim() === '') {
+        throw new RefusedError('a decision with no reviewer is not a decision');
+      }
+      const reason = body.reason as string | null;
+      if (body.decision === 'reject') {
+        // Saying no is a claim about the proposal; it owes a sentence.
+        if (reason === null || reason.trim() === '') {
+          throw new RefusedError('a rejection requires a reason');
+        }
+      } else if (reason !== null) {
+        // Saying yes agrees with what is already written; a second
+        // free-text field is just somewhere else to look.
+        throw new RefusedError('an approval carries no reason');
+      }
+      break;
+    }
+    case 'proposal.applied': {
+      if (!isId128(body.proposal_id) || !isId128(body.commit_set_id)) {
+        throw new RefusedError('proposal/commit set ids are not stable ids');
+      }
+      if (body.decision_id !== null && !isId128(body.decision_id)) {
+        throw new RefusedError('decision_id is not a stable id');
+      }
+      sortedUniqueIds(body.mutation_event_ids as string[], 'mutation_event_ids');
+      if ((body.mutation_event_ids as string[]).length === 0) {
+        throw new RefusedError('an application that changed nothing is not an application');
+      }
+      break;
+    }
+    case 'proposal.rejected': {
+      if (!isId128(body.proposal_id) || !isId128(body.commit_set_id)) {
+        throw new RefusedError('proposal/commit set ids are not stable ids');
+      }
+      for (const value of [body.code as string, body.rule as string]) {
+        if (value === '' || !/^[a-z0-9_]+$/.test(value)) {
+          throw new RefusedError('code/rule is not a lower_snake_case code');
+        }
+      }
+      const peer = body.refused_by_proposal_id as string | null;
+      if (peer !== null) {
+        if (!isId128(peer)) throw new RefusedError('refused_by_proposal_id is not a stable id');
+        if (peer === body.proposal_id) {
+          throw new RefusedError('a proposal cannot be refused by itself');
+        }
+      }
+      break;
+    }
+    case 'proposal.reverted': {
+      if (!isId128(body.proposal_id) || !isId128(body.reverted_by_proposal_id)) {
+        throw new RefusedError('proposal ids are not stable ids');
+      }
+      if (body.proposal_id === body.reverted_by_proposal_id) {
+        throw new RefusedError('a proposal cannot revert itself');
+      }
+      sortedUniqueIds(body.prior_applied_event_ids as string[], 'prior_applied_event_ids');
+      sortedUniqueIds(body.forward_event_ids as string[], 'forward_event_ids');
+      break;
+    }
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
+  }
+}
+
+/** Sorted, unique, all event ids — the shape every plural id list has. */
+function sortedUniqueIds(ids: string[], what: string): void {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (!isId128(id)) throw new RefusedError(`${what}: not a stable id`);
+    if (seen.has(id)) throw new RefusedError(`${what}: duplicate`);
+    seen.add(id);
+  }
+  if ([...seen].sort().join('|') !== ids.join('|')) {
+    throw new RefusedError(`${what}: not sorted`);
+  }
+}
+
+function validateQualificationProfile(profile: JsonObject): void {
+  if ((profile.type_id as string) === '') throw new RefusedError('type_id is empty');
+  if (!isSha256(profile.type_schema_hash)) {
+    throw new RefusedError('type_schema_hash is not a sha256');
+  }
+  const roles = profile.required_roles as string[];
+  if (roles.length === 0) {
+    throw new RefusedError('a profile requiring no roles is a gate that never gates');
+  }
+  const canonical = FIELD_ROLES.filter((role) => roles.includes(role));
+  if (canonical.join('|') !== roles.join('|')) {
+    throw new RefusedError('required roles are not unique and in canonical order');
   }
 }

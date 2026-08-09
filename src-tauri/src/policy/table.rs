@@ -36,28 +36,11 @@ pub const POLICY_V1_DIGEST_PATH: &str = "shared/policy/policy.v1.sha256";
 
 pub const FORMAT: u64 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Risk {
-    #[serde(rename = "LOW")]
-    Low,
-    #[serde(rename = "MEDIUM")]
-    Medium,
-    #[serde(rename = "HIGH")]
-    High,
-    #[serde(rename = "CRITICAL")]
-    Critical,
-}
-
-impl Risk {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Risk::Low => "LOW",
-            Risk::Medium => "MEDIUM",
-            Risk::High => "HIGH",
-            Risk::Critical => "CRITICAL",
-        }
-    }
-}
+/// Risk is a PERSISTED vocabulary — a Proposal declares one and
+/// `proposal.applied` records the effective one — so it is defined once in
+/// the ledger schema and re-exported here. A second copy in the policy
+/// layer could drift from the bytes already on disk.
+pub use crate::ledger::schema::Risk;
 
 /// Where a refused proposal is RECORDED — the D5 two-records split. Never
 /// inferred: every code names its destiny in the table's one registry.

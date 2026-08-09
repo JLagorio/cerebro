@@ -36,6 +36,28 @@ describe('the tool catalog mirrors Rust', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  it('serves no proposal tool — M24 keeps that surface internal', () => {
+    // AGENTS STAY OFF, MECHANICALLY (M24.3). The proposal boundary exists
+    // and is exercised by the Rust tests, but nothing serves it to a model
+    // and no mock stub pretends otherwise. M26 has one explicit
+    // registration phase, after semantic candidate search is live and the
+    // preventive graph guards pass their fixtures.
+    //
+    // Asserted from BOTH sides: `policy::submit`'s
+    // `no_proposal_tool_is_registered` reads the same `tool_catalog()`, and
+    // this holds the picker's own catalog to the same absence.
+    const forbidden = [
+      'submit_proposal',
+      'commit_proposals',
+      'propose_mutation',
+      'revert_proposal',
+    ];
+    for (const name of forbidden) {
+      expect(rustToolNames()).not.toContain(name);
+      expect(ALL_TOOLS.map((t) => t.name)).not.toContain(name);
+    }
+  });
+
   it('gives every tool a summary a person can read', () => {
     for (const tool of ALL_TOOLS) {
       expect(tool.summary.length).toBeGreaterThan(10);
