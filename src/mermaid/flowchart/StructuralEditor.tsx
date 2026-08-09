@@ -15,6 +15,7 @@ import { NodeStyleMenu } from './NodeStyleMenu';
 import {
   addEdge,
   addNode,
+  canAnimateEdge,
   deleteEdge,
   deleteNode,
   renameNode,
@@ -181,6 +182,11 @@ export function StructuralEditor({
         el.onclick = (e) => {
           e.stopPropagation();
           setSelected(id);
+          // The mirror of the edge handler below, which has always cleared the
+          // selection. Without it the two surfaces sat open at once — and the
+          // edge editor's controls then had a live node selection to delete
+          // when a keystroke leaked out of them (M29.33 review).
+          setEdgeEditor(null);
           const host = hostRef.current;
           if (host !== null) {
             const hostBox = host.getBoundingClientRect();
@@ -361,6 +367,9 @@ export function StructuralEditor({
   // edgeMeta map (O(lines)) on every call, and the controls row below needs
   // the answer twice — for the pressed state and for the toggle's target.
   const edgeIsAnimated = edgeEditor !== null && edgeAnimated(model, edgeEditor.edge);
+  // Whether this expansion could carry an id at all — the same predicate
+  // setEdgeAnimate refuses by, read here so the control can say so up front.
+  const edgeCanAnimate = edgeEditor !== null && canAnimateEdge(model, edgeEditor.edge);
 
   return (
     <div
@@ -582,6 +591,12 @@ export function StructuralEditor({
           <div
             className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 flex-col gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
             onClick={(e) => e.stopPropagation()}
+            // Same guard the two node popovers carry, and the one this editor
+            // never had: its label input stopped its OWN keys, but Backspace on
+            // any of the buttons travelled up to this component's onKeyDown and
+            // deleted the selected node. `Delete edge` leaked that way long
+            // before these controls joined it.
+            onKeyDown={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-1">
               <input
@@ -641,6 +656,11 @@ export function StructuralEditor({
               >
                 {HEAD_LABEL[edgeEditor.edge.arrow.head]}
               </button>
+              {/* A stroke or head belongs to the SEGMENT, so on `A & Z --> B`
+                  or a chain both expansions change together — that is what the
+                  mermaid text can express, no more, and the same scope
+                  setEdgeLabel has always had. Only `animate` is per-edge, which
+                  is why it is the one control that can go dead below. */}
               {STROKES.map((s) => (
                 <button
                   key={s}
@@ -670,12 +690,22 @@ export function StructuralEditor({
                 type="button"
                 aria-label="Animate edge"
                 aria-pressed={edgeIsAnimated}
-                title="Animate edge"
+                // Animation rides an edge id, and a segment spells exactly one
+                // — so on an & group every expansion but last-from × first-to
+                // has nowhere to hang it and setEdgeAnimate refuses. Saying so
+                // beats swallowing the click: an enabled button that closes the
+                // popover and changes nothing reads as broken, not as refused.
+                disabled={!edgeCanAnimate}
+                title={
+                  edgeCanAnimate
+                    ? 'Animate edge'
+                    : 'Only one edge of an & group can be animated — split the line to animate this one'
+                }
                 onClick={() => {
                   apply(setEdgeAnimate(model, edgeEditor.edge, !edgeIsAnimated));
                   setEdgeEditor(null);
                 }}
-                className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+                className="rounded border-0 bg-transparent p-1 hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon name="play" size={13} color="var(--n-600)" />
               </button>

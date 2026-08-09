@@ -69,6 +69,13 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 
 ## Verifying UI work
 
+**Only `*.mermaid.test.ts` may `import mermaid`.** Those files exist to measure
+claims about the bundled renderer — the shape registry, the `style`/arrow syntax
+our ops emit — and each pays ~4s of real parse/render for it. Everything else
+under `src/` stays pure string code or mocks `../render` with a fixture svg
+(`StructuralEditor.test.tsx`); a component test that reaches for real mermaid is
+a component test that flakes under load.
+
 Playwright specs use `getByTestId`/`getByRole` against the mock backend
 (`window.__cerebroMockFs` exposes the fake disk). The background distiller is
 disabled via localStorage in `boot()` — copy an existing spec's boot. For live

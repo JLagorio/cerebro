@@ -507,6 +507,28 @@ export function newEdgeId(model: FlowchartModel): string {
 }
 
 /**
+ * True when this expansion is the one that can carry the segment's id — and so
+ * the only one `setEdgeAnimate` will act on.
+ *
+ * An `&` group expands to several edges but its segment can spell exactly ONE
+ * id, and `addLink` hands it to the LAST start crossed with the FIRST end
+ * (flowDb.ts:356-371); the same rule `edges()` uses to decide which expansion
+ * gets `id`. Every other expansion has nowhere to hang a meta line.
+ *
+ * Exported because the UI has to ask the question BEFORE the click: the op's
+ * refusal is correct but silent, and a button that swallows a press and closes
+ * is indistinguishable from a broken one (M29.33 review). One predicate, so the
+ * control and the op can never disagree about which edges are live.
+ */
+export function canAnimateEdge(model: FlowchartModel, edge: EdgeEntry): boolean {
+  const line = model.lines[edge.line];
+  if (line === undefined || line.parsed.kind !== 'edges') return false;
+  const seg = line.parsed.segments[edge.seg];
+  if (seg === undefined) return false;
+  return edge.from === seg.from[seg.from.length - 1].id && edge.to === seg.to[0].id;
+}
+
+/**
  * Toggle edge animation (M29.31). ON ensures the edge has an id (minting an
  * `eN` and writing it into the edge line when needed) and an
  * `id@{ animate: true }` meta line BELOW the edge — below, because mermaid
@@ -534,12 +556,12 @@ export function setEdgeAnimate(
   if (line.parsed.kind !== 'edges') return next;
   const seg = line.parsed.segments[edge.seg];
   // An & group expands to several edges but its segment can carry only ONE
-  // id, and upstream gives that id to the last start × the first end
-  // (flowDb.ts:356-371). For any other expansion there is no id to write and
-  // no line to hang meta on, so this is a no-op rather than an edit that
-  // animates a sibling edge the caller never named. (Same shape as
-  // setNodeStyle refusing an id the diagram does not declare.)
-  if (edge.from !== seg.from[seg.from.length - 1].id || edge.to !== seg.to[0].id) return next;
+  // id. For any other expansion there is no id to write and no line to hang
+  // meta on, so this is a no-op rather than an edit that animates a sibling
+  // edge the caller never named. (Same shape as setNodeStyle refusing an id
+  // the diagram does not declare.) `canAnimateEdge` is the same question the
+  // UI asks to disable the control, so the two cannot drift apart.
+  if (!canAnimateEdge(next, edge)) return next;
   const declares = (i: number): boolean => {
     const parsed = next.lines[i].parsed;
     return parsed.kind === 'node-meta' && parsed.meta.entries.some(([k]) => k === 'animate');

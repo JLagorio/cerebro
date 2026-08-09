@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import mermaid from 'mermaid';
 import {
+  edgeAnimated,
   edges,
   nodeStyle,
   nodes,
@@ -9,7 +10,7 @@ import {
   type EdgeHead,
   type EdgeStroke,
 } from './model';
-import { setEdgeAnimate, setEdgeArrow, setNodeStyle } from './ops';
+import { canAnimateEdge, setEdgeAnimate, setEdgeArrow, setNodeStyle } from './ops';
 import { STYLE_SWATCHES } from './NodeStyleMenu';
 
 /**
@@ -264,6 +265,15 @@ const EDGE_FORMS: [string, string][] = [
   ['frontmatter', '---\nconfig:\n  layout: dagre\n---\nflowchart TD\n  A --> B'],
 ];
 
+/**
+ * Forms where `setEdgeAnimate` is EXPECTED to refuse, named one by one. An
+ * `&` group expands to several edges but its segment carries a single id, which
+ * upstream gives to the last start x the first end (flowDb.ts:356-371), so
+ * every other expansion has nowhere to hang the meta line. The UI disables the
+ * toggle for exactly this set, through the same `canAnimateEdge` predicate.
+ */
+const ANIMATE_REFUSALS = new Set(['group']);
+
 /** Exactly what the controls can reach: `invisible` is deliberately not offered. */
 const HEADS: EdgeHead[] = ['arrow', 'open', 'circle', 'cross', 'double'];
 const STROKES: EdgeStroke[] = ['normal', 'thick', 'dotted'];
@@ -352,6 +362,33 @@ describe('edge control conformance (M29.33)', () => {
           bad.push(`${form}/on: NOT IDEMPOTENT`);
         }
 
+        // THE assertion, and the one this sweep was missing: the toggle
+        // actually turned the thing on. Everything above passes vacuously when
+        // the op REFUSES and hands back the input — it parses, round-trips,
+        // keeps every vertex and is trivially idempotent — which is exactly how
+        // 1048 sweep inputs produced no signal for a control that is dead on
+        // every `&`-group expansion but one. A refusal is now something a form
+        // must be NAMED for, never something the sweep shrugs at.
+        const isOn = edgeAnimated(onModel, onEdge);
+        if (ANIMATE_REFUSALS.has(form)) {
+          if (isOn) bad.push(`${form}/on: expected a refusal, got ${JSON.stringify(on)}`);
+          if (on !== src) bad.push(`${form}/on: refused but rewrote bytes — ${JSON.stringify(on)}`);
+          if (canAnimateEdge(base, edge))
+            bad.push(`${form}: refusal is not predictable from canAnimateEdge`);
+          continue;
+        }
+        if (!canAnimateEdge(base, edge)) {
+          bad.push(`${form}: canAnimateEdge says no but this form is not a named refusal`);
+        }
+        if (!isOn) {
+          bad.push(`${form}/on: toggle did nothing — ${JSON.stringify(on)}`);
+          continue;
+        }
+        if (onEdge.id === null) {
+          bad.push(`${form}/on: animated with no id on the edge — ${JSON.stringify(on)}`);
+          continue;
+        }
+
         // The two-way proof. Minting an id RENAMES the rendered path from
         // `L_<from>_<to>_<n>` to the id verbatim (getEdgeId, utils.ts:946), so
         // without svgBinding's by-id arm (M29.31) the edge you just animated
@@ -367,7 +404,7 @@ describe('edge control conformance (M29.33)', () => {
           // unreachable from the canvas, which is why the UI offers no
           // invisible stroke to get back out of.
           if (links.length !== 0) bad.push(`${form}: clickable after all — ${links.join(',')}`);
-        } else if (onEdge.id !== null && !links.some((i) => i.endsWith(`-${onEdge.id}`))) {
+        } else if (!links.some((i) => i.endsWith(`-${onEdge.id}`))) {
           bad.push(`${form}/on: no path for id ${onEdge.id} — ${links.join(',')}`);
         }
 
@@ -377,7 +414,7 @@ describe('edge control conformance (M29.33)', () => {
         const offModel = parseFlowchart(off);
         if (offModel === null || serialize(offModel) !== off) {
           bad.push(`${form}/off: ROUND-TRIP — ${JSON.stringify(off)}`);
-        } else if (edges(offModel)[0].id !== null && edgeStillAnimated(off)) {
+        } else if (edgeAnimated(offModel, edges(offModel)[0]) || /animate:\s*true/.test(off)) {
           bad.push(`${form}/off: still animated — ${off}`);
         }
       }
@@ -386,8 +423,3 @@ describe('edge control conformance (M29.33)', () => {
     TIMEOUT,
   );
 });
-
-/** Cheap textual check that no `animate: true` survived a toggle off. */
-function edgeStillAnimated(code: string): boolean {
-  return /animate:\s*true/.test(code);
-}

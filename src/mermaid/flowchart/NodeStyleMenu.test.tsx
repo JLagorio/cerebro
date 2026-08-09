@@ -33,20 +33,35 @@ describe('NodeStyleMenu', () => {
   // when the existing line is already canonical: `style A fill: #eef1fe` would
   // re-emit reformatted and cost an undo step for a click that changed no
   // colour. The menu knows the answer without looking at the bytes.
-  it('re-picking the colour already applied patches nothing at all', async () => {
+  // A guarded press is still a press: it dismisses like every other one.
+  // Returning early from onPatch alone left the menu hanging open on exactly
+  // the swatch that was already current, while all eleven others closed it.
+  it('re-picking the colour already applied patches nothing but still closes', async () => {
     const onPatch = vi.fn();
-    render(<NodeStyleMenu current={{ fill: '#eef1fe' }} onPatch={onPatch} onClose={() => {}} />);
+    const onClose = vi.fn();
+    render(<NodeStyleMenu current={{ fill: '#eef1fe' }} onPatch={onPatch} onClose={onClose} />);
     await userEvent.click(screen.getByRole('button', { name: 'Fill #eef1fe' }));
     expect(onPatch).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
   });
 
-  it('clearing a declaration that is not there patches nothing at all', async () => {
+  it('clearing a declaration that is not there patches nothing but still closes', async () => {
     const onPatch = vi.fn();
-    render(<NodeStyleMenu current={{ fill: '#eef1fe' }} onPatch={onPatch} onClose={() => {}} />);
+    const onClose = vi.fn();
+    render(<NodeStyleMenu current={{ fill: '#eef1fe' }} onPatch={onPatch} onClose={onClose} />);
     await userEvent.click(screen.getByRole('button', { name: 'Clear border' }));
     expect(onPatch).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
     await userEvent.click(screen.getByRole('button', { name: 'Clear fill' }));
     expect(onPatch).toHaveBeenCalledTimes(1);
+  });
+
+  // ShapePalette's search box takes focus on open; a sibling popover that
+  // leaves focus on the trigger makes Tab mean something different a
+  // centimetre away.
+  it('opens with the first swatch focused', () => {
+    render(<NodeStyleMenu current={{}} onPatch={() => {}} onClose={() => {}} />);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Fill #f6f7fa');
   });
 
   // A style value we did not write (`fill:red`, or a colour outside the ramp)

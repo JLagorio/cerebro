@@ -328,7 +328,7 @@ describe('StructuralEditor', () => {
     );
   });
 
-  it('re-picking the color the node already has costs no undo step', async () => {
+  it('re-picking the color the node already has costs no undo step, and still closes', async () => {
     const onChangeCode = vi.fn();
     render(
       <StructuralEditor
@@ -341,6 +341,16 @@ describe('StructuralEditor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Node colors' }));
     await userEvent.click(screen.getByRole('button', { name: 'Fill #eef1fe' }));
     expect(onChangeCode).not.toHaveBeenCalled();
+    // A press that changes nothing is still a press: it dismisses.
+    expect(screen.queryByTestId('node-style-menu')).toBeNull();
+  });
+
+  it('the color menu opens with a swatch focused, like the shape palette', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node colors' }));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Fill #f6f7fa');
   });
 
   it('edge controls rewrite head, stroke, and animation surgically', async () => {
@@ -383,6 +393,70 @@ describe('StructuralEditor', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('true');
     await userEvent.click(toggle);
     expect(onChangeCode).toHaveBeenCalledWith('flowchart TD\n  A[Start] e1@--> B[End]');
+  });
+
+  // Half one of the leak M29.33's review measured: the edge editor is not a
+  // Popover and had no key guard of its own, so Backspace on any of its four
+  // controls travelled up to the editor's own onKeyDown — which deletes the
+  // SELECTED NODE. (`Delete edge` leaked the same way before E5 ever existed.)
+  // The spy stands in for that ancestor handler: nothing typed in here may
+  // reach it at all.
+  it('keys pressed inside the edge editor never reach the canvas', async () => {
+    const outerKeyDown = vi.fn();
+    render(
+      <div onKeyDown={outerKeyDown}>
+        <StructuralEditor code={CODE} onChangeCode={() => {}} />
+      </div>,
+    );
+    await waitFor(() => expect(document.getElementById('L_A_B_0')).not.toBeNull());
+    await userEvent.click(document.getElementById('L_A_B_0')!);
+    for (const name of ['Stroke thick', 'Animate edge', 'Delete edge']) {
+      screen.getByRole('button', { name }).focus();
+      await userEvent.keyboard('{Backspace}{Delete}');
+    }
+    expect(outerKeyDown).not.toHaveBeenCalled();
+  });
+
+  // Half two: an edge click clears the selection, but a node click never
+  // cleared the edge editor — so both surfaces sat open at once, which is the
+  // state that made the leak above reachable in the first place.
+  it('clicking a node closes the edge editor', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('L_A_B_0')).not.toBeNull());
+    await userEvent.click(document.getElementById('L_A_B_0')!);
+    expect(screen.getByLabelText('Edge label')).toBeTruthy();
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    expect(screen.queryByLabelText('Edge label')).toBeNull();
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+  });
+
+  // An & group expands to several edges but the segment carries only ONE id,
+  // and upstream gives it to the last start × the first end — so setEdgeAnimate
+  // refuses every other expansion. Rendering the button anyway made a control
+  // that swallowed the click and closed, which is indistinguishable from broken.
+  it('the animate toggle disables itself where an id cannot be carried', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={'flowchart TD\n  A & Z --> B'} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('L_A_B_0')).not.toBeNull());
+    await userEvent.click(document.getElementById('L_A_B_0')!);
+    const toggle = screen.getByRole('button', { name: 'Animate edge' });
+    expect(toggle.hasAttribute('disabled')).toBe(true);
+    expect(toggle.getAttribute('title')).toContain('&');
+    await userEvent.click(toggle);
+    expect(onChangeCode).not.toHaveBeenCalled();
+    // The controls that DO work on a group edge stay live.
+    expect(screen.getByRole('button', { name: 'Stroke thick' }).hasAttribute('disabled')).toBe(
+      false,
+    );
+  });
+
+  it('the animate toggle stays live on an edge that can carry an id', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('L_A_B_0')).not.toBeNull());
+    await userEvent.click(document.getElementById('L_A_B_0')!);
+    expect(screen.getByRole('button', { name: 'Animate edge' }).hasAttribute('disabled')).toBe(
+      false,
+    );
   });
 
   // An author-chosen length is not ours to normalize on a click that picked

@@ -75,15 +75,26 @@ export function NodeStyleMenu({
                 structure, and heading navigation is how a screen reader walks
                 it — the same call ShapePalette made for its categories. */}
             <h3 className="w-10 flex-none text-[11px] font-normal text-n-500">{row.label}</h3>
-            {STYLE_SWATCHES.map((hex) => (
+            {STYLE_SWATCHES.map((hex, i) => (
               <button
                 key={hex}
+                // The first control takes focus on open, as ShapePalette's
+                // search box does: two sibling popovers where Tab means
+                // different things is worse than either behavior alone.
+                autoFocus={row.key === 'fill' && i === 0}
                 type="button"
                 aria-label={`${row.label} ${hex}`}
                 aria-pressed={current[row.key] === hex}
                 title={hex}
                 onClick={() => {
-                  if (current[row.key] === hex) return;
+                  // A press that cannot change anything still DISMISSES —
+                  // closing is the caller's job, done through onPatch, so an
+                  // early return alone left this one swatch inert while its
+                  // eleven neighbours closed the menu.
+                  if (current[row.key] === hex) {
+                    onClose();
+                    return;
+                  }
                   onPatch({ [row.key]: hex });
                 }}
                 className={`h-4 w-4 flex-none rounded-sm border ${
@@ -97,7 +108,10 @@ export function NodeStyleMenu({
               aria-label={`Clear ${row.label.toLowerCase()}`}
               title={`Clear ${row.label.toLowerCase()}`}
               onClick={() => {
-                if (current[row.key] === undefined) return;
+                if (current[row.key] === undefined) {
+                  onClose();
+                  return;
+                }
                 onPatch({ [row.key]: null });
               }}
               className="rounded border-0 bg-transparent p-0.5 hover:bg-n-50"
