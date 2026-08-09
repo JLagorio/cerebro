@@ -14,6 +14,7 @@
 
 pub mod authority;
 pub mod goldens;
+pub mod rejection;
 pub mod risk;
 pub mod table;
 pub mod verdict;

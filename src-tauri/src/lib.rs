@@ -11,6 +11,7 @@ pub mod mcp;
 pub mod policy;
 pub mod roots;
 pub mod roots_commands;
+pub mod runtime;
 pub mod search;
 pub mod vault;
 
@@ -415,6 +416,14 @@ fn start_watcher(
     // ledger records nothing and says why through ledger_status.
     if let Ok(dir) = config_dir(&app) {
         let _ = ledger::shadow::activate(&dir, &vault_path);
+        // M24.2: the runtime DB is armed beside the ledger index, in
+        // app-data — never inside a possibly cloud-synced vault (D2).
+        // Failing to open the OPERATIONAL LOG must not stop the app from
+        // opening the vault: it would trade a working workspace for a
+        // diagnostic, and every refusal is still returned to its caller.
+        if let Err(e) = runtime::sink::arm(&dir) {
+            eprintln!("runtime db unavailable, operational refusals go unrecorded: {e}");
+        }
     }
     vault::watcher::start(app, state.inner(), vault_path)
 }

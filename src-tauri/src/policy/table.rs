@@ -224,6 +224,11 @@ pub struct PolicyTable {
     pub predicates: Vec<String>,
     pub transitions: Vec<String>,
     pub rejection_destinies: BTreeMap<String, Destiny>,
+    /// The `RuleCode` members that are NOT predicates or transitions —
+    /// `risk_ladder`, `target_version`, and friends. Registered here so
+    /// `RuleCode` is validated against the artifact rather than against a
+    /// Rust enum that would have to be kept in step with it by hand.
+    pub rule_codes: Vec<String>,
     pub transport_rejections: Vec<String>,
     pub writer_rejections: Vec<String>,
     pub unbound_rejections: Vec<String>,
@@ -301,6 +306,17 @@ impl PolicyTable {
         check_closed_list("target_classes", &self.target_classes)?;
         check_closed_list("predicates", &self.predicates)?;
         check_closed_list("transitions", &self.transitions)?;
+        check_closed_list("rule_codes", &self.rule_codes)?;
+        // A `RuleCode` is a predicate, a transition, or one of these. The
+        // three namespaces must not overlap, or "which rule refused this?"
+        // has two answers.
+        for extra in &self.rule_codes {
+            if self.predicates.contains(extra) || self.transitions.contains(extra) {
+                return Err(format!(
+                    "rule_codes {extra:?} collides with a predicate or transition of the same name"
+                ));
+            }
+        }
 
         let classes: BTreeSet<&str> = self.target_classes.iter().map(String::as_str).collect();
         let predicates: BTreeSet<&str> = self.predicates.iter().map(String::as_str).collect();

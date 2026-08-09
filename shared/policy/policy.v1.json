@@ -88,6 +88,13 @@
     "target_set_mismatch": "ledger",
     "untrusted_provenance": "ledger"
   },
+  "rule_codes": [
+    "candidate_receipt",
+    "commit_set",
+    "human_decision",
+    "risk_ladder",
+    "target_version"
+  ],
   "transport_rejections": [
     "malformed_arguments",
     "run_actor_mismatch",

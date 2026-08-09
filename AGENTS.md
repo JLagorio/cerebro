@@ -48,9 +48,28 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 
 - **Commits**: `type(scope): sentence (M<milestone>.<n>)` — see `git log`. One
   milestone phase per commit where possible.
-- **Store-layer error invariant**: actions never throw. They catch, `toast()`,
-  and return `null`/`false`; call sites may fire-and-forget with `void`.
-  Anything that breaks this needs a written reason at the call site.
+- **Store-layer error invariant — human-UI actions only** (re-scoped M24.2):
+  actions behind a human action never throw. They catch, `toast()`, and
+  return `null`/`false`; call sites may fire-and-forget with `void`. Anything
+  that breaks this needs a written reason at the call site.
+  **Proposal channels are exempt, and must be.** They return a typed
+  `applied | queued | rejected { code, rule, expected, actual }` result that
+  the caller is expected to READ and act on — a queued HIGH-risk mutation is
+  not an error to toast away, and a `stale_target_version` rejection is a
+  card the user has to see. Collapsing those into `null` would throw away
+  the whole point of typing them.
+- **Policy is data**: `shared/policy/` is loaded by Rust (`include_str!`) and
+  TS (vite) from the SAME files. A policy rule implemented as twin Rust and
+  TS code is a review-blocking defect — grow the table format instead.
+  Parity is the shared artifact plus `shared/policy/goldens/`; see that
+  directory's README before editing either artifact (both have regeneration
+  steps that are deliberate, `#[ignore]`d tests).
+- **Two records, two destinies**: every refusal names a code whose
+  ledger-or-operational destiny is declared in `policy.v1.json`. Epistemic
+  history goes in the vault ledger; schema mistakes, malformed arguments,
+  and capability gaps go in `<app-data>/runtime.db`. When in doubt:
+  operational. Promoting a code into the ledger needs a
+  coverage-materiality argument in review.
 - **Knowledge is guarded**: `knowledge/` is agent-written, human-VERIFIED.
   Writes go through `write_concept`/`verify_concept` only; the mock backend
   (`src/lib/mockIpc.ts`) must mirror every Rust-side guard, and that parity is

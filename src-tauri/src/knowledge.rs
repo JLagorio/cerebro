@@ -159,10 +159,45 @@ fn title_tokens(title: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
+/// Build a typed refusal for a bundle-boundary guard and record it.
+///
+/// M24.2: every refusal on the epistemic plane carries a code with a
+/// DECLARED DESTINY instead of being an anonymous string. These are all
+/// `malformed_arguments` — a caller reaching the bundle through the wrong
+/// door is a tool-surface mistake, not a claim about the world, so they
+/// belong in the runtime DB and not in the append-only ledger. (When in
+/// doubt the answer is operational; promoting a code into the ledger needs
+/// a coverage-materiality argument in review.)
+///
+/// The MESSAGE is unchanged, byte for byte. These strings are agent-facing
+/// prompt surface and human-facing UI text; typing the refusal is about
+/// where it is recorded, never about rewording it.
+fn guard_refusal(
+    surface: &str,
+    detail: &str,
+) -> Result<crate::policy::rejection::OperationalRefusal, String> {
+    let table = crate::policy::table::PolicyTable::load()?;
+    crate::policy::rejection::OperationalRefusal::new(&table, GUARD_CODE, surface, detail)
+}
+
+fn refuse(surface: &str, detail: &'static str) -> String {
+    refuse_owned(surface, detail.to_string())
+}
+
+fn refuse_owned(surface: &str, detail: String) -> String {
+    if let Ok(refusal) = guard_refusal(surface, &detail) {
+        crate::runtime::sink::record(&refusal, &crate::runtime::operational::LogEntry::bare());
+    }
+    detail
+}
+
+/// The one code every bundle-boundary guard reports under.
+const GUARD_CODE: &str = "malformed_arguments";
+
 /// Reject a write from the human-facing UI into the bundle.
 pub fn guard_human_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
-        return Err(READ_ONLY.to_string());
+        return Err(refuse("human_write", READ_ONLY));
     }
     Ok(())
 }
@@ -179,7 +214,7 @@ pub fn guard_human_write(path: &str) -> Result<(), String> {
 /// grow a body with no provenance at all.
 pub fn guard_agent_write(path: &str) -> Result<(), String> {
     if is_knowledge_path(path) {
-        return Err(AGENT_USE_WRITE_CONCEPT.to_string());
+        return Err(refuse("agent_write", AGENT_USE_WRITE_CONCEPT));
     }
     Ok(())
 }
@@ -200,17 +235,25 @@ pub fn guard_human_move(from: &str, to: &str) -> Result<(), String> {
 /// it must not become a general-purpose way around `guard_human_write`.
 pub fn guard_verify(path: &str, patch: &Map<String, Value>) -> Result<(), String> {
     if !is_knowledge_path(path) {
-        return Err("verify_concept only applies to knowledge/ concepts".to_string());
+        return Err(refuse(
+            "verify_concept",
+            "verify_concept only applies to knowledge/ concepts",
+        ));
     }
     for key in patch.keys() {
         if key != "verified" {
-            return Err(format!(
-                "verify_concept may only write `verified`, not `{key}`"
-            ));
+            // The interpolated key makes this one message dynamic, so it
+            // cannot share the `&'static str` path — the code, surface, and
+            // destiny are the same.
+            let detail = format!("verify_concept may only write `verified`, not `{key}`");
+            return Err(refuse_owned("verify_concept", detail));
         }
     }
     if patch.is_empty() {
-        return Err("verify_concept requires a `verified` value".to_string());
+        return Err(refuse(
+            "verify_concept",
+            "verify_concept requires a `verified` value",
+        ));
     }
     Ok(())
 }
@@ -317,6 +360,53 @@ mod tests {
         assert!(guard_agent_write("records/decisions/d-1.md").is_ok());
         // The trailing-slash rule holds here too: a sibling is not the bundle.
         assert!(guard_agent_write("knowledge-archive/old.md").is_ok());
+    }
+
+    /// The guard messages are agent-facing prompt surface and human-facing
+    /// UI text. M24.2 typed WHERE they are recorded; it must not have
+    /// reworded a single one of them.
+    #[test]
+    fn typing_the_refusals_did_not_change_one_word_the_caller_sees() {
+        assert_eq!(guard_human_write(REL).unwrap_err(), READ_ONLY);
+        assert_eq!(guard_agent_write(REL).unwrap_err(), AGENT_USE_WRITE_CONCEPT);
+        assert_eq!(
+            guard_verify("records/d.md", &patch(&[("verified", Value::Null)])).unwrap_err(),
+            "verify_concept only applies to knowledge/ concepts"
+        );
+        assert_eq!(
+            guard_verify(REL, &patch(&[("title", Value::Null)])).unwrap_err(),
+            "verify_concept may only write `verified`, not `title`"
+        );
+        assert_eq!(
+            guard_verify(REL, &patch(&[])).unwrap_err(),
+            "verify_concept requires a `verified` value"
+        );
+    }
+
+    #[test]
+    fn a_refused_bundle_write_is_typed_and_operational_destined() {
+        // D5: reaching the bundle through the wrong door is a tool-surface
+        // mistake, not a claim about the world. It belongs in the runtime DB
+        // — otherwise the vault's permanent epistemic record fills with
+        // "Claude used the wrong tool" and the Skeptic drowns.
+        //
+        // The destiny is read off the shared table, never decided here. That
+        // is the whole point: the routing rule has one home, and a future
+        // decision to promote this code into the ledger is a table edit with
+        // a coverage-materiality argument, not a call-site change.
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        for (surface, detail) in [
+            ("agent_write", AGENT_USE_WRITE_CONCEPT),
+            ("human_write", READ_ONLY),
+        ] {
+            let refusal = guard_refusal(surface, detail).unwrap();
+            assert_eq!(refusal.surface, surface);
+            assert_eq!(refusal.message(), detail, "the caller's words, untouched");
+            assert_eq!(
+                refusal.code.destiny(&table),
+                crate::policy::table::Destiny::Operational
+            );
+        }
     }
 
     #[test]
