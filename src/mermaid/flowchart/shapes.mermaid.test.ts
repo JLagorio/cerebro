@@ -28,15 +28,15 @@ import { PALETTE_SHAPES, SHAPE_ALIASES, VALID_SHAPES } from './shapes';
  */
 
 /**
- * Generous per-test budgets (the suite default is 15s). Nothing here is slow
- * on an idle machine — the whole file runs in ~4s — but it is the only
- * CPU-bound file in the suite, and this repo has already been bitten by
- * load-induced `waitFor` flakes on shared runners (see src/test/setup.ts). A
- * timeout only bounds a HANGING test; a passing one still finishes the moment
- * it is done, so there is no cost to being generous and a real cost to a
- * conformance failure that turns out to have been a busy CPU.
+ * A per-test budget above the suite default (15s), because this is the only
+ * CPU-bound file here and the repo has been bitten by load-induced flakes on
+ * shared runners (see src/test/setup.ts). 60s is ~15x the measured worst case
+ * (3.6-3.9s, taken at load average 83) — headroom, not a blank cheque: six
+ * tests carry it, and the pre-push hook runs this suite, so an over-generous
+ * budget buys a genuinely hung mermaid the right to stall a push for as long
+ * as the number allows.
  */
-const TIMEOUT = 300_000;
+const TIMEOUT = 60_000;
 
 const SHORT_NAMES = PALETTE_SHAPES.map((s) => s.name);
 
@@ -84,7 +84,13 @@ async function geometry(code: string): Promise<string> {
   seq += 1;
   const host = document.createElement('div');
   document.body.appendChild(host);
-  const { svg } = await mermaid.render(`conf${seq}`, code, host);
+  let svg: string;
+  try {
+    ({ svg } = await mermaid.render(`conf${seq}`, code, host));
+  } finally {
+    // ~150 of these per run otherwise, each holding a rendered svg alive.
+    host.remove();
+  }
   const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
   const group = [...doc.querySelectorAll('g.node')].find((n) =>
     (n.getAttribute('id') ?? '').includes('-A-'),

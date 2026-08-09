@@ -103,6 +103,26 @@ function nodeMetaLinesFor(model: FlowchartModel, id: string): number[] {
   return out;
 }
 
+/**
+ * True when an OPAQUE line opens a multi-line `id@{` block.
+ *
+ * The block form is real mermaid and carries a real shape, but the parser
+ * declines it (M29.29) — so `nodeMeta()` cannot see it while `nodes()` still
+ * reports the node, and `setNodeShape` would take the brackets-first path,
+ * invent a definition line, and change nothing on screen because the block's
+ * `shape:` still wins at render. That is the exact "inert on a meta-shaped
+ * node" defect M29.32 closed, surviving in the form the plan declared opaque —
+ * plus a spurious line. The meta path is no better: its new line lands ABOVE
+ * the block, which then out-votes it.
+ *
+ * `startsWith` rather than an exact match, because any opaque line opening
+ * `id@{` is meta for `id` that we cannot read, however it continues. The `@`
+ * makes prefix collision impossible (`AB@{` never starts with `A@{`).
+ */
+function hasOpaqueMetaBlock(model: FlowchartModel, id: string): boolean {
+  return model.lines.some((l) => l.parsed.kind === 'opaque' && l.raw.trim().startsWith(`${id}@{`));
+}
+
 /** True when some edge line carries `id` as ITS id (`A e1@--> B`). */
 function declaresEdgeId(model: FlowchartModel, id: string): boolean {
   return model.lines.some(
@@ -167,6 +187,10 @@ export function setNodeShape(
   // `id` is always a token our own parser produced, so every line emitted here
   // is one we can read straight back.
   if (!nodes(model).has(id)) return clone(model);
+  // Meta we cannot read is meta we cannot beat: the block's shape wins at
+  // render whatever we write, so every path here would be a visible no-op
+  // paid for with changed bytes and an undo step.
+  if (hasOpaqueMetaBlock(model, id)) return clone(model);
 
   const bracket = REGISTRY_TO_BRACKET[shape];
   if (bracket !== undefined && !nodeMeta(model).has(id)) {
@@ -185,6 +209,15 @@ export function setNodeShape(
   // Object.prototype member (the table is null-prototype).
   const registryName = SHORT_NAME_FOR[shape];
   if (registryName === undefined) return clone(model);
+  // Already this shape: do nothing at all. Canonicalizing would otherwise
+  // rewrite a user's `shape: database` to `shape: cyl` on a click that picked
+  // the button already showing as pressed — changed bytes and an undo entry
+  // for an edit that moved nothing. Compared through SHORT_NAME_FOR so an
+  // alias counts as the shape it denotes, exactly as the palette reads it.
+  const currentMeta = nodes(model).get(id)?.metaShape;
+  if (currentMeta !== undefined && SHORT_NAME_FOR[currentMeta] === registryName) {
+    return clone(model);
+  }
   // An id some edge also claims makes POSITION decide what an `@{ … }` line
   // means (flowDb.ts:163, and `edgeMetaLines` in model.ts): below that edge the
   // shape we wrote would be read as edge meta and silently dropped. We cannot

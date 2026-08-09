@@ -748,6 +748,60 @@ describe('setNodeShape — registry shapes (M29.32, D4)', () => {
     }
   });
 
+  // The M29.32 review measured this: the block form is opaque, so
+  // nodeMeta() cannot see it while nodes() still reports A — and the
+  // brackets-first path invented `A((A))` while mermaid went on rendering the
+  // cloud the block declares. The inert-shape defect, in the one shape the
+  // parser declines.
+  it('an opaque multi-line @{ block is refused, not silently out-voted', () => {
+    const src = 'flowchart TD\n  A --> B\n  A@{\n    shape: cloud\n  }';
+    const m = parseFlowchart(src)!;
+    expect(m.lines.map((l) => l.parsed.kind)).toEqual([
+      'header',
+      'edges',
+      'opaque',
+      'opaque',
+      'opaque',
+    ]);
+    for (const shape of ['circle', 'hexagon', 'cloud', 'cyl', 'rect']) {
+      // No invented definition line, no second meta line, no bytes at all.
+      expect([shape, serialize(setNodeShape(m, 'A', shape))]).toEqual([shape, src]);
+    }
+  });
+
+  it('a node with no opaque block of its OWN still edits normally', () => {
+    // The refusal keys on the id, not on "some block exists somewhere".
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  B@{\n    shape: cloud\n  }')!;
+    expect(serialize(setNodeShape(m, 'A', 'cloud'))).toBe(
+      'flowchart TD\n  A --> B\n  A@{ shape: cloud }\n  B@{\n    shape: cloud\n  }',
+    );
+  });
+
+  it('picking the shape a node already has is a true no-op', () => {
+    // An alias spelling reads as pressed in the palette, so re-picking it must
+    // not rewrite `database` to `cyl` — changed bytes, an undo entry, and
+    // nothing moved on screen.
+    for (const [src, pick] of [
+      ['flowchart TD\n  A --> B\n  A@{ shape: database }', 'cyl'],
+      ['flowchart TD\n  A --> B\n  A@{ shape: database }', 'database'],
+      ['flowchart TD\n  A --> B\n  A@{ shape: cyl }', 'cyl'],
+      ['flowchart TD\n  A --> B\n  A@{ shape: doublecircle }', 'dbl-circ'],
+    ]) {
+      expect([src, pick, serialize(setNodeShape(parseFlowchart(src)!, 'A', pick))]).toEqual([
+        src,
+        pick,
+        src,
+      ]);
+    }
+  });
+
+  it('a DIFFERENT shape still rewrites the alias-spelled meta', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ shape: database }')!;
+    expect(serialize(setNodeShape(m, 'A', 'hex'))).toBe(
+      'flowchart TD\n  A --> B\n  A@{ shape: hex }',
+    );
+  });
+
   it('a bare node gains brackets for a classic 8, a meta line for the rest', () => {
     const bare = parseFlowchart('flowchart TD\n  A --> B')!;
     const withBrackets = serialize(setNodeShape(bare, 'A', 'hexagon'));

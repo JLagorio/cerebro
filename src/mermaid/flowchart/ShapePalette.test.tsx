@@ -40,6 +40,53 @@ describe('ShapePalette', () => {
     expect(screen.queryByText('Basic')).toBeNull();
   });
 
+  // Before this landed, reaching Cloud from the search box took 40 Tab
+  // presses and Enter picked nothing at all.
+  it('Enter takes the top match once a query has narrowed the list', async () => {
+    const onPick = vi.fn();
+    render(<ShapePalette current={null} onPick={onPick} onClose={() => {}} />);
+    const search = screen.getByLabelText('Search shapes');
+    await userEvent.type(search, 'clou{Enter}');
+    expect(onPick).toHaveBeenCalledWith('cloud');
+  });
+
+  it('Enter on an UNFILTERED grid picks nothing — every shape is "first"', async () => {
+    const onPick = vi.fn();
+    render(<ShapePalette current={null} onPick={onPick} onClose={() => {}} />);
+    await userEvent.type(screen.getByLabelText('Search shapes'), '{Enter}');
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('Enter with no match picks nothing', async () => {
+    const onPick = vi.fn();
+    render(<ShapePalette current={null} onPick={onPick} onClose={() => {}} />);
+    await userEvent.type(screen.getByLabelText('Search shapes'), 'zzzz{Enter}');
+    expect(onPick).not.toHaveBeenCalled();
+  });
+
+  it('focus is trapped: Tab from the last control returns into the palette', async () => {
+    render(<ShapePalette current={null} onPick={() => {}} onClose={() => {}} />);
+    const palette = screen.getByTestId('shape-palette');
+    const search = screen.getByLabelText('Search shapes');
+    search.focus();
+    // Walk well past the 49 focusable controls; focus must never leave.
+    for (let i = 0; i < 60; i += 1) {
+      await userEvent.tab();
+      expect(palette.contains(document.activeElement), `after ${i + 1} tabs`).toBe(true);
+    }
+  }, 60_000);
+
+  it('the categories are headings, and the search box is a search box', () => {
+    render(<ShapePalette current={null} onPick={() => {}} onClose={() => {}} />);
+    expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual([
+      'Basic',
+      'Process',
+      'Technical',
+      'Annotation',
+    ]);
+    expect(screen.getByLabelText('Search shapes').getAttribute('type')).toBe('search');
+  });
+
   it('every one of the 48 registry shapes is reachable', () => {
     render(<ShapePalette current={null} onPick={() => {}} onClose={() => {}} />);
     const buttons = screen

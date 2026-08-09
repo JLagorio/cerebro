@@ -822,3 +822,25 @@ describe('edge labels quote what mermaid cannot lex bare (M29.31)', () => {
     }
   });
 });
+
+describe('meta bodies with duplicate keys (M29.32 review)', () => {
+  it('goes opaque — mermaid refuses the whole document', () => {
+    // Measured on 11.16.0: `A@{ shape: cyl, shape: hex }` throws
+    // `duplicated mapping key (2:14)` out of yaml.load, so a body we read
+    // happily would be a line the renderer rejects outright.
+    for (const body of ['shape: cyl, shape: hex', 'label: a, label: b', 'w: 1, w: 2']) {
+      const m = parseFlowchart(`flowchart TD\n  A --> B\n  A@{ ${body} }`)!;
+      expect([body, m.lines[2].parsed.kind]).toEqual([body, 'opaque']);
+    }
+  });
+
+  it('and its bytes survive untouched, as every refusal does', () => {
+    const src = 'flowchart TD\n  A --> B\n  A@{ shape: cyl, shape: hex }';
+    expect(serialize(parseFlowchart(src)!)).toBe(src);
+  });
+
+  it('distinct keys are unaffected', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ shape: cyl, label: x }')!;
+    expect(m.lines[2].parsed.kind).toBe('node-meta');
+  });
+});

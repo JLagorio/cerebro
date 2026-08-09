@@ -155,6 +155,7 @@ function parseMetaBody(body: string): NodeMeta | null {
   parts.push(cur);
 
   const entries: [string, string][] = [];
+  const seen = new Set<string>();
   for (const part of parts) {
     const item = part.trim();
     if (item === '') return null;
@@ -163,6 +164,13 @@ function parseMetaBody(body: string): NodeMeta | null {
     const key = item.slice(0, colon).trim();
     let value = item.slice(colon + 1).trim();
     if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(key)) return null;
+    // A repeated key is a YAML error, not a last-wins merge: `yaml.load`
+    // refuses the whole document (measured on 11.16.0 — `A@{ shape: cyl,
+    // shape: hex }` → `duplicated mapping key (2:14)`), so a body we read
+    // happily here is one mermaid will not render at all. Owning a line the
+    // renderer rejects breaks the boundary this parser exists to hold.
+    if (seen.has(key)) return null;
+    seen.add(key);
     if (value.startsWith('"')) {
       if (value.length < 2 || !value.endsWith('"')) return null;
       value = value.slice(1, -1);

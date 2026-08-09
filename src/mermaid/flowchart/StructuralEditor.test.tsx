@@ -181,6 +181,53 @@ describe('StructuralEditor', () => {
     ).toBe('false');
   });
 
+  it('the shape trigger announces the popover it owns', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    const trigger = screen.getByRole('button', { name: 'Change shape' });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Change shape' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+  });
+
+  it('picking the shape the node already has costs no undo step', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  A@{ shape: database }'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
+    const database = screen.getByRole('button', { name: 'Shape: Database' });
+    expect(database.getAttribute('aria-pressed')).toBe('true');
+    await userEvent.click(database);
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  it('an opaque multi-line meta block disables the shape edit rather than lying', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  A@{\n    shape: cloud\n  }'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Circle' }));
+    // No invented `A((A))` line, and no undo step for an edit that could not
+    // have moved anything.
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
   it('toolbar={false} hides the built-in control row but keeps the host', async () => {
     render(
       <StructuralEditor code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} toolbar={false} />,

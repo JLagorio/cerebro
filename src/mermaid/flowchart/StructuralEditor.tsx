@@ -90,7 +90,15 @@ export function StructuralEditor({
     selected !== null && model !== null && nodes(model).has(selected) ? selected : null;
 
   const apply = (next: ReturnType<typeof parseFlowchart>) => {
-    if (next !== null) onChangeCode(serialize(next));
+    if (next === null) return;
+    const out = serialize(next);
+    // An op that refused (an unknown shape, a shape the node already has)
+    // returns the model unchanged, and pushing identical bytes back through
+    // onChangeCode would still cost the user an undo step for a click that
+    // moved nothing. Same reasoning as the edge-label editor's unchanged-value
+    // check below — history churn is a real cost, not a cosmetic one.
+    if (out === code) return;
+    onChangeCode(out);
   };
 
   // Every popover keys off line/segment indices captured from a PAST render
@@ -415,6 +423,8 @@ export function StructuralEditor({
               type="button"
               aria-label="Change shape"
               title="Change shape"
+              aria-haspopup="dialog"
+              aria-expanded={shapeOpen}
               onClick={() => setShapeOpen(true)}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
             >

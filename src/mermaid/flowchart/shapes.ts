@@ -82,7 +82,16 @@ export const SHAPE_ALIASES: Readonly<Record<string, readonly string[]>> = {
   cloud: [],
 };
 
-/** Every name setNodeShape may write or accept: short names + verified aliases. */
+/**
+ * Every spelling mermaid accepts from us: short names + verified aliases.
+ *
+ * NOT a production gate any more — `setNodeShape` decides with
+ * `SHORT_NAME_FOR`, whose key set is exactly this one (`shapes.test.ts` pins
+ * the equality, which is what makes the `cylinder` alias above load-bearing).
+ * This is the CONFORMANCE SURFACE: `shapes.mermaid.test.ts` sweeps it against
+ * the bundled mermaid, so every writable spelling is proven to parse. Deleting
+ * it as dead code would silently delete that proof.
+ */
 export const VALID_SHAPES: ReadonlySet<string> = new Set(
   Object.entries(SHAPE_ALIASES).flatMap(([name, aliases]) => [name, ...aliases]),
 );
