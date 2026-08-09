@@ -72,22 +72,49 @@ export function withMetaEntry(meta: NodeMeta, key: string, value: string | null)
 }
 
 /**
- * Parse a single-line `@{ … }` body — a YAML flow mapping per the v11.16.1
- * lexer. Bare values may not contain `,` `:` `"` `^` (quote them instead);
- * `^` is illegal even quoted (lexer class `[^}^"]+`), and nested braces mean
- * a body we don't own. Any violation → null → the line goes opaque.
+ * A bare value starting with one of these is YAML syntax, not text: a
+ * single-quoted scalar, an anchor, an alias, a tag, or a comment. Mermaid
+ * runs the body through `yaml.load` (flowDb.ts:146-151), so for these the
+ * text we can see is NOT the value mermaid gets — and re-emitting our reading
+ * of it would change what renders. We refuse to own the line instead.
+ */
+const YAML_SIGIL_PREFIX = /^['&*!#]/;
+
+/**
+ * Parse a single-line `@{ … }` body — a YAML flow mapping that mermaid feeds
+ * to `yaml.load` (flowDb.ts:146-151), lexed by `flow.jison`. We own a body
+ * only when its text and its YAML value are the same thing:
+ *
+ * - Bare `{` `}` `^` are outside the lexer's `[^}^"]+` class; INSIDE quotes
+ *   `flow.jison:52` is `[^\"]+`, so both are perfectly legal there.
+ * - A whitespace-preceded `#` opens a YAML comment, so the value mermaid sees
+ *   is shorter than the text — `shape: cyl # note` means `cyl`.
+ * - A bare value opening with a YAML sigil means something other than itself.
+ *
+ * Any violation → null → the line goes opaque, which is never wrong.
  */
 function parseMetaBody(body: string): NodeMeta | null {
-  if (/[{}^]/.test(body)) return null;
+  // ONE quote-aware scan does the splitting and the structural guard together,
+  // so the two can never disagree about what "inside a quoted string" means —
+  // the bug that let us emit `label: "a}b"` and then disown it.
   const parts: string[] = [];
   let quote = false;
   let cur = '';
-  for (const ch of body) {
-    if (ch === '"') quote = !quote;
-    if (ch === ',' && !quote) {
-      parts.push(cur);
-      cur = '';
+  for (let i = 0; i < body.length; i += 1) {
+    const ch = body[i];
+    if (ch === '"') {
+      quote = !quote;
+      cur += ch;
       continue;
+    }
+    if (!quote) {
+      if (ch === '{' || ch === '}' || ch === '^') return null;
+      if (ch === '#' && (i === 0 || /\s/.test(body[i - 1]))) return null;
+      if (ch === ',') {
+        parts.push(cur);
+        cur = '';
+        continue;
+      }
     }
     cur += ch;
   }
@@ -107,7 +134,7 @@ function parseMetaBody(body: string): NodeMeta | null {
       if (value.length < 2 || !value.endsWith('"')) return null;
       value = value.slice(1, -1);
       if (value.includes('"')) return null;
-    } else if (value === '' || /[:"]/.test(value)) {
+    } else if (value === '' || /[:"]/.test(value) || YAML_SIGIL_PREFIX.test(value)) {
       return null;
     }
     entries.push([key, value]);
@@ -381,14 +408,22 @@ function quoteLabel(label: string): string {
 }
 
 /**
- * Quote a meta value when the flow mapping demands it (`,` `:` braces, `#`,
- * or edge whitespace/emptiness). `"` and `^` are illegal in `@{ … }` bodies
- * altogether, so — same last-boundary discipline as setEdgeLabel's pipe —
- * they are substituted here rather than corrupting the file.
+ * Quote a meta value whenever bare text would not mean itself: the flow
+ * mapping's own structural characters (`,` `:` `{` `}`), a `^` (illegal bare
+ * per `flow.jison:57`, fine quoted per `flow.jison:52`), a comment-opening
+ * ` #`, a leading YAML sigil, or edge whitespace/emptiness.
+ *
+ * Only `"` is substituted (→ `'`), because it is the quote character itself
+ * and has no escape inside `[^\"]+` — the same last-boundary discipline as
+ * setEdgeLabel's pipe. Everything else is PRESERVED by quoting rather than
+ * dropped: quoting is lossless, dropping silently loses what the user typed.
+ *
+ * Every branch here emits something `parseMetaBody` can read back, so an edit
+ * never costs a line its structural editability.
  */
 function emitMetaValue(value: string): string {
-  const cleaned = value.replaceAll('"', "'").replaceAll('^', '');
-  return /[,:{}#]|^\s|\s$|^$/.test(cleaned) ? `"${cleaned}"` : cleaned;
+  const cleaned = value.replaceAll('"', "'");
+  return /[,:{}^]|\s#|^[#'&*!]|^\s|\s$|^$/.test(cleaned) ? `"${cleaned}"` : cleaned;
 }
 
 export function emitNodeRef(ref: NodeRef): string {
@@ -432,11 +467,29 @@ export function serialize(model: FlowchartModel): string {
   return model.lines.map((l) => (l.dirty ? emitLine(l) : l.raw)).join('\n');
 }
 
-/** Meta per id — the LAST meta line for an id wins, mirroring mermaid's sequential apply. */
+/**
+ * Meta per id, merged PER KEY with the last value winning — not per line.
+ * Mermaid applies each key independently onto the accumulated vertex
+ * (flowDb.ts:236-262 is a run of `if (doc.shape) …`, `if (doc?.label) …`), so
+ * `A@{ label: X }` followed by `A@{ shape: hex }` renders as BOTH. Replacing
+ * the whole meta per line would make this resolved view lie.
+ *
+ * The merged result is a read-only view: emission always goes through the
+ * individual line's own `meta`, never through this.
+ */
 export function nodeMeta(model: FlowchartModel): Map<string, NodeMeta> {
   const out = new Map<string, NodeMeta>();
   for (const line of model.lines) {
-    if (line.parsed.kind === 'node-meta') out.set(line.parsed.id, line.parsed.meta);
+    if (line.parsed.kind !== 'node-meta') continue;
+    const { id, meta } = line.parsed;
+    const prior = out.get(id);
+    if (prior === undefined) {
+      out.set(id, meta);
+      continue;
+    }
+    let merged = prior;
+    for (const [k, v] of meta.entries) merged = withMetaEntry(merged, k, v);
+    out.set(id, merged);
   }
   return out;
 }

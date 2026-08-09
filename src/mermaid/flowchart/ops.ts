@@ -227,6 +227,10 @@ export function deleteNode(model: FlowchartModel, id: string): FlowchartModel {
     const parsed = next.lines[i].parsed;
     if (parsed.kind === 'node' && parsed.node.id === id) {
       next.lines.splice(i, 1);
+    } else if (parsed.kind === 'node-meta' && parsed.id === id) {
+      // A lone `A@{ shape: cyl }` DECLARES A (M29.29), so leaving it behind
+      // would leave the node rendering after a delete that claimed to remove it.
+      next.lines.splice(i, 1);
     } else if (parsed.kind === 'edges') {
       rebuildEdgeLines(next, i, (f, t) => f.id === id || t.id === id, id);
     }

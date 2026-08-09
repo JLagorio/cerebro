@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { edges, parseFlowchart, serialize } from './model';
+import { edges, nodeMeta, nodes, parseFlowchart, serialize } from './model';
 import {
   addEdge,
   addNode,
@@ -167,5 +167,28 @@ describe('renameNode and node-meta (M29.29)', () => {
     const out = serialize(renameNode(m, 'A', 'New'));
     expect(out).toContain('A[New] --> B');
     expect(out).toContain('A@{ shape: cloud }');
+  });
+
+  it('a rename introducing } or ^ writes a line our own parser still owns', () => {
+    for (const [label, expected] of [
+      ['a}b', 'A@{ shape: cloud, label: "a}b" }'],
+      ['a^b', 'A@{ shape: cloud, label: "a^b" }'],
+    ]) {
+      const m = parseFlowchart('flowchart TD\n  A[Old] --> B\n  A@{ shape: cloud, label: Older }')!;
+      const out = serialize(renameNode(m, 'A', label));
+      expect(out).toContain(expected);
+      // The character survives AND the line stays structurally editable.
+      const again = parseFlowchart(out)!;
+      expect(again.lines[2].parsed.kind).toBe('node-meta');
+      expect(nodeMeta(again).get('A')?.label).toBe(label);
+    }
+  });
+
+  it('deleteNode removes the meta line that declares the node', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B\n  A@{ shape: cloud, label: Older }')!;
+    const out = deleteNode(m, 'A');
+    // Left behind, the meta line would keep declaring — and rendering — A.
+    expect(serialize(out)).not.toContain('A@{');
+    expect(nodes(out).has('A')).toBe(false);
   });
 });

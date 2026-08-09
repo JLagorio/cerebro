@@ -157,9 +157,24 @@ describe('node-meta lines (M29.29)', () => {
     expect(serialize(parseFlowchart(META)!)).toBe(META);
   });
 
-  it('nodeMeta maps ids to their meta, last line winning', () => {
-    const m = parseFlowchart('flowchart TD\n  A\n  A@{ shape: hex }\n  A@{ shape: cloud }')!;
-    expect(nodeMeta(m).get('A')?.shape).toBe('cloud');
+  it('nodeMeta merges per KEY, last value winning — not per line', () => {
+    // mermaid applies each key independently onto the accumulated vertex
+    // (flowDb.ts:236-262 — `if (doc.shape) …`, `if (doc?.label) …`), so a
+    // later line REFINES the earlier one instead of replacing it. Asserting
+    // per-line "last wins" here would encode a model mermaid does not use.
+    const m = parseFlowchart(
+      'flowchart TD\n  A\n  A@{ shape: hex, label: Keep }\n  A@{ shape: cloud }',
+    )!;
+    const meta = nodeMeta(m).get('A');
+    expect(meta?.shape).toBe('cloud');
+    expect(meta?.label).toBe('Keep');
+  });
+
+  it('nodes() reports the per-key merge, so the rename box is prefilled truthfully', () => {
+    const m = parseFlowchart(
+      'flowchart TD\n  A[Old] --> B\n  A@{ label: Meta }\n  A@{ shape: hex }',
+    )!;
+    expect(nodes(m).get('A')).toEqual({ label: 'Meta', shape: 'rect', metaShape: 'hex' });
   });
 
   it('nodes() merges meta shape and label so the resolved view is truthful', () => {
@@ -223,23 +238,84 @@ describe('node-meta lines (M29.29)', () => {
     expect(withMetaEntry(base, 'w', null).entries).toEqual([['shape', 'hex']]);
   });
 
-  it('dirty meta lines re-quote values that need it and sanitize illegal characters', () => {
+  it('dirty meta lines re-quote values that need it, substituting only the quote', () => {
     const m = parseFlowchart('flowchart TD\n  A@{ shape: hex }')!;
     const line = m.lines[1];
     if (line.parsed.kind !== 'node-meta') throw new Error('expected node-meta');
     line.parsed.meta = withMetaEntry(line.parsed.meta, 'label', 'a, b: "c" ^d');
     line.dirty = true;
-    expect(serialize(m)).toBe(`flowchart TD\n  A@{ shape: hex, label: "a, b: 'c' d" }`);
+    // `^` is only illegal BARE (flow.jison:57 `[^}^"]+`); inside a quoted
+    // string flow.jison:52 is `[^\"]+`, so quoting preserves it. Only `"`
+    // itself has no escape and must be substituted.
+    expect(serialize(m)).toBe(`flowchart TD\n  A@{ shape: hex, label: "a, b: 'c' ^d" }`);
   });
 
   it('keys we do not understand survive a dirty re-emit in their original positions', () => {
-    const m = parseFlowchart('flowchart TD\n  A@{ foo: bar, shape: hex, zed: 1 }')!;
+    // `foo, shape, abc` is deliberately NOT alphabetical: a sorting emitter
+    // would reorder it and fail here, which an already-sorted fixture cannot
+    // detect.
+    const m = parseFlowchart('flowchart TD\n  A@{ foo: bar, shape: hex, abc: 1 }')!;
     const line = m.lines[1];
     if (line.parsed.kind !== 'node-meta') throw new Error('expected node-meta');
     line.parsed.meta = withMetaEntry(line.parsed.meta, 'shape', 'cloud');
     line.dirty = true;
-    // `shape` is replaced where it stood — not appended — and `foo`/`zed`
+    // `shape` is replaced where it stood — not appended — and `foo`/`abc`
     // bracket it exactly as the source did.
-    expect(serialize(m)).toBe('flowchart TD\n  A@{ foo: bar, shape: cloud, zed: 1 }');
+    expect(serialize(m)).toBe('flowchart TD\n  A@{ foo: bar, shape: cloud, abc: 1 }');
+  });
+
+  it('bodies whose text is not their YAML value go opaque — re-emitting would break the render', () => {
+    // mermaid runs the body through yaml.load (flowDb.ts:146-151), so for each
+    // of these the value it gets differs from the text we can see. Owning them
+    // would mean a rename re-emits our misreading — and for `shape` that
+    // throws `No such shape` at flowDb.ts:239, killing the whole diagram.
+    for (const bad of [
+      'A@{ shape: cyl # note }', // comment: mermaid sees `cyl`
+      "A@{ shape: 'cyl' }", // single-quoted scalar: mermaid sees `cyl`
+      'A@{ note: #fff }', // comment: mermaid sees null
+      'A@{ shape: &anc cyl }', // anchor
+      'A@{ shape: *ali }', // alias
+      'A@{ shape: !!str cyl }', // tag
+    ]) {
+      const m = parseFlowchart(`flowchart TD\n  ${bad}`)!;
+      expect(m.lines[1].parsed.kind).toBe('opaque');
+      expect(serialize(m)).toBe(`flowchart TD\n  ${bad}`);
+    }
+  });
+
+  it('a `#` that opens no comment is ordinary text and stays understood', () => {
+    const m = parseFlowchart('flowchart TD\n  A@{ label: a#b }')!;
+    expect(nodeMeta(m).get('A')?.label).toBe('a#b');
+    expect(serialize(m)).toBe('flowchart TD\n  A@{ label: a#b }');
+  });
+
+  it('emit → re-parse → emit is a fixed point, and quoting never loses the value', () => {
+    // Each value drives a different emitMetaValue branch. Whatever it writes,
+    // our OWN parser must read back — otherwise an edit silently costs the
+    // line its structural editability, even though the bytes stay valid.
+    for (const value of [
+      'plain',
+      'a, b',
+      'a: b',
+      'a}b',
+      'a^b',
+      'a # b',
+      'a#b',
+      ' padded ',
+      "'single'",
+    ]) {
+      const m = parseFlowchart('flowchart TD\n  A@{ shape: hex }')!;
+      const line = m.lines[1];
+      if (line.parsed.kind !== 'node-meta') throw new Error('expected node-meta');
+      line.parsed.meta = withMetaEntry(line.parsed.meta, 'label', value);
+      line.dirty = true;
+      const once = serialize(m);
+
+      const again = parseFlowchart(once)!;
+      expect(again.lines[1].parsed.kind).toBe('node-meta');
+      expect(nodeMeta(again).get('A')?.label).toBe(value);
+      again.lines[1].dirty = true;
+      expect(serialize(again)).toBe(once);
+    }
   });
 });
