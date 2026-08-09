@@ -166,7 +166,13 @@ export function CanvasViewport({
       <div
         ref={viewportRef}
         data-testid="canvas-viewport"
-        className="relative h-full w-full cursor-grab overflow-hidden bg-n-25 active:cursor-grabbing"
+        // `touch-none select-none`: pan is this surface's primary gesture, and
+        // pointerdown never calls preventDefault, so without them a background
+        // drag across mermaid's label text drag-selects it and smears blue
+        // behind the canvas. Every other drag surface in the repo already pairs
+        // these (CalendarView.tsx:339,391 · GanttView.tsx:337 ·
+        // TimelineView.tsx:272); the resize/grip handles take touch-none alone.
+        className="relative h-full w-full touch-none select-none overflow-hidden bg-n-25 cursor-grab active:cursor-grabbing"
         onPointerDown={(e) => {
           if (e.button !== 0 || !startsPan(e.target)) return;
           e.currentTarget.setPointerCapture?.(e.pointerId);
