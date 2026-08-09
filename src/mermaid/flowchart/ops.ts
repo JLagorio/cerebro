@@ -1,5 +1,23 @@
-import type { EdgeEntry, FlowchartModel, ModelLine, NodeRef, Shape } from './model';
-import { nodes, styleDecl, withEntry, withMetaEntry } from './model';
+import type {
+  EdgeEntry,
+  EdgeHead,
+  EdgeStroke,
+  FlowchartModel,
+  ModelLine,
+  NodeRef,
+  Shape,
+} from './model';
+import {
+  DEFAULT_ARROW,
+  edgeMetaLinesFor,
+  edges,
+  emitArrow,
+  nodeMeta,
+  nodes,
+  styleDecl,
+  withEntry,
+  withMetaEntry,
+} from './model';
 
 /**
  * Pure flowchart operations (M29.15). Every function returns a new model and
@@ -115,8 +133,9 @@ export function addEdge(model: FlowchartModel, from: string, to: string): Flowch
         {
           from: [{ id: from, label: null, shape: null }],
           to: [{ id: to, label: null, shape: null }],
-          arrow: '-->',
+          arrow: { ...DEFAULT_ARROW },
           label: null,
+          id: null,
         },
       ],
     },
@@ -188,7 +207,16 @@ function rebuildEdgeLines(
   }
 
   const original = line.parsed.segments;
+  // A segment's id names ONE edge, so a split may only give it to one
+  // survivor — duplicating `e1@` across lines would silently drop all but the
+  // first upstream (`addSingleLink` refuses an id already taken,
+  // flowDb.ts:315). The first survivor gets it rather than nobody: an id left
+  // unwritten orphans its `e1@{ … }` companion, which then names no edge and
+  // renders as a stray box (measured).
+  const idUsed = new Set<number>();
   for (const pair of survivors) {
+    const keepId = original[pair.seg].id !== null && !idUsed.has(pair.seg);
+    idUsed.add(pair.seg);
     replacements.push({
       raw: indent,
       parsed: {
@@ -199,6 +227,7 @@ function rebuildEdgeLines(
             to: [pair.to],
             arrow: original[pair.seg].arrow,
             label: original[pair.seg].label,
+            id: keepId ? original[pair.seg].id : null,
           },
         ],
       },
@@ -263,8 +292,138 @@ export function setEdgeLabel(
   // literal one would emit `-->|a|b|` and get misread as an unlabeled arrow
   // followed by garbage. This is the last boundary before the file, so
   // substitute `|` → `/` here rather than propagate corrupt text.
-  line.parsed.segments[edge.seg].label = label === null ? null : label.replaceAll('|', '/');
+  //
+  // An empty label is "no label", never `-->||`: that emits a line mermaid
+  // refuses outright (`arrowText` needs a token, flow.jison:501 — measured)
+  // and one this module's own parser now sends opaque.
+  const cleaned = label === null ? null : label.replaceAll('|', '/');
+  line.parsed.segments[edge.seg].label = cleaned === '' ? null : cleaned;
   line.dirty = true;
+  return next;
+}
+
+/**
+ * Rewrite one segment's arrow (M29.31). Only that token changes: the rest of
+ * the line re-emits from its own raws/labels, and a rewritten arrow
+ * normalizes to minimum length (length is authorable in code, not here).
+ * `~~~` can carry neither head nor label, so entering invisible drops the
+ * label, and picking a head while invisible lands back on a normal stroke.
+ */
+export function setEdgeArrow(
+  model: FlowchartModel,
+  edge: EdgeEntry,
+  patch: { stroke?: EdgeStroke; head?: EdgeHead },
+): FlowchartModel {
+  const next = clone(model);
+  const line = next.lines[edge.line];
+  if (line.parsed.kind !== 'edges') return next;
+  const seg = line.parsed.segments[edge.seg];
+  let stroke = patch.stroke ?? seg.arrow.stroke;
+  const head = patch.head ?? seg.arrow.head;
+  if (patch.head !== undefined && patch.stroke === undefined && stroke === 'invisible') {
+    stroke = 'normal';
+  }
+  const raw = emitArrow(stroke, head, seg.arrow.raw);
+  seg.arrow = { stroke, head: stroke === 'invisible' ? 'open' : head, raw };
+  if (stroke === 'invisible') seg.label = null;
+  line.dirty = true;
+  return next;
+}
+
+/** `e1`-style id no existing node, edge, or meta id claims (case-insensitive, like newNodeId). */
+export function newEdgeId(model: FlowchartModel): string {
+  const used = new Set<string>();
+  for (const id of nodes(model).keys()) used.add(id.toLowerCase());
+  for (const entry of edges(model)) {
+    if (entry.id !== null) used.add(entry.id.toLowerCase());
+  }
+  for (const id of nodeMeta(model).keys()) used.add(id.toLowerCase());
+  let n = 1;
+  while (used.has(`e${n}`)) n += 1;
+  return `e${n}`;
+}
+
+/**
+ * Toggle edge animation (M29.31). ON ensures the edge has an id (minting an
+ * `eN` and writing it into the edge line when needed) and an
+ * `id@{ animate: true }` meta line BELOW the edge — below, because mermaid
+ * resolves the id against the edges parsed so far, so the same line above the
+ * edge silently becomes a node declaration instead (measured, see
+ * `edgeMetaLinesFor`). OFF removes only the `animate` entry — the line too
+ * when that empties it — and leaves the id in place: ids are cheap, other
+ * meta keys may depend on them, and removing more than asked violates the
+ * surgical rule.
+ *
+ * Like `setNodeStyle`, a set lands on the LAST meta line that already
+ * declares `animate` and a removal strips it from EVERY one, because several
+ * `id@{ … }` lines may name one edge and mermaid lets the last value for a
+ * key win (`edge.animate = edgeDoc.animate` per line, flowDb.ts:167-169 —
+ * measured: `animate: true` then `animate: false` renders unanimated).
+ * Writing to the first would be a silent no-op.
+ */
+export function setEdgeAnimate(
+  model: FlowchartModel,
+  edge: EdgeEntry,
+  on: boolean,
+): FlowchartModel {
+  const next = clone(model);
+  const line = next.lines[edge.line];
+  if (line.parsed.kind !== 'edges') return next;
+  const seg = line.parsed.segments[edge.seg];
+  // An & group expands to several edges but its segment can carry only ONE
+  // id, and upstream gives that id to the last start × the first end
+  // (flowDb.ts:356-371). For any other expansion there is no id to write and
+  // no line to hang meta on, so this is a no-op rather than an edit that
+  // animates a sibling edge the caller never named. (Same shape as
+  // setNodeStyle refusing an id the diagram does not declare.)
+  if (edge.from !== seg.from[seg.from.length - 1].id || edge.to !== seg.to[0].id) return next;
+  const declares = (i: number): boolean => {
+    const parsed = next.lines[i].parsed;
+    return parsed.kind === 'node-meta' && parsed.meta.entries.some(([k]) => k === 'animate');
+  };
+
+  if (!on) {
+    if (seg.id === null) return next;
+    const owners = edgeMetaLinesFor(next, seg.id);
+    // Back to front: splicing an emptied line shifts every later index.
+    for (let n = owners.length - 1; n >= 0; n -= 1) {
+      const i = owners[n];
+      const parsed = next.lines[i].parsed;
+      if (parsed.kind !== 'node-meta' || !declares(i)) continue;
+      const stripped = withMetaEntry(parsed.meta, 'animate', null);
+      if (stripped.entries.length === 0) {
+        next.lines.splice(i, 1);
+      } else {
+        parsed.meta = stripped;
+        next.lines[i].dirty = true;
+      }
+    }
+    return next;
+  }
+
+  let id = seg.id;
+  if (id === null) {
+    id = newEdgeId(next);
+    seg.id = id;
+    line.dirty = true;
+  }
+  const owners = edgeMetaLinesFor(next, id);
+  const target = owners.filter(declares).at(-1) ?? owners.at(-1);
+  if (target !== undefined) {
+    const parsed = next.lines[target].parsed;
+    if (parsed.kind === 'node-meta') {
+      parsed.meta = withMetaEntry(parsed.meta, 'animate', 'true');
+      next.lines[target].dirty = true;
+      return next;
+    }
+  }
+  const indent = line.raw.match(/^\s*/)?.[0] ?? '  ';
+  const at = next.lines.indexOf(line);
+  next.lines.splice(at + 1, 0, {
+    raw: indent,
+    parsed: { kind: 'node-meta', id, meta: { entries: [['animate', 'true']] } },
+    dirty: true,
+  });
   return next;
 }
 

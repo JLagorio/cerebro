@@ -1,13 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { edges, nodeMeta, nodeStyle, nodes, parseFlowchart, serialize } from './model';
+import {
+  edgeAnimated,
+  edges,
+  nodeMeta,
+  nodeStyle,
+  nodes,
+  parseFlowchart,
+  serialize,
+} from './model';
 import {
   addEdge,
   addNode,
   deleteEdge,
   deleteNode,
+  newEdgeId,
   newNodeId,
   renameNode,
   setDirection,
+  setEdgeAnimate,
+  setEdgeArrow,
   setEdgeLabel,
   setLayoutEngine,
   setNodeShape,
@@ -347,5 +358,197 @@ describe('setNodeStyle (M29.30)', () => {
     const m = parseFlowchart('flowchart TD\n  A --> B')!;
     const out = serialize(setNodeStyle(m, 'A', { ' fill ': ' #f96 ', stroke: 'rgb(0,0,0)' }));
     expect(out).toBe('flowchart TD\n  A --> B\n  style A fill:#f96');
+  });
+});
+
+describe('setEdgeArrow (M29.31)', () => {
+  it('rewrites only its segment; line-mates stay byte-true', () => {
+    const m = parseFlowchart('flowchart TD\n  A -->|go| B o==o C')!;
+    const target = edges(m).find((e) => e.from === 'A')!;
+    expect(serialize(setEdgeArrow(m, target, { head: 'circle' }))).toBe(
+      'flowchart TD\n  A --o|go| B o==o C',
+    );
+  });
+
+  it('normalizes length on rewrite and keeps the o/x family on stroke-only changes', () => {
+    const m = parseFlowchart('flowchart TD\n  A ----> B\n  C o--o D')!;
+    const e = edges(m);
+    expect(serialize(setEdgeArrow(m, e[0], { head: 'cross' }))).toContain('A --x B');
+    expect(serialize(setEdgeArrow(m, e[1], { stroke: 'thick' }))).toContain('C o==o D');
+  });
+
+  it('double from a single-ended edge writes <…>; invisible drops the label', () => {
+    const m = parseFlowchart('flowchart TD\n  C -->|go| D')!;
+    const e = edges(m);
+    expect(serialize(setEdgeArrow(m, e[0], { head: 'double' }))).toContain('C <-->|go| D');
+    expect(serialize(setEdgeArrow(m, e[0], { stroke: 'invisible' }))).toContain('C ~~~ D');
+  });
+
+  it('picking a head on an invisible edge lands back on a normal stroke', () => {
+    const m = parseFlowchart('flowchart TD\n  A ~~~ B')!;
+    expect(serialize(setEdgeArrow(m, edges(m)[0], { head: 'arrow' }))).toContain('A --> B');
+  });
+});
+
+describe('setEdgeAnimate (M29.31)', () => {
+  it('mints an id, writes it into the edge line, and appends the meta line', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B')!;
+    expect(serialize(setEdgeAnimate(m, edges(m)[0], true))).toBe(
+      'flowchart TD\n  A[Start] e1@--> B\n  e1@{ animate: true }',
+    );
+  });
+
+  it('reuses an existing id and patches an existing meta line', () => {
+    const m = parseFlowchart('flowchart TD\n  A e7@--> B\n  e7@{ curve: linear }')!;
+    const out = serialize(setEdgeAnimate(m, edges(m)[0], true));
+    expect(out).toContain('A e7@--> B');
+    expect(out).toContain('e7@{ curve: linear, animate: true }');
+  });
+
+  it('off removes the entry, deletes an emptied line, and keeps the id', () => {
+    const m = parseFlowchart('flowchart TD\n  A e1@--> B\n  e1@{ animate: true }')!;
+    expect(serialize(setEdgeAnimate(m, edges(m)[0], false))).toBe('flowchart TD\n  A e1@--> B');
+  });
+
+  it('off leaves a meta line with other keys in place', () => {
+    const m = parseFlowchart('flowchart TD\n  A e1@--> B\n  e1@{ animate: true, curve: basis }')!;
+    const out = serialize(setEdgeAnimate(m, edges(m)[0], false));
+    expect(out).toContain('e1@{ curve: basis }');
+  });
+
+  it('newEdgeId skips node and edge ids alike', () => {
+    const m = parseFlowchart('flowchart TD\n  e1[X] e2@--> Y')!;
+    expect(newEdgeId(m)).toBe('e3');
+  });
+});
+
+describe('the last boundary on edge lines (M29.31)', () => {
+  it('an empty label is no label, never `-->||`', () => {
+    // Measured: `A -->|| B` is a parse error upstream (`arrowText` needs a
+    // token), so emitting one would kill the whole diagram from a caller that
+    // merely cleared the box.
+    const m = parseFlowchart('flowchart TD\n  A -->|go| B')!;
+    const out = serialize(setEdgeLabel(m, edges(m)[0], ''));
+    expect(out).toBe('flowchart TD\n  A --> B');
+    expect(parseFlowchart(out)!.lines[1].parsed.kind).toBe('edges');
+  });
+
+  it('a rename to a label carrying @ writes a line mermaid still parses', () => {
+    // `A[a@b]` is a parse error (measured, char by char against 11.16.0);
+    // `A["a@b"]` is fine. `@` was the one hole in quoteLabel's set.
+    const m = parseFlowchart('flowchart TD\n  A[Old] --> B')!;
+    const out = serialize(renameNode(m, 'A', 'ops@example.com'));
+    expect(out).toBe('flowchart TD\n  A["ops@example.com"] --> B');
+    expect(nodes(parseFlowchart(out)!).get('A')?.label).toBe('ops@example.com');
+  });
+
+  it('setEdgeArrow leaves the segment id and every line-mate alone', () => {
+    const m = parseFlowchart('flowchart TD\n  A e1@-->|go| B e2@--> C\n  X ----> Y')!;
+    const out = serialize(setEdgeArrow(m, edges(m)[0], { stroke: 'dotted' }));
+    expect(out).toBe('flowchart TD\n  A e1@-.->|go| B e2@--> C\n  X ----> Y');
+  });
+
+  it('every arrow the picker can produce reads back as itself', () => {
+    const m = parseFlowchart('flowchart TD\n  A o--o B')!;
+    for (const stroke of ['normal', 'thick', 'dotted', 'invisible'] as const) {
+      for (const head of ['arrow', 'open', 'circle', 'cross', 'double'] as const) {
+        const out = serialize(setEdgeArrow(m, edges(m)[0], { stroke, head }));
+        const again = parseFlowchart(out)!;
+        expect([stroke, head, again.lines[1].parsed.kind]).toEqual([stroke, head, 'edges']);
+        const got = edges(again)[0].arrow;
+        expect([stroke, head, got.stroke]).toEqual([stroke, head, stroke]);
+        expect([stroke, head, got.head]).toEqual([
+          stroke,
+          head,
+          stroke === 'invisible' ? 'open' : head,
+        ]);
+      }
+    }
+  });
+});
+
+describe('setEdgeAnimate placement and targeting (M29.31)', () => {
+  it('writes the meta line BELOW the edge, where mermaid can find it', () => {
+    // Above the edge the id resolves against no edge at all and mermaid mints
+    // a vertex instead (measured) — the toggle would silently do nothing and
+    // add a stray box.
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  B --> C')!;
+    const out = serialize(setEdgeAnimate(m, edges(m)[1], true));
+    expect(out).toBe('flowchart TD\n  A --> B\n  B e1@--> C\n  e1@{ animate: true }');
+    const again = parseFlowchart(out)!;
+    expect(edgeAnimated(again, edges(again)[1])).toBe(true);
+  });
+
+  it('sets on the LAST meta line that declares animate, like setNodeStyle', () => {
+    // Several `e1@{ … }` lines may name one edge and the last value for a key
+    // wins (measured: `animate: true` then `animate: false` renders
+    // unanimated), so patching the first would be a silent no-op.
+    const src = [
+      'flowchart TD',
+      '  A e1@--> B',
+      '  e1@{ animate: true }',
+      '  e1@{ curve: basis }',
+      '  e1@{ animate: false }',
+    ].join('\n');
+    const m = parseFlowchart(src)!;
+    const out = serialize(setEdgeAnimate(m, edges(m)[0], true));
+    expect(out.split('\n')[2]).toBe('  e1@{ animate: true }'); // shadowed, untouched
+    expect(out.split('\n')[4]).toBe('  e1@{ animate: true }');
+    const again = parseFlowchart(out)!;
+    expect(edgeAnimated(again, edges(again)[0])).toBe(true);
+  });
+
+  it('off strips animate from EVERY line, deleting the ones it empties', () => {
+    const src = [
+      'flowchart TD',
+      '  A e1@--> B',
+      '  e1@{ animate: true }',
+      '  e1@{ curve: basis, animate: true }',
+    ].join('\n');
+    const out = serialize(
+      setEdgeAnimate(parseFlowchart(src)!, edges(parseFlowchart(src)!)[0], false),
+    );
+    expect(out).toBe('flowchart TD\n  A e1@--> B\n  e1@{ curve: basis }');
+  });
+
+  it('an indented edge keeps its indentation on the meta line it grows', () => {
+    const m = parseFlowchart('flowchart TD\n  subgraph S\n    A --> B\n  end')!;
+    const out = serialize(setEdgeAnimate(m, edges(m)[0], true));
+    expect(out).toBe('flowchart TD\n  subgraph S\n    A e1@--> B\n    e1@{ animate: true }\n  end');
+  });
+
+  it('a fan-out edge that cannot own the segment id is a no-op, not a sibling edit', () => {
+    // `A e1@--> B & C`: upstream gives e1 to A→B only, so animating A→C has
+    // nowhere to be written. Writing anyway would animate A→B — an edit the
+    // caller never asked for, on an edge it never named.
+    const src = 'flowchart TD\n  A e1@--> B & C\n  e1@{ animate: true }';
+    const m = parseFlowchart(src)!;
+    const other = edges(m).find((e) => e.to === 'C')!;
+    expect(other.id).toBeNull();
+    expect(serialize(setEdgeAnimate(m, other, true))).toBe(src);
+    expect(serialize(setEdgeAnimate(m, other, false))).toBe(src);
+    expect(edgeAnimated(m, other)).toBe(false);
+
+    // The edge that DOES own it still toggles.
+    const owner = edges(m).find((e) => e.to === 'B')!;
+    expect(serialize(setEdgeAnimate(m, owner, false))).toBe('flowchart TD\n  A e1@--> B & C');
+
+    // And an id-less group behaves the same way.
+    const bare = parseFlowchart('flowchart TD\n  A --> B & C')!;
+    const bareOther = edges(bare).find((e) => e.to === 'C')!;
+    expect(serialize(setEdgeAnimate(bare, bareOther, true))).toBe('flowchart TD\n  A --> B & C');
+  });
+
+  it('newEdgeId walks past node ids, edge ids, and meta ids alike', () => {
+    const m = parseFlowchart('flowchart TD\n  e1[X] e2@--> Y\n  e3@{ shape: cyl }')!;
+    expect(newEdgeId(m)).toBe('e4');
+  });
+
+  it('deleteNode splits a chain and keeps the surviving segment editable', () => {
+    const m = parseFlowchart('flowchart TD\n  A e1@--> B e2@--o C\n  e2@{ animate: true }')!;
+    const out = serialize(deleteNode(m, 'A'));
+    expect(out).toBe('flowchart TD\n  B e2@--o C\n  e2@{ animate: true }');
+    const again = parseFlowchart(out)!;
+    expect(edgeAnimated(again, edges(again)[0])).toBe(true);
   });
 });

@@ -13,7 +13,25 @@
 export type Direction = 'TD' | 'TB' | 'LR' | 'RL' | 'BT';
 export type Shape =
   'rect' | 'rounded' | 'stadium' | 'circle' | 'diamond' | 'hexagon' | 'cylinder' | 'subroutine';
-export type Arrow = '-->' | '---' | '-.->' | '==>';
+
+export type EdgeStroke = 'normal' | 'thick' | 'dotted' | 'invisible';
+export type EdgeHead = 'arrow' | 'open' | 'circle' | 'cross' | 'double';
+
+/**
+ * One edge's arrow (M29.31). `raw` is the verbatim source token and the
+ * emission truth — an untouched segment re-emits its exact bytes even when a
+ * line-mate goes dirty, and author-chosen lengths (`----->`) survive until
+ * the segment itself is rewritten. `stroke`/`head` are the parsed reading;
+ * `head: 'double'` covers <-->, o--o, and x--x, whose marker family lives in
+ * `raw` (and is preserved by emitArrow on stroke-only rewrites).
+ */
+export interface EdgeArrow {
+  stroke: EdgeStroke;
+  head: EdgeHead;
+  raw: string;
+}
+
+export const DEFAULT_ARROW: EdgeArrow = { stroke: 'normal', head: 'arrow', raw: '-->' };
 
 export interface NodeRef {
   id: string;
@@ -160,8 +178,10 @@ function parseMetaBody(body: string): NodeMeta | null {
 export interface EdgeSegment {
   from: NodeRef[];
   to: NodeRef[];
-  arrow: Arrow;
+  arrow: EdgeArrow;
   label: string | null;
+  /** `A e1@--> B` — the id riding this segment's arrow, or null. */
+  id: string | null;
 }
 
 export type ParsedLine =
@@ -259,19 +279,103 @@ function splitGroup(text: string): string[] {
   return parts;
 }
 
-const ARROWS: [string, Arrow][] = [
-  ['-.->', '-.->'],
-  ['-->', '-->'],
-  ['==>', '==>'],
-  ['---', '---'],
-];
+const HEAD_BY_MARKER: Record<string, EdgeHead> = { '>': 'arrow', o: 'circle', x: 'cross' };
+const DOUBLE_PAIR: Record<string, string> = { '<': '>', o: 'o', x: 'x' };
+
+/**
+ * Read one already-matched arrow token, or refuse it.
+ *
+ * MEASURED on mermaid 11.16.0, because the obvious reading is wrong: a
+ * mismatched pair like `o--x` is NOT a parse error. `destructEndLink`
+ * (flowDb.ts:865-912) looks only at the LAST character to pick the head, and
+ * then treats everything before it — the leading `o` included — as line
+ * material whose length becomes the edge's minlen. So `A o--x B` renders as a
+ * plain cross arrow one rank longer than `A --x B`, with the circle silently
+ * gone. (`INVALID` does exist, at flowDb.ts:920-931, but only for the
+ * two-token `A x-- text --o B` form, which we never own.)
+ *
+ * We cannot represent "start marker swallowed into the length", so we refuse:
+ * the line goes opaque and its bytes survive, which is never wrong.
+ */
+function classifyArrow(
+  token: string,
+  stroke: EdgeStroke,
+  start: string | undefined,
+  end: string | undefined,
+  bodyLen: number,
+): { token: string; stroke: EdgeStroke; head: EdgeHead } | null {
+  if (start !== undefined && end !== undefined) {
+    if (DOUBLE_PAIR[start] !== end) return null; // o--x, <--o … we cannot reproduce
+    return { token, stroke, head: 'double' };
+  }
+  if (start !== undefined) return null; // a lone `<--` is START_LINK, not a link
+  if (end !== undefined) return { token, stroke, head: HEAD_BY_MARKER[end] };
+  // No markers → open, which needs one body char beyond the minimum
+  // (`---`, `===`; dotted's shortest form `-.-` is already open).
+  if (stroke === 'dotted') return { token, stroke, head: 'open' };
+  return bodyLen >= 3 ? { token, stroke, head: 'open' } : null;
+}
+
+/**
+ * Match one arrow token anchored at `i`, or null. Mirrors the v11.16.1 lexer
+ * rules (flow.jison:156-169) — `[xo<]?--+[-xo>]`, `[xo<]?==+[=xo>]`,
+ * `[xo<]?-?\.+-[xo>]?`, `~~~+` — with two deliberate narrowings, both of
+ * which only ever cost editability:
+ *
+ * - the two-dash `--`/`==`/`-.` forms are START_LINK (they open the
+ *   `A -- text --> B` state), never a link on their own, so we require the
+ *   closing character mermaid does;
+ * - the dotted rule's leading `-` is optional upstream (`A .-> B` is a real
+ *   dotted arrow) but required here, so that form goes opaque.
+ */
+function matchArrow(
+  text: string,
+  i: number,
+): { token: string; stroke: EdgeStroke; head: EdgeHead } | null {
+  const slice = text.slice(i);
+  let m = slice.match(/^([<ox])?(-{2,}|={2,})([>ox])?/);
+  if (m !== null) {
+    const stroke: EdgeStroke = m[2][0] === '=' ? 'thick' : 'normal';
+    return classifyArrow(m[0], stroke, m[1], m[3], m[2].length);
+  }
+  m = slice.match(/^([<ox])?-(\.+)-([>ox])?/);
+  if (m !== null) {
+    return classifyArrow(m[0], 'dotted', m[1], m[3], m[2].length + 2);
+  }
+  m = slice.match(/^~{3,}/);
+  if (m !== null) {
+    return { token: m[0], stroke: 'invisible', head: 'open' };
+  }
+  return null;
+}
+
+/**
+ * The minimum-length token for a stroke × head. `prevRaw` keeps an existing
+ * o/x double family alive across rewrites; heads have no meaning on `~~~`.
+ *
+ * Every string this can produce is a token `matchArrow` reads back to the same
+ * stroke and head — the last-boundary discipline, proven exhaustively in
+ * model.test.ts rather than asserted here.
+ */
+export function emitArrow(stroke: EdgeStroke, head: EdgeHead, prevRaw: string): string {
+  if (stroke === 'invisible') return '~~~';
+  const core = stroke === 'thick' ? '==' : stroke === 'dotted' ? '-.-' : '--';
+  if (head === 'double') {
+    const start = prevRaw.startsWith('o') || prevRaw.startsWith('x') ? prevRaw[0] : '<';
+    return `${start}${core}${start === '<' ? '>' : start}`;
+  }
+  if (head === 'open') return stroke === 'dotted' ? core : `${core}${core[0]}`;
+  const marker = head === 'arrow' ? '>' : head === 'circle' ? 'o' : 'x';
+  return `${core}${marker}`;
+}
 
 /** `A & B -->|go| C --> D` → segments, or null when any piece is not ours. */
 export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
   interface Piece {
     text?: string;
-    arrow?: Arrow;
+    arrow?: EdgeArrow;
     label?: string | null;
+    id?: string | null;
   }
   const pieces: Piece[] = [];
   let depth = 0;
@@ -282,19 +386,47 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
     const ch = trimmed[i];
     if (ch === '"') quote = !quote;
     if (!quote && depth === 0) {
-      const hit = ARROWS.find(([text]) => trimmed.startsWith(text, i));
-      if (hit !== undefined) {
-        pieces.push({ text: cur });
+      const hit = matchArrow(trimmed, i);
+      if (hit !== null) {
+        // `A e1@--> B`: an edge id rides the arrow token (lexer
+        // flow.jison:146, `[^\s"]+@(?=[^{"])`).
+        let text = cur;
+        let id: string | null = null;
+        const idMatch = text.match(/(?:^|\s)([^\s"]+)@$/);
+        if (idMatch !== null) {
+          // `A a@b@--> B` is legal but does not mean what it looks like:
+          // `addLink` strips the FIRST `@` from the token (flowDb.ts:353,
+          // `linkData.id.replace('@', '')`), so mermaid's id is `ab@` while
+          // the text says `a@b` — and `ab@@{ … }`, the only line that could
+          // then address it, is itself a parse error (measured). An id we
+          // cannot name correctly is one we refuse to own.
+          if (idMatch[1].includes('@')) return null;
+          id = idMatch[1];
+          text = text.slice(0, text.length - id.length - 1);
+        }
+        pieces.push({ text });
         cur = '';
-        i += hit[0].length;
+        i += hit.token.length;
         let label: string | null = null;
         if (trimmed[i] === '|') {
           const close = trimmed.indexOf('|', i + 1);
           if (close === -1) return null;
           label = trimmed.slice(i + 1, close);
           i = close + 1;
+          // `A -->|| B` is a PARSE ERROR upstream — `arrowText: PIPE text
+          // PIPE` (flow.jison:501) needs at least one token, and `| |` is the
+          // shortest thing that satisfies it (measured: it yields the empty
+          // label). A line mermaid cannot parse is not one we may claim to
+          // own, so it goes opaque with its bytes intact.
+          if (label === '') return null;
         }
-        pieces.push({ arrow: hit[1], label });
+        // `A ~~~|no| B` IS valid mermaid (measured: an invisible link labeled
+        // "no"), but setEdgeArrow drops the label on the way into invisible,
+        // so owning this form would give the model a state our own ops can
+        // never produce. Refusing keeps "invisible ⇒ no label" true of every
+        // line we own, and costs only editability.
+        if (label !== null && hit.stroke === 'invisible') return null;
+        pieces.push({ arrow: { stroke: hit.stroke, head: hit.head, raw: hit.token }, label, id });
         continue;
       }
     }
@@ -309,7 +441,7 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
 
   if (pieces.length < 3 || pieces.length % 2 === 0) return null;
   const groups: NodeRef[][] = [];
-  const arrows: { arrow: Arrow; label: string | null }[] = [];
+  const arrows: { arrow: EdgeArrow; label: string | null; id: string | null }[] = [];
   for (let p = 0; p < pieces.length; p += 1) {
     if (p % 2 === 0) {
       const tokens = splitGroup(pieces[p].text ?? '');
@@ -322,7 +454,9 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
       }
       groups.push(refs);
     } else {
-      arrows.push({ arrow: pieces[p].arrow as Arrow, label: pieces[p].label ?? null });
+      const piece = pieces[p];
+      if (piece.arrow === undefined) return null;
+      arrows.push({ arrow: piece.arrow, label: piece.label ?? null, id: piece.id ?? null });
     }
   }
   const segments: EdgeSegment[] = [];
@@ -332,6 +466,7 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
       to: groups[s + 1],
       arrow: arrows[s].arrow,
       label: arrows[s].label,
+      id: arrows[s].id,
     });
   }
   return segments;
@@ -446,14 +581,13 @@ function parseLine(rawLine: string): ParsedLine {
     return meta === null ? { kind: 'opaque' } : { kind: 'node-meta', id: metaMatch[1], meta };
   }
 
-  // An arrow substring inside a node's own label (`A[Contains --> text]`)
-  // makes this an unreliable signal on its own — parseEdgeLine is the real
-  // arbiter, and when it fails (arrow was inside brackets, not a real edge)
-  // we fall through to the node-token attempt below rather than going opaque.
-  if (ARROWS.some(([text]) => trimmed.includes(text))) {
-    const segments = parseEdgeLine(trimmed);
-    if (segments !== null) return { kind: 'edges', segments };
-  }
+  // parseEdgeLine is its own arbiter: no arrow, or any piece not fully ours,
+  // → null, and the line falls through to the node-token attempt below. (An
+  // arrow substring inside a node's own label — `A[Contains --> text]` — is
+  // exactly why a substring pre-gate would be the wrong signal: the scanner's
+  // bracket depth is what settles it.)
+  const segments = parseEdgeLine(trimmed);
+  if (segments !== null) return { kind: 'edges', segments };
 
   const node = parseNodeToken(trimmed);
   if (node !== null) return { kind: 'node', node };
@@ -494,8 +628,17 @@ export function parseFlowchart(code: string): FlowchartModel | null {
   return sawHeader ? { lines } : null;
 }
 
+/**
+ * Bracket labels: quote whatever mermaid's `text` lexer state cannot take
+ * bare. Measured char by char against 11.16.0 — `"()@[]{|}` are parse errors
+ * unquoted and every one of them but `"` itself is fine inside quotes, so
+ * quoting is lossless and `parseNodeToken` strips the quotes back off.
+ *
+ * `@` was the gap: `A[a@b]` kills the whole diagram, which made a rename to
+ * any label carrying an `@` (an email, a handle) a render-stopper.
+ */
 function quoteLabel(label: string): string {
-  return /[|()[\]{}&"]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
+  return /[|()[\]{}&"@]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
 }
 
 /**
@@ -543,9 +686,9 @@ function emitLine(line: ModelLine): string {
       // Contiguous chains re-emit as chains; ops splits non-contiguous lines.
       let out = `${indent}${p.segments[0].from.map(emitNodeRef).join(' & ')}`;
       for (const seg of p.segments) {
-        out += ` ${seg.arrow}${seg.label !== null ? `|${seg.label}|` : ''} ${seg.to
-          .map(emitNodeRef)
-          .join(' & ')}`;
+        out += ` ${seg.id !== null ? `${seg.id}@` : ''}${seg.arrow.raw}${
+          seg.label !== null ? `|${seg.label}|` : ''
+        } ${seg.to.map(emitNodeRef).join(' & ')}`;
       }
       return out;
     }
@@ -563,30 +706,88 @@ export function serialize(model: FlowchartModel): string {
 }
 
 /**
+ * Which `id@{ … }` lines annotate an EDGE rather than declaring a node
+ * (M29.31) — the exclusion M29.29 promised, and the reason `A e1@--> B` no
+ * longer costs A and B their place in `nodes()`.
+ *
+ * POSITION decides, not the id alone. Mermaid resolves the id against the
+ * edges recorded SO FAR (`this.edges.find(e => e.id === id)`,
+ * flowDb.ts:163-176), so the same line means two different things depending
+ * on where it sits: below `A e1@--> B` it sets that edge's animate/animation/
+ * curve, while ABOVE it — measured on 11.16.0 — it finds no edge, falls
+ * through to `addVertex`, and renders a stray box labeled `e1`. Keying on the
+ * id alone would hide a node that genuinely draws.
+ *
+ * (Upstream checks subgraph ids ahead of edges. That branch is 11.16.1-only —
+ * the 11.16.0 we bundle has no `subGraphLookup` lookup in `addVertex`, and
+ * `s1@{ label: X }` after a subgraph really does mint a vertex there — so a
+ * subgraph-id meta line stays node meta for us, which is what 11.16.0 does.)
+ */
+function edgeMetaLines(model: FlowchartModel): Set<number> {
+  const declared = new Set<string>();
+  const out = new Set<number>();
+  model.lines.forEach((line, i) => {
+    if (line.parsed.kind === 'edges') {
+      for (const seg of line.parsed.segments) {
+        if (seg.id !== null) declared.add(seg.id);
+      }
+    } else if (line.parsed.kind === 'node-meta' && declared.has(line.parsed.id)) {
+      out.add(i);
+    }
+  });
+  return out;
+}
+
+/**
  * Meta per id, merged PER KEY with the last value winning — not per line.
  * Mermaid applies each key independently onto the accumulated vertex
  * (flowDb.ts:236-262 is a run of `if (doc.shape) …`, `if (doc?.label) …`), so
  * `A@{ label: X }` followed by `A@{ shape: hex }` renders as BOTH. Replacing
- * the whole meta per line would make this resolved view lie.
+ * the whole meta per line would make this resolved view lie. Edge meta
+ * (flowDb.ts:163-176) folds by exactly the same rule, one `if` per key.
  *
  * The merged result is a read-only view: emission always goes through the
  * individual line's own `meta`, never through this.
  */
-export function nodeMeta(model: FlowchartModel): Map<string, NodeMeta> {
+function mergeMeta(
+  model: FlowchartModel,
+  wanted: (index: number) => boolean,
+): Map<string, NodeMeta> {
   const out = new Map<string, NodeMeta>();
-  for (const line of model.lines) {
-    if (line.parsed.kind !== 'node-meta') continue;
+  model.lines.forEach((line, i) => {
+    if (line.parsed.kind !== 'node-meta' || !wanted(i)) return;
     const { id, meta } = line.parsed;
     const prior = out.get(id);
     if (prior === undefined) {
       out.set(id, meta);
-      continue;
+      return;
     }
     let merged = prior;
     for (const [k, v] of meta.entries) merged = withMetaEntry(merged, k, v);
     out.set(id, merged);
-  }
+  });
   return out;
+}
+
+/** Meta for ids that name NODES — every `id@{ … }` line that is not edge meta. */
+export function nodeMeta(model: FlowchartModel): Map<string, NodeMeta> {
+  const edgeLines = edgeMetaLines(model);
+  return mergeMeta(model, (i) => !edgeLines.has(i));
+}
+
+/** Meta for ids that name EDGES: `animate`, `animation`, `curve` (flowDb.ts:163-176). */
+export function edgeMeta(model: FlowchartModel): Map<string, NodeMeta> {
+  const edgeLines = edgeMetaLines(model);
+  return mergeMeta(model, (i) => edgeLines.has(i));
+}
+
+/** Line indices carrying `id`'s edge meta, in source order. Empty when there are none. */
+export function edgeMetaLinesFor(model: FlowchartModel, id: string): number[] {
+  const edgeLines = edgeMetaLines(model);
+  return [...edgeLines].filter((i) => {
+    const parsed = model.lines[i].parsed;
+    return parsed.kind === 'node-meta' && parsed.id === id;
+  });
 }
 
 /**
@@ -673,8 +874,10 @@ export interface EdgeEntry {
   seg: number;
   from: string;
   to: string;
-  arrow: Arrow;
+  arrow: EdgeArrow;
   label: string | null;
+  /** The `e1` of `A e1@--> B`, on the ONE expanded edge that upstream gives it to. */
+  id: string | null;
 }
 
 /** Every logical edge, groups and chains expanded. */
@@ -683,8 +886,15 @@ export function edges(model: FlowchartModel): EdgeEntry[] {
   model.lines.forEach((line, lineIdx) => {
     if (line.parsed.kind !== 'edges') return;
     line.parsed.segments.forEach((segment, segIdx) => {
-      for (const f of segment.from) {
-        for (const t of segment.to) {
+      segment.from.forEach((f, fi) => {
+        segment.to.forEach((t, ti) => {
+          // An & group expands to several edges but the segment's id names
+          // exactly ONE of them: `addLink` (flowDb.ts:356-371) hands the
+          // user id to the LAST start crossed with the FIRST end and
+          // auto-generates ids for the rest — so `A e1@--> B & C` animates
+          // A→B only. Copying the id onto every expansion would make
+          // edgeAnimated lie and point setEdgeAnimate at the wrong edge.
+          const owns = fi === segment.from.length - 1 && ti === 0;
           out.push({
             line: lineIdx,
             seg: segIdx,
@@ -692,10 +902,23 @@ export function edges(model: FlowchartModel): EdgeEntry[] {
             to: t.id,
             arrow: segment.arrow,
             label: segment.label,
+            id: owns ? segment.id : null,
           });
-        }
-      }
+        });
+      });
     });
   });
   return out;
+}
+
+/**
+ * True when this edge's id carries `animate: true`. `animation: fast|slow`
+ * animates too (flowDb.ts:170-172) but is a separate key with its own values,
+ * so it is not folded in here — a toggle that reported `animation: slow` as
+ * "on" and then wrote `animate: true` would leave both keys fighting.
+ */
+export function edgeAnimated(model: FlowchartModel, edge: EdgeEntry): boolean {
+  if (edge.id === null) return false;
+  const meta = edgeMeta(model).get(edge.id);
+  return meta?.entries.some(([k, v]) => k === 'animate' && v === 'true') ?? false;
 }

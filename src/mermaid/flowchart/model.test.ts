@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  edgeAnimated,
+  edgeMeta,
   edges,
+  emitArrow,
   emitNodeRef,
   nodeMeta,
   nodeStyle,
@@ -9,6 +12,8 @@ import {
   parseNodeToken,
   serialize,
   withMetaEntry,
+  type EdgeHead,
+  type EdgeStroke,
   type NodeMeta,
 } from './model';
 
@@ -421,5 +426,287 @@ describe('style lines (M29.30)', () => {
       expect([line, m.lines[2].parsed.kind]).toEqual([line, 'opaque']);
       expect([line, [...nodes(m).keys()]]).toEqual([line, ['A', 'B']]);
     }
+  });
+});
+
+describe('extended edge grammar (M29.31)', () => {
+  it('parses every stroke × head combination, raw tokens intact', () => {
+    const src = [
+      'flowchart TD',
+      '  A --o B',
+      '  B --x C',
+      '  C <--> D',
+      '  D o--o E',
+      '  E x==x F',
+      '  F ==> G',
+      '  G === H',
+      '  H -..-> I',
+      '  I ~~~ J',
+      '  J ----> K',
+    ].join('\n');
+    const m = parseFlowchart(src)!;
+    expect(m.lines.slice(1).every((l) => l.parsed.kind === 'edges')).toBe(true);
+    const e = edges(m);
+    expect(e[0].arrow).toEqual({ stroke: 'normal', head: 'circle', raw: '--o' });
+    expect(e[1].arrow).toEqual({ stroke: 'normal', head: 'cross', raw: '--x' });
+    expect(e[2].arrow).toEqual({ stroke: 'normal', head: 'double', raw: '<-->' });
+    expect(e[3].arrow).toEqual({ stroke: 'normal', head: 'double', raw: 'o--o' });
+    expect(e[4].arrow).toEqual({ stroke: 'thick', head: 'double', raw: 'x==x' });
+    expect(e[5].arrow).toEqual({ stroke: 'thick', head: 'arrow', raw: '==>' });
+    expect(e[6].arrow).toEqual({ stroke: 'thick', head: 'open', raw: '===' });
+    expect(e[7].arrow).toEqual({ stroke: 'dotted', head: 'arrow', raw: '-..->' });
+    expect(e[8].arrow).toEqual({ stroke: 'invisible', head: 'open', raw: '~~~' });
+    expect(e[9].arrow).toEqual({ stroke: 'normal', head: 'arrow', raw: '---->' });
+    expect(serialize(m)).toBe(src);
+  });
+
+  it('mismatched markers, lone starts, and labeled invisibles are not ours', () => {
+    for (const bad of ['A o--x B', 'A <--o B', 'A <-- B', 'A ~~~|no| B']) {
+      const m = parseFlowchart(`flowchart TD\n  ${bad}`)!;
+      expect(m.lines[1].parsed.kind).toBe('opaque');
+      expect(serialize(m)).toBe(`flowchart TD\n  ${bad}`);
+    }
+  });
+
+  it('edge ids ride their segment and round-trip', () => {
+    const src = 'flowchart TD\n  A e1@-->|go| B e2@--> C';
+    const m = parseFlowchart(src)!;
+    const e = edges(m);
+    expect(e[0]).toMatchObject({ from: 'A', to: 'B', id: 'e1', label: 'go' });
+    expect(e[1]).toMatchObject({ from: 'B', to: 'C', id: 'e2' });
+    expect(serialize(m)).toBe(src);
+  });
+
+  it('an edge-meta id is meta, not a node', () => {
+    const m = parseFlowchart('flowchart TD\n  A e1@--> B\n  e1@{ animate: true }')!;
+    expect(m.lines[2].parsed.kind).toBe('node-meta');
+    expect(nodes(m).has('e1')).toBe(false);
+    expect(nodes(m).has('A')).toBe(true);
+    expect(edgeAnimated(m, edges(m)[0])).toBe(true);
+  });
+});
+
+describe('extended edge grammar — adversarial sweep (M29.31)', () => {
+  // Every one of these was cross-checked against real mermaid 11.16.0 while
+  // this task was built: for each line we OWN, mermaid's parsed endpoints,
+  // arrow type, stroke, label, and edge id match ours, and every dirty
+  // re-emit is a line mermaid still accepts. The cross-check needs a mermaid
+  // import, so it lived in a throwaway harness; what survives here is the
+  // pure half — ownership and byte fidelity — which is what can regress.
+  const OWNED = [
+    // every stroke × head that is a single-token link
+    'A --> B',
+    'A --o B',
+    'A --x B',
+    'A --- B',
+    'A ==> B',
+    'A ==o B',
+    'A ==x B',
+    'A === B',
+    'A -.-> B',
+    'A -.-o B',
+    'A -.-x B',
+    'A -.- B',
+    'A <--> B',
+    'A o--o B',
+    'A x--x B',
+    'A <==> B',
+    'A o==o B',
+    'A x==x B',
+    'A <-.-> B',
+    'A o-.-o B',
+    'A x-.-x B',
+    'A ~~~ B',
+    // lengths, at and past the upstream minlen cap of 10
+    'A ---> B',
+    'A -----------> B',
+    'A ---------------------> B',
+    'A ====> B',
+    'A -...........-> B',
+    'A ~~~~~~~~~~~~ B',
+    // labels
+    'A -->|a-->b| B',
+    'A -->|a==>b| B',
+    'A -->|über 中文 🎉| B',
+    'A --o|circle label| B',
+    // ids
+    'A e1@--> B',
+    'A e1@-->|go| B',
+    'A e1@~~~ B',
+    'A e1@<--> B',
+    'A e-1.x@--> B',
+    'A é1@--> B',
+    'A e1@--> B e2@--o C e3@~~~ D',
+    'A e1@--> B & C',
+    'A & B e1@--> C & D',
+    // chains, groups, inline brackets, no-space forms
+    'A --> B --> C --> D --> E',
+    'A[x] e1@--> B([y]) e2@--x C{{z}}',
+    'A[Start] e1@-->|go| B{Choice} --x C[(Store)]',
+    'A["a|b"] --> B',
+    'A-->B',
+    'A--oB',
+    'A~~~B',
+    'A-.-B',
+    'A===B',
+  ];
+
+  // Not ours — and each for a measured reason, listed beside it.
+  const OPAQUE = [
+    // A start marker that does not pair with the end one is NOT a parse
+    // error upstream: destructEndLink (flowDb.ts:865-912) reads only the last
+    // character for the head and counts the rest — the stray `o`/`x`/`<`
+    // included — as length. `A o--x B` renders as `A --x B` one rank longer,
+    // circle gone. We cannot reproduce that, so we refuse it.
+    'A <--o B',
+    'A <--x B',
+    'A o--> B',
+    'A o--x B',
+    'A x--> B',
+    'A x--o B',
+    'A <==o B',
+    'A o==> B',
+    'A x==o B',
+    'A <-.-o B',
+    'A o-.-> B',
+    'A x-.-o B',
+    // START_LINK forms: `--`/`==`/`-.` open the `A -- text --> B` state and
+    // are never links on their own (measured: both are parse errors alone).
+    'A <-- B',
+    'A -- B',
+    'A -- text --> B',
+    // valid mermaid we deliberately decline (see parseEdgeLine)
+    'A ~~~|no| B',
+    'A .-> B',
+    'A e1@ --> B',
+    // genuinely broken, or unnameable
+    'A -->|| B',
+    'A -->|a|b| B',
+    'A -->|unclosed B',
+    'A a@b@--> B',
+    'A @--> B',
+    'Ae1@--> B',
+    'e1@--> B',
+    'A ==WEIRD==> C',
+    'A --> B extra text',
+  ];
+
+  it('owns what it can reproduce, and every owned line survives a dirty re-emit', () => {
+    for (const body of OWNED) {
+      const src = `flowchart TD\n  ${body}`;
+      const m = parseFlowchart(src)!;
+      expect([body, m.lines[1].parsed.kind]).toEqual([body, 'edges']);
+      expect([body, serialize(m)]).toEqual([body, src]);
+
+      // Emit → re-parse → emit is a fixed point: an edit may normalize the
+      // line, but never costs it its structural editability.
+      m.lines[1].dirty = true;
+      const once = serialize(m);
+      const again = parseFlowchart(once)!;
+      expect([body, again.lines[1].parsed.kind]).toEqual([body, 'edges']);
+      again.lines[1].dirty = true;
+      expect([body, serialize(again)]).toEqual([body, once]);
+      expect([body, edges(again)]).toEqual([body, edges(m)]);
+    }
+  });
+
+  it('refuses what it cannot reproduce, byte-for-byte', () => {
+    for (const body of OPAQUE) {
+      const src = `flowchart TD\n  ${body}`;
+      const m = parseFlowchart(src)!;
+      expect([body, m.lines[1].parsed.kind]).not.toEqual([body, 'edges']);
+      expect([body, serialize(m)]).toEqual([body, src]);
+    }
+  });
+
+  it('emitArrow only ever writes tokens the parser reads back unchanged', () => {
+    // The last boundary before the file, for the one emitter this task adds:
+    // every (stroke, head) the ops layer can ask for, from every marker
+    // family it can start from.
+    const strokes: EdgeStroke[] = ['normal', 'thick', 'dotted', 'invisible'];
+    const heads: EdgeHead[] = ['arrow', 'open', 'circle', 'cross', 'double'];
+    for (const stroke of strokes) {
+      for (const head of heads) {
+        for (const prev of ['-->', 'o--o', 'x==x', '<-->', '~~~', '-.-']) {
+          const raw = emitArrow(stroke, head, prev);
+          const m = parseFlowchart(`flowchart TD\n  A ${raw} B`)!;
+          const line = m.lines[1].parsed;
+          expect([stroke, head, prev, line.kind]).toEqual([stroke, head, prev, 'edges']);
+          if (line.kind !== 'edges') continue;
+          const got = line.segments[0].arrow;
+          // `~~~` has no head of its own; everything else survives intact.
+          expect([stroke, head, prev, got]).toEqual([
+            stroke,
+            head,
+            prev,
+            { stroke, head: stroke === 'invisible' ? 'open' : head, raw },
+          ]);
+        }
+      }
+    }
+  });
+
+  it('round-trips CRLF, tabs, and odd indentation untouched', () => {
+    for (const src of [
+      'flowchart TD\r\n  A e1@--> B\r\n  e1@{ animate: true }\r\n',
+      'flowchart TD\n\tA --o B\n\t\tB ~~~ C',
+      'flowchart TD\n   A   -->   B',
+      '---\nconfig:\n  layout: elk\n---\nflowchart LR\n  A e1@--> B\n  e1@{ animate: true }',
+    ]) {
+      expect(serialize(parseFlowchart(src)!)).toBe(src);
+    }
+  });
+});
+
+describe('edge ids and the meta they own (M29.31)', () => {
+  it('an edge-id line no longer costs its endpoints their place in nodes()', () => {
+    // M29.29 shipped this backwards: `A e1@--> B` failed parseEdgeLine, went
+    // opaque, and the only "node" the model could see was the phantom `e1`
+    // minted by the meta line — A and B vanished outright.
+    const m = parseFlowchart('flowchart TD\n  A e1@--> B\n  e1@{ animate: true }')!;
+    expect([...nodes(m).keys()]).toEqual(['A', 'B']);
+    expect(nodeMeta(m).has('e1')).toBe(false);
+    expect(edgeMeta(m).get('e1')?.entries).toEqual([['animate', 'true']]);
+  });
+
+  it('position decides: the same meta line above the edge really is a node', () => {
+    // Measured on 11.16.0 — `addVertex` resolves the id against the edges
+    // parsed SO FAR (flowDb.ts:163), so this source renders a stray box
+    // labeled `e1` and the edge is NOT animated. Hiding it would be a lie.
+    const m = parseFlowchart('flowchart TD\n  e1@{ animate: true }\n  A e1@--> B')!;
+    expect([...nodes(m).keys()].sort()).toEqual(['A', 'B', 'e1']);
+    expect(edgeAnimated(m, edges(m)[0])).toBe(false);
+  });
+
+  it('an id no edge claims stays node meta, exactly as mermaid renders it', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  e1@{ shape: cyl }')!;
+    expect(nodes(m).get('e1')).toEqual({ label: 'e1', shape: 'rect', metaShape: 'cyl' });
+  });
+
+  it('an & group gives its id to the one edge upstream gives it to', () => {
+    // addLink (flowDb.ts:356-371) hands the user id to the LAST start crossed
+    // with the FIRST end and auto-generates the rest, so `A e1@--> B & C`
+    // animates A→B only.
+    const fanOut = parseFlowchart('flowchart TD\n  A e1@--> B & C')!;
+    expect(edges(fanOut).map((e) => [e.from, e.to, e.id])).toEqual([
+      ['A', 'B', 'e1'],
+      ['A', 'C', null],
+    ]);
+    const fanIn = parseFlowchart('flowchart TD\n  A & B e1@--> C')!;
+    expect(edges(fanIn).map((e) => [e.from, e.to, e.id])).toEqual([
+      ['A', 'C', null],
+      ['B', 'C', 'e1'],
+    ]);
+  });
+
+  it('edgeAnimated follows the last value per key, and ignores animation:', () => {
+    const off = parseFlowchart(
+      'flowchart TD\n  A e1@--> B\n  e1@{ animate: true }\n  e1@{ animate: false }',
+    )!;
+    expect(edgeAnimated(off, edges(off)[0])).toBe(false);
+    const keyed = parseFlowchart('flowchart TD\n  A e1@--> B\n  e1@{ animation: fast }')!;
+    expect(edgeAnimated(keyed, edges(keyed)[0])).toBe(false);
+    const idless = parseFlowchart('flowchart TD\n  A --> B')!;
+    expect(edgeAnimated(idless, edges(idless)[0])).toBe(false);
   });
 });
