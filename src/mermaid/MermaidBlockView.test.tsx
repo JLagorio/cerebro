@@ -16,9 +16,19 @@ describe('MermaidBlockView', () => {
     );
   });
 
-  it('starts in editing mode when the code is empty', () => {
+  it('an empty block shows the template grid, not an auto-opened textarea', () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
-    expect(screen.getByLabelText('Mermaid source')).toBeTruthy();
+    expect(screen.getByTestId('mermaid-template-grid')).toBeTruthy();
+    expect(screen.queryByLabelText('Mermaid source')).toBeNull();
+  });
+
+  it('an empty block offers the template grid; picking one enters editing with its code', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    expect(screen.getByTestId('mermaid-template-grid')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Flowchart' }));
+    const source = await screen.findByLabelText('Mermaid source');
+    expect((source as HTMLTextAreaElement).value).toContain('flowchart TD');
   });
 
   it('surfaces the full render error, not just its first line', async () => {
@@ -75,6 +85,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
 
   it('live-renders the draft after the debounce window', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    await user().click(screen.getByRole('button', { name: 'Blank' }));
     await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
     act(() => {
       vi.advanceTimersByTime(300);
@@ -87,6 +98,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
 
   it('keeps the last good render and shows a lined error while the draft is broken', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    await user().click(screen.getByRole('button', { name: 'Blank' }));
     await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
     act(() => {
       vi.advanceTimersByTime(300);
@@ -107,6 +119,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
   it('Done commits, Escape cancels', async () => {
     const onChangeCode = vi.fn();
     render(<MermaidBlockView code="" onChangeCode={onChangeCode} />);
+    await user().click(screen.getByRole('button', { name: 'Blank' }));
     await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
     await user().click(screen.getByRole('button', { name: 'Done' }));
     expect(onChangeCode).toHaveBeenCalledWith('graph TD');
@@ -121,6 +134,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
 
   it('does not resurrect a stale error when Edit reopens inside the debounce window (regression)', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    await user().click(screen.getByRole('button', { name: 'Blank' }));
     renderMock.mockResolvedValue({ ok: false, message: 'Parse error on line 2: bad', line: 2 });
     await user().type(screen.getByLabelText('Mermaid source'), 'graph TD\n  A -->');
     act(() => {

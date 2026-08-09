@@ -4,6 +4,7 @@ import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
 import { renderMermaid } from './render';
+import { TEMPLATES } from './templates';
 import { useDebounced } from './useDebounced';
 
 /**
@@ -20,7 +21,7 @@ export function MermaidBlockView({
   code: string;
   onChangeCode: (code: string) => void;
 }) {
-  const [editing, setEditing] = useState(code.trim() === '');
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(code);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
 
@@ -102,16 +103,36 @@ export function MermaidBlockView({
       )}
 
       {!editing && code.trim() === '' && (
-        <button
-          type="button"
-          onClick={() => {
-            setDraft(code);
-            setEditing(true);
-          }}
-          className="w-full border-0 bg-transparent px-3 py-3 text-left text-sm text-n-400"
+        <div
+          data-testid="mermaid-template-grid"
+          className="grid grid-cols-2 gap-1.5 p-3 sm:grid-cols-3"
         >
-          Empty diagram — click to add mermaid source
-        </button>
+          {TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setDraft(t.code);
+                setEditing(true);
+              }}
+              className="flex items-center gap-2 rounded-md border border-n-200 bg-n-0 px-2.5 py-2 text-left text-sm text-n-700 hover:border-n-300 hover:bg-n-25"
+            >
+              <Icon name={t.icon} size={14} color="var(--n-500)" />
+              {t.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setDraft('');
+              setEditing(true);
+            }}
+            className="flex items-center gap-2 rounded-md border border-dashed border-n-200 bg-transparent px-2.5 py-2 text-left text-sm text-n-500 hover:border-n-300"
+          >
+            <Icon name="pencil" size={14} color="var(--n-400)" />
+            Blank
+          </button>
+        </div>
       )}
 
       {lightboxSvg !== null && (
