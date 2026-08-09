@@ -22,11 +22,15 @@ describe('MermaidBlockView', () => {
     expect(screen.queryByLabelText('Mermaid source')).toBeNull();
   });
 
-  it('an empty block offers the template grid; picking one enters editing with its code', async () => {
+  it('an empty block offers the template grid; picking the flowchart one enters editing visually with its code', async () => {
     renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     expect(screen.getByTestId('mermaid-template-grid')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Flowchart' }));
+    // Flowcharts open visual-first (M29.18) — the structural editor, not the
+    // source textarea, is what appears right after picking the template.
+    expect(await screen.findByTestId('structural-host')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Show code' }));
     const source = await screen.findByLabelText('Mermaid source');
     expect((source as HTMLTextAreaElement).value).toContain('flowchart TD');
   });
@@ -49,7 +53,11 @@ describe('MermaidBlockView', () => {
       message: 'Parse error on line 2:\nExpecting …',
       line: 2,
     });
-    const code = 'graph TD\n  A -->';
+    // Not flowchart-shaped: this exercises the plain code-editing path,
+    // untangled from M29.18's visual mode (a `graph TD` header would parse as
+    // visual-capable even with a broken second line, since a bad line just
+    // goes opaque rather than failing the whole model).
+    const code = 'sequenceDiagram\n  A-->';
     render(<MermaidBlockView code={code} onChangeCode={() => {}} />);
     await waitFor(() => screen.getByTestId('mermaid-error'));
     // The header still has its own "Edit" button, so target the error card
@@ -83,14 +91,20 @@ describe('MermaidBlockView editing (M29.9)', () => {
 
   const user = () => userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
 
+  // These three tests deliberately type a non-flowchart-shaped diagram
+  // (`sequenceDiagram`, not `graph TD`/`flowchart TD`): they exercise Stage
+  // B's debounce/error/cancel mechanics, which are diagram-type-agnostic, and
+  // a flowchart-shaped draft would flip `isVisualCapable` mid-session
+  // (M29.18) and swap the textarea out from under an in-flight `type()` call.
+
   it('live-renders the draft after the debounce window', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
-    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
+    await user().type(screen.getByLabelText('Mermaid source'), 'sequenceDiagram');
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    await waitFor(() => expect(renderMock).toHaveBeenCalledWith('graph TD'));
+    await waitFor(() => expect(renderMock).toHaveBeenCalledWith('sequenceDiagram'));
     await waitFor(() =>
       expect(screen.getByTestId('mermaid-live-preview').innerHTML).toContain('data-fake="live"'),
     );
@@ -99,7 +113,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
   it('keeps the last good render and shows a lined error while the draft is broken', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
-    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
+    await user().type(screen.getByLabelText('Mermaid source'), 'sequenceDiagram');
     act(() => {
       vi.advanceTimersByTime(300);
     });
@@ -136,7 +150,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
     renderMock.mockResolvedValue({ ok: false, message: 'Parse error on line 2: bad', line: 2 });
-    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD\n  A -->');
+    await user().type(screen.getByLabelText('Mermaid source'), 'sequenceDiagram\n  A-->');
     act(() => {
       vi.advanceTimersByTime(300);
     });
@@ -156,5 +170,24 @@ describe('MermaidBlockView editing (M29.9)', () => {
     // ...and the fresh preview must match it immediately, not lag behind
     // with the previous session's error.
     expect(screen.queryByTestId('mermaid-edit-error')).toBeNull();
+  });
+});
+
+describe('MermaidBlockView visual/code mode (M29.18)', () => {
+  it('flowcharts edit visually with a code toggle; other types go straight to code', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    render(<MermaidBlockView code={'flowchart TD\n  A[X] --> B[Y]'} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByTestId('structural-host')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Show code' }));
+    expect(screen.getByLabelText('Mermaid source')).toBeTruthy();
+  });
+
+  it('non-flowcharts have no visual mode', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    render(<MermaidBlockView code={'sequenceDiagram\n  A->>B: hi'} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText('Mermaid source')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show code' })).toBeNull();
   });
 });

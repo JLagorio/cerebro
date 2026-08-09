@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { renderMermaid } from '../render';
-import { nodes, parseFlowchart, serialize, type Shape } from './model';
-import { addEdge, addNode, deleteNode, renameNode, setNodeShape } from './ops';
+import { nodes, parseFlowchart, serialize, type EdgeEntry, type Shape } from './model';
+import {
+  addEdge,
+  addNode,
+  deleteEdge,
+  deleteNode,
+  renameNode,
+  setDirection,
+  setEdgeLabel,
+  setLayoutEngine,
+  setNodeShape,
+} from './ops';
 import { bindFlowchartSvg, type FlowchartSvgBinding } from './svgBinding';
 
 const SHAPE_CHOICES: { shape: Shape; label: string; icon: string }[] = [
@@ -16,12 +26,20 @@ const SHAPE_CHOICES: { shape: Shape; label: string; icon: string }[] = [
   { shape: 'subroutine', label: 'Subroutine', icon: 'square-stack' },
 ];
 
+const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
+
+/** True when the source's YAML frontmatter pins mermaid's ELK layout engine. */
+function isElk(code: string): boolean {
+  return code.match(/^\s*layout:\s*elk\s*$/m) !== null;
+}
+
 /**
- * The structural editor (M29.17): mermaid renders, we bind its SVG, and every
- * interaction becomes a surgical text edit flowing out through onChangeCode —
- * the same channel typing uses, so BlockNote history gives undo/redo for free.
- * The diagram re-lays-out after each edit; that is mermaid's auto-layout
- * nature, honestly embraced, not fought with hand positions.
+ * The structural editor (M29.17–.18): mermaid renders, we bind its SVG, and
+ * every interaction becomes a surgical text edit flowing out through
+ * onChangeCode — the same channel typing uses, so BlockNote history gives
+ * undo/redo for free. The diagram re-lays-out after each edit; that is
+ * mermaid's auto-layout nature, honestly embraced, not fought with hand
+ * positions.
  */
 export function StructuralEditor({
   code,
@@ -36,6 +54,11 @@ export function StructuralEditor({
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
+  const [ghost, setGhost] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
+    null,
+  );
+  const dragFrom = useRef<string | null>(null);
 
   // A selection can outlive the node it points at — an external edit (undo,
   // another surface, a code-mode change) can delete the node between one
@@ -50,17 +73,32 @@ export function StructuralEditor({
     if (next !== null) onChangeCode(serialize(next));
   };
 
+  // Every popover keys off line/segment indices captured from a PAST render
+  // of `code`. A code change — whether from an edit made here or from
+  // outside (undo, code-mode, another surface) — can shift or delete those
+  // indices, so any open popover closes the instant the source it was
+  // reasoning about is no longer current. Normal open-after-click still
+  // works: a click always happens after the render for the code it's
+  // clicking on, never before. `validSelected` above already guards reads of
+  // `selected` defensively; this clears the state outright too — belt and
+  // suspenders.
+  useEffect(() => {
+    setEdgeEditor(null);
+    setSelected(null);
+    setToolbarPos(null);
+  }, [code]);
+
   // Render, inject, and bind in one pass. The svg is written imperatively —
   // hostRef.current.innerHTML = r.svg — rather than through React's
   // dangerouslySetInnerHTML, and deliberately so: bindFlowchartSvg attaches
-  // raw onclick/ondblclick handlers straight onto mermaid's DOM nodes below,
-  // and this component's own state changes (select, rename, toolbar
-  // position) re-render it constantly. A React-managed subtree gets
-  // re-diffed on every one of those renders; an imperatively-written one
-  // does not — React never looks at this subtree again after the initial
-  // empty <div>, so a click can't clobber the very handlers it just used.
-  // This effect only re-runs on [code, model], i.e. on an actual diagram
-  // change, never on selection/rename/toolbar state.
+  // raw onclick/ondblclick/onpointerdown handlers straight onto mermaid's DOM
+  // nodes below, and this component's own state changes (select, rename,
+  // toolbar position, edge editor, drag ghost) re-render it constantly. A
+  // React-managed subtree gets re-diffed on every one of those renders; an
+  // imperatively-written one does not — React never looks at this subtree
+  // again after the initial empty <div>, so a click can't clobber the very
+  // handlers it just used. This effect only re-runs on [code, model], i.e. on
+  // an actual diagram change, never on selection/rename/toolbar/edge state.
   useEffect(() => {
     let stale = false;
     void renderMermaid(code).then((r) => {
@@ -88,12 +126,110 @@ export function StructuralEditor({
           const label = nodes(model).get(id)?.label ?? id;
           setRenaming({ id, value: label });
         };
+        // addEventListener, not `.onpointerdown =` — jsdom (no PointerEvent
+        // support) never wires the onpointerdown IDL property up to actual
+        // "pointerdown" dispatches, so an assignment there silently never
+        // fires under test even though it works in a real browser.
+        el.addEventListener('pointerdown', (e: PointerEvent) => {
+          const host = hostRef.current;
+          if (host === null) return;
+          const hostBox = host.getBoundingClientRect();
+          dragFrom.current = id;
+          setGhost({
+            x1: e.clientX - hostBox.left,
+            y1: e.clientY - hostBox.top,
+            x2: e.clientX - hostBox.left,
+            y2: e.clientY - hostBox.top,
+          });
+        });
+      }
+
+      // Bound edge entries carry their own line/seg/from/to/label directly
+      // (see svgBinding's docstring) — reused here as-is, never re-looked-up
+      // through edges(model).find(...), which would reintroduce the very
+      // duplicate-pair ambiguity the binding already resolved.
+      for (const bound of binding.edgeEls) {
+        bound.el.style.cursor = 'pointer';
+        bound.el.onclick = (e) => {
+          e.stopPropagation();
+          setSelected(null);
+          setToolbarPos(null);
+          setEdgeEditor({ edge: bound, value: bound.label ?? '' });
+        };
       }
     });
     return () => {
       stale = true;
     };
   }, [code, model]);
+
+  // Window-level drag-to-connect: pointerdown on a node (above) starts it,
+  // these two finish it. Registered once per model (i.e. per actual diagram
+  // change), not per render, so ghost/selection churn during a drag can't
+  // tear the listeners down mid-gesture.
+  useEffect(() => {
+    if (model === null) return;
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (dragFrom.current === null) return;
+      const host = hostRef.current;
+      if (host === null) return;
+      const hostBox = host.getBoundingClientRect();
+      setGhost((g) =>
+        g === null ? null : { ...g, x2: e.clientX - hostBox.left, y2: e.clientY - hostBox.top },
+      );
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      const from = dragFrom.current;
+      dragFrom.current = null;
+      setGhost(null);
+      if (from === null) return;
+
+      // elementFromPoint is unimplemented in plain jsdom (returns undefined,
+      // not null) — every plain click also fires a pointerdown/pointerup
+      // pair, so this must degrade to a no-op rather than throw when the
+      // method isn't there at all.
+      const target = document.elementFromPoint?.(e.clientX, e.clientY) ?? null;
+      const hitGroup =
+        (target?.closest('g.node[id^="flowchart-"]') as SVGGElement | null) ?? null;
+
+      if (hitGroup !== null) {
+        // Landed inside a node group — resolve it back to a model id and
+        // connect, but never to itself: dropping back on the SAME node ends
+        // the gesture as a no-op, not a self-edge, and never falls through
+        // to the "empty canvas" branch below.
+        const binding = bindingRef.current;
+        if (binding === null) return;
+        let hitId: string | null = null;
+        for (const [mid, el] of binding.nodeEls) {
+          if (el === hitGroup) {
+            hitId = mid;
+            break;
+          }
+        }
+        if (hitId === null || hitId === from) return;
+        apply(addEdge(model, from, hitId));
+        return;
+      }
+
+      const host = hostRef.current;
+      if (host !== null && target !== null && host.contains(target)) {
+        // Dropped on empty canvas: spin up a fresh node and wire it in one
+        // motion, same as the toolbar's "Add connected node".
+        const added = addNode(model, 'New step');
+        apply(addEdge(added.model, from, added.id));
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- apply closes over model/onChangeCode; re-registering per render would tear the listeners down mid-gesture.
+  }, [model]);
 
   // Selection outline via inline stroke on the bound group's shapes. This
   // effect intentionally has no dependency array: it must resync the DOM
@@ -155,10 +291,62 @@ export function StructuralEditor({
       tabIndex={-1}
     >
       <div
+        data-testid="structural-toolbar"
+        className="mb-1.5 flex items-center gap-1"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={() => apply(addNode(model, 'New step').model)}
+          className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+        >
+          + Node
+        </button>
+        <span className="mx-0.5 h-4 w-px bg-n-100" />
+        {DIRECTIONS.map((d) => (
+          <button
+            key={d}
+            type="button"
+            aria-label={`Direction ${d}`}
+            onClick={() => apply(setDirection(model, d))}
+            className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+          >
+            {d}
+          </button>
+        ))}
+        <span className="mx-0.5 h-4 w-px bg-n-100" />
+        <button
+          type="button"
+          aria-label={isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
+          onClick={() => apply(setLayoutEngine(model, isElk(code) ? 'dagre' : 'elk'))}
+          className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+        >
+          {isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
+        </button>
+      </div>
+
+      <div
         ref={hostRef}
         data-testid="structural-host"
         className="[&_svg]:h-auto [&_svg]:max-w-full"
       />
+
+      {ghost !== null && (
+        <svg className="pointer-events-none absolute inset-0 h-full w-full">
+          <line
+            // Real pointer events always carry clientX/Y; jsdom's fallback
+            // (no PointerEvent constructor) does not, so this guards against
+            // NaN reaching the DOM under test rather than trusting the input.
+            x1={Number.isFinite(ghost.x1) ? ghost.x1 : 0}
+            y1={Number.isFinite(ghost.y1) ? ghost.y1 : 0}
+            x2={Number.isFinite(ghost.x2) ? ghost.x2 : 0}
+            y2={Number.isFinite(ghost.y2) ? ghost.y2 : 0}
+            stroke="var(--cortex-500)"
+            strokeWidth="1.5"
+            strokeDasharray="4 3"
+          />
+        </svg>
+      )}
 
       {validSelected !== null && toolbarPos !== null && renaming === null && (
         <div
@@ -226,6 +414,47 @@ export function StructuralEditor({
           }}
           className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md border border-cortex-500 bg-n-0 px-2 py-1 text-sm text-n-800 shadow-sm outline-none"
         />
+      )}
+
+      {edgeEditor !== null && (
+        <div
+          className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            autoFocus
+            aria-label="Edge label"
+            value={edgeEditor.value}
+            placeholder="label"
+            onChange={(e) => setEdgeEditor({ ...edgeEditor, value: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                apply(
+                  setEdgeLabel(
+                    model,
+                    edgeEditor.edge,
+                    edgeEditor.value.trim() === '' ? null : edgeEditor.value,
+                  ),
+                );
+                setEdgeEditor(null);
+              }
+              if (e.key === 'Escape') setEdgeEditor(null);
+            }}
+            className="w-32 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+          />
+          <button
+            type="button"
+            aria-label="Delete edge"
+            onClick={() => {
+              apply(deleteEdge(model, edgeEditor.edge));
+              setEdgeEditor(null);
+            }}
+            className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+          >
+            <Icon name="trash-2" size={13} color="var(--danger-600)" />
+          </button>
+        </div>
       )}
     </div>
   );

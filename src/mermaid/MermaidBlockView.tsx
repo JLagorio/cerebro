@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { detectDiagramType } from './detect';
+import { StructuralEditor } from './flowchart/StructuralEditor';
+import { parseFlowchart } from './flowchart/model';
 import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
@@ -25,6 +27,10 @@ export function MermaidBlockView({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(code);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
+  // Stage C (M29.18): flowcharts get a visual/code toggle; every other
+  // diagram type has no structural model to edit, so it never leaves code.
+  const [editMode, setEditMode] = useState<'visual' | 'code'>('visual');
+  const isVisualCapable = parseFlowchart(editing ? draft : code) !== null;
 
   const commit = () => {
     setEditing(false);
@@ -47,6 +53,16 @@ export function MermaidBlockView({
         <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">
           {detectDiagramType(editing ? draft : code)}
         </span>
+        {editing && isVisualCapable && (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setEditMode(editMode === 'visual' ? 'code' : 'visual')}
+            className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
+          >
+            {editMode === 'visual' ? 'Show code' : 'Show diagram'}
+          </button>
+        )}
         <span className="flex-1" />
         <button
           type="button"
@@ -67,7 +83,35 @@ export function MermaidBlockView({
         </button>
       </div>
 
-      {editing && (
+      {editing && isVisualCapable && editMode === 'visual' && (
+        <div
+          onKeyDown={(e) => {
+            // No Stage-B textarea here to swallow BlockNote hotkeys via
+            // e.stopPropagation on every keystroke, so only intercept the one
+            // key this pane cares about: Escape just exits — every visual op
+            // already committed through onChangeCode as it happened, so
+            // there is nothing left to revert (unlike Stage B's cancel()).
+            if (e.key === 'Escape') {
+              e.stopPropagation();
+              setEditing(false);
+            }
+          }}
+        >
+          <StructuralEditor
+            code={draft}
+            onChangeCode={(next) => {
+              // Each visual operation (drag an edge, rename, delete…) commits
+              // immediately — its own BlockNote history step — rather than
+              // batching until Done, so cmd+z undoes one visual action at a
+              // time instead of the whole editing session.
+              setDraft(next);
+              onChangeCode(next);
+            }}
+          />
+        </div>
+      )}
+
+      {editing && (!isVisualCapable || editMode === 'code') && (
         <div className="flex flex-wrap">
           <HighlightedTextarea
             autoFocus
