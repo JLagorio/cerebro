@@ -80,6 +80,12 @@ pub struct Golden {
     /// Server-derived escalator signals, already folded across targets.
     #[serde(default)]
     pub signals: BTreeMap<String, GoldenSignal>,
+    /// `"<class>/<id>" -> version` — the M22 `state_versions` this fixture
+    /// evaluates its expected-version CAS against. A fixture that sets this
+    /// must be `rust_only`: CAS is out of the mock's scope by declaration,
+    /// and the mark is what says so out loud (M24.5).
+    #[serde(default)]
+    pub versions: BTreeMap<String, u64>,
     /// A complete `ProposalV1` body.
     pub proposal: serde_json::Value,
     pub expect: GoldenExpectation,
@@ -162,6 +168,43 @@ impl Golden {
         let facts = self
             .facts(table)
             .map_err(|e| format!("{}: {e}", self.name))?;
+
+        // The state-dependent half, when the fixture declares a world. CAS
+        // runs BEFORE the table verdict is reported, because a proposal
+        // aimed at a version that moved was never about today's world.
+        if !self.versions.is_empty() {
+            let proposal: crate::ledger::schema::ProposalV1 =
+                serde_json::from_value(self.proposal.clone())
+                    .map_err(|e| format!("{}: {e}", self.name))?;
+            let mut state = crate::ledger::reduce::EpistemicState::default();
+            for (target, version) in &self.versions {
+                let (class, id) = target
+                    .split_once('/')
+                    .ok_or_else(|| format!("{}: {target:?} is not <class>/<id>", self.name))?;
+                state.versions.insert(
+                    (class.to_string(), id.to_string()),
+                    (*version, String::new()),
+                );
+            }
+            if let Err(failure) = crate::policy::preconditions::versions_current(&state, &proposal)
+            {
+                if Some(failure.code.to_string()) != self.expect.rejection {
+                    return Err(format!(
+                        "{}: expected rejection {:?}, CAS gave {:?}",
+                        self.name, self.expect.rejection, failure.code
+                    ));
+                }
+                return Ok(Verdict::Rejected {
+                    rejection: crate::policy::verdict::Rejection {
+                        code: failure.code.to_string(),
+                        destiny: table
+                            .destiny(failure.code)
+                            .ok_or_else(|| format!("{} has no destiny", failure.code))?,
+                    },
+                    risk: None,
+                });
+            }
+        }
         let verdict = table_verdict(table, &facts)
             .map_err(|e| format!("{}: structural failure {e:?}", self.name))?;
 
@@ -260,6 +303,42 @@ mod tests {
             golden
                 .check(&table)
                 .unwrap_or_else(|e| panic!("{file}: {e}"));
+        }
+    }
+
+    #[test]
+    fn a_fixture_that_declares_a_world_declares_itself_rust_only() {
+        // BY DECLARATION, NOT OMISSION. CAS and logical-batch semantics are
+        // out of the mock's scope; a fixture that depends on them says so in
+        // the file, so the TS runner skips it loudly instead of the
+        // directory quietly missing the case.
+        for (file, golden) in load_all().unwrap() {
+            if !golden.versions.is_empty() {
+                assert!(
+                    golden.rust_only,
+                    "{file} declares state versions but is not marked rust_only"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_cas_fixtures_are_present_rather_than_assumed() {
+        // A directory that lost its version-conflict cases would still pass
+        // every other assertion here, which is exactly why this one names
+        // them.
+        let names: BTreeSet<String> = load_all()
+            .unwrap()
+            .into_iter()
+            .filter(|(_, g)| !g.versions.is_empty())
+            .map(|(_, g)| g.name)
+            .collect();
+        for required in [
+            "a-null-expected-version-against-something-that-exists-is-refused",
+            "a-target-whose-version-moved-is-refused",
+            "a-version-that-agrees-lets-the-verdict-through",
+        ] {
+            assert!(names.contains(required), "the {required} fixture is gone");
         }
     }
 

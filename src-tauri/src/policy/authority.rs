@@ -306,13 +306,11 @@ pub struct AuthorityRoutesV1 {
 }
 
 /// A proposal's pinned reference into the immutable artifact set.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AuthorityRouteRef {
-    pub authority_route_id: String,
-    pub authority_rule_version: u64,
-    pub artifact_hash: String,
-}
+///
+/// RE-EXPORTED, not redeclared: this shape is persisted inside
+/// `ProposalBasis`, so a second copy here could drift from bytes already on
+/// disk — the same reasoning that keeps `Risk` in the ledger schema.
+pub use crate::ledger::schema::AuthorityRouteRef;
 
 impl AuthorityRoutesV1 {
     pub fn load() -> Result<AuthorityRoutesV1, String> {

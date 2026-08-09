@@ -18,6 +18,7 @@ pub mod commit;
 pub mod expand;
 pub mod goldens;
 pub mod interpreter;
+pub mod preconditions;
 pub mod rejection;
 pub mod risk;
 pub mod submit;

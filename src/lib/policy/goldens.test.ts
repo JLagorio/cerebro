@@ -29,6 +29,12 @@ interface Golden {
   why: string;
   rust_only?: boolean;
   signals?: Record<string, GoldenSignal>;
+  /**
+   * `"<class>/<id>" -> version`. A fixture that declares a world is
+   * asserting expected-version CAS, which is Rust-only by declaration (D5) —
+   * so it must also be `rust_only`, and the test below proves it is.
+   */
+  versions?: Record<string, number>;
   proposal: Record<string, unknown>;
   expect: {
     verdict: string;
@@ -104,6 +110,17 @@ describe('the fixture set itself', () => {
   it('names each file after its fixture', () => {
     for (const file of files) {
       expect(`${load(file).name}.json`).toBe(file);
+    }
+  });
+
+  it('marks every CAS fixture rust_only rather than quietly omitting it', () => {
+    // BY DECLARATION, NOT OMISSION. The mock has no `state_versions`, so a
+    // fixture that depends on them is skipped out loud in this file rather
+    // than missing from the directory.
+    const cas = files.filter((f) => Object.keys(load(f).versions ?? {}).length > 0);
+    expect(cas.length).toBeGreaterThan(0);
+    for (const file of cas) {
+      expect(load(file).rust_only, `${file} declares versions`).toBe(true);
     }
   });
 

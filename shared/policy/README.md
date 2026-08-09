@@ -20,7 +20,7 @@ preemptively.)
 | `policy.v1.sha256` | SHA-256 of `policy.v1.json`'s bytes. Rust and TS each hash what they loaded and compare against this file — the only way two processes in two languages assert the *same* bytes rather than each asserting self-consistency. |
 | `authority-routes.v1.json` | The current predicate- and stage-specific authority routes (D11). |
 | `authority-routes/<hash>.json` | Immutable content-addressed snapshots. A queued proposal pins `(route_id, rule_version, artifact_hash)`, so an approval tomorrow is evaluated against the rule the agent was actually shown. |
-| `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. |
+| `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators) and `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against). Declaring `versions` requires `rust_only: true` — CAS is out of the mock's scope by declaration, so the TS runner skips it loudly rather than the directory quietly missing the case. |
 
 The whole directory is `.prettierignore`d: the bytes are hashed, and a
 formatter that reflowed them would break the anchor.
@@ -79,6 +79,24 @@ come first in each language.
   ledger requires a coverage-materiality argument in review, because the
   alternative is an append-only ledger that fills with "Claude forgot a
   required field 92,000 times."
+
+- **`lineage_fan_in` counts INCOMING live relations.** The design fixes the
+  mechanism and leaves the measure to the server. Incoming edges are the ones
+  a reader actually follows, so they are what "much depends on this" means;
+  outgoing edges are the record's own claims about others and say nothing
+  about who would be surprised by a change. Written once, in
+  `policy/interpreter.rs`.
+- **Precondition precedence is the op's `requires` order.** Which
+  state-dependent predicates run, and in what order, comes off the table row
+  rather than out of whichever `if` an interpreter writes first — the same
+  reasoning that put `evaluation_order` in the artifact. `requires` is sorted,
+  so "sorted" is the declared precedence until someone has a reason to make it
+  something else.
+- **A predicate the table requires and nothing evaluates is a rule that looks
+  like protection.** `PREDICATE_OWNERS` in `policy/preconditions.rs` names
+  every predicate and the phase that implements it, and a tripwire proves that
+  list and the table's `predicates` are the same set. Gaps are written down,
+  not inferred from a missing branch.
 
 ## What is deliberately NOT here yet
 

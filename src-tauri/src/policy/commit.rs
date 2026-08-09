@@ -38,6 +38,7 @@ use crate::ledger::{ledger_dir, read_ledger};
 
 use super::expand::{expand, ExpandError, ExpansionContext};
 use super::interpreter::facts_at;
+use super::preconditions::{self, PreconditionFailure};
 use super::rejection::{OperationalRefusal, Rejection};
 use super::submit::{rule_for, SubmitError, SubmitResult};
 use super::table::{Destiny, PolicyTable, Revert};
@@ -277,11 +278,41 @@ pub fn commit_proposals(
         });
     }
 
-    // ONE snapshot decides the whole set.
+    // A run has one actor; a set that mixed two would let one producer
+    // commit another's work under a set id neither agreed to.
+    if let Err(failure) =
+        preconditions::actor_matches_run(&actors.iter().map(|a| a.id.clone()).collect::<Vec<_>>())
+    {
+        return Err(SubmitError {
+            code: "run_actor_mismatch",
+            detail: format!("{:?} != {:?}", failure.expected, failure.actual),
+        });
+    }
+
+    // ONE snapshot decides the whole set: the table verdict first, then the
+    // state-dependent predicates the table's `requires` list names.
     let mut verdicts = Vec::with_capacity(members.len());
-    for proposal in &members {
+    let mut failure: Option<(usize, Box<PreconditionFailure>)> = None;
+    for (index, proposal) in members.iter().enumerate() {
         let facts = facts_at(table, &state, proposal)?;
-        verdicts.push(table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?);
+        let verdict = table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?;
+        if verdict.rejection().is_none() && failure.is_none() {
+            if let Err(precondition) = preconditions::check(table, &state, proposal) {
+                failure = Some((index, precondition));
+            }
+        }
+        verdicts.push(verdict);
+    }
+    if let Some((culprit, precondition)) = failure {
+        return reject_precondition(
+            table,
+            writer,
+            &commit_set_id,
+            &members,
+            culprit,
+            *precondition,
+            TransitionCode::InitialReject,
+        );
     }
 
     if verdicts.iter().any(|v| v.rejection().is_some()) {
@@ -502,11 +533,21 @@ pub fn resolve_commit_set(
     // re-resolution to this same pass.
     let mut verdicts = Vec::with_capacity(members.len());
     let mut stale_reason: Option<(usize, (TypedValue, TypedValue))> = None;
+    // A precondition names its own code (`stale_target_version`,
+    // `invalid_reference`, `candidate_receipt_stale`); a risk that merely
+    // rose is `policy_precondition_stale`.
+    let mut stale_code: Option<&'static str> = None;
     for (index, proposal) in members.iter().enumerate() {
         let facts = facts_at(table, &state, proposal)?;
         let verdict = table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?;
         if stale_reason.is_none() {
-            if let Some(rejection) = verdict.rejection() {
+            if let Err(precondition) = preconditions::check(table, &state, proposal) {
+                // The window target-id CAS alone cannot see: a duplicate
+                // created while the card waited, evidence that stopped
+                // resolving, a version that moved after approval.
+                stale_code = Some(precondition.code);
+                stale_reason = Some((index, (precondition.expected, precondition.actual)));
+            } else if let Some(rejection) = verdict.rejection() {
                 stale_reason = Some((
                     index,
                     (
@@ -540,7 +581,9 @@ pub fn resolve_commit_set(
                 if index == culprit {
                     Verdict::Rejected {
                         rejection: super::verdict::Rejection {
-                            code: "policy_precondition_stale".to_string(),
+                            code: stale_code
+                                .unwrap_or("policy_precondition_stale")
+                                .to_string(),
                             destiny: Destiny::Ledger,
                         },
                         risk: None,
@@ -691,6 +734,52 @@ fn reject_set(
         batch_id: receipt.batch_id,
         replayed: receipt.replayed,
     })
+}
+
+/// A precondition failure refuses the whole set: the culprit carries the
+/// predicate's own code and detail, every peer carries `atomic_set_refused`.
+#[allow(clippy::too_many_arguments)]
+fn reject_precondition(
+    table: &PolicyTable,
+    writer: &mut LedgerWriter,
+    commit_set_id: &str,
+    members: &[ProposalV1],
+    culprit: usize,
+    precondition: PreconditionFailure,
+    transition: TransitionCode,
+) -> Result<CommitOutcome, SubmitError> {
+    let verdicts: Vec<Verdict> = (0..members.len())
+        .map(|index| {
+            if index == culprit {
+                Verdict::Rejected {
+                    rejection: super::verdict::Rejection {
+                        code: precondition.code.to_string(),
+                        destiny: Destiny::Ledger,
+                    },
+                    risk: None,
+                }
+            } else {
+                Verdict::Applied {
+                    risk: super::risk::EffectiveRisk {
+                        risk: crate::ledger::schema::Risk::Low,
+                        base: crate::ledger::schema::Risk::Low,
+                        declared: crate::ledger::schema::Risk::Low,
+                        fired: vec![],
+                    },
+                }
+            }
+        })
+        .collect();
+    reject_set(
+        table,
+        writer,
+        commit_set_id,
+        members,
+        &verdicts,
+        transition,
+        None,
+        Some((precondition.expected, precondition.actual)),
+    )
 }
 
 /// What a table-decidable refusal expected and what it got. These come off
@@ -1121,6 +1210,56 @@ mod tests_support {
             .unwrap();
     }
 
+    /// A live `refines` edge from one Belief to another — fan-in, without
+    /// touching the target's own version.
+    pub fn add_relation(writer: &mut LedgerWriter, from: &str, to: &str) {
+        let (schema_v, batch_id, key, body_actor) = common(&actor());
+        let relation = schema::BeliefRelation {
+            schema: schema_v,
+            batch_id,
+            idempotency_key: key,
+            actor: body_actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            relation_id: schema::derive_relation_id(from, to, schema::RelationKind::Refines),
+            action: schema::RelationAction::Add,
+            from: from.to_string(),
+            to: to.to_string(),
+            relation: schema::RelationKind::Refines,
+        };
+        writer
+            .append(
+                schema::KIND_BELIEF_RELATION,
+                serde_json::to_value(&relation).unwrap(),
+            )
+            .unwrap();
+    }
+
+    /// Register a display alias on an Entity — how a duplicate becomes
+    /// findable by the alias leg without sharing a path-derived id.
+    pub fn add_alias(writer: &mut LedgerWriter, entity_id: &str, alias: &str) {
+        let (schema_v, batch_id, key, body_actor) = common(&actor());
+        let body = schema::EntityAliasAdded {
+            schema: schema_v,
+            batch_id,
+            idempotency_key: key,
+            actor: body_actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            entity_id: entity_id.to_string(),
+            alias: alias.to_string(),
+            normalized_alias: schema::normalize_alias_v1(alias),
+        };
+        writer
+            .append(
+                schema::KIND_ENTITY_ALIAS_ADDED,
+                serde_json::to_value(&body).unwrap(),
+            )
+            .unwrap();
+    }
+
     pub fn seed_belief(writer: &mut LedgerWriter, slug: &str) -> String {
         let store = writer.store_id().to_string();
         let belief_id = schema::migrate_id(&store, "belief", slug);
@@ -1400,11 +1539,11 @@ mod tests {
     }
 
     #[test]
-    fn approving_medium_is_not_approving_high() {
-        // THE STALENESS RULE. The card said MEDIUM; between the click and
-        // the append a human attested the target, which floors the same
-        // change at HIGH. That approval was given to a different question.
-        let (vault, mut writer, belief) = seeded("commit-stale");
+    fn approval_is_authorization_not_a_snapshot_of_the_world() {
+        // THE CAS RULE, after approval. A human said yes to version 1;
+        // between the click and the append the target moved. Applying now
+        // would write over something nobody looked at.
+        let (vault, mut writer, belief) = seeded("commit-stale-cas");
         submit(
             &mut writer,
             P1,
@@ -1428,10 +1567,95 @@ mod tests {
             .unwrap();
         }
 
-        // The world moves: a human verifies the target.
+        // The world moves: a human verifies the target, which advances the
+        // Belief's version.
         attest(&mut writer, &vault, &belief);
 
         let outcome = resolve_commit_set(&table(), &mut writer, &vault, RUN, &ordered).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::StaleReject);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let stale = read
+            .frames
+            .iter()
+            .find(|f| {
+                f.kind == schema::KIND_PROPOSAL_REJECTED && f.body["code"] == "stale_target_version"
+            })
+            .unwrap();
+        // The card stays inspectable: it says WHICH target moved, from what
+        // to what — never a bare "something changed".
+        assert_eq!(
+            stale.body["expected"]["value"],
+            format!("belief/{belief}@1")
+        );
+        assert_eq!(stale.body["actual"]["value"], format!("belief/{belief}@2"));
+        assert_eq!(
+            state(&writer, &vault).beliefs[&belief].current().revision,
+            1,
+            "state untouched"
+        );
+
+        // ...and the server can offer a proposal that IS current, under a
+        // NEW id, rather than silently refreshing the one a human read.
+        let current = state(&writer, &vault);
+        let prepared = crate::policy::preconditions::prepare_updated(
+            &current,
+            &current.proposals[P1].proposal,
+        );
+        assert_ne!(prepared.proposal_id, P1);
+        assert!(crate::policy::preconditions::versions_current(&current, &prepared).is_ok());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn approving_medium_is_not_approving_high() {
+        // THE RISK-ROSE RULE, which CAS alone cannot see: the target itself
+        // never moved. What changed is how much depends on it — fan-in rose
+        // past the threshold while the card sat in the queue, and the same
+        // edit is now a HIGH one. Approving MEDIUM is not approving HIGH.
+        let (vault, mut writer, belief) = seeded("commit-stale-risk");
+        submit(
+            &mut writer,
+            P1,
+            update_op(&belief, "x"),
+            &belief,
+            Risk::Medium,
+        );
+        // A HIGH peer keeps the set queued, so there is a decision to outlive.
+        submit(&mut writer, P2, tombstone_op(&belief), &belief, Risk::High);
+        let ordered = [P1.to_string(), P2.to_string()];
+        commit_proposals(&table(), &mut writer, &vault, RUN, &ordered).unwrap();
+        for id in &ordered {
+            record_decision(
+                &mut writer,
+                &vault,
+                id,
+                Decision::Approve,
+                "human:me",
+                None,
+                "2026-08-09T10:00:00Z",
+            )
+            .unwrap();
+        }
+
+        // Other Beliefs come to depend on the target. None of that touches
+        // the target's OWN version, so CAS still agrees.
+        let table = table();
+        let threshold = table.threshold("lineage_fan_in_high").unwrap();
+        for index in 0..=threshold {
+            let dependent = seed_belief(&mut writer, &format!("dependent-{index}"));
+            add_relation(&mut writer, &dependent, &belief);
+        }
+        let current = state(&writer, &vault);
+        assert!(
+            crate::policy::preconditions::versions_current(
+                &current,
+                &current.proposals[P1].proposal
+            )
+            .is_ok(),
+            "the target itself never moved"
+        );
+
+        let outcome = resolve_commit_set(&table, &mut writer, &vault, RUN, &ordered).unwrap();
         assert_eq!(outcome.transition, TransitionCode::StaleReject);
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
         let stale = read
@@ -1442,7 +1666,6 @@ mod tests {
                     && f.body["code"] == "policy_precondition_stale"
             })
             .unwrap();
-        // The card stays inspectable: it says what it expected and what it got.
         assert_eq!(stale.body["expected"]["value"], "MEDIUM");
         assert_eq!(stale.body["actual"]["value"], "HIGH");
         assert_eq!(
@@ -1500,6 +1723,226 @@ mod tests {
             applied.body["revert_plan"]["steps"][0]["kind"],
             "belief_revised"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_duplicate_created_while_the_card_waited_rejects_the_whole_set() {
+        // THE WINDOW TARGET-ID CAS CANNOT SEE. A create names no existing
+        // target, so no version can move under it — but the very thing it
+        // claims is new can appear while it sits in the queue. Repeating the
+        // search at the current head is what closes that.
+        let (vault, mut writer, existing) = seeded("commit-candidate-stale");
+        let store = writer.store_id().to_string();
+        let new_id = schema::migrate_id(&store, "belief", "fresh");
+        let entity_id = schema::migrate_id(&store, "entity", "fresh");
+        let receipt = crate::policy::candidates::mint(
+            &state(&writer, &vault),
+            crate::policy::candidates::EMPTY_INDEX_HEAD,
+            &entity_id,
+            "fresh.md",
+            &["Fresh Thing".to_string()],
+        )
+        .unwrap();
+        assert!(
+            receipt.considered.is_empty(),
+            "nothing held that identity when the search ran"
+        );
+
+        let mut create = proposal(
+            P1,
+            RUN,
+            ProposalOp::CreateBelief {
+                belief_id: new_id.clone(),
+                subject: schema::SubjectRef::Resolved {
+                    entity_id,
+                    aliases: vec!["fresh.md".into()],
+                },
+                content: "# fresh\n".into(),
+                fields: serde_json::json!({}),
+                basis: schema::BeliefBasis::Unsupported {
+                    reason: "fixture".into(),
+                },
+                distinctness_reason: "nothing holds fresh.md".into(),
+            },
+            vec![target(TargetClass::Belief, &new_id, None)],
+            Risk::Low,
+        );
+        create.candidate_search_receipt = Some(receipt);
+        submit_proposal(&table(), &mut writer, &actor(), &create).unwrap();
+        // A HIGH peer keeps the set queued so a human is in the loop.
+        submit(
+            &mut writer,
+            P2,
+            tombstone_op(&existing),
+            &existing,
+            Risk::High,
+        );
+        let ordered = [P1.to_string(), P2.to_string()];
+        commit_proposals(&table(), &mut writer, &vault, RUN, &ordered).unwrap();
+        for id in &ordered {
+            record_decision(
+                &mut writer,
+                &vault,
+                id,
+                Decision::Approve,
+                "human:me",
+                None,
+                "2026-08-09T10:00:00Z",
+            )
+            .unwrap();
+        }
+
+        // Someone else makes an existing record answer to that name. The
+        // create's own id is path-derived and still free, so no version
+        // moved — only the SEARCH now returns something.
+        add_alias(
+            &mut writer,
+            &schema::migrate_id(&store, "entity", "seed"),
+            "Fresh Thing",
+        );
+
+        let outcome = resolve_commit_set(&table(), &mut writer, &vault, RUN, &ordered).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::StaleReject);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let stale = read
+            .frames
+            .iter()
+            .find(|f| {
+                f.kind == schema::KIND_PROPOSAL_REJECTED
+                    && f.body["code"] == "candidate_receipt_stale"
+            })
+            .unwrap();
+        assert_eq!(stale.body["proposal_id"], serde_json::json!(P1));
+        // The immutable proposal was NOT refreshed in place: the record must
+        // not say a human approved a search they never saw.
+        assert!(
+            !state(&writer, &vault).beliefs.contains_key(&new_id),
+            "nothing was created"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_revert_is_a_new_forward_mutation_that_erases_nothing() {
+        // Reverting is never a deletion: the original application and this
+        // reversion both stand, and the ledger is not rewound.
+        let (vault, mut writer, belief) = seeded("commit-revert");
+        submit(
+            &mut writer,
+            P1,
+            update_op(&belief, "x"),
+            &belief,
+            Risk::Medium,
+        );
+        commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        let applied_state = state(&writer, &vault);
+        assert_eq!(applied_state.beliefs[&belief].current().revision, 2);
+        let applied_event = applied_state.proposals[P1]
+            .applied_event_id
+            .clone()
+            .unwrap();
+        assert!(applied_state.proposals[P1].revert_plan.is_some());
+
+        // The revert is its own proposal, in its own run.
+        const REVERT_RUN: &str = "7333333333333333333333333333333c";
+        const P3: &str = "0000000000000000000000000000000c";
+        let revert = proposal(
+            P3,
+            REVERT_RUN,
+            ProposalOp::RevertProposal {
+                applied_proposal_id: P1.into(),
+                applied_event_ids: vec![applied_event.clone()],
+            },
+            vec![
+                target(TargetClass::Belief, &belief, Some(2)),
+                target(
+                    TargetClass::Proposal,
+                    P1,
+                    applied_state.version("proposal", P1),
+                ),
+            ],
+            Risk::Medium,
+        );
+        submit_proposal(&table(), &mut writer, &actor(), &revert).unwrap();
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, REVERT_RUN, &[P3.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::Apply);
+
+        let after = state(&writer, &vault);
+        // The inverse ran forward: revision 3 undoes what revision 2 did.
+        assert_eq!(after.beliefs[&belief].current().revision, 3);
+        assert_eq!(
+            after.beliefs[&belief].current().fields,
+            serde_json::json!({}),
+            "the patch was inverted, not deleted"
+        );
+        // Both records stand.
+        assert_eq!(after.proposals[P1].state, schema::ProposalState::Reverted);
+        assert_eq!(after.proposals[P3].state, schema::ProposalState::Applied);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let reverted = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_PROPOSAL_REVERTED)
+            .unwrap();
+        assert_eq!(reverted.body["proposal_id"], serde_json::json!(P1));
+        assert_eq!(
+            reverted.body["reverted_by_proposal_id"],
+            serde_json::json!(P3)
+        );
+        assert_eq!(
+            reverted.body["prior_applied_event_ids"],
+            serde_json::json!([applied_event])
+        );
+        // The original application is still on disk, untouched.
+        assert!(read
+            .frames
+            .iter()
+            .any(|f| f.event_id == applied_event && f.kind == schema::KIND_PROPOSAL_APPLIED));
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_revert_of_something_the_table_calls_non_invertible_is_refused() {
+        let (vault, mut writer, belief) = seeded("commit-revert-unsupported");
+        // Tombstone is `revert: none`, so its application stores no plan.
+        submit(&mut writer, P1, tombstone_op(&belief), &belief, Risk::High);
+        commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        record_decision(
+            &mut writer,
+            &vault,
+            P1,
+            Decision::Approve,
+            "human:me",
+            None,
+            "2026-08-09T10:00:00Z",
+        )
+        .unwrap();
+        resolve_commit_set(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        let applied = state(&writer, &vault);
+        assert!(applied.proposals[P1].revert_plan.is_none());
+
+        const REVERT_RUN: &str = "7333333333333333333333333333333c";
+        const P3: &str = "0000000000000000000000000000000c";
+        let revert = proposal(
+            P3,
+            REVERT_RUN,
+            ProposalOp::RevertProposal {
+                applied_proposal_id: P1.into(),
+                applied_event_ids: vec![applied.proposals[P1].applied_event_id.clone().unwrap()],
+            },
+            vec![target(
+                TargetClass::Proposal,
+                P1,
+                applied.version("proposal", P1),
+            )],
+            Risk::Medium,
+        );
+        submit_proposal(&table(), &mut writer, &actor(), &revert).unwrap();
+        let err = commit_proposals(&table(), &mut writer, &vault, REVERT_RUN, &[P3.to_string()])
+            .unwrap_err();
+        assert!(err.detail.contains("revert_not_supported"), "{err:?}");
         let _ = std::fs::remove_dir_all(&vault);
     }
 
