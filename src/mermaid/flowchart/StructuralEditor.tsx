@@ -2,7 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
-import { nodes, parseFlowchart, serialize, type EdgeEntry } from './model';
+import {
+  edgeAnimated,
+  nodeStyle,
+  nodes,
+  parseFlowchart,
+  serialize,
+  type EdgeEntry,
+  type EdgeHead,
+} from './model';
+import { NodeStyleMenu } from './NodeStyleMenu';
 import {
   addEdge,
   addNode,
@@ -10,15 +19,42 @@ import {
   deleteNode,
   renameNode,
   setDirection,
+  setEdgeAnimate,
+  setEdgeArrow,
   setEdgeLabel,
   setLayoutEngine,
   setNodeShape,
+  setNodeStyle,
 } from './ops';
 import { ShapePalette } from './ShapePalette';
 import { BRACKET_SHAPE_TO_REGISTRY, SHORT_NAME_FOR } from './shapes';
 import { bindFlowchartSvg, type FlowchartSvgBinding } from './svgBinding';
 
 const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
+
+/**
+ * The head cycle (M29.33). `invisible` is a STROKE, not a head, and neither
+ * control offers it: entering it from the canvas is a ONE-WAY DOOR. Measured on
+ * the bundled 11.16.0 — a `~~~` link does render a path, but its classes are
+ * `edge-thickness-invisible edge-pattern-solid` with no `flowchart-link`, which
+ * is exactly the selector `svgBinding` matches on, so the edge stops being
+ * clickable and nothing on screen could bring it back. Code mode still writes
+ * it, and the model still reads it.
+ */
+const HEAD_CYCLE: EdgeHead[] = ['arrow', 'open', 'circle', 'cross', 'double'];
+const HEAD_LABEL: Record<EdgeHead, string> = {
+  arrow: 'Arrow',
+  open: 'None',
+  circle: 'Circle',
+  cross: 'Cross',
+  double: 'Both ways',
+};
+const STROKES = ['normal', 'thick', 'dotted'] as const;
+const STROKE_LABEL: Record<(typeof STROKES)[number], string> = {
+  normal: 'Solid',
+  thick: 'Thick',
+  dotted: 'Dotted',
+};
 
 /** True when the source's YAML frontmatter pins mermaid's ELK layout engine. */
 function isElk(code: string): boolean {
@@ -55,6 +91,7 @@ export function StructuralEditor({
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
   const [shapeOpen, setShapeOpen] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
   const [ghost, setGhost] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
     null,
   );
@@ -115,6 +152,7 @@ export function StructuralEditor({
     setSelected(null);
     setToolbarPos(null);
     setShapeOpen(false);
+    setStyleOpen(false);
   }, [code]);
 
   // Render, inject, and bind in one pass. The svg is written imperatively —
@@ -319,6 +357,11 @@ export function StructuralEditor({
     setRenaming(null);
   };
 
+  // Read ONCE per render, not once per use: edgeAnimated rebuilds the whole
+  // edgeMeta map (O(lines)) on every call, and the controls row below needs
+  // the answer twice — for the pressed state and for the toggle's target.
+  const edgeIsAnimated = edgeEditor !== null && edgeAnimated(model, edgeEditor.edge);
+
   return (
     <div
       className="relative px-3 py-2"
@@ -425,7 +468,14 @@ export function StructuralEditor({
               title="Change shape"
               aria-haspopup="dialog"
               aria-expanded={shapeOpen}
-              onClick={() => setShapeOpen(true)}
+              // Closing the sibling is this trigger's job, not the popover's:
+              // Popover dismisses on an outside press, but its anchor is the
+              // whole mini-toolbar, so a press on the button next door counts
+              // as inside and both surfaces stayed open on top of each other.
+              onClick={() => {
+                setStyleOpen(false);
+                setShapeOpen(true);
+              }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name="shapes" size={13} color="var(--n-600)" />
@@ -451,6 +501,35 @@ export function StructuralEditor({
                   apply(setNodeShape(model, validSelected, name));
                 }}
                 onClose={() => setShapeOpen(false)}
+              />
+            )}
+            <button
+              type="button"
+              aria-label="Node colors"
+              title="Node colors"
+              aria-haspopup="dialog"
+              aria-expanded={styleOpen}
+              onClick={() => {
+                setShapeOpen(false);
+                setStyleOpen(true);
+              }}
+              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+            >
+              <Icon name="palette" size={13} color="var(--n-600)" />
+            </button>
+            {styleOpen && (
+              <NodeStyleMenu
+                // The FOLDED reading of every style line for this node, which
+                // is what mermaid renders — and what setNodeStyle writes back
+                // onto. A node coloured through classDef reads as {} here (a
+                // known gap: classDef stays opaque this wave, spec D5), so it
+                // shows as unstyled rather than as some colour it is not.
+                current={validSelected !== null ? nodeStyle(model, validSelected) : {}}
+                onPatch={(patch) => {
+                  setStyleOpen(false);
+                  if (validSelected !== null) apply(setNodeStyle(model, validSelected, patch));
+                }}
+                onClose={() => setStyleOpen(false)}
               />
             )}
             <span className="mx-0.5 h-4 w-px bg-n-100" />
@@ -501,46 +580,106 @@ export function StructuralEditor({
 
         {edgeEditor !== null && (
           <div
-            className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
+            className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 flex-col gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
             onClick={(e) => e.stopPropagation()}
           >
-            <input
-              autoFocus
-              aria-label="Edge label"
-              value={edgeEditor.value}
-              placeholder="label"
-              onChange={(e) => setEdgeEditor({ ...edgeEditor, value: e.target.value })}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === 'Enter') {
-                  // No-op on an unchanged label: skip the apply so hitting
-                  // Enter without editing anything doesn't churn history.
-                  if (edgeEditor.value !== (edgeEditor.edge.label ?? '')) {
-                    apply(
-                      setEdgeLabel(
-                        model,
-                        edgeEditor.edge,
-                        edgeEditor.value.trim() === '' ? null : edgeEditor.value,
-                      ),
-                    );
+            <div className="flex items-center gap-1">
+              <input
+                autoFocus
+                aria-label="Edge label"
+                value={edgeEditor.value}
+                placeholder="label"
+                onChange={(e) => setEdgeEditor({ ...edgeEditor, value: e.target.value })}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') {
+                    // No-op on an unchanged label: skip the apply so hitting
+                    // Enter without editing anything doesn't churn history.
+                    if (edgeEditor.value !== (edgeEditor.edge.label ?? '')) {
+                      apply(
+                        setEdgeLabel(
+                          model,
+                          edgeEditor.edge,
+                          edgeEditor.value.trim() === '' ? null : edgeEditor.value,
+                        ),
+                      );
+                    }
+                    setEdgeEditor(null);
                   }
+                  if (e.key === 'Escape') setEdgeEditor(null);
+                }}
+                className="w-32 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+              />
+              <button
+                type="button"
+                aria-label="Delete edge"
+                onClick={() => {
+                  apply(deleteEdge(model, edgeEditor.edge));
                   setEdgeEditor(null);
-                }
-                if (e.key === 'Escape') setEdgeEditor(null);
-              }}
-              className="w-32 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
-            />
-            <button
-              type="button"
-              aria-label="Delete edge"
-              onClick={() => {
-                apply(deleteEdge(model, edgeEditor.edge));
-                setEdgeEditor(null);
-              }}
-              className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
-            >
-              <Icon name="trash-2" size={13} color="var(--danger-600)" />
-            </button>
+                }}
+                className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+              >
+                <Icon name="trash-2" size={13} color="var(--danger-600)" />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              {/* One button, five heads: a cycle rather than five controls,
+                  because the arrow head is one property with one current
+                  value — and the label names that value, so the button reads
+                  as the state it is in, not as a guess about the next one. */}
+              <button
+                type="button"
+                aria-label={`Arrow head: ${HEAD_LABEL[edgeEditor.edge.arrow.head]}`}
+                title="Cycle arrow head"
+                onClick={() => {
+                  const cur = edgeEditor.edge.arrow.head;
+                  const next = HEAD_CYCLE[(HEAD_CYCLE.indexOf(cur) + 1) % HEAD_CYCLE.length];
+                  apply(setEdgeArrow(model, edgeEditor.edge, { head: next }));
+                  setEdgeEditor(null);
+                }}
+                className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+              >
+                {HEAD_LABEL[edgeEditor.edge.arrow.head]}
+              </button>
+              {STROKES.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  aria-label={`Stroke ${STROKE_LABEL[s].toLowerCase()}`}
+                  aria-pressed={edgeEditor.edge.arrow.stroke === s}
+                  onClick={() => {
+                    // Re-picking the stroke the edge already has changes
+                    // nothing on screen, and setEdgeArrow would still
+                    // normalize the token — silently shortening an author's
+                    // `---->` and costing an undo step for a click that moved
+                    // nothing. (apply's byte guard only catches this when the
+                    // line was already canonical.)
+                    if (edgeEditor.edge.arrow.stroke !== s) {
+                      apply(setEdgeArrow(model, edgeEditor.edge, { stroke: s }));
+                    }
+                    setEdgeEditor(null);
+                  }}
+                  className={`rounded-md border border-n-200 px-1.5 py-0.5 text-xs hover:bg-n-50 ${
+                    edgeEditor.edge.arrow.stroke === s ? 'bg-n-50 text-n-800' : 'bg-n-0 text-n-600'
+                  }`}
+                >
+                  {STROKE_LABEL[s]}
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-label="Animate edge"
+                aria-pressed={edgeIsAnimated}
+                title="Animate edge"
+                onClick={() => {
+                  apply(setEdgeAnimate(model, edgeEditor.edge, !edgeIsAnimated));
+                  setEdgeEditor(null);
+                }}
+                className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              >
+                <Icon name="play" size={13} color="var(--n-600)" />
+              </button>
+            </div>
           </div>
         )}
       </div>

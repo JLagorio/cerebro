@@ -51,7 +51,16 @@ export function ShapePalette({
       trapFocus
       className="w-60 p-2"
     >
-      <div data-testid="shape-palette" className="flex max-h-96 flex-col gap-1.5">
+      <div
+        data-testid="shape-palette"
+        // The search box below stops its own keystrokes from reaching
+        // StructuralEditor's Backspace-deletes-the-node handler; the 48 shape
+        // buttons had no such guard, so tabbing to one and pressing Backspace
+        // deleted the very node being reshaped (M29.33). One handler on the
+        // container covers every control in here, the input included.
+        onKeyDown={(e) => e.stopPropagation()}
+        className="flex max-h-96 flex-col gap-1.5"
+      >
         <input
           autoFocus
           type="search"
