@@ -51,7 +51,7 @@ const OPAQUE_KEYWORDS = /^(classDef|class|style|linkStyle|click|direction|accTit
 /** Bracket pairs, longest opener first — order is load-bearing. */
 const SHAPES: [string, string, Shape][] = [
   ['((', '))', 'circle'],
-  ['([', ')]', 'stadium'],
+  ['([', '])', 'stadium'],
   ['[[', ']]', 'subroutine'],
   ['[(', ')]', 'cylinder'],
   ['{{', '}}', 'hexagon'],
@@ -62,7 +62,7 @@ const SHAPES: [string, string, Shape][] = [
 
 export const SHAPE_BRACKETS: Record<Shape, [string, string]> = {
   circle: ['((', '))'],
-  stadium: ['([', ')]'],
+  stadium: ['([', '])'],
   subroutine: ['[[', ']]'],
   cylinder: ['[(', ')]'],
   hexagon: ['{{', '}}'],
@@ -221,9 +221,13 @@ function parseLine(rawLine: string): ParsedLine {
   // (which would otherwise mint a phantom node with id "subgraph").
   if (trimmed === 'subgraph') return { kind: 'opaque' };
 
+  // An arrow substring inside a node's own label (`A[Contains --> text]`)
+  // makes this an unreliable signal on its own — parseEdgeLine is the real
+  // arbiter, and when it fails (arrow was inside brackets, not a real edge)
+  // we fall through to the node-token attempt below rather than going opaque.
   if (ARROWS.some(([text]) => trimmed.includes(text))) {
     const segments = parseEdgeLine(trimmed);
-    return segments === null ? { kind: 'opaque' } : { kind: 'edges', segments };
+    if (segments !== null) return { kind: 'edges', segments };
   }
 
   const node = parseNodeToken(trimmed);
@@ -309,12 +313,18 @@ export function serialize(model: FlowchartModel): string {
 /** Resolved view: definition line wins, else first labeled inline site, else the id itself. */
 export function nodes(model: FlowchartModel): Map<string, { label: string; shape: Shape }> {
   const out = new Map<string, { label: string; shape: Shape }>();
+  // A label claim is "locked" once a definition line or a labeled inline site
+  // has set it — a later bare reference (`A --> B`) must not clobber that
+  // label with a placeholder, but a later definition line still wins outright,
+  // and among labeled inline sites the first one wins.
+  const locked = new Set<string>();
   const claim = (ref: NodeRef, defLine: boolean) => {
-    const existing = out.get(ref.id);
-    if (existing !== undefined && !defLine) return;
     if (ref.label !== null) {
-      out.set(ref.id, { label: ref.label, shape: ref.shape ?? 'rect' });
-    } else if (existing === undefined) {
+      if (defLine || !locked.has(ref.id)) {
+        out.set(ref.id, { label: ref.label, shape: ref.shape ?? 'rect' });
+        locked.add(ref.id);
+      }
+    } else if (!out.has(ref.id)) {
       out.set(ref.id, { label: ref.id, shape: 'rect' });
     }
   };

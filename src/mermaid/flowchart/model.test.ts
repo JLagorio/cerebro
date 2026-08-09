@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { edges, nodes, parseFlowchart, serialize } from './model';
+import { edges, emitNodeRef, nodes, parseFlowchart, parseNodeToken, serialize } from './model';
 
 const SIMPLE = ['flowchart TD', '  A[Start] --> B{Choice}', '  B -->|yes| C[Done]'].join('\n');
 
@@ -67,6 +67,39 @@ describe('parseFlowchart', () => {
     expect(nodes(model).has('subgraph')).toBe(false);
     expect(edges(model)).toContainEqual(expect.objectContaining({ from: 'A', to: 'B' }));
   });
+
+  it('parses stadium shape with the correct close bracket', () => {
+    expect(parseNodeToken('A([Start])')).toEqual({ id: 'A', label: 'Start', shape: 'stadium' });
+  });
+
+  it('a later labeled inline site wins over an earlier bare reference', () => {
+    const model = parseFlowchart('flowchart TD\n  A --> B\n  D --> B[Loop back]')!;
+    expect(nodes(model).get('B')).toEqual({ label: 'Loop back', shape: 'rect' });
+  });
+
+  it('an earlier labeled inline site still wins when the bare reference comes later', () => {
+    const model = parseFlowchart('flowchart TD\n  D --> B[Loop back]\n  A --> B')!;
+    expect(nodes(model).get('B')).toEqual({ label: 'Loop back', shape: 'rect' });
+  });
+
+  it('a node label containing an arrow substring still parses as a node', () => {
+    const model1 = parseFlowchart('flowchart TD\n  A[Contains --> text]')!;
+    expect(model1.lines[1].parsed).toMatchObject({
+      kind: 'node',
+      node: { id: 'A', label: 'Contains --> text' },
+    });
+
+    const model2 = parseFlowchart('flowchart TD\n  A[Section ---]')!;
+    expect(model2.lines[1].parsed).toMatchObject({
+      kind: 'node',
+      node: { id: 'A', label: 'Section ---' },
+    });
+  });
+
+  it('a genuinely broken edge line still goes opaque', () => {
+    const model = parseFlowchart('flowchart TD\n  A --> B extra text')!;
+    expect(model.lines[1].parsed.kind).toBe('opaque');
+  });
 });
 
 describe('serialize', () => {
@@ -79,5 +112,9 @@ describe('serialize', () => {
   it('round-trips an anonymous subgraph byte-identically', () => {
     const src = 'flowchart TD\n  subgraph\n    A --> B\n  end';
     expect(serialize(parseFlowchart(src)!)).toBe(src);
+  });
+
+  it('emits stadium nodes with valid mermaid syntax', () => {
+    expect(emitNodeRef({ id: 'A', label: 'Start', shape: 'stadium' })).toBe('A([Start])');
   });
 });
