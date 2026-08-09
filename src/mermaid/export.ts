@@ -36,6 +36,12 @@ export async function svgToPngBytes(svg: string, scale = 2): Promise<Uint8Array>
   }
 }
 
+// Both copy functions let clipboard/rasterise failures propagate to the
+// caller instead of toasting here — unlike the store-layer copyText pattern
+// (actions catch and toast in place). The lightbox (M29.5) is the only
+// caller, and it needs the rejection itself to show a diagram-specific
+// error, not a generic one raised from inside this module.
+
 export async function copySvg(svg: string): Promise<void> {
   await navigator.clipboard.writeText(svg);
 }
