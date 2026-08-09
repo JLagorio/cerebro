@@ -249,7 +249,9 @@ pub fn reduce(frames: &[Frame], store_id: &str) -> EpistemicState {
             }
             (None, _) => {
                 let staged = Staged::new();
-                if let Err((code, detail)) = apply(&mut state, store_id, frame, &decoded, &staged) {
+                if let Err((code, detail)) =
+                    apply(&mut state, store_id, frame, &decoded, &staged, &[])
+                {
                     state.anomalies.push(Anomaly {
                         seq: frame.seq,
                         event_id: frame.event_id.clone(),
@@ -384,7 +386,7 @@ fn commit_batch(
         .map(|(frame, _)| frame.event_id.clone())
         .collect();
     for (ordinal, (frame, body)) in members.iter().enumerate() {
-        if let Err((code, detail)) = apply(&mut scratch, store_id, frame, body, &staged) {
+        if let Err((code, detail)) = apply(&mut scratch, store_id, frame, body, &staged, &members) {
             state.anomalies.push(Anomaly {
                 seq: frame.seq,
                 event_id: frame.event_id.clone(),
@@ -429,12 +431,13 @@ fn apply(
     frame: &Frame,
     body: &EventBody,
     staged: &Staged,
+    members: &[(Frame, EventBody)],
 ) -> Result<(), Refusal> {
     body.validate(store_id).map_err(refused)?;
     match body {
         EventBody::BatchCommitted(_) => Err(refused("a marker cannot be applied as a member")),
         EventBody::SourceRegistered(b) => apply_source(state, frame, b),
-        EventBody::ObservationRecorded(b) => apply_observation(state, frame, b, staged),
+        EventBody::ObservationRecorded(b) => apply_observation(state, frame, b, staged, members),
         EventBody::SubjectResolved(b) => apply_resolution(state, frame, b, staged),
         EventBody::IndependenceRecorded(b) => apply_independence(state, frame, b),
         EventBody::BeliefCreated(b) => apply_belief_created(state, frame, b),
@@ -494,8 +497,12 @@ fn apply_observation(
     frame: &Frame,
     body: &schema::ObservationRecorded,
     staged: &Staged,
+    members: &[(Frame, EventBody)],
 ) -> Result<(), Refusal> {
     let payload = body.validate().map_err(refused)?;
+    if let ObservationPayload::HumanAssertion(human) = &payload {
+        verify_human_form_pairing(state, frame, human, members)?;
+    }
 
     // The registration pin: an earlier committed (or earlier-staged)
     // registration event whose source id matches.
@@ -627,6 +634,124 @@ fn apply_observation(
     );
     state.create_version("observation", &frame.event_id, &frame.event_id);
     state.bump_version("source", &body.source_id, &frame.event_id);
+    Ok(())
+}
+
+/// Human EFFECT forms (field_change / relation_change / alias_add) pair
+/// one-to-one with the exact event that realizes them, in the SAME logical
+/// batch — a claimed effect without its event (or vice versa in spirit)
+/// refuses the whole batch. `standalone` is root evidence and stays free,
+/// but a same-batch basis use must agree with its intended Belief.
+fn verify_human_form_pairing(
+    state: &EpistemicState,
+    frame: &Frame,
+    human: &schema::HumanAssertionPayload,
+    members: &[(Frame, EventBody)],
+) -> Result<(), Refusal> {
+    match &human.form {
+        schema::HumanAssertionForm::FieldChange {
+            target_belief_id,
+            field_path,
+            before,
+            after,
+            ..
+        } => {
+            let paired = members.iter().any(|(_, member)| match member {
+                EventBody::BeliefRevised(revised) => {
+                    revised.belief_id == *target_belief_id
+                        && revised.patch.iter().any(|op| {
+                            op.field_path == *field_path
+                                && op.before == *before
+                                && op.after == *after
+                        })
+                }
+                _ => false,
+            });
+            if !paired {
+                return Err(refused(
+                    "field_change requires its exact paired belief.revised patch in the same                      logical batch",
+                ));
+            }
+        }
+        schema::HumanAssertionForm::RelationChange {
+            relation_id,
+            action,
+            from,
+            to,
+            relation,
+            ..
+        } => {
+            let paired = members.iter().any(|(_, member)| match member {
+                EventBody::BeliefRelation(rel) => {
+                    rel.relation_id == *relation_id
+                        && rel.action == *action
+                        && rel.from == *from
+                        && rel.to == *to
+                        && rel.relation == *relation
+                }
+                _ => false,
+            });
+            if !paired {
+                return Err(refused(
+                    "relation_change requires its exact paired belief.relation event in the same                      logical batch",
+                ));
+            }
+        }
+        schema::HumanAssertionForm::AliasAdd {
+            target_belief_id,
+            entity_id,
+            alias,
+            normalized_alias,
+            ..
+        } => {
+            let belief = state
+                .beliefs
+                .get(target_belief_id)
+                .ok_or_else(|| refused("alias_add target Belief does not exist"))?;
+            if belief.entity_id != *entity_id {
+                return Err(refused(
+                    "alias_add entity must be the subject Entity of the target Belief",
+                ));
+            }
+            let paired = members.iter().any(|(_, member)| match member {
+                EventBody::EntityAliasAdded(added) => {
+                    added.entity_id == *entity_id
+                        && added.alias == *alias
+                        && added.normalized_alias == *normalized_alias
+                }
+                _ => false,
+            });
+            if !paired {
+                return Err(refused(
+                    "alias_add requires its exact paired entity.alias_added event in the same                      logical batch",
+                ));
+            }
+        }
+        schema::HumanAssertionForm::Standalone {
+            intended_belief_id, ..
+        } => {
+            if let Some(intended) = intended_belief_id {
+                for (_, member) in members {
+                    let (belief_id, basis) = match member {
+                        EventBody::BeliefCreated(b) => (&b.belief_id, &b.basis),
+                        EventBody::BeliefRevised(b) => (&b.belief_id, &b.basis),
+                        _ => continue,
+                    };
+                    if let BeliefBasis::Linked { links } = basis {
+                        if links
+                            .iter()
+                            .any(|l| l.observation_event_id == frame.event_id)
+                            && belief_id != intended
+                        {
+                            return Err(refused(
+                                "a same-batch basis use must name the standalone assertion's                                  intended Belief",
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 

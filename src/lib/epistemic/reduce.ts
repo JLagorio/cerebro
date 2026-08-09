@@ -208,7 +208,7 @@ export function reduce(frames: VectorFrame[], storeId: string): EpistemicState {
       pending.set(batchId, buffer);
     } else {
       try {
-        apply(state, storeId, frame, decoded, new Set());
+        apply(state, storeId, frame, decoded, new Set(), []);
       } catch (error) {
         state.anomalies.push({
           seq: frame.seq,
@@ -297,7 +297,7 @@ function commitBatch(
   const staged = new Set(members.map(({ frame }) => frame.event_id));
   for (const [ordinal, { frame, decoded }] of members.entries()) {
     try {
-      apply(scratch, storeId, frame, decoded, staged);
+      apply(scratch, storeId, frame, decoded, staged, members);
     } catch (error) {
       state.anomalies.push({
         seq: frame.seq,
@@ -330,6 +330,7 @@ function apply(
   frame: VectorFrame,
   decoded: Decoded,
   staged: Set<string>,
+  members: { frame: VectorFrame; decoded: Decoded }[],
 ): void {
   validateBody(decoded, storeId);
   const body = decoded.body;
@@ -339,7 +340,7 @@ function apply(
     case 'source.registered':
       return applySource(state, frame, body);
     case 'observation.recorded':
-      return applyObservation(state, frame, body, staged);
+      return applyObservation(state, frame, body, staged, members);
     case 'observation.subject_resolved':
       return applyResolution(state, frame, body, staged);
     case 'observation.independence_recorded':
@@ -385,8 +386,10 @@ function applyObservation(
   frame: VectorFrame,
   body: JsonObject,
   staged: Set<string>,
+  members: { frame: VectorFrame; decoded: Decoded }[],
 ): void {
   const info = validateObservation(body);
+  if (info.humanForm) verifyHumanFormPairing(state, frame, info.humanForm, members);
   const pinned = state.registrationsByEvent.get(body.source_registration_event_id as string);
   if (pinned === undefined) {
     throw new RefusedError('source_registration_event_id names no committed registration');
@@ -459,6 +462,81 @@ function applyObservation(
   });
   createVersion(state, 'observation', frame.event_id, frame.event_id);
   bumpVersion(state, 'source', body.source_id as string, frame.event_id);
+}
+
+/**
+ * Human EFFECT forms pair one-to-one with the exact event that realizes
+ * them, in the SAME logical batch; standalone stays free but a same-batch
+ * basis use must agree with its intended Belief.
+ */
+function verifyHumanFormPairing(
+  state: EpistemicState,
+  frame: VectorFrame,
+  form: JsonObject,
+  members: { frame: VectorFrame; decoded: Decoded }[],
+): void {
+  const kind = form.assertion_form as string;
+  if (kind === 'field_change') {
+    const paired = members.some(({ decoded }) => {
+      if (decoded.kind !== 'belief.revised') return false;
+      if (decoded.body.belief_id !== form.target_belief_id) return false;
+      return (decoded.body.patch as JsonObject[]).some(
+        (op) =>
+          op.field_path === form.field_path &&
+          canonicalJson(op.before as Json) === canonicalJson(form.before as Json) &&
+          canonicalJson(op.after as Json) === canonicalJson(form.after as Json),
+      );
+    });
+    if (!paired) {
+      throw new RefusedError('field_change requires its paired belief.revised patch');
+    }
+  } else if (kind === 'relation_change') {
+    const paired = members.some(({ decoded }) => {
+      if (decoded.kind !== 'belief.relation') return false;
+      const b = decoded.body;
+      return (
+        b.relation_id === form.relation_id &&
+        b.action === form.action &&
+        b.from === form.from &&
+        b.to === form.to &&
+        b.relation === form.relation
+      );
+    });
+    if (!paired) {
+      throw new RefusedError('relation_change requires its paired belief.relation event');
+    }
+  } else if (kind === 'alias_add') {
+    const belief = state.beliefs.get(form.target_belief_id as string);
+    if (!belief) throw new RefusedError('alias_add target Belief does not exist');
+    if (belief.entityId !== form.entity_id) {
+      throw new RefusedError('alias_add entity must be the subject Entity of the target Belief');
+    }
+    const paired = members.some(({ decoded }) => {
+      if (decoded.kind !== 'entity.alias_added') return false;
+      const b = decoded.body;
+      return (
+        b.entity_id === form.entity_id &&
+        b.alias === form.alias &&
+        b.normalized_alias === form.normalized_alias
+      );
+    });
+    if (!paired) {
+      throw new RefusedError('alias_add requires its paired entity.alias_added event');
+    }
+  } else if (form.intended_belief_id !== null && form.intended_belief_id !== undefined) {
+    for (const { decoded } of members) {
+      if (decoded.kind !== 'belief.created' && decoded.kind !== 'belief.revised') continue;
+      const basis = decoded.body.basis as JsonObject;
+      if (basis.state !== 'linked') continue;
+      const links = basis.links as JsonObject[];
+      if (
+        links.some((l) => l.observation_event_id === frame.event_id) &&
+        decoded.body.belief_id !== form.intended_belief_id
+      ) {
+        throw new RefusedError('a same-batch basis use must name the intended Belief');
+      }
+    }
+  }
 }
 
 function applyResolution(

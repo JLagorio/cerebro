@@ -1329,6 +1329,276 @@ fn scenario_batches() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+fn scenario_human_forms() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let human = human_registration("human:josef");
+    let human_reg = b.push_body(KIND_SOURCE_REGISTERED, &human);
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
+
+    let human_effect = |assertion: AssertionFields, form: HumanAssertionForm| {
+        serde_json::to_value(observation_body(
+            ObservationKind::HumanAssertion,
+            &human_registration("human:josef"),
+            &human_reg,
+            "human:josef",
+            SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec![],
+            },
+            vec![],
+            serde_json::to_value(HumanAssertionPayload { assertion, form }).unwrap(),
+        ))
+        .unwrap()
+    };
+    let trusted = |predicate: &str, value: TypedValue| AssertionFields {
+        predicate: predicate.into(),
+        value,
+        authority_provenance: AuthorityProvenance::TrustedHumanCapture,
+        ..assertion(
+            AuthorityProvenance::TrustedHumanCapture,
+            AssertionBasis::Firsthand,
+        )
+    };
+
+    // A field_change with its exact paired belief.revised patch: applies.
+    let patch = PatchOp {
+        field_path: "/fields/status".into(),
+        before: TypedValue::string("active"),
+        after: TypedValue::string("paused"),
+    };
+    let field_form = HumanAssertionForm::FieldChange {
+        target_belief_id: BELIEF.into(),
+        field_path: patch.field_path.clone(),
+        before: patch.before.clone(),
+        after: patch.after.clone(),
+        corrects: None,
+        reason: None,
+    };
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0101",
+        vec![
+            (
+                KIND_OBSERVATION_RECORDED.into(),
+                human_effect(
+                    trusted("status", TypedValue::string("paused")),
+                    field_form.clone(),
+                ),
+            ),
+            (
+                KIND_BELIEF_REVISED.into(),
+                serde_json::to_value(revised_body(BELIEF, vec![patch], unsupported())).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // A relation_change with its exact paired belief.relation event.
+    let relation_id = derive_relation_id(BELIEF, BELIEF_B, RelationKind::Refines);
+    let relation_value = TypedValue::Object {
+        value: [
+            ("relation_id".to_string(), TypedValue::string(&relation_id)),
+            ("action".to_string(), TypedValue::string("add")),
+            ("from".to_string(), TypedValue::string(BELIEF)),
+            ("to".to_string(), TypedValue::string(BELIEF_B)),
+            ("relation".to_string(), TypedValue::string("refines")),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let relation_form = HumanAssertionForm::RelationChange {
+        target_belief_id: BELIEF.into(),
+        relation_id: relation_id.clone(),
+        action: RelationAction::Add,
+        from: BELIEF.into(),
+        to: BELIEF_B.into(),
+        relation: RelationKind::Refines,
+        corrects: None,
+        reason: None,
+    };
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0102",
+        vec![
+            (
+                KIND_OBSERVATION_RECORDED.into(),
+                human_effect(trusted("belief_relation", relation_value), relation_form),
+            ),
+            (
+                KIND_BELIEF_RELATION.into(),
+                serde_json::to_value(relation_body(
+                    BELIEF,
+                    BELIEF_B,
+                    RelationKind::Refines,
+                    RelationAction::Add,
+                ))
+                .unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // An alias_add with its exact paired entity.alias_added event.
+    let alias_value = TypedValue::Object {
+        value: [
+            ("entity_id".to_string(), TypedValue::string(ENTITY)),
+            ("alias".to_string(), TypedValue::string("Acme HQ")),
+            (
+                "normalized_alias".to_string(),
+                TypedValue::string("acme hq"),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let alias_form = HumanAssertionForm::AliasAdd {
+        target_belief_id: BELIEF.into(),
+        entity_id: ENTITY.into(),
+        alias: "Acme HQ".into(),
+        normalized_alias: "acme hq".into(),
+        corrects: None,
+        reason: None,
+    };
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0103",
+        vec![
+            (
+                KIND_OBSERVATION_RECORDED.into(),
+                human_effect(
+                    trusted("entity_alias", alias_value.clone()),
+                    alias_form.clone(),
+                ),
+            ),
+            (
+                KIND_ENTITY_ALIAS_ADDED.into(),
+                serde_json::to_value(alias_body(ENTITY, "Acme HQ")).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // A field_change WITHOUT its paired patch: the whole batch refuses.
+    let orphan_form = HumanAssertionForm::FieldChange {
+        target_belief_id: BELIEF.into(),
+        field_path: "/fields/status".into(),
+        before: TypedValue::string("paused"),
+        after: TypedValue::string("archived"),
+        corrects: None,
+        reason: None,
+    };
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0104",
+        vec![(
+            KIND_OBSERVATION_RECORDED.into(),
+            human_effect(
+                trusted("status", TypedValue::string("archived")),
+                orphan_form.clone(),
+            ),
+        )],
+        true,
+        None,
+    );
+    // ...and SOLO, outside any batch: refused the same way.
+    b.push(
+        KIND_OBSERVATION_RECORDED,
+        human_effect(
+            trusted("status", TypedValue::string("archived")),
+            orphan_form,
+        ),
+    );
+
+    // alias_add whose entity is not the target Belief's subject: batch dies.
+    let wrong_alias_value = TypedValue::Object {
+        value: [
+            ("entity_id".to_string(), TypedValue::string(ENTITY_B)),
+            ("alias".to_string(), TypedValue::string("Acme Annex")),
+            (
+                "normalized_alias".to_string(),
+                TypedValue::string("acme annex"),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let wrong_alias_form = HumanAssertionForm::AliasAdd {
+        target_belief_id: BELIEF.into(),
+        entity_id: ENTITY_B.into(),
+        alias: "Acme Annex".into(),
+        normalized_alias: "acme annex".into(),
+        corrects: None,
+        reason: None,
+    };
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0105",
+        vec![
+            (
+                KIND_OBSERVATION_RECORDED.into(),
+                human_effect(trusted("entity_alias", wrong_alias_value), wrong_alias_form),
+            ),
+            (
+                KIND_ENTITY_ALIAS_ADDED.into(),
+                serde_json::to_value(alias_body(ENTITY_B, "Acme Annex")).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // Alias REMOVAL has no event and no form: an unsupported transition.
+    let mut removal = human_effect(trusted("entity_alias", alias_value), alias_form);
+    removal["payload"]["assertion_form"] = serde_json::json!("alias_remove");
+    b.push(KIND_OBSERVATION_RECORDED, removal);
+
+    // A standalone whose same-batch basis use names the WRONG Belief.
+    let standalone = human_effect(
+        trusted("status", TypedValue::string("active")),
+        HumanAssertionForm::Standalone {
+            intended_belief_id: Some(BELIEF_B.into()),
+            corrects: None,
+            reason: None,
+        },
+    );
+    let member0_id = format!("{:032x}", b.frames.len() as u64 + 1);
+    let disagreeing = revised_body(
+        BELIEF,
+        vec![],
+        BeliefBasis::Linked {
+            links: vec![BasisLink {
+                observation_event_id: member0_id,
+                role: BasisRole::Supports,
+            }],
+        },
+    );
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0106",
+        vec![
+            (KIND_OBSERVATION_RECORDED.into(), standalone),
+            (
+                KIND_BELIEF_REVISED.into(),
+                serde_json::to_value(disagreeing).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    (
+        "human-forms",
+        "Human effect forms (field_change/relation_change/alias_add) pair one-to-one with the \
+         exact event realizing them in the same logical batch; unpaired, solo, wrong-entity, \
+         alias-removal, and intended-Belief-disagreeing uses are refused.",
+        b.frames,
+    )
+}
+
 fn scenario_derived_sources() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     let content = content_registration("svc.distill");
@@ -1457,6 +1727,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_resolution(),
         scenario_relations(),
         scenario_attestation(),
+        scenario_human_forms(),
         scenario_aliases(),
         scenario_independence(),
         scenario_batches(),
