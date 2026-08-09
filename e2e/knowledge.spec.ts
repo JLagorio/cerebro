@@ -79,6 +79,38 @@ test('knowledge: browse the bundle, read provenance, and verify a concept', asyn
   await expect(page.getByTestId('concept-row')).toHaveCount(queuedCount - 1);
 });
 
+test('knowledge: a verified concept revised later shows the predating notice (M23.4)', async ({
+  page,
+}) => {
+  await boot(page);
+  await page
+    .getByTestId('rail')
+    .getByRole('button', { name: /^Knowledge/ })
+    .click();
+
+  // The agent revised a previously verified concept: the projection renders
+  // the review notice instead of silently reverting to "Nobody yet".
+  await page.evaluate((p) => {
+    const text = window.__cerebroMockFs.get(p);
+    if (text === undefined) throw new Error(`no mock file at ${p}`);
+    const close = text.indexOf('\n---\n', 4);
+    const notice = 'verified: verified at r2; current is r3 — attestation predates revision\n';
+    window.__cerebroMockFs.set(p, text.slice(0, close + 1) + notice + text.slice(close + 1));
+  }, CONCEPT);
+  // The mock has no watcher; a store write (verifying another concept)
+  // triggers the rescan that picks the projection up.
+  await page.getByTestId('concept-row').filter({ hasText: 'Warehouse cutover' }).click();
+  await page.getByRole('button', { name: /^Verify$/ }).click();
+
+  await page.getByTestId('concept-row').filter({ hasText: 'Sync error rate' }).click();
+  const panel = page.getByTestId('knowledge-panel');
+  await expect(panel.getByTestId('verified-notice')).toContainText(
+    'verified at r2; current is r3 — attestation predates revision',
+  );
+  // The stale review does NOT count as verification of the current content.
+  await expect(panel.getByTestId('trust-chip')).toHaveAttribute('data-tier', 'unverified');
+});
+
 test("knowledge: the bundle navigates by its own axes, not by Home's", async ({ page }) => {
   await boot(page);
   await page

@@ -1085,18 +1085,35 @@ function applyOverlayOp(carrier: { content: string; fields: JsonObject }, op: Js
   }
 }
 
-/** Canonical projection state with the active overlay applied. */
-function overlaid(belief: BeliefState): { content: string; fields: JsonObject } {
+/** The review-metadata overlay (M23.4): a PREDATING attestation renders
+ * its notice instead of silently rendering stale review state. A current
+ * attestation leaves the stored fields untouched. */
+function applyReviewOverlay(state: EpistemicState, belief: BeliefState, fields: JsonObject): void {
+  if (belief.attested === null) return;
+  const pinned = belief.attested[1];
+  const current = belief.revisions[belief.revisions.length - 1];
+  if (pinned === current.eventId) return;
+  const pinnedRevision = state.beliefRevisionEvents.get(pinned)?.[1] ?? 0;
+  fields.verified = `verified at r${pinnedRevision}; current is r${current.revision} — attestation predates revision`;
+}
+
+/** Canonical projection state with the review overlay and the active
+ * editorial overlay applied. */
+function overlaid(
+  state: EpistemicState,
+  belief: BeliefState,
+): { content: string; fields: JsonObject } {
   const current = belief.revisions[belief.revisions.length - 1];
   const carrier = { content: current.content, fields: structuredClone(current.fields) };
+  applyReviewOverlay(state, belief, carrier.fields);
   for (const override of belief.overrides) {
     for (const op of override.patch) applyOverlayOp(carrier, op);
   }
   return carrier;
 }
 
-function projected(belief: BeliefState): string {
-  const carrier = overlaid(belief);
+function projected(state: EpistemicState, belief: BeliefState): string {
+  const carrier = overlaid(state, belief);
   return project(carrier.content, carrier.fields as Json);
 }
 
@@ -1142,7 +1159,7 @@ function applyOverride(state: EpistemicState, frame: VectorFrame, body: JsonObje
   if (body.base_generating_event !== belief.projectionHeadEvent) {
     throw new RefusedError('override base generating event is not the projection head');
   }
-  if (sha256Hex(projected(belief)) !== body.before_projection_hash) {
+  if (sha256Hex(projected(state, belief)) !== body.before_projection_hash) {
     throw new RefusedError('before_projection_hash does not match the current projection');
   }
 
@@ -1155,7 +1172,7 @@ function applyOverride(state: EpistemicState, frame: VectorFrame, body: JsonObje
         throw new RefusedError('supersedes names a non-active override');
       }
     }
-    const carrier = overlaid(belief);
+    const carrier = overlaid(state, belief);
     for (const op of change.patch as JsonObject[]) {
       const path = op.field_path as string;
       const currentValue =
@@ -1227,7 +1244,7 @@ function applyReconciliationResolved(
       throw new RefusedError('affected path is not a known projection');
     }
     const belief = state.beliefs.get(beliefId) as BeliefState;
-    entries.push({ path, content_hash: sha256Hex(projected(belief)) });
+    entries.push({ path, content_hash: sha256Hex(projected(state, belief)) });
   }
   if (sha256Hex(canonicalJson(entries)) !== body.resulting_projection_digest) {
     throw new RefusedError('resulting_projection_digest does not match the reducer projections');
@@ -1324,7 +1341,7 @@ export function vectorState(state: EpistemicState): Json {
         path: b.path,
         generating_event: b.projectionHeadEvent,
         state_digest: sha256Hex(canonicalJson(descriptor(state, b) as Json)),
-        content_hash: sha256Hex(projected(b)),
+        content_hash: sha256Hex(projected(state, b)),
         review_event_ids: [...b.attestationEvents],
         active_overrides: b.overrides.map((o) => o.eventId),
         stale_overrides: b.overrides.filter((o) => o.stale).map((o) => o.eventId),

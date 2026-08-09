@@ -1004,10 +1004,26 @@ fn scenario_attestation() -> (&'static str, &'static str, Vec<Frame>) {
         KIND_BELIEF_ATTESTED,
         &attest(&good, "0123456789abcdef0123456789abcdef"),
     );
+    // A later revision makes the attestation PREDATE: the projection now
+    // renders the review notice ("verified at r1; current is r2 — …")
+    // instead of silently forgetting the review (M23.4, D8).
+    b.push_body(
+        KIND_BELIEF_REVISED,
+        &revised_body(
+            BELIEF,
+            vec![PatchOp {
+                field_path: "/fields/status".into(),
+                before: TypedValue::string("active"),
+                after: TypedValue::string("paused"),
+            }],
+            unsupported(),
+        ),
+    );
     (
         "attestation",
         "The id/hash pair must name one committed revision of the named Belief, hashed over its \
-         byte-stable projection.",
+         byte-stable projection; a later revision renders the predating review notice, never \
+         silence.",
         b.frames,
     )
 }

@@ -125,28 +125,61 @@ impl BeliefState {
             .last()
             .expect("a belief always has revision 1")
     }
+}
 
-    /// Canonical projection state with the active overlay applied:
-    /// current-revision content/fields, then every active override's ops in
-    /// order. An op a later revision made inapplicable is skipped — the
-    /// overlay is presentation state, not a patch with preconditions.
-    pub fn overlaid(&self) -> (String, serde_json::Value) {
-        let current = self.current();
-        let mut content = current.content.clone();
-        let mut fields = current.fields.clone();
-        for override_state in &self.overrides {
-            for op in &override_state.patch {
-                apply_overlay_op(&mut content, &mut fields, op);
-            }
+/// The review-metadata overlay (M23.4, D8): when the attestation PREDATES
+/// the current revision, the projection SAYS so instead of silently
+/// rendering stale review state or none at all. A current attestation
+/// leaves the stored fields untouched — migrated verified stamps render
+/// byte-identically, and a fresh verify writes its stamp through a normal
+/// field revision before attesting.
+fn apply_review_overlay(
+    state: &EpistemicState,
+    belief: &BeliefState,
+    fields: &mut serde_json::Value,
+) {
+    let Some((_, pinned_event)) = &belief.attested else {
+        return;
+    };
+    if pinned_event == &belief.current().event_id {
+        return;
+    }
+    let pinned_revision = state
+        .belief_revision_events
+        .get(pinned_event)
+        .map(|(_, revision)| *revision)
+        .unwrap_or(0);
+    let notice = format!(
+        "verified at r{pinned_revision}; current is r{} — attestation predates revision",
+        belief.current().revision
+    );
+    if let Some(map) = fields.as_object_mut() {
+        map.insert("verified".to_string(), serde_json::Value::String(notice));
+    }
+}
+
+/// Canonical projection state with the review overlay and the active
+/// editorial overlay applied: current-revision content/fields, the
+/// predating-attestation notice, then every active override's ops in
+/// order. An op a later revision made inapplicable is skipped — the
+/// overlay is presentation state, not a patch with preconditions.
+pub fn overlaid(state: &EpistemicState, belief: &BeliefState) -> (String, serde_json::Value) {
+    let current = belief.current();
+    let mut content = current.content.clone();
+    let mut fields = current.fields.clone();
+    apply_review_overlay(state, belief, &mut fields);
+    for override_state in &belief.overrides {
+        for op in &override_state.patch {
+            apply_overlay_op(&mut content, &mut fields, op);
         }
-        (content, fields)
     }
+    (content, fields)
+}
 
-    /// The projected bytes of the overlaid state.
-    pub fn projected(&self) -> String {
-        let (content, fields) = self.overlaid();
-        super::project::project(&content, &fields)
-    }
+/// The projected bytes of the overlaid state.
+pub fn projected_bytes(state: &EpistemicState, belief: &BeliefState) -> String {
+    let (content, fields) = overlaid(state, belief);
+    super::project::project(&content, &fields)
 }
 
 /// The canonical projection-state descriptor (M23): every event the
@@ -230,7 +263,7 @@ pub fn project_belief(state: &EpistemicState, belief_id: &str) -> Result<Project
         .beliefs
         .get(belief_id)
         .ok_or_else(|| format!("belief {belief_id} does not exist"))?;
-    let bytes = belief.projected();
+    let bytes = projected_bytes(state, belief);
     let described = descriptor(state, belief);
     Ok(ProjectionResult {
         content_hash: crate::ledger::sha256_hex(bytes.as_bytes()),
@@ -1859,7 +1892,7 @@ fn apply_override(
             body.base_generating_event, belief.projection_head_event
         )));
     }
-    let before_bytes = belief.projected();
+    let before_bytes = projected_bytes(state, belief);
     if crate::ledger::sha256_hex(before_bytes.as_bytes()) != body.before_projection_hash {
         return Err(refused(
             "before_projection_hash does not match the current projection",
@@ -1883,7 +1916,7 @@ fn apply_override(
             }
             // Every op's before must match the CURRENT overlaid projection
             // state — a stale edit is a refusal, never a merge.
-            let (content, overlaid_fields) = belief.overlaid();
+            let (content, overlaid_fields) = overlaid(state, belief);
             for op in patch {
                 let current_value = if op.field_path == "/body" {
                     TypedValue::string(&content)
@@ -1930,9 +1963,10 @@ fn apply_override(
     }
 
     // The after-hash proof: the declared bytes must be exactly what the
-    // new overlay projects.
+    // new overlay projects (review overlay included).
     let mut content = current.content.clone();
     let mut fields = current.fields.clone();
+    apply_review_overlay(state, belief, &mut fields);
     for override_state in &next {
         for op in &override_state.patch {
             apply_overlay_op(&mut content, &mut fields, op);
@@ -2011,7 +2045,7 @@ fn apply_reconciliation_resolved(
             .beliefs
             .get(belief_id)
             .expect("path index is consistent");
-        let projected = belief.projected();
+        let projected = projected_bytes(state, belief);
         entries.push(serde_json::json!({
             "path": path,
             "content_hash": crate::ledger::sha256_hex(projected.as_bytes()),
@@ -2130,7 +2164,7 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                         "path": b.path,
                         "generating_event": b.projection_head_event,
                         "state_digest": described.digest().unwrap_or_default(),
-                        "content_hash": crate::ledger::sha256_hex(b.projected().as_bytes()),
+                        "content_hash": crate::ledger::sha256_hex(projected_bytes(state, b).as_bytes()),
                         "review_event_ids": b.attestation_events,
                         "active_overrides": b
                             .overrides

@@ -317,6 +317,12 @@ export function KnowledgePanel({
             // Multiple entries capture INDEPENDENT checks — a human sign-off
             // and a nightly process are different claims, so both are shown.
             concept.verified.map((stamp, i) => <ActorLine key={i} stamp={stamp} today={today} />)
+          ) : concept.verifiedNotice !== null ? (
+            // M23.4: the review happened, the content moved on. Say so —
+            // never render a stale stamp, never pretend nobody reviewed it.
+            <span data-testid="verified-notice" className="text-xs text-n-600">
+              {concept.verifiedNotice}
+            </span>
           ) : (
             <span className="text-xs text-n-400">Nobody yet</span>
           )}

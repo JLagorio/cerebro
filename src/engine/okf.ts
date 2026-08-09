@@ -153,6 +153,18 @@ export function parseVerified(entry: Entry): Stamp[] {
   return items.map(parseStamp).filter((s): s is Stamp => s !== null);
 }
 
+/**
+ * M23.4: when a verified concept is revised afterwards, the projection
+ * renders the review state as a plain string — "verified at r3; current is
+ * r5 — attestation predates revision" — instead of silently dropping the
+ * stamp. Surfaced verbatim; the concept still reads as unverified (the
+ * review no longer covers the current content).
+ */
+export function verifiedNotice(entry: Entry): string | null {
+  const raw = entry.properties.verified;
+  return typeof raw === 'string' ? raw : null;
+}
+
 export type TrustTier = 'unverified' | 'machine-confirmed' | 'human-reviewed';
 
 export const TRUST_LABELS: Record<TrustTier, string> = {
@@ -479,6 +491,8 @@ export interface Concept {
   sources: Source[];
   generated: Stamp | null;
   verified: Stamp[];
+  /** The predating-attestation notice the projection rendered, if any. */
+  verifiedNotice: string | null;
   trust: TrustTier;
   lastVerified: string | null;
   lifecycle: Lifecycle;
@@ -514,6 +528,7 @@ export function toConcept(entry: Entry, today: string): Concept {
     sources: parseSources(entry),
     generated: parseGenerated(entry),
     verified: parseVerified(entry),
+    verifiedNotice: verifiedNotice(entry),
     trust: trustTier(entry),
     lastVerified: lastVerifiedAt(entry),
     lifecycle: lifecycleOf(entry),

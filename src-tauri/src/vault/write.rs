@@ -310,6 +310,12 @@ pub fn verify_frontmatter(
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
+    // The M23.4 flip: with an active writer, the stamp is a field revision
+    // plus a belief.attested pinned to the reviewed revision event and its
+    // projection hash, and the file regenerates as the projection.
+    if let Some(result) = crate::ledger::concepts::verify_concept(vault, rel, patch) {
+        return result;
+    }
     let content = patched_frontmatter(vault, rel, patch)?;
     write_file(&safe_join(vault, rel)?, &content)?;
     shadow_write(vault, rel, &content, "knowledge.verify", None);

@@ -1,6 +1,6 @@
 {
   "name": "attestation",
-  "description": "The id/hash pair must name one committed revision of the named Belief, hashed over its byte-stable projection.",
+  "description": "The id/hash pair must name one committed revision of the named Belief, hashed over its byte-stable projection; a later revision renders the predating review notice, never silence.",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -172,6 +172,45 @@
         "attested_belief_revision_event_id": "0123456789abcdef0123456789abcdef",
         "attested_content_hash": "d89a6ee2a7e5090eaf810d34ce13f2043a333e5a9cfcc8c452cf0615ae0a5c1b"
       }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "723fe7d1514eb70c02243d4bc01fce39fa3f7b1b502c0919dade93247e157a69",
+      "hash": "e3b9b800ed483d94d4d408961b07c68f5a6415451a028f9e14085ddb7c9a92bb",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.revised",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "patch": [
+          {
+            "field_path": "/fields/status",
+            "before": {
+              "type": "string",
+              "value": "active"
+            },
+            "after": {
+              "type": "string",
+              "value": "paused"
+            }
+          }
+        ],
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
     }
   ],
   "expected_state": {
@@ -185,10 +224,10 @@
     "beliefs": {
       "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
         "entity_id": "cccccccccccccccccccccccccccccccc",
-        "revision": 1,
+        "revision": 2,
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
-          "status": "active"
+          "status": "paused"
         },
         "basis": {
           "state": "unsupported",
@@ -199,13 +238,14 @@
           "00000000000000000000000000000001"
         ],
         "revision_events": [
-          "00000000000000000000000000000001"
+          "00000000000000000000000000000001",
+          "00000000000000000000000000000007"
         ],
         "projection": {
           "path": null,
-          "generating_event": "00000000000000000000000000000003",
-          "state_digest": "1662bb6da781974a48ac26691e5cc6b8f2bb3538703a09f163625f31e8ddbf28",
-          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "generating_event": "00000000000000000000000000000007",
+          "state_digest": "9e730f79bfe696fbc64fef8f38659e12a348826f108525ad4252f2b2840a79a9",
+          "content_hash": "11843ea779097af8f8dc861ee57a9c7a4cf8daf914d37cb862e7416f75d3381a",
           "review_event_ids": [
             "00000000000000000000000000000003"
           ],
@@ -246,7 +286,7 @@
     "independence": [],
     "derived_belief_sources": [],
     "versions": {
-      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 2,
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 3,
       "belief:ffffffffffffffffffffffffffffffff": 1,
       "entity:cccccccccccccccccccccccccccccccc": 1,
       "entity:dddddddddddddddddddddddddddddddd": 1

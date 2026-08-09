@@ -420,21 +420,20 @@ mod tests {
         vw::rename_note(&vault, &rel, "records/soak-renamed.md").unwrap();
 
         // The soak's point: the chain over everything above VERIFIES.
+        // Twelve writes, thirteen events — the M23.4 verify is a field
+        // revision PLUS its attestation.
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
-        assert_eq!(
-            read.records,
-            baseline + 12,
-            "one event per write, none lost"
-        );
+        assert_eq!(read.records, baseline + 13, "no write lost, none doubled");
         let kinds: std::collections::BTreeSet<&str> =
             read.frames.iter().map(|f| f.kind.as_str()).collect();
         assert!(kinds.contains("vault.write"));
         assert!(kinds.contains("vault.rename"));
-        // The M23.3 flip: a concept write is a committed Belief creation
-        // (and the log append its revision), not a shadow observation.
+        // The M23.3/M23.4 flip: a concept write is a committed Belief
+        // creation (the log append its revision), and a human verify is a
+        // field revision plus its attestation — no shadow observations.
         assert!(kinds.contains("belief.created"));
         assert!(kinds.contains("belief.revised"));
-        assert!(kinds.contains("knowledge.verify"));
+        assert!(kinds.contains("belief.attested"));
 
         // Bodies carry what the plan says they carry.
         let concept = read
@@ -447,18 +446,23 @@ mod tests {
             .unwrap();
         assert_eq!(concept.body["actor"]["id"], "soak-agent");
         assert_eq!(concept.body["fields"]["generated"]["by"], "soak-agent");
-        // ...and the file on disk was its byte-stable projection until the
-        // human verify stamp patched it below.
-        let verify = read
-            .frames
-            .iter()
-            .find(|f| f.kind == "knowledge.verify")
-            .unwrap();
-        let disk = std::fs::read(vault.join("knowledge/concepts/soak.md")).unwrap();
-        assert_eq!(
-            verify.body["content_hash"],
-            serde_json::json!(crate::ledger::sha256_hex(&disk)),
-            "the recorded hash is the bytes on disk"
+        let soak_belief = serde_json::json!(crate::ledger::schema::migrate_id(
+            &read.store.store_id,
+            "belief",
+            "concepts/soak.md"
+        ));
+        assert!(
+            read.frames
+                .iter()
+                .any(|f| f.kind == "belief.attested" && f.body["belief_id"] == soak_belief),
+            "the verify attested the soak concept (migration attested others)"
+        );
+        // The file on disk is the byte-stable projection, stamp included in
+        // canonical spelling.
+        let disk = std::fs::read_to_string(vault.join("knowledge/concepts/soak.md")).unwrap();
+        assert!(
+            disk.contains("verified: { by: human, at: 2026-08-07 }"),
+            "{disk}"
         );
         let rename = read
             .frames
@@ -471,7 +475,7 @@ mod tests {
         // Diagnostics agree, live.
         let status = status(Some(config.as_path()), &vault);
         assert_eq!(status.verdict, "valid");
-        assert_eq!(status.seq, Some(baseline + 12));
+        assert_eq!(status.seq, Some(baseline + 13));
         assert_eq!(status.head, Some(read.head_hash.clone()));
         assert_eq!(status.segments, 1);
         assert_eq!(status.anomalies, 0);
@@ -480,7 +484,7 @@ mod tests {
         // after every commit, not just at activate.
         let index = Index::open(&config, &read.store.store_id).unwrap();
         let remembered = index.remembered().unwrap().unwrap();
-        assert_eq!(remembered.head_seq, Some(baseline + 12));
+        assert_eq!(remembered.head_seq, Some(baseline + 13));
         assert_eq!(remembered.head_hash, read.head_hash);
 
         deactivate();

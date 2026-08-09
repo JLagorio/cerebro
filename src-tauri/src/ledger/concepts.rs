@@ -74,6 +74,131 @@ pub fn append_log(
     })
 }
 
+/// Ledger-first `verify_concept` (M23.4): the human stamp lands in fields
+/// through a normal `belief.revised`, then `belief.attested` pins the
+/// reviewed — now current — revision event and its projection hash, and
+/// the projection regenerates. `None` without an active writer.
+pub fn verify_concept(
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Option<Result<(), String>> {
+    if !rel.starts_with("knowledge/") {
+        return None;
+    }
+    shadow::with_writer(vault, |writer| verify_with(writer, vault, rel, patch))
+}
+
+/// Honest event time only: a date-only stamp yields None, never a
+/// fabricated instant (the migration convention).
+fn rfc3339_or_null(stamp: Option<&str>) -> Option<String> {
+    let stamp = stamp?;
+    chrono::DateTime::parse_from_rfc3339(stamp)
+        .ok()
+        .map(|_| stamp.to_string())
+}
+
+fn verify_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    rel: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let krel = rel
+        .strip_prefix("knowledge/")
+        .ok_or("verify_concept only applies to knowledge/ concepts")?;
+    let stamp = patch
+        .get("verified")
+        .cloned()
+        .ok_or("verify_concept requires a `verified` value")?;
+    let actor = Actor {
+        id: stamp
+            .get("by")
+            .and_then(|v| v.as_str())
+            .unwrap_or("human")
+            .to_string(),
+    };
+    let occurred_at = rfc3339_or_null(stamp.get("at").and_then(|v| v.as_str()));
+
+    let state = current_state(writer, vault)?;
+    let belief_id = state
+        .projection_paths
+        .get(krel)
+        .ok_or_else(|| format!("{rel} is not a committed projection — nothing to verify"))?
+        .clone();
+    let belief = state.beliefs.get(&belief_id).expect("path index");
+    let current = belief.current();
+
+    // 1. The stamp is DATA: a normal field revision, byte-compatible with
+    //    the legacy patch (an existing key keeps its position, a new one
+    //    appends). The basis carries forward — review is never evidence.
+    let before = current
+        .fields
+        .as_object()
+        .and_then(|m| m.get("verified"))
+        .map(typed_from_value)
+        .unwrap_or(schema::TypedValue::Missing);
+    let after = typed_from_value(&stamp);
+    let revising = before != after;
+    if revising {
+        let revised = schema::BeliefRevised {
+            schema: schema::BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: actor.clone(),
+            occurred_at: occurred_at.clone(),
+            valid_from: None,
+            valid_to: None,
+            belief_id: belief_id.clone(),
+            patch: vec![PatchOp {
+                field_path: "/fields/verified".to_string(),
+                before,
+                after,
+            }],
+            basis: current.basis.clone(),
+        };
+        writer.append(
+            schema::KIND_BELIEF_REVISED,
+            serde_json::to_value(&revised).map_err(|e| e.to_string())?,
+        )?;
+    }
+
+    // 2. Attest the reviewed, now-current revision: the event ID / content
+    //    hash PAIR, never basis or lineage.
+    let state = current_state(writer, vault)?;
+    let belief = state.beliefs.get(&belief_id).expect("still present");
+    let current = belief.current();
+    let already_pinned = belief
+        .attested
+        .as_ref()
+        .is_some_and(|(_, pinned)| pinned == &current.event_id);
+    if revising || !already_pinned {
+        let projected = super::project::project(&current.content, &current.fields);
+        let attested = schema::BeliefAttested {
+            schema: schema::BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor,
+            occurred_at,
+            valid_from: None,
+            valid_to: None,
+            belief_id: belief_id.clone(),
+            attested_belief_revision_event_id: current.event_id.clone(),
+            attested_content_hash: schema::belief::attested_content_hash(projected.as_bytes()),
+        };
+        writer.append(
+            schema::KIND_BELIEF_ATTESTED,
+            serde_json::to_value(&attested).map_err(|e| e.to_string())?,
+        )?;
+    }
+    crate::crash::crash_point("verify-committed");
+
+    // 3. Regenerate through the manifest-first protocol.
+    let state = current_state(writer, vault)?;
+    let projection = project_belief(&state, &belief_id)?;
+    write_projection(vault, rel, &projection)
+}
+
 fn current_state(writer: &LedgerWriter, vault: &Path) -> Result<EpistemicState, String> {
     let read = read_ledger(&ledger_dir(vault)).map_err(|e| e.to_string())?;
     Ok(reduce(&read.frames, writer.store_id()))
@@ -785,6 +910,97 @@ mod tests {
         assert!(belief.current().content.contains("[X](/concepts/x.md)"));
         let disk = std::fs::read_to_string(vault.join("knowledge/log.md")).unwrap();
         assert_eq!(disk, project_belief(&state, &log_belief).unwrap().bytes);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn verify_revises_the_stamp_and_attests_the_reviewed_revision() {
+        let vault = corpus_copy("concepts-verify");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let store = writer.store_id().to_string();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        let patch = fm(&[(
+            "verified",
+            serde_json::json!({ "by": "human:me", "at": "2026-08-09T10:00:00Z" }),
+        )]);
+        verify_with(&mut writer, &vault, rel, &patch).unwrap();
+
+        let state = current_state(&writer, &vault).unwrap();
+        let belief_id = schema::migrate_id(&store, "belief", "metrics/sync-error-rate.md");
+        let belief = state.beliefs.get(&belief_id).unwrap();
+        // The stamp is a field revision; the attestation pins THAT revision
+        // event — the reviewed revision is the current one.
+        assert_eq!(belief.current().revision, 2);
+        let (_, pinned) = belief.attested.as_ref().unwrap();
+        assert_eq!(pinned, &belief.current().event_id);
+        let disk = std::fs::read_to_string(vault.join(rel)).unwrap();
+        assert_eq!(disk, project_belief(&state, &belief_id).unwrap().bytes);
+        assert!(
+            disk.contains("verified: { by: human:me, at: 2026-08-09T10:00:00Z }"),
+            "{disk}"
+        );
+
+        // The identical stamp is a no-op: no revision, no re-attestation.
+        let head = writer.head();
+        verify_with(&mut writer, &vault, rel, &patch).unwrap();
+        assert_eq!(writer.head(), head, "an identical verify appends nothing");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_later_revision_renders_the_predating_notice_and_keeps_the_attestation() {
+        let vault = corpus_copy("concepts-predate");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let store = writer.store_id().to_string();
+        super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
+
+        let rel = "knowledge/metrics/sync-error-rate.md";
+        verify_with(
+            &mut writer,
+            &vault,
+            rel,
+            &fm(&[(
+                "verified",
+                serde_json::json!({ "by": "human:me", "at": "2026-08-09T10:00:00Z" }),
+            )]),
+        )
+        .unwrap();
+
+        // The agent rewrites the verified concept: today's tool drops the
+        // stamp from fields, but the projection SAYS what happened instead
+        // of silently reverting to unverified — and the attestation stays.
+        let frontmatter = fm(&[
+            ("type", serde_json::json!("Metric")),
+            ("title", serde_json::json!("Sync error rate")),
+            (
+                "generated",
+                serde_json::json!({ "by": "agent:run-3", "at": "2026-08-09" }),
+            ),
+        ]);
+        write_concept_with(
+            &mut writer,
+            &vault,
+            rel,
+            &frontmatter,
+            "# Sync error rate\n\nRewritten.",
+        )
+        .unwrap();
+
+        let state = current_state(&writer, &vault).unwrap();
+        let belief_id = schema::migrate_id(&store, "belief", "metrics/sync-error-rate.md");
+        let belief = state.beliefs.get(&belief_id).unwrap();
+        assert_eq!(belief.current().revision, 3);
+        assert!(belief.attested.is_some(), "the attestation persists");
+        let disk = std::fs::read_to_string(vault.join(rel)).unwrap();
+        assert!(
+            disk.contains(
+                "verified: verified at r2; current is r3 — attestation predates revision"
+            ),
+            "{disk}"
+        );
+        assert_eq!(disk, project_belief(&state, &belief_id).unwrap().bytes);
         let _ = std::fs::remove_dir_all(&vault);
     }
 
