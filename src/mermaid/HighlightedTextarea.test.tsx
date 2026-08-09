@@ -39,7 +39,8 @@ describe('HighlightedTextarea', () => {
     const originalTheme = document.documentElement.getAttribute('data-theme');
     document.documentElement.setAttribute('data-theme', 'light');
     loadMock.mockResolvedValue(
-      (code) => `<pre class="theme-${document.documentElement.getAttribute('data-theme')}">${code}</pre>`,
+      (code) =>
+        `<pre class="theme-${document.documentElement.getAttribute('data-theme')}">${code}</pre>`,
     );
     render(
       <HighlightedTextarea
