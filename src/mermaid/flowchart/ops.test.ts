@@ -87,6 +87,16 @@ describe('deleteNode', () => {
     expect(out).toContain('G[One]');
     expect(out).toContain('I[Three]');
   });
+
+  it('never touches lines the deleted node does not appear on', () => {
+    const chain = '  G[One] --> H[Two] --> I[Three]';
+    const group = '  A & B --> C';
+    const spaced = '  X   -->   Y';
+    const src = ['flowchart TD', '  Q[Iso]', chain, group, spaced].join('\n');
+    const out = serialize(deleteNode(parseFlowchart(src)!, 'Q'));
+    const outLines = out.split('\n');
+    expect(outLines).toEqual(['flowchart TD', chain, group, spaced]);
+  });
 });
 
 describe('setEdgeLabel', () => {
@@ -98,6 +108,16 @@ describe('setEdgeLabel', () => {
     const cleared = serialize(setEdgeLabel(m2, edges(m2)[0], null));
     expect(cleared).toContain('A --> B');
     expect(cleared).not.toContain('|');
+  });
+
+  it('sanitizes a literal pipe so the edge stays parseable', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const out = serialize(setEdgeLabel(m, edges(m)[0], 'a|b'));
+    const reparsed = parseFlowchart(out)!;
+    const es = edges(reparsed);
+    expect(es).toHaveLength(1);
+    expect(es[0].label).toBe('a/b');
+    expect(reparsed.lines.every((l) => l.parsed.kind !== 'opaque')).toBe(true);
   });
 });
 

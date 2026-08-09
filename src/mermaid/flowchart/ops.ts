@@ -139,10 +139,12 @@ function rebuildEdgeLines(
   }
   const survivors: Pair[] = [];
   const orphanLabels: NodeRef[] = [];
+  let totalPairs = 0;
 
   line.parsed.segments.forEach((segment, segIdx) => {
     for (const f of segment.from) {
       for (const t of segment.to) {
+        totalPairs += 1;
         if (shouldDrop(f, t, segIdx)) {
           for (const ref of [f, t]) {
             if (ref.id !== dropNodeId && ref.label !== null) orphanLabels.push(ref);
@@ -153,6 +155,12 @@ function rebuildEdgeLines(
       }
     }
   });
+
+  // Nothing on this line matched shouldDrop: leave it completely untouched
+  // rather than re-emitting it through the normalizing splice below, which
+  // would flatten chains/&-groups, drop quoting, and rewrite whitespace on
+  // lines the caller never asked to change.
+  if (survivors.length === totalPairs) return;
 
   const replacements: ModelLine[] = [];
 
@@ -231,7 +239,12 @@ export function setEdgeLabel(
   const next = clone(model);
   const line = next.lines[edge.line];
   if (line.parsed.kind !== 'edges') return next;
-  line.parsed.segments[edge.seg].label = label;
+  // Unlike node labels, edge labels have no quoting escape for `|` — the
+  // pipe is the delimiter mermaid uses to close the label itself, so a
+  // literal one would emit `-->|a|b|` and get misread as an unlabeled arrow
+  // followed by garbage. This is the last boundary before the file, so
+  // substitute `|` → `/` here rather than propagate corrupt text.
+  line.parsed.segments[edge.seg].label = label === null ? null : label.replaceAll('|', '/');
   line.dirty = true;
   return next;
 }
