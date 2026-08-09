@@ -351,6 +351,27 @@ pub(crate) fn all_bodies() -> Vec<EventBody> {
         },
     )));
 
+    // The M23 additions: override (both change arms), divergence, and both
+    // resolution actions.
+    bodies.push(EventBody::ProjectionOverridden(Box::new(
+        projection::tests::set_body(),
+    )));
+    let mut clear = projection::tests::set_body();
+    clear.change = OverrideChange::Clear {
+        override_event_ids: vec![ID_C.into()],
+        reason: "maintenance retired the tweak".into(),
+    };
+    bodies.push(EventBody::ProjectionOverridden(Box::new(clear)));
+    bodies.push(EventBody::LedgerDivergence(Box::new(
+        reconciliation::tests::divergence_body(),
+    )));
+    bodies.push(EventBody::ReconciliationResolved(Box::new(
+        reconciliation::tests::resolution_body(ReconciliationAction::AcceptCurrentFiles),
+    )));
+    bodies.push(EventBody::ReconciliationResolved(Box::new(
+        reconciliation::tests::resolution_body(ReconciliationAction::RestoreLedgerAuthority),
+    )));
+
     bodies
 }
 
@@ -363,8 +384,8 @@ fn every_variant_encodes_decodes_and_re_encodes_byte_identically() {
             .map(EventBody::kind)
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        12,
-        "all twelve M22 kinds are exercised"
+        15,
+        "all twelve M22 kinds plus the three M23 kinds are exercised"
     );
     for body in bodies {
         let value = body.to_value().unwrap();

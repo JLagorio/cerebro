@@ -37,6 +37,21 @@ export const RESERVED_KINDS = [
 export const ACTOR_LEDGER = 'system:ledger';
 export const ACTOR_SOURCE_REGISTRY = 'system:source-registry';
 export const ACTOR_MIGRATOR = 'system:migrator';
+export const ACTOR_RECONCILIATION = 'system:reconciliation';
+
+/** Frontmatter fields declared presentation-only — the ONLY legal override
+ * targets besides `/body` (mirrors `schema/projection.rs`). */
+export const PRESENTATION_ONLY_FIELDS = ['title', 'tags'];
+
+/** The CLOSED divergence signal list, in canonical (declaration) order. */
+export const DIVERGENCE_SIGNALS = [
+  'git_anchor_regression',
+  'remembered_head_regression',
+  'manifest_reducer_disagreement',
+  'mass_projection_mismatch',
+  'migration_source_changed',
+  'migration_idempotency_conflict',
+];
 
 export const isId128 = (s: unknown): s is string =>
   typeof s === 'string' && /^[0-9a-f]{32}$/.test(s);
@@ -542,6 +557,74 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     output_count: asU64(obj.output_count, 'output_count'),
     output_keys_digest: asString(obj.output_keys_digest, 'output_keys_digest'),
   }),
+  'projection.overridden': (obj) => {
+    const change = asObject(obj.change, 'change');
+    const action = oneOf(change.action, ['set', 'clear'], 'override action');
+    const canonChange: JsonObject =
+      action === 'set'
+        ? {
+            action,
+            patch: asArray(change.patch, 'override patch').map((op) => {
+              const o = asObject(op, 'override op');
+              return {
+                field_path: asString(o.field_path, 'field_path'),
+                before: canonTypedValue(o.before),
+                after: canonTypedValue(o.after),
+              };
+            }),
+            supersedes_override_event_ids: asArray(
+              change.supersedes_override_event_ids,
+              'supersedes',
+            ).map((id) => asString(id, 'superseded override ref')),
+          }
+        : {
+            action,
+            override_event_ids: asArray(change.override_event_ids, 'cleared overrides').map((id) =>
+              asString(id, 'cleared override ref'),
+            ),
+            reason: asString(change.reason, 'clear reason'),
+          };
+    return {
+      ...canonCommon(obj),
+      belief_id: asString(obj.belief_id, 'belief_id'),
+      path: asString(obj.path, 'path'),
+      base_belief_revision: asU64(obj.base_belief_revision, 'base_belief_revision'),
+      base_belief_revision_event: asString(obj.base_belief_revision_event, 'base revision event'),
+      base_generating_event: asString(obj.base_generating_event, 'base generating event'),
+      before_projection_hash: asString(obj.before_projection_hash, 'before hash'),
+      after_projection_hash: asString(obj.after_projection_hash, 'after hash'),
+      origin: oneOf(obj.origin, ['in_app', 'out_of_band', 'reconciliation_adoption'], 'origin'),
+      change: canonChange,
+    };
+  },
+  'ledger.divergence': (obj) => ({
+    ...canonCommon(obj),
+    detection_key: asString(obj.detection_key, 'detection_key'),
+    signals: asArray(obj.signals, 'signals').map((s) =>
+      oneOf(s, DIVERGENCE_SIGNALS, 'divergence signal'),
+    ),
+    ledger_head: asString(obj.ledger_head, 'ledger_head'),
+    git_anchored_head: asStringOrNull(obj.git_anchored_head, 'git_anchored_head'),
+    remembered_head: asStringOrNull(obj.remembered_head, 'remembered_head'),
+    manifest_digest: asString(obj.manifest_digest, 'manifest_digest'),
+    reducer_projection_digest: asString(obj.reducer_projection_digest, 'reducer digest'),
+    mismatch_count: asU64(obj.mismatch_count, 'mismatch_count'),
+    projection_count: asU64(obj.projection_count, 'projection_count'),
+    sample_paths: asArray(obj.sample_paths, 'sample_paths').map((p) => asString(p, 'sample path')),
+  }),
+  'ledger.reconciliation_resolved': (obj) => ({
+    ...canonCommon(obj),
+    divergence_event_id: asString(obj.divergence_event_id, 'divergence_event_id'),
+    action: oneOf(obj.action, ['accept_current_files', 'restore_ledger_authority'], 'action'),
+    affected_paths: asArray(obj.affected_paths, 'affected_paths').map((p) =>
+      asString(p, 'affected path'),
+    ),
+    capture_batch_ids: asArray(obj.capture_batch_ids, 'capture_batch_ids').map((id) =>
+      asString(id, 'capture batch id'),
+    ),
+    accepted_files_digest: asStringOrNull(obj.accepted_files_digest, 'accepted digest'),
+    resulting_projection_digest: asString(obj.resulting_projection_digest, 'resulting digest'),
+  }),
 };
 
 export interface Decoded {
@@ -910,6 +993,33 @@ export function validateFieldPath(path: string): void {
   }
 }
 
+/** `/body`, or a declared presentation-only field (or a subpath in one). */
+export function validateOverridePointer(path: string): void {
+  validateFieldPath(path);
+  if (path === '/body') return;
+  const field = path.slice('/fields/'.length);
+  const head = field.split('/')[0];
+  if (!PRESENTATION_ONLY_FIELDS.includes(head)) {
+    throw new RefusedError(`override pointer ${path} targets an epistemic or provenance field`);
+  }
+}
+
+/** A knowledge-relative projection path: relative, markdown, non-escaping. */
+export function validateProjectionPath(path: string): void {
+  if (path.length === 0 || !path.endsWith('.md')) {
+    throw new RefusedError(`projection path ${path} must be a .md file`);
+  }
+  if (path.startsWith('/') || path.includes('\\')) {
+    throw new RefusedError(`projection path ${path} must be knowledge-relative`);
+  }
+  if (path.split('/').some((seg) => seg.length === 0 || seg === '..')) {
+    throw new RefusedError(`projection path ${path} must not escape or double-slash`);
+  }
+}
+
+/** A chain head hash: a frame hash (64 hex) or the store id anchor (32). */
+const isHeadHash = (s: unknown): boolean => isSha256(s) || isId128(s);
+
 /** The Rust `derive_authority` port — exact and closed. */
 export function deriveAuthority(
   registration: JsonObject,
@@ -1112,6 +1222,147 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if (!isSha256(body.source_digest)) throw new RefusedError('source_digest is not SHA-256');
       if (decoded.kind === 'migration.completed' && !isSha256(body.output_keys_digest)) {
         throw new RefusedError('output_keys_digest is not SHA-256');
+      }
+      break;
+    }
+    case 'projection.overridden': {
+      if (!isId128(body.belief_id)) throw new RefusedError('belief_id is not a stable id');
+      validateProjectionPath(body.path as string);
+      if ((body.base_belief_revision as number) === 0) {
+        throw new RefusedError('base_belief_revision starts at 1');
+      }
+      if (!isId128(body.base_belief_revision_event) || !isId128(body.base_generating_event)) {
+        throw new RefusedError('override base events must be event ids');
+      }
+      if (!isSha256(body.before_projection_hash) || !isSha256(body.after_projection_hash)) {
+        throw new RefusedError('projection hashes must be SHA-256 hex');
+      }
+      const change = body.change as JsonObject;
+      if (change.action === 'set') {
+        const patch = change.patch as JsonObject[];
+        if (patch.length === 0) throw new RefusedError('an override set requires a patch');
+        const seen = new Set<string>();
+        for (const op of patch) {
+          validateOverridePointer(op.field_path as string);
+          if (seen.has(op.field_path as string)) {
+            throw new RefusedError(`duplicate override pointer ${op.field_path}`);
+          }
+          seen.add(op.field_path as string);
+          validateTypedValue(op.before as Json);
+          validateTypedValue(op.after as Json);
+        }
+        const ids = new Set<string>();
+        for (const id of change.supersedes_override_event_ids as string[]) {
+          if (!isId128(id)) throw new RefusedError('superseded override ref is not an event id');
+          if (ids.has(id)) throw new RefusedError(`duplicate superseded override ${id}`);
+          ids.add(id);
+        }
+      } else {
+        const ids = change.override_event_ids as string[];
+        if (ids.length === 0) {
+          throw new RefusedError('an override clear must name the overrides it retires');
+        }
+        const seen = new Set<string>();
+        for (const id of ids) {
+          if (!isId128(id)) throw new RefusedError('cleared override ref is not an event id');
+          if (seen.has(id)) throw new RefusedError(`duplicate cleared override ${id}`);
+          seen.add(id);
+        }
+        if ((change.reason as string).length === 0) {
+          throw new RefusedError('an override clear requires a non-empty reason');
+        }
+      }
+      break;
+    }
+    case 'ledger.divergence': {
+      if ((body.actor as JsonObject).id !== ACTOR_RECONCILIATION) {
+        throw new RefusedError('ledger.divergence is recorded only by system:reconciliation');
+      }
+      if (!isSha256(body.detection_key)) {
+        throw new RefusedError('detection_key must be a SHA-256 condition hash');
+      }
+      const signals = body.signals as string[];
+      if (signals.length === 0) throw new RefusedError('a divergence names at least one signal');
+      let prevIndex = -1;
+      for (const signal of signals) {
+        const index = DIVERGENCE_SIGNALS.indexOf(signal);
+        if (index <= prevIndex) {
+          throw new RefusedError('signals must be unique and in canonical order');
+        }
+        prevIndex = index;
+      }
+      if (!isHeadHash(body.ledger_head)) {
+        throw new RefusedError('ledger_head is not a chain head hash');
+      }
+      for (const key of ['git_anchored_head', 'remembered_head']) {
+        if (body[key] !== null && !isHeadHash(body[key])) {
+          throw new RefusedError(`${key} is not a chain head hash`);
+        }
+      }
+      if (!isSha256(body.manifest_digest) || !isSha256(body.reducer_projection_digest)) {
+        throw new RefusedError('manifest/reducer digests must be SHA-256 hex');
+      }
+      if ((body.mismatch_count as number) > (body.projection_count as number)) {
+        throw new RefusedError('mismatch_count cannot exceed projection_count');
+      }
+      const samples = body.sample_paths as string[];
+      if (samples.length > 32) throw new RefusedError('sample_paths is bounded at 32');
+      let prev: string | null = null;
+      for (const path of samples) {
+        validateProjectionPath(path);
+        if (prev !== null && prev >= path) {
+          throw new RefusedError('sample_paths must be sorted and duplicate-free');
+        }
+        prev = path;
+      }
+      break;
+    }
+    case 'ledger.reconciliation_resolved': {
+      if ((body.actor as JsonObject).id !== ACTOR_RECONCILIATION) {
+        throw new RefusedError(
+          'ledger.reconciliation_resolved is recorded only by system:reconciliation',
+        );
+      }
+      if (!isId128(body.divergence_event_id)) {
+        throw new RefusedError('divergence_event_id is not an event id');
+      }
+      const affected = body.affected_paths as string[];
+      if (affected.length === 0) throw new RefusedError('a resolution names its affected paths');
+      let prev: string | null = null;
+      for (const path of affected) {
+        validateProjectionPath(path);
+        if (prev !== null && prev >= path) {
+          throw new RefusedError('affected_paths must be sorted and duplicate-free');
+        }
+        prev = path;
+      }
+      if (!isSha256(body.resulting_projection_digest)) {
+        throw new RefusedError('resulting_projection_digest must be SHA-256 hex');
+      }
+      const captures = body.capture_batch_ids as string[];
+      if (body.action === 'accept_current_files') {
+        const batchId = body.batch_id as string | null;
+        if (batchId === null) {
+          throw new RefusedError('accept_current_files commits inside its adoption batch');
+        }
+        if (captures.length !== 1 || captures[0] !== batchId) {
+          throw new RefusedError('capture_batch_ids is exactly the singleton own batch id');
+        }
+        const accepted = body.accepted_files_digest as string | null;
+        if (accepted === null || !isSha256(accepted)) {
+          throw new RefusedError('accept_current_files requires the accepted-files digest');
+        }
+        if (accepted !== body.resulting_projection_digest) {
+          throw new RefusedError('accepted and resulting digests must match');
+        }
+      } else {
+        if (body.batch_id !== null) {
+          throw new RefusedError('restore_ledger_authority is appended unbatched');
+        }
+        if (captures.length !== 0) throw new RefusedError('restore captures nothing');
+        if (body.accepted_files_digest !== null) {
+          throw new RefusedError('restore accepted_files_digest is null');
+        }
       }
       break;
     }

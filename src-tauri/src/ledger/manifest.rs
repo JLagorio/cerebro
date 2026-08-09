@@ -9,6 +9,10 @@
 //! projection. A vault whose files disagree gets no manifest; the launch
 //! reconciliation scan (M23.6) owns that state.
 //!
+//! The projection identity itself (descriptor, generating event, overlaid
+//! bytes) is reducer state — see `reduce::{descriptor, project_belief}`;
+//! this module consumes that complete result, never a file hash alone.
+//!
 //! `.cerebro/projection-manifest.json` travels with the vault and stays
 //! under the `.cerebro/` blanket gitignore/self-heal.
 
@@ -17,10 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::frame::Frame;
-use super::project::project;
-use super::reduce::{BeliefState, EpistemicState};
-use super::schema;
+use super::reduce::{project_belief, EpistemicState};
 
 /// The one manifest format this build reads and writes.
 pub const MANIFEST_FORMAT: u64 = 1;
@@ -66,145 +67,6 @@ pub struct ManifestEntry {
     pub write_state: WriteState,
     /// The prior file hash, held only while `write_state` is pending.
     pub previous_content_hash: Option<String>,
-}
-
-/// The canonical projection-state descriptor: every event the renderer's
-/// output (or its identity) depends on. `generating_event` is the highest-
-/// seq member — NOT merely the newest byte producer — so a review-state
-/// change, relation remove, alias addition, or override clear advances
-/// projection identity even when the resulting bytes equal an older
-/// projection.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ProjectionStateDescriptor {
-    pub belief_revision_event: String,
-    /// Attestation event IDs read by the renderer, seq order.
-    pub review_event_ids: Vec<String>,
-    /// Latest add/remove event per relation, sorted by relation_id.
-    pub relation_transition_heads: Vec<RelationHead>,
-    /// Live subject-alias event IDs sorted by normalized alias.
-    pub alias_event_ids: Vec<String>,
-    /// Active override event IDs in application order (none until M23.1).
-    pub active_override_event_ids: Vec<String>,
-    /// The latest override set/supersede/clear event, clear included.
-    pub override_head_event_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct RelationHead {
-    pub relation_id: String,
-    pub event_id: String,
-}
-
-impl ProjectionStateDescriptor {
-    /// SHA-256 of the canonical JSON serialization (fixed field order).
-    pub fn digest(&self) -> Result<String, String> {
-        let canonical = serde_json::to_string(self).map_err(|e| e.to_string())?;
-        Ok(crate::ledger::sha256_hex(canonical.as_bytes()))
-    }
-
-    /// Every event the descriptor names, in serialization order.
-    fn event_ids(&self) -> Vec<&str> {
-        let mut ids: Vec<&str> = vec![&self.belief_revision_event];
-        ids.extend(self.review_event_ids.iter().map(String::as_str));
-        ids.extend(
-            self.relation_transition_heads
-                .iter()
-                .map(|h| h.event_id.as_str()),
-        );
-        ids.extend(self.alias_event_ids.iter().map(String::as_str));
-        ids.extend(self.active_override_event_ids.iter().map(String::as_str));
-        if let Some(head) = &self.override_head_event_id {
-            ids.push(head);
-        }
-        ids
-    }
-
-    /// The highest-seq event named by the descriptor — the entry's
-    /// `generating_event`. Every named event must exist in the chain.
-    pub fn generating_event(&self, seq_of: &BTreeMap<String, u64>) -> Result<String, String> {
-        let mut best: Option<(u64, &str)> = None;
-        for id in self.event_ids() {
-            let seq = seq_of
-                .get(id)
-                .ok_or_else(|| format!("descriptor names {id}, which is not in the chain"))?;
-            if best.is_none_or(|(s, _)| *seq > s) {
-                best = Some((*seq, id));
-            }
-        }
-        best.map(|(_, id)| id.to_string())
-            .ok_or_else(|| "empty descriptor".to_string())
-    }
-}
-
-/// event_id → seq over the committed chain, for generating-event selection.
-pub fn seq_index(frames: &[Frame]) -> BTreeMap<String, u64> {
-    frames.iter().map(|f| (f.event_id.clone(), f.seq)).collect()
-}
-
-/// Build the descriptor for one Belief from reduced state. Attestations are
-/// scanned from the committed frames (the reducer keeps only the latest
-/// pointer): an attestation counts only when it APPLIED — not refused as an
-/// anomaly, and, if batched, its batch committed.
-pub fn descriptor(
-    state: &EpistemicState,
-    frames: &[Frame],
-    belief: &BeliefState,
-) -> ProjectionStateDescriptor {
-    let refused: std::collections::BTreeSet<&str> = state
-        .anomalies
-        .iter()
-        .map(|a| a.event_id.as_str())
-        .collect();
-    let committed_members: std::collections::BTreeSet<&str> = state
-        .batches
-        .iter()
-        .filter(|b| b.state == "committed")
-        .flat_map(|b| b.members.iter().map(|(id, _)| id.as_str()))
-        .collect();
-    let mut review_event_ids = Vec::new();
-    for frame in frames {
-        if frame.kind != schema::KIND_BELIEF_ATTESTED {
-            continue;
-        }
-        if frame.body.get("belief_id").and_then(|v| v.as_str()) != Some(belief.belief_id.as_str()) {
-            continue;
-        }
-        if refused.contains(frame.event_id.as_str()) {
-            continue;
-        }
-        let batched = frame.body.get("batch_id").is_some_and(|v| !v.is_null());
-        if batched && !committed_members.contains(frame.event_id.as_str()) {
-            continue;
-        }
-        review_event_ids.push(frame.event_id.clone());
-    }
-
-    // BTreeMap iteration: relations sorted by relation_id, aliases by
-    // normalized alias — exactly the descriptor's required orders.
-    let relation_transition_heads = state
-        .relations
-        .values()
-        .filter(|r| r.from == belief.belief_id)
-        .map(|r| RelationHead {
-            relation_id: r.relation_id.clone(),
-            event_id: r.last_event_id.clone(),
-        })
-        .collect();
-    let alias_event_ids = state
-        .alias_registry
-        .values()
-        .filter(|a| a.entity_id == belief.entity_id)
-        .map(|a| a.event_id.clone())
-        .collect();
-
-    ProjectionStateDescriptor {
-        belief_revision_event: belief.current().event_id.clone(),
-        review_event_ids,
-        relation_transition_heads,
-        alias_event_ids,
-        active_override_event_ids: Vec::new(),
-        override_head_event_id: None,
-    }
 }
 
 /// Load the manifest; `Ok(None)` when none exists. An unreadable or
@@ -253,12 +115,10 @@ pub fn save(vault: &Path, manifest: &Manifest) -> Result<(), String> {
 pub fn build_initial(
     vault: &Path,
     store_id: &str,
-    frames: &[Frame],
     state: &EpistemicState,
 ) -> Result<Option<Manifest>, String> {
     let knowledge = vault.join("knowledge");
     let mut entries = BTreeMap::new();
-    let seq_of = seq_index(frames);
     if knowledge.exists() {
         for entry in walkdir::WalkDir::new(&knowledge).sort_by_file_name() {
             let entry = entry.map_err(|e| e.to_string())?;
@@ -274,28 +134,24 @@ pub fn build_initial(
                 .to_str()
                 .ok_or("non-UTF-8 knowledge path")?
                 .replace('\\', "/");
-            let Some(belief) = state
-                .beliefs
-                .get(&schema::migrate_id(store_id, "belief", &rel))
-            else {
+            let belief_id = super::schema::migrate_id(store_id, "belief", &rel);
+            if !state.beliefs.contains_key(&belief_id) {
                 return Ok(None); // a file the ledger cannot explain
-            };
+            }
+            let projection = project_belief(state, &belief_id)?;
             let bytes = std::fs::read(entry.path()).map_err(|e| e.to_string())?;
-            let current = belief.current();
-            let projected = project(&current.content, &current.fields);
-            if projected.as_bytes() != bytes.as_slice() {
+            if projection.bytes.as_bytes() != bytes.as_slice() {
                 return Ok(None); // bytes disagree — reconciliation's problem
             }
-            let descriptor = descriptor(state, frames, belief);
             entries.insert(
                 format!("knowledge/{rel}"),
                 ManifestEntry {
-                    belief_id: belief.belief_id.clone(),
-                    projected_revision: current.revision,
-                    belief_revision_event: current.event_id.clone(),
-                    generating_event: descriptor.generating_event(&seq_of)?,
-                    projection_state_digest: descriptor.digest()?,
-                    content_hash: crate::ledger::sha256_hex(&bytes),
+                    belief_id,
+                    projected_revision: projection.projected_revision,
+                    belief_revision_event: projection.belief_revision_event,
+                    generating_event: projection.generating_event,
+                    projection_state_digest: projection.projection_state_digest,
+                    content_hash: projection.content_hash,
                     write_state: WriteState::Complete,
                     previous_content_hash: None,
                 },
@@ -312,7 +168,7 @@ pub fn build_initial(
 mod tests {
     use super::super::migrate::migrate_vault;
     use super::super::migrate::tests::{corpus_copy, WRITER};
-    use super::super::reduce::reduce;
+    use super::super::reduce::{descriptor, reduce};
     use super::super::writer::LedgerWriter;
     use super::super::{ledger_dir, read_ledger};
     use super::*;
@@ -359,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn the_descriptor_head_outranks_the_revision_event_when_review_advanced() {
+    fn the_projection_head_outranks_the_revision_event_when_review_advanced() {
         let vault = corpus_copy("manifest-descriptor");
         let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
         let store = writer.store_id().to_string();
@@ -367,7 +223,6 @@ mod tests {
         drop(writer);
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
         let state = reduce(&read.frames, &store);
-        let seq_of = seq_index(&read.frames);
 
         // A verified concept: its attestation was appended AFTER creation,
         // so the generating event is the attestation, not the revision.
@@ -376,14 +231,19 @@ mod tests {
             .values()
             .find(|b| b.attested.is_some())
             .expect("the corpus has verified concepts");
-        let described = descriptor(&state, &read.frames, verified);
+        let described = descriptor(&state, verified);
         assert!(!described.review_event_ids.is_empty());
-        let head = described.generating_event(&seq_of).unwrap();
-        assert_eq!(head, *described.review_event_ids.last().unwrap());
-        assert!(seq_of[&head] > seq_of[&described.belief_revision_event]);
+        assert_eq!(
+            verified.projection_head_event,
+            *described.review_event_ids.last().unwrap(),
+            "review state is the newest projection transition"
+        );
+        assert_ne!(verified.projection_head_event, verified.current().event_id);
         // Digest is deterministic and moves when review state moves.
-        let again = descriptor(&state, &read.frames, verified);
-        assert_eq!(described.digest().unwrap(), again.digest().unwrap());
+        assert_eq!(
+            described.digest().unwrap(),
+            descriptor(&state, verified).digest().unwrap()
+        );
         let mut without_review = described.clone();
         without_review.review_event_ids.clear();
         assert_ne!(
@@ -391,26 +251,19 @@ mod tests {
             without_review.digest().unwrap()
         );
 
-        // An unverified concept's head IS its revision event.
-        let unverified = state
+        // An unverified, relation-less, alias-less concept's head IS its
+        // revision event.
+        let plain = state
             .beliefs
             .values()
             .find(|b| {
                 b.attested.is_none() && {
-                    let d = descriptor(&state, &read.frames, b);
+                    let d = descriptor(&state, b);
                     d.relation_transition_heads.is_empty() && d.alias_event_ids.is_empty()
                 }
             })
             .expect("the corpus has plain concepts");
-        let plain = descriptor(&state, &read.frames, unverified);
-        assert_eq!(
-            plain.generating_event(&seq_of).unwrap(),
-            plain.belief_revision_event
-        );
-        // A descriptor naming an event outside the chain is an error.
-        let mut alien = plain;
-        alien.review_event_ids.push("f".repeat(32));
-        assert!(alien.generating_event(&seq_of).is_err());
+        assert_eq!(plain.projection_head_event, plain.current().event_id);
         let _ = std::fs::remove_dir_all(&vault);
     }
 }

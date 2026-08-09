@@ -197,11 +197,24 @@ const EPISTEMIC_DDL: &str = "
         code TEXT NOT NULL,
         detail TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS projection_overrides (
+        override_event_id TEXT PRIMARY KEY,
+        belief_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        ordinal INTEGER NOT NULL,
+        base_belief_revision INTEGER NOT NULL,
+        stale INTEGER NOT NULL,
+        patch TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS reconciliation_state (
+        detection_key TEXT PRIMARY KEY,
+        divergence_event_id TEXT NOT NULL
+    );
 ";
 
 /// The epistemic tables in drop/insert order — one list so materialize and
 /// its tests cannot disagree about what "all of them" means.
-const EPISTEMIC_TABLES: [&str; 16] = [
+const EPISTEMIC_TABLES: [&str; 18] = [
     "logical_batches",
     "batch_members",
     "state_versions",
@@ -218,6 +231,8 @@ const EPISTEMIC_TABLES: [&str; 16] = [
     "derived_belief_sources",
     "relations",
     "reducer_anomalies",
+    "projection_overrides",
+    "reconciliation_state",
 ];
 
 /// Is this database healthy enough to trust as a cache? Any failure —
@@ -696,6 +711,34 @@ fn materialize(
         )
         .map_err(err)?;
     }
+    // M23.1: the active editorial overlay per Belief, in application order,
+    // and the open reconciliation mode's unresolved detection keys. Both are
+    // pure materializations of the fold — rebuilt from the ledger alone.
+    for belief in state.beliefs.values() {
+        let Some(path) = &belief.path else { continue };
+        for (ordinal, override_state) in belief.overrides.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO projection_overrides VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    override_state.event_id,
+                    belief.belief_id,
+                    path,
+                    ordinal as i64,
+                    override_state.base_belief_revision as i64,
+                    override_state.stale,
+                    serde_json::to_string(&override_state.patch).map_err(|e| e.to_string())?,
+                ],
+            )
+            .map_err(err)?;
+        }
+    }
+    for (detection_key, divergence_event) in &state.reconciliation_divergences {
+        tx.execute(
+            "INSERT INTO reconciliation_state VALUES (?1, ?2)",
+            rusqlite::params![detection_key, divergence_event],
+        )
+        .map_err(err)?;
+    }
     Ok(())
 }
 
@@ -926,7 +969,13 @@ mod tests {
         belief.basis = schema::BeliefBasis::Unsupported {
             reason: "index fixture without observations".into(),
         };
-        writer
+        // A `.md` subject alias makes the Belief a projection, so the M23
+        // overlay/reconciliation tables get rows too.
+        let schema::SubjectRef::Resolved { aliases, .. } = &mut belief.subject else {
+            unreachable!("the fixture subject is resolved");
+        };
+        *aliases = vec!["concepts/acme.md".into()];
+        let created = writer
             .append(
                 schema::KIND_BELIEF_CREATED,
                 serde_json::to_value(&belief).unwrap(),
@@ -934,6 +983,68 @@ mod tests {
             .unwrap();
         writer
             .append("vault.write", serde_json::json!({ "path": "a.md" }))
+            .unwrap();
+        // One active override and one open divergence — the two M23 tables.
+        let projected = super::super::project::project(&belief.content, &belief.fields);
+        let overridden = "# Acme\n\nAn active vendor.\n";
+        let after = super::super::project::project(overridden, &belief.fields);
+        let (schema_v, actor) = schema_tests::common("human:josef");
+        writer
+            .append(
+                schema::KIND_PROJECTION_OVERRIDDEN,
+                serde_json::to_value(&schema::ProjectionOverridden {
+                    schema: schema_v,
+                    batch_id: None,
+                    idempotency_key: None,
+                    actor,
+                    occurred_at: None,
+                    valid_from: None,
+                    valid_to: None,
+                    belief_id: belief.belief_id.clone(),
+                    path: "concepts/acme.md".into(),
+                    base_belief_revision: 1,
+                    base_belief_revision_event: created.event_id.clone(),
+                    base_generating_event: created.event_id.clone(),
+                    before_projection_hash: crate::ledger::sha256_hex(projected.as_bytes()),
+                    after_projection_hash: crate::ledger::sha256_hex(after.as_bytes()),
+                    origin: schema::OverrideOrigin::InApp,
+                    change: schema::OverrideChange::Set {
+                        patch: vec![schema::OverridePatchOp {
+                            field_path: "/body".into(),
+                            before: schema::TypedValue::string(&belief.content),
+                            after: schema::TypedValue::string(overridden),
+                        }],
+                        supersedes_override_event_ids: vec![],
+                    },
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let (schema_v, actor) = schema_tests::common(schema::ACTOR_RECONCILIATION);
+        writer
+            .append(
+                schema::KIND_LEDGER_DIVERGENCE,
+                serde_json::to_value(&schema::LedgerDivergence {
+                    schema: schema_v,
+                    batch_id: None,
+                    idempotency_key: None,
+                    actor,
+                    occurred_at: None,
+                    valid_from: None,
+                    valid_to: None,
+                    detection_key: crate::ledger::sha256_hex(b"condition"),
+                    signals: vec![schema::DivergenceSignal::ManifestReducerDisagreement],
+                    ledger_head: crate::ledger::sha256_hex(b"head"),
+                    git_anchored_head: None,
+                    remembered_head: None,
+                    manifest_digest: crate::ledger::sha256_hex(b"manifest"),
+                    reducer_projection_digest: crate::ledger::sha256_hex(b"reducer"),
+                    mismatch_count: 1,
+                    projection_count: 1,
+                    sample_paths: vec!["concepts/acme.md".into()],
+                })
+                .unwrap(),
+            )
             .unwrap();
         drop(writer);
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
@@ -946,6 +1057,15 @@ mod tests {
             "the belief materialized: {dump}"
         );
         assert!(dump.contains("belief|"), "state_versions row exists");
+        assert!(
+            dump.contains(&format!("{}|concepts/acme.md|0|1|0|", belief.belief_id))
+                || dump.contains("concepts/acme.md|0|1|0|"),
+            "the active override materialized: {dump}"
+        );
+        assert!(
+            dump.contains(&crate::ledger::sha256_hex(b"condition")),
+            "the open divergence materialized: {dump}"
+        );
 
         // Rebuild from zero twice: byte-identical files, identical dumps.
         let index = index.rebuild(&read, WRITER).unwrap();

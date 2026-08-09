@@ -1716,6 +1716,559 @@ fn scenario_migration() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// A Belief that IS a projection: its subject's `.md` alias claims the
+/// knowledge-relative path.
+fn projection_belief_body(belief_id: &str, entity_id: &str, path: &str) -> BeliefCreated {
+    let mut body = belief_body(belief_id, entity_id, unsupported());
+    body.subject = SubjectRef::Resolved {
+        entity_id: entity_id.into(),
+        aliases: vec![path.into()],
+    };
+    body
+}
+
+fn override_body(
+    belief_id: &str,
+    path: &str,
+    base: (u64, &str, &str),
+    before_bytes: &str,
+    after_bytes: &str,
+    change: OverrideChange,
+) -> ProjectionOverridden {
+    let (schema, batch_id, idempotency_key, actor) = common("human:josef");
+    ProjectionOverridden {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        belief_id: belief_id.into(),
+        path: path.into(),
+        base_belief_revision: base.0,
+        base_belief_revision_event: base.1.into(),
+        base_generating_event: base.2.into(),
+        before_projection_hash: crate::ledger::sha256_hex(before_bytes.as_bytes()),
+        after_projection_hash: crate::ledger::sha256_hex(after_bytes.as_bytes()),
+        origin: OverrideOrigin::InApp,
+        change,
+    }
+}
+
+const BODY_V1: &str = "# Acme\n\nActive vendor.\n";
+const BODY_V2: &str = "# Acme\n\nAn active vendor.\n";
+const ACME_PATH: &str = "concepts/acme.md";
+
+fn acme_projection(body: &str, title: Option<&str>) -> String {
+    let mut fields = serde_json::Map::new();
+    fields.insert("status".into(), serde_json::json!("active"));
+    if let Some(title) = title {
+        fields.insert("title".into(), serde_json::json!(title));
+    }
+    super::project::project(body, &serde_json::Value::Object(fields))
+}
+
+fn body_patch(before: &str, after: &str) -> Vec<OverridePatchOp> {
+    vec![OverridePatchOp {
+        field_path: "/body".into(),
+        before: TypedValue::string(before),
+        after: TypedValue::string(after),
+    }]
+}
+
+fn scenario_overrides() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF, ENTITY, ACME_PATH),
+    );
+
+    // Set #1: an editorial body rewrite over the canonical projection.
+    let set1 = b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &created),
+            &acme_projection(BODY_V1, None),
+            &acme_projection(BODY_V2, None),
+            OverrideChange::Set {
+                patch: body_patch(BODY_V1, BODY_V2),
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+
+    // Set #2 SUPERSEDES #1: body returns to canon, a presentation title
+    // appears instead. Its base head is set #1's event, not the revision.
+    let set2 = b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &set1),
+            &acme_projection(BODY_V2, None),
+            &acme_projection(BODY_V1, Some("Acme (vendor)")),
+            OverrideChange::Set {
+                patch: vec![OverridePatchOp {
+                    field_path: "/fields/title".into(),
+                    before: TypedValue::Missing,
+                    after: TypedValue::string("Acme (vendor)"),
+                }],
+                supersedes_override_event_ids: vec![set1.clone()],
+            },
+        ),
+    );
+
+    // Wrong base: the projection head advanced (byte-identically or not);
+    // a stale generating event is refused.
+    b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &set1),
+            &acme_projection(BODY_V1, Some("Acme (vendor)")),
+            &acme_projection(BODY_V2, Some("Acme (vendor)")),
+            OverrideChange::Set {
+                patch: body_patch(BODY_V1, BODY_V2),
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+
+    // Before mismatch: right hashes shape, wrong op before-value.
+    b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &set2),
+            &acme_projection(BODY_V1, Some("Acme (vendor)")),
+            &acme_projection(BODY_V2, Some("Acme (vendor)")),
+            OverrideChange::Set {
+                patch: body_patch("# Acme\n\nNever the projected body.\n", BODY_V2),
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+
+    // Illegal pointer: provenance is never an override target.
+    b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &set2),
+            &acme_projection(BODY_V1, Some("Acme (vendor)")),
+            &acme_projection(BODY_V1, Some("Acme (vendor)")),
+            OverrideChange::Set {
+                patch: vec![OverridePatchOp {
+                    field_path: "/fields/verified".into(),
+                    before: TypedValue::Missing,
+                    after: TypedValue::string("forged"),
+                }],
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+
+    // Evidence exclusion: an override event can never be basis or lineage.
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(
+            BELIEF_B,
+            ENTITY_B,
+            BeliefBasis::Linked {
+                links: vec![BasisLink {
+                    observation_event_id: set2.clone(),
+                    role: BasisRole::Context,
+                }],
+            },
+        ),
+    );
+
+    // A Belief that is not a projection cannot be overridden.
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
+    b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF_B,
+            "concepts/other.md",
+            (1, &created, &created),
+            BODY_V1,
+            BODY_V2,
+            OverrideChange::Set {
+                patch: body_patch(BODY_V1, BODY_V2),
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+
+    // Clear #2: the canonical projection returns; history and the head
+    // advance — an override clear is a projection-state transition.
+    let clear = b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &set2),
+            &acme_projection(BODY_V1, Some("Acme (vendor)")),
+            &acme_projection(BODY_V1, None),
+            OverrideChange::Clear {
+                override_event_ids: vec![set2.clone()],
+                reason: "maintenance retired the presentation tweak".into(),
+            },
+        ),
+    );
+
+    // Clearing something that is not active: refused.
+    b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &clear),
+            &acme_projection(BODY_V1, None),
+            &acme_projection(BODY_V1, None),
+            OverrideChange::Clear {
+                override_event_ids: vec![set1.clone()],
+                reason: "already gone".into(),
+            },
+        ),
+    );
+
+    // A fresh set, then a REVISION: the overlay stays active, marked stale.
+    let set3 = b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &clear),
+            &acme_projection(BODY_V1, None),
+            &acme_projection(BODY_V2, None),
+            OverrideChange::Set {
+                patch: body_patch(BODY_V1, BODY_V2),
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+    let _ = set3;
+    b.push_body(
+        KIND_BELIEF_REVISED,
+        &revised_body(
+            BELIEF,
+            vec![PatchOp {
+                field_path: "/fields/status".into(),
+                before: TypedValue::string("active"),
+                after: TypedValue::string("paused"),
+            }],
+            unsupported(),
+        ),
+    );
+    (
+        "overrides",
+        "Override set/supersede/clear mutate only the projection overlay and bump the Belief \
+         version; wrong base, stale head, before mismatch, illegal pointers, non-projection \
+         targets, and evidence use are refused; a revision marks the overlay stale, never \
+         clears it.",
+        b.frames,
+    )
+}
+
+fn scenario_projection_identity() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF, ENTITY, ACME_PATH),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF_B, ENTITY_B, "concepts/other.md"),
+    );
+
+    // Attestation: bytes identical, identity advances.
+    let projected = acme_projection(BODY_V1, None);
+    let (schema, batch_id, idempotency_key, actor) = common("human:josef");
+    b.push_body(
+        KIND_BELIEF_ATTESTED,
+        &BeliefAttested {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF.into(),
+            attested_belief_revision_event_id: created.clone(),
+            attested_content_hash: schema::belief::attested_content_hash(projected.as_bytes()),
+        },
+    );
+    // Relation add and remove: the FROM Belief's identity advances twice.
+    b.push_body(
+        KIND_BELIEF_RELATION,
+        &relation_body(BELIEF, BELIEF_B, RelationKind::Refines, RelationAction::Add),
+    );
+    b.push_body(
+        KIND_BELIEF_RELATION,
+        &relation_body(
+            BELIEF,
+            BELIEF_B,
+            RelationKind::Refines,
+            RelationAction::Remove,
+        ),
+    );
+    // Alias addition on the subject Entity: identity advances again.
+    b.push_body(KIND_ENTITY_ALIAS_ADDED, &alias_body(ENTITY, "Acme Corp"));
+    // Override set, then clear: bytes return to canon; identity does not.
+    let head_after_alias = b.frames.last().unwrap().event_id.clone();
+    let set = b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &head_after_alias),
+            &acme_projection(BODY_V1, None),
+            &acme_projection(BODY_V2, None),
+            OverrideChange::Set {
+                patch: body_patch(BODY_V1, BODY_V2),
+                supersedes_override_event_ids: vec![],
+            },
+        ),
+    );
+    b.push_body(
+        KIND_PROJECTION_OVERRIDDEN,
+        &override_body(
+            BELIEF,
+            ACME_PATH,
+            (1, &created, &set),
+            &acme_projection(BODY_V2, None),
+            &acme_projection(BODY_V1, None),
+            OverrideChange::Clear {
+                override_event_ids: vec![set.clone()],
+                reason: "canon restored".into(),
+            },
+        ),
+    );
+    (
+        "projection-identity",
+        "Every projection-state transition — attestation, relation add/remove, alias addition, \
+         override set/clear — advances the generating event and state digest, even when the \
+         projected bytes are identical to an earlier state.",
+        b.frames,
+    )
+}
+
+fn path_digest(entries: &[(&str, &str)]) -> String {
+    let list: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(path, bytes)| {
+            serde_json::json!({
+                "path": path,
+                "content_hash": crate::ledger::sha256_hex(bytes.as_bytes()),
+            })
+        })
+        .collect();
+    crate::ledger::sha256_hex(serde_json::to_string(&list).unwrap().as_bytes())
+}
+
+fn scenario_reconciliation() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF, ENTITY, ACME_PATH),
+    );
+
+    let divergence = |key: &[u8], signals: Vec<DivergenceSignal>| {
+        let (schema, batch_id, idempotency_key, actor) = common(ACTOR_RECONCILIATION);
+        LedgerDivergence {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            detection_key: crate::ledger::sha256_hex(key),
+            signals,
+            ledger_head: crate::ledger::sha256_hex(b"head"),
+            git_anchored_head: None,
+            remembered_head: Some(crate::ledger::sha256_hex(b"remembered")),
+            manifest_digest: crate::ledger::sha256_hex(b"manifest"),
+            reducer_projection_digest: crate::ledger::sha256_hex(b"reducer"),
+            mismatch_count: 1,
+            projection_count: 1,
+            sample_paths: vec![ACME_PATH.into()],
+        }
+    };
+    let resolution = |divergence_event: &str,
+                      action: ReconciliationAction,
+                      batch: Option<&str>,
+                      digest: &str| {
+        let (schema, _, idempotency_key, actor) = common(ACTOR_RECONCILIATION);
+        ReconciliationResolved {
+            schema,
+            batch_id: batch.map(str::to_string),
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            divergence_event_id: divergence_event.into(),
+            action,
+            affected_paths: vec![ACME_PATH.into()],
+            capture_batch_ids: batch.map(str::to_string).into_iter().collect(),
+            accepted_files_digest: matches!(action, ReconciliationAction::AcceptCurrentFiles)
+                .then(|| digest.to_string()),
+            resulting_projection_digest: digest.to_string(),
+        }
+    };
+
+    // Open the mode; the duplicate key is refused (append-once's reducer
+    // half); a second detection key is ABSORBED, never a second mode.
+    let first = b.push_body(
+        KIND_LEDGER_DIVERGENCE,
+        &divergence(
+            b"condition-1",
+            vec![DivergenceSignal::ManifestReducerDisagreement],
+        ),
+    );
+    b.push_body(
+        KIND_LEDGER_DIVERGENCE,
+        &divergence(
+            b"condition-1",
+            vec![DivergenceSignal::MassProjectionMismatch],
+        ),
+    );
+    let second = b.push_body(
+        KIND_LEDGER_DIVERGENCE,
+        &divergence(
+            b"condition-2",
+            vec![DivergenceSignal::MigrationSourceChanged],
+        ),
+    );
+    let _ = second;
+
+    // A resolution naming a non-divergence event: wrong, refused.
+    let canon = acme_projection(BODY_V1, None);
+    let canon_digest = path_digest(&[(ACME_PATH, &canon)]);
+    b.push_body(
+        KIND_RECONCILIATION_RESOLVED,
+        &resolution(
+            &created,
+            ReconciliationAction::RestoreLedgerAuthority,
+            None,
+            &canon_digest,
+        ),
+    );
+    // A digest that does not match the reducer projections: refused.
+    b.push_body(
+        KIND_RECONCILIATION_RESOLVED,
+        &resolution(
+            &first,
+            ReconciliationAction::RestoreLedgerAuthority,
+            None,
+            &crate::ledger::sha256_hex(b"not the projections"),
+        ),
+    );
+    // The valid restore: proves the reducer projections and closes the
+    // whole mode — both detection keys resolve together.
+    b.push_body(
+        KIND_RECONCILIATION_RESOLVED,
+        &resolution(
+            &first,
+            ReconciliationAction::RestoreLedgerAuthority,
+            None,
+            &canon_digest,
+        ),
+    );
+    // Stale: the mode is closed; the same reference no longer resolves.
+    b.push_body(
+        KIND_RECONCILIATION_RESOLVED,
+        &resolution(
+            &first,
+            ReconciliationAction::RestoreLedgerAuthority,
+            None,
+            &canon_digest,
+        ),
+    );
+
+    // Accept-current-files: a new divergence, then ONE logical batch holding
+    // the adoption override and the resolution whose digests match the
+    // staged projection.
+    let third = b.push_body(
+        KIND_LEDGER_DIVERGENCE,
+        &divergence(
+            b"condition-3",
+            vec![DivergenceSignal::MassProjectionMismatch],
+        ),
+    );
+    let adopted = acme_projection(BODY_V2, None);
+    let adopted_digest = path_digest(&[(ACME_PATH, &adopted)]);
+    let batch_id = "beefbeefbeefbeefbeefbeefbeef0201";
+    let adoption_override = override_body(
+        BELIEF,
+        ACME_PATH,
+        (1, &created, &created),
+        &canon,
+        &adopted,
+        OverrideChange::Set {
+            patch: body_patch(BODY_V1, BODY_V2),
+            supersedes_override_event_ids: vec![],
+        },
+    );
+    b.push_batch(
+        batch_id,
+        vec![
+            (
+                KIND_PROJECTION_OVERRIDDEN.into(),
+                serde_json::to_value(&adoption_override).unwrap(),
+            ),
+            (
+                KIND_RECONCILIATION_RESOLVED.into(),
+                serde_json::to_value(resolution(
+                    &third,
+                    ReconciliationAction::AcceptCurrentFiles,
+                    Some(batch_id),
+                    &adopted_digest,
+                ))
+                .unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // Uncommitted: divergence and resolution members without a marker have
+    // ZERO state effect — the mode stays closed.
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0202",
+        vec![(
+            KIND_LEDGER_DIVERGENCE.into(),
+            serde_json::to_value(divergence(
+                b"condition-4",
+                vec![DivergenceSignal::GitAnchorRegression],
+            ))
+            .unwrap(),
+        )],
+        false,
+        None,
+    );
+    (
+        "reconciliation",
+        "One divergence per detection key opens (or is absorbed into) the single reconciliation \
+         mode; a resolution closes it only by referencing an active divergence with digests the \
+         reducer projections prove; wrong, stale, mismatched, and uncommitted events have no \
+         effect.",
+        b.frames,
+    )
+}
+
 // --- Generation ------------------------------------------------------------
 
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
@@ -1734,6 +2287,9 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_derived_sources(),
         scenario_plumbing(),
         scenario_migration(),
+        scenario_overrides(),
+        scenario_projection_identity(),
+        scenario_reconciliation(),
     ]
 }
 
@@ -1910,6 +2466,9 @@ fn the_vector_suite_covers_every_kind() {
         KIND_ENTITY_ALIAS_ADDED,
         KIND_MIGRATION_STARTED,
         KIND_MIGRATION_COMPLETED,
+        KIND_PROJECTION_OVERRIDDEN,
+        KIND_LEDGER_DIVERGENCE,
+        KIND_RECONCILIATION_RESOLVED,
     ] {
         assert!(kinds.contains(kind), "no vector exercises {kind}");
     }

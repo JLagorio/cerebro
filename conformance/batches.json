@@ -915,7 +915,17 @@
         "attested": null,
         "revision_events": [
           "00000000000000000000000000000003"
-        ]
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000003",
+          "state_digest": "f9feb557e54ae6033c21855c94ecfbf9db3582a9bb5c7a0084ea6131d45d765a",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
       }
     },
     "relations": {},
@@ -969,7 +979,12 @@
         "orphaned",
         1
       ]
-    ]
+    ],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
   },
   "expected_refusals": [
     {

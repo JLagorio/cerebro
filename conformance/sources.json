@@ -290,7 +290,12 @@
       "source:c8147897afd510dad9278f297ba49115": 1,
       "source:d89318cdd73ee2a9db48ab151c0445eb": 1
     },
-    "batches": []
+    "batches": [],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
   },
   "expected_refusals": [
     {

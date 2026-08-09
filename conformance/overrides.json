@@ -1,0 +1,684 @@
+{
+  "name": "overrides",
+  "description": "Override set/supersede/clear mutate only the projection overlay and bump the Belief version; wrong base, stale head, before mismatch, illegal pointers, non-projection targets, and evidence use are refused; a revision marks the overlay stale, never clears it.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "f42643a823ed606829aa739d537ad405943076efd3fbdbdf6f0a3f9306b465c5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "f42643a823ed606829aa739d537ad405943076efd3fbdbdf6f0a3f9306b465c5",
+      "hash": "a5100ced7dc972d1bb242662d9f5a226d6b16a322d7edae983e5b0691d16f4a8",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000001",
+        "before_projection_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+        "after_projection_hash": "5df42a3e1b35074caf7d2bf4b9b13d2b9f1cf5db56883136a60c8cac33476ed4",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/body",
+              "before": {
+                "type": "string",
+                "value": "# Acme\n\nActive vendor.\n"
+              },
+              "after": {
+                "type": "string",
+                "value": "# Acme\n\nAn active vendor.\n"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "a5100ced7dc972d1bb242662d9f5a226d6b16a322d7edae983e5b0691d16f4a8",
+      "hash": "bebb602f11037c28807362bb174e5ac5bb294ab8584ba2a254e3103e4f161687",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000002",
+        "before_projection_hash": "5df42a3e1b35074caf7d2bf4b9b13d2b9f1cf5db56883136a60c8cac33476ed4",
+        "after_projection_hash": "43867e48a6d1b0ccf3ed1c584d99f40d5cb240d94ab0ebf3fae8cc6003035c22",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/fields/title",
+              "before": {
+                "type": "missing"
+              },
+              "after": {
+                "type": "string",
+                "value": "Acme (vendor)"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": [
+            "00000000000000000000000000000002"
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "bebb602f11037c28807362bb174e5ac5bb294ab8584ba2a254e3103e4f161687",
+      "hash": "f1cefd2d0ccd6aa8c1e66c4e632e3e50a9747258c0dc62f6a2100cb03710ead5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000002",
+        "before_projection_hash": "43867e48a6d1b0ccf3ed1c584d99f40d5cb240d94ab0ebf3fae8cc6003035c22",
+        "after_projection_hash": "0c80434dda85ae5184773b4b5ab965bd1ecb4f6e4128cbabd5f0a3649726fbc2",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/body",
+              "before": {
+                "type": "string",
+                "value": "# Acme\n\nActive vendor.\n"
+              },
+              "after": {
+                "type": "string",
+                "value": "# Acme\n\nAn active vendor.\n"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "f1cefd2d0ccd6aa8c1e66c4e632e3e50a9747258c0dc62f6a2100cb03710ead5",
+      "hash": "a314d5c354b0ff3509cbaadbcc8069f83919f2a1fe38b73725a8e7ec1b9bdb71",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000003",
+        "before_projection_hash": "43867e48a6d1b0ccf3ed1c584d99f40d5cb240d94ab0ebf3fae8cc6003035c22",
+        "after_projection_hash": "0c80434dda85ae5184773b4b5ab965bd1ecb4f6e4128cbabd5f0a3649726fbc2",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/body",
+              "before": {
+                "type": "string",
+                "value": "# Acme\n\nNever the projected body.\n"
+              },
+              "after": {
+                "type": "string",
+                "value": "# Acme\n\nAn active vendor.\n"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "a314d5c354b0ff3509cbaadbcc8069f83919f2a1fe38b73725a8e7ec1b9bdb71",
+      "hash": "ff7836bb6d289d5f5d78f7ee588d4c6d12fceb4de4996ad7b282c581f4efb724",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000003",
+        "before_projection_hash": "43867e48a6d1b0ccf3ed1c584d99f40d5cb240d94ab0ebf3fae8cc6003035c22",
+        "after_projection_hash": "43867e48a6d1b0ccf3ed1c584d99f40d5cb240d94ab0ebf3fae8cc6003035c22",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/fields/verified",
+              "before": {
+                "type": "missing"
+              },
+              "after": {
+                "type": "string",
+                "value": "forged"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "ff7836bb6d289d5f5d78f7ee588d4c6d12fceb4de4996ad7b282c581f4efb724",
+      "hash": "aea2f7e69afa6926bfaaae14bb3a00a0ce39c4688a7926632aa9e940c3d093b4",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "linked",
+          "links": [
+            {
+              "observation_event_id": "00000000000000000000000000000003",
+              "role": "context"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "aea2f7e69afa6926bfaaae14bb3a00a0ce39c4688a7926632aa9e940c3d093b4",
+      "hash": "016e339792f6935c7dcfc3ca2461ed8a86d50b05d7f79fba11178ff689878392",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "dddddddddddddddddddddddddddddddd",
+          "aliases": [
+            "Acme Corp"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "016e339792f6935c7dcfc3ca2461ed8a86d50b05d7f79fba11178ff689878392",
+      "hash": "37bbf8da3268ec27a7d310c4243e86f6a873dc9def8a3e5673932953d3b714a3",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "ffffffffffffffffffffffffffffffff",
+        "path": "concepts/other.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000001",
+        "before_projection_hash": "200e1f492b8f5df7776041b91fa5f8b0441300b4649ec84af78f4cb40710cfc8",
+        "after_projection_hash": "c7390cce4017a9989b40adbcdc9f28209fb15a108ac0737e411996bc98657115",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/body",
+              "before": {
+                "type": "string",
+                "value": "# Acme\n\nActive vendor.\n"
+              },
+              "after": {
+                "type": "string",
+                "value": "# Acme\n\nAn active vendor.\n"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "37bbf8da3268ec27a7d310c4243e86f6a873dc9def8a3e5673932953d3b714a3",
+      "hash": "1e15668dd93cedda288a66a52d4a11b8817c40ce197ae5126ebc4e61fb28f2a1",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000003",
+        "before_projection_hash": "43867e48a6d1b0ccf3ed1c584d99f40d5cb240d94ab0ebf3fae8cc6003035c22",
+        "after_projection_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+        "origin": "in_app",
+        "change": {
+          "action": "clear",
+          "override_event_ids": [
+            "00000000000000000000000000000003"
+          ],
+          "reason": "maintenance retired the presentation tweak"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "1e15668dd93cedda288a66a52d4a11b8817c40ce197ae5126ebc4e61fb28f2a1",
+      "hash": "f4ac791d9ad72e740859b6d9760b48b703f3b9dfb015dcd4c036c028a8b27e80",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "0000000000000000000000000000000a",
+        "before_projection_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+        "after_projection_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+        "origin": "in_app",
+        "change": {
+          "action": "clear",
+          "override_event_ids": [
+            "00000000000000000000000000000002"
+          ],
+          "reason": "already gone"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "f4ac791d9ad72e740859b6d9760b48b703f3b9dfb015dcd4c036c028a8b27e80",
+      "hash": "6920bc00b637cb27978c5368a684d362905bca897e898e0a68104eb8c4149a72",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "0000000000000000000000000000000a",
+        "before_projection_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+        "after_projection_hash": "5df42a3e1b35074caf7d2bf4b9b13d2b9f1cf5db56883136a60c8cac33476ed4",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/body",
+              "before": {
+                "type": "string",
+                "value": "# Acme\n\nActive vendor.\n"
+              },
+              "after": {
+                "type": "string",
+                "value": "# Acme\n\nAn active vendor.\n"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "6920bc00b637cb27978c5368a684d362905bca897e898e0a68104eb8c4149a72",
+      "hash": "cee55d93155a55a4e50fdf7e18a2b3b7e0249e18088d678a3d0ad7581b090b95",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.revised",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "patch": [
+          {
+            "field_path": "/fields/status",
+            "before": {
+              "type": "string",
+              "value": "active"
+            },
+            "after": {
+              "type": "string",
+              "value": "paused"
+            }
+          }
+        ],
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000001",
+      "dddddddddddddddddddddddddddddddd": "00000000000000000000000000000008"
+    },
+    "aliases": {},
+    "observations": {},
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 2,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "paused"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000001",
+          "0000000000000000000000000000000d"
+        ],
+        "projection": {
+          "path": "concepts/acme.md",
+          "generating_event": "0000000000000000000000000000000d",
+          "state_digest": "0a5ff5f0ee9dad977d693e8e9860b61acc9e3047fba8d3dedcb43a2385065d39",
+          "content_hash": "6de5b5c987a1a2ab8448207e8d4fd61d2b73953be1c1c0d00c809b9a300e3728",
+          "review_event_ids": [],
+          "active_overrides": [
+            "0000000000000000000000000000000c"
+          ],
+          "stale_overrides": [
+            "0000000000000000000000000000000c"
+          ],
+          "override_head": "0000000000000000000000000000000c"
+        }
+      },
+      "ffffffffffffffffffffffffffffffff": {
+        "entity_id": "dddddddddddddddddddddddddddddddd",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000008"
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000008",
+          "state_digest": "9b28c54d838c6f47d0f7ba200dc3f6dead9040d0431b77cc59098b1ece4d1189",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 6,
+      "belief:ffffffffffffffffffffffffffffffff": 1,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "entity:dddddddddddddddddddddddddddddddd": 1
+    },
+    "batches": [],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "override base generating event 00000000000000000000000000000002 is not the projection head 00000000000000000000000000000003 — the projection state advanced (possibly byte-identically) since this edit was computed"
+    },
+    {
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "override before-value does not match the projected state at /body"
+    },
+    {
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "override pointer \"/fields/verified\" targets an epistemic or provenance field — only /body and declared presentation-only fields (title, tags) may be overridden"
+    },
+    {
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "basis link 00000000000000000000000000000003 is not an Observation — attestations and overrides are never evidence"
+    },
+    {
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "the Belief is not a projection — it claimed no projection path at creation"
+    },
+    {
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "clear names 00000000000000000000000000000002, which is not an active override"
+    }
+  ]
+}

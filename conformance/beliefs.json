@@ -582,7 +582,17 @@
           "00000000000000000000000000000008",
           "0000000000000000000000000000000b",
           "0000000000000000000000000000000c"
-        ]
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "0000000000000000000000000000000c",
+          "state_digest": "2fc10fc6658895a6b15777d5f7c91279203ebda6714cd74f2aec371e4cb5cf95",
+          "content_hash": "0ca68445f05a61e8c481b45c85be594831563f19d66385120c3596f14d541c7d",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
       }
     },
     "relations": {},
@@ -596,7 +606,12 @@
       "observation:00000000000000000000000000000003": 1,
       "source:c8147897afd510dad9278f297ba49115": 3
     },
-    "batches": []
+    "batches": [],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
   },
   "expected_refusals": [
     {

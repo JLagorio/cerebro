@@ -70,12 +70,29 @@ interface RevisionState {
   basis: JsonObject;
 }
 
+interface OverrideState {
+  eventId: string;
+  baseBeliefRevision: number;
+  patch: JsonObject[];
+  stale: boolean;
+}
+
 interface BeliefState {
   beliefId: string;
   entityId: string;
   createdEventId: string;
   revisions: RevisionState[];
   attested: [string, string] | null;
+  /** Every APPLIED attestation event, fold order. */
+  attestationEvents: string[];
+  /** The knowledge-relative projection path claimed at creation. */
+  path: string | null;
+  /** Active editorial overlays in application order. */
+  overrides: OverrideState[];
+  /** The latest override set/supersede/clear event, clear included. */
+  overrideHeadEvent: string | null;
+  /** The highest-seq projection-state transition event. */
+  projectionHeadEvent: string;
 }
 
 interface RelationState {
@@ -111,6 +128,12 @@ interface MigrationEpoch {
   completed: boolean;
 }
 
+interface ReconciliationLogRow {
+  eventId: string;
+  divergenceEventId: string;
+  action: string;
+}
+
 export interface EpistemicState {
   sources: Map<string, SourceState>;
   sourceKeys: Map<string, string>;
@@ -132,6 +155,11 @@ export interface EpistemicState {
   batches: BatchRow[];
   anomalies: Anomaly[];
   migration: MigrationEpoch | null;
+  /** knowledge-relative projection path → Belief id. */
+  projectionPaths: Map<string, string>;
+  /** Active divergences: detection_key → divergence event id. */
+  reconciliationDivergences: Map<string, string>;
+  reconciliationLog: ReconciliationLogRow[];
 }
 
 function emptyState(): EpistemicState {
@@ -156,6 +184,9 @@ function emptyState(): EpistemicState {
     batches: [],
     anomalies: [],
     migration: null,
+    projectionPaths: new Map(),
+    reconciliationDivergences: new Map(),
+    reconciliationLog: [],
   };
 }
 
@@ -359,6 +390,12 @@ function apply(
       return applyMigrationStarted(state, body);
     case 'migration.completed':
       return applyMigrationCompleted(state, body);
+    case 'projection.overridden':
+      return applyOverride(state, frame, body);
+    case 'ledger.divergence':
+      return applyDivergence(state, frame, body);
+    case 'ledger.reconciliation_resolved':
+      return applyReconciliationResolved(state, frame, body);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
@@ -763,6 +800,15 @@ function applyBeliefCreated(state: EpistemicState, frame: VectorFrame, body: Jso
     state.entities.set(entityId, frame.event_id);
     createVersion(state, 'entity', entityId, frame.event_id);
   }
+  // The projection-path claim: the first `.md` subject alias names the
+  // knowledge-relative file this Belief projects to. One Belief per path.
+  const path = (subject.aliases as string[]).find((a) => a.endsWith('.md')) ?? null;
+  if (path !== null) {
+    if (state.projectionPaths.has(path)) {
+      throw new RefusedError(`projection path ${path} is already claimed`);
+    }
+    state.projectionPaths.set(path, beliefId);
+  }
   state.entityRegistrations.set(frame.event_id, [entityId, subject.aliases as string[]]);
   state.beliefs.set(beliefId, {
     beliefId,
@@ -778,6 +824,11 @@ function applyBeliefCreated(state: EpistemicState, frame: VectorFrame, body: Jso
       },
     ],
     attested: null,
+    attestationEvents: [],
+    path,
+    overrides: [],
+    overrideHeadEvent: null,
+    projectionHeadEvent: frame.event_id,
   });
   state.beliefRevisionEvents.set(frame.event_id, [beliefId, 1]);
   createVersion(state, 'belief', beliefId, frame.event_id);
@@ -826,6 +877,10 @@ function applyBeliefRevised(state: EpistemicState, frame: VectorFrame, body: Jso
     fields,
     basis: body.basis as JsonObject,
   });
+  // A revision never silently clears a human overlay: it stays active and
+  // is marked stale against its base revision.
+  for (const override of belief.overrides) override.stale = true;
+  belief.projectionHeadEvent = frame.event_id;
   state.beliefRevisionEvents.set(frame.event_id, [belief.beliefId, revision]);
   bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
 }
@@ -952,6 +1007,9 @@ function applyRelation(state: EpistemicState, frame: VectorFrame, body: JsonObje
     existing.lastEventId = frame.event_id;
     bumpVersion(state, 'relation', relationId, frame.event_id);
   }
+  // Both transitions move the FROM Belief's projection identity.
+  const fromBelief = state.beliefs.get(body.from as string);
+  if (fromBelief) fromBelief.projectionHeadEvent = frame.event_id;
 }
 
 function applyAttested(
@@ -977,6 +1035,8 @@ function applyAttested(
     throw new RefusedError('attested_content_hash does not match the projection');
   }
   belief.attested = [frame.event_id, revisionEvent];
+  belief.attestationEvents.push(frame.event_id);
+  belief.projectionHeadEvent = frame.event_id;
   bumpVersion(state, 'belief', beliefId, frame.event_id);
 }
 
@@ -993,7 +1053,191 @@ function applyAlias(state: EpistemicState, frame: VectorFrame, body: JsonObject)
     eventId: frame.event_id,
   });
   state.aliasEvents.set(frame.event_id, [entityId, normalized]);
+  // A live subject alias is descriptor state for every Belief about the
+  // Entity: their projection identity advances even byte-identically.
+  for (const belief of state.beliefs.values()) {
+    if (belief.entityId === entityId) belief.projectionHeadEvent = frame.event_id;
+  }
   bumpVersion(state, 'entity', entityId, frame.event_id);
+}
+
+// --- the M23 projection overlay + reconciliation fold ----------------------
+
+const pointerTokens = (path: string): string[] =>
+  path
+    .slice('/fields/'.length)
+    .split('/')
+    .map((t) => t.replace(/~1/g, '/').replace(/~0/g, '~'));
+
+/** Apply one overlay op WITHOUT preconditions — an op a later revision made
+ * inapplicable is skipped deterministically, never an error. */
+function applyOverlayOp(carrier: { content: string; fields: JsonObject }, op: JsonObject): void {
+  const path = op.field_path as string;
+  const after = op.after as JsonObject;
+  if (path === '/body') {
+    if (after.type === 'string') carrier.content = after.value as string;
+    return;
+  }
+  try {
+    setTypedAt(carrier.fields, pointerTokens(path), after);
+  } catch (error) {
+    if (!(error instanceof RefusedError)) throw error;
+  }
+}
+
+/** Canonical projection state with the active overlay applied. */
+function overlaid(belief: BeliefState): { content: string; fields: JsonObject } {
+  const current = belief.revisions[belief.revisions.length - 1];
+  const carrier = { content: current.content, fields: structuredClone(current.fields) };
+  for (const override of belief.overrides) {
+    for (const op of override.patch) applyOverlayOp(carrier, op);
+  }
+  return carrier;
+}
+
+function projected(belief: BeliefState): string {
+  const carrier = overlaid(belief);
+  return project(carrier.content, carrier.fields as Json);
+}
+
+/** The canonical projection-state descriptor — field order IS the digest
+ * input; must serialize byte-identically to Rust's serde output. */
+function descriptor(state: EpistemicState, belief: BeliefState): JsonObject {
+  const relationHeads: JsonObject[] = [];
+  for (const [, relation] of sorted([...state.relations.entries()])) {
+    if (relation.from === belief.beliefId) {
+      relationHeads.push({ relation_id: relation.relationId, event_id: relation.lastEventId });
+    }
+  }
+  const aliasEvents: string[] = [];
+  for (const [, alias] of sorted([...state.aliasRegistry.entries()])) {
+    if (alias.entityId === belief.entityId) aliasEvents.push(alias.eventId);
+  }
+  return {
+    belief_revision_event: belief.revisions[belief.revisions.length - 1].eventId,
+    review_event_ids: [...belief.attestationEvents],
+    relation_transition_heads: relationHeads,
+    alias_event_ids: aliasEvents,
+    active_override_event_ids: belief.overrides.map((o) => o.eventId),
+    override_head_event_id: belief.overrideHeadEvent,
+  };
+}
+
+function applyOverride(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const belief = state.beliefs.get(body.belief_id as string);
+  if (!belief) throw new RefusedError('belief does not exist');
+  if (belief.path === null) {
+    throw new RefusedError('the Belief is not a projection — it claimed no path');
+  }
+  if (belief.path !== body.path) {
+    throw new RefusedError('override path does not match the projection path');
+  }
+  const current = belief.revisions[belief.revisions.length - 1];
+  if (
+    body.base_belief_revision !== current.revision ||
+    body.base_belief_revision_event !== current.eventId
+  ) {
+    throw new RefusedError('override base is not the current revision — wrong base');
+  }
+  if (body.base_generating_event !== belief.projectionHeadEvent) {
+    throw new RefusedError('override base generating event is not the projection head');
+  }
+  if (sha256Hex(projected(belief)) !== body.before_projection_hash) {
+    throw new RefusedError('before_projection_hash does not match the current projection');
+  }
+
+  const change = body.change as JsonObject;
+  let next: OverrideState[];
+  if (change.action === 'set') {
+    const supersedes = change.supersedes_override_event_ids as string[];
+    for (const id of supersedes) {
+      if (!belief.overrides.some((o) => o.eventId === id)) {
+        throw new RefusedError('supersedes names a non-active override');
+      }
+    }
+    const carrier = overlaid(belief);
+    for (const op of change.patch as JsonObject[]) {
+      const path = op.field_path as string;
+      const currentValue =
+        path === '/body'
+          ? typedString(carrier.content)
+          : typedAt(carrier.fields, pointerTokens(path));
+      if (canonicalJson(op.before as Json) !== canonicalJson(currentValue)) {
+        throw new RefusedError('override before-value does not match the projected state');
+      }
+      if (path === '/body' && (op.after as JsonObject).type !== 'string') {
+        throw new RefusedError('the body override must stay a string');
+      }
+    }
+    next = belief.overrides.filter((o) => !supersedes.includes(o.eventId));
+    next.push({
+      eventId: frame.event_id,
+      baseBeliefRevision: current.revision,
+      patch: change.patch as JsonObject[],
+      stale: false,
+    });
+  } else {
+    const cleared = change.override_event_ids as string[];
+    for (const id of cleared) {
+      if (!belief.overrides.some((o) => o.eventId === id)) {
+        throw new RefusedError('clear names a non-active override');
+      }
+    }
+    next = belief.overrides.filter((o) => !cleared.includes(o.eventId));
+  }
+
+  // The after-hash proof against the WOULD-BE overlay before any mutation.
+  const carrier = { content: current.content, fields: structuredClone(current.fields) };
+  for (const override of next) {
+    for (const op of override.patch) applyOverlayOp(carrier, op);
+  }
+  if (sha256Hex(project(carrier.content, carrier.fields as Json)) !== body.after_projection_hash) {
+    throw new RefusedError('after_projection_hash does not reproduce from the declared change');
+  }
+
+  belief.overrides = next;
+  belief.overrideHeadEvent = frame.event_id;
+  belief.projectionHeadEvent = frame.event_id;
+  bumpVersion(state, 'belief', belief.beliefId, frame.event_id);
+}
+
+function applyDivergence(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const key = body.detection_key as string;
+  if (state.reconciliationDivergences.has(key)) {
+    throw new RefusedError('detection key is already open');
+  }
+  state.reconciliationDivergences.set(key, frame.event_id);
+}
+
+function applyReconciliationResolved(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+): void {
+  const divergenceEvent = body.divergence_event_id as string;
+  let active = false;
+  for (const event of state.reconciliationDivergences.values()) {
+    if (event === divergenceEvent) active = true;
+  }
+  if (!active) throw new RefusedError('divergence is not active — wrong or stale resolution');
+  const entries: Json[] = [];
+  for (const path of body.affected_paths as string[]) {
+    const beliefId = state.projectionPaths.get(path);
+    if (beliefId === undefined) {
+      throw new RefusedError('affected path is not a known projection');
+    }
+    const belief = state.beliefs.get(beliefId) as BeliefState;
+    entries.push({ path, content_hash: sha256Hex(projected(belief)) });
+  }
+  if (sha256Hex(canonicalJson(entries)) !== body.resulting_projection_digest) {
+    throw new RefusedError('resulting_projection_digest does not match the reducer projections');
+  }
+  state.reconciliationDivergences.clear();
+  state.reconciliationLog.push({
+    eventId: frame.event_id,
+    divergenceEventId: divergenceEvent,
+    action: body.action as string,
+  });
 }
 
 function applyMigrationStarted(state: EpistemicState, body: JsonObject): void {
@@ -1076,6 +1320,16 @@ export function vectorState(state: EpistemicState): Json {
       basis: current.basis,
       attested: b.attested ? [b.attested[0], b.attested[1]] : null,
       revision_events: b.revisions.map((r) => r.eventId),
+      projection: {
+        path: b.path,
+        generating_event: b.projectionHeadEvent,
+        state_digest: sha256Hex(canonicalJson(descriptor(state, b) as Json)),
+        content_hash: sha256Hex(projected(b)),
+        review_event_ids: [...b.attestationEvents],
+        active_overrides: b.overrides.map((o) => o.eventId),
+        stale_overrides: b.overrides.filter((o) => o.stale).map((o) => o.eventId),
+        override_head: b.overrideHeadEvent,
+      },
     };
   }
   const relations: JsonObject = {};
@@ -1106,5 +1360,14 @@ export function vectorState(state: EpistemicState): Json {
     derived_belief_sources: state.derivedBeliefSources.map(([o, r]) => [o, r] as Json[]),
     versions,
     batches: state.batches.map((b) => [b.batchId, b.state, b.memberCount] as Json[]),
+    reconciliation: {
+      open: state.reconciliationDivergences.size > 0,
+      divergences: Object.fromEntries(
+        sorted([...state.reconciliationDivergences.entries()]),
+      ) as Json,
+      resolutions: state.reconciliationLog.map(
+        (r) => [r.eventId, r.divergenceEventId, r.action] as Json[],
+      ),
+    },
   };
 }

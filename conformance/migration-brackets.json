@@ -117,7 +117,12 @@
     "independence": [],
     "derived_belief_sources": [],
     "versions": {},
-    "batches": []
+    "batches": [],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
   },
   "expected_refusals": [
     {

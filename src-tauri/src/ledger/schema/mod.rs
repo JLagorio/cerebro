@@ -27,6 +27,8 @@ pub mod independence;
 pub mod migration;
 pub mod normalize;
 pub mod observation;
+pub mod projection;
+pub mod reconciliation;
 pub mod resolution;
 pub mod source;
 pub mod subject;
@@ -47,6 +49,14 @@ pub use observation::{
     AuthorityProvenance, DerivedContentPayload, ExtractedAssertionPayload, HumanAssertionForm,
     HumanAssertionPayload, ObservationKind, ObservationPayload, ObservationRecorded, Provenance,
     RelationshipToSubject, Scope, SourceSnapshotPayload, Stage, SubjectRole, SystemEventPayload,
+};
+pub use projection::{
+    validate_override_pointer, OverrideChange, OverrideOrigin, OverridePatchOp,
+    ProjectionOverridden,
+};
+pub use reconciliation::{
+    DivergenceSignal, LedgerDivergence, ReconciliationAction, ReconciliationResolved,
+    ACTOR_RECONCILIATION,
 };
 pub use resolution::{ResolutionChange, ResolverTier, SubjectResolved};
 pub use source::{
@@ -71,6 +81,10 @@ pub const KIND_BELIEF_ATTESTED: &str = "belief.attested";
 pub const KIND_ENTITY_ALIAS_ADDED: &str = "entity.alias_added";
 pub const KIND_MIGRATION_STARTED: &str = "migration.started";
 pub const KIND_MIGRATION_COMPLETED: &str = "migration.completed";
+// The M23 additions — the frame envelope stays `v: 0`.
+pub const KIND_PROJECTION_OVERRIDDEN: &str = "projection.overridden";
+pub const KIND_LEDGER_DIVERGENCE: &str = "ledger.divergence";
+pub const KIND_RECONCILIATION_RESOLVED: &str = "ledger.reconciliation_resolved";
 
 /// Reserved M24 lifecycle vocabulary: the kinds are fixed NOW so nothing
 /// else ever claims the names, but their bodies are deliberately undefined —
@@ -232,6 +246,9 @@ pub enum EventBody {
     EntityAliasAdded(Box<EntityAliasAdded>),
     MigrationStarted(Box<MigrationStarted>),
     MigrationCompleted(Box<MigrationCompleted>),
+    ProjectionOverridden(Box<ProjectionOverridden>),
+    LedgerDivergence(Box<LedgerDivergence>),
+    ReconciliationResolved(Box<ReconciliationResolved>),
 }
 
 impl EventBody {
@@ -249,6 +266,9 @@ impl EventBody {
             EventBody::EntityAliasAdded(_) => KIND_ENTITY_ALIAS_ADDED,
             EventBody::MigrationStarted(_) => KIND_MIGRATION_STARTED,
             EventBody::MigrationCompleted(_) => KIND_MIGRATION_COMPLETED,
+            EventBody::ProjectionOverridden(_) => KIND_PROJECTION_OVERRIDDEN,
+            EventBody::LedgerDivergence(_) => KIND_LEDGER_DIVERGENCE,
+            EventBody::ReconciliationResolved(_) => KIND_RECONCILIATION_RESOLVED,
         }
     }
 
@@ -266,6 +286,9 @@ impl EventBody {
             EventBody::EntityAliasAdded(b) => b.batch_id.as_deref(),
             EventBody::MigrationStarted(b) => b.batch_id.as_deref(),
             EventBody::MigrationCompleted(b) => b.batch_id.as_deref(),
+            EventBody::ProjectionOverridden(b) => b.batch_id.as_deref(),
+            EventBody::LedgerDivergence(b) => b.batch_id.as_deref(),
+            EventBody::ReconciliationResolved(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -283,6 +306,9 @@ impl EventBody {
             EventBody::EntityAliasAdded(b) => b.idempotency_key.as_deref(),
             EventBody::MigrationStarted(b) => b.idempotency_key.as_deref(),
             EventBody::MigrationCompleted(b) => b.idempotency_key.as_deref(),
+            EventBody::ProjectionOverridden(b) => b.idempotency_key.as_deref(),
+            EventBody::LedgerDivergence(b) => b.idempotency_key.as_deref(),
+            EventBody::ReconciliationResolved(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -304,6 +330,9 @@ impl EventBody {
             EventBody::EntityAliasAdded(b) => b.validate(),
             EventBody::MigrationStarted(b) => b.validate(),
             EventBody::MigrationCompleted(b) => b.validate(),
+            EventBody::ProjectionOverridden(b) => b.validate(),
+            EventBody::LedgerDivergence(b) => b.validate(),
+            EventBody::ReconciliationResolved(b) => b.validate(),
         }
     }
 
@@ -322,6 +351,9 @@ impl EventBody {
             EventBody::EntityAliasAdded(b) => serde_json::to_value(b),
             EventBody::MigrationStarted(b) => serde_json::to_value(b),
             EventBody::MigrationCompleted(b) => serde_json::to_value(b),
+            EventBody::ProjectionOverridden(b) => serde_json::to_value(b),
+            EventBody::LedgerDivergence(b) => serde_json::to_value(b),
+            EventBody::ReconciliationResolved(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -379,6 +411,11 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_ENTITY_ALIAS_ADDED => EventBody::EntityAliasAdded(Box::new(gate(kind, body)?)),
         KIND_MIGRATION_STARTED => EventBody::MigrationStarted(Box::new(gate(kind, body)?)),
         KIND_MIGRATION_COMPLETED => EventBody::MigrationCompleted(Box::new(gate(kind, body)?)),
+        KIND_PROJECTION_OVERRIDDEN => EventBody::ProjectionOverridden(Box::new(gate(kind, body)?)),
+        KIND_LEDGER_DIVERGENCE => EventBody::LedgerDivergence(Box::new(gate(kind, body)?)),
+        KIND_RECONCILIATION_RESOLVED => {
+            EventBody::ReconciliationResolved(Box::new(gate(kind, body)?))
+        }
         other => {
             return Err(format!(
                 "kind {other} carries a schema-v1 body but is not in this build's vocabulary"

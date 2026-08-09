@@ -83,7 +83,7 @@ pub fn arm(writer: &mut LedgerWriter, vault: &Path) -> Arming {
         Ok(Some(_)) => false,
         Ok(None) => {
             let state = reduce(&read.frames, &store);
-            match manifest::build_initial(vault, &store, &read.frames, &state) {
+            match manifest::build_initial(vault, &store, &state) {
                 Ok(Some(built)) => match manifest::save(vault, &built) {
                     Ok(()) => true,
                     Err(detail) => return Arming::Failed(detail),
@@ -157,7 +157,6 @@ mod tests {
         assert_eq!(manifest.entries.len(), 10, "the whole golden corpus");
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
         let state = reduce(&read.frames, &store);
-        let seq_of = manifest::seq_index(&read.frames);
         for (path, entry) in &manifest.entries {
             assert!(path.starts_with("knowledge/"), "{path}");
             let bytes = std::fs::read(vault.join(path)).unwrap();
@@ -165,14 +164,17 @@ mod tests {
             assert_eq!(entry.projected_revision, 1);
             assert_eq!(entry.write_state, manifest::WriteState::Complete);
             assert_eq!(entry.previous_content_hash, None);
-            let belief = state.beliefs.get(&entry.belief_id).unwrap();
-            assert_eq!(entry.belief_revision_event, belief.current().event_id);
-            let descriptor = manifest::descriptor(&state, &read.frames, belief);
+            let projection =
+                super::super::reduce::project_belief(&state, &entry.belief_id).unwrap();
             assert_eq!(
-                entry.generating_event,
-                descriptor.generating_event(&seq_of).unwrap()
+                entry.belief_revision_event,
+                projection.belief_revision_event
             );
-            assert_eq!(entry.projection_state_digest, descriptor.digest().unwrap());
+            assert_eq!(entry.generating_event, projection.generating_event);
+            assert_eq!(
+                entry.projection_state_digest,
+                projection.projection_state_digest
+            );
         }
 
         // The second arm is the fast no-op: zero appends, manifest kept.

@@ -82,6 +82,18 @@ pub struct RevisionState {
     pub basis: BeliefBasis,
 }
 
+/// One active editorial overlay (M23.1). Durable canonical projection
+/// state, structurally excluded from evidence. A Belief revision does not
+/// clear it — the overlay stays active and is marked STALE against its
+/// base revision until superseded or cleared.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OverrideState {
+    pub event_id: String,
+    pub base_belief_revision: u64,
+    pub patch: Vec<schema::OverridePatchOp>,
+    pub stale: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeliefState {
     pub belief_id: String,
@@ -90,6 +102,21 @@ pub struct BeliefState {
     pub revisions: Vec<RevisionState>,
     /// Verification pointer: (attesting event, attested revision event).
     pub attested: Option<(String, String)>,
+    /// Every APPLIED attestation event, fold (= seq) order — the
+    /// descriptor's review_event_ids.
+    pub attestation_events: Vec<String>,
+    /// The knowledge-relative projection path, when this Belief is a
+    /// projection (its creation subject carried a `.md` alias).
+    pub path: Option<String>,
+    /// Active editorial overlays in application order.
+    pub overrides: Vec<OverrideState>,
+    /// The latest override set/supersede/clear event, clear included.
+    pub override_head_event: Option<String>,
+    /// The highest-seq projection-state transition event — the projection
+    /// identity head. Advances on revision, attestation, relation
+    /// transition, alias addition, and override set/clear, even when the
+    /// projected bytes stay identical.
+    pub projection_head_event: String,
 }
 
 impl BeliefState {
@@ -98,6 +125,128 @@ impl BeliefState {
             .last()
             .expect("a belief always has revision 1")
     }
+
+    /// Canonical projection state with the active overlay applied:
+    /// current-revision content/fields, then every active override's ops in
+    /// order. An op a later revision made inapplicable is skipped — the
+    /// overlay is presentation state, not a patch with preconditions.
+    pub fn overlaid(&self) -> (String, serde_json::Value) {
+        let current = self.current();
+        let mut content = current.content.clone();
+        let mut fields = current.fields.clone();
+        for override_state in &self.overrides {
+            for op in &override_state.patch {
+                apply_overlay_op(&mut content, &mut fields, op);
+            }
+        }
+        (content, fields)
+    }
+
+    /// The projected bytes of the overlaid state.
+    pub fn projected(&self) -> String {
+        let (content, fields) = self.overlaid();
+        super::project::project(&content, &fields)
+    }
+}
+
+/// The canonical projection-state descriptor (M23): every event the
+/// renderer's output — or its identity — depends on. Serialized field
+/// order IS the canonical digest input.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ProjectionStateDescriptor {
+    pub belief_revision_event: String,
+    pub review_event_ids: Vec<String>,
+    pub relation_transition_heads: Vec<RelationHead>,
+    pub alias_event_ids: Vec<String>,
+    pub active_override_event_ids: Vec<String>,
+    pub override_head_event_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RelationHead {
+    pub relation_id: String,
+    pub event_id: String,
+}
+
+impl ProjectionStateDescriptor {
+    /// SHA-256 of the canonical JSON serialization.
+    pub fn digest(&self) -> Result<String, String> {
+        let canonical = serde_json::to_string(self).map_err(|e| e.to_string())?;
+        Ok(crate::ledger::sha256_hex(canonical.as_bytes()))
+    }
+}
+
+/// Build the descriptor for one Belief from reduced state alone.
+pub fn descriptor(state: &EpistemicState, belief: &BeliefState) -> ProjectionStateDescriptor {
+    // BTreeMap iteration: relations sorted by relation_id, aliases by
+    // normalized alias — exactly the descriptor's required orders.
+    let relation_transition_heads = state
+        .relations
+        .values()
+        .filter(|r| r.from == belief.belief_id)
+        .map(|r| RelationHead {
+            relation_id: r.relation_id.clone(),
+            event_id: r.last_event_id.clone(),
+        })
+        .collect();
+    let alias_event_ids = state
+        .alias_registry
+        .values()
+        .filter(|a| a.entity_id == belief.entity_id)
+        .map(|a| a.event_id.clone())
+        .collect();
+    ProjectionStateDescriptor {
+        belief_revision_event: belief.current().event_id.clone(),
+        review_event_ids: belief.attestation_events.clone(),
+        relation_transition_heads,
+        alias_event_ids,
+        active_override_event_ids: belief
+            .overrides
+            .iter()
+            .map(|o| o.event_id.clone())
+            .collect(),
+        override_head_event_id: belief.override_head_event.clone(),
+    }
+}
+
+/// The complete projector result (M23.1) — what the manifest and
+/// reconciliation consume, never a file hash alone.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectionResult {
+    pub bytes: String,
+    pub content_hash: String,
+    pub belief_id: String,
+    pub projected_revision: u64,
+    pub belief_revision_event: String,
+    pub generating_event: String,
+    pub projection_state_digest: String,
+    pub descriptor: ProjectionStateDescriptor,
+    pub active_override_event_ids: Vec<String>,
+}
+
+/// Project one Belief with its full identity tuple.
+pub fn project_belief(state: &EpistemicState, belief_id: &str) -> Result<ProjectionResult, String> {
+    let belief = state
+        .beliefs
+        .get(belief_id)
+        .ok_or_else(|| format!("belief {belief_id} does not exist"))?;
+    let bytes = belief.projected();
+    let described = descriptor(state, belief);
+    Ok(ProjectionResult {
+        content_hash: crate::ledger::sha256_hex(bytes.as_bytes()),
+        bytes,
+        belief_id: belief.belief_id.clone(),
+        projected_revision: belief.current().revision,
+        belief_revision_event: belief.current().event_id.clone(),
+        generating_event: belief.projection_head_event.clone(),
+        projection_state_digest: described.digest()?,
+        active_override_event_ids: belief
+            .overrides
+            .iter()
+            .map(|o| o.event_id.clone())
+            .collect(),
+        descriptor: described,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -148,6 +297,14 @@ struct MigrationEpoch {
     completed: bool,
 }
 
+/// One reconciliation resolution, kept as history after the mode closes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReconciliationLogRow {
+    pub event_id: String,
+    pub divergence_event_id: String,
+    pub action: schema::ReconciliationAction,
+}
+
 /// The whole reduced world. `Clone` is the batch staging mechanism: members
 /// fold into a scratch clone that replaces the state only when every member
 /// applies.
@@ -175,6 +332,22 @@ pub struct EpistemicState {
     pub batches: Vec<BatchRow>,
     pub anomalies: Vec<Anomaly>,
     migration: Option<MigrationEpoch>,
+    /// knowledge-relative projection path → Belief id — one Belief per
+    /// projection file, claimed at creation by its `.md` subject alias.
+    pub projection_paths: BTreeMap<String, String>,
+    /// Active divergences: detection_key → divergence event id. The mode is
+    /// OPEN exactly while this is non-empty; a new detection key arriving
+    /// under an open mode is absorbed, never a second mode entry.
+    pub reconciliation_divergences: BTreeMap<String, String>,
+    /// Every valid resolution, in fold order.
+    pub reconciliation_log: Vec<ReconciliationLogRow>,
+}
+
+impl EpistemicState {
+    /// Is the divergence circuit breaker's named reconciliation mode open?
+    pub fn reconciliation_open(&self) -> bool {
+        !self.reconciliation_divergences.is_empty()
+    }
 }
 
 impl EpistemicState {
@@ -447,6 +620,9 @@ fn apply(
         EventBody::EntityAliasAdded(b) => apply_alias(state, frame, b),
         EventBody::MigrationStarted(b) => apply_migration_started(state, b),
         EventBody::MigrationCompleted(b) => apply_migration_completed(state, b),
+        EventBody::ProjectionOverridden(b) => apply_override(state, frame, b),
+        EventBody::LedgerDivergence(b) => apply_divergence(state, frame, b),
+        EventBody::ReconciliationResolved(b) => apply_reconciliation_resolved(state, frame, b),
     }
 }
 
@@ -1158,6 +1334,19 @@ fn apply_belief_created(
         );
         state.create_version("entity", entity_id, &frame.event_id);
     }
+    // The projection-path claim: the first `.md` subject alias names the
+    // knowledge-relative file this Belief projects to. One Belief per path.
+    let path = aliases.iter().find(|a| a.ends_with(".md")).cloned();
+    if let Some(path) = &path {
+        if let Some(holder) = state.projection_paths.get(path) {
+            return Err(refused(format!(
+                "projection path {path:?} is already claimed by belief {holder}"
+            )));
+        }
+        state
+            .projection_paths
+            .insert(path.clone(), body.belief_id.clone());
+    }
     state
         .entity_registrations
         .insert(frame.event_id.clone(), (entity_id.clone(), aliases.clone()));
@@ -1175,6 +1364,11 @@ fn apply_belief_created(
                 basis: body.basis.clone(),
             }],
             attested: None,
+            attestation_events: Vec::new(),
+            path,
+            overrides: Vec::new(),
+            override_head_event: None,
+            projection_head_event: frame.event_id.clone(),
         },
     );
     state
@@ -1223,6 +1417,12 @@ fn apply_belief_revised(
         fields,
         basis: body.basis.clone(),
     });
+    // A revision never silently clears a human overlay: it stays active and
+    // is marked stale against its base revision (M26 maintenance's queue).
+    for override_state in &mut belief.overrides {
+        override_state.stale = true;
+    }
+    belief.projection_head_event = frame.event_id.clone();
     state
         .belief_revision_events
         .insert(frame.event_id.clone(), (body.belief_id.clone(), revision));
@@ -1440,6 +1640,12 @@ fn apply_relation(
             state.bump_version("relation", &body.relation_id, &frame.event_id);
         }
     }
+    // Both transitions move the FROM Belief's projection identity — a
+    // remove changes what the renderer's relation state says even when the
+    // resulting bytes match an older projection.
+    if let Some(belief) = state.beliefs.get_mut(&body.from) {
+        belief.projection_head_event = frame.event_id.clone();
+    }
     Ok(())
 }
 
@@ -1487,6 +1693,8 @@ fn apply_attested(
         frame.event_id.clone(),
         body.attested_belief_revision_event_id.clone(),
     ));
+    belief.attestation_events.push(frame.event_id.clone());
+    belief.projection_head_event = frame.event_id.clone();
     state.bump_version("belief", &body.belief_id, &frame.event_id);
     Ok(())
 }
@@ -1528,6 +1736,13 @@ fn apply_alias(
         frame.event_id.clone(),
         (body.entity_id.clone(), body.normalized_alias.clone()),
     );
+    // A live subject alias is descriptor state for every Belief about the
+    // Entity: their projection identity advances even byte-identically.
+    for belief in state.beliefs.values_mut() {
+        if belief.entity_id == body.entity_id {
+            belief.projection_head_event = frame.event_id.clone();
+        }
+    }
     state.bump_version("entity", &body.entity_id, &frame.event_id);
     Ok(())
 }
@@ -1575,6 +1790,252 @@ fn apply_migration_completed(
         )));
     }
     epoch.completed = true;
+    Ok(())
+}
+
+/// Apply one overlay op WITHOUT preconditions: overlays are presentation
+/// state, so an op a later revision made inapplicable (missing parent,
+/// retyped body) is skipped deterministically, never an error.
+fn apply_overlay_op(
+    content: &mut String,
+    fields: &mut serde_json::Value,
+    op: &schema::OverridePatchOp,
+) {
+    if op.field_path == "/body" {
+        if let TypedValue::String { value } = &op.after {
+            *content = value.clone();
+        }
+        return;
+    }
+    let tokens: Vec<String> = op
+        .field_path
+        .strip_prefix("/fields/")
+        .expect("override pointers are /body or /fields/…")
+        .split('/')
+        .map(|t| t.replace("~1", "/").replace("~0", "~"))
+        .collect();
+    let _ = set_typed_at(fields, &tokens, &op.after);
+}
+
+fn apply_override(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ProjectionOverridden,
+) -> Result<(), Refusal> {
+    let belief = state
+        .beliefs
+        .get(&body.belief_id)
+        .ok_or_else(|| refused(format!("belief {} does not exist", body.belief_id)))?;
+    match &belief.path {
+        Some(path) if path == &body.path => {}
+        Some(path) => {
+            return Err(refused(format!(
+                "override path {:?} does not match the Belief's projection path {path:?}",
+                body.path
+            )))
+        }
+        None => {
+            return Err(refused(
+                "the Belief is not a projection — it claimed no projection path at creation",
+            ))
+        }
+    }
+    let current = belief.current();
+    if body.base_belief_revision != current.revision
+        || body.base_belief_revision_event != current.event_id
+    {
+        return Err(refused(format!(
+            "override base r{} ({}) is not the current revision r{} ({}) — wrong base",
+            body.base_belief_revision,
+            body.base_belief_revision_event,
+            current.revision,
+            current.event_id
+        )));
+    }
+    if body.base_generating_event != belief.projection_head_event {
+        return Err(refused(format!(
+            "override base generating event {} is not the projection head {} — the projection \
+             state advanced (possibly byte-identically) since this edit was computed",
+            body.base_generating_event, belief.projection_head_event
+        )));
+    }
+    let before_bytes = belief.projected();
+    if crate::ledger::sha256_hex(before_bytes.as_bytes()) != body.before_projection_hash {
+        return Err(refused(
+            "before_projection_hash does not match the current projection",
+        ));
+    }
+
+    // Build the next overlay list on the side; nothing mutates until every
+    // check (after-hash included) has passed.
+    let mut next = belief.overrides.clone();
+    match &body.change {
+        schema::OverrideChange::Set {
+            patch,
+            supersedes_override_event_ids,
+        } => {
+            for id in supersedes_override_event_ids {
+                if !next.iter().any(|o| &o.event_id == id) {
+                    return Err(refused(format!(
+                        "supersedes names {id}, which is not an active override"
+                    )));
+                }
+            }
+            // Every op's before must match the CURRENT overlaid projection
+            // state — a stale edit is a refusal, never a merge.
+            let (content, overlaid_fields) = belief.overlaid();
+            for op in patch {
+                let current_value = if op.field_path == "/body" {
+                    TypedValue::string(&content)
+                } else {
+                    let tokens: Vec<String> = op
+                        .field_path
+                        .strip_prefix("/fields/")
+                        .expect("validated pointer")
+                        .split('/')
+                        .map(|t| t.replace("~1", "/").replace("~0", "~"))
+                        .collect();
+                    typed_at(&overlaid_fields, &tokens)
+                };
+                if op.before != current_value {
+                    return Err(refused(format!(
+                        "override before-value does not match the projected state at {}",
+                        op.field_path
+                    )));
+                }
+                if op.field_path == "/body" && !matches!(op.after, TypedValue::String { .. }) {
+                    return Err(refused("the body override must stay a string"));
+                }
+            }
+            next.retain(|o| !supersedes_override_event_ids.contains(&o.event_id));
+            next.push(OverrideState {
+                event_id: frame.event_id.clone(),
+                base_belief_revision: current.revision,
+                patch: patch.clone(),
+                stale: false,
+            });
+        }
+        schema::OverrideChange::Clear {
+            override_event_ids, ..
+        } => {
+            for id in override_event_ids {
+                if !next.iter().any(|o| &o.event_id == id) {
+                    return Err(refused(format!(
+                        "clear names {id}, which is not an active override"
+                    )));
+                }
+            }
+            next.retain(|o| !override_event_ids.contains(&o.event_id));
+        }
+    }
+
+    // The after-hash proof: the declared bytes must be exactly what the
+    // new overlay projects.
+    let mut content = current.content.clone();
+    let mut fields = current.fields.clone();
+    for override_state in &next {
+        for op in &override_state.patch {
+            apply_overlay_op(&mut content, &mut fields, op);
+        }
+    }
+    let after_bytes = super::project::project(&content, &fields);
+    if crate::ledger::sha256_hex(after_bytes.as_bytes()) != body.after_projection_hash {
+        return Err(refused(
+            "after_projection_hash does not reproduce from the declared overlay change",
+        ));
+    }
+
+    let belief = state
+        .beliefs
+        .get_mut(&body.belief_id)
+        .expect("checked above");
+    belief.overrides = next;
+    belief.override_head_event = Some(frame.event_id.clone());
+    belief.projection_head_event = frame.event_id.clone();
+    // Canonical projection state changed: the Belief version advances once,
+    // whichever arm ran. Never an Observation, basis, lineage, support, or
+    // independence effect — overrides are not evidence.
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_divergence(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::LedgerDivergence,
+) -> Result<(), Refusal> {
+    if state
+        .reconciliation_divergences
+        .contains_key(&body.detection_key)
+    {
+        return Err(refused(format!(
+            "detection key {} is already open — one divergence event per unresolved condition",
+            body.detection_key
+        )));
+    }
+    // Open (or absorb into) the one reconciliation mode. No registered
+    // target: divergence has no version effect.
+    state
+        .reconciliation_divergences
+        .insert(body.detection_key.clone(), frame.event_id.clone());
+    Ok(())
+}
+
+fn apply_reconciliation_resolved(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ReconciliationResolved,
+) -> Result<(), Refusal> {
+    if !state
+        .reconciliation_divergences
+        .values()
+        .any(|event| event == &body.divergence_event_id)
+    {
+        return Err(refused(format!(
+            "divergence {} is not active — wrong or stale resolution",
+            body.divergence_event_id
+        )));
+    }
+    // The digest proof: every affected path must be a known projection, and
+    // the staged/current reducer projections over those paths must equal the
+    // declared resulting digest. A prose-only event cannot bless bytes that
+    // were never translated into ledger state.
+    let mut entries: Vec<serde_json::Value> = Vec::with_capacity(body.affected_paths.len());
+    for path in &body.affected_paths {
+        let belief_id = state.projection_paths.get(path).ok_or_else(|| {
+            refused(format!(
+                "affected path {path:?} is not a known projection — nothing proves its bytes"
+            ))
+        })?;
+        let belief = state
+            .beliefs
+            .get(belief_id)
+            .expect("path index is consistent");
+        let projected = belief.projected();
+        entries.push(serde_json::json!({
+            "path": path,
+            "content_hash": crate::ledger::sha256_hex(projected.as_bytes()),
+        }));
+    }
+    let digest = crate::ledger::sha256_hex(
+        serde_json::to_string(&entries)
+            .map_err(|e| refused(e.to_string()))?
+            .as_bytes(),
+    );
+    if digest != body.resulting_projection_digest {
+        return Err(refused(
+            "resulting_projection_digest does not match the reducer projections over the \
+             affected paths",
+        ));
+    }
+    // Close the mode: every unresolved condition is either explained by the
+    // adoption batch this member rode in on or regenerated by restore.
+    state.reconciliation_divergences.clear();
+    state.reconciliation_log.push(ReconciliationLogRow {
+        event_id: frame.event_id.clone(),
+        divergence_event_id: body.divergence_event_id.clone(),
+        action: body.action,
+    });
     Ok(())
 }
 
@@ -1648,6 +2109,7 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
         .values()
         .map(|b| {
             let current = b.current();
+            let described = descriptor(state, b);
             (
                 b.belief_id.clone(),
                 serde_json::json!({
@@ -1662,6 +2124,27 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                         .iter()
                         .map(|r| r.event_id.clone())
                         .collect::<Vec<_>>(),
+                    // The full projection identity (M23.1): head, state
+                    // digest, overlaid bytes hash, and overlay listing.
+                    "projection": {
+                        "path": b.path,
+                        "generating_event": b.projection_head_event,
+                        "state_digest": described.digest().unwrap_or_default(),
+                        "content_hash": crate::ledger::sha256_hex(b.projected().as_bytes()),
+                        "review_event_ids": b.attestation_events,
+                        "active_overrides": b
+                            .overrides
+                            .iter()
+                            .map(|o| o.event_id.clone())
+                            .collect::<Vec<_>>(),
+                        "stale_overrides": b
+                            .overrides
+                            .iter()
+                            .filter(|o| o.stale)
+                            .map(|o| o.event_id.clone())
+                            .collect::<Vec<_>>(),
+                        "override_head": b.override_head_event,
+                    },
                 }),
             )
         })
@@ -1720,6 +2203,23 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
             .iter()
             .map(|b| serde_json::json!([b.batch_id, b.state, b.member_count]))
             .collect::<Vec<_>>(),
+        "reconciliation": {
+            "open": state.reconciliation_open(),
+            "divergences": state
+                .reconciliation_divergences
+                .iter()
+                .map(|(key, event)| (key.clone(), serde_json::json!(event)))
+                .collect::<serde_json::Map<String, serde_json::Value>>(),
+            "resolutions": state
+                .reconciliation_log
+                .iter()
+                .map(|r| serde_json::json!([
+                    r.event_id,
+                    r.divergence_event_id,
+                    r.action.as_str(),
+                ]))
+                .collect::<Vec<_>>(),
+        },
     })
 }
 

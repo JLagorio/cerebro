@@ -847,7 +847,17 @@
         "attested": null,
         "revision_events": [
           "00000000000000000000000000000002"
-        ]
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "0000000000000000000000000000000e",
+          "state_digest": "1ab7572c6a2854fe494c667f70fd9fcc0c1b1a59b4e3ff18bd804107b0a758e1",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
       },
       "ffffffffffffffffffffffffffffffff": {
         "entity_id": "dddddddddddddddddddddddddddddddd",
@@ -863,7 +873,17 @@
         "attested": null,
         "revision_events": [
           "00000000000000000000000000000003"
-        ]
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000003",
+          "state_digest": "f9feb557e54ae6033c21855c94ecfbf9db3582a9bb5c7a0084ea6131d45d765a",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
       }
     },
     "relations": {
@@ -931,7 +951,12 @@
       "relation:7f20b085c71802edf85f2a3390ff8ce0": 1,
       "source:c8147897afd510dad9278f297ba49115": 6
     },
-    "batches": []
+    "batches": [],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
   },
   "expected_refusals": [
     {

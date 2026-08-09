@@ -200,7 +200,19 @@
         ],
         "revision_events": [
           "00000000000000000000000000000001"
-        ]
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000003",
+          "state_digest": "1662bb6da781974a48ac26691e5cc6b8f2bb3538703a09f163625f31e8ddbf28",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [
+            "00000000000000000000000000000003"
+          ],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
       },
       "ffffffffffffffffffffffffffffffff": {
         "entity_id": "dddddddddddddddddddddddddddddddd",
@@ -216,7 +228,17 @@
         "attested": null,
         "revision_events": [
           "00000000000000000000000000000004"
-        ]
+        ],
+        "projection": {
+          "path": null,
+          "generating_event": "00000000000000000000000000000004",
+          "state_digest": "35f746f48c6bb934706e02da2a2554b023c39140d6766510673f7d0eea92d4c5",
+          "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+          "review_event_ids": [],
+          "active_overrides": [],
+          "stale_overrides": [],
+          "override_head": null
+        }
       }
     },
     "relations": {},
@@ -229,7 +251,12 @@
       "entity:cccccccccccccccccccccccccccccccc": 1,
       "entity:dddddddddddddddddddddddddddddddd": 1
     },
-    "batches": []
+    "batches": [],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
   },
   "expected_refusals": [
     {

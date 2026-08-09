@@ -1,0 +1,551 @@
+{
+  "name": "reconciliation",
+  "description": "One divergence per detection key opens (or is absorbed into) the single reconciliation mode; a resolution closes it only by referencing an active divergence with digests the reducer projections prove; wrong, stale, mismatched, and uncommitted events have no effect.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "f42643a823ed606829aa739d537ad405943076efd3fbdbdf6f0a3f9306b465c5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": [
+            "concepts/acme.md"
+          ]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "f42643a823ed606829aa739d537ad405943076efd3fbdbdf6f0a3f9306b465c5",
+      "hash": "05f037513e6cee8e782f9aaf81c50d9baaa61256f1b656e4dbad4bd1bdcdad5b",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.divergence",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "detection_key": "864b2540921b512ce8705f13160cf2f20143079b492d22dee3c30e2174a3c481",
+        "signals": [
+          "manifest_reducer_disagreement"
+        ],
+        "ledger_head": "9f2e6d33a3717ee826353a404ba4618d1aeeb6879ad7936bce8ed5f46814924d",
+        "git_anchored_head": null,
+        "remembered_head": "c8354361fe5663bfb90c77966e012f4985b82b6534dffb471092e1acccfec943",
+        "manifest_digest": "05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+        "reducer_projection_digest": "d5bb10afb69497ffae6d0e05a7fe5b27ba2a0b2cf5c1b00093f212fcf1db6f5a",
+        "mismatch_count": 1,
+        "projection_count": 1,
+        "sample_paths": [
+          "concepts/acme.md"
+        ]
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "05f037513e6cee8e782f9aaf81c50d9baaa61256f1b656e4dbad4bd1bdcdad5b",
+      "hash": "19c9dc8d0db22b6664609dcf5285a03b1b0b177135fe6e4de78e105c2591a789",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.divergence",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "detection_key": "864b2540921b512ce8705f13160cf2f20143079b492d22dee3c30e2174a3c481",
+        "signals": [
+          "mass_projection_mismatch"
+        ],
+        "ledger_head": "9f2e6d33a3717ee826353a404ba4618d1aeeb6879ad7936bce8ed5f46814924d",
+        "git_anchored_head": null,
+        "remembered_head": "c8354361fe5663bfb90c77966e012f4985b82b6534dffb471092e1acccfec943",
+        "manifest_digest": "05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+        "reducer_projection_digest": "d5bb10afb69497ffae6d0e05a7fe5b27ba2a0b2cf5c1b00093f212fcf1db6f5a",
+        "mismatch_count": 1,
+        "projection_count": 1,
+        "sample_paths": [
+          "concepts/acme.md"
+        ]
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "19c9dc8d0db22b6664609dcf5285a03b1b0b177135fe6e4de78e105c2591a789",
+      "hash": "bbbe325fab5808053c92c253216f6941a2b6350b0322de2200e5689e70cbff9b",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.divergence",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "detection_key": "07c10eea59b8e9c81943bdabb613e99a500bc262f3646ec34827f30216423674",
+        "signals": [
+          "migration_source_changed"
+        ],
+        "ledger_head": "9f2e6d33a3717ee826353a404ba4618d1aeeb6879ad7936bce8ed5f46814924d",
+        "git_anchored_head": null,
+        "remembered_head": "c8354361fe5663bfb90c77966e012f4985b82b6534dffb471092e1acccfec943",
+        "manifest_digest": "05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+        "reducer_projection_digest": "d5bb10afb69497ffae6d0e05a7fe5b27ba2a0b2cf5c1b00093f212fcf1db6f5a",
+        "mismatch_count": 1,
+        "projection_count": 1,
+        "sample_paths": [
+          "concepts/acme.md"
+        ]
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "bbbe325fab5808053c92c253216f6941a2b6350b0322de2200e5689e70cbff9b",
+      "hash": "9b61919806df6c097df3caaa41214e8ef6132c038acbcfffde9103d0e3af39c0",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.reconciliation_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "divergence_event_id": "00000000000000000000000000000001",
+        "action": "restore_ledger_authority",
+        "affected_paths": [
+          "concepts/acme.md"
+        ],
+        "capture_batch_ids": [],
+        "accepted_files_digest": null,
+        "resulting_projection_digest": "b2764a4d3e0273ae36a852dc4d7b040f6e5d94e87382f79a9e84ae632b776857"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "9b61919806df6c097df3caaa41214e8ef6132c038acbcfffde9103d0e3af39c0",
+      "hash": "900ae5ce567a64b0c83c8177b86fca6896d0201d3082c965e27510b521d27c35",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.reconciliation_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "divergence_event_id": "00000000000000000000000000000002",
+        "action": "restore_ledger_authority",
+        "affected_paths": [
+          "concepts/acme.md"
+        ],
+        "capture_batch_ids": [],
+        "accepted_files_digest": null,
+        "resulting_projection_digest": "5d3492b9b2b8e50fbfc119558dfc2ff6bec27e34a5636531a571f54b87f9d849"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "900ae5ce567a64b0c83c8177b86fca6896d0201d3082c965e27510b521d27c35",
+      "hash": "e70205d97db98658d790c64480ec9801e29a2a87ba35e7853d00abea34aa5b8f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.reconciliation_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "divergence_event_id": "00000000000000000000000000000002",
+        "action": "restore_ledger_authority",
+        "affected_paths": [
+          "concepts/acme.md"
+        ],
+        "capture_batch_ids": [],
+        "accepted_files_digest": null,
+        "resulting_projection_digest": "b2764a4d3e0273ae36a852dc4d7b040f6e5d94e87382f79a9e84ae632b776857"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "e70205d97db98658d790c64480ec9801e29a2a87ba35e7853d00abea34aa5b8f",
+      "hash": "dd9c589df71f6f58a71cf9c5bd6a2487b7b6674db623d130eff9903c12667b45",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.reconciliation_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "divergence_event_id": "00000000000000000000000000000002",
+        "action": "restore_ledger_authority",
+        "affected_paths": [
+          "concepts/acme.md"
+        ],
+        "capture_batch_ids": [],
+        "accepted_files_digest": null,
+        "resulting_projection_digest": "b2764a4d3e0273ae36a852dc4d7b040f6e5d94e87382f79a9e84ae632b776857"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "dd9c589df71f6f58a71cf9c5bd6a2487b7b6674db623d130eff9903c12667b45",
+      "hash": "a19a747f5a5da4a6b7a47f1f52d6bcb75e9cad0d199bae7bfcbbae530622b873",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.divergence",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "detection_key": "0ffe93c7ddfe4b844b565f2161dae50b035e26c67ff4465dd4c5a2fe4bf995b1",
+        "signals": [
+          "mass_projection_mismatch"
+        ],
+        "ledger_head": "9f2e6d33a3717ee826353a404ba4618d1aeeb6879ad7936bce8ed5f46814924d",
+        "git_anchored_head": null,
+        "remembered_head": "c8354361fe5663bfb90c77966e012f4985b82b6534dffb471092e1acccfec943",
+        "manifest_digest": "05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+        "reducer_projection_digest": "d5bb10afb69497ffae6d0e05a7fe5b27ba2a0b2cf5c1b00093f212fcf1db6f5a",
+        "mismatch_count": 1,
+        "projection_count": 1,
+        "sample_paths": [
+          "concepts/acme.md"
+        ]
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "a19a747f5a5da4a6b7a47f1f52d6bcb75e9cad0d199bae7bfcbbae530622b873",
+      "hash": "fdcd2041461d9fa1ede392524da53f65a48459612525eb64abe436eacb432d9f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "projection.overridden",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0201",
+        "idempotency_key": null,
+        "actor": {
+          "id": "human:josef"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "path": "concepts/acme.md",
+        "base_belief_revision": 1,
+        "base_belief_revision_event": "00000000000000000000000000000001",
+        "base_generating_event": "00000000000000000000000000000001",
+        "before_projection_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
+        "after_projection_hash": "5df42a3e1b35074caf7d2bf4b9b13d2b9f1cf5db56883136a60c8cac33476ed4",
+        "origin": "in_app",
+        "change": {
+          "action": "set",
+          "patch": [
+            {
+              "field_path": "/body",
+              "before": {
+                "type": "string",
+                "value": "# Acme\n\nActive vendor.\n"
+              },
+              "after": {
+                "type": "string",
+                "value": "# Acme\n\nAn active vendor.\n"
+              }
+            }
+          ],
+          "supersedes_override_event_ids": []
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "fdcd2041461d9fa1ede392524da53f65a48459612525eb64abe436eacb432d9f",
+      "hash": "22045f5c1064c538fc6e15621258c37a26c8c49e05fc306213d4e78c8a70a629",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.reconciliation_resolved",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0201",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "divergence_event_id": "00000000000000000000000000000009",
+        "action": "accept_current_files",
+        "affected_paths": [
+          "concepts/acme.md"
+        ],
+        "capture_batch_ids": [
+          "beefbeefbeefbeefbeefbeefbeef0201"
+        ],
+        "accepted_files_digest": "5e7eb1d8db00e75796825bcbce869f9a0207d57bbe13947b75508a344bc8832d",
+        "resulting_projection_digest": "5e7eb1d8db00e75796825bcbce869f9a0207d57bbe13947b75508a344bc8832d"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "22045f5c1064c538fc6e15621258c37a26c8c49e05fc306213d4e78c8a70a629",
+      "hash": "7f18a636aa358f2c25c611d0c0bb8b93d009249e931f095686b89c5bc74a3cc5",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "batch.committed",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0201",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:ledger"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "member_event_ids": [
+          "0000000000000000000000000000000a",
+          "0000000000000000000000000000000b"
+        ],
+        "member_count": 2,
+        "members_digest": "af9dd27dfb6b03b2f885acc389263bbb09af1d6ccec6aac4682eb21fc12fc36a",
+        "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "7f18a636aa358f2c25c611d0c0bb8b93d009249e931f095686b89c5bc74a3cc5",
+      "hash": "85b693560d041ba295228493b49dcc45e6946a4a33768337a10be207ff0e487a",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ledger.divergence",
+      "body": {
+        "schema": 1,
+        "batch_id": "beefbeefbeefbeefbeefbeefbeef0202",
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:reconciliation"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "detection_key": "78c827c6769b150deb1c6a0585fed464717eb4c3725f91b40b0b2eed28d876db",
+        "signals": [
+          "git_anchor_regression"
+        ],
+        "ledger_head": "9f2e6d33a3717ee826353a404ba4618d1aeeb6879ad7936bce8ed5f46814924d",
+        "git_anchored_head": null,
+        "remembered_head": "c8354361fe5663bfb90c77966e012f4985b82b6534dffb471092e1acccfec943",
+        "manifest_digest": "05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+        "reducer_projection_digest": "d5bb10afb69497ffae6d0e05a7fe5b27ba2a0b2cf5c1b00093f212fcf1db6f5a",
+        "mismatch_count": 1,
+        "projection_count": 1,
+        "sample_paths": [
+          "concepts/acme.md"
+        ]
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000001"
+    },
+    "aliases": {},
+    "observations": {},
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": [
+          "00000000000000000000000000000001"
+        ],
+        "projection": {
+          "path": "concepts/acme.md",
+          "generating_event": "0000000000000000000000000000000a",
+          "state_digest": "16ce5f7f341fdf95ad52f848810db871a22f8c185e959acf0276dfe4d2153e40",
+          "content_hash": "5df42a3e1b35074caf7d2bf4b9b13d2b9f1cf5db56883136a60c8cac33476ed4",
+          "review_event_ids": [],
+          "active_overrides": [
+            "0000000000000000000000000000000a"
+          ],
+          "stale_overrides": [],
+          "override_head": "0000000000000000000000000000000a"
+        }
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 2,
+      "entity:cccccccccccccccccccccccccccccccc": 1
+    },
+    "batches": [
+      [
+        "beefbeefbeefbeefbeefbeefbeef0201",
+        "committed",
+        2
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0202",
+        "orphaned",
+        1
+      ]
+    ],
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": [
+        [
+          "00000000000000000000000000000007",
+          "00000000000000000000000000000002",
+          "restore_ledger_authority"
+        ],
+        [
+          "0000000000000000000000000000000b",
+          "00000000000000000000000000000009",
+          "accept_current_files"
+        ]
+      ]
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "detection key 864b2540921b512ce8705f13160cf2f20143079b492d22dee3c30e2174a3c481 is already open — one divergence event per unresolved condition"
+    },
+    {
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "divergence 00000000000000000000000000000001 is not active — wrong or stale resolution"
+    },
+    {
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "resulting_projection_digest does not match the reducer projections over the affected paths"
+    },
+    {
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "divergence 00000000000000000000000000000002 is not active — wrong or stale resolution"
+    },
+    {
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "batch_id": "beefbeefbeefbeefbeefbeefbeef0202",
+      "code": "batch",
+      "detail": "batch beefbeefbeefbeefbeefbeefbeef0202 has 1 member(s) and no committed marker — orphaned"
+    }
+  ]
+}
