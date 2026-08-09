@@ -56,7 +56,14 @@ describe('NoteBodyEditor', () => {
     const { editor } = await renderReady(PAGE);
     const last = editor.document[editor.document.length - 1];
     editor.insertBlocks([{ type: 'paragraph', content: 'Fresh words' }], last, 'after');
-    await waitFor(() => expect(fs().get(PAGE)).toContain('Fresh words'));
+    // The 5s budget every other disk-write assertion in this file already uses
+    // (lines 95, 103, 168, 182, 204). This one relied on waitFor's 1s default
+    // and flaked at roughly one full-suite run in seven: a 20ms debounce plus
+    // an async mock-fs write has no margin once the suite runs wide enough to
+    // starve this worker. M29's mermaid modules join MarkdownEditor's block
+    // graph (MarkdownEditor.tsx registers a `mermaid` block), so wave 2's added
+    // load is what surfaced it — the thin budget was always the defect.
+    await waitFor(() => expect(fs().get(PAGE)).toContain('Fresh words'), { timeout: 5_000 });
     expect(fs().get(PAGE)!.startsWith('---\ntype: Doc\n---\n')).toBe(true);
   });
 
