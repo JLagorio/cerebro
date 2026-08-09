@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { detectDiagramType } from './detect';
 import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
@@ -43,7 +44,9 @@ export function MermaidBlockView({
     >
       <div className="flex items-center gap-1.5 border-b border-n-100 px-2.5 py-1">
         <Icon name="waypoints" size={13} color="var(--n-500)" />
-        <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">Mermaid</span>
+        <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">
+          {detectDiagramType(editing ? draft : code)}
+        </span>
         <span className="flex-1" />
         <button
           type="button"
