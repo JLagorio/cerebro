@@ -65,6 +65,13 @@ export function NoteBodyEditor({
   const [generation, setGeneration] = useState(0);
   const [conflict, setConflict] = useState(false);
   const dirty = useRef(false);
+  // An own save's rescan publishes the new mtime to the store BEFORE the
+  // `await rescan()` continuation below re-baselines — and React can flush
+  // the reconciler effect in that gap (observed in the M29.13 e2e: every
+  // save silently reloaded the editor ~100ms later, which remounted the
+  // mermaid block and threw away its open edit session). While this flag is
+  // up, the mtime change is ours, not somebody else's.
+  const ownSaveInFlight = useRef(false);
   const entryModifiedAt = useVaultStore(
     (s) => s.entries.find((e) => e.path === path)?.modifiedAt ?? null,
   );
@@ -120,6 +127,7 @@ export function NoteBodyEditor({
   // why this is Phase 0 of a milestone about putting AI into the editor.
   useEffect(() => {
     if (loaded === null || loaded.path !== path) return;
+    if (ownSaveInFlight.current) return;
     if (entryModifiedAt === null || entryModifiedAt === baseline.current) return;
     if (dirty.current) {
       setConflict(true);
@@ -159,6 +167,7 @@ export function NoteBodyEditor({
       }
       emitSaveState('saved');
       dirty.current = false;
+      ownSaveInFlight.current = true;
       try {
         await rescan();
         // Our own write moved the file's mtime. Re-baselining here is what
@@ -169,6 +178,8 @@ export function NoteBodyEditor({
           baseline.current;
       } catch {
         toast("Couldn't refresh vault");
+      } finally {
+        ownSaveInFlight.current = false;
       }
     })();
   };
