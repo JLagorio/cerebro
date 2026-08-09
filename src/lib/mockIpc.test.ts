@@ -432,6 +432,17 @@ describe('mockIpc', () => {
         /not found/i,
       );
     });
+
+    // M29.23: mermaid's config header IS valid YAML — updateFrontmatter on a
+    // .mmd would merge the patch into the diagram's own header (the agent's
+    // MCP door included) and reserialize it. Parity with write.rs.
+    it('updateFrontmatter refuses a .mmd and leaves the bytes alone', async () => {
+      const before = await mock.readNote('/demo-vault', 'diagrams/pipeline.mmd');
+      await expect(
+        mock.updateFrontmatter('/demo-vault', 'diagrams/pipeline.mmd', { status: 'done' }),
+      ).rejects.toThrow(/no frontmatter/);
+      expect(await mock.readNote('/demo-vault', 'diagrams/pipeline.mmd')).toBe(before);
+    });
   });
 
   /** Parity with `vault::write::write_text_file` (M29.22). */
@@ -469,6 +480,23 @@ describe('mockIpc', () => {
       await expect(
         mock.writeTextFile('/demo-vault', 'knowledge/concept.mmd', 'graph TD\n'),
       ).rejects.toThrow(/read-only/);
+    });
+
+    // Parity with safe_join in write.rs (M29.23): the mock must refuse the
+    // same escapes the backend does, or containment "works" only in dev.
+    it('refuses paths that escape the vault', async () => {
+      await expect(mock.writeTextFile('/demo-vault', '/tmp/abs.mmd', 'x\n')).rejects.toThrow(
+        /escapes the vault/,
+      );
+      await expect(mock.writeTextFile('/demo-vault', '../outside.mmd', 'x\n')).rejects.toThrow(
+        /escapes the vault/,
+      );
+      await expect(
+        mock.writeTextFile('/demo-vault', 'diagrams/../../sneaky.mmd', 'x\n'),
+      ).rejects.toThrow(/escapes the vault/);
+      await expect(mock.writeTextFile('/demo-vault', '', 'x\n')).rejects.toThrow(
+        /escapes the vault/,
+      );
     });
   });
 

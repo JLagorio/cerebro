@@ -162,6 +162,12 @@ export async function updateFrontmatter(
   patch: Record<string, unknown>,
 ): Promise<void> {
   guardHumanWrite(path);
+  // Parity with update_frontmatter in write.rs (M29.23): mermaid's config
+  // header IS valid YAML, so patching a .mmd would merge into the diagram's
+  // own header and reserialize it. There is no frontmatter here to update.
+  if (path.endsWith('.mmd')) {
+    throw new Error(`${path}: a .mmd is raw diagram source and has no frontmatter to update`);
+  }
   return writeFrontmatter(path, patch);
 }
 
@@ -500,8 +506,9 @@ export async function importAttachment(_vault: string, source: string): Promise<
 
 /**
  * Mirror of `vault::write::write_text_file` (M29.22): same knowledge guard,
- * same `.mmd`-only extension allowlist, same stem dedupe. Returns the
- * vault-relative path actually written.
+ * same `.mmd`-only extension allowlist, same stem dedupe, and the same
+ * vault containment `safe_join` enforces (no absolute paths, no `..`, no
+ * empty path). Returns the vault-relative path actually written.
  */
 export async function writeTextFile(
   _vault: string,
@@ -509,6 +516,9 @@ export async function writeTextFile(
   content: string,
 ): Promise<string> {
   guardHumanWrite(path);
+  if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
+    throw new Error(`path escapes the vault: ${path}`);
+  }
   const dot = path.lastIndexOf('.');
   if (dot === -1) throw new Error(`write_text_file requires an extension: ${path}`);
   const [stem, ext] = [path.slice(0, dot), path.slice(dot + 1)];

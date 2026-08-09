@@ -101,9 +101,13 @@ function CanvasOutlet() {
     // screen is a Collection.
     case 'doc':
       return <DocPage selection={selection} />;
-    // M29.21: a standalone .mmd opens as a full-page diagram editor.
+    // M29.21: a standalone .mmd opens as a full-page diagram editor. KEYED on
+    // the path so navigating diagram→diagram is a true unmount/remount: the
+    // page's debounced-save flush runs as an unmount cleanup, and an unkeyed
+    // path change re-pointed the save at the NEW file before the OLD page's
+    // pending edit had flushed — writing A's bytes into B and losing A's edit.
     case 'diagram':
-      return <DiagramPage selection={selection} />;
+      return <DiagramPage key={selection.path} selection={selection} />;
     case 'docs':
       return <DocsPage />;
     // M10: a Collection is the container's page; a List is the record canvas.

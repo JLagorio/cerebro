@@ -5,6 +5,7 @@ import { Icon } from '@/components/ui/Icon';
 import type { SaveState } from '@/editor/NoteBodyEditor';
 import type { Selection } from '@/engine/types';
 import { readNote, saveNote } from '@/lib/ipc';
+import { humanize } from '@/lib/mockParse';
 import { detectDiagramType } from '@/mermaid/detect';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { StructuralEditor } from '@/mermaid/flowchart/StructuralEditor';
@@ -47,6 +48,13 @@ const SAVE_DEBOUNCE_MS = 500;
  * loses on last-write like any plain editor. The watcher's rescan still
  * updates the entry (title, tree) — only the open buffer stays put. This is
  * DocPage's M17.4 reconcile problem, consciously deferred.
+ *
+ * App.tsx mounts this KEYED on the path, and the save machinery depends on
+ * it: the pending-debounce flush runs as an unmount cleanup, and only a true
+ * unmount guarantees that cleanup still belongs to the file it was editing.
+ * An unkeyed diagram→diagram navigation re-rendered first — re-pointing
+ * `flushRef` at the new path — and THEN ran the old effect's cleanup, which
+ * wrote the old file's bytes into the new one and dropped the pending edit.
  */
 export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   const entry = useEntry(selection.path);
@@ -58,6 +66,12 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   const [code, setCode] = useState<string | null>(null);
   const [mode, setMode] = useState<'visual' | 'code'>('code');
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  // The read failed — renamed, trashed, or unreadable. The tombstone keys on
+  // THIS, not on the entry lookup: the file is the truth in a files-first
+  // app, so the page attempts the read regardless of whether the scanner has
+  // adopted the path yet (a just-created .mmd opens fine pre-rescan), and
+  // only a failed read means there is nothing here to edit.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // The save pipeline lives in refs so the debounce and the unmount flush
   // always see the newest source without re-arming effects per keystroke.
@@ -105,12 +119,14 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
     }, SAVE_DEBOUNCE_MS);
   };
 
-  // Load once per path; the entry mode is LATCHED here (visual for
-  // flowcharts, code for everything else) and never auto-promoted after.
+  // Load once per mount (the App.tsx key makes a path change a fresh mount);
+  // the entry mode is LATCHED here (visual for flowcharts, code for
+  // everything else) and never auto-promoted after.
   useEffect(() => {
     let cancelled = false;
     setCode(null);
     setSaveState('idle');
+    setLoadFailed(false);
     if (vaultPath === null) return;
     void readNote(vaultPath, selection.path)
       .then((raw) => {
@@ -120,17 +136,18 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         setMode(parseFlowchart(raw) !== null ? 'visual' : 'code');
       })
       .catch(() => {
-        // The entry-null empty state below is the visible face of this.
-        if (!cancelled) setCode(null);
+        if (!cancelled) setLoadFailed(true);
       });
     return () => {
       cancelled = true;
     };
   }, [vaultPath, selection.path]);
 
-  // A pending debounce must not die with the page: flush it on the way out.
-  // flushRef still holds the closure over THIS path's bytes when the cleanup
-  // runs, so a navigation mid-debounce saves the right file.
+  // A pending debounce must not die with the page: flush it on unmount. This
+  // is only safe BECAUSE App.tsx keys the page on the path — a path change
+  // is a real unmount, so the flushRef this cleanup reads was last assigned
+  // by the dying instance and still closes over ITS path and bytes. (Without
+  // the key, the new path's render reassigned flushRef before this ran.)
   useEffect(() => {
     return () => {
       if (timer.current !== null) {
@@ -139,7 +156,7 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
         void flushRef.current();
       }
     };
-  }, [selection.path]);
+  }, []);
 
   const flowchartCapable = code !== null && parseFlowchart(code) !== null;
 
@@ -151,13 +168,16 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
     if (mode === 'visual' && code !== null && !flowchartCapable) setMode('code');
   }, [mode, code, flowchartCapable]);
 
-  if (entry === null) {
+  // Only a FAILED READ tombstones the page (see loadFailed above): an entry
+  // the scanner has not adopted yet still opens, and an entry that lingers
+  // after its file went unreadable does not pretend to be editable.
+  if (loadFailed) {
     return (
       <div className="flex min-w-0 flex-1 items-center justify-center">
         <EmptyState
           icon="file-x"
           title="This diagram no longer exists"
-          description="It may have been renamed or moved to the Trash."
+          description="It may have been renamed, moved to the Trash, or its file couldn't be read."
           action={
             <Button variant="secondary" onClick={() => navigate({ kind: 'home' })}>
               Go home
@@ -168,12 +188,19 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
     );
   }
 
+  // The scanner's title when it has one; the filename stem before then —
+  // `humanize` is the same sentence-casing the scanner itself applies, so
+  // the title doesn't flicker when the rescan lands.
+  const title =
+    entry?.title ??
+    humanize((selection.path.split('/').pop() ?? selection.path).replace(/\.mmd$/, ''));
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="diagram-page">
       <div className="flex h-11 flex-none items-center gap-1.5 border-b border-n-200 px-3">
         <Icon name="waypoints" size={14} color="var(--n-500)" />
         <span className="truncate text-sm font-medium text-n-900" data-testid="diagram-title">
-          {entry.title}
+          {title}
         </span>
         <span className="flex-none text-xs uppercase tracking-[0.05em] text-n-500">
           {detectDiagramType(code ?? '')}

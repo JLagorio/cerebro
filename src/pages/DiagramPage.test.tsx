@@ -80,8 +80,50 @@ describe('DiagramPage', () => {
     await waitFor(() => expect(screen.getByTestId('diagram-save-state').textContent).toBe('Saved'));
   });
 
-  it('shows the empty state when the file is gone from the vault', () => {
+  // The tombstone keys on the READ failing, not on the entry lookup (M29.23):
+  // the file is the truth, so only "nothing readable at this path" says gone.
+  it('shows the empty state when the read fails', async () => {
     render(<DiagramPage selection={{ kind: 'diagram', path: 'diagrams/gone.mmd' }} />);
-    expect(screen.getByText('This diagram no longer exists')).toBeTruthy();
+    expect(await screen.findByText('This diagram no longer exists')).toBeTruthy();
+  });
+
+  it('opens a file the scanner has not adopted yet, titled from its stem', async () => {
+    // Written but NOT rescanned — no entry exists for it.
+    await writeTextFile('/demo-vault', 'diagrams/brand-new.mmd', 'sequenceDiagram\n  A->>B: x\n');
+    expect(useVaultStore.getState().entries.some((e) => e.path === 'diagrams/brand-new.mmd')).toBe(
+      false,
+    );
+    render(<DiagramPage selection={{ kind: 'diagram', path: 'diagrams/brand-new.mmd' }} />);
+    expect(await screen.findByTestId('diagram-code-pane')).toBeTruthy();
+    expect(screen.getByTestId('diagram-title').textContent).toBe('Brand new');
+  });
+
+  // M29.23 CRITICAL regression: App.tsx keys the page on the path, so a
+  // diagram→diagram navigation is a true unmount and the unmount flush still
+  // belongs to the file it was editing. Unkeyed, the new path's render
+  // re-pointed flushRef BEFORE the old cleanup ran — A's pending edit was
+  // written into B and lost from A.
+  it('a navigation mid-debounce flushes to the OLD file and never touches the new one', async () => {
+    const A = 'diagrams/a.mmd';
+    const B = 'diagrams/b.mmd';
+    const A_RAW = 'sequenceDiagram\n  A->>A: a\n';
+    const B_RAW = 'sequenceDiagram\n  B->>B: b\n';
+    await writeTextFile('/demo-vault', A, A_RAW);
+    await writeTextFile('/demo-vault', B, B_RAW);
+    await useVaultStore.getState().rescan();
+
+    // Mirror App.tsx: the page is KEYED on the selection path.
+    const { rerender } = render(<DiagramPage key={A} selection={{ kind: 'diagram', path: A }} />);
+    const textarea = (await screen.findByLabelText('Mermaid source')) as HTMLTextAreaElement;
+    const edited = `${A_RAW}  A->>B: edited\n`;
+    fireEvent.change(textarea, { target: { value: edited } });
+
+    // Navigate to B inside the 500ms debounce window.
+    rerender(<DiagramPage key={B} selection={{ kind: 'diagram', path: B }} />);
+    await screen.findByTestId('diagram-code-pane');
+
+    // A received its pending edit; B is byte-identical to what was seeded.
+    await waitFor(() => expect(fs().get(A)).toBe(edited), { timeout: 3000 });
+    expect(fs().get(B)).toBe(B_RAW);
   });
 });

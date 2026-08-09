@@ -153,6 +153,16 @@ pub fn update_frontmatter(
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
+    // A .mmd has NO frontmatter to patch (M29.23): its leading `---` block is
+    // mermaid config — valid YAML, so without this guard a patch (including
+    // the agent's MCP update_frontmatter) would merge into the diagram's
+    // config header and reserialize it. Refused at the mechanism, not the
+    // callers, same as vault containment.
+    if rel.ends_with(".mmd") {
+        return Err(format!(
+            "{rel}: a .mmd is raw diagram source and has no frontmatter to update"
+        ));
+    }
     let content = read_file(vault, rel)?;
     let (block, body) = parse::split_frontmatter(&content);
     let mut mapping = match block {
@@ -194,6 +204,11 @@ pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
 /// vault's schema (M13.5). Malformed frontmatter reads as untyped, which is
 /// also how scan.rs reads it: a doc the scanner does not type is not schema.
 pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
+    // A .mmd is always untyped: its `---` header is mermaid config, and a
+    // stray `type:` key in there is diagram data, not vault schema (M29.23).
+    if rel.ends_with(".mmd") {
+        return None;
+    }
     let content = read_file(vault, rel).ok()?;
     let (block, _) = parse::split_frontmatter(&content);
     let mapping = parse::parse_frontmatter(block?).ok()?;
@@ -845,6 +860,28 @@ mod tests {
         assert_eq!(read(&vault, "diagrams/pipeline.mmd"), edited);
         // Same contract as .md: save only overwrites an existing file.
         assert!(save_note(&vault, "diagrams/nope.mmd", "flowchart TD\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The other doors stay shut too (M29.23): mermaid's config header IS
+    // valid YAML, so without these guards a frontmatter patch — including the
+    // agent's MCP update_frontmatter — would merge into it and reserialize.
+    #[test]
+    fn mmd_refuses_frontmatter_updates_and_reads_as_untyped() {
+        const MMD: &str = "---\ntype: Should never surface\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n";
+        let vault = testutil::temp_vault("wfm-mmd-doors");
+        testutil::write(&vault, "diagrams/pipeline.mmd", MMD);
+        let err = update_frontmatter(
+            &vault,
+            "diagrams/pipeline.mmd",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap_err();
+        assert!(err.contains("no frontmatter"), "{err}");
+        // The file is byte-identical — the refusal happened before any write.
+        assert_eq!(read(&vault, "diagrams/pipeline.mmd"), MMD);
+        // The header's `type:` key is diagram data, never vault schema.
+        assert_eq!(note_type(&vault, "diagrams/pipeline.mmd"), None);
         let _ = std::fs::remove_dir_all(&vault);
     }
 
