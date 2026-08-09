@@ -19,6 +19,7 @@
 //! acknowledgement wants. Re-verify on toolchain bumps.
 
 pub mod arm;
+pub mod capture;
 pub mod concepts;
 #[cfg(test)]
 mod conformance;

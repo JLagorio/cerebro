@@ -182,6 +182,20 @@ pub fn projected_bytes(state: &EpistemicState, belief: &BeliefState) -> String {
     super::project::project(&content, &fields)
 }
 
+/// The typed value at a `/fields/...` pointer over a fields object;
+/// Missing when absent. (The `/body` pointer is the caller's branch —
+/// content is not inside fields.)
+pub fn typed_at_pointer(fields: &serde_json::Value, pointer: &str) -> TypedValue {
+    let Some(rest) = pointer.strip_prefix("/fields/") else {
+        return TypedValue::Missing;
+    };
+    let tokens: Vec<String> = rest
+        .split('/')
+        .map(|t| t.replace("~1", "/").replace("~0", "~"))
+        .collect();
+    typed_at(fields, &tokens)
+}
+
 /// The canonical projection-state descriptor (M23): every event the
 /// renderer's output — or its identity — depends on. Serialized field
 /// order IS the canonical digest input.
@@ -1829,7 +1843,7 @@ fn apply_migration_completed(
 /// Apply one overlay op WITHOUT preconditions: overlays are presentation
 /// state, so an op a later revision made inapplicable (missing parent,
 /// retyped body) is skipped deterministically, never an error.
-fn apply_overlay_op(
+pub(crate) fn apply_overlay_op(
     content: &mut String,
     fields: &mut serde_json::Value,
     op: &schema::OverridePatchOp,

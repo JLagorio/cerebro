@@ -473,7 +473,24 @@ impl LedgerWriter {
                 .as_object_mut()
                 .ok_or("batch members must be schema-v1 bodies")?;
             object.insert("batch_id".to_string(), serde_json::json!(batch_id));
-            let member_key = operation_key.map(|key| format!("{key}#m{ordinal}"));
+            // A member that ARRIVES keyed keeps its own key (M23.5: a staged
+            // source registration rides its `source-register-v1:` key, so
+            // the same registration is idempotent whether it commits
+            // standalone or as a batch member). An already-claimed member
+            // key is a hard conflict here — the caller should not have
+            // staged it — never a silent dedupe.
+            let member_key = match object.get("idempotency_key").and_then(|v| v.as_str()) {
+                Some(own) => {
+                    if self.keys.contains_key(own) || self.operations.contains_key(own) {
+                        return Err(format!(
+                            "batch member {ordinal} carries idempotency key {own:?}, which is \
+                             already committed — stage only what does not exist"
+                        ));
+                    }
+                    Some(own.to_string())
+                }
+                None => operation_key.map(|key| format!("{key}#m{ordinal}")),
+            };
             object.insert("idempotency_key".to_string(), serde_json::json!(member_key));
             let decoded = schema::decode_body(&kind, &body)
                 .map_err(|e| format!("batch member {ordinal}: {e}"))?

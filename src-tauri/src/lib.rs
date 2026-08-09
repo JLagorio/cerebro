@@ -108,6 +108,21 @@ fn verify_concept(
     vault::write::verify_frontmatter(Path::new(&vault), &path, &patch)
 }
 
+/// The M23.5 capture boundary: a structured in-app edit to a knowledge
+/// projection commits assertion+revision as one logical batch; an editorial
+/// edit commits a projection override. The M23.7 valve routes the human
+/// edit paths here; until then only capture-aware surfaces call it. A vault
+/// without an active ledger writer cannot capture — the error names it.
+#[tauri::command(async)]
+fn capture_concept_edit(vault: String, request: serde_json::Value) -> Result<(), String> {
+    ledger::capture::capture_from_json(Path::new(&vault), &request).unwrap_or_else(|| {
+        Err(
+            "no active ledger writer for this vault — capture is unavailable (see ledger_status)"
+                .to_string(),
+        )
+    })
+}
+
 #[tauri::command(async)]
 fn create_note(
     vault: String,
@@ -388,6 +403,7 @@ pub fn run() {
             save_note,
             update_frontmatter,
             verify_concept,
+            capture_concept_edit,
             create_note,
             set_note_title,
             list_views,

@@ -70,6 +70,18 @@ export function verifyConcept(
     : mock.verifyConcept(vault, path, patch);
 }
 
+/**
+ * The M23.5 capture boundary: a structured edit to a knowledge projection
+ * becomes an assertion+revision batch; an editorial edit becomes a
+ * projection override. The M23.7 valve routes in-app projection edits here
+ * instead of the guard refusal. `request.kind` selects the channel.
+ */
+export function captureConceptEdit(vault: string, request: Record<string, unknown>): Promise<void> {
+  return inTauri()
+    ? invokeTauri('capture_concept_edit', { vault, request })
+    : mock.captureConceptEdit(vault, request);
+}
+
 export function createNote(
   vault: string,
   folder: string,

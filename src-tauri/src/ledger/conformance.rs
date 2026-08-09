@@ -2285,6 +2285,313 @@ fn scenario_reconciliation() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+fn scenario_capture() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF, ENTITY, ACME_PATH),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &projection_belief_body(BELIEF_B, ENTITY_B, "concepts/other.md"),
+    );
+    let _ = created;
+
+    // The M23.5 capture batch, exactly as the boundary builds it: the
+    // FIRST-capture human registration rides its own source-register-v1
+    // key; every effect gets one human assertion with UI-selected authority
+    // (both fields defaulting to unknown) and CORE-derived provenance; one
+    // revision carries the complete replacement basis; the exact paired
+    // events follow.
+    let human = human_registration("human:owner");
+    let mut registration_value = serde_json::to_value(&human).unwrap();
+    registration_value["idempotency_key"] =
+        serde_json::json!(format!("source-register-v1:{STORE}:{}", human.source_id));
+    let registration_ref = format!("{:032x}", b.frames.len() as u64 + 1);
+
+    let capture_assertion =
+        |predicate: &str, value: TypedValue, basis: AssertionBasis, form: HumanAssertionForm| {
+            let mut body = observation_body(
+                ObservationKind::HumanAssertion,
+                &human,
+                &registration_ref,
+                "human:owner",
+                SubjectRef::Resolved {
+                    entity_id: ENTITY.into(),
+                    aliases: vec![],
+                },
+                vec![],
+                serde_json::to_value(HumanAssertionPayload {
+                    assertion: AssertionFields {
+                        assertion_kind: AssertionKind::Presence,
+                        predicate: predicate.into(),
+                        value,
+                        scope: Scope::empty(),
+                        relationship_to_subject: RelationshipToSubject {
+                            role: SubjectRole::Unknown,
+                        },
+                        assertion_basis: basis,
+                        authority_provenance: AuthorityProvenance::TrustedHumanCapture,
+                        absence: None,
+                    },
+                    form,
+                })
+                .unwrap(),
+            );
+            body.actor.id = "human:owner".into();
+            serde_json::to_value(&body).unwrap()
+        };
+
+    let field_assertion = capture_assertion(
+        "/fields/status",
+        TypedValue::string("paused"),
+        AssertionBasis::Unknown,
+        HumanAssertionForm::FieldChange {
+            target_belief_id: BELIEF.into(),
+            field_path: "/fields/status".into(),
+            before: TypedValue::string("active"),
+            after: TypedValue::string("paused"),
+            corrects: None,
+            reason: None,
+        },
+    );
+    let relation_id = derive_relation_id(BELIEF, BELIEF_B, RelationKind::Refines);
+    let relation_assertion = capture_assertion(
+        "belief_relation",
+        TypedValue::Object {
+            value: [
+                ("relation_id".to_string(), TypedValue::string(&relation_id)),
+                ("action".to_string(), TypedValue::string("add")),
+                ("from".to_string(), TypedValue::string(BELIEF)),
+                ("to".to_string(), TypedValue::string(BELIEF_B)),
+                ("relation".to_string(), TypedValue::string("refines")),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        AssertionBasis::Unknown,
+        HumanAssertionForm::RelationChange {
+            target_belief_id: BELIEF.into(),
+            relation_id: relation_id.clone(),
+            action: RelationAction::Add,
+            from: BELIEF.into(),
+            to: BELIEF_B.into(),
+            relation: RelationKind::Refines,
+            corrects: None,
+            reason: None,
+        },
+    );
+    let alias_assertion = capture_assertion(
+        "entity_alias",
+        TypedValue::Object {
+            value: [
+                ("entity_id".to_string(), TypedValue::string(ENTITY)),
+                ("alias".to_string(), TypedValue::string("The Acme File")),
+                (
+                    "normalized_alias".to_string(),
+                    TypedValue::string("the acme file"),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        },
+        AssertionBasis::Unknown,
+        HumanAssertionForm::AliasAdd {
+            target_belief_id: BELIEF.into(),
+            entity_id: ENTITY.into(),
+            alias: "The Acme File".into(),
+            normalized_alias: "the acme file".into(),
+            corrects: None,
+            reason: None,
+        },
+    );
+    // Member ids are seq-deterministic: registration m0, assertions m1-m3.
+    let base = b.frames.len() as u64;
+    let member_id = |offset: u64| format!("{:032x}", base + offset);
+    let revised = revised_body(
+        BELIEF,
+        vec![PatchOp {
+            field_path: "/fields/status".into(),
+            before: TypedValue::string("active"),
+            after: TypedValue::string("paused"),
+        }],
+        BeliefBasis::Linked {
+            links: vec![
+                BasisLink {
+                    observation_event_id: member_id(2),
+                    role: BasisRole::Supports,
+                },
+                BasisLink {
+                    observation_event_id: member_id(3),
+                    role: BasisRole::Supports,
+                },
+                BasisLink {
+                    observation_event_id: member_id(4),
+                    role: BasisRole::Supports,
+                },
+            ],
+        },
+    );
+    let mut revised_value = serde_json::to_value(&revised).unwrap();
+    revised_value["actor"]["id"] = serde_json::json!("human:owner");
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0301",
+        vec![
+            (KIND_SOURCE_REGISTERED.into(), registration_value),
+            (KIND_OBSERVATION_RECORDED.into(), field_assertion),
+            (KIND_OBSERVATION_RECORDED.into(), relation_assertion),
+            (KIND_OBSERVATION_RECORDED.into(), alias_assertion),
+            (KIND_BELIEF_REVISED.into(), revised_value),
+            (
+                KIND_BELIEF_RELATION.into(),
+                serde_json::to_value(relation_body(
+                    BELIEF,
+                    BELIEF_B,
+                    RelationKind::Refines,
+                    RelationAction::Add,
+                ))
+                .unwrap(),
+            ),
+            (
+                KIND_ENTITY_ALIAS_ADDED.into(),
+                serde_json::to_value(alias_body(ENTITY, "The Acme File")).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // A STALE capture: the before-value no longer holds — the whole batch
+    // (assertion AND revision) has zero effect.
+    let stale_assertion = capture_assertion(
+        "/fields/status",
+        TypedValue::string("archived"),
+        AssertionBasis::Unknown,
+        HumanAssertionForm::FieldChange {
+            target_belief_id: BELIEF.into(),
+            field_path: "/fields/status".into(),
+            before: TypedValue::string("active"), // now "paused"
+            after: TypedValue::string("archived"),
+            corrects: None,
+            reason: None,
+        },
+    );
+    let stale_revised = revised_body(
+        BELIEF,
+        vec![PatchOp {
+            field_path: "/fields/status".into(),
+            before: TypedValue::string("active"),
+            after: TypedValue::string("archived"),
+        }],
+        unsupported(),
+    );
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0302",
+        vec![
+            (KIND_OBSERVATION_RECORDED.into(), stale_assertion),
+            (
+                KIND_BELIEF_REVISED.into(),
+                serde_json::to_value(&stale_revised).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // A FORGED capture: an agent actor claiming trusted human provenance —
+    // authority derivation refuses it, killing the batch.
+    let mut forged = capture_assertion(
+        "/fields/status",
+        TypedValue::string("forged"),
+        AssertionBasis::Firsthand,
+        HumanAssertionForm::FieldChange {
+            target_belief_id: BELIEF.into(),
+            field_path: "/fields/status".into(),
+            before: TypedValue::string("paused"),
+            after: TypedValue::string("forged"),
+            corrects: None,
+            reason: None,
+        },
+    );
+    forged["actor"]["id"] = serde_json::json!("agent:sneaky");
+    let forged_revised = revised_body(
+        BELIEF,
+        vec![PatchOp {
+            field_path: "/fields/status".into(),
+            before: TypedValue::string("paused"),
+            after: TypedValue::string("forged"),
+        }],
+        unsupported(),
+    );
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0303",
+        vec![
+            (KIND_OBSERVATION_RECORDED.into(), forged),
+            (
+                KIND_BELIEF_REVISED.into(),
+                serde_json::to_value(&forged_revised).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // The extracted-claim-text correction SHAPE: a field_change targeting
+    // the body with corrects/reason — the closed union gains no new kind.
+    let correction = capture_assertion(
+        "/body",
+        TypedValue::string("# Acme\n\nCorrected vendor.\n"),
+        AssertionBasis::Unknown,
+        HumanAssertionForm::FieldChange {
+            target_belief_id: BELIEF.into(),
+            field_path: "/body".into(),
+            before: TypedValue::string("# Acme\n\nActive vendor.\n"),
+            after: TypedValue::string("# Acme\n\nCorrected vendor.\n"),
+            corrects: Some(member_id(2)),
+            reason: Some("the extracted claim text was wrong".into()),
+        },
+    );
+    // The complete-replacement rule again: every still-admissible prior
+    // link survives and the correction Observation joins as support.
+    let correction_obs_id = format!("{:032x}", b.frames.len() as u64 + 1);
+    let correction_revised = revised_body(
+        BELIEF,
+        vec![PatchOp {
+            field_path: "/body".into(),
+            before: TypedValue::string("# Acme\n\nActive vendor.\n"),
+            after: TypedValue::string("# Acme\n\nCorrected vendor.\n"),
+        }],
+        BeliefBasis::Linked {
+            links: [member_id(2), member_id(3), member_id(4), correction_obs_id]
+                .into_iter()
+                .map(|observation_event_id| BasisLink {
+                    observation_event_id,
+                    role: BasisRole::Supports,
+                })
+                .collect(),
+        },
+    );
+    let mut correction_revised_value = serde_json::to_value(&correction_revised).unwrap();
+    correction_revised_value["actor"]["id"] = serde_json::json!("human:owner");
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0304",
+        vec![
+            (KIND_OBSERVATION_RECORDED.into(), correction),
+            (KIND_BELIEF_REVISED.into(), correction_revised_value),
+        ],
+        true,
+        None,
+    );
+    (
+        "capture",
+        "The M23.5 capture batch: first-source registration under its own key, one assertion per \
+         effect with unknown-defaulted authority and core-derived provenance, the complete \
+         replacement basis, and exact paired events — while stale and forged captures refuse \
+         wholesale and corrections stay inside the closed field_change form.",
+        b.frames,
+    )
+}
+
 // --- Generation ------------------------------------------------------------
 
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
@@ -2306,6 +2613,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_overrides(),
         scenario_projection_identity(),
         scenario_reconciliation(),
+        scenario_capture(),
     ]
 }
 

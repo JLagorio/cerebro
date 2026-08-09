@@ -500,6 +500,76 @@ describe('mockIpc', () => {
     });
   });
 
+  describe('captureConceptEdit (M23.5) — guards come from src/lib/epistemic', () => {
+    const CONCEPT = 'knowledge/systems/status-model.md';
+    const editorial = (ops: Record<string, unknown>[]): Record<string, unknown> => ({
+      kind: 'editorial',
+      path: CONCEPT,
+      actor_id: 'human:owner',
+      ops,
+      origin: 'in_app',
+      request_id: 'req-1',
+    });
+
+    it('applies a body override and refuses provenance/epistemic pointers', async () => {
+      await mock.captureConceptEdit(
+        '/demo-vault',
+        editorial([
+          {
+            field_path: '/body',
+            before: { type: 'string', value: 'x' },
+            after: { type: 'string', value: '\n# Rewritten\n\nEditorial.\n' },
+          },
+        ]),
+      );
+      expect(await mock.readNote('/demo-vault', CONCEPT)).toContain('Editorial.');
+      // The pointer allowlist is the SHARED epistemic rule, not a copy.
+      for (const illegal of ['/fields/verified', '/fields/generated', '/fields/supersedes']) {
+        await expect(
+          mock.captureConceptEdit(
+            '/demo-vault',
+            editorial([
+              {
+                field_path: illegal,
+                before: { type: 'missing' },
+                after: { type: 'string', value: 'forged' },
+              },
+            ]),
+          ),
+        ).rejects.toThrow(/epistemic or provenance/);
+      }
+    });
+
+    it('applies a structured field edit and refuses non-belief pointers', async () => {
+      await mock.captureConceptEdit('/demo-vault', {
+        kind: 'structured',
+        path: CONCEPT,
+        actor_id: 'human:owner',
+        fields: [
+          {
+            field_path: '/fields/lifecycle',
+            before: { type: 'string', value: 'stable' },
+            after: { type: 'string', value: 'deprecated' },
+          },
+        ],
+        request_id: 'req-2',
+      });
+      const raw = (await mock.scanVault('/demo-vault')).find((e) => e.path === CONCEPT);
+      expect(raw?.properties.lifecycle).toBe('deprecated');
+      await expect(
+        mock.captureConceptEdit('/demo-vault', {
+          kind: 'structured',
+          path: CONCEPT,
+          actor_id: 'human:owner',
+          fields: [
+            { field_path: '/nowhere', before: { type: 'missing' }, after: { type: 'missing' } },
+          ],
+          request_id: 'req-3',
+        }),
+      ).rejects.toThrow(/\/body or \/fields/);
+    });
+  });
+
   it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
     await mock.createFolder('/demo-vault', 'projects/empty-folder');
     await mock.saveView('/demo-vault', 'v', 'name: V\n');

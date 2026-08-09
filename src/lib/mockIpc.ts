@@ -7,6 +7,7 @@
 import YAML, { type Document } from 'yaml';
 import { isKnowledgePath } from '@/engine/okf';
 import type { Entry } from '@/engine/types';
+import { validateFieldPath, validateOverridePointer } from './epistemic/schema';
 import { firstH1LineIndex, humanize, parseNote, splitFrontmatter } from './mockParse';
 
 const SEED_TIME = '2026-07-24T00:00:00.000Z';
@@ -188,6 +189,90 @@ export async function verifyConcept(
   }
   if (keys.length === 0) throw new Error('verify_concept requires a `verified` value');
   return writeFrontmatter(path, patch);
+}
+
+/** A wire TypedValue → its plain JSON value (`missing` means delete). */
+function plainFromTyped(typed: Record<string, unknown>): unknown {
+  switch (typed.type) {
+    case 'missing':
+      return undefined;
+    case 'array':
+      return (typed.value as Record<string, unknown>[]).map(plainFromTyped);
+    case 'object': {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(typed.value as Record<string, Record<string, unknown>>)) {
+        out[k] = plainFromTyped(v);
+      }
+      return out;
+    }
+    default:
+      return typed.value;
+  }
+}
+
+/**
+ * The M23.5 capture boundary, browser half. The GUARDS come from
+ * `src/lib/epistemic` — the same module the conformance vectors pin — so
+ * no schema rule grows a third hand-written copy here: editorial pointers
+ * are restricted to `/body` and the declared presentation-only fields
+ * (generated/verified provenance, epistemic frontmatter, and relation
+ * pointers stay hard-refused), and structured pointers must be canonical
+ * belief-state paths. The mock has no ledger; application is the file
+ * update the Rust projection would regenerate.
+ */
+export async function captureConceptEdit(
+  _vault: string,
+  request: Record<string, unknown>,
+): Promise<void> {
+  const path = String(request.path ?? '');
+  if (!isKnowledgePath(path)) {
+    throw new Error('capture applies only to knowledge/ projections');
+  }
+  if (typeof request.request_id !== 'string' || request.request_id.length === 0) {
+    throw new Error('capture requires the UI request id');
+  }
+  const kind = request.kind;
+  if (kind === 'editorial') {
+    const ops = (request.ops ?? []) as Record<string, unknown>[];
+    if (ops.length === 0) throw new Error('an editorial capture with no ops changes nothing');
+    for (const op of ops) validateOverridePointer(String(op.field_path ?? ''));
+    applyCaptureOps(path, ops);
+    return;
+  }
+  if (kind === 'structured') {
+    const fields = (request.fields ?? []) as Record<string, unknown>[];
+    const aliases = (request.alias_adds ?? []) as string[];
+    if (fields.length === 0 && aliases.length === 0) {
+      throw new Error('an empty capture request captures nothing');
+    }
+    for (const edit of fields) validateFieldPath(String(edit.field_path ?? ''));
+    applyCaptureOps(path, fields);
+    if (aliases.length > 0) {
+      const { yaml } = splitFrontmatter(mustGet(path));
+      const doc: Document = YAML.parseDocument(yaml ?? '');
+      const existing = (doc.get('aliases') as string[] | undefined) ?? [];
+      await writeFrontmatter(path, { aliases: [...existing, ...aliases] });
+    }
+    return;
+  }
+  throw new Error(`unknown capture kind ${String(kind)}`);
+}
+
+function applyCaptureOps(path: string, ops: Record<string, unknown>[]): void {
+  for (const op of ops) {
+    const pointer = String(op.field_path ?? '');
+    const after = op.after as Record<string, unknown>;
+    if (pointer === '/body') {
+      const { yaml } = splitFrontmatter(mustGet(path));
+      const body = String(plainFromTyped(after) ?? '');
+      files.set(path, yaml !== null ? `---\n${yaml}---\n${body}` : body);
+      touch(path);
+      continue;
+    }
+    const key = pointer.slice('/fields/'.length).split('/')[0];
+    const value = plainFromTyped(after);
+    void writeFrontmatter(path, { [key]: value === undefined ? null : value });
+  }
 }
 
 async function writeFrontmatter(path: string, patch: Record<string, unknown>): Promise<void> {
