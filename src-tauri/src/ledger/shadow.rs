@@ -77,7 +77,7 @@ pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
         .and_then(|index| index.remembered().ok().flatten());
     let verdict = classify(&dir, Some(&id), remembered.as_ref()).verdict;
 
-    let writer = match &verdict {
+    let mut writer = match &verdict {
         Verdict::Valid | Verdict::TornTail { .. } | Verdict::SealPending | Verdict::NoLedger => {
             // Recoverable (or empty) — open performs the recovery actions
             // and mints on first contact. A held lock (second instance)
@@ -86,6 +86,14 @@ pub fn activate(config_dir: &Path, vault: &Path) -> Verdict {
         }
         _ => None,
     };
+
+    // Arm the migrator (M23.0) BEFORE the index replay, so the index sees
+    // the migration events it appends. A typed refusal or failure is a
+    // state, not an error: the writer stays open (agent writes continue)
+    // and M23.6's circuit breaker surfaces the stored signal.
+    if let Some(writer) = writer.as_mut() {
+        let _ = super::arm::arm(writer, &vault);
+    }
 
     // Replay the disposable index and remember the (possibly recovered)
     // head — only when a writer opened: a refused ledger must not overwrite
@@ -342,6 +350,12 @@ mod tests {
         let config = testutil::temp_vault("shadow-soak-config");
         let verdict = activate(&config, &vault);
         assert_eq!(verdict, Verdict::NoLedger, "fresh copy starts unledgered");
+        // Activation armed the migrator (M23.0): the knowledge corpus is now
+        // committed history and the initial projection manifest exists. The
+        // soak's own writes land on top of that baseline.
+        let baseline = read_ledger(&ledger_dir(&vault)).unwrap().records;
+        assert!(baseline > 2, "migration outputs plus the two brackets");
+        assert!(super::super::manifest::load(&vault).unwrap().is_some());
 
         let rel = vw::create_note(
             &vault,
@@ -392,7 +406,11 @@ mod tests {
 
         // The soak's point: the chain over everything above VERIFIES.
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
-        assert_eq!(read.records, 12, "one event per write, none lost");
+        assert_eq!(
+            read.records,
+            baseline + 12,
+            "one event per write, none lost"
+        );
         let kinds: std::collections::BTreeSet<&str> =
             read.frames.iter().map(|f| f.kind.as_str()).collect();
         assert!(kinds.contains("vault.write"));
@@ -430,7 +448,7 @@ mod tests {
         // Diagnostics agree, live.
         let status = status(Some(config.as_path()), &vault);
         assert_eq!(status.verdict, "valid");
-        assert_eq!(status.seq, Some(12));
+        assert_eq!(status.seq, Some(baseline + 12));
         assert_eq!(status.head, Some(read.head_hash.clone()));
         assert_eq!(status.segments, 1);
         assert_eq!(status.anomalies, 0);
@@ -439,7 +457,7 @@ mod tests {
         // after every commit, not just at activate.
         let index = Index::open(&config, &read.store.store_id).unwrap();
         let remembered = index.remembered().unwrap().unwrap();
-        assert_eq!(remembered.head_seq, Some(12));
+        assert_eq!(remembered.head_seq, Some(baseline + 12));
         assert_eq!(remembered.head_hash, read.head_hash);
 
         deactivate();

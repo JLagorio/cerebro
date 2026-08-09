@@ -38,7 +38,63 @@ use super::writer::LedgerWriter;
 /// record no Observations, and the ledger never pretends otherwise.
 pub const MIGRATED_BASIS_REASON: &str = "migrated from OKF markdown without captured observations";
 
-#[derive(Debug, Default, PartialEq)]
+/// Why migration cannot proceed. The two conflict variants are the CLOSED
+/// migration reconciliation signals (M23): a changed corpus under the open
+/// epoch and a deterministic key holding different canonical content. They
+/// refuse into reconciliation — never a second epoch, never a duplicate
+/// output. `Failed` is an operational error (IO, parse), not a
+/// reconciliation state.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MigrateError {
+    /// The started-key content conflict: the corpus digest changed under an
+    /// epoch that opened over different bytes.
+    SourceChanged {
+        detail: String,
+    },
+    /// A deterministic per-output (or completed) key is already committed
+    /// with different canonical content.
+    IdempotencyConflict {
+        key: String,
+        detail: String,
+    },
+    Failed(String),
+}
+
+impl std::fmt::Display for MigrateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MigrateError::SourceChanged { detail } => write!(
+                f,
+                "migration source changed — reconcile, never duplicate: {detail}"
+            ),
+            MigrateError::IdempotencyConflict { key, detail } => write!(
+                f,
+                "migration idempotency conflict on {key} — reconcile, never duplicate: {detail}"
+            ),
+            MigrateError::Failed(detail) => write!(f, "{detail}"),
+        }
+    }
+}
+
+impl MigrateError {
+    /// The closed divergence-signal name this refusal will carry when the
+    /// M23 circuit breaker records it; None for operational failures.
+    pub fn signal(&self) -> Option<&'static str> {
+        match self {
+            MigrateError::SourceChanged { .. } => Some("migration_source_changed"),
+            MigrateError::IdempotencyConflict { .. } => Some("migration_idempotency_conflict"),
+            MigrateError::Failed(_) => None,
+        }
+    }
+}
+
+/// True when an `append_once` error is a key-content conflict (the writer's
+/// hard-conflict refusal), as opposed to an operational failure.
+fn is_key_conflict(detail: &str) -> bool {
+    detail.contains("hard conflict") || detail.contains("already names a committed batch operation")
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MigrationOutcome {
     /// Deterministic output keys, in emission order (brackets excluded).
     pub output_keys: Vec<String>,
@@ -62,41 +118,47 @@ struct Concept {
 }
 
 /// Migrate every `knowledge/*.md` file into the ledger. Restart-idempotent
-/// at every prefix; never modifies any file.
+/// at every prefix; never modifies any file. A missing knowledge directory
+/// is an EMPTY corpus, not an error — a fresh vault closes its epoch over
+/// zero outputs and never migrates again.
 pub fn migrate_vault(
     writer: &mut LedgerWriter,
     knowledge_dir: &Path,
-) -> Result<MigrationOutcome, String> {
+) -> Result<MigrationOutcome, MigrateError> {
+    let fail = |detail: String| MigrateError::Failed(detail);
     let store = writer.store_id().to_string();
     let mut outcome = MigrationOutcome::default();
 
     // --- Scan and parse the corpus, path-sorted. ---------------------------
     let mut concepts: Vec<Concept> = Vec::new();
-    for entry in walkdir::WalkDir::new(knowledge_dir).sort_by_file_name() {
-        let entry = entry.map_err(|e| e.to_string())?;
-        if !entry.file_type().is_file()
-            || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
-        {
-            continue;
+    if knowledge_dir.exists() {
+        for entry in walkdir::WalkDir::new(knowledge_dir).sort_by_file_name() {
+            let entry = entry.map_err(|e| fail(e.to_string()))?;
+            if !entry.file_type().is_file()
+                || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
+            {
+                continue;
+            }
+            let rel = entry
+                .path()
+                .strip_prefix(knowledge_dir)
+                .map_err(|e| fail(e.to_string()))?
+                .to_str()
+                .ok_or_else(|| fail("non-UTF-8 knowledge path".into()))?
+                .replace('\\', "/");
+            let original = std::fs::read_to_string(entry.path())
+                .map_err(|e| fail(format!("{}: {e}", entry.path().display())))?;
+            let (content, fields) =
+                parse_okf(&original).map_err(|e| fail(format!("{rel}: {e}")))?;
+            concepts.push(Concept {
+                belief_id: schema::migrate_id(&store, "belief", &rel),
+                entity_id: schema::migrate_id(&store, "entity", &rel),
+                path: rel,
+                original,
+                content,
+                fields,
+            });
         }
-        let rel = entry
-            .path()
-            .strip_prefix(knowledge_dir)
-            .map_err(|e| e.to_string())?
-            .to_str()
-            .ok_or("non-UTF-8 knowledge path")?
-            .replace('\\', "/");
-        let original = std::fs::read_to_string(entry.path())
-            .map_err(|e| format!("{}: {e}", entry.path().display()))?;
-        let (content, fields) = parse_okf(&original).map_err(|e| format!("{rel}: {e}"))?;
-        concepts.push(Concept {
-            belief_id: schema::migrate_id(&store, "belief", &rel),
-            entity_id: schema::migrate_id(&store, "entity", &rel),
-            path: rel,
-            original,
-            content,
-            fields,
-        });
     }
     concepts.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -113,7 +175,7 @@ pub fn migrate_vault(
         .collect();
     let source_digest = crate::ledger::sha256_hex(
         serde_json::to_string(&corpus)
-            .map_err(|e| e.to_string())?
+            .map_err(|e| fail(e.to_string()))?
             .as_bytes(),
     );
     outcome.source_digest = source_digest.clone();
@@ -131,7 +193,7 @@ pub fn migrate_vault(
         }
     }
 
-    let planned_output_count = planned_outputs(&concepts, &store, &resources)?;
+    let planned_output_count = planned_outputs(&concepts, &store, &resources).map_err(fail)?;
 
     // --- The epoch opener. A changed corpus digest under the same key is
     // an append_once content conflict = the reconciliation refusal. --------
@@ -153,9 +215,17 @@ pub fn migrate_vault(
         .append_once(
             &started_key,
             schema::KIND_MIGRATION_STARTED,
-            serde_json::to_value(&started).map_err(|e| e.to_string())?,
+            serde_json::to_value(&started).map_err(|e| fail(e.to_string()))?,
         )
-        .map_err(|e| format!("migration epoch conflict — reconcile, never duplicate: {e}"))?;
+        .map_err(|e| {
+            if is_key_conflict(&e) {
+                // The epoch opened over different corpus bytes: the closed
+                // migration_source_changed reconciliation signal.
+                MigrateError::SourceChanged { detail: e }
+            } else {
+                fail(format!("migration epoch opener: {e}"))
+            }
+        })?;
 
     // --- Registrations, in source-id order. --------------------------------
     let mut registration_receipts: BTreeMap<String, String> = BTreeMap::new();
@@ -264,7 +334,7 @@ pub fn migrate_vault(
                     source_artifact_hash: None,
                     raw_pointer: resource.clone(),
                 })
-                .map_err(|e| e.to_string())?,
+                .map_err(|e| fail(e.to_string()))?,
             };
             let key = format!("migrate-v1:{store}:{}:source:{ordinal}", concept.path);
             append_output(
@@ -383,16 +453,16 @@ pub fn migrate_vault(
 
     // --- The epoch closer. -------------------------------------------------
     if outcome.output_keys.len() as u64 != planned_output_count {
-        return Err(format!(
+        return Err(fail(format!(
             "planned {planned_output_count} outputs, emitted {} — plan/emission drift",
             outcome.output_keys.len()
-        ));
+        )));
     }
     let mut sorted_keys = outcome.output_keys.clone();
     sorted_keys.sort();
     let output_keys_digest = crate::ledger::sha256_hex(
         serde_json::to_string(&sorted_keys)
-            .map_err(|e| e.to_string())?
+            .map_err(|e| fail(e.to_string()))?
             .as_bytes(),
     );
     outcome.output_keys_digest = output_keys_digest.clone();
@@ -415,9 +485,22 @@ pub fn migrate_vault(
         .append_once(
             &completed_key,
             schema::KIND_MIGRATION_COMPLETED,
-            serde_json::to_value(&completed).map_err(|e| e.to_string())?,
+            serde_json::to_value(&completed).map_err(|e| fail(e.to_string()))?,
         )
-        .map_err(|e| format!("{completed_key}: {e}"))?;
+        .map_err(|e| {
+            if is_key_conflict(&e) {
+                MigrateError::IdempotencyConflict {
+                    key: completed_key.clone(),
+                    detail: e,
+                }
+            } else {
+                fail(format!("{completed_key}: {e}"))
+            }
+        })?;
+    // The M23.0 kill matrix's last boundary: died right after the epoch
+    // closer fsynced but before any manifest work — the reopen must take
+    // the fast completed path and build the missing manifest.
+    crate::crash::crash_point("migrate-completed");
     Ok(outcome)
 }
 
@@ -460,11 +543,18 @@ fn append_output<T: serde::Serialize>(
     key: &str,
     kind: &str,
     body: &T,
-) -> Result<String, String> {
-    let value = serde_json::to_value(body).map_err(|e| e.to_string())?;
-    let result = writer
-        .append_once(key, kind, value)
-        .map_err(|e| format!("{key}: {e}"))?;
+) -> Result<String, MigrateError> {
+    let value = serde_json::to_value(body).map_err(|e| MigrateError::Failed(e.to_string()))?;
+    let result = writer.append_once(key, kind, value).map_err(|e| {
+        if is_key_conflict(&e) {
+            MigrateError::IdempotencyConflict {
+                key: key.to_string(),
+                detail: e,
+            }
+        } else {
+            MigrateError::Failed(format!("{key}: {e}"))
+        }
+    })?;
     if result.was_existing() {
         outcome.replayed += 1;
     }
@@ -774,7 +864,12 @@ pub(crate) mod tests {
         text.push_str("\nEdited after migration.\n");
         std::fs::write(&target, text).unwrap();
         let err = migrate_vault(&mut writer, &vault.join("knowledge")).unwrap_err();
-        assert!(err.contains("reconcile"), "{err}");
+        assert!(
+            matches!(err, MigrateError::SourceChanged { .. }),
+            "the typed migration_source_changed signal, got {err:?}"
+        );
+        assert_eq!(err.signal(), Some("migration_source_changed"));
+        assert!(err.to_string().contains("reconcile"), "{err}");
         let _ = std::fs::remove_dir_all(&vault);
     }
 

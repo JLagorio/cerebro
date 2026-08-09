@@ -105,8 +105,9 @@ fn the_migration_soak_holds_end_to_end() {
     let _ = std::fs::remove_dir_all(&config);
 }
 
-/// Child: run the migrator against CEREBRO_CRASH_VAULT; the parent arms the
-/// kill point at one output boundary per iteration.
+/// Child: arm the migrator (the M23.0 production path) against
+/// CEREBRO_CRASH_VAULT; the parent walks the kill point one output
+/// boundary per iteration.
 #[test]
 #[ignore = "crash-scenario child body, spawned by the soak kill matrix"]
 fn crash_scenario_migrate_vault() {
@@ -115,7 +116,7 @@ fn crash_scenario_migrate_vault() {
     };
     let vault = std::path::PathBuf::from(vault);
     let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
-    let _ = migrate_vault(&mut writer, &vault.join("knowledge"));
+    let _ = super::arm::arm(&mut writer, &vault);
 }
 
 #[test]
@@ -147,7 +148,13 @@ fn kill_and_restart_after_every_output_never_duplicates() {
         assert!(boundary < 200, "runaway kill matrix");
     }
 
-    // The full run converged: rerun in-process, prove zero duplicates.
+    // The full run converged: the armed child also built the initial
+    // manifest over agreeing bytes.
+    assert!(
+        super::manifest::load(&vault).unwrap().is_some(),
+        "the completing run created the projection manifest"
+    );
+    // Rerun in-process, prove zero duplicates.
     let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
     let store = writer.store_id().to_string();
     let outcome = migrate_vault(&mut writer, &knowledge).unwrap();
