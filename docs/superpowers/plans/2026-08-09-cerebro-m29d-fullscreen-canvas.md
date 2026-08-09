@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** One shared full-screen diagram editor (spec D1): a pan/zoom infinite canvas (`CanvasViewport`, spec D2) hosting the structural editor or a read-only render, a floating `CodeOverlay` with Auto-Update, and a `DiagramToolbar` carrying structural controls, the `look: handDrawn` toggle (spec D9, partial), and the export actions. Two hosts: the `.mmd` DiagramPage (now sidebarless) and a "Open full screen" overlay on every mermaid block.
+**Goal:** One shared full-screen diagram editor (spec D1): a pan/zoom infinite canvas (`CanvasViewport`, spec D2) hosting the structural editor or a read-only render, a floating `CodeOverlay` with Auto-Update, and a `DiagramToolbar` carrying structural controls and the export actions. Two hosts: the `.mmd` DiagramPage (now sidebarless) and a "Open full screen" overlay on every mermaid block.
 
-**Architecture:** Everything new lives in `src/mermaid/`. `CanvasViewport` is a dumb primitive that owns pan/zoom/fit and publishes its transform through `useCanvasTransform` so overlays can position in plane coordinates. `FullScreenDiagramEditor` composes viewport + toolbar + overlay and owns NO persistence — hosts keep their own save discipline (DiagramPage's M29.23 keyed autosave survives untouched). `setLook` joins `flowchart/ops.ts` as one more surgical frontmatter op (spec D10). MermaidLightbox stays exactly as it is (spec D2: it does not migrate).
+**Architecture:** Everything new lives in `src/mermaid/`. `CanvasViewport` is a dumb primitive that owns pan/zoom/fit and publishes its transform through `useCanvasTransform` so overlays can position in plane coordinates. `FullScreenDiagramEditor` composes viewport + toolbar + overlay and owns NO persistence — hosts keep their own save discipline (DiagramPage's M29.23 keyed autosave survives untouched). MermaidLightbox stays exactly as it is (spec D2: it does not migrate). (The `look: handDrawn` toggle and its `setLook` op were cut at review 2026-08-09 — spec §4.5.)
 
 **Tech stack:** No new dependencies. React 19, existing mermaid core (`render.ts`), existing primitives (`Dialog`, `Popover`, `Menu`, `Switch`, `IconButton`).
 
-**Spec:** `docs/superpowers/specs/2026-08-09-cerebro-m29-wave2-parity-design.md` — decisions honored here: D1 (one shared editor, two hosts), D2 (CanvasViewport primitive; lightbox untouched), D9 **partially** (direction + Dagre/ELK menu + `look: handDrawn` this stage; the ELK-variant engines and Auto-layout ON/OFF arrive in Stages E/G per the stage map), D10 (every new op surgical, round-trip proven).
+**Spec:** `docs/superpowers/specs/2026-08-09-cerebro-m29-wave2-parity-design.md` — decisions honored here: D1 (one shared editor, two hosts), D2 (CanvasViewport primitive; lightbox untouched), D9 **partially** (direction + Dagre/ELK menu this stage; the ELK-variant engines and Auto-layout ON/OFF arrive in Stages E/G per the stage map; the handDrawn toggle is cut per spec §4.5), D10 (every new op surgical, round-trip proven).
 
 **A note on `dangerouslySetInnerHTML` in this plan:** the read-only canvas face injects mermaid output as HTML — the same commented, strict-mode-sanitized pattern every sink in `src/mermaid/` already uses (MermaidDiagram, MermaidLightbox, LivePreview). No other HTML source ever reaches these sinks; keep the in-code safety comments.
 
@@ -33,7 +33,6 @@
 
 - **The zoom cluster renders INSIDE CanvasViewport** (floating bottom-left card), not in DiagramToolbar. "The zoom cluster comes from CanvasViewport" (spec D2/D9) is read as ownership: the viewport owns zoom state, so it draws the controls, and every future host (Stage H's WhiteboardView) gets them for free.
 - **StructuralEditor grows two things:** a `toolbar` prop (default `true`; the full-screen editor passes `false` because DiagramToolbar owns those controls — rendering both would be two direction rows) and scale-corrected overlay math via `useCanvasTransform` (its overlays measure `getBoundingClientRect` deltas, which are screen px; inside a scaled plane those must divide by `scale` to become the plane coordinates CSS positioning uses). The default context value is the identity, so both existing hosts (block, page-until-D4) are byte-for-byte unaffected.
-- **The `look: handDrawn` toggle is flowchart-only this stage:** `setLook` is a model op per the spec's own signature (`setLook(model, look|null)`), and a non-flowchart source has no model. The toggle simply doesn't render over a read-only canvas.
 - **Block full-screen = a `fullscreen` variant on the existing Dialog**, not a new layer primitive. Dialog already owns scrim, Escape-via-layers, Tab trap, and focus restore; the variant is ~6 lines of CSS + one prop. A bespoke FullscreenLayer would re-answer all four questions to save a header we actually want (title + Close).
 - **The latch never auto-promotes** (same rule as MermaidBlockView/DiagramPage), so a flowchart-capable source on a read-only canvas gets an explicit **"Edit visually"** toolbar button. Without it, a demoted session would be stuck read-only until remount.
 - **CodeOverlay flushes its pending Auto-Update draft on unmount.** The overlay adds a 250ms buffer UNDER DiagramPage's 500ms save debounce; keystrokes younger than 250ms at navigation time would otherwise vanish — the exact shape of the M29.23 bug one level up. Auto-Update OFF keeps its contract: only Apply commits, and closing discards.
@@ -46,12 +45,11 @@ src/mermaid/
   CanvasViewport.test.tsx
   CodeOverlay.tsx               floating code panel: Auto-Update / Apply / dirty dot (M29.25)
   CodeOverlay.test.tsx
-  DiagramToolbar.tsx            structural cluster, layout menu, look toggle, export, Show code (M29.26)
+  DiagramToolbar.tsx            structural cluster, layout menu, export, Show code (M29.26)
   DiagramToolbar.test.tsx
   FullScreenDiagramEditor.tsx   the shared editor: toolbar + viewport + overlay (M29.26)
   FullScreenDiagramEditor.test.tsx
   MermaidBlockView.tsx          + "Open full screen" header action (M29.27)
-  flowchart/ops.ts              + setLook (M29.26)
   flowchart/StructuralEditor.tsx  + toolbar prop, scale-aware overlays (M29.26)
 src/pages/DiagramPage.tsx       body becomes the shared editor; header/save/tombstone stay (M29.27)
 src/app/Sidebar.tsx             + 'diagram' in SIDEBARLESS (M29.27)
@@ -703,11 +701,9 @@ git commit -m "feat(mermaid): CodeOverlay — the floating code panel with Auto-
 
 ---
 
-### Task D3: `setLook`, scale-aware StructuralEditor, `DiagramToolbar`, `FullScreenDiagramEditor` (M29.26)
+### Task D3: Scale-aware StructuralEditor, `DiagramToolbar`, `FullScreenDiagramEditor` (M29.26)
 
 **Files:**
-- Modify: `src/mermaid/flowchart/ops.ts` (append `setLook`)
-- Modify: `src/mermaid/flowchart/ops.test.ts` (append)
 - Modify: `src/mermaid/flowchart/StructuralEditor.tsx` (`toolbar` prop, scale-corrected overlays)
 - Modify: `src/mermaid/flowchart/StructuralEditor.test.tsx` (append)
 - Create: `src/mermaid/DiagramToolbar.tsx`
@@ -715,134 +711,9 @@ git commit -m "feat(mermaid): CodeOverlay — the floating code panel with Auto-
 - Create: `src/mermaid/FullScreenDiagramEditor.tsx` (**heredoc — contains `dangerouslySetInnerHTML`, trap #4**)
 - Create: `src/mermaid/FullScreenDiagramEditor.test.tsx`
 
-One phase, one commit: the op, the two editor adjustments, the toolbar, and the composition land together because none is shippable alone.
+One phase, one commit: the two editor adjustments, the toolbar, and the composition land together because none is shippable alone.
 
-- [ ] **Step 1: Write the failing `setLook` tests**
-
-Append to `src/mermaid/flowchart/ops.test.ts` (it already imports `parseFlowchart`/`serialize` and uses the `parseFlowchart(src)!` idiom):
-
-```ts
-describe('setLook', () => {
-  it('creates frontmatter when there is none', () => {
-    const m = parseFlowchart('flowchart TD\n  A --> B')!;
-    expect(serialize(setLook(m, 'handDrawn'))).toBe(
-      '---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n  A --> B',
-    );
-  });
-
-  it('joins an existing config block without touching its other keys', () => {
-    const src = '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B';
-    const m = parseFlowchart(src)!;
-    expect(serialize(setLook(m, 'handDrawn'))).toBe(
-      '---\nconfig:\n  look: handDrawn\n  layout: elk\n---\nflowchart TD\n  A --> B',
-    );
-  });
-
-  it('null removes exactly the look line, nothing else', () => {
-    const src = '---\nconfig:\n  look: handDrawn\n  layout: elk\n---\nflowchart TD\n  A --> B';
-    const m = parseFlowchart(src)!;
-    expect(serialize(setLook(m, null))).toBe(
-      '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B',
-    );
-  });
-
-  it('null with no look anywhere is byte-identical (D10)', () => {
-    const src = '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B';
-    const m = parseFlowchart(src)!;
-    expect(serialize(setLook(m, null))).toBe(src);
-  });
-
-  it('rewrites an existing look line in place, indentation preserved', () => {
-    const src = '---\nconfig:\n    look: neo\n---\nflowchart TD\n  A --> B';
-    const m = parseFlowchart(src)!;
-    expect(serialize(setLook(m, 'handDrawn'))).toBe(
-      '---\nconfig:\n    look: handDrawn\n---\nflowchart TD\n  A --> B',
-    );
-  });
-
-  it('opaque body lines survive byte-for-byte around the edit (D10)', () => {
-    const src = 'flowchart TD\n  A[Start] --> B\n  classDef hot fill:#f96\n  class A hot';
-    const out = serialize(setLook(parseFlowchart(src)!, 'handDrawn'));
-    expect(out.endsWith(src)).toBe(true);
-  });
-});
-```
-
-Add `setLook` to the ops import list at the top of the test file.
-
-- [ ] **Step 2: Run it to make sure it fails**
-
-Run: `pnpm test:run src/mermaid/flowchart/ops.test.ts`
-Expected: FAIL — `setLook` is not exported.
-
-- [ ] **Step 3: Implement `setLook` in `src/mermaid/flowchart/ops.ts`**
-
-Append after `setLayoutEngine` (it is that function with `layout` swapped for `look` — same sanctioned opaque-raw exception, same insertion points):
-
-```ts
-/**
- * `look: handDrawn` rides the diagram's YAML frontmatter (spec D9), exactly
- * as `setLayoutEngine` handles `layout:` — the one sanctioned opaque-raw
- * exception, because frontmatter is structure the parser refuses to own.
- * `null` removes the override (mermaid's classic look). Only `handDrawn` is
- * offered this wave (spec §1 non-goals keep the theme picker out).
- */
-export function setLook(model: FlowchartModel, look: 'handDrawn' | null): FlowchartModel {
-  const next = clone(model);
-  const hasFrontmatter = next.lines[0]?.raw.trim() === '---';
-
-  if (!hasFrontmatter) {
-    if (look === null) return next;
-    next.lines.unshift(
-      { raw: '---', parsed: { kind: 'opaque' }, dirty: false },
-      { raw: 'config:', parsed: { kind: 'opaque' }, dirty: false },
-      { raw: `  look: ${look}`, parsed: { kind: 'opaque' }, dirty: false },
-      { raw: '---', parsed: { kind: 'opaque' }, dirty: false },
-    );
-    return next;
-  }
-
-  let close = 1;
-  while (close < next.lines.length && next.lines[close].raw.trim() !== '---') close += 1;
-  const lookIdx = next.lines.findIndex(
-    (l, i) => i > 0 && i < close && l.raw.match(/^\s*look:/) !== null,
-  );
-
-  if (look === null) {
-    if (lookIdx !== -1) next.lines.splice(lookIdx, 1);
-    return next;
-  }
-
-  if (lookIdx !== -1) {
-    const indent = next.lines[lookIdx].raw.match(/^\s*/)?.[0] ?? '  ';
-    next.lines[lookIdx].raw = `${indent}look: ${look}`;
-    return next;
-  }
-  const configIdx = next.lines.findIndex(
-    (l, i) => i > 0 && i < close && l.raw.match(/^\s*config:\s*$/) !== null,
-  );
-  if (configIdx !== -1) {
-    next.lines.splice(configIdx + 1, 0, {
-      raw: `  look: ${look}`,
-      parsed: { kind: 'opaque' },
-      dirty: false,
-    });
-  } else {
-    next.lines.splice(close, 0, { raw: 'config:', parsed: { kind: 'opaque' }, dirty: false });
-    next.lines.splice(close + 1, 0, {
-      raw: `  look: ${look}`,
-      parsed: { kind: 'opaque' },
-      dirty: false,
-    });
-  }
-  return next;
-}
-```
-
-Run: `pnpm test:run src/mermaid/flowchart/ops.test.ts`
-Expected: all pass (existing + 6 new).
-
-- [ ] **Step 4: StructuralEditor — `toolbar` prop + scale-corrected overlays**
+- [ ] **Step 1: StructuralEditor — `toolbar` prop + scale-corrected overlays**
 
 Write the failing test first. Append to `src/mermaid/flowchart/StructuralEditor.test.tsx` (match its existing render-mock setup):
 
@@ -928,7 +799,7 @@ jsdom rects are all 0×0, so a unit test of the division would assert `0 === 0` 
 
 Run: `pnpm test:run src/mermaid/flowchart/` — all pass.
 
-- [ ] **Step 5: Write the failing `DiagramToolbar` test**
+- [ ] **Step 2: Write the failing `DiagramToolbar` test**
 
 Create `src/mermaid/DiagramToolbar.test.tsx`:
 
@@ -982,19 +853,6 @@ describe('DiagramToolbar', () => {
     );
   });
 
-  it('the hand-drawn toggle writes and removes look: handDrawn', async () => {
-    const onChangeCode = mount();
-    await userEvent.click(screen.getByRole('button', { name: 'Hand-drawn look' }));
-    expect(onChangeCode).toHaveBeenCalledWith(
-      '---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n  A[Start] --> B[End]',
-    );
-    const off = mount({ code: '---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n  A --> B' });
-    await userEvent.click(screen.getAllByRole('button', { name: 'Hand-drawn look' })[1]);
-    // Surgical: only the look line goes — the fences and `config:` stay, the
-    // same leave-the-empty-config rule setLayoutEngine follows.
-    expect(off).toHaveBeenCalledWith('---\nconfig:\n---\nflowchart TD\n  A --> B');
-  });
-
   it('+ Node appends a fresh node line', async () => {
     const onChangeCode = mount();
     await userEvent.click(screen.getByRole('button', { name: 'Add node' }));
@@ -1005,7 +863,6 @@ describe('DiagramToolbar', () => {
     const onEditVisually = vi.fn();
     mount({ code: 'sequenceDiagram\n  A->>B: x', mode: 'code', onEditVisually });
     expect(screen.queryByRole('button', { name: 'Direction TD' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Hand-drawn look' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Edit visually' })).toBeTruthy();
   });
 
@@ -1025,24 +882,22 @@ describe('DiagramToolbar', () => {
 Run: `pnpm test:run src/mermaid/DiagramToolbar.test.tsx`
 Expected: FAIL — module not found.
 
-- [ ] **Step 6: Implement `src/mermaid/DiagramToolbar.tsx`**
+- [ ] **Step 3: Implement `src/mermaid/DiagramToolbar.tsx`**
 
 ```tsx
 import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { IconButton } from '@/components/ui/IconButton';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { useUiStore } from '@/stores/uiStore';
 import { parseFlowchart, serialize, type FlowchartModel } from './flowchart/model';
-import { addNode, setDirection, setLayoutEngine, setLook } from './flowchart/ops';
+import { addNode, setDirection, setLayoutEngine } from './flowchart/ops';
 import { copyPng, copySvg, savePng } from './export';
 import { renderMermaid } from './render';
 
 const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
 
 const isElk = (code: string): boolean => code.match(/^\s*layout:\s*elk\s*$/m) !== null;
-const isHandDrawn = (code: string): boolean => code.match(/^\s*look:\s*handDrawn\s*$/m) !== null;
 
 const TEXT_BTN =
   'rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50';
@@ -1050,9 +905,8 @@ const TEXT_BTN =
 /**
  * The full-screen editor's control strip (M29.26, spec D1/D9-partial).
  *
- * The structural cluster (add node, direction, layout engine, hand-drawn
- * look) only exists over the structural editor — a read-only canvas has no
- * model to operate on. The zoom cluster is NOT here on purpose: CanvasViewport
+ * The structural cluster (add node, direction, layout engine) only exists
+ * over the structural editor — a read-only canvas has no model to operate on. The zoom cluster is NOT here on purpose: CanvasViewport
  * owns zoom state, so it draws its own controls (spec D2). Stage G grows the
  * layout menu (ELK variants, Auto-layout OFF); this stage names the two
  * engines the ops already speak.
@@ -1170,12 +1024,6 @@ export function DiagramToolbar({
               </MenuSurface>
             </Popover>
           )}
-          <IconButton
-            icon="pen-tool"
-            label="Hand-drawn look"
-            active={isHandDrawn(code)}
-            onClick={() => apply(setLook(model, isHandDrawn(code) ? null : 'handDrawn'))}
-          />
         </>
       )}
       {onEditVisually !== null && (
@@ -1202,12 +1050,12 @@ export function DiagramToolbar({
 }
 ```
 
-Verify at implementation time: `pen-tool` is a valid lucide name for `Icon` (fallback: `pencil-ruler`, keep the label), and `Popover`'s `anchorRef` accepts a `RefObject<HTMLButtonElement | null>` (`PopoverProps.anchorRef: React.RefObject<HTMLElement | null>` — TS property covariance allows it; if the compiler disagrees, type the ref as `HTMLElement | null` and cast at the `ref=` site with a written reason).
+Verify at implementation time: `Popover`'s `anchorRef` accepts a `RefObject<HTMLButtonElement | null>` (`PopoverProps.anchorRef: React.RefObject<HTMLElement | null>` — TS property covariance allows it; if the compiler disagrees, type the ref as `HTMLElement | null` and cast at the `ref=` site with a written reason).
 
 Run: `pnpm test:run src/mermaid/DiagramToolbar.test.tsx`
-Expected: 7 passed.
+Expected: 6 passed.
 
-- [ ] **Step 7: Write the failing `FullScreenDiagramEditor` test**
+- [ ] **Step 4: Write the failing `FullScreenDiagramEditor` test**
 
 Create `src/mermaid/FullScreenDiagramEditor.test.tsx`:
 
@@ -1301,7 +1149,7 @@ describe('FullScreenDiagramEditor', () => {
 Run: `pnpm test:run src/mermaid/FullScreenDiagramEditor.test.tsx`
 Expected: FAIL — module not found.
 
-- [ ] **Step 8: Implement `src/mermaid/FullScreenDiagramEditor.tsx`** (via Bash heredoc — trap #4)
+- [ ] **Step 5: Implement `src/mermaid/FullScreenDiagramEditor.tsx`** (via Bash heredoc — trap #4)
 
 ```tsx
 import { useEffect, useMemo, useState } from 'react';
@@ -1441,12 +1289,12 @@ export function FullScreenDiagramEditor({
 
 Note the CodeOverlay is a SIBLING of CanvasViewport (both absolute in the same relative box), not a child of the plane — it must not scale with the zoom, and its pointer events never reach the viewport at all.
 
-- [ ] **Step 9: Run the whole mermaid suite**
+- [ ] **Step 6: Run the whole mermaid suite**
 
 Run: `pnpm test:run src/mermaid/`
 Expected: all pass — including the untouched MermaidBlockView/StructuralEditor suites (the identity-default context and `toolbar = true` default mean zero behavior change for existing hosts).
 
-- [ ] **Step 10: Lint + typecheck, then commit**
+- [ ] **Step 7: Lint + typecheck, then commit**
 
 Run: `pnpm lint && pnpm typecheck`
 
@@ -1860,7 +1708,7 @@ git commit -m "test(mermaid): full-screen canvas e2e — page zoom, overlay edit
 - Opening a `.mmd` file is a full-screen canvas: sidebar gone (`SIDEBARLESS`), pan on background drag (button 0, pointercancel-safe), cursor-anchored wheel zoom through a native non-passive listener, zoom cluster (out / % readout-reset / in / fit) with aria-labels, scale clamped 0.1–4.
 - The floating Code panel edits any diagram type: Auto-Update ON streams at 250ms; OFF buffers behind a dirty dot until Apply; keystrokes never leak to host shortcuts; a pending Auto-Update draft survives close/navigation (unmount flush).
 - `FullScreenDiagramEditor` is ONE component with two hosts (spec D1): DiagramPage's keyed debounced autosave is byte-for-byte intact (M29.23 regression test still passes, now one debounce deeper), and the block's "Open full screen" edits through the block's own `onChangeCode` — BlockNote history, doc autosave, no new file or Selection kind.
-- The toolbar carries add-node/direction/layout(Dagre|ELK)/`look: handDrawn` over the structural editor, "Edit visually" as the only promotion path, Show code, and the Copy SVG / Copy PNG / Save PNG… actions through `export.ts`; `setLook` round-trips surgically with opaque lines byte-identical (spec D10).
+- The toolbar carries add-node/direction/layout(Dagre|ELK) over the structural editor, "Edit visually" as the only promotion path, Show code, and the Copy SVG / Copy PNG / Save PNG… actions through `export.ts`.
 - StructuralEditor behaves identically on its two old hosts (identity context, `toolbar` defaulting true) and positions its overlays correctly under scale inside the viewport; React still never touches its svg subtree.
 - MermaidLightbox is unchanged (spec D2).
 - `pnpm lint && pnpm typecheck && pnpm test:run && pnpm test:coverage` and `PORT=5273 pnpm e2e` all green; live-check once in the packaged app (`./scripts/mac-build.sh`) that Save PNG… still opens the native dialog from the full-screen toolbar.

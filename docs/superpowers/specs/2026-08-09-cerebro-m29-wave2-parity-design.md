@@ -24,7 +24,7 @@
 | Record/task cards on the canvas (ClickUp) | ✅ | ❌ | partially — `click` directive + our overlay |
 | Themes (redux, neo, handDrawn look) | ✅ | token-derived base theme | ✅ `theme: redux/neo/…`, `look: handDrawn/neo` exist in OSS |
 
-**Non-goals for wave 2** (explicitly out, revisit later): collaborative cursors, comments, version history UI, mermaid.ai's AI actions, image `img:` nodes (CORS/asset story unsolved), collapsible subgraphs (`@{ view: collapsed }` — too new/unstable), swimlanes, kanban-diagram type, per-diagram theme picker UI (we stay token-themed; `look: handDrawn` toggle is IN as a cheap win).
+**Non-goals for wave 2** (explicitly out, revisit later): collaborative cursors, comments, version history UI, mermaid.ai's AI actions, image `img:` nodes (CORS/asset story unsolved), collapsible subgraphs (`@{ view: collapsed }` — too new/unstable), swimlanes, kanban-diagram type, per-diagram theme picker UI (we stay token-themed), and the `look: handDrawn` toggle (**cut at review 2026-08-09** — hand-authored `look:` frontmatter still renders; we just don't build UI for it).
 
 ---
 
@@ -46,7 +46,7 @@
 - `{ kind: 'pos-comment'; positions: Map<string,{x,y}> }` — OUR position store, a mermaid comment: `%% cerebro:pos id1 120,40 id2 300,200`. Mermaid ignores comments; our model owns them. (`classDef`/`class`/`linkStyle` stay opaque this wave — `:::` on a node token also keeps the whole token opaque as today.)
 
 ### D4. Shape strategy: brackets for the classic 8, `@{ shape }` for the rest
-`setNodeShape(model, id, shape)`: if the target shape is one of the 8 bracket shapes AND the node has no meta line, rewrite brackets (today's behavior). Otherwise ensure/patch a `node-meta` line (`id@{ shape: x }`). The palette exposes a **curated 30-shape subset** of the 49-entry registry, grouped Basic / Process / Technical (categories are OUR editorial grouping — OSS has none; mermaid.ai's grouping is their UI invention too). Full registry list + the alias/validation gotchas (lowercase-only guard, `doublecircle` exception, broken `ellipse`) are in the Stage E plan.
+`setNodeShape(model, id, shape)`: if the target shape is one of the 8 bracket shapes AND the node has no meta line, rewrite brackets (today's behavior). Otherwise ensure/patch a `node-meta` line (`id@{ shape: x }`). The palette exposes **the full 49-entry registry** (resolved at review 2026-08-09 — was curated-30), grouped Basic / Process / Technical / Annotation (categories are OUR editorial grouping — OSS has none; mermaid.ai's grouping is their UI invention too). Full registry list + the alias/validation gotchas (lowercase-only guard, `doublecircle` exception, broken `ellipse`) are in the Stage E plan.
 
 ### D5. Colors write `style` lines; theme stays token-derived
 Node fill/stroke/text-color pickers emit/patch `style <id> fill:#…,stroke:#…,color:#…` (surgical: only the touched declarations change; unknown declarations on the line are preserved in order). A small fixed swatch palette (12 swatches derived from the app's token ramps + "clear"). No classDef authoring UI this wave.
@@ -55,7 +55,7 @@ Node fill/stroke/text-color pickers emit/patch `style <id> fill:#…,stroke:#…
 `render.ts`'s `loadMermaid()` additionally calls `registerIconPacks([{ name: 'lucide', loader: () => import('@iconify-json/lucide').then(m => m.icons) }])` (new dep, lazy chunk ~1MB — loads only when mermaid loads). Icon picker writes `id@{ icon: "lucide:name", form: rounded, pos: t|b }`. Unregistered/unknown icons render mermaid's blue "?" box — acceptable, never an error. FontAwesome pack NOT bundled (mermaid.ai uses fa; we standardize on lucide to match the app's icon language).
 
 ### D7. Manual layout ("Auto-layout OFF") — built by us, spike-gated
-OSS mermaid cannot do fixed positions, so: positions live in the `%% cerebro:pos` comment (D3). When the diagram contains `%% cerebro:layout manual`, the editor post-processes mermaid's render: each node group gets `transform: translate(dx,dy)` from its stored offset, and **edges are re-routed by us** as straight lines with arrowheads between node border anchor points (replacing each edge path's `d`; labels move to the midpoint). Dragging a node in manual mode writes its position (debounced one commit per drag-end). Toggling manual OFF preserves the comment (positions are remembered) but stops applying it. **Stage G opens with a time-boxed feasibility spike** whose exit criteria (listed in the plan) decide between full free-drag vs. the fallback scope (per-node nudge offsets on top of auto-layout). This is the riskiest item in the wave; review should weigh whether to defer Stage G entirely.
+OSS mermaid cannot do fixed positions, so: positions live in the `%% cerebro:pos` comment (D3). When the diagram contains `%% cerebro:layout manual`, the editor post-processes mermaid's render: each node group gets `transform: translate(dx,dy)` from its stored offset, and **edges are re-routed by us** as straight lines with arrowheads between node border anchor points (replacing each edge path's `d`; labels move to the midpoint). Dragging a node in manual mode writes its position (debounced one commit per drag-end). Toggling manual OFF preserves the comment (positions are remembered) but stops applying it. **Stage G opens with a time-boxed feasibility spike** whose exit criteria (listed in the plan) gate the rest of the stage. **Resolved at review 2026-08-09: the appetite is full free-drag** — the spike stays as a technical gate only; if a criterion fails, the implementer stops and reports per the plan's protocol (the nudge-offset fallback is a coordinator decision at that point, not pre-authorized scope).
 
 ### D8. Whiteboard = ViewType #10, backed by a `.mmd` file — on Lists (not Collections)
 **The user asked for "whiteboard view on any collection." Collections deliberately carry no views** (M10 invariant: a Collection is a container; queries/views live on Lists). Recommended resolution, matching ClickUp's actual model (their whiteboard is a view on a *list*):
@@ -66,7 +66,7 @@ OSS mermaid cannot do fixed positions, so: positions live in the `%% cerebro:pos
 - Docs embedding is already done (mermaid blocks); block "Open full screen" (D1) completes the ClickUp-embed story.
 
 ### D9. Layout controls
-The toolbar's layout menu grows: direction (TD/LR/BT/RL — exists), engine (Dagre / ELK-layered / ELK-force / ELK-mrtree — via `config.layout` + `config.elk.*` frontmatter, all OSS-supported), `look: handDrawn` toggle, and Auto-layout ON/OFF (D7). "Adaptive vs Hierarchical" in mermaid.ai maps to ELK-layered vs force-family — our menu names the real engines.
+The toolbar's layout menu grows: direction (TD/LR/BT/RL — exists), engine (Dagre / ELK-layered / ELK-force / ELK-mrtree — via `config.layout` + `config.elk.*` frontmatter, all OSS-supported), and Auto-layout ON/OFF (D7). (The `look: handDrawn` toggle was cut at review 2026-08-09.) "Adaptive vs Hierarchical" in mermaid.ai maps to ELK-layered vs force-family — our menu names the real engines.
 
 ### D10. What stays surgical
 Every new op obeys the M29.14 invariant: touch exactly the lines you must, ids never change, opaque lines survive byte-for-byte, and every op = one `onChangeCode` = one undo step. New understood kinds ship with byte-identical round-trip proofs like the originals.
@@ -85,13 +85,13 @@ Every new op obeys the M29.14 invariant: touch exactly the lines you must, ids n
 
 Order is dependency-true: E and F build on D's editor shell; G builds on E's model extensions; H builds on D (editor) + F (click lines). D→E→F can ship value each on its own; G and H are independent of each other.
 
-## 4. Open questions for review
+## 4. Open questions — ALL RESOLVED at review 2026-08-09
 
-1. **Stage G ambition** — full free-drag (our own edge re-routing, most work, real whiteboard feel) vs. nudge-offsets fallback vs. defer G entirely? The spike task is designed to answer feasibility, but the appetite call is yours.
-2. **Whiteboard home** — is "view tab on Lists" (D8) acceptable as the reading of "whiteboard on any collection"? The alternative (views directly on Collections) breaks a locked M10 invariant.
-3. **Icon pack choice** — lucide only (app-consistent), or also bundle a FontAwesome pack for mermaid.ai copy-paste compatibility (~0.5MB more, lazy)?
-4. **Shape palette size** — curated 30 vs. all 49 (some are obscure: `bolt`, `flip-tri`, `brace-r`…)? Plans assume curated-30 with the rest still parsing fine.
-5. **`look: handDrawn` toggle** — included as a cheap toolbar win in Stage D; cut if you want the wave leaner.
+1. **Stage G ambition** — **RESOLVED: full free-drag** (our own edge re-routing) when Auto-layout is OFF. The spike remains as a technical feasibility gate only; a failed criterion means stop-and-report, with the nudge-offset fallback as a coordinator decision, not pre-authorized scope.
+2. **Whiteboard home** — **RESOLVED: view tab on Lists** (D8 as written). Collections stay pure containers per M10; every collection gets whiteboards through its Lists, matching ClickUp's model.
+3. **Icon pack choice** — **RESOLVED: lucide only** (D6 as written). No FontAwesome pack; mermaid.ai-pasted `fa:` icons render the blue "?" box, which is acceptable.
+4. **Shape palette size** — **RESOLVED: all 49.** The palette shows the full registry (grouped Basic / Process / Technical / Annotation), not a curated 30. `ellipse` stays excluded — broken upstream (mermaid#5976).
+5. **`look: handDrawn` toggle** — **RESOLVED: cut.** No toggle UI anywhere in the wave; hand-authored `look:` frontmatter still renders (and Stage G's degradation notes for handDrawn-look edges stay valid for that case).
 
 ## 5. Verified-fact appendix (what the plans rely on)
 

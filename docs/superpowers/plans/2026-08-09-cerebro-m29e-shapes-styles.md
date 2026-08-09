@@ -4,7 +4,7 @@
 
 **Goal:** Grow the flowchart model from 8 bracket shapes and 4 arrows to mermaid's real surface — `@{ shape: … }` node metadata, `style` lines with color pickers, the full edge grammar (every stroke × head, lengths, edge ids, `animate`) — while every op stays a surgical text edit and every line we don't own survives byte-for-byte.
 
-**Architecture:** All model growth happens in `src/mermaid/flowchart/model.ts` (two new understood line kinds: `node-meta`, `style`; a structured `EdgeArrow` replacing the 4-string `Arrow` union) and `ops.ts` (`setNodeStyle`, `setEdgeArrow`, `setEdgeAnimate`, extended `setNodeShape`). UI lands in two new components — `ShapePalette.tsx` (popover grid over a curated 30-shape subset) and `NodeStyleMenu.tsx` (token-derived swatches) — plus edge controls in `StructuralEditor.tsx`'s existing edge editor. A new `shapes.ts` holds the verified v11.16.1 shape registry.
+**Architecture:** All model growth happens in `src/mermaid/flowchart/model.ts` (two new understood line kinds: `node-meta`, `style`; a structured `EdgeArrow` replacing the 4-string `Arrow` union) and `ops.ts` (`setNodeStyle`, `setEdgeArrow`, `setEdgeAnimate`, extended `setNodeShape`). UI lands in two new components — `ShapePalette.tsx` (popover grid over the full 49-shape registry, per spec §4.4) and `NodeStyleMenu.tsx` (token-derived swatches) — plus edge controls in `StructuralEditor.tsx`'s existing edge editor. A new `shapes.ts` holds the verified v11.16.1 shape registry.
 
 **Tech stack:** No new dependencies. The model/ops layers stay pure string+data code — no mermaid, no DOM — which is what keeps this stage unit-testable to the byte.
 
@@ -1222,7 +1222,7 @@ git commit -m "feat(mermaid): the full edge grammar — strokes, heads, ids, ani
 
 ### Task E4: The shape registry + `ShapePalette` (M29.32)
 
-The 8-icon strip becomes a searchable popover grid over a **curated 30-shape subset** (Basic / Process / Technical — our editorial grouping; upstream has none) of the verified registry. `setNodeShape` widens per **D4**: a classic-8 target on a meta-less node still rewrites brackets (byte-compatible with Stage C); everything else patches/creates the node's `@{ shape: … }` line, brackets untouched (shape data wins at render). Every lucide icon name below was verified to resolve in the installed `lucide-react@^0.525.0`, and a test *keeps* that true via `resolveIcon`.
+The 8-icon strip becomes a searchable popover grid over **the full 49-shape registry** (resolved at review 2026-08-09 — spec §4.4), grouped Basic / Process / Technical / Annotation (our editorial grouping; upstream has none). `setNodeShape` widens per **D4**: a classic-8 target on a meta-less node still rewrites brackets (byte-compatible with Stage C); everything else patches/creates the node's `@{ shape: … }` line, brackets untouched (shape data wins at render). Every lucide icon name below was verified to resolve in the installed `lucide-react@^0.525.0`, and a test *keeps* that true via `resolveIcon`.
 
 **Files:**
 - Create: `src/mermaid/flowchart/shapes.ts`
@@ -1241,18 +1241,19 @@ import { describe, expect, it } from 'vitest';
 import { resolveIcon } from '@/components/ui/Icon';
 import {
   BRACKET_SHAPE_TO_REGISTRY,
-  CURATED_SHAPES,
+  PALETTE_SHAPES,
   REGISTRY_TO_BRACKET,
+  SHAPE_ALIASES,
   VALID_SHAPES,
 } from './shapes';
 
 describe('shape registry (M29.32)', () => {
-  it('every curated shape is a valid registry short name', () => {
-    for (const s of CURATED_SHAPES) expect(VALID_SHAPES.has(s.name), s.name).toBe(true);
+  it('every palette shape is a valid registry short name', () => {
+    for (const s of PALETTE_SHAPES) expect(VALID_SHAPES.has(s.name), s.name).toBe(true);
   });
 
-  it('every curated icon resolves to a real lucide glyph', () => {
-    for (const s of CURATED_SHAPES) expect(resolveIcon(s.icon).Comp, s.icon).not.toBeNull();
+  it('every palette icon resolves to a real lucide glyph', () => {
+    for (const s of PALETTE_SHAPES) expect(resolveIcon(s.icon).Comp, s.icon).not.toBeNull();
   });
 
   it('registry names are mermaid-legal: lowercase, no underscores', () => {
@@ -1274,10 +1275,11 @@ describe('shape registry (M29.32)', () => {
     }
   });
 
-  it('curates exactly 30 shapes across the three authored categories', () => {
-    expect(CURATED_SHAPES).toHaveLength(30);
-    expect(new Set(CURATED_SHAPES.map((s) => s.category))).toEqual(
-      new Set(['Basic', 'Process', 'Technical']),
+  it('the palette covers the ENTIRE registry — all 49 short names, four categories', () => {
+    expect(PALETTE_SHAPES).toHaveLength(49);
+    expect(new Set(PALETTE_SHAPES.map((s) => s.name))).toEqual(new Set(Object.keys(SHAPE_ALIASES)));
+    expect(new Set(PALETTE_SHAPES.map((s) => s.category))).toEqual(
+      new Set(['Basic', 'Process', 'Technical', 'Annotation']),
     );
   });
 });
@@ -1292,12 +1294,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { ShapePalette } from './ShapePalette';
 
 describe('ShapePalette', () => {
-  it('renders the three categories and picks a shape', async () => {
+  it('renders the four categories and picks a shape', async () => {
     const onPick = vi.fn();
     render(<ShapePalette current="rect" onPick={onPick} onClose={() => {}} />);
     expect(screen.getByText('Basic')).toBeTruthy();
     expect(screen.getByText('Process')).toBeTruthy();
     expect(screen.getByText('Technical')).toBeTruthy();
+    expect(screen.getByText('Annotation')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Shape: Cloud' }));
     expect(onPick).toHaveBeenCalledWith('cloud');
   });
@@ -1473,21 +1476,23 @@ export const REGISTRY_TO_BRACKET: Readonly<Record<string, Shape | undefined>> = 
   return out;
 })();
 
-export interface CuratedShape {
+export interface PaletteShape {
   /** Registry short name — what setNodeShape writes. */
   name: string;
   label: string;
   /** lucide icon (kebab-case), verified against lucide-react 0.525. */
   icon: string;
-  category: 'Basic' | 'Process' | 'Technical';
+  category: 'Basic' | 'Process' | 'Technical' | 'Annotation';
 }
 
 /**
- * The palette's curated 30 (D4). Categories are OUR editorial grouping —
- * upstream has none. Everything else in the registry still parses, resolves,
- * and renders; it just isn't in the grid.
+ * The palette shows the ENTIRE registry (D4, spec §4.4) — every short name in
+ * SHAPE_ALIASES, one entry each; the covering test enforces set equality.
+ * Categories are OUR editorial grouping — upstream has none. The three brace
+ * comments share one lucide glyph on purpose (no single-brace icon exists);
+ * their labels disambiguate.
  */
-export const CURATED_SHAPES: readonly CuratedShape[] = [
+export const PALETTE_SHAPES: readonly PaletteShape[] = [
   // Basic
   { name: 'rect', label: 'Rectangle', icon: 'square', category: 'Basic' },
   { name: 'rounded', label: 'Rounded', icon: 'square-round-corner', category: 'Basic' },
@@ -1499,6 +1504,9 @@ export const CURATED_SHAPES: readonly CuratedShape[] = [
   { name: 'hex', label: 'Hexagon', icon: 'hexagon', category: 'Basic' },
   { name: 'tri', label: 'Triangle', icon: 'triangle', category: 'Basic' },
   { name: 'text', label: 'Text', icon: 'type', category: 'Basic' },
+  { name: 'fr-circ', label: 'Stop', icon: 'circle-stop', category: 'Basic' },
+  { name: 'f-circ', label: 'Junction', icon: 'dot', category: 'Basic' },
+  { name: 'odd', label: 'Odd', icon: 'octagon', category: 'Basic' },
   // Process
   { name: 'fr-rect', label: 'Subprocess', icon: 'square-stack', category: 'Process' },
   { name: 'lin-rect', label: 'Lined process', icon: 'columns-2', category: 'Process' },
@@ -1510,6 +1518,14 @@ export const CURATED_SHAPES: readonly CuratedShape[] = [
   { name: 'lean-l', label: 'Output / input', icon: 'move-left', category: 'Process' },
   { name: 'hourglass', label: 'Collate', icon: 'hourglass', category: 'Process' },
   { name: 'fork', label: 'Fork / join', icon: 'git-fork', category: 'Process' },
+  { name: 'delay', label: 'Delay', icon: 'timer', category: 'Process' },
+  { name: 'notch-pent', label: 'Loop limit', icon: 'pentagon', category: 'Process' },
+  { name: 'flip-tri', label: 'Manual file', icon: 'flip-vertical', category: 'Process' },
+  { name: 'sl-rect', label: 'Manual input', icon: 'keyboard', category: 'Process' },
+  { name: 'st-rect', label: 'Stacked process', icon: 'layers', category: 'Process' },
+  { name: 'tag-rect', label: 'Tagged process', icon: 'tag', category: 'Process' },
+  { name: 'flag', label: 'Paper tape', icon: 'flag', category: 'Process' },
+  { name: 'bolt', label: 'Com link', icon: 'zap', category: 'Process' },
   // Technical
   { name: 'cyl', label: 'Database', icon: 'database', category: 'Technical' },
   { name: 'h-cyl', label: 'Direct access storage', icon: 'cylinder', category: 'Technical' },
@@ -1521,6 +1537,15 @@ export const CURATED_SHAPES: readonly CuratedShape[] = [
   { name: 'win-pane', label: 'Internal storage', icon: 'grid-2x2', category: 'Technical' },
   { name: 'cloud', label: 'Cloud', icon: 'cloud', category: 'Technical' },
   { name: 'person', label: 'Person', icon: 'user', category: 'Technical' },
+  { name: 'datastore', label: 'Data store', icon: 'server', category: 'Technical' },
+  { name: 'bow-rect', label: 'Stored data', icon: 'save', category: 'Technical' },
+  { name: 'tag-doc', label: 'Tagged document', icon: 'file-badge', category: 'Technical' },
+  { name: 'cross-circ', label: 'Summary', icon: 'circle-x', category: 'Technical' },
+  { name: 'bang', label: 'Bang', icon: 'sparkles', category: 'Technical' },
+  // Annotation
+  { name: 'brace', label: 'Comment (left brace)', icon: 'braces', category: 'Annotation' },
+  { name: 'brace-r', label: 'Comment (right brace)', icon: 'braces', category: 'Annotation' },
+  { name: 'braces', label: 'Comment (both braces)', icon: 'braces', category: 'Annotation' },
 ];
 ```
 
@@ -1591,16 +1616,17 @@ export function setNodeShape(
 import { useMemo, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
-import { CURATED_SHAPES, SHAPE_ALIASES } from './shapes';
+import { PALETTE_SHAPES, SHAPE_ALIASES } from './shapes';
 
-const CATEGORIES = ['Basic', 'Process', 'Technical'] as const;
+const CATEGORIES = ['Basic', 'Process', 'Technical', 'Annotation'] as const;
 
 /**
- * The shape palette (M29.32): a searchable grid over the curated 30, grouped
- * by our three categories. Renders through the Popover primitive, anchored to
- * the node mini-toolbar it opens from (the nearest positioned ancestor —
- * Popover's documented default). Picking calls onPick with the registry
- * short name; the caller owns the op and the close.
+ * The shape palette (M29.32): a searchable grid over the FULL 49-shape
+ * registry (spec §4.4), grouped by our four categories, scrolling inside the
+ * popover past its max height. Renders through the Popover primitive,
+ * anchored to the node mini-toolbar it opens from (the nearest positioned
+ * ancestor — Popover's documented default). Picking calls onPick with the
+ * registry short name; the caller owns the op and the close.
  */
 export function ShapePalette({
   current,
@@ -1615,8 +1641,8 @@ export function ShapePalette({
   const [query, setQuery] = useState('');
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (q === '') return CURATED_SHAPES;
-    return CURATED_SHAPES.filter(
+    if (q === '') return PALETTE_SHAPES;
+    return PALETTE_SHAPES.filter(
       (s) =>
         s.name.includes(q) ||
         s.label.toLowerCase().includes(q) ||
@@ -1626,7 +1652,7 @@ export function ShapePalette({
 
   return (
     <Popover onClose={onClose} role="dialog" ariaLabel="Shape palette" className="w-60 p-2">
-      <div data-testid="shape-palette" className="flex flex-col gap-1.5">
+      <div data-testid="shape-palette" className="flex max-h-96 flex-col gap-1.5">
         <input
           autoFocus
           aria-label="Search shapes"
@@ -1634,8 +1660,9 @@ export function ShapePalette({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.stopPropagation()}
-          className="w-full rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
+          className="w-full flex-none rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
         />
+        <div className="min-h-0 flex-1 overflow-y-auto">
         {CATEGORIES.map((cat) => {
           const inCat = visible.filter((s) => s.category === cat);
           if (inCat.length === 0) return null;
@@ -1667,6 +1694,7 @@ export function ShapePalette({
         {visible.length === 0 && (
           <div className="px-1 py-2 text-xs text-n-400">No shapes match.</div>
         )}
+        </div>
       </div>
     </Popover>
   );
@@ -2123,6 +2151,6 @@ git commit -m "test(mermaid): shapes, styles, and animated edges round-trip in e
 - `id@{ … }` single-line meta parses into ordered, unknown-key-preserving `NodeMeta`; multi-line blocks and bracket+meta hybrids go opaque and survive byte-for-byte (unit-proven). `nodes()` reports meta shape/label truthfully; `renameNode` lands on a meta label when one would win at render.
 - `style` lines parse; `setNodeStyle` patches exactly the named declarations, preserves unknown ones in order, deletes an emptied line, creates a missing one after its node, and refuses undeclared ids. `linkStyle`/`classDef`/`class`/`click` remain opaque and untouched.
 - The full edge surface — every stroke × head, both-way `o--o`/`x--x`/`<-->` families, lengths, `~~~` — parses with verbatim `raw` tokens; a dirty line re-emits untouched segments byte-true. `setEdgeArrow` rewrites one token at minimum length; `setEdgeAnimate` mints/reuses `eN` ids and manages the `animate` meta entry surgically.
-- The node toolbar opens a searchable 30-shape palette (Basic/Process/Technical) whose picks follow D4, and a 12-swatch color menu writing portable hex `style` lines; the edge editor cycles heads, picks strokes, and toggles animation.
+- The node toolbar opens a searchable palette over the full 49-shape registry (Basic/Process/Technical/Annotation, spec §4.4) whose picks follow D4, and a 12-swatch color menu writing portable hex `style` lines; the edge editor cycles heads, picks strokes, and toggles animation.
 - e2e proves real mermaid v11.16.1 accepts everything we write (zero-error re-renders) and the edits land on the (mock) disk.
 - Full gate green; coverage ratchet intact; ids never changed anywhere in this stage.
