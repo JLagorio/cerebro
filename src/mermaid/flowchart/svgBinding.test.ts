@@ -109,4 +109,33 @@ describe('bindFlowchartSvg', () => {
     expect(binding.edgeEls).toHaveLength(1);
     expect(binding.edgeEls[0]).toMatchObject({ from: 'A', to: 'B_C', line: aToBc[1].line });
   });
+
+  // Observed live (M29.19 e2e): in a real browser mermaid namespaces every
+  // internal DOM id with the id the diagram was rendered under — our
+  // `cerebro-mermaid-<seq>` — so groups render as
+  // `cerebro-mermaid-3-flowchart-Idea-0` and paths as
+  // `cerebro-mermaid-3-L_Idea_Build_0`. The bare-`flowchart-…` fixtures
+  // above still bind (the strip is a no-op without the prefix); this one
+  // pins the browser-shaped form, which the original prefix-match missed
+  // entirely — leaving the structural editor inert in production.
+  it('binds ids namespaced under the svg render id, as the browser build emits them', () => {
+    const model = parseFlowchart('flowchart TD\n  A[One] --> B[Two]\n  B --> my-node[Three]')!;
+    const prefixedSvg = [
+      '<svg id="cerebro-mermaid-3" viewBox="0 0 100 100">',
+      '  <g class="node default" id="cerebro-mermaid-3-flowchart-A-0"><rect/></g>',
+      '  <g class="node default" id="cerebro-mermaid-3-flowchart-B-1"><rect/></g>',
+      '  <g class="node default" id="cerebro-mermaid-3-flowchart-my-node-2"><rect/></g>',
+      '  <path class="flowchart-link" id="cerebro-mermaid-3-L_A_B_0"/>',
+      '  <path class="flowchart-link" id="cerebro-mermaid-3-L_B_my-node_0"/>',
+      '</svg>',
+    ].join('\n');
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = prefixedSvg;
+
+    const binding = bindFlowchartSvg(host, model);
+    expect([...binding.nodeEls.keys()].sort()).toEqual(['A', 'B', 'my-node']);
+    expect(binding.edgeEls).toHaveLength(2);
+    expect(binding.edgeEls[1]).toMatchObject({ from: 'B', to: 'my-node' });
+  });
 });

@@ -118,7 +118,14 @@ export function StructuralEditor({
           if (host !== null) {
             const hostBox = host.getBoundingClientRect();
             const box = el.getBoundingClientRect();
-            setToolbarPos({ x: box.left - hostBox.left, y: box.top - hostBox.top - 34 });
+            // Prefer floating above the node; when a top-row node leaves no
+            // headroom, drop BELOW it instead. The old Math.max(0, y) clamp
+            // parked the toolbar directly ON such a node — covering its
+            // center, so the second click of a double-click rename landed on
+            // toolbar buttons instead of the node (observed live, M29.19).
+            const above = box.top - hostBox.top - 34;
+            const y = above >= 0 ? above : box.bottom - hostBox.top + 6;
+            setToolbarPos({ x: box.left - hostBox.left, y });
           }
         };
         el.ondblclick = (e) => {
@@ -191,8 +198,12 @@ export function StructuralEditor({
       // pair, so this must degrade to a no-op rather than throw when the
       // method isn't there at all.
       const target = document.elementFromPoint?.(e.clientX, e.clientY) ?? null;
+      // `id*=`, not `id^=`: in a real browser mermaid namespaces the group id
+      // with the render id (`cerebro-mermaid-3-flowchart-…` — see
+      // svgBinding.ts), so a prefix match finds nothing live. The id is only
+      // a coarse filter here; the binding resolves it by element identity.
       const hitGroup =
-        (target?.closest('g.node[id^="flowchart-"]') as SVGGElement | null) ?? null;
+        (target?.closest('g.node[id*="flowchart-"]') as SVGGElement | null) ?? null;
 
       if (hitGroup !== null) {
         // Landed inside a node group — resolve it back to a model id and
@@ -365,7 +376,7 @@ export function StructuralEditor({
           <div
             data-testid="mermaid-node-toolbar"
             className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-            style={{ left: toolbarPos.x, top: Math.max(0, toolbarPos.y) }}
+            style={{ left: toolbarPos.x, top: toolbarPos.y }}
             onClick={(e) => e.stopPropagation()}
           >
             {SHAPE_CHOICES.map((c) => (
