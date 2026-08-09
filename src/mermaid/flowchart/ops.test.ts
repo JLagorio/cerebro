@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { edges, nodeMeta, nodes, parseFlowchart, serialize } from './model';
+import { edges, nodeMeta, nodeStyle, nodes, parseFlowchart, serialize } from './model';
 import {
   addEdge,
   addNode,
@@ -11,6 +11,7 @@ import {
   setEdgeLabel,
   setLayoutEngine,
   setNodeShape,
+  setNodeStyle,
 } from './ops';
 
 const SRC = [
@@ -190,5 +191,76 @@ describe('renameNode and node-meta (M29.29)', () => {
     // Left behind, the meta line would keep declaring — and rendering — A.
     expect(serialize(out)).not.toContain('A@{');
     expect(nodes(out).has('A')).toBe(false);
+  });
+});
+
+describe('setNodeStyle (M29.30)', () => {
+  const STYLED = [
+    'flowchart TD',
+    '  A[Start] --> B{Choice}',
+    '  style A fill:#f96,stroke:#333,stroke-width:2px',
+  ].join('\n');
+
+  it('patches named declarations surgically, unknown ones kept in order', () => {
+    const m = parseFlowchart(STYLED)!;
+    const out = serialize(setNodeStyle(m, 'A', { fill: '#eef1fe', color: '#3d5bde' }));
+    expect(out).toContain('style A fill:#eef1fe,stroke:#333,stroke-width:2px,color:#3d5bde');
+    expect(out).toContain('A[Start] --> B{Choice}'); // nothing else moved
+  });
+
+  it('creates the line right after the node when absent', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B\n  B --> C')!;
+    const out = serialize(setNodeStyle(m, 'A', { fill: '#f96' }));
+    expect(out).toBe('flowchart TD\n  A[Start] --> B\n  style A fill:#f96\n  B --> C');
+  });
+
+  it('removing the last declaration deletes the line', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  style A fill:#f96')!;
+    expect(serialize(setNodeStyle(m, 'A', { fill: null }))).toBe('flowchart TD\n  A --> B');
+  });
+
+  it('never styles an id the diagram does not declare — upstream would auto-create it', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    expect(serialize(setNodeStyle(m, 'Ghost', { fill: '#f96' }))).toBe('flowchart TD\n  A --> B');
+  });
+
+  it('a patch of only-nulls on a styleless node changes nothing', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    expect(serialize(setNodeStyle(m, 'A', { fill: null }))).toBe('flowchart TD\n  A --> B');
+  });
+
+  it('leaves every other line byte-identical, opaque ones included', () => {
+    const src = [
+      '---',
+      'config:',
+      '  layout: elk',
+      '---',
+      'flowchart TD',
+      '  %% keep me',
+      '  A[Start] --> B{Choice}',
+      '  classDef hot fill:#f96',
+      '  linkStyle 0 stroke:#f00',
+      '  style A fill: #f96 , stroke:#333',
+      '  click A "https://x"',
+    ].join('\n');
+    const out = serialize(setNodeStyle(parseFlowchart(src)!, 'A', { fill: '#eee' }));
+    const before = src.split('\n');
+    const after = out.split('\n');
+    expect(after.length).toBe(before.length);
+    after.forEach((line, i) => {
+      if (i === 9) return;
+      expect([i, line]).toEqual([i, before[i]]);
+    });
+    expect(after[9]).toBe('  style A fill:#eee,stroke:#333');
+  });
+
+  it('a written style line is one our own parser reads back', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const once = serialize(setNodeStyle(m, 'A', { fill: '#f96', 'stroke-width': '2px' }));
+    const again = parseFlowchart(once)!;
+    expect(again.lines[2].parsed.kind).toBe('style');
+    expect(nodeStyle(again, 'A')).toEqual({ fill: '#f96', 'stroke-width': '2px' });
+    again.lines[2].dirty = true;
+    expect(serialize(again)).toBe(once);
   });
 });

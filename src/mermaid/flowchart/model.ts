@@ -2,9 +2,10 @@
  * The line-oriented flowchart model (M29.14).
  *
  * Every source line is either UNDERSTOOD (header, node definition, edge line —
- * chains and & groups included — subgraph markers) or OPAQUE (frontmatter,
- * comments, classDef/class/style/linkStyle/click, and anything the parser is
- * not 100% sure about). Serialization re-emits `raw` for every non-dirty line,
+ * chains and & groups included — subgraph markers, `@{ … }` metadata, `style`)
+ * or OPAQUE (frontmatter, comments, classDef/class/linkStyle/click, and
+ * anything the parser is not 100% sure about, a half-owned `style` body
+ * included). Serialization re-emits `raw` for every non-dirty line,
  * so opaque content survives byte-for-byte BY CONSTRUCTION — the invariant the
  * whole structural editor stands on.
  */
@@ -52,23 +53,37 @@ function buildMeta(entries: [string, string][]): NodeMeta {
   return meta;
 }
 
-/** New meta with `key` set (replacing in place, order kept) or removed (`null`). */
-export function withMetaEntry(meta: NodeMeta, key: string, value: string | null): NodeMeta {
-  const entries: [string, string][] = [];
+/**
+ * Ordered entries with `key` set (replacing in place, order kept) or removed
+ * (`null`) — the one implementation behind both meta bodies and style
+ * declarations, so the two can never disagree about ordering or about what a
+ * duplicate key means.
+ */
+export function withEntry(
+  entries: [string, string][],
+  key: string,
+  value: string | null,
+): [string, string][] {
+  const out: [string, string][] = [];
   let replaced = false;
-  for (const [k, v] of meta.entries) {
+  for (const [k, v] of entries) {
     if (k === key) {
       if (value !== null && !replaced) {
-        entries.push([k, value]);
+        out.push([k, value]);
         replaced = true;
       }
       // value === null → drop; a duplicate key collapses onto its first site
     } else {
-      entries.push([k, v]);
+      out.push([k, v]);
     }
   }
-  if (value !== null && !replaced) entries.push([key, value]);
-  return buildMeta(entries);
+  if (value !== null && !replaced) out.push([key, value]);
+  return out;
+}
+
+/** New meta with `key` set (replacing in place, order kept) or removed (`null`). */
+export function withMetaEntry(meta: NodeMeta, key: string, value: string | null): NodeMeta {
+  return buildMeta(withEntry(meta.entries, key, value));
 }
 
 /**
@@ -153,6 +168,7 @@ export type ParsedLine =
   | { kind: 'header'; keyword: 'flowchart' | 'graph'; direction: Direction }
   | { kind: 'node'; node: NodeRef }
   | { kind: 'node-meta'; id: string; meta: NodeMeta }
+  | { kind: 'style'; id: string; decls: [string, string][] }
   | { kind: 'edges'; segments: EdgeSegment[] }
   | { kind: 'subgraph-start'; title: string }
   | { kind: 'subgraph-end' }
@@ -321,9 +337,56 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
   return segments;
 }
 
+/**
+ * Characters a `style` declaration's value may carry. mermaid builds a
+ * declaration by concatenating `styleComponent`s — `NUM | NODE_STRING | COLON
+ * | UNIT | SPACE | BRKT | STYLE | PCT` (flow.jison:594) — and anything outside
+ * that set either fails to lex or means something structural, so the text we
+ * read would not be the value mermaid gets.
+ *
+ * `;` is the sharp one, because it does not error: it TERMINATES the style
+ * statement, so `fill:#f96;` declares `fill` and nothing more. Emit our
+ * reading of it back with one more declaration appended and mermaid reads
+ * `style A fill:#f96;,color:#000` as that style plus a brand-new vertex named
+ * `,color:#000` (COMMA and COLON are `idStringToken`s, flow.jison:597) — a
+ * phantom box grown out of a colour edit. `\` is excluded for a related
+ * reason: `\,` is a `classDef` escape (flowDb.ts:415-421), NOT a `style` one,
+ * so here it is a backslash followed by a real separator.
+ */
+const STYLE_VALUE_SAFE = /^[A-Za-z0-9#%._ \t-]+$/;
+
+/** `fill:#f96,stroke:#333` → declarations, or null when any part is not ours. */
+function parseStyleDecls(text: string): [string, string][] | null {
+  const decls: [string, string][] = [];
+  for (const part of text.split(',')) {
+    const item = part.trim();
+    if (item === '') return null;
+    const colon = item.indexOf(':');
+    if (colon === -1) return null;
+    const key = item.slice(0, colon).trim();
+    const value = item.slice(colon + 1).trim();
+    if (!/^[A-Za-z-]+$/.test(key)) return null;
+    if (!STYLE_VALUE_SAFE.test(value)) return null;
+    decls.push([key, value]);
+  }
+  return decls;
+}
+
 function parseLine(rawLine: string): ParsedLine {
   const trimmed = rawLine.trim();
   if (trimmed === '' || trimmed.startsWith('%%')) return { kind: 'opaque' };
+
+  // `style <id> k:v,…`, tested BEFORE the keyword blocklist so that every
+  // other shape of `style` line — a bare `style`, `style[X]`, an uppercase
+  // `STYLE` — keeps falling through to the blocklist and staying opaque
+  // instead of minting a phantom node called `style`. A body we cannot own
+  // 100% (a declaration with no colon, a value outside STYLE_VALUE_SAFE)
+  // sends the WHOLE line opaque, never a guess.
+  const styleMatch = trimmed.match(/^style\s+([A-Za-z0-9_.-]+)\s+(\S.*)$/);
+  if (styleMatch !== null) {
+    const decls = parseStyleDecls(styleMatch[2]);
+    return decls === null ? { kind: 'opaque' } : { kind: 'style', id: styleMatch[1], decls };
+  }
   if (OPAQUE_KEYWORDS.test(trimmed)) return { kind: 'opaque' };
 
   const header = trimmed.match(/^(flowchart|graph)\s+(TD|TB|LR|RL|BT)\s*$/);
@@ -444,6 +507,10 @@ function emitLine(line: ModelLine): string {
       return `${indent}${p.id}@{ ${p.meta.entries
         .map(([k, v]) => `${k}: ${emitMetaValue(v)}`)
         .join(', ')} }`;
+    // Dirty style lines emit canonical `k:v,` spacing; untouched ones keep
+    // their quirks through `raw`, which the round-trip tests prove.
+    case 'style':
+      return `${indent}style ${p.id} ${p.decls.map(([k, v]) => `${k}:${v}`).join(',')}`;
     case 'edges': {
       // Contiguous chains re-emit as chains; ops splits non-contiguous lines.
       let out = `${indent}${p.segments[0].from.map(emitNodeRef).join(' & ')}`;
@@ -492,6 +559,27 @@ export function nodeMeta(model: FlowchartModel): Map<string, NodeMeta> {
     out.set(id, merged);
   }
   return out;
+}
+
+/**
+ * The FIRST style line's declarations for `id`, as a record ({} when
+ * unstyled). Paired with `setNodeStyle`, which patches that same first line —
+ * read and write always agree about which line owns the node's colours.
+ *
+ * KNOWN EDGE: mermaid pushes EVERY style line's declarations onto the vertex
+ * (flowDb.ts addVertex) and lets CSS settle the duplicates, so with two style
+ * lines for one id the later `fill` is what renders while this view reports
+ * the earlier one. Honouring that would mean one edit rewriting several lines,
+ * which the surgical rule forbids; two style lines for one id stay a
+ * hand-written arrangement the UI reads conservatively.
+ */
+export function nodeStyle(model: FlowchartModel, id: string): Record<string, string> {
+  for (const line of model.lines) {
+    if (line.parsed.kind === 'style' && line.parsed.id === id) {
+      return Object.fromEntries(line.parsed.decls);
+    }
+  }
+  return {};
 }
 
 export interface ResolvedNode {

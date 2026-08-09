@@ -1,5 +1,5 @@
 import type { EdgeEntry, FlowchartModel, ModelLine, NodeRef, Shape } from './model';
-import { nodes, withMetaEntry } from './model';
+import { nodes, withEntry, withMetaEntry } from './model';
 
 /**
  * Pure flowchart operations (M29.15). Every function returns a new model and
@@ -258,6 +258,78 @@ export function setEdgeLabel(
   // substitute `|` → `/` here rather than propagate corrupt text.
   line.parsed.segments[edge.seg].label = label === null ? null : label.replaceAll('|', '/');
   line.dirty = true;
+  return next;
+}
+
+/**
+ * Where a new companion line (style, meta) belongs: after the node's
+ * definition line, else after the first line that references it, else the
+ * header. Never BEFORE the node exists — a style statement ahead of its node
+ * would auto-create one upstream (flowDb.ts addVertex mints the vertex and
+ * only logs a warning).
+ */
+function anchorLineFor(model: FlowchartModel, id: string): number {
+  for (let i = 0; i < model.lines.length; i += 1) {
+    const parsed = model.lines[i].parsed;
+    if (parsed.kind === 'node' && parsed.node.id === id) return i;
+  }
+  for (let i = 0; i < model.lines.length; i += 1) {
+    const parsed = model.lines[i].parsed;
+    if (parsed.kind === 'node-meta' && parsed.id === id) return i;
+    let hit = false;
+    eachRef(model.lines[i], (ref) => {
+      if (ref.id === id) hit = true;
+    });
+    if (hit) return i;
+  }
+  return headerIndex(model);
+}
+
+/**
+ * Patch a node's `style` line surgically (M29.30): change/add/remove exactly
+ * the named declarations, keep unknown ones in order, delete the line when it
+ * empties, create it (after the node) when absent. Unknown ids are a no-op —
+ * upstream auto-creates a node for a styled undeclared id, which is exactly
+ * the kind of surprise this layer exists to prevent.
+ *
+ * Multiple `style` lines for one id: the FIRST is patched and the rest stay
+ * untouched, matching what `nodeStyle` reads back. Touching more than asked
+ * would violate the surgical rule.
+ */
+export function setNodeStyle(
+  model: FlowchartModel,
+  id: string,
+  patch: Record<string, string | null>,
+): FlowchartModel {
+  const next = clone(model);
+  if (!nodes(next).has(id)) return next;
+
+  const apply = (decls: [string, string][]): [string, string][] =>
+    Object.entries(patch).reduce((acc, [key, value]) => withEntry(acc, key, value), decls);
+
+  const idx = next.lines.findIndex((l) => l.parsed.kind === 'style' && l.parsed.id === id);
+  if (idx !== -1) {
+    const parsed = next.lines[idx].parsed;
+    if (parsed.kind !== 'style') return next; // unreachable; narrows the type
+    const decls = apply(parsed.decls);
+    if (decls.length === 0) {
+      next.lines.splice(idx, 1);
+    } else {
+      parsed.decls = decls;
+      next.lines[idx].dirty = true;
+    }
+    return next;
+  }
+
+  const decls = apply([]);
+  if (decls.length === 0) return next;
+  const at = anchorLineFor(next, id);
+  const indent = next.lines[at]?.raw.match(/^\s*/)?.[0] ?? '  ';
+  next.lines.splice(at + 1, 0, {
+    raw: indent,
+    parsed: { kind: 'style', id, decls },
+    dirty: true,
+  });
   return next;
 }
 

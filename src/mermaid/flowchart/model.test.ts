@@ -3,6 +3,7 @@ import {
   edges,
   emitNodeRef,
   nodeMeta,
+  nodeStyle,
   nodes,
   parseFlowchart,
   parseNodeToken,
@@ -316,6 +317,88 @@ describe('node-meta lines (M29.29)', () => {
       expect(nodeMeta(again).get('A')?.label).toBe(value);
       again.lines[1].dirty = true;
       expect(serialize(again)).toBe(once);
+    }
+  });
+});
+
+describe('style lines (M29.30)', () => {
+  const STYLED = [
+    'flowchart TD',
+    '  A[Start] --> B{Choice}',
+    '  style A fill:#f96,stroke:#333,stroke-width:2px',
+  ].join('\n');
+
+  it('parses declarations in order', () => {
+    const m = parseFlowchart(STYLED)!;
+    const line = m.lines[2].parsed;
+    expect(line.kind).toBe('style');
+    if (line.kind !== 'style') return;
+    expect(line.id).toBe('A');
+    expect(line.decls).toEqual([
+      ['fill', '#f96'],
+      ['stroke', '#333'],
+      ['stroke-width', '2px'],
+    ]);
+  });
+
+  it('round-trips untouched style lines byte-identically, spacing quirks included', () => {
+    const quirky = 'flowchart TD\n  A --> B\n  style A fill: #f96 , stroke:#333';
+    expect(serialize(parseFlowchart(quirky)!)).toBe(quirky);
+  });
+
+  it('linkStyle and classDef stay opaque; an unowned style body goes opaque', () => {
+    const m = parseFlowchart(
+      [
+        'flowchart TD',
+        '  A --> B',
+        '  linkStyle 0 stroke:#f00',
+        '  style A fill',
+        '  classDef hot fill:#f96',
+      ].join('\n'),
+    )!;
+    expect(m.lines[2].parsed.kind).toBe('opaque');
+    expect(m.lines[3].parsed.kind).toBe('opaque');
+    expect(m.lines[4].parsed.kind).toBe('opaque');
+  });
+
+  it('nodeStyle reads the first style line as a record', () => {
+    const m = parseFlowchart(STYLED)!;
+    expect(nodeStyle(m, 'A')).toEqual({ fill: '#f96', stroke: '#333', 'stroke-width': '2px' });
+    expect(nodeStyle(m, 'B')).toEqual({});
+  });
+
+  it('refuses bodies whose characters mermaid does not lex as style components', () => {
+    // Verified against mermaid 11.16: `;` ENDS the style statement, so our
+    // canonical re-emission of a `;`-bearing value would smuggle the rest of
+    // the line into a brand-new vertex statement (`,color:#000` is a legal
+    // idString) — a phantom node appearing out of an unrelated colour edit.
+    // The rest are outright parse/lex errors upstream.
+    for (const body of [
+      'fill:#f96;',
+      'fill:"#f96"',
+      'fill:a=b',
+      'fill:a^b',
+      'fill:a@b',
+      'fill:a<b',
+      'fill:a{b',
+      'fill:a~b',
+      'fill:#f96\\,stroke:#333',
+      'fill:rgb(255,0,0)',
+      'fill:#f96,',
+      ',fill:#f96',
+      '"fill":#f96',
+    ]) {
+      const m = parseFlowchart(`flowchart TD\n  A --> B\n  style A ${body}`)!;
+      expect([body, m.lines[2].parsed.kind]).toEqual([body, 'opaque']);
+      expect(serialize(m)).toBe(`flowchart TD\n  A --> B\n  style A ${body}`);
+    }
+  });
+
+  it('a `style` line we cannot own never becomes a phantom node named style', () => {
+    for (const line of ['style', 'style[X]', 'style.a', 'STYLE A fill:#f96', 'style A']) {
+      const m = parseFlowchart(`flowchart TD\n  A --> B\n  ${line}`)!;
+      expect([line, m.lines[2].parsed.kind]).toEqual([line, 'opaque']);
+      expect([line, [...nodes(m).keys()]]).toEqual([line, ['A', 'B']]);
     }
   });
 });
