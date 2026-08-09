@@ -5,6 +5,11 @@ import { test, expect } from '@playwright/test';
 // ELK-layout flowchart, the last proving the lazy elk chunk actually loads) —
 // and the lightbox opens, zooms, and closes.
 test('mermaid renders in docs, and the lightbox zooms', async ({ page }) => {
+  // A cold run downloads mermaid (~1MB) and then the lazy ELK chunk mid-test;
+  // the per-assertion budgets below (10s boot + 2×20s diagram waits) can sum
+  // past the global 30s test timeout and fail with a confusing outer timeout.
+  test.setTimeout(60_000);
+
   // -- Boot -------------------------------------------------------------
   // The background distiller (M8.6) is off for tests that are not about it:
   // a reader that fires four seconds in would rescan the vault mid-assertion.
