@@ -286,3 +286,141 @@ test('a .mmd file opens as a diagram page and edits round-trip raw', async ({ pa
   const raw = await page.evaluate(() => window.__cerebroMockFs.get('diagrams/pipeline.mmd'));
   expect(raw?.startsWith('---\nconfig:\n  layout: elk\n---\n')).toBe(true);
 });
+
+// M29.24–.27: the .mmd page is now a full-screen canvas — pan/zoom viewport,
+// zoom cluster, floating code overlay with Auto-Update and Apply — and the
+// page's keyed debounced autosave still writes raw bytes underneath it all.
+test('the diagram page is a pan/zoom canvas with a floating code overlay', async ({ page }) => {
+  test.setTimeout(60_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  // -- Open the seeded diagram through quick open ------------------------
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpenInput = page.getByTestId('quick-open-input');
+  await expect(quickOpenInput).toBeVisible();
+  await quickOpenInput.fill('Pipeline');
+  const result = page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first();
+  await expect(result).toBeVisible();
+  // Quick Open labels the row as a Diagram, not a Note (M29.21).
+  await expect(result).toContainText('Diagram');
+  await result.click();
+
+  // -- Canvas up, sidebar gone (SIDEBARLESS) -----------------------------
+  await expect(page.getByTestId('diagram-page')).toBeVisible();
+  const viewport = page.getByTestId('canvas-viewport');
+  await expect(viewport).toBeVisible();
+  await expect(page.getByTestId('sidebar-type')).toHaveCount(0);
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 20_000 });
+
+  // -- Wheel zoom moves the readout --------------------------------------
+  // Pin 100% first: initialFit may have landed on any scale.
+  const readout = page.getByRole('button', { name: 'Reset zoom' });
+  await readout.click();
+  await expect(readout).toContainText('100%');
+  await viewport.hover();
+  await page.mouse.wheel(0, -100);
+  await expect(readout).toContainText('110%');
+
+  // -- Overlay: Auto-Update streams edits onto the canvas ----------------
+  await page.getByRole('button', { name: 'Show code' }).click();
+  const overlay = page.getByTestId('code-overlay');
+  await expect(overlay).toBeVisible();
+  const source = page.getByLabel('Mermaid source');
+  await expect(source).toHaveValue(/^---\nconfig:/);
+  const current = await source.inputValue();
+  await source.fill(`${current}  D --> Quill[Quill]\n`);
+  await expect(host).toContainText('Quill', { timeout: 15_000 });
+  // …and the page's raw autosave got it too (250ms overlay + 500ms save).
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('diagrams/pipeline.mmd')), {
+      timeout: 15_000,
+    })
+    .toContain('Quill[Quill]');
+
+  // -- Auto-Update OFF buffers until Apply -------------------------------
+  await page.getByText('Auto-update').click(); // the Switch input is 0×0; its label text is the click target
+  const buffered = await source.inputValue();
+  await source.fill(`${buffered}  D --> Vega[Vega]\n`);
+  // Bounded negative: give the (disabled) debounce room to have fired.
+  await page.waitForTimeout(800);
+  await expect(host).not.toContainText('Vega');
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(host).toContainText('Vega', { timeout: 15_000 });
+});
+
+// M29.27: a doc block opens the SAME editor full screen in a Dialog layer,
+// wired to the block's own code channel — a structural rename made there
+// lands back in the block render and, through the doc's autosave, on disk.
+test('a doc block opens full screen, and a rename flows back into the block', async ({ page }) => {
+  test.setTimeout(60_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  // -- Open the corpus doc through quick open ---------------------------
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpenInput = page.getByTestId('quick-open-input');
+  await expect(quickOpenInput).toBeVisible();
+  await quickOpenInput.fill('Systems map');
+  const result = page.getByTestId('quick-open-result').filter({ hasText: 'Systems map' }).first();
+  await expect(result).toBeVisible();
+  await result.click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 20_000 });
+
+  // -- Open the first (flowchart) block full screen ----------------------
+  const block = page.getByTestId('mermaid-block').first();
+  await block.getByRole('button', { name: 'Open full screen' }).click();
+  const editor = page.getByTestId('fullscreen-diagram-editor');
+  await expect(editor).toBeVisible();
+  // The structural editor is unique on the page (the block behind is a plain
+  // render), so structural-host scopes every node locator below — a bare
+  // [id*=…] would also match the block's svg and trip strict mode.
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Rename by double-click, same gesture as the inline editor ---------
+  await host.locator('[id*="flowchart-Idea-"]').dblclick();
+  const labelInput = page.getByLabel('Node label');
+  await labelInput.fill('Quasar');
+  await labelInput.press('Enter');
+  await expect(host).toContainText('Quasar', { timeout: 15_000 });
+
+  // -- Close the dialog; the block shows the rename ----------------------
+  await page.locator('.cb-dlg').getByRole('button', { name: 'Close' }).click();
+  await expect(editor).toHaveCount(0);
+  await expect(block.getByTestId('mermaid-diagram')).toContainText('Quasar', { timeout: 15_000 });
+  // The surgical edit reached the (mock) disk through the doc's autosave.
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md')), {
+      timeout: 15_000,
+    })
+    .toContain('Idea[Quasar]');
+});
