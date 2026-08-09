@@ -36,7 +36,15 @@ describe('StructuralEditor', () => {
     const onChangeCode = vi.fn();
     render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
     await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
-    await userEvent.dblClick(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+    // Re-fetch from the live document rather than reusing the element handle
+    // from before the click: if the svg subtree were React-diffed instead of
+    // an imperative sink, the click's setState would re-render and replace
+    // this node wholesale, orphaning the handlers bindFlowchartSvg attached
+    // and silently dropping this dblclick on a detached element.
+    const liveNode = document.getElementById('flowchart-A-0')!;
+    await userEvent.dblClick(liveNode);
     const input = screen.getByLabelText('Node label');
     await userEvent.clear(input);
     await userEvent.type(input, 'Kickoff{Enter}');
@@ -61,5 +69,23 @@ describe('StructuralEditor', () => {
     const call = onChangeCode.mock.calls[0][0] as string;
     expect(call).toContain('n1[New step]');
     expect(call).toContain('A --> n1');
+  });
+
+  it('a stale selection cannot resurrect a node an external edit deleted', async () => {
+    const onChangeCode = vi.fn();
+    const { rerender } = render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-B-1')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-B-1')!);
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+
+    // An external edit (undo, another surface, code-mode) removes B from the
+    // diagram entirely while it was still selected here.
+    rerender(<StructuralEditor code="flowchart TD\n  A[Start]" onChangeCode={onChangeCode} />);
+
+    // The stale selection must not survive: no toolbar to click, and nothing
+    // it could still reach (shape/add/delete) is on screen to resurrect B.
+    await waitFor(() => expect(screen.queryByTestId('mermaid-node-toolbar')).toBeNull());
+    expect(screen.queryByRole('button', { name: 'Delete node' })).toBeNull();
+    expect(onChangeCode).not.toHaveBeenCalled();
   });
 });

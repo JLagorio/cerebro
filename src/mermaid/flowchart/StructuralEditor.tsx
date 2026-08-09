@@ -33,52 +33,67 @@ export function StructuralEditor({
   const model = useMemo(() => parseFlowchart(code), [code]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const bindingRef = useRef<FlowchartSvgBinding | null>(null);
-  const [svg, setSvg] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+
+  // A selection can outlive the node it points at — an external edit (undo,
+  // another surface, a code-mode change) can delete the node between one
+  // render and the next. `selected` itself is left alone (no setState here,
+  // this is a plain render-time guard); every read that matters — the
+  // toolbar's visibility and every op below — goes through this instead of
+  // the raw state so a stale id can never resurrect a node that's gone.
+  const validSelected =
+    selected !== null && model !== null && nodes(model).has(selected) ? selected : null;
 
   const apply = (next: ReturnType<typeof parseFlowchart>) => {
     if (next !== null) onChangeCode(serialize(next));
   };
 
-  // Render only: the svg goes through dangerouslySetInnerHTML below (same
-  // sink every Stage A component uses at strict securityLevel), never a raw
-  // DOM write here.
+  // Render, inject, and bind in one pass. The svg is written imperatively —
+  // hostRef.current.innerHTML = r.svg — rather than through React's
+  // dangerouslySetInnerHTML, and deliberately so: bindFlowchartSvg attaches
+  // raw onclick/ondblclick handlers straight onto mermaid's DOM nodes below,
+  // and this component's own state changes (select, rename, toolbar
+  // position) re-render it constantly. A React-managed subtree gets
+  // re-diffed on every one of those renders; an imperatively-written one
+  // does not — React never looks at this subtree again after the initial
+  // empty <div>, so a click can't clobber the very handlers it just used.
+  // This effect only re-runs on [code, model], i.e. on an actual diagram
+  // change, never on selection/rename/toolbar state.
   useEffect(() => {
     let stale = false;
     void renderMermaid(code).then((r) => {
-      if (stale) return;
+      if (stale || hostRef.current === null) return;
       if (!r.ok) return; // the block view surfaces errors; here we hold the last svg
-      setSvg(r.svg);
+      // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.
+      hostRef.current.innerHTML = r.svg;
+      if (model === null) return;
+      const binding = bindFlowchartSvg(hostRef.current, model);
+      bindingRef.current = binding;
+      for (const [id, el] of binding.nodeEls) {
+        el.style.cursor = 'pointer';
+        el.onclick = (e) => {
+          e.stopPropagation();
+          setSelected(id);
+          const host = hostRef.current;
+          if (host !== null) {
+            const hostBox = host.getBoundingClientRect();
+            const box = el.getBoundingClientRect();
+            setToolbarPos({ x: box.left - hostBox.left, y: box.top - hostBox.top - 34 });
+          }
+        };
+        el.ondblclick = (e) => {
+          e.stopPropagation();
+          const label = nodes(model).get(id)?.label ?? id;
+          setRenaming({ id, value: label });
+        };
+      }
     });
     return () => {
       stale = true;
     };
-  }, [code]);
-
-  // Bind, once React has committed the new svg markup into the DOM.
-  useEffect(() => {
-    const host = hostRef.current;
-    if (host === null || model === null || svg === null) return;
-    const binding = bindFlowchartSvg(host, model);
-    bindingRef.current = binding;
-    for (const [id, el] of binding.nodeEls) {
-      el.style.cursor = 'pointer';
-      el.onclick = (e) => {
-        e.stopPropagation();
-        setSelected(id);
-        const hostBox = host.getBoundingClientRect();
-        const box = el.getBoundingClientRect();
-        setToolbarPos({ x: box.left - hostBox.left, y: box.top - hostBox.top - 34 });
-      };
-      el.ondblclick = (e) => {
-        e.stopPropagation();
-        const label = nodes(model).get(id)?.label ?? id;
-        setRenaming({ id, value: label });
-      };
-    }
-  }, [svg, model]);
+  }, [code, model]);
 
   // Selection outline via inline stroke on the bound group's shapes. This
   // effect intentionally has no dependency array: it must resync the DOM
@@ -90,7 +105,7 @@ export function StructuralEditor({
     if (binding === null) return;
     for (const [id, el] of binding.nodeEls) {
       for (const shapeEl of el.querySelectorAll<SVGElement>('rect, circle, polygon, path')) {
-        if (id === selected) {
+        if (id === validSelected) {
           shapeEl.style.stroke = 'var(--cortex-500)';
           shapeEl.style.strokeWidth = '2.5px';
         } else {
@@ -105,12 +120,7 @@ export function StructuralEditor({
     // Header unparseable: render-only + honest hint. Rendering never degrades.
     return (
       <div className="px-3 py-2">
-        <div
-          ref={hostRef}
-          data-testid="structural-host"
-          // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.
-          dangerouslySetInnerHTML={svg !== null ? { __html: svg } : undefined}
-        />
+        <div ref={hostRef} data-testid="structural-host" />
         <div className="mt-1 text-xs text-n-400">
           This diagram uses syntax the visual editor does not own — edit it as code.
         </div>
@@ -134,10 +144,10 @@ export function StructuralEditor({
       onKeyDown={(e) => {
         if (
           (e.key === 'Delete' || e.key === 'Backspace') &&
-          selected !== null &&
+          validSelected !== null &&
           renaming === null
         ) {
-          apply(deleteNode(model, selected));
+          apply(deleteNode(model, validSelected));
           setSelected(null);
           setToolbarPos(null);
         }
@@ -148,11 +158,9 @@ export function StructuralEditor({
         ref={hostRef}
         data-testid="structural-host"
         className="[&_svg]:h-auto [&_svg]:max-w-full"
-        // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.
-        dangerouslySetInnerHTML={svg !== null ? { __html: svg } : undefined}
       />
 
-      {selected !== null && toolbarPos !== null && renaming === null && (
+      {validSelected !== null && toolbarPos !== null && renaming === null && (
         <div
           data-testid="mermaid-node-toolbar"
           className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
@@ -165,7 +173,10 @@ export function StructuralEditor({
               type="button"
               title={c.label}
               aria-label={`Shape: ${c.label}`}
-              onClick={() => apply(setNodeShape(model, selected, c.shape))}
+              onClick={() => {
+                if (validSelected === null) return;
+                apply(setNodeShape(model, validSelected, c.shape));
+              }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
             >
               <Icon name={c.icon} size={13} color="var(--n-600)" />
@@ -176,8 +187,9 @@ export function StructuralEditor({
             type="button"
             aria-label="Add connected node"
             onClick={() => {
+              if (validSelected === null) return;
               const added = addNode(model, 'New step');
-              apply(addEdge(added.model, selected, added.id));
+              apply(addEdge(added.model, validSelected, added.id));
             }}
             className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
           >
@@ -187,7 +199,8 @@ export function StructuralEditor({
             type="button"
             aria-label="Delete node"
             onClick={() => {
-              apply(deleteNode(model, selected));
+              if (validSelected === null) return;
+              apply(deleteNode(model, validSelected));
               setSelected(null);
               setToolbarPos(null);
             }}
