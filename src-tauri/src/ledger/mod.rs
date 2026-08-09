@@ -22,6 +22,7 @@
 mod conformance;
 pub mod frame;
 pub mod index;
+pub mod migrate;
 pub mod project;
 pub mod recovery;
 pub mod reduce;

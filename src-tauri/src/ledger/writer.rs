@@ -257,6 +257,11 @@ impl LedgerWriter {
         })
     }
 
+    /// The store identity this writer appends into.
+    pub fn store_id(&self) -> &str {
+        &self.store_id
+    }
+
     /// The committed head as this writer knows it — no disk read.
     pub fn head(&self) -> Option<super::LedgerHead> {
         self.segment.as_ref().map(|segment| super::LedgerHead {
