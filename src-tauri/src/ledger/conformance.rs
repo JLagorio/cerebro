@@ -333,7 +333,12 @@ fn revised_body(belief_id: &str, patch: Vec<PatchOp>, basis: BeliefBasis) -> Bel
     }
 }
 
-fn relation_body(from: &str, to: &str, relation: RelationKind, action: RelationAction) -> BeliefRelation {
+fn relation_body(
+    from: &str,
+    to: &str,
+    relation: RelationKind,
+    action: RelationAction,
+) -> BeliefRelation {
     let (schema, batch_id, idempotency_key, actor) = common("agent:run-1");
     BeliefRelation {
         schema,
@@ -351,11 +356,7 @@ fn relation_body(from: &str, to: &str, relation: RelationKind, action: RelationA
     }
 }
 
-fn independence_body(
-    left: &str,
-    right: &str,
-    proof: IndependenceProof,
-) -> IndependenceRecorded {
+fn independence_body(left: &str, right: &str, proof: IndependenceProof) -> IndependenceRecorded {
     let (schema, batch_id, idempotency_key, actor) = common("system:prefilter");
     IndependenceRecorded {
         schema,
@@ -377,7 +378,10 @@ fn independence_body(
 fn scenario_sources() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     b.push_body(KIND_SOURCE_REGISTERED, &human_registration("human:josef"));
-    b.push_body(KIND_SOURCE_REGISTERED, &direct_registration("conn-1", "domain-github"));
+    b.push_body(
+        KIND_SOURCE_REGISTERED,
+        &direct_registration("conn-1", "domain-github"),
+    );
     b.push_body(KIND_SOURCE_REGISTERED, &content_registration("svc.mail"));
     b.push_body(
         KIND_SOURCE_REGISTERED,
@@ -698,7 +702,10 @@ fn scenario_beliefs() -> (&'static str, &'static str, Vec<Frame>) {
         ),
     );
     // Duplicate belief id: refused.
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
     // supports → snapshot: refused.
     b.push_body(
         KIND_BELIEF_CREATED,
@@ -740,10 +747,19 @@ fn scenario_beliefs() -> (&'static str, &'static str, Vec<Frame>) {
             role: BasisRole::Supports,
         }],
     };
-    b.push_body(KIND_BELIEF_REVISED, &revised_body(BELIEF, patch.clone(), linked.clone()));
-    b.push_body(KIND_BELIEF_REVISED, &revised_body(BELIEF, patch, linked.clone()));
+    b.push_body(
+        KIND_BELIEF_REVISED,
+        &revised_body(BELIEF, patch.clone(), linked.clone()),
+    );
+    b.push_body(
+        KIND_BELIEF_REVISED,
+        &revised_body(BELIEF, patch, linked.clone()),
+    );
     b.push_body(KIND_BELIEF_REVISED, &revised_body(BELIEF, vec![], linked));
-    b.push_body(KIND_BELIEF_REVISED, &revised_body(BELIEF, vec![], unsupported()));
+    b.push_body(
+        KIND_BELIEF_REVISED,
+        &revised_body(BELIEF, vec![], unsupported()),
+    );
     // Remove the field via Missing, and edit the body.
     b.push_body(
         KIND_BELIEF_REVISED,
@@ -782,8 +798,14 @@ fn scenario_resolution() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     let human = human_registration("human:josef");
     let human_reg = b.push_body(KIND_SOURCE_REGISTERED, &human);
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF_B, ENTITY_B, unsupported()));
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
     let alias_event = b.push_body(KIND_ENTITY_ALIAS_ADDED, &alias_body(ENTITY, "Acme Corp"));
     let unresolved = |raw: &str, b: &mut Builder| {
         b.push_body(
@@ -911,8 +933,14 @@ fn scenario_resolution() -> (&'static str, &'static str, Vec<Frame>) {
 
 fn scenario_relations() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF_B, ENTITY_B, unsupported()));
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
     let rel = |action| relation_body(BELIEF, BELIEF_B, RelationKind::Supersedes, action);
     b.push_body(KIND_BELIEF_RELATION, &rel(RelationAction::Add));
     b.push_body(KIND_BELIEF_RELATION, &rel(RelationAction::Add));
@@ -938,7 +966,10 @@ fn scenario_relations() -> (&'static str, &'static str, Vec<Frame>) {
 
 fn scenario_attestation() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
-    let created = b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
     let projected = super::project::project(
         "# Acme\n\nActive vendor.\n",
         &serde_json::json!({ "status": "active" }),
@@ -963,10 +994,16 @@ fn scenario_attestation() -> (&'static str, &'static str, Vec<Frame>) {
     b.push_body(KIND_BELIEF_ATTESTED, &attest(&"0".repeat(64), &created));
     b.push_body(KIND_BELIEF_ATTESTED, &attest(&good, &created));
     // A revision event that belongs to another Belief.
-    let other = b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF_B, ENTITY_B, unsupported()));
+    let other = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
     b.push_body(KIND_BELIEF_ATTESTED, &attest(&good, &other));
     // A non-revision event.
-    b.push_body(KIND_BELIEF_ATTESTED, &attest(&good, "0123456789abcdef0123456789abcdef"));
+    b.push_body(
+        KIND_BELIEF_ATTESTED,
+        &attest(&good, "0123456789abcdef0123456789abcdef"),
+    );
     (
         "attestation",
         "The id/hash pair must name one committed revision of the named Belief, hashed over its \
@@ -977,8 +1014,14 @@ fn scenario_attestation() -> (&'static str, &'static str, Vec<Frame>) {
 
 fn scenario_aliases() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF_B, ENTITY_B, unsupported()));
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
     b.push_body(KIND_ENTITY_ALIAS_ADDED, &alias_body(ENTITY, "Acme  Corp"));
     b.push_body(KIND_ENTITY_ALIAS_ADDED, &alias_body(ENTITY_B, "ACME CORP"));
     b.push_body(KIND_ENTITY_ALIAS_ADDED, &alias_body(ENTITY, "Acme Corp"));
@@ -1061,20 +1104,21 @@ fn scenario_independence() -> (&'static str, &'static str, Vec<Frame>) {
             snapshot_payload(),
         ),
     );
-    let extract = |b: &mut Builder, source: &SourceRegistered, reg: &str, lineage: Vec<LineageEdge>| {
-        b.push_body(
-            KIND_OBSERVATION_RECORDED,
-            &observation_body(
-                ObservationKind::ExtractedAssertion,
-                source,
-                reg,
-                "agent:run-1",
-                subject.clone(),
-                lineage,
-                extraction_payload(AuthorityProvenance::RegisteredDirectArtifact),
-            ),
-        )
-    };
+    let extract =
+        |b: &mut Builder, source: &SourceRegistered, reg: &str, lineage: Vec<LineageEdge>| {
+            b.push_body(
+                KIND_OBSERVATION_RECORDED,
+                &observation_body(
+                    ObservationKind::ExtractedAssertion,
+                    source,
+                    reg,
+                    "agent:run-1",
+                    subject.clone(),
+                    lineage,
+                    extraction_payload(AuthorityProvenance::RegisteredDirectArtifact),
+                ),
+            )
+        };
     let shared_edge = vec![LineageEdge {
         edge: LineageKind::DerivedFrom,
         parent_observation_event_id: parent.clone(),
@@ -1289,7 +1333,10 @@ fn scenario_derived_sources() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     let content = content_registration("svc.distill");
     let content_reg = b.push_body(KIND_SOURCE_REGISTERED, &content);
-    let created = b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
+    let created = b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
     let subject = SubjectRef::Resolved {
         entity_id: ENTITY.into(),
         aliases: vec![],
@@ -1331,10 +1378,16 @@ fn scenario_derived_sources() -> (&'static str, &'static str, Vec<Frame>) {
 fn scenario_plumbing() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     b.push("vault.write", serde_json::json!({ "path": "a.md" }));
-    b.push_body(KIND_BELIEF_CREATED, &belief_body(BELIEF, ENTITY, unsupported()));
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
     b.push("vault.delete", serde_json::json!({ "path": "a.md" }));
     // Garbage claiming schema membership, and a reserved kind.
-    b.push(KIND_BELIEF_CREATED, serde_json::json!({ "schema": 1, "garbage": true }));
+    b.push(
+        KIND_BELIEF_CREATED,
+        serde_json::json!({ "schema": 1, "garbage": true }),
+    );
     b.push("proposal.submitted", serde_json::json!({ "schema": 1 }));
     (
         "plumbing",

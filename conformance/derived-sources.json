@@ -55,7 +55,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -124,7 +126,9 @@
           "absence": null,
           "rendered_text": "Acme is active.",
           "generator_version": "g1",
-          "source_belief_revision_event_ids": ["00000000000000000000000000000002"]
+          "source_belief_revision_event_ids": [
+            "00000000000000000000000000000002"
+          ]
         }
       }
     },
@@ -185,7 +189,9 @@
           "absence": null,
           "rendered_text": "Acme is active.",
           "generator_version": "g1",
-          "source_belief_revision_event_ids": ["00000000000000000000000000000001"]
+          "source_belief_revision_event_ids": [
+            "00000000000000000000000000000001"
+          ]
         }
       }
     }
@@ -209,7 +215,10 @@
         "seq": 3,
         "kind": "derived_content",
         "source_id": "f93f1bb04a4866c64021368363b52caa",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "agent_inferred",
@@ -229,14 +238,19 @@
           "reason": "conformance fixture without observations"
         },
         "attested": null,
-        "revision_events": ["00000000000000000000000000000002"]
+        "revision_events": [
+          "00000000000000000000000000000002"
+        ]
       }
     },
     "relations": {},
     "resolutions": [],
     "independence": [],
     "derived_belief_sources": [
-      ["00000000000000000000000000000003", "00000000000000000000000000000002"]
+      [
+        "00000000000000000000000000000003",
+        "00000000000000000000000000000002"
+      ]
     ],
     "versions": {
       "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,

@@ -17,7 +17,7 @@ sources:
     last_modified: 2026-07-28
   - id: phx-421
     resource: /sources/issues/phx-421.md
-    title: "PHX-421 — Rehearse the warehouse rollback end to end"
+    title: PHX-421 — Rehearse the warehouse rollback end to end
     last_modified: 2026-07-28
 ---
 

@@ -199,7 +199,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme"]
+          "aliases": [
+            "Acme"
+          ]
         },
         "lineage": [
           {
@@ -633,7 +635,9 @@
         "seq": 4,
         "kind": "source_snapshot",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
@@ -643,7 +647,9 @@
         "seq": 5,
         "kind": "system_event",
         "source_id": "5d871c5a591b9a75635682be36c5f1de",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
@@ -653,17 +659,28 @@
         "seq": 6,
         "kind": "extracted_assertion",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "registered_direct_artifact",
-        "lineage": [["derived_from", "00000000000000000000000000000004"]]
+        "lineage": [
+          [
+            "derived_from",
+            "00000000000000000000000000000004"
+          ]
+        ]
       },
       "00000000000000000000000000000007": {
         "seq": 7,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["unresolved", "Acme Corp"],
+        "subject": [
+          "unresolved",
+          "Acme Corp"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",

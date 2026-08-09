@@ -26,7 +26,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -61,7 +63,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "dddddddddddddddddddddddddddddddd",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -251,7 +255,9 @@
           "reason": "conformance fixture without observations"
         },
         "attested": null,
-        "revision_events": ["00000000000000000000000000000001"]
+        "revision_events": [
+          "00000000000000000000000000000001"
+        ]
       },
       "ffffffffffffffffffffffffffffffff": {
         "entity_id": "dddddddddddddddddddddddddddddddd",
@@ -265,7 +271,9 @@
           "reason": "conformance fixture without observations"
         },
         "attested": null,
-        "revision_events": ["00000000000000000000000000000002"]
+        "revision_events": [
+          "00000000000000000000000000000002"
+        ]
       }
     },
     "relations": {

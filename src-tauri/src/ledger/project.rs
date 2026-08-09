@@ -198,9 +198,133 @@ fn quote(s: &str) -> String {
     out
 }
 
+/// The projection's inverse for migration (M22.5/6): split an OKF file
+/// into exact body bytes and order-preserving JSON fields. Pure; reads and
+/// writes nothing.
+pub fn parse_okf(text: &str) -> Result<(String, serde_json::Value), String> {
+    let (block, body) = crate::vault::parse::split_frontmatter(text);
+    let Some(block) = block else {
+        return Ok((text.to_string(), serde_json::json!({})));
+    };
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(block).map_err(|e| format!("frontmatter: {e}"))?;
+    Ok((body.to_string(), yaml_to_json(&yaml)?))
+}
+
+fn yaml_to_json(value: &serde_yaml::Value) -> Result<serde_json::Value, String> {
+    Ok(match value {
+        serde_yaml::Value::Null => serde_json::Value::Null,
+        serde_yaml::Value::Bool(b) => serde_json::Value::Bool(*b),
+        serde_yaml::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                serde_json::Value::from(i)
+            } else if let Some(u) = n.as_u64() {
+                serde_json::Value::from(u)
+            } else {
+                serde_json::Value::from(n.as_f64().ok_or("unrepresentable YAML number")?)
+            }
+        }
+        serde_yaml::Value::String(s) => serde_json::Value::String(s.clone()),
+        serde_yaml::Value::Sequence(items) => {
+            serde_json::Value::Array(items.iter().map(yaml_to_json).collect::<Result<_, _>>()?)
+        }
+        serde_yaml::Value::Mapping(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, item) in map {
+                let key = key
+                    .as_str()
+                    .ok_or("non-string frontmatter key — not OKF")?
+                    .to_string();
+                out.insert(key, yaml_to_json(item)?);
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_yaml::Value::Tagged(_) => return Err("tagged YAML is not OKF".to_string()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every demo-vault knowledge file — the golden corpus — must survive
+    /// parse → project byte-identically, AND survive the reducer: a
+    /// migrated-shape belief.created folded through `reduce` projects the
+    /// same bytes. This is `project(reduce(migrate(file))) == read(file)`
+    /// with the M22.6 migrator's exact body mapping inlined.
+    #[test]
+    fn every_demo_vault_knowledge_file_round_trips_byte_identically() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../demo-vault/knowledge");
+        let store = "feedfacefeedfacefeedfacefeedface";
+        let mut checked = 0;
+        for entry in walkdir::WalkDir::new(&root) {
+            let entry = entry.unwrap();
+            if !entry.file_type().is_file()
+                || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
+            {
+                continue;
+            }
+            let original = std::fs::read_to_string(entry.path()).unwrap();
+            let (content, fields) =
+                parse_okf(&original).unwrap_or_else(|e| panic!("{}: {e}", entry.path().display()));
+            assert_eq!(
+                project(&content, &fields),
+                original,
+                "{}: parse → project must be byte-identical",
+                entry.path().display()
+            );
+
+            // Through the reducer, as the migrator will emit it.
+            let rel = entry
+                .path()
+                .strip_prefix(&root)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let body = crate::ledger::schema::BeliefCreated {
+                schema: crate::ledger::schema::BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: crate::ledger::schema::Actor {
+                    id: crate::ledger::schema::ACTOR_MIGRATOR.to_string(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                belief_id: crate::ledger::schema::migrate_id(store, "belief", &rel),
+                subject: crate::ledger::schema::SubjectRef::Resolved {
+                    entity_id: crate::ledger::schema::migrate_id(store, "entity", &rel),
+                    aliases: vec![rel.clone()],
+                },
+                content: content.clone(),
+                fields: fields.clone(),
+                basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                    reason: "migrated from OKF markdown without captured observations".into(),
+                },
+            };
+            let frame = crate::ledger::frame::tests::fixture(
+                1,
+                store,
+                crate::ledger::schema::KIND_BELIEF_CREATED,
+                serde_json::to_value(&body).unwrap(),
+            );
+            let state = crate::ledger::reduce::reduce(&[frame], store);
+            assert!(state.anomalies.is_empty(), "{rel}: {:?}", state.anomalies);
+            let belief = state.beliefs.values().next().unwrap();
+            let revision = belief.current();
+            assert_eq!(
+                project(&revision.content, &revision.fields),
+                original,
+                "{rel}: project(reduce(migrate(file))) must equal read(file)"
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 9,
+            "the golden corpus is present ({checked} files)"
+        );
+    }
 
     #[test]
     fn a_full_concept_projects_to_its_pinned_bytes() {

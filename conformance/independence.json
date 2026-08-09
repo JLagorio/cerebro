@@ -907,7 +907,10 @@
         "seq": 5,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",
@@ -917,7 +920,10 @@
         "seq": 6,
         "kind": "human_assertion",
         "source_id": "3ca30a9a34ebe478c5c8891097777062",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",
@@ -927,7 +933,10 @@
         "seq": 9,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",
@@ -937,7 +946,9 @@
         "seq": 12,
         "kind": "source_snapshot",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
@@ -947,27 +958,45 @@
         "seq": 13,
         "kind": "extracted_assertion",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "registered_direct_artifact",
-        "lineage": [["derived_from", "0000000000000000000000000000000c"]]
+        "lineage": [
+          [
+            "derived_from",
+            "0000000000000000000000000000000c"
+          ]
+        ]
       },
       "0000000000000000000000000000000e": {
         "seq": 14,
         "kind": "extracted_assertion",
         "source_id": "320b2531116f6f38049b18a8f916893f",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "registered_direct_artifact",
-        "lineage": [["derived_from", "0000000000000000000000000000000c"]]
+        "lineage": [
+          [
+            "derived_from",
+            "0000000000000000000000000000000c"
+          ]
+        ]
       },
       "00000000000000000000000000000010": {
         "seq": 16,
         "kind": "source_snapshot",
         "source_id": "320b2531116f6f38049b18a8f916893f",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
@@ -977,21 +1006,37 @@
         "seq": 17,
         "kind": "extracted_assertion",
         "source_id": "320b2531116f6f38049b18a8f916893f",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "registered_direct_artifact",
-        "lineage": [["derived_from", "00000000000000000000000000000010"]]
+        "lineage": [
+          [
+            "derived_from",
+            "00000000000000000000000000000010"
+          ]
+        ]
       },
       "00000000000000000000000000000013": {
         "seq": 19,
         "kind": "extracted_assertion",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "registered_direct_artifact",
-        "lineage": [["derived_from", "0000000000000000000000000000000c"]]
+        "lineage": [
+          [
+            "derived_from",
+            "0000000000000000000000000000000c"
+          ]
+        ]
       }
     },
     "beliefs": {},

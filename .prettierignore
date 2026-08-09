@@ -12,3 +12,6 @@ playwright-report
 pnpm-lock.yaml
 HardwareSoftware Security Engineering Tool
 coverage
+
+# conformance vectors are Rust-generated canonical bytes (M22.4) — byte-compared against regeneration
+conformance/

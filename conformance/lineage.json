@@ -473,7 +473,9 @@
         "seq": 2,
         "kind": "source_snapshot",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
@@ -483,7 +485,9 @@
         "seq": 3,
         "kind": "source_snapshot",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
@@ -493,26 +497,44 @@
         "seq": 4,
         "kind": "extracted_assertion",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "registered_direct_artifact",
         "lineage": [
-          ["reported_by", "00000000000000000000000000000002"],
-          ["summarized_from", "00000000000000000000000000000003"]
+          [
+            "reported_by",
+            "00000000000000000000000000000002"
+          ],
+          [
+            "summarized_from",
+            "00000000000000000000000000000003"
+          ]
         ]
       },
       "00000000000000000000000000000005": {
         "seq": 5,
         "kind": "derived_content",
         "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "agent_inferred",
         "lineage": [
-          ["copied_from", "00000000000000000000000000000002"],
-          ["derived_from", "00000000000000000000000000000004"]
+          [
+            "copied_from",
+            "00000000000000000000000000000002"
+          ],
+          [
+            "derived_from",
+            "00000000000000000000000000000004"
+          ]
         ]
       }
     },

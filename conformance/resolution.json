@@ -55,7 +55,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -90,7 +92,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "dddddddddddddddddddddddddddddddd",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -398,7 +402,9 @@
           "action": "attach",
           "entity_id": "dddddddddddddddddddddddddddddddd",
           "resolver_tier": "known_alias",
-          "basis_event_ids": ["00000000000000000000000000000004"]
+          "basis_event_ids": [
+            "00000000000000000000000000000004"
+          ]
         }
       }
     },
@@ -426,7 +432,9 @@
           "action": "attach",
           "entity_id": "cccccccccccccccccccccccccccccccc",
           "resolver_tier": "known_alias",
-          "basis_event_ids": ["00000000000000000000000000000004"]
+          "basis_event_ids": [
+            "00000000000000000000000000000004"
+          ]
         }
       }
     },
@@ -454,7 +462,9 @@
           "action": "attach",
           "entity_id": "cccccccccccccccccccccccccccccccc",
           "resolver_tier": "known_alias",
-          "basis_event_ids": ["00000000000000000000000000000004"]
+          "basis_event_ids": [
+            "00000000000000000000000000000004"
+          ]
         }
       }
     },
@@ -510,7 +520,9 @@
           "action": "attach",
           "entity_id": "cccccccccccccccccccccccccccccccc",
           "resolver_tier": "normalized_match",
-          "basis_event_ids": ["00000000000000000000000000000002"]
+          "basis_event_ids": [
+            "00000000000000000000000000000002"
+          ]
         }
       }
     },
@@ -564,7 +576,9 @@
           "action": "attach",
           "entity_id": "dddddddddddddddddddddddddddddddd",
           "resolver_tier": "explicit_relation",
-          "basis_event_ids": ["0000000000000000000000000000000e"]
+          "basis_event_ids": [
+            "0000000000000000000000000000000e"
+          ]
         }
       }
     },
@@ -594,7 +608,9 @@
           "from_entity_id": "cccccccccccccccccccccccccccccccc",
           "to_entity_id": "dddddddddddddddddddddddddddddddd",
           "resolver_tier": "exact_id",
-          "basis_event_ids": ["00000000000000000000000000000003"],
+          "basis_event_ids": [
+            "00000000000000000000000000000003"
+          ],
           "reason": "the mention names the subsidiary"
         }
       }
@@ -625,7 +641,9 @@
           "from_entity_id": "cccccccccccccccccccccccccccccccc",
           "to_entity_id": "dddddddddddddddddddddddddddddddd",
           "resolver_tier": "exact_id",
-          "basis_event_ids": ["00000000000000000000000000000003"],
+          "basis_event_ids": [
+            "00000000000000000000000000000003"
+          ],
           "reason": "the mention names the subsidiary"
         }
       }
@@ -718,7 +736,9 @@
           "from_entity_id": "cccccccccccccccccccccccccccccccc",
           "to_entity_id": "dddddddddddddddddddddddddddddddd",
           "resolver_tier": "exact_id",
-          "basis_event_ids": ["00000000000000000000000000000003"],
+          "basis_event_ids": [
+            "00000000000000000000000000000003"
+          ],
           "reason": "nothing to correct"
         }
       }
@@ -750,7 +770,10 @@
         "seq": 5,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["unresolved", "ACME corp"],
+        "subject": [
+          "unresolved",
+          "ACME corp"
+        ],
         "effective_entity": "dddddddddddddddddddddddddddddddd",
         "effective_resolution_event": "00000000000000000000000000000010",
         "authority": "trusted_human_capture",
@@ -760,7 +783,10 @@
         "seq": 6,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["unresolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "unresolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": "0000000000000000000000000000000c",
         "authority": "trusted_human_capture",
@@ -770,7 +796,10 @@
         "seq": 7,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["unresolved", "acme  CORP"],
+        "subject": [
+          "unresolved",
+          "acme  CORP"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": "0000000000000000000000000000000d",
         "authority": "trusted_human_capture",
@@ -780,7 +809,10 @@
         "seq": 8,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["unresolved", "whatever mention"],
+        "subject": [
+          "unresolved",
+          "whatever mention"
+        ],
         "effective_entity": "dddddddddddddddddddddddddddddddd",
         "effective_resolution_event": "0000000000000000000000000000000f",
         "authority": "trusted_human_capture",
@@ -790,7 +822,10 @@
         "seq": 18,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["unresolved", "never attached"],
+        "subject": [
+          "unresolved",
+          "never attached"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",
@@ -810,7 +845,9 @@
           "reason": "conformance fixture without observations"
         },
         "attested": null,
-        "revision_events": ["00000000000000000000000000000002"]
+        "revision_events": [
+          "00000000000000000000000000000002"
+        ]
       },
       "ffffffffffffffffffffffffffffffff": {
         "entity_id": "dddddddddddddddddddddddddddddddd",
@@ -824,7 +861,9 @@
           "reason": "conformance fixture without observations"
         },
         "attested": null,
-        "revision_events": ["00000000000000000000000000000003"]
+        "revision_events": [
+          "00000000000000000000000000000003"
+        ]
       }
     },
     "relations": {

@@ -117,7 +117,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -519,7 +521,9 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "member_event_ids": ["00000000000000000000000000000009"],
+        "member_event_ids": [
+          "00000000000000000000000000000009"
+        ],
         "member_count": 1,
         "members_digest": "c6ba37f8c2b37786cf92db34aa46b2ad69355f449e3fc572145605ff16f183e9",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
@@ -606,7 +610,9 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "member_event_ids": ["0000000000000000000000000000000c"],
+        "member_event_ids": [
+          "0000000000000000000000000000000c"
+        ],
         "member_count": 1,
         "members_digest": "0000000000000000000000000000000000000000000000000000000000000000",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
@@ -823,7 +829,9 @@
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "member_event_ids": ["00000000000000000000000000000011"],
+        "member_event_ids": [
+          "00000000000000000000000000000011"
+        ],
         "member_count": 1,
         "members_digest": "55cc126164dfb930335c123423b6f975508efb5d72195ae17a65c861a9252cc9",
         "operation_digest": "59a3a8251d36181f8569a3210c5a525c2a1006637234506992f8ca8f76afd9d9"
@@ -877,7 +885,10 @@
         "seq": 2,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",
@@ -902,7 +913,9 @@
           ]
         },
         "attested": null,
-        "revision_events": ["00000000000000000000000000000003"]
+        "revision_events": [
+          "00000000000000000000000000000003"
+        ]
       }
     },
     "relations": {},
@@ -916,14 +929,46 @@
       "source:c8147897afd510dad9278f297ba49115": 2
     },
     "batches": [
-      ["beefbeefbeefbeefbeefbeefbeef0001", "committed", 2],
-      ["beefbeefbeefbeefbeefbeefbeef0003", "refused", 2],
-      ["beefbeefbeefbeefbeefbeefbeef0004", "refused", 2],
-      ["beefbeefbeefbeefbeefbeefbeef0005", "refused", 1],
-      ["beefbeefbeefbeefbeefbeefbeef0006", "refused", 2],
-      ["beefbeefbeefbeefbeefbeefbeef0007", "refused", 1],
-      ["beefbeefbeefbeefbeefbeefbeef0001", "refused", 0],
-      ["beefbeefbeefbeefbeefbeefbeef0002", "orphaned", 1]
+      [
+        "beefbeefbeefbeefbeefbeefbeef0001",
+        "committed",
+        2
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0003",
+        "refused",
+        2
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0004",
+        "refused",
+        2
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0005",
+        "refused",
+        1
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0006",
+        "refused",
+        2
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0007",
+        "refused",
+        1
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0001",
+        "refused",
+        0
+      ],
+      [
+        "beefbeefbeefbeefbeefbeefbeef0002",
+        "orphaned",
+        1
+      ]
     ]
   },
   "expected_refusals": [

@@ -1478,7 +1478,12 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
     let entities: serde_json::Map<String, serde_json::Value> = state
         .entities
         .values()
-        .map(|e| (e.entity_id.clone(), serde_json::json!(e.registered_by_event_id)))
+        .map(|e| {
+            (
+                e.entity_id.clone(),
+                serde_json::json!(e.registered_by_event_id),
+            )
+        })
         .collect();
     let aliases: serde_json::Map<String, serde_json::Value> = state
         .alias_registry

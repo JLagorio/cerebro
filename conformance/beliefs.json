@@ -157,7 +157,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -201,7 +203,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "cccccccccccccccccccccccccccccccc",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -236,7 +240,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "dddddddddddddddddddddddddddddddd",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -276,7 +282,9 @@
         "subject": {
           "resolution": "resolved",
           "entity_id": "dddddddddddddddddddddddddddddddd",
-          "aliases": ["Acme Corp"]
+          "aliases": [
+            "Acme Corp"
+          ]
         },
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -536,7 +544,10 @@
         "seq": 2,
         "kind": "human_assertion",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["resolved", "cccccccccccccccccccccccccccccccc"],
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
         "effective_entity": "cccccccccccccccccccccccccccccccc",
         "effective_resolution_event": null,
         "authority": "trusted_human_capture",
@@ -546,7 +557,9 @@
         "seq": 3,
         "kind": "source_snapshot",
         "source_id": "c8147897afd510dad9278f297ba49115",
-        "subject": ["none"],
+        "subject": [
+          "none"
+        ],
         "effective_entity": null,
         "effective_resolution_event": null,
         "authority": null,
