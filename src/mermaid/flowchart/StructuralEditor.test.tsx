@@ -252,7 +252,7 @@ describe('StructuralEditor', () => {
   // any press inside its anchor — which is the whole toolbar — as its own. So
   // nothing dismissed the first when the second opened, and both floated at
   // the same z-index on top of each other.
-  it('opening one node popover closes the other', async () => {
+  it('opening one node popover closes the others', async () => {
     render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
     await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
     await userEvent.click(document.getElementById('flowchart-A-0')!);
@@ -261,8 +261,11 @@ describe('StructuralEditor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
     expect(screen.queryByTestId('node-style-menu')).toBeNull();
     expect(screen.getByTestId('shape-palette')).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'Node colors' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
     expect(screen.queryByTestId('shape-palette')).toBeNull();
+    expect(screen.getByTestId('mermaid-icon-picker')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Node colors' }));
+    expect(screen.queryByTestId('mermaid-icon-picker')).toBeNull();
     expect(screen.getByTestId('node-style-menu')).toBeTruthy();
   });
 
@@ -284,6 +287,12 @@ describe('StructuralEditor', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
     screen.getByRole('button', { name: 'Shape: Cloud' }).focus();
+    await userEvent.keyboard('{Backspace}');
+    await userEvent.keyboard('{Delete}');
+    expect(onChangeCode).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    screen.getByRole('button', { name: 'Icon rocket' }).focus();
     await userEvent.keyboard('{Backspace}');
     await userEvent.keyboard('{Delete}');
     expect(onChangeCode).not.toHaveBeenCalled();
@@ -343,6 +352,81 @@ describe('StructuralEditor', () => {
     expect(onChangeCode).not.toHaveBeenCalled();
     // A press that changes nothing is still a press: it dismisses.
     expect(screen.queryByTestId('node-style-menu')).toBeNull();
+  });
+
+  it('the icon picker writes an icon meta line', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Icon rocket' }));
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  A[Start] --> B[End]\n  A@{ icon: "lucide:rocket", form: rounded, pos: b }',
+    );
+  });
+
+  // Several meta lines fold per key with the LAST value winning (measured,
+  // icons.mermaid.test.ts), so the picker must mark what RENDERS — reading the
+  // first line would light up an icon the diagram does not show.
+  it('the picker marks the icon that renders, and clearing strips every site', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={
+          'flowchart TD\n  A[Start] --> B[End]\n  A@{ icon: "lucide:zap" }\n  A@{ icon: "lucide:rocket" }'
+        }
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    expect(screen.getByRole('button', { name: 'Icon rocket' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Icon zap' }).getAttribute('aria-pressed')).toBe(
+      'false',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Remove icon' }));
+    expect(onChangeCode).toHaveBeenCalledWith('flowchart TD\n  A[Start] --> B[End]');
+  });
+
+  it('the icon trigger announces the popover it owns', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    const trigger = screen.getByRole('button', { name: 'Node icon' });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Node icon' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+  });
+
+  it('re-picking the icon the node already has costs no undo step, and still closes', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  A@{ icon: "lucide:rocket" }'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Icon rocket' }));
+    expect(onChangeCode).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('mermaid-icon-picker')).toBeNull();
+  });
+
+  it('the icon picker opens with its search box focused, like the shape palette', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Search icons');
   });
 
   it('the color menu opens with a swatch focused, like the shape palette', async () => {

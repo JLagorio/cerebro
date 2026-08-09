@@ -4,6 +4,7 @@ import type {
   EdgeStroke,
   FlowchartModel,
   ModelLine,
+  NodeMeta,
   NodeRef,
   Shape,
 } from './model';
@@ -131,20 +132,21 @@ function declaresEdgeId(model: FlowchartModel, id: string): boolean {
 }
 
 /**
- * Where a shape write belongs among `id`'s meta lines, creating an empty one
+ * Where a write of `key` belongs among `id`'s meta lines, creating an empty one
  * after the node's anchor when there is none.
  *
- * The LAST line already declaring `shape` wins, then the last line at all.
+ * The LAST line already declaring `key` wins, then the last line at all.
  * Several `id@{ … }` lines may name one node and mermaid folds them PER KEY
- * with the last value winning (`mergeMeta`, flowDb.ts:236-262), so writing to
- * the first would leave a later `shape:` still rendering — the silent no-op
- * M29.30 found for `style` lines, in its meta twin.
+ * with the last value winning (`mergeMeta`, flowDb.ts:236-262 — re-measured for
+ * `icon` in icons.mermaid.test.ts), so writing to the first would leave a later
+ * `shape:`/`icon:` still rendering — the silent no-op M29.30 found for `style`
+ * lines, in its meta twin.
  */
-function ensureShapeMetaLine(next: FlowchartModel, id: string): number {
+function ensureMetaLine(next: FlowchartModel, id: string, key: string): number {
   const owners = nodeMetaLinesFor(next, id);
   const declares = (i: number): boolean => {
     const parsed = next.lines[i].parsed;
-    return parsed.kind === 'node-meta' && parsed.meta.entries.some(([k]) => k === 'shape');
+    return parsed.kind === 'node-meta' && parsed.meta.entries.some(([k]) => k === key);
   };
   const target = owners.filter(declares).at(-1) ?? owners.at(-1);
   if (target !== undefined) return target;
@@ -224,10 +226,108 @@ export function setNodeShape(
   // reproduce that, so we decline — the bytes survive, which is never wrong.
   if (declaresEdgeId(model, id)) return clone(model);
   const next = clone(model);
-  const idx = ensureShapeMetaLine(next, id);
+  const idx = ensureMetaLine(next, id, 'shape');
   const line = next.lines[idx];
   if (line.parsed.kind !== 'node-meta') return next; // unreachable; narrows the type
   line.parsed.meta = withMetaEntry(line.parsed.meta, 'shape', registryName);
+  line.dirty = true;
+  return next;
+}
+
+/** The keys that exist only to present an icon — meaningless without one. */
+const ICON_PRESENTATION = ['form', 'pos'];
+
+/**
+ * Icon metadata rides the node's `@{ … }` meta line (M29.35, spec D6).
+ *
+ * Setting writes `icon` (always quoted on the way out — the value carries the
+ * pack's `:`) and defaults `form: rounded` / `pos: b` ONLY when the node has
+ * neither, so an explicit choice survives an icon swap. Clearing (`null`)
+ * removes icon/form/pos as a unit and deletes any line that empties.
+ *
+ * MEASURED on the bundled 11.16.0 (icons.mermaid.test.ts), because all three
+ * of these are claims about mermaid and not preferences:
+ *
+ * - An icon BEATS a shape: `getTypeFromVertex` (flowDb.ts:975-988) checks
+ *   `vertex.icon` before `vertex.type`, so a node carrying both draws the icon.
+ *   `form` picks between the `icon`/`iconSquare`/`iconCircle`/`iconRounded`
+ *   shapes; all four are in 11.16.0's registry.
+ * - Several meta lines for one node fold PER KEY, LAST value winning — so a
+ *   set goes to the last line already carrying `icon` and a clear strips EVERY
+ *   line. Writing to the first would be the silent no-op M29.30/.32/.33 each
+ *   had to close in a different control.
+ * - An unregistered pack or an unknown name renders mermaid's placeholder box,
+ *   never an error, so no value here can take the diagram down.
+ *
+ * The refusals mirror `setNodeShape`'s exactly, for the same reasons: an
+ * undeclared id would be CREATED by either path; an opaque multi-line `id@{`
+ * block out-votes anything we write, making every edit a visible no-op paid
+ * for in bytes and an undo step; and an id some edge also claims makes POSITION
+ * decide what an `@{ … }` line means, which we cannot reproduce.
+ */
+export function setNodeIcon(
+  model: FlowchartModel,
+  id: string,
+  icon: string | null,
+): FlowchartModel {
+  if (!nodes(model).has(id)) return clone(model);
+  if (hasOpaqueMetaBlock(model, id)) return clone(model);
+  if (declaresEdgeId(model, id)) return clone(model);
+
+  const next = clone(model);
+  const owners = nodeMetaLinesFor(next, id);
+  const metaAt = (i: number): NodeMeta | null => {
+    const parsed = next.lines[i].parsed;
+    return parsed.kind === 'node-meta' ? parsed.meta : null;
+  };
+
+  if (icon === null) {
+    // Nothing to clear is nothing to do. `form`/`pos` are inert without an
+    // icon, but they are still the user's bytes and "remove icon" must not
+    // quietly become "tidy up" — the same surgical rule setEdgeAnimate's OFF
+    // path keeps when it leaves an edge id behind.
+    if (nodeMeta(next).get(id)?.icon === undefined) return next;
+    // `pos` is icon AND image presentation, and `img` wins over `icon` at
+    // render (flowDb.ts:972-974), so on a node carrying both, stripping the
+    // presentation keys would silently re-place the image's label. Removing
+    // more than asked is exactly what the surgical rule forbids.
+    const hasImage = owners.some((i) => metaAt(i)?.entries.some(([k]) => k === 'img') === true);
+    const drop = hasImage ? ['icon'] : ['icon', ...ICON_PRESENTATION];
+    // Back to front: splicing an emptied line shifts every later index.
+    for (let n = owners.length - 1; n >= 0; n -= 1) {
+      const i = owners[n];
+      const meta = metaAt(i);
+      if (meta === null || !meta.entries.some(([k]) => drop.includes(k))) continue;
+      let stripped = meta;
+      for (const key of drop) stripped = withMetaEntry(stripped, key, null);
+      if (stripped.entries.length === 0) {
+        next.lines.splice(i, 1);
+      } else {
+        const parsed = next.lines[i].parsed;
+        if (parsed.kind === 'node-meta') parsed.meta = stripped;
+        next.lines[i].dirty = true;
+      }
+    }
+    return next;
+  }
+
+  // Already showing this icon: do nothing at all, the same call setNodeShape
+  // makes. Rewriting would cost an undo step for a click that moved nothing —
+  // and worse here, it would ADD `form: rounded` to a node that had chosen the
+  // bare `icon` shape, silently redrawing it.
+  const resolved = nodeMeta(next).get(id);
+  if (resolved?.icon === icon) return clone(model);
+
+  const idx = ensureMetaLine(next, id, 'icon');
+  const line = next.lines[idx];
+  if (line.parsed.kind !== 'node-meta') return next; // unreachable; narrows the type
+  let meta = withMetaEntry(line.parsed.meta, 'icon', icon);
+  // Asked of the FOLDED view, not this line: a `form:` sitting on a sibling
+  // meta line is just as much the user's explicit choice, and writing our
+  // default onto the winning line would override it.
+  if (resolved?.form === undefined) meta = withMetaEntry(meta, 'form', 'rounded');
+  if (resolved?.pos === undefined) meta = withMetaEntry(meta, 'pos', 'b');
+  line.parsed.meta = meta;
   line.dirty = true;
   return next;
 }

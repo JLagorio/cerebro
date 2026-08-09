@@ -3,15 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const renderSpy = vi.fn();
 const initializeSpy = vi.fn();
 const registerSpy = vi.fn();
+const iconPackSpy = vi.fn();
 
 vi.mock('mermaid', () => ({
   default: {
     initialize: (...a: unknown[]) => initializeSpy(...a),
     render: (...a: unknown[]) => renderSpy(...a),
     registerLayoutLoaders: (...a: unknown[]) => registerSpy(...a),
+    registerIconPacks: (...a: unknown[]) => iconPackSpy(...a),
   },
 }));
 vi.mock('@mermaid-js/layout-elk', () => ({ default: [] }));
+vi.mock('@iconify-json/lucide', () => ({
+  icons: { prefix: 'lucide', icons: { rocket: { body: '<path d="fake"/>' } } },
+}));
 
 async function freshModule() {
   vi.resetModules();
@@ -22,6 +27,7 @@ beforeEach(() => {
   renderSpy.mockReset().mockResolvedValue({ svg: '<svg data-fake="1"></svg>' });
   initializeSpy.mockReset();
   registerSpy.mockReset();
+  iconPackSpy.mockReset();
 });
 
 describe('renderMermaid', () => {
@@ -84,6 +90,26 @@ describe('renderMermaid', () => {
     expect(r1).toEqual({ ok: true, svg: '<svg data-fake="1"></svg>' });
     expect(r2).toEqual({ ok: true, svg: '<svg data-fake="1"></svg>' });
     expect(renderSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('icon packs', () => {
+  it('registers the lucide pack once, lazily, under the name mermaid will resolve', async () => {
+    const { renderMermaid } = await freshModule();
+    await renderMermaid('graph TD\n  A --> B');
+    await renderMermaid('graph TD\n  A --> C');
+    expect(iconPackSpy).toHaveBeenCalledTimes(1);
+    const packs = iconPackSpy.mock.calls[0][0] as {
+      name: string;
+      loader: () => Promise<unknown>;
+    }[];
+    expect(packs).toHaveLength(1);
+    // `name` is what `lucide:` in diagram source resolves against — it
+    // overrides the pack's own prefix, so this string IS the contract.
+    expect(packs[0].name).toBe('lucide');
+    // The loader is the lazy edge: calling it must yield the pack's icons.
+    const icons = (await packs[0].loader()) as { prefix: string };
+    expect(icons.prefix).toBe('lucide');
   });
 });
 

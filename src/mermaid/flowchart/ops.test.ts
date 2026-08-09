@@ -21,6 +21,7 @@ import {
   setEdgeArrow,
   setEdgeLabel,
   setLayoutEngine,
+  setNodeIcon,
   setNodeShape,
   setNodeStyle,
 } from './ops';
@@ -810,5 +811,147 @@ describe('setNodeShape — registry shapes (M29.32, D4)', () => {
     expect(serialize(setNodeShape(bare, 'A', 'cloud'))).toBe(
       'flowchart TD\n  A --> B\n  A@{ shape: cloud }',
     );
+  });
+});
+
+describe('setNodeIcon', () => {
+  it('writes a full meta line for a node that has none', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B')!;
+    const out = serialize(setNodeIcon(m, 'A', 'lucide:rocket'));
+    expect(out).toContain('A@{ icon: "lucide:rocket", form: rounded, pos: b }');
+    // Untouched lines stay byte-identical.
+    expect(out.split('\n')[0]).toBe('flowchart TD');
+    expect(out).toContain('  A[Start] --> B');
+  });
+
+  it('patches an existing meta line, preserving other keys and their order', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start]\n  A@{ shape: hexagon }')!;
+    const out = serialize(setNodeIcon(m, 'A', 'lucide:zap'));
+    // shape came first in the source, so shape still comes first.
+    expect(out).toContain('A@{ shape: hexagon, icon: "lucide:zap", form: rounded, pos: b }');
+  });
+
+  it('does not clobber an explicit form/pos the user already chose', () => {
+    const m = parseFlowchart('flowchart TD\n  A@{ icon: "lucide:zap", form: circle, pos: t }')!;
+    const out = serialize(setNodeIcon(m, 'A', 'lucide:rocket'));
+    expect(out).toContain('form: circle');
+    expect(out).toContain('pos: t');
+    expect(out).toContain('icon: "lucide:rocket"');
+  });
+
+  it('null removes icon, form, and pos — and deletes the line when that empties it', () => {
+    const m = parseFlowchart(
+      'flowchart TD\n  A[Start]\n  A@{ icon: "lucide:zap", form: rounded, pos: b }',
+    )!;
+    const out = serialize(setNodeIcon(m, 'A', null));
+    expect(out).toBe('flowchart TD\n  A[Start]');
+  });
+
+  it('null keeps a meta line that still carries other keys', () => {
+    const m = parseFlowchart('flowchart TD\n  A@{ shape: hexagon, icon: "lucide:zap" }')!;
+    const out = serialize(setNodeIcon(m, 'A', null));
+    expect(out).toContain('A@{ shape: hexagon }');
+    expect(out).not.toContain('icon');
+  });
+
+  it('null on a node with no meta line is a no-op', () => {
+    const src = 'flowchart TD\n  A[Start] --> B';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null))).toBe(src);
+  });
+
+  it('null on a node with no ICON leaves even inert form/pos alone', () => {
+    // form/pos mean nothing without an icon, but they are still the author's
+    // bytes: "remove icon" must not become "tidy up".
+    const src = 'flowchart TD\n  A --> B\n  A@{ shape: hex, form: circle, pos: t }';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null))).toBe(src);
+  });
+
+  // MEASURED on the bundled 11.16.0 (icons.mermaid.test.ts): several
+  // `A@{ … }` lines fold PER KEY with the LAST value winning, so a set that
+  // landed on the first line would be a silent no-op — the defect three Stage E
+  // controls shipped and M29.30/.32/.33 each had to close again.
+  it('a set lands on the LAST line already carrying icon — the one that renders', () => {
+    const m = parseFlowchart(
+      'flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap" }\n  A@{ shape: hex }\n  A@{ icon: "lucide:star" }',
+    )!;
+    expect(serialize(setNodeIcon(m, 'A', 'lucide:rocket'))).toBe(
+      'flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap" }\n  A@{ shape: hex }\n  A@{ icon: "lucide:rocket", form: rounded, pos: b }',
+    );
+  });
+
+  it('with no icon anywhere, a set lands on the LAST meta line', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ shape: hex }\n  A@{ label: X }')!;
+    expect(serialize(setNodeIcon(m, 'A', 'lucide:rocket'))).toBe(
+      'flowchart TD\n  A --> B\n  A@{ shape: hex }\n  A@{ label: X, icon: "lucide:rocket", form: rounded, pos: b }',
+    );
+  });
+
+  // A clear has to reach EVERY site: stripping only the winner leaves an
+  // earlier `icon:` still rendering.
+  it('null strips icon/form/pos from every line, deleting the ones it empties', () => {
+    const m = parseFlowchart(
+      'flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap", form: circle }\n  A@{ shape: hex, pos: t }\n  A@{ icon: "lucide:star" }',
+    )!;
+    expect(serialize(setNodeIcon(m, 'A', null))).toBe(
+      'flowchart TD\n  A --> B\n  A@{ shape: hex }',
+    );
+  });
+
+  it('leaves EDGE meta alone — an id can name both a node and an edge', () => {
+    // `e1@{ … }` BELOW the edge is edge meta, never node meta (model.ts's
+    // edgeMetaLines). Here `e1` is not even a node, so there is nothing to
+    // icon; the animation line survives untouched.
+    const src = 'flowchart TD\n  A e1@--> B\n  e1@{ animate: true }';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'e1', 'lucide:zap'))).toBe(src);
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'e1', null))).toBe(src);
+
+    // And when the SAME id names a real node too, position decides what an
+    // `@{ … }` line means — a distinction we cannot reproduce, so the op
+    // declines wholesale rather than write a line that reads as edge meta.
+    const both = 'flowchart TD\n  A --> e1\n  A e1@--> B\n  e1@{ animate: true }';
+    const parsed = parseFlowchart(both)!;
+    expect(nodes(parsed).has('e1')).toBe(true);
+    expect(serialize(setNodeIcon(parsed, 'e1', 'lucide:zap'))).toBe(both);
+  });
+
+  it('an id the diagram does not declare is a no-op, not a new node', () => {
+    const src = 'flowchart TD\n  A[Start] --> B';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'ZZZ', 'lucide:zap'))).toBe(src);
+  });
+
+  it('an opaque multi-line meta block wins at render, so we decline rather than lie', () => {
+    const src = 'flowchart TD\n  A[Start] --> B\n  A@{\n    icon: "lucide:zap"\n  }';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', 'lucide:rocket'))).toBe(src);
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null))).toBe(src);
+  });
+
+  // Same reasoning as setNodeShape's: re-picking what the node already shows
+  // must not cost an undo step. Here it would also silently ADD form/pos and
+  // change the drawn shape from `icon` to `iconRounded`.
+  it('re-picking the icon the node already has changes nothing at all', () => {
+    const src = 'flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap" }';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', 'lucide:zap'))).toBe(src);
+  });
+
+  // `pos` is icon AND image presentation (flowDb getTypeFromVertex reads
+  // `img` before `icon`), so a node carrying both keeps its image's position
+  // when the icon goes — removing more than asked is the surgical rule's whole
+  // point.
+  it('an image on the same node keeps its form/pos when the icon is cleared', () => {
+    const m = parseFlowchart('flowchart TD\n  A@{ img: "a.png", icon: "lucide:zap", pos: t }')!;
+    // (`a.png` needs no quotes, and a dirtied line re-emits every value through
+    // emitMetaValue — Stage E's canonical spacing/quoting, unchanged here.)
+    expect(serialize(setNodeIcon(m, 'A', null))).toBe('flowchart TD\n  A@{ img: a.png, pos: t }');
+  });
+
+  it('an icon value carrying a quote is substituted, never emitted raw', () => {
+    // emitMetaValue's last boundary: `"` has no escape inside mermaid's
+    // quoted-string lexer state, so it becomes `'` rather than breaking the line.
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const out = serialize(setNodeIcon(m, 'A', 'lucide:a"b'));
+    expect(out).toContain(`icon: "lucide:a'b"`);
+    // The line is still one our own parser owns — the substitution cost the
+    // node no editability.
+    expect(nodeMeta(parseFlowchart(out)!).get('A')?.icon).toBe("lucide:a'b");
   });
 });

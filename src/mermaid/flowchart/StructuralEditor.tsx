@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
+import { IconPicker } from './IconPicker';
 import {
   edgeAnimated,
+  nodeMeta,
   nodeStyle,
   nodes,
   parseFlowchart,
@@ -24,6 +26,7 @@ import {
   setEdgeArrow,
   setEdgeLabel,
   setLayoutEngine,
+  setNodeIcon,
   setNodeShape,
   setNodeStyle,
 } from './ops';
@@ -93,6 +96,7 @@ export function StructuralEditor({
   const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
   const [shapeOpen, setShapeOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
   const [ghost, setGhost] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
     null,
   );
@@ -154,6 +158,7 @@ export function StructuralEditor({
     setToolbarPos(null);
     setShapeOpen(false);
     setStyleOpen(false);
+    setIconOpen(false);
   }, [code]);
 
   // Render, inject, and bind in one pass. The svg is written imperatively —
@@ -483,6 +488,7 @@ export function StructuralEditor({
               // as inside and both surfaces stayed open on top of each other.
               onClick={() => {
                 setStyleOpen(false);
+                setIconOpen(false);
                 setShapeOpen(true);
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
@@ -520,6 +526,7 @@ export function StructuralEditor({
               aria-expanded={styleOpen}
               onClick={() => {
                 setShapeOpen(false);
+                setIconOpen(false);
                 setStyleOpen(true);
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
@@ -539,6 +546,36 @@ export function StructuralEditor({
                   if (validSelected !== null) apply(setNodeStyle(model, validSelected, patch));
                 }}
                 onClose={() => setStyleOpen(false)}
+              />
+            )}
+            <button
+              type="button"
+              aria-label="Node icon"
+              title="Node icon"
+              aria-haspopup="dialog"
+              aria-expanded={iconOpen}
+              onClick={() => {
+                setShapeOpen(false);
+                setStyleOpen(false);
+                setIconOpen(true);
+              }}
+              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+            >
+              <Icon name="sparkles" size={13} color="var(--n-600)" />
+            </button>
+            {iconOpen && (
+              <IconPicker
+                // The FOLDED reading of every meta line for this node, which is
+                // what mermaid renders: several `A@{ … }` lines settle per key
+                // with the last value winning (measured, icons.mermaid.test.ts),
+                // so reading the first would mark an icon the diagram does not
+                // show — and setNodeIcon writes to the same line this reads.
+                current={nodeMeta(model).get(validSelected)?.icon ?? null}
+                onPick={(icon) => {
+                  setIconOpen(false);
+                  apply(setNodeIcon(model, validSelected, icon));
+                }}
+                onClose={() => setIconOpen(false)}
               />
             )}
             <span className="mx-0.5 h-4 w-px bg-n-100" />

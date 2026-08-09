@@ -27,6 +27,20 @@ async function loadMermaid(): Promise<typeof import('mermaid').default> {
     const mermaid = (await import('mermaid')).default;
     const { default: elkLayouts } = await import('@mermaid-js/layout-elk');
     mermaid.registerLayoutLoaders(elkLayouts);
+    // Icon packs (M29.35, spec D6): registration is cheap — the loader is
+    // the lazy part, fetched+cached by mermaid only when a diagram actually
+    // uses a `lucide:` icon (the pack JSON is ~1MB, so it gets its own chunk).
+    // `name` overrides the pack's own prefix and is what `@{ icon: "lucide:x" }`
+    // resolves against; mermaid's fallbackPrefix is '', so an UNPREFIXED name
+    // resolves to nothing. An unknown icon or a typo'd pack renders mermaid's
+    // blue "?" placeholder box — never an error, so this can't break the
+    // render pipeline (measured in flowchart/icons.mermaid.test.ts).
+    mermaid.registerIconPacks([
+      {
+        name: 'lucide',
+        loader: () => import('@iconify-json/lucide').then((m) => m.icons),
+      },
+    ]);
     return mermaid;
   })();
   try {
