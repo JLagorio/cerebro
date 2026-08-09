@@ -26,10 +26,7 @@ function eachRef(line: ModelLine, visit: (ref: NodeRef) => void): void {
 }
 
 /** First labeled site wins: definition line, else inline ref. Null = no site. */
-function findLabelSite(
-  model: FlowchartModel,
-  id: string,
-): { line: number; ref: NodeRef } | null {
+function findLabelSite(model: FlowchartModel, id: string): { line: number; ref: NodeRef } | null {
   for (let i = 0; i < model.lines.length; i += 1) {
     const parsed = model.lines[i].parsed;
     if (parsed.kind === 'node' && parsed.node.id === id) {
