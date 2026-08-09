@@ -58,10 +58,18 @@ describe('FullScreenDiagramEditor', () => {
   });
 
   it('demotes to code when the source stops being a flowchart, and opens the overlay', async () => {
+    renderMock.mockClear();
     const { rerender } = render(<FullScreenDiagramEditor code={FLOW} onChangeCode={() => {}} />);
     rerender(<FullScreenDiagramEditor code={SEQ} onChangeCode={() => {}} />);
     await waitFor(() => expect(screen.getByTestId('code-overlay')).toBeTruthy());
     expect(screen.queryByTestId('structural-host')).toBeNull();
+    // Demotion is a PASSIVE effect, so there is one committed frame between
+    // the new code arriving and the mode flipping. The `&& flowchartCapable`
+    // guard on the visual branch is what keeps StructuralEditor from mounting
+    // into it holding model === null — painting its "syntax the visual editor
+    // does not own" fallback inside the zoom plane and rendering a face that
+    // is already doomed. Exactly one render of the demoted source, not two.
+    expect(renderMock.mock.calls.filter((c) => c[0] === SEQ)).toHaveLength(1);
     // Explicit promotion is offered — the latch never promotes on its own.
     rerender(<FullScreenDiagramEditor code={FLOW} onChangeCode={() => {}} />);
     expect(screen.queryByTestId('structural-host')).toBeNull();
@@ -82,6 +90,22 @@ describe('FullScreenDiagramEditor', () => {
     await waitFor(() => expect(screen.getByTestId('fullscreen-render-error')).toBeTruthy());
     expect(screen.getByTestId('fullscreen-render-error').textContent).toContain('Line 2:');
     expect(screen.getByTestId('fullscreen-readonly-diagram').innerHTML).toContain('good');
+  });
+
+  it('renders a host overlay inside the plane, not outside it', () => {
+    // INSIDE canvas-plane is the whole contract (spec D1): a Stage-H host
+    // positions its overlay against useCanvasTransform, which only means
+    // anything for a node that scales and translates with the plane.
+    render(
+      <FullScreenDiagramEditor
+        code={FLOW}
+        onChangeCode={() => {}}
+        overlay={<div data-testid="host-overlay" />}
+      />,
+    );
+    expect(
+      screen.getByTestId('canvas-plane').querySelector('[data-testid="host-overlay"]'),
+    ).toBeTruthy();
   });
 
   it('renders the title when a host passes one', () => {

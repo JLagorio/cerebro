@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
-import { useCanvasTransform } from '../CanvasViewport';
+import { useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
 import { nodes, parseFlowchart, serialize, type EdgeEntry, type Shape } from './model';
 import {
@@ -71,13 +71,22 @@ export function StructuralEditor({
   // Inside a CanvasViewport the host is scaled, and getBoundingClientRect
   // deltas are SCREEN px — dividing by the plane scale converts them to the
   // plane coordinates CSS absolute positioning uses in here. Outside any
-  // viewport the context is the identity and this is a no-op (M29.26). Read
-  // through a ref: the bind effect below re-runs only on [code, model], so its
-  // handler closures would otherwise capture whatever scale was current when
-  // the diagram last changed.
-  const { scale } = useCanvasTransform();
-  const scaleRef = useRef(1);
-  scaleRef.current = scale;
+  // viewport the context is the identity and this is a no-op (M29.26).
+  //
+  // The REF context, never useCanvasTransform(): the value context publishes a
+  // fresh object per pan frame and per wheel tick, so consuming it re-rendered
+  // this component once per frame for a value nothing here reads at render
+  // time — and every one of those renders re-ran the deliberately
+  // dep-array-less selection-sync effect below (a querySelectorAll plus two
+  // style writes per bound node, per frame). Measured over 20 pan frames: 20
+  // renders as a value consumer, 0 as a ref consumer. The handlers read the
+  // scale when a gesture actually happens, which is the only time it matters.
+  //
+  // React.memo is NOT the alternative fix here. The scale's freshness was
+  // parasitic on that per-frame re-render, so memoizing would freeze it at
+  // mount and mis-place every overlay after a zoom — and jsdom rects are all
+  // 0×0, so no unit test could ever catch that.
+  const transformRef = useCanvasTransformRef();
 
   // A selection can outlive the node it points at — an external edit (undo,
   // another surface, a code-mode change) can delete the node between one
@@ -142,7 +151,7 @@ export function StructuralEditor({
             // parked the toolbar directly ON such a node — covering its
             // center, so the second click of a double-click rename landed on
             // toolbar buttons instead of the node (observed live, M29.19).
-            const s = scaleRef.current;
+            const s = transformRef.current.scale;
             const above = (box.top - hostBox.top) / s - 34;
             const y = above >= 0 ? above : (box.bottom - hostBox.top) / s + 6;
             setToolbarPos({ x: (box.left - hostBox.left) / s, y });
@@ -161,7 +170,7 @@ export function StructuralEditor({
           const host = hostRef.current;
           if (host === null) return;
           const hostBox = host.getBoundingClientRect();
-          const s = scaleRef.current;
+          const s = transformRef.current.scale;
           dragFrom.current = id;
           setGhost({
             x1: (e.clientX - hostBox.left) / s,
@@ -189,7 +198,12 @@ export function StructuralEditor({
     return () => {
       stale = true;
     };
-  }, [code, model]);
+    // transformRef comes from context, so exhaustive-deps cannot see it is a
+    // ref and asks for it by name. Harmless to give it: the provider's object
+    // identity never changes (that is the entire point of the ref context), so
+    // this effect still re-binds only on an actual diagram change — and if a
+    // host ever DID swap providers, re-binding would be the correct answer.
+  }, [code, model, transformRef]);
 
   // Window-level drag-to-connect: pointerdown on a node (above) starts it,
   // these two finish it. Registered once per model (i.e. per actual diagram
@@ -203,7 +217,7 @@ export function StructuralEditor({
       const host = hostRef.current;
       if (host === null) return;
       const hostBox = host.getBoundingClientRect();
-      const s = scaleRef.current;
+      const s = transformRef.current.scale;
       setGhost((g) =>
         g === null
           ? null

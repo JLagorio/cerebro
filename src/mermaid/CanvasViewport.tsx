@@ -20,9 +20,38 @@ const CanvasTransformContext = createContext<CanvasTransform>({
   offset: { x: 0, y: 0 },
 });
 
+/**
+ * The same transform, published through a STABLE ref (M29.26).
+ *
+ * The value context above hands out a fresh object on every `setT`, which is
+ * exactly right for an overlay that renders against the live transform (Stage
+ * H's record chips) and exactly wrong for a consumer that only reads the scale
+ * inside an event handler: subscribing re-rendered it once per pan frame for a
+ * value it never read at render time. This ref's identity never changes, so
+ * reading it costs nothing per frame.
+ *
+ * Identity default, same contract as the value context: a consumer outside any
+ * viewport reads scale 1 and its divide is a no-op.
+ */
+const IDENTITY_TRANSFORM_REF: React.RefObject<CanvasTransform> = {
+  current: { scale: 1, offset: { x: 0, y: 0 } },
+};
+const CanvasTransformRefContext =
+  createContext<React.RefObject<CanvasTransform>>(IDENTITY_TRANSFORM_REF);
+
 /** The viewport's current transform — for overlays positioning in plane coordinates. */
 export function useCanvasTransform(): CanvasTransform {
   return useContext(CanvasTransformContext);
+}
+
+/**
+ * The viewport's current transform, read on demand and WITHOUT subscribing to
+ * it — for consumers that need the scale inside an event handler rather than
+ * at render time. Prefer this one; reach for `useCanvasTransform` only when a
+ * render genuinely depends on the live value.
+ */
+export function useCanvasTransformRef(): React.RefObject<CanvasTransform> {
+  return useContext(CanvasTransformRefContext);
 }
 
 /**
@@ -57,6 +86,11 @@ export function CanvasViewport({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const planeRef = useRef<HTMLDivElement | null>(null);
   const [t, setT] = useState<CanvasTransform>({ scale: 1, offset: { x: 0, y: 0 } });
+  // The ref context's value. Assigned during render, not in an effect: a
+  // handler that fires between a pan frame's commit and a passive effect must
+  // still read the transform that is already on screen.
+  const tRef = useRef<CanvasTransform>(t);
+  tRef.current = t;
   const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(
     null,
   );
@@ -162,75 +196,82 @@ export function CanvasViewport({
   }, [initialFit]);
 
   return (
-    <CanvasTransformContext.Provider value={t}>
-      <div
-        ref={viewportRef}
-        data-testid="canvas-viewport"
-        // `touch-none select-none`: pan is this surface's primary gesture, and
-        // pointerdown never calls preventDefault, so without them a background
-        // drag across mermaid's label text drag-selects it and smears blue
-        // behind the canvas. Every other drag surface in the repo already pairs
-        // these (CalendarView.tsx:339,391 · GanttView.tsx:337 ·
-        // TimelineView.tsx:272); the resize/grip handles take touch-none alone.
-        className="relative h-full w-full touch-none select-none overflow-hidden bg-n-25 cursor-grab active:cursor-grabbing"
-        onPointerDown={(e) => {
-          if (e.button !== 0 || !startsPan(e.target)) return;
-          e.currentTarget.setPointerCapture?.(e.pointerId);
-          drag.current = {
-            startX: e.clientX,
-            startY: e.clientY,
-            baseX: t.offset.x,
-            baseY: t.offset.y,
-          };
-        }}
-        onPointerMove={(e) => {
-          if (drag.current === null) return;
-          const d = drag.current;
-          setT((prev) => ({
-            ...prev,
-            offset: { x: d.baseX + (e.clientX - d.startX), y: d.baseY + (e.clientY - d.startY) },
-          }));
-        }}
-        onPointerUp={() => {
-          drag.current = null;
-        }}
-        onPointerCancel={() => {
-          drag.current = null;
-        }}
-      >
+    <CanvasTransformRefContext.Provider value={tRef}>
+      <CanvasTransformContext.Provider value={t}>
         <div
-          ref={planeRef}
-          data-testid="canvas-plane"
-          style={{
-            transform: `translate(${t.offset.x}px, ${t.offset.y}px) scale(${t.scale})`,
-            transformOrigin: '0 0',
+          ref={viewportRef}
+          data-testid="canvas-viewport"
+          // `touch-none select-none`: pan is this surface's primary gesture, and
+          // pointerdown never calls preventDefault, so without them a background
+          // drag across mermaid's label text drag-selects it and smears blue
+          // behind the canvas. Every other drag surface in the repo already pairs
+          // these (CalendarView.tsx:339,391 · GanttView.tsx:337 ·
+          // TimelineView.tsx:272); the resize/grip handles take touch-none alone.
+          className="relative h-full w-full touch-none select-none overflow-hidden bg-n-25 cursor-grab active:cursor-grabbing"
+          onPointerDown={(e) => {
+            if (e.button !== 0 || !startsPan(e.target)) return;
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            drag.current = {
+              startX: e.clientX,
+              startY: e.clientY,
+              baseX: t.offset.x,
+              baseY: t.offset.y,
+            };
+          }}
+          onPointerMove={(e) => {
+            if (drag.current === null) return;
+            const d = drag.current;
+            setT((prev) => ({
+              ...prev,
+              offset: { x: d.baseX + (e.clientX - d.startX), y: d.baseY + (e.clientY - d.startY) },
+            }));
+          }}
+          onPointerUp={() => {
+            drag.current = null;
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
           }}
         >
-          {children}
-        </div>
-        <div
-          data-testid="canvas-zoom-controls"
-          data-no-pan
-          className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-        >
-          <IconButton icon="zoom-out" label="Zoom out" size="sm" onClick={() => zoomBy(1 / 1.1)} />
-          <button
-            type="button"
-            aria-label="Reset zoom"
-            className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50"
-            onClick={() => setT({ scale: 1, offset: { x: 0, y: 0 } })}
+          <div
+            ref={planeRef}
+            data-testid="canvas-plane"
+            style={{
+              transform: `translate(${t.offset.x}px, ${t.offset.y}px) scale(${t.scale})`,
+              transformOrigin: '0 0',
+            }}
           >
-            {Math.round(t.scale * 100)}%
-          </button>
-          <IconButton icon="zoom-in" label="Zoom in" size="sm" onClick={() => zoomBy(1.1)} />
-          <IconButton
-            icon="maximize"
-            label="Fit diagram"
-            size="sm"
-            onClick={() => fitRef.current()}
-          />
+            {children}
+          </div>
+          <div
+            data-testid="canvas-zoom-controls"
+            data-no-pan
+            className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
+          >
+            <IconButton
+              icon="zoom-out"
+              label="Zoom out"
+              size="sm"
+              onClick={() => zoomBy(1 / 1.1)}
+            />
+            <button
+              type="button"
+              aria-label="Reset zoom"
+              className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50"
+              onClick={() => setT({ scale: 1, offset: { x: 0, y: 0 } })}
+            >
+              {Math.round(t.scale * 100)}%
+            </button>
+            <IconButton icon="zoom-in" label="Zoom in" size="sm" onClick={() => zoomBy(1.1)} />
+            <IconButton
+              icon="maximize"
+              label="Fit diagram"
+              size="sm"
+              onClick={() => fitRef.current()}
+            />
+          </div>
         </div>
-      </div>
-    </CanvasTransformContext.Provider>
+      </CanvasTransformContext.Provider>
+    </CanvasTransformRefContext.Provider>
   );
 }

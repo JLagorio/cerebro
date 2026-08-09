@@ -51,11 +51,11 @@ export function FullScreenDiagramEditor({
   overlay?: React.ReactNode;
 }) {
   const flowchartCapable = useMemo(() => parseFlowchart(code) !== null, [code]);
-  const [mode, setMode] = useState<'visual' | 'code'>(() =>
-    parseFlowchart(code) !== null ? 'visual' : 'code',
-  );
+  // Latched from the memo, not re-parsed: both initializers run once, at mount,
+  // and `flowchartCapable` is already the answer for the code they would parse.
+  const [mode, setMode] = useState<'visual' | 'code'>(() => (flowchartCapable ? 'visual' : 'code'));
   // The overlay IS the editor when the canvas is read-only, so it opens itself there.
-  const [showCode, setShowCode] = useState(() => parseFlowchart(code) === null);
+  const [showCode, setShowCode] = useState(() => !flowchartCapable);
 
   // Demotion safety net (parity with MermaidBlockView and DiagramPage):
   // source that stops parsing as a flowchart falls back to the read-only
@@ -102,12 +102,29 @@ export function FullScreenDiagramEditor({
       />
       <div className="relative min-h-0 flex-1">
         <CanvasViewport initialFit>
-          {mode === 'visual' ? (
+          {/*
+            `&& flowchartCapable`, matching DiagramPage.tsx:232. Demotion below
+            is a PASSIVE effect, so a source that stops parsing as a flowchart
+            gets one committed, painted frame before it runs — and without this
+            guard that frame shows StructuralEditor's "syntax the visual editor
+            does not own" fallback inside the zoom plane, and fires a
+            renderMermaid for a face about to be replaced. The effect still
+            owns the mode flip and the showCode side effect; this just refuses
+            to paint the doomed frame.
+          */}
+          {mode === 'visual' && flowchartCapable ? (
             <StructuralEditor code={code} onChangeCode={onChangeCode} toolbar={false} />
           ) : (
             <div
               data-testid="fullscreen-readonly-diagram"
-              className="p-3 [&_svg]:h-auto [&_svg]:max-w-none"
+              // pointer-events-none on the injected svg: CanvasViewport's
+              // NO_PAN list exempts g.node/g.edgePaths/g.edgeLabels because the
+              // STRUCTURAL editor owns those gestures (drag-to-connect). This
+              // face has no node interactions at all, so without this a drag
+              // starting on any node — most of the canvas on a dense diagram —
+              // would refuse to pan. Purely a hit-testing property: no layout
+              // effect, so initialFit still measures the same box.
+              className="p-3 [&_svg]:pointer-events-none [&_svg]:h-auto [&_svg]:max-w-none"
               // Safe: strict-mode mermaid output, the same sanitized sink as
               // MermaidDiagram/MermaidLightbox/LivePreview.
               dangerouslySetInnerHTML={{ __html: view.svg ?? '' }}
