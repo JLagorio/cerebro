@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
+import { renderMermaid } from './render';
+import { useDebounced } from './useDebounced';
 
 /**
  * The mermaid block's body (M29.6) — moved out of editor/blocks.tsx so the
  * editor keeps only BlockNote glue. Rendering goes through the shared core;
- * this file owns block chrome and the edit lifecycle. Stage B replaces the
- * textarea toggle with side-by-side live editing; Stage C adds the structural
- * editor. Both land here.
+ * this file owns block chrome and the edit lifecycle. Stage B (M29.9)
+ * replaced the textarea-toggle-with-blur-commit with side-by-side live
+ * editing; Stage C adds the structural editor. Both land here.
  */
 export function MermaidBlockView({
   code,
@@ -20,10 +22,19 @@ export function MermaidBlockView({
   const [editing, setEditing] = useState(code.trim() === '');
   const [draft, setDraft] = useState(code);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
+  // Hooks can't live in conditional JSX, so this runs every render even in
+  // view mode — cheap, and it means LivePreview always has a settled value
+  // the instant editing flips on.
+  const debouncedDraft = useDebounced(draft, 250);
 
   const commit = () => {
     setEditing(false);
     if (draft !== code) onChangeCode(draft);
+  };
+
+  const cancel = () => {
+    setDraft(code);
+    setEditing(false);
   };
 
   return (
@@ -56,17 +67,29 @@ export function MermaidBlockView({
       </div>
 
       {editing && (
-        <textarea
-          autoFocus
-          aria-label="Mermaid source"
-          value={draft}
-          placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => e.stopPropagation()}
-          rows={Math.max(4, draft.split('\n').length + 1)}
-          className="w-full resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-sm leading-[1.5] text-n-800 outline-none"
-        />
+        <div className="flex flex-wrap">
+          <textarea
+            autoFocus
+            aria-label="Mermaid source"
+            value={draft}
+            placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // BlockNote hotkeys must not fire while typing in the source box.
+              e.stopPropagation();
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                cancel();
+              } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                commit();
+              }
+            }}
+            rows={Math.max(6, draft.split('\n').length + 1)}
+            className="min-w-[260px] flex-1 basis-[280px] resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-sm leading-[1.5] text-n-800 outline-none"
+          />
+          <LivePreview code={debouncedDraft} />
+        </div>
       )}
 
       {!editing && code.trim() !== '' && (
@@ -102,6 +125,64 @@ export function MermaidBlockView({
           title="Diagram"
           onClose={() => setLightboxSvg(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The edit-mode pane: renders the (debounced) draft, keeps the last good svg
+ * when the draft breaks, and names the error's line.
+ */
+function LivePreview({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; line: number | null } | null>(null);
+
+  useEffect(() => {
+    if (code.trim() === '') {
+      setSvg(null);
+      setError(null);
+      return;
+    }
+    let stale = false;
+    void renderMermaid(code).then((r) => {
+      if (stale) return;
+      if (r.ok) {
+        setSvg(r.svg);
+        setError(null);
+      } else {
+        setError({ message: r.message, line: r.line });
+        // svg intentionally untouched: the last good render stays visible.
+      }
+    });
+    return () => {
+      stale = true;
+    };
+  }, [code]);
+
+  return (
+    <div className="min-w-[260px] flex-1 basis-[280px] border-l border-n-100 px-3 py-2">
+      {error !== null && (
+        <div
+          data-testid="mermaid-edit-error"
+          className="mb-1.5 rounded-md bg-danger-50 px-2 py-1 text-xs text-danger-700"
+        >
+          {error.line !== null ? `Line ${error.line}: ` : ''}
+          {error.message.split('\n')[0]}
+        </div>
+      )}
+      {svg !== null && (
+        <div
+          data-testid="mermaid-live-preview"
+          className={`overflow-auto [&_svg]:h-auto [&_svg]:max-w-full ${error !== null ? 'opacity-60' : ''}`}
+          // Safe: strict-mode mermaid output, same as every other sink in
+          // this module (MermaidDiagram, MermaidLightbox) — mermaid runs in
+          // securityLevel: 'strict', so the svg it returns is sanitized.
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      )}
+      {svg === null && error === null && (
+        <div className="py-4 text-center text-xs text-n-400">Preview appears as you type</div>
       )}
     </div>
   );
