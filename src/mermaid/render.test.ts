@@ -52,6 +52,39 @@ describe('renderMermaid', () => {
     await renderMermaid('graph TD\n  A --> B');
     expect(renderSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('retries after a load failure and does not cache it', async () => {
+    registerSpy.mockImplementationOnce(() => {
+      throw new Error('chunk load failed');
+    });
+    const { renderMermaid } = await freshModule();
+
+    const first = await renderMermaid('graph TD\n  A --> B');
+    expect(first).toEqual({ ok: false, message: 'chunk load failed', line: null });
+    expect(renderSpy).not.toHaveBeenCalled();
+
+    const second = await renderMermaid('graph TD\n  A --> B');
+    expect(second).toEqual({ ok: true, svg: '<svg data-fake="1"></svg>' });
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('dedups concurrent calls for the same code into a single render', async () => {
+    let resolveRender!: (v: { svg: string }) => void;
+    const deferred = new Promise<{ svg: string }>((resolve) => {
+      resolveRender = resolve;
+    });
+    renderSpy.mockReturnValueOnce(deferred);
+    const { renderMermaid } = await freshModule();
+
+    const p1 = renderMermaid('graph TD\n  A --> B');
+    const p2 = renderMermaid('graph TD\n  A --> B');
+    resolveRender({ svg: '<svg data-fake="1"></svg>' });
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    expect(r1).toEqual({ ok: true, svg: '<svg data-fake="1"></svg>' });
+    expect(r2).toEqual({ ok: true, svg: '<svg data-fake="1"></svg>' });
+    expect(renderSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('extractErrorLine', () => {
