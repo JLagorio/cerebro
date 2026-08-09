@@ -184,8 +184,10 @@ pub struct ScanOutcome {
     pub regenerated: Vec<String>,
     /// Pending entries finalized (the file already held the target bytes).
     pub finalized: Vec<String>,
-    /// Valid out-of-band edits, parked for the M23.7 capture pass.
+    /// Valid out-of-band edits still parked (mode open, or mass signature).
     pub out_of_band: Vec<String>,
+    /// Out-of-band edits CAPTURED this scan (M23.7's live half).
+    pub captured: Vec<String>,
     /// Unproven states, with the classifier's reason.
     pub divergent: Vec<(String, String)>,
     /// The detection key of the divergence recorded this scan, if any.
@@ -296,12 +298,35 @@ pub fn launch_scan(
         }
     }
 
-    // The circuit breaker: signals in canonical (declaration) order.
+    // A mass of mismatches is a RESTORE SIGNATURE, checked BEFORE any
+    // capture: adopting it edit-by-edit would silently bless a rollback.
     let projection_count = paths.len();
+    let initial_mismatches = outcome.out_of_band.len() + outcome.divergent.len();
+    let mass_signature = projection_count >= MASS_MIN_PROJECTIONS
+        && initial_mismatches >= MASS_MIN_MISMATCHES
+        && (initial_mismatches as f64) >= (projection_count as f64) * MASS_MIN_RATIO;
+
+    // The M23.7 live half: capture parked out-of-band edits — but only
+    // when nothing else already demands reconciliation. A failed capture
+    // (forged provenance, alias removal, ambiguous overlap) escalates to
+    // divergence instead of guessing.
+    if !already_open
+        && !mass_signature
+        && outcome.divergent.is_empty()
+        && migration_signal.is_none()
+    {
+        let parked = std::mem::take(&mut outcome.out_of_band);
+        for path in parked {
+            match super::capture::capture_out_of_band_with(writer, vault, &path) {
+                Ok(()) => outcome.captured.push(path),
+                Err(reason) => outcome.divergent.push((path, reason)),
+            }
+        }
+    }
+
+    // The circuit breaker: signals in canonical (declaration) order.
     let mismatches = outcome.out_of_band.len() + outcome.divergent.len();
-    let mass = projection_count >= MASS_MIN_PROJECTIONS
-        && mismatches >= MASS_MIN_MISMATCHES
-        && (mismatches as f64) >= (projection_count as f64) * MASS_MIN_RATIO;
+    let mass = mass_signature;
     let mut signals: Vec<schema::DivergenceSignal> = Vec::new();
     if !outcome.divergent.is_empty() {
         signals.push(schema::DivergenceSignal::ManifestReducerDisagreement);
@@ -382,6 +407,522 @@ pub fn launch_scan(
     let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
     outcome.reconciliation_open = reduce(&read.frames, writer.store_id()).reconciliation_open();
     Ok(outcome)
+}
+
+// --- The reconciliation exits (M23.7) --------------------------------------
+
+/// Dispatch one reconciliation action through the vault's active writer.
+pub fn resolve(vault: &Path, action: &str) -> Option<Result<(), String>> {
+    super::shadow::with_writer(vault, |writer| match action {
+        "restore_ledger_authority" => resolve_restore_with(writer, vault),
+        "accept_current_files" => resolve_accept_with(writer, vault),
+        other => Err(format!("unknown reconciliation action {other:?}")),
+    })
+}
+
+/// restore-ledger-authority: regenerate EVERY projection from reducer state
+/// through the pending-manifest protocol, remove what the ledger cannot
+/// explain, recheck F=M=R, and only then append the UNBATCHED resolution.
+/// A crash before that append leaves the mode open and resumable.
+pub(crate) fn resolve_restore_with(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+) -> Result<(), String> {
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, writer.store_id());
+    let Some(divergence_event) = state.reconciliation_divergences.values().next().cloned() else {
+        return Err("no open reconciliation to resolve".to_string());
+    };
+    let affected: Vec<String> = state.projection_paths.keys().cloned().collect();
+    if affected.is_empty() {
+        return Err("nothing to restore — the ledger holds no projections".to_string());
+    }
+
+    // The ledger is the authority: every projection regenerates; files and
+    // manifest entries the reducer cannot explain are removed.
+    for (krel, belief) in &state.projection_paths {
+        let projection = project_belief(&state, belief)?;
+        super::manifest::write_projection(vault, &format!("knowledge/{krel}"), &projection)?;
+    }
+    if let Some(mut manifest) = super::manifest::load(vault)? {
+        manifest
+            .entries
+            .retain(|path, _| match path.strip_prefix("knowledge/") {
+                Some(krel) => state.projection_paths.contains_key(krel),
+                None => false,
+            });
+        super::manifest::save(vault, &manifest)?;
+    }
+    let knowledge = vault.join("knowledge");
+    if knowledge.exists() {
+        for entry in walkdir::WalkDir::new(&knowledge).sort_by_file_name() {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if !entry.file_type().is_file()
+                || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
+            {
+                continue;
+            }
+            let krel = entry
+                .path()
+                .strip_prefix(&knowledge)
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !state.projection_paths.contains_key(&krel) {
+                std::fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    // Recheck F = M = R before declaring anything.
+    for (krel, belief) in &state.projection_paths {
+        let projection = project_belief(&state, belief)?;
+        let bytes = std::fs::read(vault.join(format!("knowledge/{krel}")))
+            .map_err(|e| format!("restore left {krel} unreadable: {e}"))?;
+        if bytes != projection.bytes.as_bytes() {
+            return Err(format!("restore did not reproduce {krel} byte-for-byte"));
+        }
+    }
+    crate::crash::crash_point("restore-regenerated");
+
+    // Only now: the unbatched resolution. A crash before this append leaves
+    // the mode open; rerunning restore converges and appends it.
+    let resulting = reducer_projection_digest(&state)?;
+    let body = schema::ReconciliationResolved {
+        schema: schema::BODY_SCHEMA,
+        batch_id: None,
+        idempotency_key: None,
+        actor: schema::Actor {
+            id: schema::ACTOR_RECONCILIATION.to_string(),
+        },
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        divergence_event_id: divergence_event,
+        action: schema::ReconciliationAction::RestoreLedgerAuthority,
+        affected_paths: affected,
+        capture_batch_ids: vec![],
+        accepted_files_digest: None,
+        resulting_projection_digest: resulting,
+    };
+    writer.append(
+        schema::KIND_RECONCILIATION_RESOLVED,
+        serde_json::to_value(&body).map_err(|e| e.to_string())?,
+    )?;
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, writer.store_id());
+    if state.reconciliation_open() {
+        return Err("the restore resolution did not close the mode".to_string());
+    }
+    Ok(())
+}
+
+/// accept-current-files: adoption through the capture valve, never manifest
+/// rebaselining. Every affected file is parsed and mechanically diffed;
+/// every representable epistemic diff becomes assertion+revision/effect
+/// members and every editorial diff an override member; the resolution
+/// rides the SAME logical batch, its digests proving the staged reducer
+/// projections equal the adopted bytes. One unparsable, forged, ambiguous,
+/// or unrepresentable file refuses the entire action — the manifest
+/// advances only after the marker fsync and reducer equality.
+pub(crate) fn resolve_accept_with(
+    writer: &mut super::writer::LedgerWriter,
+    vault: &Path,
+) -> Result<(), String> {
+    use super::capture;
+    use super::writer::{batch_self_ref, member_ref};
+
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let store = writer.store_id().to_string();
+    let state = reduce(&read.frames, &store);
+    let Some(divergence_event) = state.reconciliation_divergences.values().next().cloned() else {
+        return Err("no open reconciliation to resolve".to_string());
+    };
+    let manifest = super::manifest::load(vault)?;
+
+    // Classify everything; every non-Match path is affected and must be
+    // fully explainable from its CURRENT file bytes.
+    let mut paths: std::collections::BTreeSet<String> = state
+        .projection_paths
+        .keys()
+        .map(|krel| format!("knowledge/{krel}"))
+        .collect();
+    if let Some(manifest) = &manifest {
+        paths.extend(manifest.entries.keys().cloned());
+    }
+    let knowledge = vault.join("knowledge");
+    if knowledge.exists() {
+        for entry in walkdir::WalkDir::new(&knowledge).sort_by_file_name() {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if entry.file_type().is_file()
+                && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
+            {
+                let rel = entry
+                    .path()
+                    .strip_prefix(vault)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                paths.insert(rel);
+            }
+        }
+    }
+
+    let mut affected: Vec<String> = Vec::new();
+    let mut diffs: Vec<(String, capture::FileDiff, String)> = Vec::new(); // (krel, diff, raw)
+    for path in &paths {
+        let krel = path.strip_prefix("knowledge/").unwrap_or(path);
+        let raw = match std::fs::read_to_string(vault.join(path)) {
+            Ok(raw) => raw,
+            Err(_) => {
+                return Err(format!(
+                    "accept-current-files: {path} is missing — a deleted projection has no bytes \
+                     to adopt; restore ledger authority instead"
+                ))
+            }
+        };
+        let entry = manifest.as_ref().and_then(|m| m.entries.get(path));
+        let projection = state
+            .projection_paths
+            .get(krel)
+            .and_then(|belief| project_belief(&state, belief).ok());
+        let ancestor = entry.is_some_and(|entry| verified_ancestor(&read.frames, &store, entry));
+        let file = FileFact {
+            hash: Some(crate::ledger::sha256_hex(raw.as_bytes())),
+            parses: super::project::parse_okf(&raw).is_ok(),
+        };
+        if classify_path(&file, entry, projection.as_ref(), ancestor) == PathClass::Match {
+            continue;
+        }
+        // The mechanical diff refuses forgery, alias removal, ambiguity,
+        // and unknown paths — one bad file kills the whole adoption.
+        let diff = capture::diff_projection_file(&state, krel, &raw)
+            .map_err(|e| format!("accept-current-files refused at {path}: {e}"))?;
+        affected.push(krel.to_string());
+        diffs.push((krel.to_string(), diff, raw));
+    }
+    if affected.is_empty() {
+        return Err("accept-current-files: nothing differs — resolve by restore instead".into());
+    }
+    affected.sort();
+
+    // Assemble ONE logical batch: staged registration first when needed,
+    // then per file the editorial override (based on CURRENT state) and the
+    // assertion+revision+effect members, then the resolution.
+    let authority = capture::AuthorityAnswers::default();
+    let (source_id, registration_event, staged_registration) =
+        capture::resolve_registration(&state, &store, "human:owner");
+    let mut members: Vec<(String, serde_json::Value)> = Vec::new();
+    if let Some(member) = staged_registration {
+        members.push(member);
+    }
+    let common = |actor: &str| schema::Actor {
+        id: actor.to_string(),
+    };
+    for (krel, diff, _) in &diffs {
+        let belief = state.beliefs.get(&diff.belief_id).expect("diffed belief");
+        let current = belief.current();
+        if !diff.editorial_ops.is_empty() {
+            let (mut content, mut fields) = super::reduce::overlaid(&state, belief);
+            for op in &diff.editorial_ops {
+                super::reduce::apply_overlay_op(&mut content, &mut fields, op);
+            }
+            let after_bytes = super::project::project(&content, &fields);
+            let body = schema::ProjectionOverridden {
+                schema: schema::BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: common("human:owner"),
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                belief_id: diff.belief_id.clone(),
+                path: krel.clone(),
+                base_belief_revision: current.revision,
+                base_belief_revision_event: current.event_id.clone(),
+                base_generating_event: belief.projection_head_event.clone(),
+                before_projection_hash: diff.old_hash.clone(),
+                after_projection_hash: crate::ledger::sha256_hex(after_bytes.as_bytes()),
+                origin: schema::OverrideOrigin::ReconciliationAdoption,
+                change: schema::OverrideChange::Set {
+                    patch: diff.editorial_ops.clone(),
+                    supersedes_override_event_ids: vec![],
+                },
+            };
+            members.push((
+                schema::KIND_PROJECTION_OVERRIDDEN.to_string(),
+                serde_json::to_value(&body).map_err(|e| e.to_string())?,
+            ));
+        }
+        if diff.fields.is_empty() && diff.relations.is_empty() && diff.alias_adds.is_empty() {
+            continue;
+        }
+        let mut observation_refs: Vec<String> = Vec::new();
+        for edit in &diff.fields {
+            let ordinal = members.len();
+            members.push(capture::human_assertion(
+                "human:owner",
+                &source_id,
+                &registration_event,
+                &belief.entity_id,
+                &authority,
+                &edit.field_path,
+                edit.after.clone(),
+                schema::HumanAssertionForm::FieldChange {
+                    target_belief_id: diff.belief_id.clone(),
+                    field_path: edit.field_path.clone(),
+                    before: edit.before.clone(),
+                    after: edit.after.clone(),
+                    corrects: edit.corrects.clone(),
+                    reason: edit.reason.clone(),
+                },
+            ));
+            observation_refs.push(member_ref(ordinal));
+        }
+        for relation in &diff.relations {
+            let relation_id =
+                schema::derive_relation_id(&diff.belief_id, &relation.to_belief_id, relation.kind);
+            let value = schema::TypedValue::Object {
+                value: [
+                    (
+                        "relation_id".to_string(),
+                        schema::TypedValue::string(&relation_id),
+                    ),
+                    (
+                        "action".to_string(),
+                        schema::TypedValue::string(match relation.action {
+                            schema::RelationAction::Add => "add",
+                            schema::RelationAction::Remove => "remove",
+                        }),
+                    ),
+                    (
+                        "from".to_string(),
+                        schema::TypedValue::string(&diff.belief_id),
+                    ),
+                    (
+                        "to".to_string(),
+                        schema::TypedValue::string(&relation.to_belief_id),
+                    ),
+                    (
+                        "relation".to_string(),
+                        schema::TypedValue::string(relation.kind.as_str()),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            };
+            let ordinal = members.len();
+            members.push(capture::human_assertion(
+                "human:owner",
+                &source_id,
+                &registration_event,
+                &belief.entity_id,
+                &authority,
+                "belief_relation",
+                value,
+                schema::HumanAssertionForm::RelationChange {
+                    target_belief_id: diff.belief_id.clone(),
+                    relation_id,
+                    action: relation.action,
+                    from: diff.belief_id.clone(),
+                    to: relation.to_belief_id.clone(),
+                    relation: relation.kind,
+                    corrects: None,
+                    reason: None,
+                },
+            ));
+            observation_refs.push(member_ref(ordinal));
+        }
+        for alias in &diff.alias_adds {
+            let normalized = schema::normalize_alias_v1(alias);
+            let value = schema::TypedValue::Object {
+                value: [
+                    (
+                        "entity_id".to_string(),
+                        schema::TypedValue::string(&belief.entity_id),
+                    ),
+                    ("alias".to_string(), schema::TypedValue::string(alias)),
+                    (
+                        "normalized_alias".to_string(),
+                        schema::TypedValue::string(&normalized),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            };
+            let ordinal = members.len();
+            members.push(capture::human_assertion(
+                "human:owner",
+                &source_id,
+                &registration_event,
+                &belief.entity_id,
+                &authority,
+                "entity_alias",
+                value,
+                schema::HumanAssertionForm::AliasAdd {
+                    target_belief_id: diff.belief_id.clone(),
+                    entity_id: belief.entity_id.clone(),
+                    alias: alias.clone(),
+                    normalized_alias: normalized,
+                    corrects: None,
+                    reason: None,
+                },
+            ));
+            observation_refs.push(member_ref(ordinal));
+        }
+        let mut links: Vec<schema::BasisLink> = match &current.basis {
+            schema::BeliefBasis::Linked { links } => links.clone(),
+            schema::BeliefBasis::Unsupported { .. } => Vec::new(),
+        };
+        for observation in &observation_refs {
+            links.push(schema::BasisLink {
+                observation_event_id: observation.clone(),
+                role: schema::BasisRole::Supports,
+            });
+        }
+        let revised = schema::BeliefRevised {
+            schema: schema::BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: common("human:owner"),
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: diff.belief_id.clone(),
+            patch: diff
+                .fields
+                .iter()
+                .map(|edit| schema::PatchOp {
+                    field_path: edit.field_path.clone(),
+                    before: edit.before.clone(),
+                    after: edit.after.clone(),
+                })
+                .collect(),
+            basis: schema::BeliefBasis::Linked { links },
+        };
+        members.push((
+            schema::KIND_BELIEF_REVISED.to_string(),
+            serde_json::to_value(&revised).map_err(|e| e.to_string())?,
+        ));
+        for relation in &diff.relations {
+            let body = schema::BeliefRelation {
+                schema: schema::BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: common("human:owner"),
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                relation_id: schema::derive_relation_id(
+                    &diff.belief_id,
+                    &relation.to_belief_id,
+                    relation.kind,
+                ),
+                action: relation.action,
+                from: diff.belief_id.clone(),
+                to: relation.to_belief_id.clone(),
+                relation: relation.kind,
+            };
+            members.push((
+                schema::KIND_BELIEF_RELATION.to_string(),
+                serde_json::to_value(&body).map_err(|e| e.to_string())?,
+            ));
+        }
+        for alias in &diff.alias_adds {
+            let body = schema::EntityAliasAdded {
+                schema: schema::BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: common("human:owner"),
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                entity_id: belief.entity_id.clone(),
+                alias: alias.clone(),
+                normalized_alias: schema::normalize_alias_v1(alias),
+            };
+            members.push((
+                schema::KIND_ENTITY_ALIAS_ADDED.to_string(),
+                serde_json::to_value(&body).map_err(|e| e.to_string())?,
+            ));
+        }
+    }
+
+    // The resolution member, in the SAME batch: its digests pin the adopted
+    // bytes, and the reducer proves the staged projections equal them —
+    // or the whole batch dies.
+    let adopted: Vec<serde_json::Value> = affected
+        .iter()
+        .map(|krel| {
+            let (_, _, raw) = diffs
+                .iter()
+                .find(|(k, _, _)| k == krel)
+                .expect("affected paths come from diffs");
+            serde_json::json!({
+                "path": krel,
+                "content_hash": crate::ledger::sha256_hex(raw.as_bytes()),
+            })
+        })
+        .collect();
+    let accepted_digest = crate::ledger::sha256_hex(
+        serde_json::to_string(&adopted)
+            .map_err(|e| e.to_string())?
+            .as_bytes(),
+    );
+    let resolution = schema::ReconciliationResolved {
+        schema: schema::BODY_SCHEMA,
+        batch_id: None,
+        idempotency_key: None,
+        actor: common(schema::ACTOR_RECONCILIATION),
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        divergence_event_id: divergence_event.clone(),
+        action: schema::ReconciliationAction::AcceptCurrentFiles,
+        affected_paths: affected.clone(),
+        capture_batch_ids: vec![batch_self_ref()],
+        accepted_files_digest: Some(accepted_digest.clone()),
+        resulting_projection_digest: accepted_digest,
+    };
+    members.push((
+        schema::KIND_RECONCILIATION_RESOLVED.to_string(),
+        serde_json::to_value(&resolution).map_err(|e| e.to_string())?,
+    ));
+
+    let op_key = format!("reconcile-accept-v1:{store}:{divergence_event}");
+    let receipt = writer.append_batch(members, Some(&op_key))?;
+    crate::crash::crash_point("accept-committed");
+
+    let read = super::read_ledger(&super::ledger_dir(vault)).map_err(|e| e.to_string())?;
+    let state = reduce(&read.frames, &store);
+    let committed = state
+        .batches
+        .iter()
+        .any(|b| b.batch_id == receipt.batch_id && b.state == "committed");
+    if !committed && !receipt.replayed {
+        let detail = state
+            .anomalies
+            .iter()
+            .rev()
+            .find(|a| a.batch_id.as_deref() == Some(receipt.batch_id.as_str()))
+            .map(|a| a.detail.clone())
+            .unwrap_or_else(|| "the adoption batch did not apply".to_string());
+        return Err(format!("accept-current-files refused: {detail}"));
+    }
+    if state.reconciliation_open() {
+        return Err("the adoption resolution did not close the mode".to_string());
+    }
+    // Only now may the manifest advance — every adopted file is already the
+    // reducer projection, so this is identity-only.
+    for krel in &affected {
+        let belief = state
+            .projection_paths
+            .get(krel)
+            .ok_or_else(|| format!("adopted path {krel} lost its Belief"))?;
+        let projection = project_belief(&state, belief)?;
+        super::manifest::write_projection(vault, &format!("knowledge/{krel}"), &projection)?;
+    }
+    Ok(())
 }
 
 /// `path_digest` over EVERY reducer projection, path-sorted — the
@@ -728,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    fn ledger_ahead_regenerates_with_zero_capture_and_a_parked_edit_stays_parked() {
+    fn ledger_ahead_regenerates_and_a_lone_out_of_band_edit_is_captured() {
         let (vault, mut writer) = armed("scan-ahead");
         let store = writer.store_id().to_string();
         // The ledger moves ahead of file+manifest: a solo revision with no
@@ -752,36 +1293,54 @@ mod tests {
         let original = std::fs::read_to_string(&oob).unwrap();
         std::fs::write(&oob, format!("{original}\nEdited outside the app.\n")).unwrap();
 
-        let head = head_of(&writer);
         let outcome = launch_scan(&mut writer, &vault, None, None).unwrap();
         assert_eq!(
             outcome.regenerated,
             vec![format!("knowledge/{AHEAD}")],
             "ledger-ahead regenerated"
         );
+        // M23.7: the single valid out-of-band edit is CAPTURED — a body
+        // change with no extracted-text overlap becomes an editorial
+        // override, never a phantom assertion.
         assert_eq!(
-            outcome.out_of_band,
-            vec!["knowledge/metrics/webinar-attendance.md".to_string()],
-            "the valid out-of-band edit is PARKED, not captured, until M23.7"
+            outcome.captured,
+            vec!["knowledge/metrics/webinar-attendance.md".to_string()]
         );
+        assert!(outcome.out_of_band.is_empty());
         assert!(
             outcome.divergence_recorded.is_none(),
             "one edit is no storm"
         );
         assert!(!outcome.reconciliation_open);
-        assert_eq!(head_of(&writer), head, "zero events from recovery");
-        // The regenerated file is the exact reducer projection; the parked
-        // edit's bytes were not touched.
         let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
         let state = reduce(&read.frames, &store);
+        // The regenerated file is the exact reducer projection…
         let belief_id = crate::ledger::schema::migrate_id(&store, "belief", AHEAD);
         assert_eq!(
             std::fs::read_to_string(vault.join(format!("knowledge/{AHEAD}"))).unwrap(),
             project_belief(&state, &belief_id).unwrap().bytes
         );
+        // …and the captured edit is now CANONICAL projection state: an
+        // active editorial overlay reproduces the edited bytes, with no
+        // Observation fabricated from the diff.
+        let webinar =
+            crate::ledger::schema::migrate_id(&store, "belief", "metrics/webinar-attendance.md");
+        let captured = state.beliefs.get(&webinar).unwrap();
+        assert_eq!(captured.overrides.len(), 1);
+        assert_eq!(captured.current().revision, 1, "editorial, not a revision");
+        assert_eq!(
+            std::fs::read_to_string(&oob).unwrap(),
+            project_belief(&state, &webinar).unwrap().bytes
+        );
         assert!(std::fs::read_to_string(&oob)
             .unwrap()
             .contains("Edited outside the app."));
+        // A second scan is all matches: the capture reconciled the vault.
+        let head = head_of(&writer);
+        let again = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(again.matches, 10);
+        assert!(again.captured.is_empty());
+        assert_eq!(head_of(&writer), head, "the rescan appends nothing");
         let _ = std::fs::remove_dir_all(&vault);
     }
 
@@ -960,6 +1519,146 @@ mod tests {
         for (path, before) in &bytes_before {
             assert_eq!(&std::fs::read(vault.join(path)).unwrap(), before, "{path}");
         }
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Trip the breaker with a mass edit and return the edited paths.
+    fn mass_edited(vault: &Path, writer: &mut LedgerWriter) -> Vec<&'static str> {
+        let edited = vec![
+            "knowledge/index.md",
+            "knowledge/log.md",
+            "knowledge/metrics/onboarding-completion.md",
+            "knowledge/metrics/sync-error-rate.md",
+            "knowledge/metrics/webinar-attendance.md",
+        ];
+        for rel in &edited {
+            let path = vault.join(rel);
+            let original = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(&path, format!("{original}\nRewritten en masse.\n")).unwrap();
+        }
+        let outcome = launch_scan(writer, vault, None, None).unwrap();
+        assert!(outcome.reconciliation_open);
+        edited
+    }
+
+    #[test]
+    fn restore_ledger_authority_regenerates_everything_and_closes_the_mode() {
+        let (vault, mut writer) = armed("exit-restore");
+        let store = writer.store_id().to_string();
+        mass_edited(&vault, &mut writer);
+        // Plus an unexplained extra file the ledger never produced.
+        std::fs::write(vault.join("knowledge/rogue.md"), "# Rogue\n").unwrap();
+
+        resolve_restore_with(&mut writer, &vault).unwrap();
+
+        // Every projection is the exact reducer bytes; the rogue file and
+        // the edits are gone; the mode is closed and the rescan is clean.
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        assert!(!state.reconciliation_open());
+        assert!(!vault.join("knowledge/rogue.md").exists());
+        for (krel, belief) in &state.projection_paths {
+            assert_eq!(
+                std::fs::read_to_string(vault.join(format!("knowledge/{krel}"))).unwrap(),
+                project_belief(&state, belief).unwrap().bytes,
+                "{krel}"
+            );
+        }
+        let resolution = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_RECONCILIATION_RESOLVED)
+            .unwrap();
+        assert_eq!(resolution.body["action"], "restore_ledger_authority");
+        assert_eq!(resolution.body["batch_id"], serde_json::Value::Null);
+        assert_eq!(
+            resolution.body["accepted_files_digest"],
+            serde_json::Value::Null
+        );
+        let again = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(again.matches, 10);
+        assert!(!again.reconciliation_open);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn accept_current_files_adopts_through_capture_in_one_batch() {
+        let (vault, mut writer) = armed("exit-accept");
+        let store = writer.store_id().to_string();
+        let edited = mass_edited(&vault, &mut writer);
+        let edited_bytes: Vec<(String, String)> = edited
+            .iter()
+            .map(|rel| {
+                (
+                    rel.to_string(),
+                    std::fs::read_to_string(vault.join(rel)).unwrap(),
+                )
+            })
+            .collect();
+
+        resolve_accept_with(&mut writer, &vault).unwrap();
+
+        // The mode closed; every adopted file is unchanged on disk AND is
+        // now the exact reducer projection (editorial overlays carry the
+        // body edits — canonical state, never rebaselined bytes).
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        assert!(!state.reconciliation_open());
+        for (rel, bytes) in &edited_bytes {
+            assert_eq!(&std::fs::read_to_string(vault.join(rel)).unwrap(), bytes);
+            let krel = rel.strip_prefix("knowledge/").unwrap();
+            let belief = state.projection_paths.get(krel).unwrap();
+            assert_eq!(
+                &project_belief(&state, belief).unwrap().bytes,
+                bytes,
+                "{rel}: adopted bytes are reducer-reproducible"
+            );
+        }
+        // The resolution rode the adoption batch and pins matching digests.
+        let resolution = read
+            .frames
+            .iter()
+            .find(|f| f.kind == schema::KIND_RECONCILIATION_RESOLVED)
+            .unwrap();
+        assert_eq!(resolution.body["action"], "accept_current_files");
+        assert_eq!(
+            resolution.body["capture_batch_ids"][0], resolution.body["batch_id"],
+            "the resolution names exactly its own batch"
+        );
+        assert_eq!(
+            resolution.body["accepted_files_digest"],
+            resolution.body["resulting_projection_digest"]
+        );
+        let again = launch_scan(&mut writer, &vault, None, None).unwrap();
+        assert_eq!(again.matches, 10);
+        assert!(!again.reconciliation_open);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn one_forged_file_refuses_the_entire_adoption() {
+        let (vault, mut writer) = armed("exit-accept-forged");
+        mass_edited(&vault, &mut writer);
+        // One of the edited files also forges its verified stamp.
+        let forged = vault.join("knowledge/metrics/sync-error-rate.md");
+        let original = std::fs::read_to_string(&forged).unwrap();
+        std::fs::write(
+            &forged,
+            original.replace(
+                "---\ntype:",
+                "---\nverified: { by: human:me, at: 2026-08-09 }\ntype:",
+            ),
+        )
+        .unwrap();
+
+        let head = head_of(&writer);
+        let err = resolve_accept_with(&mut writer, &vault).unwrap_err();
+        assert!(err.contains("forgery") || err.contains("refused"), "{err}");
+        assert_eq!(head_of(&writer), head, "nothing committed");
+        // The mode stays open; the manifest did not move.
+        let read = super::super::read_ledger(&super::super::ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, writer.store_id());
+        assert!(state.reconciliation_open());
         let _ = std::fs::remove_dir_all(&vault);
     }
 

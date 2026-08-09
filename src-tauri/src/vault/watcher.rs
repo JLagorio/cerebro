@@ -224,6 +224,8 @@ fn relevant_change(vault: &Path, path: &Path) -> bool {
 fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<WatchSignal>) {
     let mut pending = false;
     let mut last_event: Option<Instant> = None;
+    let mut knowledge_pending: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
     loop {
         match rx.recv_timeout(POLL) {
             Ok(WatchSignal::Force) => {
@@ -235,6 +237,14 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
                     pending = true;
                     last_event = Some(Instant::now());
                 }
+                for path in &paths {
+                    if let Ok(rel) = path.strip_prefix(&vault) {
+                        let rel = rel.to_string_lossy().replace('\\', "/");
+                        if rel.starts_with("knowledge/") && rel.ends_with(".md") {
+                            knowledge_pending.insert(rel);
+                        }
+                    }
+                }
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
@@ -242,6 +252,13 @@ fn debounce_loop(app: tauri::AppHandle, vault: PathBuf, rx: mpsc::Receiver<Watch
         if should_flush(pending, last_event, Instant::now(), DEBOUNCE) {
             pending = false;
             last_event = None;
+            // M23.7: live out-of-band capture for knowledge projections.
+            // Hash-based and best-effort — a file equal to its projection
+            // no-ops, a half-saved file errors quietly and the next event
+            // (or the launch scan) retries; mtime is never consulted.
+            for rel in std::mem::take(&mut knowledge_pending) {
+                let _ = crate::ledger::capture::capture_out_of_band(&vault, &rel);
+            }
             let _ = app.emit(VAULT_CHANGED_EVENT, ());
         }
     }

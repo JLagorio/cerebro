@@ -285,6 +285,15 @@ export interface LedgerStatus {
   divergences: string[];
 }
 
+/** The M23.7 reconciliation exits. `action` is `accept_current_files` or
+ * `restore_ledger_authority`; only the Tauri backend can resolve (the
+ * browser has no ledger). */
+export function resolveReconciliation(vault: string, action: string): Promise<void> {
+  return inTauri()
+    ? invokeTauri('resolve_reconciliation', { vault, action })
+    : mock.resolveReconciliation(vault, action);
+}
+
 export function ledgerStatus(vault: string): Promise<LedgerStatus> {
   return inTauri() ? invokeTauri('ledger_status', { vault }) : mock.ledgerStatus(vault);
 }

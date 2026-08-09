@@ -4,6 +4,7 @@ import { AiPanel } from '@/agent/AiPanel';
 import { JobRunnerHost } from '@/agent/useJobRunner';
 import { CheckpointHost } from '@/git/CheckpointHost';
 import { Rail } from '@/app/Rail';
+import { ReconciliationBanner } from '@/app/ReconciliationBanner';
 import { Sidebar } from '@/app/Sidebar';
 import { StatusBar } from '@/app/StatusBar';
 import { createList } from '@/app/listActions';
@@ -335,6 +336,10 @@ function App() {
         }}
       >
         <Topbar />
+        {/* M23.7: the divergence circuit breaker's banner — visible only
+            while the ledger's reconciliation mode is open (never in the
+            browser mock, which has no ledger). */}
+        <ReconciliationBanner vault={vaultPath} />
         {/* M11: the record panel is a COLUMN here, beside the canvas, rather
             than a fixed overlay on top of it. That is what lets a table keep
             its full horizontal scroll while a record is open.

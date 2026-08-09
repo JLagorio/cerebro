@@ -142,7 +142,9 @@ function guardHumanWrite(path: string): void {
 }
 
 export async function saveNote(_vault: string, path: string, body: string): Promise<void> {
-  guardHumanWrite(path);
+  // The M23.7 capture valve: an in-app body edit to a knowledge projection
+  // is CAPTURED (Rust: an editorial override), no longer refused. The mock
+  // applies the same edit; the ledger half exists only in Tauri.
   // .mmd is RAW (M29.20): the body IS the whole file — no frontmatter
   // compose (parity with save_note in write.rs). mustGet keeps the .md
   // contract: save only overwrites an existing file.
@@ -162,12 +164,34 @@ export async function updateFrontmatter(
   path: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
-  guardHumanWrite(path);
   // Parity with update_frontmatter in write.rs (M29.23): mermaid's config
   // header IS valid YAML, so patching a .mmd would merge into the diagram's
   // own header and reserialize it. There is no frontmatter here to update.
   if (path.endsWith('.mmd')) {
     throw new Error(`${path}: a .mmd is raw diagram source and has no frontmatter to update`);
+  }
+  if (isKnowledgePath(path)) {
+    // The valve's frontmatter half, with the SAME hard refusals as Rust:
+    // provenance stamps are never a human patch, and alias removal has no
+    // v1 event.
+    for (const key of Object.keys(patch)) {
+      if (key === 'generated' || key === 'verified') {
+        throw new Error(`provenance forgery: the ${key} stamp is never a human edit — refused`);
+      }
+    }
+    if ('aliases' in patch) {
+      const { yaml } = splitFrontmatter(mustGet(path));
+      const doc: Document = YAML.parseDocument(yaml ?? '');
+      const existing = (doc.toJS() as Record<string, unknown> | null)?.aliases;
+      const before = Array.isArray(existing) ? existing.map(String) : [];
+      const after = Array.isArray(patch.aliases) ? patch.aliases.map(String) : [];
+      if (before.some((a) => !after.includes(a))) {
+        throw new Error(
+          'unsupported_alias_removal: alias removal has no v1 event — keep the alias or wait ' +
+            'for the maintenance channel',
+        );
+      }
+    }
   }
   return writeFrontmatter(path, patch);
 }
@@ -470,6 +494,12 @@ export async function startWatcher(_vault: string): Promise<void> {
 // grow. Parity is only that the command exists on both sides.
 export async function ledgerHead(_vault: string): Promise<null> {
   return null;
+}
+
+/** No ledger, no reconciliation: the mock's mode is never open, so the
+ * exits are unreachable — parity is the command existing on both sides. */
+export async function resolveReconciliation(_vault: string, _action: string): Promise<void> {
+  throw new Error('no ledger in the browser — reconciliation is a Tauri-only surface');
 }
 
 /** Fixed no-ledger status (M21.8): the browser mock has no ledger, and the

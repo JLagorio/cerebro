@@ -295,13 +295,17 @@ describe('mockIpc', () => {
   describe('knowledge/ read-only boundary (M5)', () => {
     const CONCEPT = 'knowledge/metrics/onboarding-completion.md';
 
-    it('refuses every human write into the bundle', async () => {
-      await expect(mock.saveNote('/demo-vault', CONCEPT, '# Rewritten')).rejects.toThrow(
-        /read-only/,
-      );
+    it('captures body and field edits (M23.7 valve) but refuses creation/moves', async () => {
+      // The M23.7 valve: representable edits are CAPTURED, not refused —
+      // a body edit is editorial, a field patch is an assertion (both
+      // ledger-recorded in Tauri; the mock applies the same edit).
+      await expect(
+        mock.saveNote('/demo-vault', CONCEPT, '# Rewritten by a human\n'),
+      ).resolves.toBeUndefined();
       await expect(
         mock.updateFrontmatter('/demo-vault', CONCEPT, { lifecycle: 'deprecated' }),
-      ).rejects.toThrow(/read-only/);
+      ).resolves.toBeUndefined();
+      // What cannot be represented safely stays refused.
       await expect(mock.setNoteTitle('/demo-vault', CONCEPT, 'Mine now')).rejects.toThrow(
         /read-only/,
       );
@@ -309,6 +313,28 @@ describe('mockIpc', () => {
         mock.createNote('/demo-vault', 'knowledge/metrics', 'smuggled', {}, ''),
       ).rejects.toThrow(/read-only/);
       await expect(mock.createFolder('/demo-vault', 'knowledge/new')).rejects.toThrow(/read-only/);
+    });
+
+    it('hard-refuses provenance forgery and alias removal through the valve', async () => {
+      await expect(
+        mock.updateFrontmatter('/demo-vault', CONCEPT, {
+          verified: { by: 'human:me', at: '2026-08-09' },
+        }),
+      ).rejects.toThrow(/provenance forgery/);
+      await expect(
+        mock.updateFrontmatter('/demo-vault', CONCEPT, {
+          generated: { by: 'me', at: 'now' },
+        }),
+      ).rejects.toThrow(/provenance forgery/);
+      // status-model carries no aliases; give it one, then try dropping it.
+      await mock.updateFrontmatter('/demo-vault', 'knowledge/systems/status-model.md', {
+        aliases: ['The Status Model'],
+      });
+      await expect(
+        mock.updateFrontmatter('/demo-vault', 'knowledge/systems/status-model.md', {
+          aliases: [],
+        }),
+      ).rejects.toThrow(/unsupported_alias_removal/);
     });
 
     it('refuses a delete (M17.1)', async () => {

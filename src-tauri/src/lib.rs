@@ -80,7 +80,16 @@ fn read_note(vault: String, path: String) -> Result<String, String> {
 // the bundle through `write_concept` alone. See mcp.rs.
 #[tauri::command(async)]
 fn save_note(vault: String, path: String, body: String) -> Result<(), String> {
-    knowledge::guard_human_write(&path)?;
+    // The M23.7 capture valve: an in-app body edit to a knowledge
+    // projection is CAPTURED (an editorial override, or the unique
+    // extracted-text correction), not refused. The old refusal survives
+    // only where no writer is active or the edit cannot be represented.
+    if knowledge::is_knowledge_path(&path) {
+        if let Some(result) = ledger::capture::capture_body_edit(Path::new(&vault), &path, &body) {
+            return result;
+        }
+        knowledge::guard_human_write(&path)?;
+    }
     vault::write::save_note(Path::new(&vault), &path, &body)
 }
 
@@ -90,8 +99,30 @@ fn update_frontmatter(
     path: String,
     patch: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
-    knowledge::guard_human_write(&path)?;
+    // The M23.7 capture valve, frontmatter half: presentation keys become
+    // editorial ops, epistemic keys become assertion+revision, relation and
+    // alias keys their exact paired events. Provenance stamps and alias
+    // removal remain hard-refused.
+    if knowledge::is_knowledge_path(&path) {
+        if let Some(result) =
+            ledger::capture::capture_frontmatter_patch(Path::new(&vault), &path, &patch)
+        {
+            return result;
+        }
+        knowledge::guard_human_write(&path)?;
+    }
     vault::write::update_frontmatter(Path::new(&vault), &path, &patch)
+}
+
+/// The M23.7 reconciliation exits: `accept_current_files` adopts every
+/// representable diff through the capture valve in one logical batch;
+/// `restore_ledger_authority` regenerates every projection and closes the
+/// mode with the unbatched resolution.
+#[tauri::command(async)]
+fn resolve_reconciliation(vault: String, action: String) -> Result<(), String> {
+    ledger::reconcile::resolve(Path::new(&vault), &action).unwrap_or_else(|| {
+        Err("no active ledger writer for this vault — reconciliation is unavailable".to_string())
+    })
 }
 
 /// The one sanctioned human write into the bundle: recording that a person
@@ -404,6 +435,7 @@ pub fn run() {
             update_frontmatter,
             verify_concept,
             capture_concept_edit,
+            resolve_reconciliation,
             create_note,
             set_note_title,
             list_views,

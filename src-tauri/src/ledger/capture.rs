@@ -30,6 +30,7 @@
 //! refuses the in-app paths, and this module is the machinery behind the
 //! new capture boundary plus the reconciliation adoption path.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use super::manifest;
@@ -164,6 +165,13 @@ pub fn capture_structured(vault: &Path, request: &CaptureRequest) -> Option<Resu
     })
 }
 
+/// Capture one out-of-band knowledge change through the vault's active
+/// writer — the live watcher's half of M23.7. Hash-based (never mtime):
+/// a file that already equals its projection is a silent no-op.
+pub fn capture_out_of_band(vault: &Path, rel: &str) -> Option<Result<(), String>> {
+    shadow::with_writer(vault, |writer| capture_out_of_band_with(writer, vault, rel))
+}
+
 /// Capture an editorial override through the vault's active writer.
 pub fn capture_editorial(vault: &Path, request: &EditorialRequest) -> Option<Result<(), String>> {
     shadow::with_writer(vault, |writer| {
@@ -189,7 +197,7 @@ fn common(actor: &str) -> (u64, Option<String>, Option<String>, Actor) {
 
 /// The actor-bound human registration and, when absent, the staged member
 /// carrying its own `source-register-v1:` idempotency key.
-fn resolve_registration(
+pub(crate) fn resolve_registration(
     state: &EpistemicState,
     store: &str,
     actor_id: &str,
@@ -233,7 +241,7 @@ fn resolve_registration(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn human_assertion(
+pub(crate) fn human_assertion(
     actor_id: &str,
     source_id: &str,
     registration_event: &str,
@@ -716,6 +724,393 @@ fn capture_editorial_with(
     manifest::write_projection(vault, &request.path, &projection)?;
     crate::vault::watcher::note_own_write(&vault.join(&request.path));
     Ok(())
+}
+
+// --- Out-of-band capture (M23.7) -------------------------------------------
+
+/// The presentation-only frontmatter keys — everything else in a diff is
+/// epistemic (mirrors `schema::projection::PRESENTATION_ONLY_FIELDS`).
+fn is_presentation_key(key: &str) -> bool {
+    schema::projection::PRESENTATION_ONLY_FIELDS.contains(&key)
+}
+
+/// String items of an `aliases:` field value.
+fn alias_items(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| i.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Capture one out-of-band knowledge edit from the file's parsed state,
+/// exactly as the launch scan or the live watcher found it. Field-level
+/// diffs run the SAME assertion+revision batch builder as IPC capture,
+/// with actor `human:owner`, both authority fields `unknown`, and a
+/// deterministic request key from path/base revision/old hash/new hash.
+/// Prose defaults to editorial override, with the one carve-out: a body
+/// change that uniquely maps onto a current-basis Observation's
+/// `extracted_text` becomes a `field_change` correction. Ambiguity,
+/// provenance forgery, and alias removal refuse with typed errors — the
+/// caller escalates those into reconciliation, never guesses.
+pub(crate) fn capture_out_of_band_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    path: &str,
+) -> Result<(), String> {
+    let krel = path
+        .strip_prefix("knowledge/")
+        .ok_or("capture applies only to knowledge/ projections")?;
+    let raw = std::fs::read_to_string(vault.join(path)).map_err(|e| format!("{path}: {e}"))?;
+    super::project::parse_okf(&raw)?; // unparsable bytes refuse early
+
+    let state = current_state(writer, vault)?;
+    if state.reconciliation_open() {
+        return Err(RECONCILIATION_SUSPENDED.to_string());
+    }
+    let diff = diff_projection_file(&state, krel, &raw)?;
+    capture_diff_with(writer, vault, path, diff, schema::OverrideOrigin::OutOfBand)
+}
+
+/// Commit one mechanical diff: structured first (the revision moves the
+/// head), then ONE editorial override carrying every presentation op plus
+/// the body rewrite — each under its deterministic request key.
+fn capture_diff_with(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    path: &str,
+    diff: FileDiff,
+    origin: schema::OverrideOrigin,
+) -> Result<(), String> {
+    let request_id = crate::ledger::sha256_hex(
+        serde_json::to_string(&serde_json::json!({
+            "capture": "out-of-band-v1",
+            "path": path,
+            "base": diff.base_generating_event,
+            "old": diff.old_hash,
+            "new": diff.new_hash,
+        }))
+        .map_err(|e| e.to_string())?
+        .as_bytes(),
+    );
+    if !diff.fields.is_empty() || !diff.relations.is_empty() || !diff.alias_adds.is_empty() {
+        let request = CaptureRequest {
+            path: path.to_string(),
+            actor_id: "human:owner".to_string(),
+            fields: diff.fields,
+            relations: diff.relations,
+            alias_adds: diff.alias_adds,
+            authority: AuthorityAnswers::default(),
+            request_id: request_id.clone(),
+        };
+        capture_structured_with(writer, vault, &request)?;
+    }
+    if !diff.editorial_ops.is_empty() {
+        let request = EditorialRequest {
+            path: path.to_string(),
+            actor_id: "human:owner".to_string(),
+            ops: diff.editorial_ops,
+            origin,
+            request_id: format!("{request_id}-editorial"),
+        };
+        capture_editorial_with(writer, vault, &request)?;
+    }
+    Ok(())
+}
+
+/// The M23.7 valve, body half: an in-app body edit to a projection is a
+/// captured change, not a refused write. `None` without an active writer.
+pub fn capture_body_edit(vault: &Path, path: &str, body: &str) -> Option<Result<(), String>> {
+    shadow::with_writer(vault, |writer| {
+        let krel = path
+            .strip_prefix("knowledge/")
+            .ok_or("capture applies only to knowledge/ projections")?;
+        let state = current_state(writer, vault)?;
+        if state.reconciliation_open() {
+            return Err(RECONCILIATION_SUSPENDED.to_string());
+        }
+        let belief_id = state
+            .projection_paths
+            .get(krel)
+            .ok_or_else(|| format!("{path} is not a committed projection"))?
+            .clone();
+        let belief = state.beliefs.get(&belief_id).expect("path index");
+        let (_, fields) = super::reduce::overlaid(&state, belief);
+        let empty = fields.as_object().is_none_or(|m| m.is_empty());
+        let trimmed = body.trim_end();
+        let content = if empty {
+            format!(
+                "{trimmed}
+"
+            )
+        } else {
+            format!(
+                "
+{trimmed}
+"
+            )
+        };
+        let raw = super::project::project(&content, &fields);
+        let diff = diff_projection_file(&state, krel, &raw)?;
+        capture_diff_with(writer, vault, path, diff, schema::OverrideOrigin::InApp)
+    })
+}
+
+/// The M23.7 valve, frontmatter half: an in-app patch to a projection's
+/// frontmatter partitions exactly like every other capture — presentation
+/// keys become editorial ops, epistemic keys become assertions plus their
+/// revision, relation/alias keys their paired events; provenance stamps and
+/// alias removal stay refused. `None` without an active writer.
+pub fn capture_frontmatter_patch(
+    vault: &Path,
+    path: &str,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) -> Option<Result<(), String>> {
+    shadow::with_writer(vault, |writer| {
+        let krel = path
+            .strip_prefix("knowledge/")
+            .ok_or("capture applies only to knowledge/ projections")?;
+        let state = current_state(writer, vault)?;
+        if state.reconciliation_open() {
+            return Err(RECONCILIATION_SUSPENDED.to_string());
+        }
+        let belief_id = state
+            .projection_paths
+            .get(krel)
+            .ok_or_else(|| format!("{path} is not a committed projection"))?
+            .clone();
+        let belief = state.beliefs.get(&belief_id).expect("path index");
+        let (content, fields) = super::reduce::overlaid(&state, belief);
+        let mut intended = fields.as_object().cloned().unwrap_or_default();
+        for (key, value) in patch {
+            if value.is_null() {
+                intended.shift_remove(key);
+            } else {
+                intended.insert(key.clone(), value.clone());
+            }
+        }
+        let raw = super::project::project(&content, &serde_json::Value::Object(intended));
+        let diff = diff_projection_file(&state, krel, &raw)?;
+        capture_diff_with(writer, vault, path, diff, schema::OverrideOrigin::InApp)
+    })
+}
+
+/// The mechanical, deterministic diff of one on-disk projection file
+/// against the current reducer state — the shared core of out-of-band
+/// capture and reconciliation adoption. Refusals are typed: provenance
+/// forgery, alias removal, and ambiguous extracted-text overlap all refuse
+/// rather than guess.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FileDiff {
+    pub belief_id: String,
+    pub fields: Vec<FieldEdit>,
+    pub relations: Vec<RelationEdit>,
+    pub alias_adds: Vec<String>,
+    /// Presentation-field ops plus the default body override, in op order.
+    pub editorial_ops: Vec<schema::OverridePatchOp>,
+    pub old_hash: String,
+    pub new_hash: String,
+    pub base_generating_event: String,
+}
+
+pub(crate) fn diff_projection_file(
+    state: &EpistemicState,
+    krel: &str,
+    raw: &str,
+) -> Result<FileDiff, String> {
+    let (new_content, new_fields) = super::project::parse_okf(raw)?;
+    let new_fields = new_fields.as_object().cloned().unwrap_or_default();
+    let belief_id = state
+        .projection_paths
+        .get(krel)
+        .ok_or_else(|| format!("knowledge/{krel} is not a committed projection"))?
+        .clone();
+    let belief = state.beliefs.get(&belief_id).expect("path index");
+    let (old_content, old_fields_value) = super::reduce::overlaid(state, belief);
+    let old_fields = old_fields_value.as_object().cloned().unwrap_or_default();
+    let old_hash =
+        crate::ledger::sha256_hex(super::reduce::projected_bytes(state, belief).as_bytes());
+    let new_hash = crate::ledger::sha256_hex(raw.as_bytes());
+
+    // Partition the frontmatter diff.
+    let mut fields: Vec<FieldEdit> = Vec::new();
+    let mut editorial_ops: Vec<schema::OverridePatchOp> = Vec::new();
+    let mut alias_adds: Vec<String> = Vec::new();
+    let keys: Vec<String> = old_fields
+        .keys()
+        .chain(new_fields.keys().filter(|k| !old_fields.contains_key(*k)))
+        .cloned()
+        .collect();
+    for key in keys {
+        let before = old_fields.get(&key);
+        let after = new_fields.get(&key);
+        if before == after {
+            continue;
+        }
+        // Provenance is never a human diff: a changed generated/verified
+        // stamp is forgery, hard-refused into reconciliation.
+        if key == "generated" || key == "verified" {
+            return Err(format!(
+                "provenance forgery: the {key} stamp changed out of band — refused"
+            ));
+        }
+        if key == "aliases" {
+            let norms = |value: Option<&serde_json::Value>| -> BTreeSet<String> {
+                alias_items(value)
+                    .iter()
+                    .map(|a| schema::normalize_alias_v1(a))
+                    .filter(|n| !n.is_empty())
+                    .collect()
+            };
+            if norms(before).difference(&norms(after)).next().is_some() {
+                return Err(UNSUPPORTED_ALIAS_REMOVAL.to_string());
+            }
+            for alias in alias_items(after) {
+                let normalized = schema::normalize_alias_v1(&alias);
+                if !normalized.is_empty() && !state.alias_registry.contains_key(&normalized) {
+                    alias_adds.push(alias);
+                }
+            }
+        }
+        let edit = FieldEdit {
+            field_path: format!("/fields/{}", key.replace('~', "~0").replace('/', "~1")),
+            before: before
+                .map(super::reduce::typed_from_value)
+                .unwrap_or(TypedValue::Missing),
+            after: after
+                .map(super::reduce::typed_from_value)
+                .unwrap_or(TypedValue::Missing),
+            corrects: None,
+            reason: None,
+        };
+        if is_presentation_key(&key) {
+            editorial_ops.push(schema::OverridePatchOp {
+                field_path: edit.field_path.clone(),
+                before: edit.before,
+                after: edit.after,
+            });
+        } else {
+            fields.push(edit);
+        }
+    }
+
+    // Relation diffs pair with their exact events (field patches above keep
+    // the projection matching the file bytes).
+    let relations = relation_diff(state, &belief_id, &old_fields, &new_fields);
+
+    // The body: editorial by default; the extracted-claim-text carve-out
+    // when the mapping is UNIQUE; ambiguity refuses, never guesses.
+    if new_content != old_content {
+        let candidates = extracted_text_candidates(state, belief, &old_content, &new_content);
+        match candidates.len() {
+            0 => editorial_ops.push(schema::OverridePatchOp {
+                field_path: "/body".to_string(),
+                before: TypedValue::string(&old_content),
+                after: TypedValue::string(&new_content),
+            }),
+            1 => fields.push(FieldEdit {
+                field_path: "/body".to_string(),
+                before: TypedValue::string(&old_content),
+                after: TypedValue::string(&new_content),
+                corrects: Some(candidates[0].clone()),
+                reason: Some("out-of-band correction of extracted claim text".to_string()),
+            }),
+            _ => {
+                return Err(
+                    "ambiguous extracted-text overlap — reconciliation, never a guess".to_string(),
+                )
+            }
+        }
+    }
+
+    Ok(FileDiff {
+        belief_id,
+        fields,
+        relations,
+        alias_adds,
+        editorial_ops,
+        old_hash,
+        new_hash,
+        base_generating_event: belief.projection_head_event.clone(),
+    })
+}
+
+/// The intended-vs-live relation diff for a parsed fields object.
+fn relation_diff(
+    state: &EpistemicState,
+    belief_id: &str,
+    old_fields: &serde_json::Map<String, serde_json::Value>,
+    new_fields: &serde_json::Map<String, serde_json::Value>,
+) -> Vec<RelationEdit> {
+    use super::migrate::{stem_of, wikilinks};
+    let stems: std::collections::BTreeMap<String, String> = state
+        .projection_paths
+        .iter()
+        .map(|(path, belief)| (stem_of(path).to_string(), belief.clone()))
+        .collect();
+    let resolve = |fields: &serde_json::Map<String, serde_json::Value>| {
+        let mut set: BTreeSet<(String, RelationKind)> = BTreeSet::new();
+        for (field, kind) in [
+            ("supersedes", RelationKind::Supersedes),
+            ("refines", RelationKind::Refines),
+            ("contradicts", RelationKind::Contradicts),
+        ] {
+            for link in wikilinks(fields.get(field)) {
+                if let Some(target) = stems.get(&link) {
+                    if target != belief_id {
+                        set.insert((target.clone(), kind));
+                    }
+                }
+            }
+        }
+        set
+    };
+    let old = resolve(old_fields);
+    let new = resolve(new_fields);
+    let mut edits: Vec<RelationEdit> = Vec::new();
+    for (to, kind) in new.difference(&old) {
+        edits.push(RelationEdit {
+            action: RelationAction::Add,
+            to_belief_id: to.clone(),
+            kind: *kind,
+        });
+    }
+    for (to, kind) in old.difference(&new) {
+        edits.push(RelationEdit {
+            action: RelationAction::Remove,
+            to_belief_id: to.clone(),
+            kind: *kind,
+        });
+    }
+    edits
+}
+
+/// Current-basis Observations whose `extracted_text` occurs EXACTLY once in
+/// the old body and was changed by the edit — the correction candidates.
+fn extracted_text_candidates(
+    state: &EpistemicState,
+    belief: &super::reduce::BeliefState,
+    old_content: &str,
+    new_content: &str,
+) -> Vec<String> {
+    let BeliefBasis::Linked { links } = &belief.current().basis else {
+        return Vec::new();
+    };
+    let mut candidates = Vec::new();
+    for link in links {
+        let Some(text) = state.extracted_texts.get(&link.observation_event_id) else {
+            continue;
+        };
+        if old_content.matches(text.as_str()).count() == 1 && !new_content.contains(text.as_str()) {
+            candidates.push(link.observation_event_id.clone());
+        }
+    }
+    candidates
 }
 
 #[cfg(test)]

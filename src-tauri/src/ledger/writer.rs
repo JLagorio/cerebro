@@ -93,7 +93,15 @@ pub fn member_ref(ordinal: usize) -> String {
     format!("{MEMBER_REF_PREFIX}{ordinal}")
 }
 
+/// A same-batch reference to the batch's OWN id (M23.7): the adoption
+/// resolution must name the batch it rides in (`capture_batch_ids`), which
+/// does not exist before preallocation. Substituted like member refs.
+pub fn batch_self_ref() -> String {
+    BATCH_SELF_REF.to_string()
+}
+
 const MEMBER_REF_PREFIX: &str = "cerebro-batch-member:";
+const BATCH_SELF_REF: &str = "cerebro-batch-self";
 
 /// An idempotency key claimed by a committed solo event or batch member.
 #[derive(Debug, Clone)]
@@ -468,7 +476,7 @@ impl LedgerWriter {
                 return Err("a batch marker cannot be a batch member".to_string());
             }
             let mut body = body;
-            substitute_member_refs(&mut body, &member_ids)?;
+            substitute_member_refs(&mut body, &member_ids, &batch_id)?;
             let object = body
                 .as_object_mut()
                 .ok_or("batch members must be schema-v1 bodies")?;
@@ -633,10 +641,13 @@ fn operation_digest(events: &[(String, serde_json::Value)]) -> Result<String, St
 fn substitute_member_refs(
     value: &mut serde_json::Value,
     member_ids: &[String],
+    batch_id: &str,
 ) -> Result<(), String> {
     match value {
         serde_json::Value::String(s) => {
-            if let Some(rest) = s.strip_prefix(MEMBER_REF_PREFIX) {
+            if s == BATCH_SELF_REF {
+                *s = batch_id.to_string();
+            } else if let Some(rest) = s.strip_prefix(MEMBER_REF_PREFIX) {
                 let ordinal: usize = rest
                     .parse()
                     .map_err(|_| format!("malformed member ref {s:?}"))?;
@@ -649,10 +660,10 @@ fn substitute_member_refs(
         }
         serde_json::Value::Array(items) => items
             .iter_mut()
-            .try_for_each(|item| substitute_member_refs(item, member_ids)),
+            .try_for_each(|item| substitute_member_refs(item, member_ids, batch_id)),
         serde_json::Value::Object(object) => object
             .values_mut()
-            .try_for_each(|item| substitute_member_refs(item, member_ids)),
+            .try_for_each(|item| substitute_member_refs(item, member_ids, batch_id)),
         _ => Ok(()),
     }
 }

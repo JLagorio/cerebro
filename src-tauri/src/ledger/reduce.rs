@@ -388,6 +388,10 @@ pub struct EpistemicState {
     pub reconciliation_divergences: BTreeMap<String, String>,
     /// Every valid resolution, in fold order.
     pub reconciliation_log: Vec<ReconciliationLogRow>,
+    /// Producer-side index (deliberately OUTSIDE the vector contract):
+    /// extracted-assertion event → its extracted_text, for the M23.7
+    /// out-of-band correction carve-out.
+    pub extracted_texts: BTreeMap<String, String>,
 }
 
 impl EpistemicState {
@@ -786,6 +790,12 @@ fn apply_observation(
             ));
         }
         prev_seq = Some(parent.seq);
+    }
+
+    if let ObservationPayload::ExtractedAssertion(extracted) = &payload {
+        state
+            .extracted_texts
+            .insert(frame.event_id.clone(), extracted.extracted_text.clone());
     }
 
     // Derived-content Belief inputs: earlier COMMITTED creation/revision
