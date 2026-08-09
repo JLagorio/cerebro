@@ -486,3 +486,16 @@ export async function listFolders(_vault: string): Promise<string[]> {
   }
   return [...dirs].filter((d) => !skipped.test(d)).sort();
 }
+
+// --- Mermaid diagram export (M29.4) -----------------------------------------
+
+/** Browser stand-in for the native PNG save: a plain download. */
+export async function exportPng(defaultName: string, bytes: Uint8Array): Promise<string | null> {
+  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return defaultName;
+}

@@ -212,3 +212,22 @@ export function importAttachment(vault: string, source: string): Promise<string>
     ? invokeTauri('import_attachment', { vault, source })
     : mock.importAttachment(vault, source);
 }
+
+// --- Mermaid diagram export (M29.4) -----------------------------------------
+
+/**
+ * Save PNG bytes via the native save dialog (M29.4). Base64 because Tauri's
+ * JSON invoke channel has no efficient raw-bytes lane for commands; diagrams
+ * are small enough that this does not matter. Returns the chosen absolute
+ * path, or null when the user cancels.
+ */
+export function exportPng(defaultName: string, bytes: Uint8Array): Promise<string | null> {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  const bytesBase64 = btoa(binary);
+  return inTauri()
+    ? invokeTauri('export_png', { defaultName, bytesBase64 })
+    : mock.exportPng(defaultName, bytes);
+}

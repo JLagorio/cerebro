@@ -286,6 +286,7 @@ dependencies = [
 name = "cerebro"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "notify",
  "rand",

@@ -210,6 +210,32 @@ fn import_attachment(vault: String, source: String) -> Result<String, String> {
     vault::write::import_attachment(Path::new(&vault), &source)
 }
 
+/// Save PNG bytes wherever the user points the native dialog (M29.4).
+/// Cancel is `Ok(None)` — not an error — mirroring `pick_files`.
+#[tauri::command]
+async fn export_png(
+    app: tauri::AppHandle,
+    default_name: String,
+    bytes_base64: String,
+) -> Result<Option<String>, String> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(bytes_base64)
+        .map_err(|e| e.to_string())?;
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("PNG image", &["png"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 // --- Local agent + MCP (M6) ------------------------------------------------
 
 #[tauri::command(async)]
@@ -336,6 +362,7 @@ pub fn run() {
             list_folders,
             pick_files,
             import_attachment,
+            export_png,
             start_watcher,
             read_connectors,
             save_connectors,
