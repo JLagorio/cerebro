@@ -85,7 +85,9 @@ export function Rail() {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   // Task 11: Docs owns the document surfaces; Home keeps the item world.
-  const docsActive = selection.kind === 'docs' || selection.kind === 'doc';
+  // A .mmd diagram page is a document surface too (M29.21).
+  const docsActive =
+    selection.kind === 'docs' || selection.kind === 'doc' || selection.kind === 'diagram';
   const settingsActive = selection.kind === 'settings';
   const libraryActive = selection.kind === 'library';
   const workspaceActive = selection.kind === 'workspace';

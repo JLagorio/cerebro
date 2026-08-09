@@ -256,7 +256,8 @@ export function MermaidBlockView({
 
 /**
  * The edit-mode pane: renders the (debounced) draft, keeps the last good svg
- * when the draft breaks, and names the error's line.
+ * when the draft breaks, and names the error's line. Exported for the
+ * full-page diagram editor (M29.21), which pairs it with the same textarea.
  *
  * The debounce lives HERE, not in the parent: LivePreview mounts fresh at
  * the start of every edit session, so `useDebounced`'s `useState(value)`
@@ -266,7 +267,7 @@ export function MermaidBlockView({
  * next edit session reopened, so the preview briefly showed a stale render
  * for a draft the textarea no longer had.
  */
-function LivePreview({ code }: { code: string }) {
+export function LivePreview({ code }: { code: string }) {
   const debounced = useDebounced(code, 250);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; line: number | null } | null>(null);

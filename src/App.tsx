@@ -14,6 +14,7 @@ import { DetailPanel } from '@/detail/DetailPanel';
 import { ChangesPage } from '@/pages/ChangesPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
+import { DiagramPage } from '@/pages/DiagramPage';
 import { DocPage } from '@/pages/DocPage';
 import { DocsPage } from '@/pages/DocsPage';
 import { HomePage } from '@/pages/HomePage';
@@ -100,6 +101,9 @@ function CanvasOutlet() {
     // screen is a Collection.
     case 'doc':
       return <DocPage selection={selection} />;
+    // M29.21: a standalone .mmd opens as a full-page diagram editor.
+    case 'diagram':
+      return <DiagramPage selection={selection} />;
     case 'docs':
       return <DocsPage />;
     // M10: a Collection is the container's page; a List is the record canvas.
