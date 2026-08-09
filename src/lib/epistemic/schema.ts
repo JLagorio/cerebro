@@ -927,6 +927,11 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     policy_version: asU64(obj.policy_version, 'policy_version'),
     target_versions: canonTargetVersions(obj.target_versions),
     queued_at: asString(obj.queued_at, 'queued_at'),
+    // M24.8: why policy is holding this, beyond the risk ladder. Defaulted
+    // so events written before the field still canonicalize.
+    queued_for: asArray(obj.queued_for ?? [], 'queued_for').map((code) =>
+      asString(code, 'queued reason'),
+    ),
   }),
   'proposal.decision_recorded': (obj) => ({
     ...canonCommon(obj),
@@ -1819,6 +1824,17 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       uniqueIds(members, 'member_proposal_ids');
       if (!members.includes(body.proposal_id as string)) {
         throw new RefusedError('a queued proposal must be a member of its own commit set');
+      }
+      const queuedFor = body.queued_for as string[];
+      if (queuedFor.some((code) => code.trim() === '')) {
+        throw new RefusedError('queued_for holds an empty reason');
+      }
+      const sortedReasons = [...queuedFor].sort();
+      if (
+        sortedReasons.join('\u0000') !== queuedFor.join('\u0000') ||
+        new Set(queuedFor).size !== queuedFor.length
+      ) {
+        throw new RefusedError('queued_for is not sorted and unique');
       }
       if ((body.policy_version as number) === 0) {
         throw new RefusedError('policy_version must be positive');

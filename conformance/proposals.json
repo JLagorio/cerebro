@@ -179,7 +179,7 @@
       "seq": 4,
       "event_id": "00000000000000000000000000000004",
       "prev": "0db51ed041e80dffa142cbc70582a4a1702e0e6bc297bc5637872aa1b97db0e9",
-      "hash": "7d2ff33730e0275e7cf406980749d56c47adcb2bad2a6465faa85632b3ad0d36",
+      "hash": "bbb1a9b7fdd0b350255a43949ee07e582251265d1d8d7ac41b63198b8ee7be6c",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.queued",
@@ -208,15 +208,18 @@
             "version": 1
           }
         ],
-        "queued_at": "2026-08-07T12:00:00.000Z"
+        "queued_at": "2026-08-07T12:00:00.000Z",
+        "queued_for": [
+          "high_stakes_verification_required"
+        ]
       }
     },
     {
       "v": 0,
       "seq": 5,
       "event_id": "00000000000000000000000000000005",
-      "prev": "7d2ff33730e0275e7cf406980749d56c47adcb2bad2a6465faa85632b3ad0d36",
-      "hash": "ea289de5cf566103779e4f9884e456d192e24f01e4c2f51705ce3a53c766315a",
+      "prev": "bbb1a9b7fdd0b350255a43949ee07e582251265d1d8d7ac41b63198b8ee7be6c",
+      "hash": "8bd0e1f7dc46d9002c6e1240e47bc08a92252dd9c68d344a7f78568182237958",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.queued",
@@ -245,15 +248,18 @@
             "version": 1
           }
         ],
-        "queued_at": "2026-08-07T12:00:00.000Z"
+        "queued_at": "2026-08-07T12:00:00.000Z",
+        "queued_for": [
+          "high_stakes_verification_required"
+        ]
       }
     },
     {
       "v": 0,
       "seq": 6,
       "event_id": "00000000000000000000000000000006",
-      "prev": "ea289de5cf566103779e4f9884e456d192e24f01e4c2f51705ce3a53c766315a",
-      "hash": "126bc059c8d8ee55948ae8c26f1cd532dd13866b3dc1cbce17dcee80486bd118",
+      "prev": "8bd0e1f7dc46d9002c6e1240e47bc08a92252dd9c68d344a7f78568182237958",
+      "hash": "6eff946fbdf17346de1f38d2537e755df82fa5b994910cfd97272898985b5e39",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.decision_recorded",
@@ -280,8 +286,8 @@
       "v": 0,
       "seq": 7,
       "event_id": "00000000000000000000000000000007",
-      "prev": "126bc059c8d8ee55948ae8c26f1cd532dd13866b3dc1cbce17dcee80486bd118",
-      "hash": "42bd8b15c598a49a40b7ded98d1de2392b6899ca1a92cfce52cf528873ef631a",
+      "prev": "6eff946fbdf17346de1f38d2537e755df82fa5b994910cfd97272898985b5e39",
+      "hash": "1d247e61aa909c364c0ae4527cc5d3bd4dc90322042990c0678211c2e5eb859a",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.decision_recorded",
@@ -308,8 +314,8 @@
       "v": 0,
       "seq": 8,
       "event_id": "00000000000000000000000000000008",
-      "prev": "42bd8b15c598a49a40b7ded98d1de2392b6899ca1a92cfce52cf528873ef631a",
-      "hash": "ba002e28917f9992fe5f9d06744e91bcc45373957c1bf6c1d282774f4f1e43c8",
+      "prev": "1d247e61aa909c364c0ae4527cc5d3bd4dc90322042990c0678211c2e5eb859a",
+      "hash": "7ad700f33668f2e7b2cefdaf14e59e7144caf0bab6433a3be044841ad3deb491",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.applied",
@@ -338,8 +344,8 @@
       "v": 0,
       "seq": 9,
       "event_id": "00000000000000000000000000000009",
-      "prev": "ba002e28917f9992fe5f9d06744e91bcc45373957c1bf6c1d282774f4f1e43c8",
-      "hash": "3ee665d9b7be9aa6e547f5caaba6cf5a5f2e4d6e4115ce3d9b51b2ede6cd619d",
+      "prev": "7ad700f33668f2e7b2cefdaf14e59e7144caf0bab6433a3be044841ad3deb491",
+      "hash": "47140fcc0e49a63bf5e3820b5662819317c276b0aa0ae73c1caf7e3b0a859c23",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.rejected",
@@ -373,8 +379,8 @@
       "v": 0,
       "seq": 10,
       "event_id": "0000000000000000000000000000000a",
-      "prev": "3ee665d9b7be9aa6e547f5caaba6cf5a5f2e4d6e4115ce3d9b51b2ede6cd619d",
-      "hash": "9cf677f37ea2292254bc4edcdce0eba385650891e614d5fbd96c09051e28f65d",
+      "prev": "47140fcc0e49a63bf5e3820b5662819317c276b0aa0ae73c1caf7e3b0a859c23",
+      "hash": "cfe3b4059f83fbd07e9d775e8778226c1c993f95722c9f1a5539f83312cf3e3d",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "proposal.rejected",

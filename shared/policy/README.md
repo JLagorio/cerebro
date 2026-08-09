@@ -157,6 +157,35 @@ come first in each language.
   TS-side receipt validation at all to drift from, so the honest artifact is
   the Rust test set, not a fixture the mock would skip.
 
+- **The high-stakes rule's queue is a VERDICT, its refusals are
+  preconditions.** `high_stakes_route_satisfied` is the one rule with three
+  outcomes, and the table fixes which shape gets which: absent or
+  insufficient coverage/authority queues with `queue_rejection`, a malformed
+  reference rejects with `malformed_rejection`, a resolved-then-moved one
+  rejects with `stale_rejection`. The refusals run in `preconditions::check`
+  like every other predicate; the queue is applied where verdicts are
+  decided, so "structurally valid but unverified" cannot become a rejection
+  at one call site and a queue at another.
+- **`proposal.queued` carries `queued_for`.** A card that cannot say why it
+  is waiting is a card nobody can act on, and the answer is not recomputable
+  — the world moves, and "why was this queued" is a question about the world
+  as it was. Effective risk alone does not carry it either: a HIGH card from
+  lineage fan-in and a MEDIUM card held by the stopping rule ask a human for
+  different things.
+- **Unverifiable is not verified.** Route criteria are matched over what the
+  reducer exposes today (observation kind, authority capability, assertion
+  basis, source registration kind). A criterion that also demands a
+  relationship ROLE, a cached artifact hash, or a raw pointer cannot be
+  settled until M25 registers those, so it does not match and the proposal
+  queues. The opposite default would make the rule decorative in exactly the
+  cases it exists for.
+- **`coverage_assessments` ships empty on purpose.** M24.8's rules are
+  written and tested against the real M25 record shape rather than a
+  `todo!()`, which is what makes "no coverage" a resolvable question. For the
+  whole of M24 the map is empty, so every high-stakes proposal queues — the
+  behaviour the spec asks for, arrived at by the rule rather than by a
+  special case.
+
 ## What is deliberately NOT here yet
 
 `self_ancestry` is registered in the destiny registry (so the registry is

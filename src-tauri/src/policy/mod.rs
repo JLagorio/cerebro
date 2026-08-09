@@ -15,6 +15,7 @@
 pub mod authority;
 pub mod candidates;
 pub mod commit;
+pub mod coverage;
 pub mod expand;
 pub mod goldens;
 pub mod interpreter;

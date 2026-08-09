@@ -69,8 +69,35 @@ pub struct ObservationState {
     pub effective_resolution_event: Option<String>,
     pub authority: Option<AuthorityProvenance>,
     pub assertion_basis: Option<AssertionBasis>,
+    /// The structural search story of an absence assertion (§53). Kept in
+    /// state because M24.8's absence rule joins it to a coverage assessment;
+    /// outside the conformance vector contract, like `assertion_basis`.
+    pub absence: Option<schema::AbsenceRecord>,
     pub actor: String,
     pub lineage_parents: Vec<(schema::LineageKind, String)>,
+}
+
+/// One M25 `coverage.assessed` record, reduced.
+///
+/// Declared before anything emits one: M24.8's high-stakes and absence rules
+/// are written against this shape, which is what makes "no coverage" a
+/// resolvable question rather than a `todo!()`. The map stays empty for the
+/// whole of M24 — deliberately, and a test says so — so every high-stakes
+/// proposal queues for a human until M25 gives the rule something to find.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageAssessment {
+    pub assessment_id: String,
+    /// The Entity this assessment is about. Coverage of another subject
+    /// proves nothing about this one.
+    pub subject_id: String,
+    /// Which of the table's `required_coverage_dimensions` this establishes.
+    pub dimensions: std::collections::BTreeSet<String>,
+    pub searched_domain: String,
+    pub search_scope: String,
+    pub observation_window: String,
+    pub query_strategy: String,
+    /// A later assessment replaced this one.
+    pub superseded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -408,6 +435,9 @@ pub struct ProposalRow {
     /// moves and the same proposal would now be more dangerous, the approval
     /// was given to a different question.
     pub queued_risk: Option<schema::Risk>,
+    /// Why policy is holding it, beyond the risk ladder (M24.8). Read by the
+    /// review surface; empty when the ladder alone queued it.
+    pub queued_for: Vec<String>,
     /// The human's answer, once there is one.
     pub decision: Option<(String, schema::Decision)>,
     pub applied_event_id: Option<String>,
@@ -467,6 +497,10 @@ pub struct EpistemicState {
     /// extracted-assertion event → its extracted_text, for the M23.7
     /// out-of-band correction carve-out.
     pub extracted_texts: BTreeMap<String, String>,
+    /// M25's coverage assessments. Empty for the whole of M24 — the rules
+    /// that read it are written and tested, and they refuse rather than
+    /// assume, which is why an unfillable map is safe to ship.
+    pub coverage_assessments: BTreeMap<String, CoverageAssessment>,
 }
 
 impl EpistemicState {
@@ -1025,6 +1059,7 @@ fn apply_proposal_submitted(
             commit_set_id: None,
             queued_members: Vec::new(),
             queued_risk: None,
+            queued_for: Vec::new(),
             decision: None,
             applied_event_id: None,
             revert_plan: None,
@@ -1056,6 +1091,7 @@ fn apply_proposal_queued(
     row.commit_set_id = Some(body.commit_set_id.clone());
     row.queued_members = body.member_proposal_ids.clone();
     row.queued_risk = Some(body.effective_risk);
+    row.queued_for = body.queued_for.clone();
     state.bump_version("proposal", &body.proposal_id, &frame.event_id);
     Ok(())
 }
@@ -1272,7 +1308,7 @@ fn apply_observation(
 
     // Authority is DERIVED from the registration and call path; the payload
     // must claim exactly the derivation — no upgrade, no downgrade.
-    let (authority, assertion_basis) = if let Some(assertion) = payload.assertion() {
+    let (authority, assertion_basis, absence) = if let Some(assertion) = payload.assertion() {
         let derived =
             schema::derive_authority(&source.registration, &body.actor.id, body.observation_kind);
         if assertion.authority_provenance != derived {
@@ -1282,9 +1318,13 @@ fn apply_observation(
                 assertion.authority_provenance, derived
             )));
         }
-        (Some(derived), Some(assertion.assertion_basis))
+        (
+            Some(derived),
+            Some(assertion.assertion_basis),
+            assertion.absence.clone(),
+        )
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     // Lineage: every parent an existing Observation (committed or earlier
@@ -1374,6 +1414,7 @@ fn apply_observation(
             effective_resolution_event: None,
             authority,
             assertion_basis,
+            absence,
             actor: body.actor.id.clone(),
             lineage_parents: body
                 .lineage

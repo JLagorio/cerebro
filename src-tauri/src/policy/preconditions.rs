@@ -50,16 +50,16 @@ pub struct PreconditionFailure {
 /// The point is that a gap is visible in one list rather than inferred from
 /// the absence of a branch.
 pub const PREDICATE_OWNERS: &[(&str, Option<&str>)] = &[
-    ("absence_coverage_complete", None), // M24.8
+    ("absence_coverage_complete", Some("M24.8")),
     ("actor_matches_run", Some("M24.5")),
     ("alias_unbound", Some("M24.4")), // expand: alias_collision
     ("basis_refs_valid", Some("M24.5")),
     ("candidate_receipt_current", Some("M24.7")), // §15: mint, authorship, staleness
     ("conflict_capability_available", Some("M24.1")), // the table's capability stage
     ("exact_equivalence_proven", Some("M24.3")),  // EquivalenceReceipt::validate
-    ("high_stakes_route_satisfied", None),        // M24.8
-    ("independence_confirmable", Some("M24.4")),  // expand: server-bound proof
-    ("open_contradictions_addressed", None),      // M27 (contradiction edges)
+    ("high_stakes_route_satisfied", Some("M24.8")),
+    ("independence_confirmable", Some("M24.4")), // expand: server-bound proof
+    ("open_contradictions_addressed", None),     // M27 (contradiction edges)
     ("qualification_roles_present", Some("M24.6")),
     ("revert_current_and_invertible", Some("M24.4")), // expand: revert_not_*
     ("silence_transition_allowed", Some("M24.1")),    // the table's silence stage
@@ -327,6 +327,22 @@ pub fn check(
             "candidate_receipt_current" => candidate_receipt_current(state, proposal)?,
             "qualification_roles_present" => {
                 super::qualification::roles_present(catalog, state, proposal)?
+            }
+            "absence_coverage_complete" => {
+                super::coverage::absence_complete(table, state, proposal)?
+            }
+            // Only the REFUSALS of the high-stakes rule are preconditions.
+            // Its third outcome is a queue, which is a verdict and not a
+            // failure — `commit.rs` reads it where verdicts are decided, so
+            // that "structurally valid but unverified" cannot be quietly
+            // turned into a rejection at one call site and a queue at
+            // another.
+            "high_stakes_route_satisfied" => {
+                if let super::coverage::HighStakes::Refuse(failure) =
+                    super::coverage::high_stakes(table, state, proposal)
+                {
+                    return Err(failure);
+                }
             }
             // Everything else is evaluated elsewhere or owned by a later
             // phase; `PREDICATE_OWNERS` is where that is written down.

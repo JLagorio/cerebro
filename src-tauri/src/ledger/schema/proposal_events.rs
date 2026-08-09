@@ -111,6 +111,20 @@ schema_body! {
         pub policy_version: u64,
         pub target_versions: Vec<TargetVersion>,
         pub queued_at: String,
+        /// Why policy is holding this, in the table's own rejection-code
+        /// vocabulary (M24.8) — today only `high_stakes_verification_required`.
+        ///
+        /// Durable because a card that cannot say why it is waiting is a
+        /// card nobody can act on, and the answer is NOT recomputable: the
+        /// world moves, and "why was this queued" is a question about the
+        /// world as it was. Risk alone does not carry it — a HIGH card from
+        /// lineage fan-in and a HIGH card from an unverified stopping rule
+        /// ask a human for different things.
+        ///
+        /// Defaulted so events written before M24.8 still parse; empty means
+        /// the risk ladder alone put it here.
+        #[serde(default)]
+        pub queued_for: Vec<String>,
     }
 }
 
@@ -128,6 +142,19 @@ impl ProposalQueued {
         unique_ids("member_proposal_ids", &self.member_proposal_ids)?;
         if !self.member_proposal_ids.contains(&self.proposal_id) {
             return Err("a queued proposal must be a member of its own commit set".into());
+        }
+        // Shape only: that each entry is a code the TABLE declares is a
+        // policy question, asserted where the table is loaded.
+        for code in &self.queued_for {
+            if code.trim().is_empty() {
+                return Err("queued_for holds an empty reason".into());
+            }
+        }
+        let mut sorted = self.queued_for.clone();
+        sorted.sort();
+        sorted.dedup();
+        if sorted != self.queued_for {
+            return Err("queued_for is not sorted and unique".into());
         }
         if self.policy_version == 0 {
             return Err("policy_version must be positive".into());
@@ -421,6 +448,7 @@ mod tests {
             policy_version: 1,
             target_versions: vec![],
             queued_at: "2026-08-09T10:00:00Z".into(),
+            queued_for: vec![],
         };
         assert!(queued(vec![A, B]).validate().is_ok());
         assert!(queued(vec![B])

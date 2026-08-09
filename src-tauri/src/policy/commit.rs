@@ -329,8 +329,23 @@ pub fn commit_proposals(
             None,
         );
     }
+    // THE HIGH-STAKES STOPPING RULE (M24.8). Its refusals already ran as a
+    // precondition; what is left is its third outcome, which is a QUEUE and
+    // therefore a verdict. Applying it here — where verdicts are decided —
+    // is what makes "structurally valid but unverified" one answer instead
+    // of a branch each call site picks.
+    let queued_for = stopping_rule(table, &state, &members, &mut verdicts);
+
     if verdicts.iter().any(|v| matches!(v, Verdict::Queued { .. })) {
-        return queue_set(table, writer, &state, &commit_set_id, &members, &verdicts);
+        return queue_set(
+            table,
+            writer,
+            &state,
+            &commit_set_id,
+            &members,
+            &verdicts,
+            &queued_for,
+        );
     }
     apply_set(
         table,
@@ -343,6 +358,42 @@ pub fn commit_proposals(
         &verdicts,
         TransitionCode::Apply,
     )
+}
+
+/// The high-stakes stopping rule, applied to a decided set.
+///
+/// Returns, per member, the table codes holding it — and upgrades an
+/// otherwise-applying verdict to a queue. It never downgrades: a member
+/// already queued or rejected keeps its verdict, because the stopping rule
+/// adds a reason to wait, never a reason to proceed.
+fn stopping_rule(
+    table: &PolicyTable,
+    state: &EpistemicState,
+    members: &[ProposalV1],
+    verdicts: &mut [Verdict],
+) -> Vec<Vec<String>> {
+    let mut reasons = vec![Vec::new(); members.len()];
+    for (index, proposal) in members.iter().enumerate() {
+        let super::coverage::HighStakes::Queue(code) =
+            super::coverage::high_stakes(table, state, proposal)
+        else {
+            continue;
+        };
+        reasons[index] = vec![code.to_string()];
+        if let Verdict::Applied { risk } = &verdicts[index] {
+            verdicts[index] = Verdict::Queued {
+                risk: risk.clone(),
+                // The rung's own review mode, so a card forced to wait by
+                // the stopping rule renders the same way as one the ladder
+                // queued at that risk.
+                review: table
+                    .risk_ladder
+                    .get(&risk.risk)
+                    .and_then(|rung| rung.review.clone()),
+            };
+        }
+    }
+    reasons
 }
 
 /// A queued set, as the review surface finds it after a restart.
@@ -857,6 +908,8 @@ fn queue_set(
     commit_set_id: &str,
     members: &[ProposalV1],
     verdicts: &[Verdict],
+    // Per member, the table codes holding it beyond the risk ladder.
+    queued_for: &[Vec<String>],
 ) -> Result<CommitOutcome, SubmitError> {
     // The FROZEN order, not a sorted copy: it is what the commit-set id was
     // derived from, and a queued card must be resolvable after a restart
@@ -885,6 +938,7 @@ fn queue_set(
             policy_version: table.artifact_version,
             target_versions: target_versions(state, proposal),
             queued_at: queued_at.clone(),
+            queued_for: queued_for.get(index).cloned().unwrap_or_default(),
         };
         events.push((
             schema::KIND_PROPOSAL_QUEUED.to_string(),
@@ -2151,6 +2205,47 @@ mod tests {
          breaks_when: { kind: text, role: failure_condition }\n---\n\n# Metric\n";
 
     const P3: &str = "0000000000000000000000000000000c";
+
+    #[test]
+    fn a_high_stakes_change_waits_and_the_ledger_says_what_it_is_waiting_for() {
+        // M24.8 END TO END. The op is a MEDIUM update that would auto-apply
+        // on its own; declaring HIGH intended use holds it, and the queued
+        // event carries the reason. A card that cannot say why it is waiting
+        // is a card nobody can act on — and "why" is not recomputable later,
+        // because the world moves.
+        let (vault, mut writer, belief) = seeded("commit-high-stakes");
+        let mut p = proposal(
+            P1,
+            RUN,
+            update_op(&belief, "x"),
+            vec![target(TargetClass::Belief, &belief, Some(1))],
+            Risk::Medium,
+        );
+        p.intended_use.stakes = Risk::High;
+        submit_proposal(&table(), &mut writer, &actor(), &p).unwrap();
+
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::InitialQueue);
+        assert!(matches!(outcome.results[0], SubmitResult::Queued { .. }));
+
+        let state = state(&writer, &vault);
+        assert_eq!(state.proposals[P1].state, ProposalState::Queued);
+        assert_eq!(
+            state.proposals[P1].queued_for,
+            vec!["high_stakes_verification_required".to_string()],
+            "the ledger, not a recomputation, is what says why"
+        );
+        // The risk ladder did not move: this is a MEDIUM change being held
+        // by a stopping rule, not a HIGH one.
+        assert_eq!(state.proposals[P1].queued_risk, Some(Risk::Medium));
+        assert_eq!(
+            state.beliefs[&belief].current().revision,
+            1,
+            "nothing applied while it waits"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
 
     #[test]
     fn creating_without_a_search_becomes_a_refusal_the_vault_keeps() {

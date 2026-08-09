@@ -123,6 +123,8 @@ interface ProposalRow {
   queuedMembers: string[];
   /** The effective risk the CARD SAID when a human was asked. */
   queuedRisk: string | null;
+  /** Why policy is holding it, beyond the risk ladder (M24.8). */
+  queuedFor: string[];
   decision: [string, string] | null;
   appliedEventId: string | null;
   revertPlan: Json | null;
@@ -637,6 +639,7 @@ function applyProposalSubmitted(state: EpistemicState, frame: VectorFrame, body:
     commitSetId: null,
     queuedMembers: [],
     queuedRisk: null,
+    queuedFor: [],
     decision: null,
     appliedEventId: null,
     revertPlan: null,
@@ -656,6 +659,7 @@ function applyProposalQueued(state: EpistemicState, frame: VectorFrame, body: Js
   row.commitSetId = body.commit_set_id as string;
   row.queuedMembers = [...(body.member_proposal_ids as string[])];
   row.queuedRisk = body.effective_risk as string;
+  row.queuedFor = (body.queued_for as string[]) ?? [];
   bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
 }
 

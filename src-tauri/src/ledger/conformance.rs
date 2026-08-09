@@ -2836,6 +2836,7 @@ fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
                 version: 1,
             }],
             queued_at: STAMP.into(),
+            queued_for: vec!["high_stakes_verification_required".into()],
         }
     };
     b.push_body(schema::KIND_PROPOSAL_QUEUED, &queue(proposal_a));
