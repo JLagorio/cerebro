@@ -926,6 +926,46 @@ mod tests {
     }
 
     #[test]
+    fn a_rough_note_is_never_blocked_by_a_qualification_gate() {
+        // M24.6's other half. The type declares two roles and the note fills
+        // neither — and it is written anyway, because half-finished thoughts
+        // are the normal state of a vault. Only PROMOTION is gated; capture
+        // never is, or the app would be arguing with someone who is still
+        // thinking.
+        let vault = testutil::temp_vault("concepts-rough-note");
+        std::fs::create_dir_all(vault.join("types")).unwrap();
+        std::fs::write(
+            vault.join("types/metric.md"),
+            "---\ntype: Type\nfields:\n  steward: { kind: text, role: owner }\n  \
+             breaks_when: { kind: text, role: failure_condition }\n---\n\n# Metric\n",
+        )
+        .unwrap();
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+
+        write_concept_with(
+            &mut writer,
+            &vault,
+            "knowledge/concepts/half-a-thought.md",
+            &fm(&[
+                ("type", serde_json::json!("Metric")),
+                ("title", serde_json::json!("Half a thought")),
+            ]),
+            "# Half a thought\n\nSomething about retention, maybe.",
+        )
+        .unwrap();
+
+        let state = current_state(&writer, &vault).unwrap();
+        let belief_id = state.projection_paths["concepts/half-a-thought.md"].clone();
+        assert_eq!(
+            state.beliefs[&belief_id].qualification,
+            schema::Qualification::Draft,
+            "it lands as a draft — unqualified is a state, not a refusal"
+        );
+        assert!(vault.join("knowledge/concepts/half-a-thought.md").exists());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
     fn a_new_concept_is_a_committed_belief_whose_file_is_its_projection() {
         let vault = testutil::temp_vault("concepts-create");
         let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();

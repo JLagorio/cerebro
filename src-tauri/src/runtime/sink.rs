@@ -17,6 +17,7 @@ use std::sync::{Mutex, OnceLock};
 use rusqlite::Connection;
 
 use super::operational::{self, LogEntry};
+use super::parked::{self, Parked};
 use crate::policy::rejection::OperationalRefusal;
 
 fn sink() -> &'static Mutex<Option<Connection>> {
@@ -59,11 +60,50 @@ pub fn record(refusal: &OperationalRefusal, entry: &LogEntry) {
     }
 }
 
+/// Park a refused promotion if the sink is armed (M24.6).
+///
+/// Same contract as [`record`]: the gate has already refused, and whether
+/// the worklist took the note must never change what the caller is told.
+pub fn park(parked: &Parked) {
+    let Ok(guard) = sink().lock() else {
+        return;
+    };
+    if let Some(conn) = guard.as_ref() {
+        if let Err(e) = parked::park(conn, parked) {
+            eprintln!(
+                "parked_promotions: could not park {}: {e}",
+                parked.belief_id
+            );
+        }
+    }
+}
+
+/// Clear an item's open parked row if the sink is armed (M24.6).
+pub fn clear_park(store_id: &str, belief_id: &str) {
+    let Ok(guard) = sink().lock() else {
+        return;
+    };
+    if let Some(conn) = guard.as_ref() {
+        if let Err(e) = parked::clear(conn, store_id, belief_id) {
+            eprintln!("parked_promotions: could not clear {belief_id}: {e}");
+        }
+    }
+}
+
 /// Run `f` against the armed connection, if there is one — the read path
 /// for tests and, later, M25's metering surface.
 pub fn with_sink<T>(f: impl FnOnce(&Connection) -> T) -> Option<T> {
     let guard = sink().lock().ok()?;
     guard.as_ref().map(f)
+}
+
+/// The sink is process-global, so every test that arms it serialises here —
+/// including the policy tests, which is why this lives beside the sink
+/// rather than inside one module's test scaffolding.
+#[cfg(test)]
+pub fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static SINK_LOCK: Mutex<()> = Mutex::new(());
+    SINK_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(test)]
@@ -73,11 +113,7 @@ mod tests {
     use crate::runtime::operational::counts_by_code;
     use crate::vault::testutil;
 
-    /// The sink is process-global, so its tests serialise.
-    fn lock() -> std::sync::MutexGuard<'static, ()> {
-        static SINK_LOCK: Mutex<()> = Mutex::new(());
-        SINK_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-    }
+    use super::test_lock as lock;
 
     fn refusal() -> OperationalRefusal {
         let table = PolicyTable::load().unwrap();

@@ -98,6 +98,34 @@ come first in each language.
   list and the table's `predicates` are the same set. Gaps are written down,
   not inferred from a missing branch.
 
+- **A qualification profile's required roles come off the TYPE DOC, never off
+  the proposal.** The proposal carries a `QualificationProfileRef`, but it is a
+  claim: the server derives the real profile from the type doc at the current
+  head and refuses `policy_precondition_stale` unless the two agree exactly.
+  Trusting the submitted `required_roles` would let a proposal name a weaker
+  gate than the one that exists, and the ledger event would then record a rule
+  nobody applied. Implemented once, in `policy/qualification.rs`.
+- **`type_schema_hash` covers the role assignment, not the whole type doc.**
+  The pin exists so a type-doc edit cannot retroactively re-decide a promotion,
+  which means it must cover which field carries which role — and nothing else.
+  Hashing the whole doc would make recolouring a status option invalidate every
+  promotion in flight, and a gate that cries stale for cosmetic edits is one
+  people learn to route around.
+- **An unknown `role:` annotation refuses rather than being ignored.**
+  `role: onwer` silently reading as "no role here" is the worst outcome
+  available: the type doc still *looks* like it protects something. The gate
+  fails closed for that type and names the annotation.
+- **Parked promotions are operational.** Every column is recomputable from the
+  vault's records plus the type docs, so by the standing when-in-doubt rule the
+  worklist lives in `runtime.db`, not the ledger. The refusal itself is
+  ledger-destined — "this item is not ready" is epistemic history; "here is the
+  worklist" is a cache.
+- **A refusal names the predicate that refused.** `Rejection.rule` takes the
+  failing predicate's own name (a `RuleCode` may be a predicate) instead of the
+  code→rule fallback, so a card says `qualification_roles_present` rather than
+  `commit_set`. The fallback remains for table-decidable refusals, which have
+  no predicate to name.
+
 ## What is deliberately NOT here yet
 
 `self_ancestry` is registered in the destiny registry (so the registry is

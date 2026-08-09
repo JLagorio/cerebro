@@ -60,11 +60,11 @@ pub const PREDICATE_OWNERS: &[(&str, Option<&str>)] = &[
     ("high_stakes_route_satisfied", None),        // M24.8
     ("independence_confirmable", Some("M24.4")),  // expand: server-bound proof
     ("open_contradictions_addressed", None),      // M27 (contradiction edges)
-    ("qualification_roles_present", None),        // M24.6
+    ("qualification_roles_present", Some("M24.6")),
     ("revert_current_and_invertible", Some("M24.4")), // expand: revert_not_*
-    ("silence_transition_allowed", Some("M24.1")), // the table's silence stage
-    ("subject_correction_current", Some("M24.4")), // expand: subject_resolution_*
-    ("target_set_exact", Some("M24.1")),          // the table's target-class stage
+    ("silence_transition_allowed", Some("M24.1")),    // the table's silence stage
+    ("subject_correction_current", Some("M24.4")),    // expand: subject_resolution_*
+    ("target_set_exact", Some("M24.1")),              // the table's target-class stage
     ("trusted_observation_provenance", Some("M24.3")), // AgentObservationDraft
     ("versions_current", Some("M24.5")),
 ];
@@ -227,6 +227,7 @@ pub fn actor_matches_run(actors: &[String]) -> PreconditionResult {
 pub fn check(
     table: &PolicyTable,
     state: &EpistemicState,
+    catalog: &super::qualification::Catalog,
     proposal: &ProposalV1,
 ) -> PreconditionResult {
     let Some(rule) = table.op(proposal.op.kind()) else {
@@ -237,6 +238,9 @@ pub fn check(
             "versions_current" => versions_current(state, proposal)?,
             "basis_refs_valid" => basis_refs_valid(state, proposal)?,
             "candidate_receipt_current" => candidate_receipt_current(state, proposal)?,
+            "qualification_roles_present" => {
+                super::qualification::roles_present(catalog, state, proposal)?
+            }
             // Everything else is evaluated elsewhere or owned by a later
             // phase; `PREDICATE_OWNERS` is where that is written down.
             _ => {}

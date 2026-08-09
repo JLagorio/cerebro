@@ -36,6 +36,44 @@ pub enum FieldRole {
     Verb,
 }
 
+impl FieldRole {
+    /// Every role, in the canonical order `required_roles` must be sorted
+    /// into — the enum's own declaration order, not alphabetical.
+    pub const ALL: [FieldRole; 7] = [
+        FieldRole::FailureCondition,
+        FieldRole::Impact,
+        FieldRole::Evidence,
+        FieldRole::Trigger,
+        FieldRole::CompletionCondition,
+        FieldRole::Owner,
+        FieldRole::Verb,
+    ];
+
+    /// The wire spelling — identical to the serde one, which a test pins.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FieldRole::FailureCondition => "failure_condition",
+            FieldRole::Impact => "impact",
+            FieldRole::Evidence => "evidence",
+            FieldRole::Trigger => "trigger",
+            FieldRole::CompletionCondition => "completion_condition",
+            FieldRole::Owner => "owner",
+            FieldRole::Verb => "verb",
+        }
+    }
+
+    /// A type doc's `role:` annotation, or None for a word this build does
+    /// not know. The caller decides what an unknown annotation means — it is
+    /// never silently dropped, because a typo that quietly disables a gate is
+    /// the worst outcome available.
+    pub fn parse(annotation: &str) -> Option<FieldRole> {
+        FieldRole::ALL
+            .iter()
+            .copied()
+            .find(|role| role.as_str() == annotation)
+    }
+}
+
 /// Which profile a promotion was judged against, pinned by schema hash so a
 /// later type-doc edit cannot retroactively re-decide an old promotion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -313,6 +351,31 @@ mod tests {
             type_schema_hash: "f".repeat(64),
             required_roles: vec![FieldRole::Evidence, FieldRole::Owner],
         }
+    }
+
+    #[test]
+    fn a_role_spells_itself_the_same_way_twice() {
+        // `as_str` is what a type doc's `role:` annotation is matched
+        // against and what a parked row records; serde is what the ledger
+        // writes. Two spellings of one vocabulary would let a promotion be
+        // judged against a role the event does not name.
+        for role in FieldRole::ALL {
+            let wire = serde_json::to_string(&role).unwrap();
+            assert_eq!(wire, format!("\"{}\"", role.as_str()));
+            assert_eq!(FieldRole::parse(role.as_str()), Some(role));
+        }
+        assert_eq!(FieldRole::parse("onwer"), None, "a typo is not a role");
+    }
+
+    #[test]
+    fn the_canonical_role_order_is_the_declaration_order() {
+        // `QualificationProfileRef::validate` demands sorted roles, and a
+        // derived profile sorts with this same Ord. Alphabetical would put
+        // `completion_condition` first and every derived profile would fail
+        // validation.
+        let mut sorted = FieldRole::ALL.to_vec();
+        sorted.sort();
+        assert_eq!(sorted, FieldRole::ALL.to_vec());
     }
 
     fn qualification(

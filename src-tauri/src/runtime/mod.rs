@@ -22,6 +22,7 @@
 //! asked.
 
 pub mod operational;
+pub mod parked;
 pub mod sink;
 
 use std::path::{Path, PathBuf};
@@ -31,8 +32,9 @@ use rusqlite::Connection;
 /// The one runtime database, beside the ledger index in app-data.
 pub const RUNTIME_DB: &str = "runtime.db";
 
-/// The schema version M24 establishes. M25 owns every later migration.
-pub const USER_VERSION: i64 = 1;
+/// The schema version M24 establishes: `operational_log` at M24.2, plus
+/// `parked_promotions` at M24.6. M25 owns every later migration.
+pub const USER_VERSION: i64 = 2;
 
 pub fn runtime_db_path(data_dir: &Path) -> PathBuf {
     data_dir.join(RUNTIME_DB)
@@ -55,6 +57,7 @@ pub fn open(data_dir: &Path) -> Result<Connection, String> {
         .map_err(|e| e.to_string())?;
     match version {
         0 => initialise(&conn)?,
+        1 => upgrade_to_2(&conn)?,
         v if v == USER_VERSION => {}
         v => {
             return Err(format!(
@@ -70,6 +73,7 @@ fn initialise(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(&format!(
         "BEGIN;
          {SCHEMA_V1}
+         {SCHEMA_V2}
          PRAGMA user_version = {USER_VERSION};
          COMMIT;"
     ))
@@ -78,7 +82,25 @@ fn initialise(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// The M24 schema. `parked_promotions` arrives in M24.6.
+/// The one M24 migration: a database created by M24.2 gains M24.6's table.
+///
+/// It exists because this DB is NOT rebuildable — dropping and recreating it
+/// would throw away the refusal history it was built to keep. Same shape as
+/// creation: one transaction ending in the stamp, so a kill leaves either the
+/// old schema or the new one.
+fn upgrade_to_2(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(&format!(
+        "BEGIN;
+         {SCHEMA_V2}
+         PRAGMA user_version = {USER_VERSION};
+         COMMIT;"
+    ))
+    .map_err(|e| e.to_string())?;
+    crate::crash::crash_point("runtime-db-upgraded");
+    Ok(())
+}
+
+/// The M24.2 schema.
 ///
 /// `recorded_at` is core-stamped, never caller-supplied — the same rule the
 /// ledger holds for system time. Nullable columns are the ones a refusal
@@ -97,6 +119,37 @@ const SCHEMA_V1: &str = "
         run_id TEXT
     );
     CREATE INDEX operational_log_code ON operational_log (code, id);
+";
+
+/// The M24.6 schema — visibly parked promotions.
+///
+/// Operational, not ledger, by the standing when-in-doubt rule: every column
+/// here is recomputable from the vault's records plus the type docs, so it is
+/// a cache of a question ('what is not promotable yet, and what is missing')
+/// and never an authority. Wiping app-data loses a worklist, not history.
+///
+/// `as_of` and `cleared_at` are core-stamped like `recorded_at`. They are
+/// display and ordering only: no policy decision reads them, because a clock
+/// is not evidence.
+///
+/// The partial unique index is the whole idempotency story. The gate runs
+/// twice per commit set (decide, then again before append) and once more on
+/// every retry; without it the debt lane would count attempts instead of
+/// items.
+const SCHEMA_V2: &str = "
+    CREATE TABLE parked_promotions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        belief_id TEXT NOT NULL,
+        record_path TEXT,
+        type_id TEXT NOT NULL,
+        type_schema_hash TEXT NOT NULL,
+        missing_roles TEXT NOT NULL,
+        as_of TEXT NOT NULL,
+        cleared_at TEXT
+    );
+    CREATE UNIQUE INDEX parked_promotions_open
+        ON parked_promotions (store_id, belief_id) WHERE cleared_at IS NULL;
 ";
 
 #[cfg(test)]
@@ -125,6 +178,45 @@ mod tests {
             .query_row("SELECT count(*) FROM operational_log", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 1, "a second open must not re-initialise");
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_database_born_at_m24_2_gains_the_m24_6_table_and_keeps_its_rows() {
+        // This DB is not rebuildable, so the migration is the only honest
+        // move: dropping and recreating would throw away the refusal history
+        // it exists to keep.
+        let dir = testutil::temp_vault("runtime-upgrade");
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(runtime_db_path(&dir)).unwrap();
+        conn.execute_batch(&format!(
+            "BEGIN; {SCHEMA_V1} PRAGMA user_version = 1; COMMIT;"
+        ))
+        .unwrap();
+        conn.execute(
+            "INSERT INTO operational_log (recorded_at, surface, code, detail) \
+             VALUES ('2026-08-09T00:00:00Z', 'test', 'malformed_arguments', 'x')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let conn = open(&dir).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, USER_VERSION);
+        let kept: i64 = conn
+            .query_row("SELECT count(*) FROM operational_log", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "the migration must not lose refusal history");
+        let parked: i64 = conn
+            .query_row("SELECT count(*) FROM parked_promotions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(parked, 0);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }

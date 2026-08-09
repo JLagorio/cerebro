@@ -39,6 +39,7 @@ use crate::ledger::{ledger_dir, read_ledger};
 use super::expand::{expand, ExpandError, ExpansionContext};
 use super::interpreter::facts_at;
 use super::preconditions::{self, PreconditionFailure};
+use super::qualification;
 use super::rejection::{OperationalRefusal, Rejection};
 use super::submit::{rule_for, SubmitError, SubmitResult};
 use super::table::{Destiny, PolicyTable, Revert};
@@ -291,13 +292,14 @@ pub fn commit_proposals(
 
     // ONE snapshot decides the whole set: the table verdict first, then the
     // state-dependent predicates the table's `requires` list names.
+    let catalog = qualification::Catalog::new(vault, writer.store_id());
     let mut verdicts = Vec::with_capacity(members.len());
     let mut failure: Option<(usize, Box<PreconditionFailure>)> = None;
     for (index, proposal) in members.iter().enumerate() {
         let facts = facts_at(table, &state, proposal)?;
         let verdict = table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?;
         if verdict.rejection().is_none() && failure.is_none() {
-            if let Err(precondition) = preconditions::check(table, &state, proposal) {
+            if let Err(precondition) = preconditions::check(table, &state, &catalog, proposal) {
                 failure = Some((index, precondition));
             }
         }
@@ -532,28 +534,30 @@ pub fn resolve_commit_set(
     // approving HIGH. M24.5 adds target CAS and evidence/coverage
     // re-resolution to this same pass.
     let mut verdicts = Vec::with_capacity(members.len());
-    let mut stale_reason: Option<(usize, (TypedValue, TypedValue))> = None;
+    let mut stale_reason: Option<(usize, CulpritDetail)> = None;
     // A precondition names its own code (`stale_target_version`,
     // `invalid_reference`, `candidate_receipt_stale`); a risk that merely
     // rose is `policy_precondition_stale`.
     let mut stale_code: Option<&'static str> = None;
+    let catalog = qualification::Catalog::new(vault, writer.store_id());
     for (index, proposal) in members.iter().enumerate() {
         let facts = facts_at(table, &state, proposal)?;
         let verdict = table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?;
         if stale_reason.is_none() {
-            if let Err(precondition) = preconditions::check(table, &state, proposal) {
+            if let Err(precondition) = preconditions::check(table, &state, &catalog, proposal) {
                 // The window target-id CAS alone cannot see: a duplicate
                 // created while the card waited, evidence that stopped
                 // resolving, a version that moved after approval.
                 stale_code = Some(precondition.code);
-                stale_reason = Some((index, (precondition.expected, precondition.actual)));
+                stale_reason = Some((index, CulpritDetail::of(&precondition)));
             } else if let Some(rejection) = verdict.rejection() {
                 stale_reason = Some((
                     index,
-                    (
-                        TypedValue::string("passes policy"),
-                        TypedValue::string(&rejection.code),
-                    ),
+                    CulpritDetail {
+                        rule: None,
+                        expected: TypedValue::string("passes policy"),
+                        actual: TypedValue::string(&rejection.code),
+                    },
                 ));
             } else if let (Some(now), Some(queued)) = (
                 verdict.effective_risk(),
@@ -563,10 +567,11 @@ pub fn resolve_commit_set(
                     // The card said one thing; the world now says another.
                     stale_reason = Some((
                         index,
-                        (
-                            TypedValue::string(queued.as_str()),
-                            TypedValue::string(now.as_str()),
-                        ),
+                        CulpritDetail {
+                            rule: Some("risk_ladder"),
+                            expected: TypedValue::string(queued.as_str()),
+                            actual: TypedValue::string(now.as_str()),
+                        },
                     ));
                 }
             }
@@ -646,6 +651,31 @@ fn target_versions(state: &EpistemicState, proposal: &ProposalV1) -> Vec<TargetV
 /// carries its own code; every peer carries `atomic_set_refused` naming it,
 /// so a card points at the cause instead of saying "something else went
 /// wrong".
+/// What the culprit's refusal expected and got, and which rule said so —
+/// for the refusals a caller knows more about than the table-only detail can
+/// reconstruct.
+///
+/// `rule` carries the PREDICATE that refused. A `RuleCode` may be a
+/// predicate name, and naming the predicate is the difference between a card
+/// that says "something in this commit set" and one that says
+/// `qualification_roles_present`. The code→rule fallback stays for
+/// table-decidable refusals, which have no predicate to name.
+struct CulpritDetail {
+    rule: Option<&'static str>,
+    expected: TypedValue,
+    actual: TypedValue,
+}
+
+impl CulpritDetail {
+    fn of(precondition: &PreconditionFailure) -> CulpritDetail {
+        CulpritDetail {
+            rule: Some(precondition.rule),
+            expected: precondition.expected.clone(),
+            actual: precondition.actual.clone(),
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn reject_set(
     table: &PolicyTable,
@@ -655,9 +685,7 @@ fn reject_set(
     verdicts: &[Verdict],
     transition: TransitionCode,
     human: Option<(usize, String)>,
-    // What the culprit's refusal expected and got, when the caller knows
-    // better than the table-only detail can.
-    detail_override: Option<(TypedValue, TypedValue)>,
+    detail_override: Option<CulpritDetail>,
 ) -> Result<CommitOutcome, SubmitError> {
     let culprit = verdicts
         .iter()
@@ -666,13 +694,18 @@ fn reject_set(
     let mut events = Vec::with_capacity(members.len());
     let mut results = Vec::with_capacity(members.len());
     for (index, proposal) in members.iter().enumerate() {
-        let (code, expected, actual, refused_by, decision_id) = if index == culprit {
+        let (code, rule, expected, actual, refused_by, decision_id) = if index == culprit {
             let rejection = verdicts[index].rejection().expect("checked");
-            let (expected, actual) = detail_override
-                .clone()
-                .unwrap_or_else(|| detail_of(table, proposal, &rejection.code));
+            let (expected, actual) = match &detail_override {
+                Some(detail) => (detail.expected.clone(), detail.actual.clone()),
+                None => detail_of(table, proposal, &rejection.code),
+            };
             (
                 rejection.code.clone(),
+                detail_override
+                    .as_ref()
+                    .and_then(|detail| detail.rule)
+                    .unwrap_or_else(|| rule_for(&rejection.code)),
                 expected,
                 actual,
                 None,
@@ -681,6 +714,7 @@ fn reject_set(
         } else {
             (
                 "atomic_set_refused".to_string(),
+                rule_for("atomic_set_refused"),
                 TypedValue::string("applied"),
                 TypedValue::string("refused"),
                 Some(members[culprit].proposal_id.clone()),
@@ -689,8 +723,7 @@ fn reject_set(
         };
         // Only ledger-destined codes reach a batch: operational refusals
         // never became durable proposals in the first place.
-        let rejection =
-            Rejection::new(table, &code, rule_for(&code), expected, actual).map_err(internal)?;
+        let rejection = Rejection::new(table, &code, rule, expected, actual).map_err(internal)?;
         if rejection.destiny(table) != Destiny::Ledger {
             return Err(internal(format!(
                 "{code} has operational destiny and cannot enter the ledger"
@@ -778,7 +811,7 @@ fn reject_precondition(
         &verdicts,
         transition,
         None,
-        Some((precondition.expected, precondition.actual)),
+        Some(CulpritDetail::of(&precondition)),
     )
 }
 
@@ -1261,6 +1294,14 @@ mod tests_support {
     }
 
     pub fn seed_belief(writer: &mut LedgerWriter, slug: &str) -> String {
+        seed_belief_with(writer, slug, serde_json::json!({}))
+    }
+
+    pub fn seed_belief_with(
+        writer: &mut LedgerWriter,
+        slug: &str,
+        fields: serde_json::Value,
+    ) -> String {
         let store = writer.store_id().to_string();
         let belief_id = schema::migrate_id(&store, "belief", slug);
         let entity_id = schema::migrate_id(&store, "entity", slug);
@@ -1279,7 +1320,7 @@ mod tests_support {
                 aliases: vec![format!("{slug}.md")],
             },
             content: format!("# {slug}\n"),
-            fields: serde_json::json!({}),
+            fields,
             basis: BeliefBasis::Unsupported {
                 reason: "seed".into(),
             },
@@ -2101,6 +2142,173 @@ mod tests {
             derive_commit_set_id("8222222222222222222222222222222e", &[a]),
             "two runs proposing the same thing are two sets"
         );
+    }
+
+    /// A type doc whose field names deliberately say nothing a policy rule
+    /// could pattern-match on: the roles do all the work.
+    const METRIC_TYPE_DOC: &str = "---\ntype: Type\nfields:\n  status: { kind: status }\n  \
+         steward: { kind: text, role: owner }\n  \
+         breaks_when: { kind: text, role: failure_condition }\n---\n\n# Metric\n";
+
+    const P3: &str = "0000000000000000000000000000000c";
+
+    #[test]
+    fn an_unqualified_promotion_parks_visibly_and_clears_when_the_roles_arrive() {
+        // THE WHOLE PHASE, END TO END, through the vault's real YAML: the
+        // gate refuses, the refusal leaves a worklist entry naming exactly
+        // what is missing, and filling those fields both promotes the item
+        // and closes the entry. A gate that only said "no" would be a wall.
+        let _sink = crate::runtime::sink::test_lock();
+        let vault = testutil::temp_vault("commit-park");
+        std::fs::create_dir_all(vault.join("types")).unwrap();
+        std::fs::write(vault.join("types/metric.md"), METRIC_TYPE_DOC).unwrap();
+        crate::runtime::sink::arm(&vault).unwrap();
+
+        let mut writer = LedgerWriter::open(&vault, "1111111111111111111111111111111a").unwrap();
+        let store = writer.store_id().to_string();
+        let belief = seed_belief_with(
+            &mut writer,
+            "pick-a-metric",
+            serde_json::json!({ "type": "Metric" }),
+        );
+        // The profile an honest caller must pin is the one the type doc
+        // implies — derived here from the file on disk, not hand-written.
+        let profile = crate::policy::qualification::read_types(&vault).unwrap()["Metric"]
+            .profile()
+            .unwrap();
+        let promote = |id: &str, version: u64| {
+            proposal(
+                id,
+                RUN,
+                ProposalOp::PromoteDraft {
+                    belief_id: belief.clone(),
+                    qualification_profile: profile.clone(),
+                },
+                vec![target(TargetClass::Belief, &belief, Some(version))],
+                Risk::Medium,
+            )
+        };
+
+        submit_proposal(&table(), &mut writer, &actor(), &promote(P1, 1)).unwrap();
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::InitialReject);
+        let SubmitResult::Rejected { rejection, .. } = &outcome.results[0] else {
+            panic!("expected a refusal, got {:?}", outcome.results[0]);
+        };
+        assert_eq!(rejection.code.as_str(), "qualification_missing");
+        assert_eq!(rejection.rule.as_str(), "qualification_roles_present");
+        // The card can say what was wanted and what was there.
+        assert_eq!(
+            rejection.expected,
+            TypedValue::string("failure_condition,owner")
+        );
+        // Ledger destiny: "this item is not ready" is epistemic history, not
+        // a plumbing mistake.
+        assert_eq!(rejection.code.destiny(&table()), Destiny::Ledger);
+
+        let parked = |store: &str| {
+            crate::runtime::sink::with_sink(|conn| {
+                crate::runtime::parked::open_rows(conn, store).unwrap()
+            })
+            .unwrap()
+        };
+        let rows = parked(&store);
+        assert_eq!(rows.len(), 1, "the refusal must leave a visible trace");
+        assert_eq!(rows[0].belief_id, belief);
+        assert_eq!(rows[0].type_id, "Metric");
+        assert_eq!(rows[0].missing_roles, vec!["failure_condition", "owner"]);
+
+        // Fill the two fields the roles point at. An UPDATE is not gated —
+        // only promotion is.
+        let fill = ProposalOp::UpdateBelief {
+            belief_id: belief.clone(),
+            patch: vec![
+                schema::PatchOp {
+                    field_path: "/fields/steward".into(),
+                    before: TypedValue::Missing,
+                    after: TypedValue::string("[[Ada]]"),
+                },
+                schema::PatchOp {
+                    field_path: "/fields/breaks_when".into(),
+                    before: TypedValue::Missing,
+                    after: TypedValue::string("the pipeline stops emitting"),
+                },
+            ],
+            basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                reason: "seed".into(),
+            },
+        };
+        submit(&mut writer, P2, fill, &belief, Risk::Medium);
+        let filled =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P2.to_string()]).unwrap();
+        assert_eq!(filled.transition, TransitionCode::Apply);
+        assert_eq!(
+            parked(&store).len(),
+            1,
+            "filling the fields is not itself a promotion — the item stays parked until one"
+        );
+
+        submit_proposal(&table(), &mut writer, &actor(), &promote(P3, 2)).unwrap();
+        let promoted =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P3.to_string()]).unwrap();
+        assert_eq!(promoted.transition, TransitionCode::Apply);
+        assert_eq!(
+            state(&writer, &vault).beliefs[&belief].qualification,
+            crate::ledger::schema::Qualification::Qualified
+        );
+        assert!(
+            parked(&store).is_empty(),
+            "the debt lane must let go once the roles pass"
+        );
+        // Closed, not deleted: the lane can still say how long it sat.
+        // Scoped to this store: the sink is process-global, so a unit test
+        // running in parallel may hold a row of its own in this database.
+        let total = crate::runtime::sink::with_sink(|conn| {
+            conn.query_row(
+                "SELECT count(*) FROM parked_promotions WHERE store_id = ?1",
+                [&store],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        })
+        .unwrap();
+        assert_eq!(total, 1);
+
+        crate::runtime::sink::disarm();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn an_unqualified_item_is_still_editable_and_still_tombstonable() {
+        // NEVER BLOCKING CAPTURE. The gate fires on promotion and nowhere
+        // else, so an item missing every required role is still an ordinary
+        // record that can be edited, corrected, and retired.
+        let vault = testutil::temp_vault("commit-park-free");
+        std::fs::create_dir_all(vault.join("types")).unwrap();
+        std::fs::write(vault.join("types/metric.md"), METRIC_TYPE_DOC).unwrap();
+        let mut writer = LedgerWriter::open(&vault, "1111111111111111111111111111111a").unwrap();
+        let belief = seed_belief_with(
+            &mut writer,
+            "rough-note",
+            serde_json::json!({ "type": "Metric" }),
+        );
+
+        submit(
+            &mut writer,
+            P1,
+            update_op(&belief, "still thinking"),
+            &belief,
+            Risk::Medium,
+        );
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::Apply);
+        assert_eq!(
+            state(&writer, &vault).beliefs[&belief].current().revision,
+            2
+        );
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }
 
