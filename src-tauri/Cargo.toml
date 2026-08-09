@@ -36,3 +36,9 @@ base64 = "0.22"
 # compiles SQLite in — no system dependency, and one pinned SQLite version
 # is what makes rebuild-from-zero byte-deterministic.
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+# `normalize_alias_v1` (M22.1): NFKC normalization tables. Rust/TS parity is
+# pinned by shared conformance vectors, not by trusting either runtime.
+unicode-normalization = "0.1"
+# Ordered maps for schema-v1 TypedValue objects (M22.1). Already in-tree as
+# serde_json's preserve_order backend; used directly for typed recursion.
+indexmap = { version = "2", features = ["serde"] }

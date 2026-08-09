@@ -21,6 +21,7 @@
 pub mod frame;
 pub mod index;
 pub mod recovery;
+pub mod schema;
 pub mod segment;
 pub mod shadow;
 pub mod store;
