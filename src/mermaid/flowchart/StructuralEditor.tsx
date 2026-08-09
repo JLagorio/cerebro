@@ -202,8 +202,7 @@ export function StructuralEditor({
       // with the render id (`cerebro-mermaid-3-flowchart-…` — see
       // svgBinding.ts), so a prefix match finds nothing live. The id is only
       // a coarse filter here; the binding resolves it by element identity.
-      const hitGroup =
-        (target?.closest('g.node[id*="flowchart-"]') as SVGGElement | null) ?? null;
+      const hitGroup = (target?.closest('g.node[id*="flowchart-"]') as SVGGElement | null) ?? null;
 
       if (hitGroup !== null) {
         // Landed inside a node group — resolve it back to a model id and

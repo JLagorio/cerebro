@@ -1,12 +1,24 @@
 import { useState } from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetMockFs } from '@/lib/mockIpc';
+import { useUiStore } from '@/stores/uiStore';
+import { useVaultStore } from '@/stores/vaultStore';
 import { MermaidBlockView } from './MermaidBlockView';
 
 vi.mock('./render', () => ({ renderMermaid: vi.fn() }));
 import { renderMermaid } from './render';
 const renderMock = vi.mocked(renderMermaid);
+
+// Spyable pass-through: the save-as-file tests assert the real mock-backend
+// behavior (dedupe, raw bytes) AND need one rejection path on demand.
+vi.mock('@/lib/ipc', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ipc')>();
+  return { ...actual, writeTextFile: vi.fn(actual.writeTextFile) };
+});
+import { writeTextFile } from '@/lib/ipc';
+const writeTextFileMock = vi.mocked(writeTextFile);
 
 /**
  * The visual pane renders the `code` PROP directly, never a `draft` (M29.18
@@ -253,5 +265,60 @@ describe('MermaidBlockView visual/code mode (M29.18)', () => {
     expect((screen.getByLabelText('Mermaid source') as HTMLTextAreaElement).value).toBe(
       'flowchart TD\n  A[Undone] --> B[End]',
     );
+  });
+});
+
+describe('MermaidBlockView save as file (M29.22)', () => {
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  const toasts = () => useUiStore.getState().toasts.map((t) => t.message);
+
+  beforeEach(async () => {
+    resetMockFs();
+    useUiStore.setState({ toasts: [] });
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    writeTextFileMock.mockClear();
+    await useVaultStore.getState().openVault('/demo-vault');
+  });
+
+  it('writes the source to diagrams/<slug>.mmd and toasts the landing path', async () => {
+    const code = 'sequenceDiagram\n  A->>B: hi';
+    render(<MermaidBlockView code={code} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save as file…' }));
+    await waitFor(() => expect(toasts()).toContain('Saved to diagrams/sequence.mmd'));
+    expect(writeTextFileMock).toHaveBeenCalledWith('/demo-vault', 'diagrams/sequence.mmd', code);
+    // Verbatim bytes, and the new entry is scanned in.
+    expect(fs().get('diagrams/sequence.mmd')).toBe(code);
+    expect(useVaultStore.getState().entries.some((e) => e.path === 'diagrams/sequence.mmd')).toBe(
+      true,
+    );
+  });
+
+  it('dedupes against an existing file and toasts where it actually landed', async () => {
+    const code = '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B';
+    render(<MermaidBlockView code={code} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save as file…' }));
+    // The seeded demo vault already holds a flowchart-slugged sibling? No —
+    // the first save claims flowchart.mmd; the second proves the dedupe.
+    await waitFor(() => expect(toasts()).toContain('Saved to diagrams/flowchart.mmd'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save as file…' }));
+    await waitFor(() => expect(toasts()).toContain('Saved to diagrams/flowchart-2.mmd'));
+    expect(fs().get('diagrams/flowchart-2.mmd')).toBe(code);
+  });
+
+  it('is hidden while editing and on empty blocks', async () => {
+    render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Save as file…' })).toBeNull();
+    cleanup();
+    render(<MermaidBlockView code={'graph TD\n  A --> B'} onChangeCode={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Save as file…' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.queryByRole('button', { name: 'Save as file…' })).toBeNull();
+  });
+
+  it('toasts the failure instead of throwing (store-invariant style)', async () => {
+    writeTextFileMock.mockRejectedValueOnce(new Error('disk full'));
+    render(<MermaidBlockView code={'graph TD\n  A --> B'} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Save as file…' }));
+    await waitFor(() => expect(toasts()).toContain("Couldn't save diagram: disk full"));
   });
 });

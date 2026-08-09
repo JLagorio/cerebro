@@ -51,6 +51,13 @@ describe('Rail', () => {
     expect(screen.getByRole('button', { name: 'Home' }).className).not.toContain('cortex');
     cleanup();
 
+    // M29.21: a standalone .mmd is a document surface — Docs owns it too.
+    useNavStore.setState({ selection: { kind: 'diagram', path: 'diagrams/pipeline.mmd' } });
+    render(<Rail />);
+    expect(screen.getByRole('button', { name: 'Docs' }).className).toContain('cortex');
+    expect(screen.getByRole('button', { name: 'Home' }).className).not.toContain('cortex');
+    cleanup();
+
     // M12.5: projects retired — a container selection is a Collection.
     useNavStore.setState({ selection: { kind: 'collection', folder: 'projects/x' } });
     render(<Rail />);
@@ -65,6 +72,7 @@ describe('Rail', () => {
       { kind: 'settings' } as const,
       { kind: 'changes' } as const,
       { kind: 'knowledge' } as const,
+      { kind: 'diagram', path: 'diagrams/pipeline.mmd' } as const,
     ]) {
       useNavStore.setState({ selection });
       render(<Rail />);

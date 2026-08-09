@@ -229,3 +229,60 @@ test('structural editing round-trips to the file', async ({ page }) => {
   await page.keyboard.press('ControlOrMeta+z');
   await expect(host).toContainText('Idea', { timeout: 15_000 });
 });
+
+// M29.21–.23: a standalone .mmd opens as a full diagram page, and edits
+// round-trip RAW — the file's leading `---` block is mermaid config, and it
+// must still be the first bytes on (mock) disk after the debounced autosave.
+test('a .mmd file opens as a diagram page and edits round-trip raw', async ({ page }) => {
+  // Same chunk-load headroom as the tests above (the seed pins ELK layout,
+  // so this render fetches the lazy elk chunk too).
+  test.setTimeout(60_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  // -- Open the seeded diagram through quick open ------------------------
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpenInput = page.getByTestId('quick-open-input');
+  await expect(quickOpenInput).toBeVisible();
+  await quickOpenInput.fill('Pipeline');
+  const result = page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first();
+  await expect(result).toBeVisible();
+  // Quick Open labels the row as a Diagram, not a Note (M29.21).
+  await expect(result).toContainText('Diagram');
+  await result.click();
+
+  // -- The page IS an editor: a flowchart opens in the structural editor --
+  await expect(page.getByTestId('diagram-page')).toBeVisible();
+  await expect(page.getByTestId('diagram-title')).toHaveText('Pipeline');
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 20_000 });
+
+  // -- Edit through the code pane and let the autosave settle -------------
+  await page.getByRole('button', { name: 'Show code' }).click();
+  const source = page.getByLabel('Mermaid source');
+  // The whole file is in the textarea, mermaid header included.
+  await expect(source).toHaveValue(/^---\nconfig:/);
+  const current = await source.inputValue();
+  await source.fill(`${current}  D --> E[Ship]\n`);
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('diagrams/pipeline.mmd')), {
+      timeout: 15_000,
+    })
+    .toContain('E[Ship]');
+
+  // -- The raw round-trip: the config header is still the first bytes -----
+  const raw = await page.evaluate(() => window.__cerebroMockFs.get('diagrams/pipeline.mmd'));
+  expect(raw?.startsWith('---\nconfig:\n  layout: elk\n---\n')).toBe(true);
+});

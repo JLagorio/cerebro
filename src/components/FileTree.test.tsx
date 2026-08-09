@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as mockIpc from '@/lib/mockIpc';
 import { resetMockFs } from '@/lib/mockIpc';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -94,6 +95,28 @@ describe('FileTree', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
     await waitFor(() => expect(fs().has(`${ROOT}/meetings/kickoff-notes.md`)).toBe(true));
     expect(fs().has(`${ROOT}/meetings/kickoff.md`)).toBe(false);
+  });
+
+  // M29.21: renaming used to stamp `.md` onto every file node, so a rename
+  // turned pipeline.mmd into pipeline.md — no longer a diagram — and then
+  // spliced `# title` into raw mermaid source on top of it.
+  it('renaming a .mmd keeps its extension and never writes an H1 into it', async () => {
+    const MMD = '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n';
+    await mockIpc.writeTextFile('/demo-vault', `${ROOT}/flow.mmd`, MMD);
+    await useVaultStore.getState().rescan();
+    renderTree();
+    // Title comes from the filename stem — 'Flow'.
+    fireEvent.click(screen.getByRole('button', { name: 'Options for Flow' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    fireEvent.change(screen.getByPlaceholderText('Page name'), {
+      target: { value: 'Build flow' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => expect(fs().has(`${ROOT}/build-flow.mmd`)).toBe(true));
+    expect(fs().has(`${ROOT}/flow.mmd`)).toBe(false);
+    expect(fs().has(`${ROOT}/build-flow.md`)).toBe(false);
+    // The bytes are untouched: no `# Build flow` spliced into the source.
+    expect(fs().get(`${ROOT}/build-flow.mmd`)).toBe(MMD);
   });
 
   // A row's label comes from the note's H1, so renaming only the filename
