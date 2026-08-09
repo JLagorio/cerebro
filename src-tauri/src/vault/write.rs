@@ -540,6 +540,16 @@ pub fn write_concept(
     frontmatter: &serde_json::Map<String, serde_json::Value>,
     body: &str,
 ) -> Result<(), String> {
+    // The M23.3 flip: with an active ledger writer, the concept write is a
+    // committed Belief transition and the file is its byte-stable
+    // projection, written through the manifest-first protocol.
+    if let Some(result) = crate::ledger::concepts::write_concept(vault, rel, frontmatter, body) {
+        return result;
+    }
+    // Legacy file-first path — no active writer for this vault (unit
+    // fixtures, browser builds, a ledger the startup verdict refused; the
+    // refusal is visible through ledger_status, and the M23.6 scan
+    // reconciles once a writer returns).
     let content = concept_write(vault, rel, frontmatter, body)?;
     // "Actor where the call site knows it" (M21.8): the MCP layer already
     // server-stamps `generated.by` into the frontmatter it passes here, so
@@ -622,6 +632,11 @@ pub fn append_knowledge_log(
     title: &str,
     existed: bool,
 ) -> Result<(), String> {
+    // M23.3: the log is a projection too — with an active writer, the
+    // append is a Belief body revision and the file is regenerated.
+    if let Some(result) = crate::ledger::concepts::append_log(vault, rel, title, existed) {
+        return result;
+    }
     let target = safe_join(vault, crate::knowledge::LOG_PATH)?;
     let existing = std::fs::read_to_string(&target).unwrap_or_default();
     let date = chrono::Utc::now().format("%Y-%m-%d").to_string();

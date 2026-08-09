@@ -1493,7 +1493,7 @@ fn typed_at(fields: &serde_json::Value, tokens: &[String]) -> TypedValue {
     typed_from_value(cursor)
 }
 
-fn typed_from_value(value: &serde_json::Value) -> TypedValue {
+pub(crate) fn typed_from_value(value: &serde_json::Value) -> TypedValue {
     match value {
         serde_json::Value::Null => TypedValue::Null { value: () },
         serde_json::Value::Bool(b) => TypedValue::Boolean { value: *b },

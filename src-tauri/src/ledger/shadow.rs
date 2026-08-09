@@ -138,6 +138,21 @@ pub(crate) fn deactivate() {
     }
 }
 
+/// Run `f` against this vault's ACTIVE ledger writer — the door the M23.3
+/// canonical knowledge write paths use. `None` when no writer is active
+/// for the vault (unit fixtures, browser builds, a refused ledger, a
+/// second instance that lost the lock); the caller keeps its legacy
+/// file-first behavior there, and `ledger_status` names why.
+pub fn with_writer<T>(vault: &Path, f: impl FnOnce(&mut LedgerWriter) -> T) -> Option<T> {
+    let mut guard = active().lock().ok()?;
+    let active = guard.as_mut()?;
+    if active.vault != normalize(vault) {
+        return None;
+    }
+    let writer = active.writer.as_mut()?;
+    Some(f(writer))
+}
+
 /// Record one shadow event for `vault`. Best-effort and invisible — see
 /// the module doc. A failed append is swallowed: shadow mode observes
 /// writes, it never gates them.
@@ -415,17 +430,25 @@ mod tests {
             read.frames.iter().map(|f| f.kind.as_str()).collect();
         assert!(kinds.contains("vault.write"));
         assert!(kinds.contains("vault.rename"));
-        assert!(kinds.contains("knowledge.write_concept"));
+        // The M23.3 flip: a concept write is a committed Belief creation
+        // (and the log append its revision), not a shadow observation.
+        assert!(kinds.contains("belief.created"));
+        assert!(kinds.contains("belief.revised"));
         assert!(kinds.contains("knowledge.verify"));
 
         // Bodies carry what the plan says they carry.
         let concept = read
             .frames
             .iter()
-            .find(|f| f.kind == "knowledge.write_concept")
+            .find(|f| {
+                f.kind == "belief.created"
+                    && f.body["subject"]["aliases"] == serde_json::json!(["concepts/soak.md"])
+            })
             .unwrap();
-        assert_eq!(concept.body["path"], "knowledge/concepts/soak.md");
-        assert_eq!(concept.body["actor"], "soak-agent");
+        assert_eq!(concept.body["actor"]["id"], "soak-agent");
+        assert_eq!(concept.body["fields"]["generated"]["by"], "soak-agent");
+        // ...and the file on disk was its byte-stable projection until the
+        // human verify stamp patched it below.
         let verify = read
             .frames
             .iter()

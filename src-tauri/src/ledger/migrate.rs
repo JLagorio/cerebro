@@ -631,7 +631,7 @@ fn verified_stamps(fields: &serde_json::Value) -> Vec<serde_json::Value> {
     }
 }
 
-fn wikilinks(value: Option<&serde_json::Value>) -> Vec<String> {
+pub(crate) fn wikilinks(value: Option<&serde_json::Value>) -> Vec<String> {
     value
         .and_then(|v| v.as_array())
         .map(|items| {
@@ -648,7 +648,7 @@ fn wikilinks(value: Option<&serde_json::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn stem_of(path: &str) -> &str {
+pub(crate) fn stem_of(path: &str) -> &str {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.strip_suffix(".md").unwrap_or(name)
 }
