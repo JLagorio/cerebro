@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
 import { renderMermaid } from './render';
@@ -64,12 +65,12 @@ export function MermaidBlockView({
 
       {editing && (
         <div className="flex flex-wrap">
-          <textarea
+          <HighlightedTextarea
             autoFocus
-            aria-label="Mermaid source"
+            ariaLabel="Mermaid source"
             value={draft}
             placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={setDraft}
             onKeyDown={(e) => {
               // BlockNote hotkeys must not fire while typing in the source box.
               e.stopPropagation();
@@ -82,7 +83,6 @@ export function MermaidBlockView({
               }
             }}
             rows={Math.max(6, draft.split('\n').length + 1)}
-            className="min-w-[260px] flex-1 basis-[280px] resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-sm leading-[1.5] text-n-800 outline-none"
           />
           <LivePreview code={draft} />
         </div>
