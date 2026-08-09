@@ -552,3 +552,92 @@ describe('setEdgeAnimate placement and targeting (M29.31)', () => {
     expect(edgeAnimated(again, edges(again)[0])).toBe(true);
   });
 });
+
+describe('deleting an edge sweeps the meta it orphans (M29.31)', () => {
+  // An unclaimed `e1@{ … }` is not inert: with no edge to name, mermaid falls
+  // through to addVertex (flowDb.ts:163-176) and DRAWS A NODE. Measured —
+  // deleting B→C below left `V[A, B, e1]`, a stray box where the edge was.
+  const SRC = 'flowchart TD\n  A --> B\n  B e1@--> C\n  e1@{ animate: true }';
+
+  it('deleteEdge removes the companion with the edge', () => {
+    const m = parseFlowchart(SRC)!;
+    const target = edges(m).find((e) => e.to === 'C')!;
+    expect(serialize(deleteEdge(m, target))).toBe('flowchart TD\n  A --> B');
+  });
+
+  it('deleteNode removes it too, from either end of the edge', () => {
+    expect(serialize(deleteNode(parseFlowchart(SRC)!, 'C'))).toBe('flowchart TD\n  A --> B');
+    expect(serialize(deleteNode(parseFlowchart(SRC)!, 'B'))).toBe('flowchart TD');
+  });
+
+  it('a companion whose id survives on a rebuilt line is left alone', () => {
+    // The id rides the first survivor, so the meta still names a real edge.
+    const grp = 'flowchart TD\n  A e1@--> B & C\n  e1@{ animate: true }';
+    const m = parseFlowchart(grp)!;
+    const out = serialize(
+      deleteEdge(
+        m,
+        edges(m).find((e) => e.to === 'B')!,
+      ),
+    );
+    expect(out).toBe('flowchart TD\n  A e1@--> C\n  e1@{ animate: true }');
+    const again = parseFlowchart(out)!;
+    expect(edgeAnimated(again, edges(again)[0])).toBe(true);
+  });
+
+  it('a companion another edge line still declares is left alone', () => {
+    // Mermaid gives a duplicate id to the FIRST edge that claims it, so
+    // deleting ours just promotes the other one — the meta stays live.
+    const dup = ['flowchart TD', '  A e1@--> B', '  X e1@--> Y', '  e1@{ animate: true }'].join(
+      '\n',
+    );
+    const m = parseFlowchart(dup)!;
+    const out = serialize(
+      deleteEdge(
+        m,
+        edges(m).find((e) => e.to === 'B')!,
+      ),
+    );
+    expect(out).toBe('flowchart TD\n  X e1@--> Y\n  e1@{ animate: true }');
+  });
+
+  it('an unrelated node meta line is never swept', () => {
+    const src = 'flowchart TD\n  A --> B\n  B e1@--> C\n  A@{ shape: cyl }';
+    const m = parseFlowchart(src)!;
+    const out = serialize(
+      deleteEdge(
+        m,
+        edges(m).find((e) => e.to === 'C')!,
+      ),
+    );
+    expect(out).toBe('flowchart TD\n  A --> B\n  A@{ shape: cyl }');
+  });
+});
+
+describe('setEdgeLabel writes a label mermaid can lex (M29.31)', () => {
+  it('quotes the characters that would otherwise kill the diagram', () => {
+    // Measured: bare `(`, `@`, `[`, `{`, `"` in an edge label are all parse
+    // errors — a user typing "Deploy (prod)" blanked the whole render.
+    for (const [label, expected] of [
+      ['Deploy (prod)', '  B --x|"Deploy (prod)"| C'],
+      ['a@b', '  B --x|"a@b"| C'],
+      ['a[b]', '  B --x|"a[b]"| C'],
+      ['ok', '  B --x|ok| C'],
+      ['a"b', `  B --x|"a'b"| C`],
+    ]) {
+      const m = parseFlowchart('flowchart TD\n  B --x C')!;
+      const out = serialize(setEdgeLabel(m, edges(m)[0], label));
+      expect([label, out.split('\n')[1]]).toEqual([label, expected]);
+      // And the line stays ours, with the value intact.
+      const again = parseFlowchart(out)!;
+      expect([label, again.lines[1].parsed.kind]).toEqual([label, 'edges']);
+      expect([label, edges(again)[0].label]).toEqual([label, label.replaceAll('"', "'")]);
+    }
+  });
+
+  it('the pipe is still substituted, not quoted — the Stage-C scar stands', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const out = serialize(setEdgeLabel(m, edges(m)[0], 'a|b'));
+    expect(out).toBe('flowchart TD\n  A -->|a/b| B');
+  });
+});

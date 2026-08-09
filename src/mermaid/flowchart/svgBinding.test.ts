@@ -139,3 +139,55 @@ describe('bindFlowchartSvg', () => {
     expect(binding.edgeEls[1]).toMatchObject({ from: 'B', to: 'my-node' });
   });
 });
+
+// A user-authored edge id renders VERBATIM as the path id (getEdgeId,
+// utils.ts:946, returns its 4th argument untouched when truthy), so
+// `A e1@--> B` draws `<path id="e1">` and never an `L_…` id. Measured live:
+// before this arm, setEdgeAnimate minting an id UNBOUND the very edge whose
+// toggle produced it — a one-way control.
+describe('bindFlowchartSvg and user-authored edge ids (M29.31)', () => {
+  const idSvg = [
+    '<svg viewBox="0 0 100 100">',
+    '  <g class="node default" id="flowchart-A-0"><rect/></g>',
+    '  <g class="node default" id="flowchart-B-1"><rect/></g>',
+    '  <g class="node default" id="flowchart-C-2"><rect/></g>',
+    '  <path class="flowchart-link" id="L_A_B_0"/>',
+    '  <path class="flowchart-link" id="e1"/>',
+    '</svg>',
+  ].join('\n');
+
+  it('binds an edge whose id the author wrote', () => {
+    const model = parseFlowchart('flowchart TD\n  A --> B\n  B e1@--> C\n  e1@{ animate: true }')!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = idSvg;
+    const binding = bindFlowchartSvg(host, model);
+    expect(binding.edgeEls).toHaveLength(2);
+    expect(binding.edgeEls[0]).toMatchObject({ from: 'A', to: 'B' });
+    expect(binding.edgeEls[1]).toMatchObject({ from: 'B', to: 'C', id: 'e1' });
+  });
+
+  it('leaves an id path unbound when the model has no such edge', () => {
+    const model = parseFlowchart('flowchart TD\n  A --> B')!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = idSvg;
+    const binding = bindFlowchartSvg(host, model);
+    expect(binding.edgeEls).toHaveLength(1);
+    expect(binding.edgeEls[0]).toMatchObject({ from: 'A', to: 'B' });
+  });
+
+  it('still strips the render-id prefix a real browser adds', () => {
+    const model = parseFlowchart('flowchart TD\n  B e1@--> C')!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = [
+      '<svg id="cerebro-mermaid-3" viewBox="0 0 100 100">',
+      '  <path class="flowchart-link" id="cerebro-mermaid-3-e1"/>',
+      '</svg>',
+    ].join('\n');
+    const binding = bindFlowchartSvg(host, model);
+    expect(binding.edgeEls).toHaveLength(1);
+    expect(binding.edgeEls[0]).toMatchObject({ from: 'B', to: 'C', id: 'e1' });
+  });
+});

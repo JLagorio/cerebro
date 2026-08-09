@@ -710,3 +710,115 @@ describe('edge ids and the meta they own (M29.31)', () => {
     expect(edgeAnimated(idless, edges(idless)[0])).toBe(false);
   });
 });
+
+describe('an o/x marker only starts a link at a boundary (M29.31)', () => {
+  // `o` and `x` are ordinary NODE_STRING characters (flow.jison:207), so a
+  // start marker only begins a link where an id could not have continued.
+  // Anchoring the marker anywhere ate the last character of the preceding id:
+  // measured against 11.16.0, `Foo--oBar` is `Foo --o Bar`, and reading it as
+  // `Fo o--o Bar` invented a node `Fo`, hid `Foo`, and made any edit that
+  // dirtied the line a silent rename.
+  const AT_BOUNDARY: [string, string, string, string][] = [
+    // source, from, to, expected head
+    ['Foo--oBar', 'Foo', 'Bar', 'circle'],
+    ['Repo--oDB', 'Repo', 'DB', 'circle'],
+    ['Ax--xB', 'Ax', 'B', 'cross'],
+    ['A1o--oB', 'A1o', 'B', 'circle'],
+    ['A.o--oB', 'A.o', 'B', 'circle'],
+    ['A-o--oB', 'A-o', 'B', 'circle'],
+    ['A_o--oB', 'A_o', 'B', 'circle'],
+    ['Ao==oB', 'Ao', 'B', 'circle'],
+    ['Ax==xB', 'Ax', 'B', 'cross'],
+    ['Ao-.-oB', 'Ao', 'B', 'circle'],
+    ['Ao--o B', 'Ao', 'B', 'circle'],
+  ];
+
+  it('an id ending in o/x keeps its last character, across every stroke', () => {
+    for (const [body, from, to, head] of AT_BOUNDARY) {
+      const m = parseFlowchart(`flowchart TD\n  ${body}`)!;
+      const e = edges(m);
+      expect([body, e.length]).toEqual([body, 1]);
+      expect([body, e[0].from, e[0].to, e[0].arrow.head]).toEqual([body, from, to, head]);
+      expect([body, [...nodes(m).keys()]]).toEqual([body, [from, to]]);
+      expect([body, serialize(m)]).toEqual([body, `flowchart TD\n  ${body}`]);
+    }
+  });
+
+  it('a dirtied line no longer renames the node it starts from', () => {
+    // The failure this closes: `Foo--oBar` re-emitted as `Fo --o Bar`.
+    const m = parseFlowchart('flowchart TD\n  Foo--oBar')!;
+    m.lines[1].dirty = true;
+    expect(serialize(m)).toBe('flowchart TD\n  Foo --o Bar');
+  });
+
+  it('non-id characters are still boundaries, so real double links survive', () => {
+    // `]`, `)`, `}`, `@` and whitespace all end an id, and `<` is not an id
+    // character at all — every one of these agreed with mermaid before and
+    // must keep agreeing.
+    const doubles = [
+      'A o--o B',
+      'A x--x B',
+      'A o==o B',
+      'A x-.-x B',
+      'A[x]o--oB',
+      'A(x)o--oB',
+      'A{x}x--xB',
+      'A e1@o--o B',
+      'A<-->B',
+      'A <--> B',
+    ];
+    for (const body of doubles) {
+      const m = parseFlowchart(`flowchart TD\n  ${body}`)!;
+      expect([body, m.lines[1].parsed.kind]).toEqual([body, 'edges']);
+      expect([body, edges(m)[0].arrow.head]).toEqual([body, 'double']);
+      expect([body, serialize(m)]).toEqual([body, `flowchart TD\n  ${body}`]);
+    }
+  });
+});
+
+describe('edge labels quote what mermaid cannot lex bare (M29.31)', () => {
+  // Edge labels answer to the same lexer state as bracket labels: measured
+  // char by char against 11.16.0, `( ) [ ] { } @ "` are parse errors bare and
+  // all of them are fine quoted, and mermaid strips a surrounding pair
+  // (flowDb.ts:304-306) so quoting is lossless.
+  it('strips a surrounding quote pair on parse, exactly as mermaid does', () => {
+    const m = parseFlowchart('flowchart TD\n  A -->|"Deploy (prod)"| B')!;
+    expect(edges(m)[0].label).toBe('Deploy (prod)');
+    expect(serialize(m)).toBe('flowchart TD\n  A -->|"Deploy (prod)"| B');
+  });
+
+  it('re-quotes only what needs it, and is a fixed point either way', () => {
+    for (const [label, emitted] of [
+      ['Deploy (prod)', '|"Deploy (prod)"|'],
+      ['a@b', '|"a@b"|'],
+      ['a[b]', '|"a[b]"|'],
+      ['a{b}', '|"a{b}"|'],
+      ['plain words', '|plain words|'],
+      ['a-->b', '|a-->b|'],
+      ['über 中文', '|über 中文|'],
+    ]) {
+      const m = parseFlowchart('flowchart TD\n  A --> B')!;
+      const line = m.lines[1].parsed;
+      if (line.kind !== 'edges') throw new Error('expected edges');
+      line.segments[0].label = label;
+      m.lines[1].dirty = true;
+      const once = serialize(m);
+      expect([label, once]).toEqual([label, `flowchart TD\n  A -->${emitted} B`]);
+
+      // Our own parser reads the value straight back, quotes and all.
+      const again = parseFlowchart(once)!;
+      expect([label, again.lines[1].parsed.kind]).toEqual([label, 'edges']);
+      expect([label, edges(again)[0].label]).toEqual([label, label]);
+      again.lines[1].dirty = true;
+      expect([label, serialize(again)]).toEqual([label, once]);
+    }
+  });
+
+  it('an empty label, quoted or not, is not ours — both are parse errors', () => {
+    for (const body of ['A -->|| B', 'A -->|""| B']) {
+      const m = parseFlowchart(`flowchart TD\n  ${body}`)!;
+      expect([body, m.lines[1].parsed.kind]).toEqual([body, 'opaque']);
+      expect([body, serialize(m)]).toEqual([body, `flowchart TD\n  ${body}`]);
+    }
+  });
+});

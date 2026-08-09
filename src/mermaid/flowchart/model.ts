@@ -327,19 +327,30 @@ function classifyArrow(
  *   closing character mermaid does;
  * - the dotted rule's leading `-` is optional upstream (`A .-> B` is a real
  *   dotted arrow) but required here, so that form goes opaque.
+ *
+ * The LEFT BOUNDARY is load-bearing and was missing at first. `o` and `x` are
+ * ordinary `NODE_STRING` characters (flow.jison:207), so a marker only starts
+ * a link where an id could not have continued: measured, `Foo--oBar` is
+ * `Foo --o Bar`, NOT `Fo o--o Bar`, and reading it the second way both
+ * invented a node `Fo` and lost `Foo` — after which any edit that dirtied the
+ * line silently renamed the node. `<` is exempt: it is not an id character,
+ * so `A<-->B` was never ambiguous.
  */
 function matchArrow(
   text: string,
   i: number,
 ): { token: string; stroke: EdgeStroke; head: EdgeHead } | null {
   const slice = text.slice(i);
+  const startOk = i === 0 || !/[A-Za-z0-9_.-]/.test(text[i - 1]);
   let m = slice.match(/^([<ox])?(-{2,}|={2,})([>ox])?/);
   if (m !== null) {
+    if (m[1] !== undefined && m[1] !== '<' && !startOk) return null;
     const stroke: EdgeStroke = m[2][0] === '=' ? 'thick' : 'normal';
     return classifyArrow(m[0], stroke, m[1], m[3], m[2].length);
   }
   m = slice.match(/^([<ox])?-(\.+)-([>ox])?/);
   if (m !== null) {
+    if (m[1] !== undefined && m[1] !== '<' && !startOk) return null;
     return classifyArrow(m[0], 'dotted', m[1], m[3], m[2].length + 2);
   }
   m = slice.match(/^~{3,}/);
@@ -413,11 +424,21 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
           if (close === -1) return null;
           label = trimmed.slice(i + 1, close);
           i = close + 1;
-          // `A -->|| B` is a PARSE ERROR upstream — `arrowText: PIPE text
-          // PIPE` (flow.jison:501) needs at least one token, and `| |` is the
-          // shortest thing that satisfies it (measured: it yields the empty
-          // label). A line mermaid cannot parse is not one we may claim to
-          // own, so it goes opaque with its bytes intact.
+          // A quoted edge label means its CONTENTS, not the quotes: mermaid
+          // strips a surrounding pair before storing (flowDb.ts:304-306),
+          // exactly as parseNodeToken does for brackets. Storing the stripped
+          // text is what lets emitEdgeLabel quote back only when it must —
+          // without this the two would fight and `|"a(b)"|` would re-emit as
+          // `|"'a(b)'"|`, quietly changing the label.
+          if (label.length >= 2 && label.startsWith('"') && label.endsWith('"')) {
+            label = label.slice(1, -1);
+          }
+          // `A -->|| B` and `A -->|""| B` are both PARSE ERRORS upstream —
+          // `arrowText: PIPE text PIPE` (flow.jison:501) needs at least one
+          // token, and `| |` is the shortest thing that satisfies it
+          // (measured: it yields the empty label). A line mermaid cannot
+          // parse is not one we may claim to own, so it goes opaque with its
+          // bytes intact.
           if (label === '') return null;
         }
         // `A ~~~|no| B` IS valid mermaid (measured: an invisible link labeled
@@ -642,6 +663,27 @@ function quoteLabel(label: string): string {
 }
 
 /**
+ * Edge labels answer to the same lexer state as bracket labels, so the same
+ * characters are fatal bare — measured: `-->|Deploy (prod)|` is a PARSE
+ * ERROR, and so are `@ [ ] { } "`. Every one of them is legal quoted, and
+ * mermaid strips the quotes again (flowDb.ts:304-306), so quoting is
+ * lossless and parseEdgeLine reads it straight back.
+ *
+ * `|` is the one character quoting cannot rescue HERE: a quoted pipe is legal
+ * upstream but our own scanner closes the label at the first `|` it sees, so
+ * `setEdgeLabel` substitutes `|` → `/` before this ever runs — the Stage-C
+ * scar, kept on purpose. Everything else is preserved, never dropped.
+ */
+function quoteEdgeLabel(label: string): string {
+  return /[()[\]{}"@]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
+}
+
+/** `|label|`, or nothing. Empty is "no label": `-->||` is a parse error. */
+function emitEdgeLabel(label: string | null): string {
+  return label === null || label === '' ? '' : `|${quoteEdgeLabel(label)}|`;
+}
+
+/**
  * Quote a meta value whenever bare text would not mean itself: the flow
  * mapping's own structural characters (`,` `:` `{` `}`), a `^` (illegal bare
  * per `flow.jison:57`, fine quoted per `flow.jison:52`), a comment-opening
@@ -686,9 +728,9 @@ function emitLine(line: ModelLine): string {
       // Contiguous chains re-emit as chains; ops splits non-contiguous lines.
       let out = `${indent}${p.segments[0].from.map(emitNodeRef).join(' & ')}`;
       for (const seg of p.segments) {
-        out += ` ${seg.id !== null ? `${seg.id}@` : ''}${seg.arrow.raw}${
-          seg.label !== null ? `|${seg.label}|` : ''
-        } ${seg.to.map(emitNodeRef).join(' & ')}`;
+        out += ` ${seg.id !== null ? `${seg.id}@` : ''}${seg.arrow.raw}${emitEdgeLabel(
+          seg.label,
+        )} ${seg.to.map(emitNodeRef).join(' & ')}`;
       }
       return out;
     }

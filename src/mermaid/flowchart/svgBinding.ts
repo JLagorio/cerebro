@@ -106,11 +106,26 @@ export function bindFlowchartSvg(
     if (match !== undefined && !nodeEls.has(match)) nodeEls.set(match, el);
   }
 
-  const byPair = groupByPair(edges(model));
+  const allEdges = edges(model);
+  const byPair = groupByPair(allEdges);
   const edgeEls: FlowchartSvgBinding['edgeEls'] = [];
 
   for (const el of container.querySelectorAll<SVGPathElement>('path.flowchart-link')) {
     const domId = stripRenderId(el.id);
+
+    // A user-authored edge id (`A e1@--> B`, M29.31) renders VERBATIM —
+    // `getEdgeId` (utils.ts:946) returns its 4th argument untouched when
+    // truthy — so the path is `<renderId>-e1` and never matches the `L_…`
+    // scheme below. Without this arm, setEdgeAnimate would be a ONE-WAY
+    // control: minting the id unbinds the very edge whose toggle you just
+    // used (measured — `B->C` disappeared from the binding). Ids are unique
+    // per diagram (`addSingleLink` hands a duplicate an auto id instead,
+    // flowDb.ts:315), so an exact match is unambiguous.
+    const byId = allEdges.filter((e) => e.id !== null && e.id === domId);
+    if (byId.length === 1) {
+      edgeEls.push({ ...byId[0], el });
+      continue;
+    }
 
     // Every (from, to) pair whose "L_<from>_<to>_" text is a prefix of this
     // id, with a purely-numeric remainder — candidates before counter checks.

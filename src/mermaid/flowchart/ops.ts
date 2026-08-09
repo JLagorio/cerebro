@@ -235,6 +235,39 @@ function rebuildEdgeLines(
     });
   }
 
+  // An id this rebuild does not re-emit leaves its `e1@{ … }` companion naming
+  // no edge — and an unclaimed meta id is not inert, it DECLARES A NODE
+  // (flowDb.ts:163-176 falls through to addVertex; measured: deleting the
+  // animated edge of `B e1@--> C` leaves `V[A, B, e1]`, a stray box where the
+  // edge used to be). This is the edge-side twin of the sweep deleteNode
+  // already does for a node's own meta and style companions.
+  const kept = new Set(
+    replacements.flatMap((l) =>
+      l.parsed.kind === 'edges'
+        ? l.parsed.segments.map((sg) => sg.id).filter((x) => x !== null)
+        : [],
+    ),
+  );
+  // An id another edge line also declares stays live: mermaid gives it to the
+  // first `e1@` it parses, so deleting ours just promotes that one.
+  const elsewhere = new Set<string>();
+  next.lines.forEach((l, i) => {
+    if (i === lineIdx || l.parsed.kind !== 'edges') return;
+    for (const sg of l.parsed.segments) {
+      if (sg.id !== null) elsewhere.add(sg.id);
+    }
+  });
+  const lost = new Set(
+    line.parsed.segments
+      .map((sg) => sg.id)
+      .filter((x): x is string => x !== null && !kept.has(x) && !elsewhere.has(x)),
+  );
+  // Companions sit BELOW lineIdx, so drop them first (back to front) and
+  // splice the edge line last, while every index still holds.
+  for (const i of [...lost].flatMap((id) => edgeMetaLinesFor(next, id)).sort((a, b) => b - a)) {
+    next.lines.splice(i, 1);
+  }
+
   next.lines.splice(lineIdx, 1, ...replacements);
 }
 

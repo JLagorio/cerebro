@@ -31,7 +31,14 @@ Source: vendored mermaid at `docs/examples/mermaid-develop` in the **main checko
 - `@{ … }` node metadata: the lexer treats a single-line body as a YAML **flow mapping** wrapped in `{…}` — values containing `,` or `:` must be quoted; `^` and unescaped `"` are illegal in bare values (lexer class `[^}^"]+`). Multi-line YAML block form also works (we treat it as opaque). Unknown keys are silently ignored by mermaid — safe to round-trip; **we preserve them**. Known keys: `shape`, `label`, `labelType`, `icon`, `form`, `pos`, `img`, `w`, `h`, `constraint`.
 - Shape validation: names must be lowercase, no underscore, and in the 49-entry registry, else a render error. `doublecircle` works though undocumented. **`ellipse` is broken upstream (#5976) — we never write it.**
 - `style <id> k:v,…` grammar: comma-separated declarations, `#` hex fine; the text-color key is `color`. **Styling an undeclared id auto-creates a node** — never emit `style` for an id the diagram doesn't declare. `linkStyle` **throws** on an out-of-range index — we do not emit `linkStyle` this wave (it stays opaque).
-- Edge grammar, full surface: `--> --- --o --x <--> o--o x--x` × normal / thick (`==`) / dotted (`-.-`), plus `~~~` invisible; extra body characters lengthen the edge (upstream caps minlen at 10). Edge ids: `A e1@--> B` (lexer `[^\s"]+@(?=[^{"])`), then `e1@{ animate: true }` / `animation: fast|slow` / `curve: …` (v11.10+). Mermaid's id resolution for `@{ }` lines is subgraph→edge→node; ours can key purely on syntax. Mismatched start/end strokes are INVALID.
+- Edge grammar, full surface: `--> --- --o --x <--> o--o x--x` × normal / thick (`==`) / dotted (`-.-`), plus `~~~` invisible; extra body characters lengthen the edge (upstream caps minlen at 10, `flowDb.ts:313`). Edge ids: `A e1@--> B` (lexer `[^\s"]+@(?=[^{"])`), then `e1@{ animate: true }` / `animation: fast|slow` / `curve: …` (v11.10+).
+
+  **Corrected in M29.31 — three claims that stood here were measured false. Do not re-derive them from the originals:**
+  1. ~~Mismatched start/end strokes are INVALID.~~ **Not in the single-token form.** `destructEndLink` (`flowDb.ts:865-912`) reads only the LAST character for the head and counts everything before it — the stray `o`/`x`/`<` included — as line length. So `A o--x B` parses fine and renders as `A --x B` one rank longer, circle silently dropped. `INVALID` exists only for the two-token `A x-- text --o B` form (`flowDb.ts:920-931`). We still refuse the single-token mismatches, because we cannot reproduce "start marker swallowed into the length" — but they are not parse errors.
+  2. ~~`~~~` carries no text.~~ **It does.** `A ~~~|no| B` parses and renders an invisible link labeled "no". We decline it anyway, to keep "invisible ⇒ no label" true of every line we own (`setEdgeArrow` drops the label entering invisible), but the refusal is a choice, not a grammar limit.
+  3. ~~Id resolution for `@{ }` is subgraph→edge→node; ours can key purely on syntax.~~ **Both halves are wrong for what we ship.** The subgraph branch is **11.16.1-only**; the app bundles **11.16.0**, whose `addVertex` has no `subGraphLookup` lookup, so `s1@{ label: X }` after a subgraph mints a *vertex* there. And syntax alone is not enough: mermaid resolves the id against the edges parsed **so far** (`flowDb.ts:163`), so **position decides** — `e1@{ … }` below its edge is edge meta, the identical line above it declares a node. `model.ts`'s `edgeMetaLines` implements the positional rule.
+
+  Also measured while building M29.31, and load-bearing for anything that emits an edge line: `o` and `x` are ordinary `NODE_STRING` characters (`flow.jison:207`), so a start marker only begins a link at a non-id boundary — `Foo--oBar` is `Foo --o Bar`, never `Fo o--o Bar`. And edge labels answer to the same lexer state as bracket labels: `( ) [ ] { } @ "` are parse errors **bare**, all are legal **quoted**, and mermaid strips a surrounding quote pair (`flowDb.ts:304-306`). `-->||` is a parse error; `-->| |` is the shortest legal empty label.
 
 ## Repo traps (read before every task)
 
@@ -994,7 +1001,10 @@ export interface EdgeEntry {
           label = trimmed.slice(i + 1, close);
           i = close + 1;
         }
-        if (label !== null && hit.stroke === 'invisible') return null; // `~~~` carries no text
+        // `~~~|no|` is VALID mermaid (measured) — we decline it so that
+        // "invisible ⇒ no label" holds for every line we own. See the
+        // corrections under "Verified mermaid v11.16.1 facts" above.
+        if (label !== null && hit.stroke === 'invisible') return null;
         pieces.push({ arrow: { stroke: hit.stroke, head: hit.head, raw: hit.token }, label, id });
         continue;
       }
