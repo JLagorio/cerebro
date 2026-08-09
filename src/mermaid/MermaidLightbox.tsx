@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { IconButton } from '@/components/ui/IconButton';
@@ -30,14 +30,39 @@ export function MermaidLightbox({
   const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(
     null,
   );
+  const viewportRef = useRef<HTMLDivElement>(null);
 
   const zoomBy = (factor: number) =>
     setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s * factor)));
 
-  const act = (label: string, run: () => Promise<unknown>) => {
+  // React registers its root wheel listener passive, so a JSX `onWheel` +
+  // `e.preventDefault()` is silently ignored and the Dialog body scrolls
+  // under the zoom. A native listener opted out of passive mode, attached
+  // directly to the viewport, is the only way to actually stop it (code
+  // review, M29.5). `setScale` is stable and MIN/MAX_SCALE are constants, so
+  // the effect never needs to re-subscribe.
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (el === null) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s * factor)));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
+  // `savePng` resolves `null` on a user cancel (the Rust side returns
+  // Ok(None)) — that is not a failure, but it is not a success either, so it
+  // gets no toast at all. The copy actions always resolve (undefined),
+  // which is `!== null`, so they keep toasting unconditionally.
+  const act = (success: string, failure: string, run: () => Promise<unknown>) => {
     void run()
-      .then(() => toast(label))
-      .catch(() => toast(`${label.split(' ')[0]} failed`));
+      .then((result) => {
+        if (result !== null) toast(success);
+      })
+      .catch(() => toast(failure));
   };
 
   return (
@@ -60,27 +85,31 @@ export function MermaidLightbox({
         </button>
         <IconButton icon="zoom-in" label="Zoom in" onClick={() => zoomBy(1.1)} />
         <span className="flex-1" />
-        <Button variant="secondary" onClick={() => act('SVG copied', () => copySvg(svg))}>
+        <Button
+          variant="secondary"
+          onClick={() => act('SVG copied', 'Copy SVG failed', () => copySvg(svg))}
+        >
           Copy SVG
         </Button>
-        <Button variant="secondary" onClick={() => act('PNG copied', () => copyPng(svg))}>
+        <Button
+          variant="secondary"
+          onClick={() => act('PNG copied', 'Copy PNG failed', () => copyPng(svg))}
+        >
           Copy PNG
         </Button>
         <Button
           variant="secondary"
-          onClick={() => act('PNG saved', () => savePng(svg, 'diagram.png'))}
+          onClick={() => act('PNG saved', 'Save PNG failed', () => savePng(svg, 'diagram.png'))}
         >
           Save PNG…
         </Button>
       </div>
       <div
+        ref={viewportRef}
         data-testid="lightbox-viewport"
         className="relative h-[60vh] cursor-grab overflow-hidden rounded-lg border border-n-200 bg-n-25 active:cursor-grabbing"
-        onWheel={(e) => {
-          e.preventDefault();
-          zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
-        }}
         onPointerDown={(e) => {
+          if (e.button !== 0) return;
           e.currentTarget.setPointerCapture?.(e.pointerId);
           drag.current = {
             startX: e.clientX,
@@ -97,6 +126,9 @@ export function MermaidLightbox({
           });
         }}
         onPointerUp={() => {
+          drag.current = null;
+        }}
+        onPointerCancel={() => {
           drag.current = null;
         }}
       >
