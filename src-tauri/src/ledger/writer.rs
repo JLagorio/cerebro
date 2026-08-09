@@ -1,10 +1,13 @@
-//! The single-writer append API (M21.3).
+//! The single-writer append API (M21.3) and its M22.2 idempotent/logical
+//! extensions.
 //!
 //! PUBLIC-SURFACE TRIPWIRE (code-review check): this module exposes
-//! `LedgerWriter::{open, append}`, `Committed`, and `writer_id` — and
-//! nothing else. No update, no delete, no open-sealed-for-write exists here
-//! or anywhere. Appending is the only way in-app state reaches the ledger,
-//! and only this module can append (D3: enforced by construction).
+//! `LedgerWriter::{open, append, append_once, append_batch, head}`,
+//! `Committed`, `ExistingOrCommitted`, `BatchReceipt`, `member_ref`,
+//! `existing_writer_id`, and `writer_id` — and nothing else. No update, no
+//! delete, no open-sealed-for-write exists here or anywhere. Appending is
+//! the only way in-app state reaches the ledger, and only this module can
+//! append (D3: enforced by construction).
 //!
 //! The acknowledgement rule (M21 rule one), verbatim:
 //!
@@ -14,13 +17,23 @@
 //! ```
 //!
 //! Sealing is a SEPARATE operation (rotation) and is never the transaction
-//! boundary.
+//! boundary. For a logical batch (M22.2) the SAME rule holds once, at the
+//! marker: members are written contiguously unacknowledged, the
+//! `batch.committed` marker follows, ONE fsync runs through the marker, and
+//! only then does the receipt exist. A durable member prefix without its
+//! marker is recovery history with zero entity-state effect.
+//!
+//! Idempotency (M22.2): `append_once` and `append_batch` replay against
+//! VERIFIED COMMITTED FRAMES — the maps are rebuilt from segments at open,
+//! never trusted from SQLite (the index is disposable). One door per
+//! semantics: a schema-v1 body carrying an idempotency key is refused by
+//! plain `append`; orphaned batch members never claim their keys.
 
 use std::path::{Path, PathBuf};
 
 use super::frame::{Frame, FRAME_VERSION};
 use super::segment::{self, SegmentName, SegmentWriter, Tail};
-use super::{ledger_dir, new_id128, store};
+use super::{ledger_dir, new_id128, schema, sha256_hex, store};
 
 /// Records per segment before rotation seals it and opens the next. Any
 /// value works; this one keeps segments small enough that recovery scans
@@ -38,6 +51,63 @@ const WRITER_ID_FILE: &str = "ledger-writer-id";
 pub struct Committed {
     pub event_id: String,
     pub seq: u64,
+}
+
+/// What `append_once` found: the identical event already committed under
+/// this key, or a fresh commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExistingOrCommitted {
+    Existing(Committed),
+    Committed(Committed),
+}
+
+impl ExistingOrCommitted {
+    pub fn committed(&self) -> &Committed {
+        match self {
+            ExistingOrCommitted::Existing(c) | ExistingOrCommitted::Committed(c) => c,
+        }
+    }
+
+    pub fn was_existing(&self) -> bool {
+        matches!(self, ExistingOrCommitted::Existing(_))
+    }
+}
+
+/// The acknowledgement of a whole logical batch — members in order, then
+/// the marker that made them reducer-visible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchReceipt {
+    pub batch_id: String,
+    pub members: Vec<Committed>,
+    pub marker: Committed,
+    /// True when this receipt replays an already committed operation key.
+    pub replayed: bool,
+}
+
+/// A same-batch reference for `append_batch` bodies: member event ids do
+/// not exist before preallocation, so callers reference members by ordinal
+/// and the writer substitutes the allocated ids. The SYMBOLIC form is what
+/// the operation digest hashes — stable across retries whose physical ids
+/// differ.
+pub fn member_ref(ordinal: usize) -> String {
+    format!("{MEMBER_REF_PREFIX}{ordinal}")
+}
+
+const MEMBER_REF_PREFIX: &str = "cerebro-batch-member:";
+
+/// An idempotency key claimed by a committed solo event or batch member.
+#[derive(Debug, Clone)]
+struct ClaimedKey {
+    committed: Committed,
+    /// SHA-256 over kind + canonical body — the "identical content" test.
+    content_hash: String,
+}
+
+/// An operation key claimed by a committed batch marker.
+#[derive(Debug, Clone)]
+struct ClaimedOp {
+    operation_digest: String,
+    receipt: BatchReceipt,
 }
 
 /// Read the writer identity WITHOUT minting — for read-only diagnostics
@@ -99,6 +169,13 @@ pub struct LedgerWriter {
     /// Seq of the newest committed record — with the chain hash, the head
     /// that shadow mode remembers into the index after each append.
     head_seq: Option<u64>,
+    /// The store identity — schema-v1 structural validation pins ids to it.
+    store_id: String,
+    /// Idempotency keys claimed by committed frames, rebuilt from verified
+    /// segments at open (never from the disposable index).
+    keys: std::collections::BTreeMap<String, ClaimedKey>,
+    /// Operation keys claimed by committed batch markers.
+    operations: std::collections::BTreeMap<String, ClaimedOp>,
 }
 
 impl LedgerWriter {
@@ -165,6 +242,7 @@ impl LedgerWriter {
             (Some(name), Tail::Clean) => resume_last(&dir, &name, &read)?,
         };
 
+        let (keys, operations) = rebuild_idempotency(&read.frames);
         Ok(LedgerWriter {
             _lock: lock,
             dir,
@@ -173,6 +251,9 @@ impl LedgerWriter {
             prev_wall_clock: read.frames.last().map(|f| f.ingested_at.clone()),
             segment_limit: limit.max(1),
             head_seq: read.head_seq,
+            store_id: read.store.store_id.clone(),
+            keys,
+            operations,
         })
     }
 
@@ -184,13 +265,15 @@ impl LedgerWriter {
         })
     }
 
-    /// Append one event. Returns only after the frame is durably on disk —
-    /// an event that was never acknowledged may be lost by a crash; an
-    /// acknowledged one may not. The caller-retry consequence is documented,
-    /// not hidden: a caller that dies between fsync and receiving `Committed`
-    /// and then retries writes a SECOND event — idempotency is the M22+
-    /// reducer's concern, visibility is this layer's.
-    pub fn append(&mut self, kind: &str, body: serde_json::Value) -> Result<Committed, String> {
+    /// Write one frame into the open segment WITHOUT syncing — the shared
+    /// core of `append` (which syncs immediately) and `append_batch` (which
+    /// syncs once, through the marker).
+    fn write_frame(
+        &mut self,
+        kind: &str,
+        body: serde_json::Value,
+        event_id: Option<String>,
+    ) -> Result<Frame, String> {
         if self
             .segment
             .as_ref()
@@ -211,7 +294,7 @@ impl LedgerWriter {
         let frame = Frame {
             v: FRAME_VERSION,
             seq: segment.next_seq(),
-            event_id: new_id128(),
+            event_id: event_id.unwrap_or_else(new_id128),
             prev: segment.last_hash().to_string(),
             hash: String::new(),
             ingested_at: now.clone(),
@@ -220,20 +303,263 @@ impl LedgerWriter {
             body,
         }
         .with_hash()?;
+        segment.append(&frame)?;
+        self.prev_wall_clock = Some(now);
+        self.head_seq = Some(frame.seq);
+        Ok(frame)
+    }
 
+    fn sync(&self) -> Result<(), String> {
+        self.segment
+            .as_ref()
+            .ok_or("ledger writer fail-stopped after a failed rotation")?
+            .sync()
+    }
+
+    /// Append one event. Returns only after the frame is durably on disk —
+    /// an event that was never acknowledged may be lost by a crash; an
+    /// acknowledged one may not. The caller-retry consequence is documented,
+    /// not hidden: a caller that dies between fsync and receiving `Committed`
+    /// and then retries writes a SECOND event — WHICH is why a schema-v1
+    /// body carrying an idempotency key is refused here: keyed appends go
+    /// through `append_once`/`append_batch`, the doors that replay instead.
+    pub fn append(&mut self, kind: &str, body: serde_json::Value) -> Result<Committed, String> {
+        if let Ok(Some(decoded)) = schema::decode_body(kind, &body) {
+            if decoded.idempotency_key().is_some() {
+                return Err(
+                    "a schema-v1 body with an idempotency key goes through append_once or \
+                     append_batch, never plain append"
+                        .to_string(),
+                );
+            }
+            if decoded.batch_id().is_some() {
+                return Err(
+                    "a schema-v1 body with a batch id is a batch member — use append_batch"
+                        .to_string(),
+                );
+            }
+        }
         // The acknowledgement rule. `write_all` on a raw File leaves no
         // userspace buffer to flush; sync_all is F_FULLFSYNC on Apple (see
         // the module doc in mod.rs).
-        segment.append(&frame)?;
+        let frame = self.write_frame(kind, body, None)?;
         crate::crash::crash_point("ledger-frame-written");
-        segment.sync()?;
+        self.sync()?;
         crate::crash::crash_point("ledger-frame-synced");
-        self.prev_wall_clock = Some(now);
-        self.head_seq = Some(frame.seq);
         Ok(Committed {
             event_id: frame.event_id,
             seq: frame.seq,
         })
+    }
+
+    /// Append exactly once under a producer-scoped key. The identical
+    /// key/kind/canonical body returns the existing receipt; the same key
+    /// with different canonical content is a hard conflict, never a silent
+    /// dedupe. The claim set is rebuilt from verified committed frames at
+    /// open — index loss cannot cause a duplicate.
+    pub fn append_once(
+        &mut self,
+        key: &str,
+        kind: &str,
+        body: serde_json::Value,
+    ) -> Result<ExistingOrCommitted, String> {
+        if key.is_empty() {
+            return Err("append_once requires a non-empty idempotency key".to_string());
+        }
+        let mut body = body;
+        let object = body
+            .as_object_mut()
+            .ok_or("append_once requires a schema-v1 body")?;
+        object.insert("idempotency_key".to_string(), serde_json::json!(key));
+        let decoded = schema::decode_body(kind, &body)?
+            .ok_or("append_once requires a schema-v1 body — plumbing has no keys")?;
+        if decoded.batch_id().is_some() {
+            return Err(
+                "append_once appends solo events — batch members carry no key of their \
+                        own door"
+                    .to_string(),
+            );
+        }
+        decoded.validate(&self.store_id)?;
+        let hash = content_hash(kind, &body)?;
+        if let Some(claimed) = self.keys.get(key) {
+            if claimed.content_hash == hash {
+                return Ok(ExistingOrCommitted::Existing(claimed.committed.clone()));
+            }
+            return Err(format!(
+                "idempotency key {key:?} is already committed with different canonical content — \
+                 hard conflict, never a silent dedupe"
+            ));
+        }
+        if self.operations.contains_key(key) {
+            return Err(format!(
+                "idempotency key {key:?} already names a committed batch operation"
+            ));
+        }
+        let frame = self.write_frame(kind, body, None)?;
+        crate::crash::crash_point("ledger-frame-written");
+        self.sync()?;
+        crate::crash::crash_point("ledger-frame-synced");
+        let committed = Committed {
+            event_id: frame.event_id,
+            seq: frame.seq,
+        };
+        self.keys.insert(
+            key.to_string(),
+            ClaimedKey {
+                committed: committed.clone(),
+                content_hash: hash,
+            },
+        );
+        Ok(ExistingOrCommitted::Committed(committed))
+    }
+
+    /// Append a logical batch: preallocate ids, stamp members, append them
+    /// contiguously, append the `batch.committed` marker, fsync THROUGH the
+    /// marker, and only then acknowledge. Any structurally invalid member
+    /// refuses the whole batch before a byte is written. Same-batch
+    /// references are `member_ref(ordinal)` placeholders in the submitted
+    /// bodies; the digest of that symbolic plan is what an operation-key
+    /// retry is checked against, so a retry with fresh physical ids still
+    /// replays.
+    pub fn append_batch(
+        &mut self,
+        events: Vec<(String, serde_json::Value)>,
+        operation_key: Option<&str>,
+    ) -> Result<BatchReceipt, String> {
+        if events.is_empty() {
+            return Err("a batch with no members is not a batch".to_string());
+        }
+        let op_digest = operation_digest(&events)?;
+        if let Some(key) = operation_key {
+            if key.is_empty() {
+                return Err("operation key must be non-empty when supplied".to_string());
+            }
+            if let Some(claimed) = self.operations.get(key) {
+                if claimed.operation_digest == op_digest {
+                    let mut receipt = claimed.receipt.clone();
+                    receipt.replayed = true;
+                    return Ok(receipt);
+                }
+                return Err(format!(
+                    "operation key {key:?} is already committed with a different logical plan — \
+                     idempotency conflict, never a silent dedupe"
+                ));
+            }
+            if self.keys.contains_key(key) {
+                return Err(format!(
+                    "operation key {key:?} already names a committed solo event"
+                ));
+            }
+        }
+
+        // Preallocate one fresh batch id and every member event id, then
+        // stamp and validate every member BEFORE any disk write.
+        let batch_id = new_id128();
+        let member_ids: Vec<String> = events.iter().map(|_| new_id128()).collect();
+        let mut stamped: Vec<(String, serde_json::Value)> = Vec::with_capacity(events.len());
+        for (ordinal, (kind, body)) in events.into_iter().enumerate() {
+            if kind == schema::KIND_BATCH_COMMITTED {
+                return Err("a batch marker cannot be a batch member".to_string());
+            }
+            let mut body = body;
+            substitute_member_refs(&mut body, &member_ids)?;
+            let object = body
+                .as_object_mut()
+                .ok_or("batch members must be schema-v1 bodies")?;
+            object.insert("batch_id".to_string(), serde_json::json!(batch_id));
+            let member_key = operation_key.map(|key| format!("{key}#m{ordinal}"));
+            object.insert("idempotency_key".to_string(), serde_json::json!(member_key));
+            let decoded = schema::decode_body(&kind, &body)
+                .map_err(|e| format!("batch member {ordinal}: {e}"))?
+                .ok_or_else(|| {
+                    format!(
+                        "batch member {ordinal} is not a schema-v1 body — plumbing does not batch"
+                    )
+                })?;
+            decoded
+                .validate(&self.store_id)
+                .map_err(|e| format!("batch member {ordinal}: {e}"))?;
+            stamped.push((kind, body));
+        }
+
+        // Append members contiguously, unacknowledged.
+        let mut member_frames: Vec<Frame> = Vec::with_capacity(stamped.len());
+        for (ordinal, (kind, body)) in stamped.into_iter().enumerate() {
+            let frame = self.write_frame(&kind, body, Some(member_ids[ordinal].clone()))?;
+            crate::crash::crash_point(&format!("ledger-batch-member-{ordinal}-written"));
+            member_frames.push(frame);
+        }
+
+        // The marker, then ONE fsync through it — the transaction boundary.
+        let marker_body = schema::BatchCommitted {
+            schema: schema::BODY_SCHEMA,
+            batch_id: Some(batch_id.clone()),
+            idempotency_key: operation_key.map(str::to_string),
+            actor: schema::Actor {
+                id: schema::ACTOR_LEDGER.to_string(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            member_event_ids: member_ids.clone(),
+            member_count: member_ids.len() as u64,
+            members_digest: members_digest(member_frames.iter())?,
+            operation_digest: op_digest.clone(),
+        };
+        marker_body.validate()?;
+        let marker_frame = self.write_frame(
+            schema::KIND_BATCH_COMMITTED,
+            serde_json::to_value(&marker_body).map_err(|e| e.to_string())?,
+            None,
+        )?;
+        crate::crash::crash_point("ledger-batch-marker-written");
+        self.sync()?;
+        crate::crash::crash_point("ledger-batch-synced");
+
+        let receipt = BatchReceipt {
+            batch_id,
+            members: member_frames
+                .iter()
+                .map(|f| Committed {
+                    event_id: f.event_id.clone(),
+                    seq: f.seq,
+                })
+                .collect(),
+            marker: Committed {
+                event_id: marker_frame.event_id.clone(),
+                seq: marker_frame.seq,
+            },
+            replayed: false,
+        };
+        // The batch is committed: members claim their keys now (an orphaned
+        // attempt never reaches this line).
+        for frame in &member_frames {
+            if let Ok(Some(decoded)) = schema::decode_body(&frame.kind, &frame.body) {
+                if let Some(member_key) = decoded.idempotency_key() {
+                    self.keys.insert(
+                        member_key.to_string(),
+                        ClaimedKey {
+                            committed: Committed {
+                                event_id: frame.event_id.clone(),
+                                seq: frame.seq,
+                            },
+                            content_hash: content_hash(&frame.kind, &frame.body)?,
+                        },
+                    );
+                }
+            }
+        }
+        if let Some(key) = operation_key {
+            self.operations.insert(
+                key.to_string(),
+                ClaimedOp {
+                    operation_digest: op_digest,
+                    receipt: receipt.clone(),
+                },
+            );
+        }
+        Ok(receipt)
     }
 
     /// Seal the full segment and open the next. Seal first, create second:
@@ -255,6 +581,188 @@ impl LedgerWriter {
         )?);
         Ok(())
     }
+}
+
+/// The "identical content" test for idempotent replay: SHA-256 over the
+/// kind and the canonical body bytes.
+fn content_hash(kind: &str, body: &serde_json::Value) -> Result<String, String> {
+    let canonical = serde_json::to_string(body).map_err(|e| e.to_string())?;
+    let mut bytes = Vec::with_capacity(kind.len() + 1 + canonical.len());
+    bytes.extend_from_slice(kind.as_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(canonical.as_bytes());
+    Ok(sha256_hex(&bytes))
+}
+
+/// SHA-256 over the canonical JSON of the SYMBOLIC member plan — bodies as
+/// submitted: batch id unstamped, member refs still ordinals. Stable across
+/// a retry that receives fresh physical ids, which is the whole point.
+fn operation_digest(events: &[(String, serde_json::Value)]) -> Result<String, String> {
+    let plan: Vec<serde_json::Value> = events
+        .iter()
+        .map(|(kind, body)| serde_json::json!({ "kind": kind, "body": body }))
+        .collect();
+    let canonical = serde_json::to_string(&plan).map_err(|e| e.to_string())?;
+    Ok(sha256_hex(canonical.as_bytes()))
+}
+
+/// SHA-256 over the canonical member frame lines in order, each terminated
+/// with a newline — exactly the bytes the segment holds for them.
+fn members_digest<'a>(frames: impl Iterator<Item = &'a Frame>) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    for frame in frames {
+        bytes.extend_from_slice(frame.to_line()?.as_bytes());
+        bytes.push(b'\n');
+    }
+    Ok(sha256_hex(&bytes))
+}
+
+/// Replace every `member_ref(ordinal)` placeholder string with the
+/// allocated member event id, recursively.
+fn substitute_member_refs(
+    value: &mut serde_json::Value,
+    member_ids: &[String],
+) -> Result<(), String> {
+    match value {
+        serde_json::Value::String(s) => {
+            if let Some(rest) = s.strip_prefix(MEMBER_REF_PREFIX) {
+                let ordinal: usize = rest
+                    .parse()
+                    .map_err(|_| format!("malformed member ref {s:?}"))?;
+                let id = member_ids
+                    .get(ordinal)
+                    .ok_or(format!("member ref {ordinal} is out of range"))?;
+                *s = id.clone();
+            }
+            Ok(())
+        }
+        serde_json::Value::Array(items) => items
+            .iter_mut()
+            .try_for_each(|item| substitute_member_refs(item, member_ids)),
+        serde_json::Value::Object(object) => object
+            .values_mut()
+            .try_for_each(|item| substitute_member_refs(item, member_ids)),
+        _ => Ok(()),
+    }
+}
+
+/// Rebuild the idempotency claim maps from verified committed frames. Solo
+/// schema-v1 events claim their key directly; batch members claim theirs
+/// ONLY when a valid marker proves their batch (an orphaned attempt does
+/// not claim the key, so its retry appends under a fresh batch id); a valid
+/// marker claims its operation key with a replayable receipt.
+fn rebuild_idempotency(
+    frames: &[Frame],
+) -> (
+    std::collections::BTreeMap<String, ClaimedKey>,
+    std::collections::BTreeMap<String, ClaimedOp>,
+) {
+    let mut keys = std::collections::BTreeMap::new();
+    let mut operations = std::collections::BTreeMap::new();
+    let mut members_by_batch: std::collections::BTreeMap<String, Vec<&Frame>> =
+        std::collections::BTreeMap::new();
+    let mut markers: Vec<(&Frame, schema::BatchCommitted)> = Vec::new();
+
+    for frame in frames {
+        let Ok(Some(decoded)) = schema::decode_body(&frame.kind, &frame.body) else {
+            continue; // plumbing or malformed: never claims a key
+        };
+        match (decoded.batch_id(), &decoded) {
+            (Some(_), schema::EventBody::BatchCommitted(marker)) => {
+                markers.push((frame, (**marker).clone()));
+            }
+            (Some(batch_id), _) => {
+                members_by_batch
+                    .entry(batch_id.to_string())
+                    .or_default()
+                    .push(frame);
+            }
+            (None, _) => {
+                if let Some(key) = decoded.idempotency_key() {
+                    if let Ok(hash) = content_hash(&frame.kind, &frame.body) {
+                        keys.insert(
+                            key.to_string(),
+                            ClaimedKey {
+                                committed: Committed {
+                                    event_id: frame.event_id.clone(),
+                                    seq: frame.seq,
+                                },
+                                content_hash: hash,
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    let empty: Vec<&Frame> = Vec::new();
+    for (marker_frame, marker) in markers {
+        let batch_id = match &marker.batch_id {
+            Some(id) => id,
+            None => continue,
+        };
+        let members = members_by_batch.get(batch_id).unwrap_or(&empty);
+        let ids_match = members.len() == marker.member_event_ids.len()
+            && members
+                .iter()
+                .zip(&marker.member_event_ids)
+                .all(|(frame, id)| &frame.event_id == id);
+        let contiguous = members
+            .windows(2)
+            .all(|pair| pair[1].seq == pair[0].seq + 1)
+            && members
+                .last()
+                .is_some_and(|last| last.seq + 1 == marker_frame.seq);
+        let digest_ok = members_digest(members.iter().copied())
+            .is_ok_and(|digest| digest == marker.members_digest);
+        if !(ids_match && contiguous && digest_ok) {
+            continue; // the reducer names this anomaly; nothing claims here
+        }
+        for frame in members {
+            let Ok(Some(decoded)) = schema::decode_body(&frame.kind, &frame.body) else {
+                continue;
+            };
+            if let Some(key) = decoded.idempotency_key() {
+                if let Ok(hash) = content_hash(&frame.kind, &frame.body) {
+                    keys.insert(
+                        key.to_string(),
+                        ClaimedKey {
+                            committed: Committed {
+                                event_id: frame.event_id.clone(),
+                                seq: frame.seq,
+                            },
+                            content_hash: hash,
+                        },
+                    );
+                }
+            }
+        }
+        if let Some(op_key) = &marker.idempotency_key {
+            operations.insert(
+                op_key.clone(),
+                ClaimedOp {
+                    operation_digest: marker.operation_digest.clone(),
+                    receipt: BatchReceipt {
+                        batch_id: batch_id.clone(),
+                        members: members
+                            .iter()
+                            .map(|frame| Committed {
+                                event_id: frame.event_id.clone(),
+                                seq: frame.seq,
+                            })
+                            .collect(),
+                        marker: Committed {
+                            event_id: marker_frame.event_id.clone(),
+                            seq: marker_frame.seq,
+                        },
+                        replayed: false,
+                    },
+                },
+            );
+        }
+    }
+    (keys, operations)
 }
 
 /// Resume the final open segment: reconstruct the anchor it was created
@@ -538,6 +1046,321 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
+    // --- M22.2: append_once + logical batches -------------------------------
+
+    use crate::ledger::schema::{self as schema_mod, tests as schema_tests};
+
+    /// A snapshot observation body as a `(kind, body)` pair for batching.
+    fn observation_member() -> (String, serde_json::Value) {
+        let body = schema_tests::observation_recorded(schema_mod::ObservationKind::SourceSnapshot);
+        (
+            schema_mod::KIND_OBSERVATION_RECORDED.to_string(),
+            serde_json::to_value(&body).unwrap(),
+        )
+    }
+
+    /// A belief.created body whose basis links MEMBER 0 symbolically.
+    fn belief_member_referencing(ordinal: usize) -> (String, serde_json::Value) {
+        let mut belief = schema_tests::belief_created();
+        belief.basis = schema_mod::BeliefBasis::Linked {
+            links: vec![schema_mod::BasisLink {
+                observation_event_id: member_ref(ordinal),
+                role: schema_mod::BasisRole::Supports,
+            }],
+        };
+        (
+            schema_mod::KIND_BELIEF_CREATED.to_string(),
+            serde_json::to_value(&belief).unwrap(),
+        )
+    }
+
+    fn solo_belief_body() -> serde_json::Value {
+        serde_json::to_value(schema_tests::belief_created()).unwrap()
+    }
+
+    #[test]
+    fn append_once_appends_replays_and_conflicts() {
+        let vault = testutil::temp_vault("writer-once");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let first = writer
+            .append_once(
+                "op:create-acme",
+                schema_mod::KIND_BELIEF_CREATED,
+                solo_belief_body(),
+            )
+            .unwrap();
+        assert!(!first.was_existing());
+
+        // Identical key/kind/body: the existing receipt, no second event.
+        let replay = writer
+            .append_once(
+                "op:create-acme",
+                schema_mod::KIND_BELIEF_CREATED,
+                solo_belief_body(),
+            )
+            .unwrap();
+        assert!(replay.was_existing());
+        assert_eq!(replay.committed(), first.committed());
+
+        // Same key, different canonical content: hard conflict.
+        let mut different = schema_tests::belief_created();
+        different.content = "# Acme\n\nChanged.\n".into();
+        let err = writer
+            .append_once(
+                "op:create-acme",
+                schema_mod::KIND_BELIEF_CREATED,
+                serde_json::to_value(&different).unwrap(),
+            )
+            .unwrap_err();
+        assert!(err.contains("conflict"), "{err}");
+
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 1, "one event, however many calls");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn append_once_replays_from_verified_frames_across_reopen() {
+        let vault = testutil::temp_vault("writer-once-reopen");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let first = writer
+            .append_once(
+                "op:create-acme",
+                schema_mod::KIND_BELIEF_CREATED,
+                solo_belief_body(),
+            )
+            .unwrap();
+        drop(writer);
+        // A fresh writer rebuilds the claim set from segments — the lost-ack
+        // retry returns the existing receipt instead of duplicating.
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let replay = writer
+            .append_once(
+                "op:create-acme",
+                schema_mod::KIND_BELIEF_CREATED,
+                solo_belief_body(),
+            )
+            .unwrap();
+        assert!(replay.was_existing());
+        assert_eq!(replay.committed(), first.committed());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn plain_append_refuses_keyed_or_batched_schema_bodies() {
+        let vault = testutil::temp_vault("writer-one-door");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let mut keyed = solo_belief_body();
+        keyed["idempotency_key"] = serde_json::json!("op:sneaky");
+        assert!(writer
+            .append(schema_mod::KIND_BELIEF_CREATED, keyed)
+            .unwrap_err()
+            .contains("append_once"));
+        let mut batched = solo_belief_body();
+        batched["batch_id"] = serde_json::json!("beefbeefbeefbeefbeefbeefbeefbeef");
+        assert!(writer
+            .append(schema_mod::KIND_BELIEF_CREATED, batched)
+            .unwrap_err()
+            .contains("append_batch"));
+        // Unkeyed schema bodies and plumbing still go through.
+        writer
+            .append(schema_mod::KIND_BELIEF_CREATED, solo_belief_body())
+            .unwrap();
+        writer.append("vault.write", body("a.md")).unwrap();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_batch_commits_members_marker_and_symbolic_refs() {
+        let vault = testutil::temp_vault("writer-batch");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let receipt = writer
+            .append_batch(
+                vec![observation_member(), belief_member_referencing(0)],
+                Some("op:capture-1"),
+            )
+            .unwrap();
+        assert!(!receipt.replayed);
+        assert_eq!(receipt.members.len(), 2);
+        assert_eq!(receipt.members[0].seq + 1, receipt.members[1].seq);
+        assert_eq!(receipt.members[1].seq + 1, receipt.marker.seq);
+
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 3);
+        let member0 = &read.frames[0];
+        let member1 = &read.frames[1];
+        let marker = &read.frames[2];
+        // Members are stamped with the shared batch id and derived keys.
+        assert_eq!(
+            member0.body["batch_id"],
+            serde_json::json!(receipt.batch_id)
+        );
+        assert_eq!(
+            member0.body["idempotency_key"],
+            serde_json::json!("op:capture-1#m0")
+        );
+        // The symbolic basis ref became member 0's REAL event id.
+        assert_eq!(
+            member1.body["basis"]["links"][0]["observation_event_id"],
+            serde_json::json!(receipt.members[0].event_id)
+        );
+        // The marker names the exact ordered members and verifies.
+        let decoded = schema_mod::decode_body(&marker.kind, &marker.body)
+            .unwrap()
+            .unwrap();
+        let schema_mod::EventBody::BatchCommitted(marker_body) = decoded else {
+            panic!("marker decodes as batch.committed");
+        };
+        assert_eq!(
+            marker_body.member_event_ids,
+            vec![
+                receipt.members[0].event_id.clone(),
+                receipt.members[1].event_id.clone()
+            ]
+        );
+        assert_eq!(
+            marker_body.members_digest,
+            members_digest([member0, member1].into_iter()).unwrap()
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_batch_retry_replays_by_operation_key_and_refuses_a_different_plan() {
+        let vault = testutil::temp_vault("writer-batch-retry");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let events = || vec![observation_member(), belief_member_referencing(0)];
+        let receipt = writer.append_batch(events(), Some("op:capture-1")).unwrap();
+
+        // Same plan, same key: the prior receipt, marked replayed.
+        let replay = writer.append_batch(events(), Some("op:capture-1")).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.batch_id, receipt.batch_id);
+        assert_eq!(replay.members, receipt.members);
+
+        // ...and across a reopen (rebuilt from verified frames).
+        drop(writer);
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let replay = writer.append_batch(events(), Some("op:capture-1")).unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.batch_id, receipt.batch_id);
+
+        // A different logical plan under the committed key: conflict.
+        let err = writer
+            .append_batch(vec![observation_member()], Some("op:capture-1"))
+            .unwrap_err();
+        assert!(err.contains("conflict"), "{err}");
+
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 3, "one batch, however many retries");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn one_invalid_member_refuses_the_whole_batch_before_any_write() {
+        let vault = testutil::temp_vault("writer-batch-invalid");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let mut bad = schema_tests::belief_created();
+        bad.subject = schema_mod::SubjectRef::None; // structurally invalid
+        let err = writer
+            .append_batch(
+                vec![
+                    observation_member(),
+                    (
+                        schema_mod::KIND_BELIEF_CREATED.to_string(),
+                        serde_json::to_value(&bad).unwrap(),
+                    ),
+                ],
+                Some("op:bad"),
+            )
+            .unwrap_err();
+        assert!(err.contains("batch member 1"), "{err}");
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 0, "zero bytes written for a refused batch");
+        // The key was never claimed: a corrected batch commits under it.
+        writer
+            .append_batch(vec![observation_member()], Some("op:bad"))
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_truncated_marker_leaves_an_orphan_that_claims_nothing() {
+        let vault = testutil::temp_vault("writer-batch-orphan");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let receipt = writer
+            .append_batch(
+                vec![observation_member(), belief_member_referencing(0)],
+                Some("op:capture-1"),
+            )
+            .unwrap();
+        drop(writer);
+
+        // Tear the MARKER off the open segment: members survive, commit
+        // proof does not.
+        let dir = ledger_dir(&vault);
+        let read = read_ledger(&dir).unwrap();
+        let open_path = dir.join(read.segments.last().unwrap().file_name());
+        let bytes = std::fs::read(&open_path).unwrap();
+        let marker_line_start = bytes[..bytes.len() - 1]
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map(|i| i + 1)
+            .unwrap();
+        std::fs::write(&open_path, &bytes[..marker_line_start]).unwrap();
+
+        // The orphan does not claim the operation key: the retry commits a
+        // FRESH batch (new physical ids), leaving the orphan as history.
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let retried = writer
+            .append_batch(
+                vec![observation_member(), belief_member_referencing(0)],
+                Some("op:capture-1"),
+            )
+            .unwrap();
+        assert!(!retried.replayed, "an orphan is not a commitment");
+        assert_ne!(retried.batch_id, receipt.batch_id);
+        let read = read_ledger(&dir).unwrap();
+        assert_eq!(read.records, 5, "2 orphan members + a fresh 3-frame batch");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn a_batch_spans_segment_rotation_and_still_verifies() {
+        let vault = testutil::temp_vault("writer-batch-rotate");
+        let mut writer = LedgerWriter::open_with_limit(&vault, WRITER, 2).unwrap();
+        writer.append("vault.write", body("seed.md")).unwrap();
+        let receipt = writer
+            .append_batch(
+                vec![
+                    observation_member(),
+                    observation_member(),
+                    belief_member_referencing(0),
+                ],
+                Some("op:span"),
+            )
+            .unwrap();
+        drop(writer);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 5);
+        assert!(read.segments.len() >= 2, "the batch crossed a rotation");
+        // Reopen replays the operation across the segment boundary.
+        let mut writer = LedgerWriter::open_with_limit(&vault, WRITER, 2).unwrap();
+        let replay = writer
+            .append_batch(
+                vec![
+                    observation_member(),
+                    observation_member(),
+                    belief_member_referencing(0),
+                ],
+                Some("op:span"),
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.batch_id, receipt.batch_id);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     // --- Crash scenarios (children) and their parents -----------------------
 
     /// Child: append one more event to an existing ledger. The parent picks
@@ -623,6 +1446,117 @@ mod tests {
         let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
         let next = writer.append("vault.write", body("after.md")).unwrap();
         assert_eq!(next.seq, head + 1, "seq resumes from the committed head");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Child: append a two-member batch under op key "op:crash". The parent
+    /// picks the kill point via CEREBRO_CRASH_POINT.
+    #[test]
+    #[ignore = "crash-scenario child body, spawned by the crash tests"]
+    fn crash_scenario_append_batch() {
+        let Ok(vault) = std::env::var("CEREBRO_CRASH_VAULT") else {
+            return;
+        };
+        let mut writer = LedgerWriter::open(Path::new(&vault), WRITER).unwrap();
+        let _ = writer.append_batch(
+            vec![observation_member(), belief_member_referencing(0)],
+            Some("op:crash"),
+        );
+    }
+
+    /// After a kill at ANY batch boundary, the retry must converge on
+    /// exactly one committed operation under the key — replayed if the
+    /// marker survived, fresh if it did not — and a further retry replays.
+    fn assert_batch_crash_converges(point: &str) {
+        let vault = testutil::temp_vault(&format!("writer-crash-{point}"));
+        // Seed so the ledger exists with the right writer id.
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        writer.append("vault.write", body("seed.md")).unwrap();
+        drop(writer);
+        let status = testutil::run_crash_scenario(
+            "ledger::writer::tests::crash_scenario_append_batch",
+            point,
+            &vault,
+        );
+        assert!(!status.success(), "{point}: child must die at the point");
+
+        // The committed prefix is readable and appendable either way.
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let retry = writer
+            .append_batch(
+                vec![observation_member(), belief_member_referencing(0)],
+                Some("op:crash"),
+            )
+            .unwrap();
+        let again = writer
+            .append_batch(
+                vec![observation_member(), belief_member_referencing(0)],
+                Some("op:crash"),
+            )
+            .unwrap();
+        assert!(again.replayed, "{point}: the second retry always replays");
+        assert_eq!(again.batch_id, retry.batch_id);
+        drop(writer);
+
+        // Exactly one VALID batch exists for the key, whatever the kill
+        // left behind physically.
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let (_, operations) = rebuild_idempotency(&read.frames);
+        let claimed = operations.get("op:crash").expect("operation committed");
+        assert_eq!(claimed.receipt.batch_id, retry.batch_id);
+        let markers = read
+            .frames
+            .iter()
+            .filter(|f| f.kind == schema_mod::KIND_BATCH_COMMITTED)
+            .count();
+        assert!(
+            (1..=2).contains(&markers),
+            "{point}: one marker, or a survivor plus the retry — never garbage"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn killed_after_the_first_member_the_orphan_never_commits() {
+        assert_batch_crash_converges("ledger-batch-member-0-written");
+    }
+
+    #[test]
+    fn killed_after_the_second_member_the_orphan_never_commits() {
+        assert_batch_crash_converges("ledger-batch-member-1-written");
+    }
+
+    #[test]
+    fn killed_after_the_marker_write_before_fsync_converges() {
+        assert_batch_crash_converges("ledger-batch-marker-written");
+    }
+
+    #[test]
+    fn killed_after_fsync_before_ack_the_batch_is_committed_and_replays() {
+        let vault = testutil::temp_vault("writer-crash-batch-acked");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        writer.append("vault.write", body("seed.md")).unwrap();
+        drop(writer);
+        let status = testutil::run_crash_scenario(
+            "ledger::writer::tests::crash_scenario_append_batch",
+            "ledger-batch-synced",
+            &vault,
+        );
+        assert!(!status.success());
+        // The acknowledgement-loss row: fsync ran, the receipt never
+        // arrived — the batch IS committed, and the retry replays it.
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 4, "seed + two members + marker");
+        let mut writer = LedgerWriter::open(&vault, WRITER).unwrap();
+        let retry = writer
+            .append_batch(
+                vec![observation_member(), belief_member_referencing(0)],
+                Some("op:crash"),
+            )
+            .unwrap();
+        assert!(retry.replayed, "a lost acknowledgement is not a lost batch");
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        assert_eq!(read.records, 4, "no duplicate");
         let _ = std::fs::remove_dir_all(&vault);
     }
 
