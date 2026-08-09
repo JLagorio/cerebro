@@ -60,8 +60,10 @@ not change.
 |                       | small LRU cache (code+theme → svg) so re-mounts are instant.             |
 | `theme.ts`            | Builds mermaid `themeVariables` from Cerebro CSS tokens read at render   |
 |                       | time via `getComputedStyle` (fills `--n-25`/`--cortex-50`, borders       |
-|                       | `--n-200`, text `--n-800`, font `--font-sans`). No more hardcoded        |
-|                       | `neutral`. A future dark mode inherits correct diagrams for free.        |
+|                       | `--n-200`, text `--n-800`, font `--font-ui`). No more hardcoded          |
+|                       | `neutral`. Dark mode exists (M16.39, `<html data-theme>`): live token    |
+|                       | reads follow a flip; the render cache keys on the resolved palette and a |
+|                       | theme-epoch hook re-renders mounted diagrams.                            |
 | `MermaidDiagram.tsx`  | Universal read-only renderer: fit-to-width, max-height with expand       |
 |                       | affordance, error state showing message + source.                        |
 | `MermaidLightbox.tsx` | Fullscreen overlay on the M16 layers system: zoom 25–400% (wheel +       |
@@ -119,7 +121,8 @@ edited model, and untouched lines are byte-identical.
 **Interactions** — an overlay on mermaid's own SVG output (node groups carry
 their ids in the DOM). No second rendering engine; no reactflow.
 
-- double-click node → inline rename; double-click edge label → edit label
+- double-click node → inline rename; click an edge → edit its label or
+  delete it (the path is the reliable hit target, not the floating label)
 - click selects → mini-toolbar: shape (rect/rounded/diamond/circle/cylinder…),
   delete, add-connected-node
 - drag from node → ghost line → drop on node = new edge; drop on empty = new
@@ -162,8 +165,9 @@ Add `@mermaid-js/layout-elk` (lazy chunk). Possibly an explicit `shiki` entry.
   mermaid; the structural editor is the chosen shape.
 - **No visual editing of non-flowchart types** — they render, template, and
   text-edit (Stages A+B) only.
-- **No dark theme work** — the app has no dark mode; `theme.ts` reading live
-  tokens is the seam a future dark mode plugs into.
+- **No mermaid-specific dark palette** — dark mode exists (M16.39) and
+  diagrams follow it automatically because `theme.ts` reads tokens live;
+  nothing beyond that token pass-through is designed here.
 
 ## Milestone framing
 
