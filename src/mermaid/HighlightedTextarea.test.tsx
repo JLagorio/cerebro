@@ -34,4 +34,32 @@ describe('HighlightedTextarea', () => {
       expect(screen.getByTestId('mermaid-highlight-layer').innerHTML).toContain('shiki'),
     );
   });
+
+  it('repaints the highlight layer when the theme flips', async () => {
+    const originalTheme = document.documentElement.getAttribute('data-theme');
+    document.documentElement.setAttribute('data-theme', 'light');
+    loadMock.mockResolvedValue(
+      (code) => `<pre class="theme-${document.documentElement.getAttribute('data-theme')}">${code}</pre>`,
+    );
+    render(
+      <HighlightedTextarea
+        value="graph TD"
+        onChange={() => {}}
+        ariaLabel="Mermaid source"
+        rows={4}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('mermaid-highlight-layer').innerHTML).toContain('theme-light'),
+    );
+
+    document.documentElement.setAttribute('data-theme', 'dark');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('mermaid-highlight-layer').innerHTML).toContain('theme-dark'),
+    );
+
+    if (originalTheme === null) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', originalTheme);
+  });
 });

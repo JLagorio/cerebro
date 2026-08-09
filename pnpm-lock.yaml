@@ -26,6 +26,12 @@ importers:
       '@mermaid-js/layout-elk':
         specifier: ^0.2.2
         version: 0.2.2(mermaid@11.16.0)
+      '@shikijs/langs':
+        specifier: 4.4.2
+        version: 4.4.2
+      '@shikijs/themes':
+        specifier: 4.4.2
+        version: 4.4.2
       '@tauri-apps/api':
         specifier: ^2.6.0
         version: 2.11.1

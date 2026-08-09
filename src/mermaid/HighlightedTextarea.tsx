@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadMermaidHighlighter, type Highlighter } from './highlight';
+import { useThemeEpoch } from './useThemeEpoch';
 
 /**
  * A textarea with a highlight layer painted underneath (M29.10). The classic
@@ -27,6 +28,12 @@ export function HighlightedTextarea({
 }) {
   const [highlighter, setHighlighter] = useState<Highlighter | null>(null);
   const layerRef = useRef<HTMLDivElement | null>(null);
+  // Bumps when <html data-theme> flips. `highlighter` is a closure that reads
+  // the attribute at call time, so the same `value` yields different html
+  // once the theme changes — this forces that recompute (React has no other
+  // signal that the closure's *output* changed; the closure identity itself
+  // never does).
+  const themeEpoch = useThemeEpoch();
 
   useEffect(() => {
     let stale = false;
@@ -37,6 +44,16 @@ export function HighlightedTextarea({
       stale = true;
     };
   }, []);
+
+  const highlightedHtml = useMemo(
+    () => (highlighter !== null ? highlighter(value) : ''),
+    // themeEpoch isn't read inside the memo body, but it must still gate the
+    // recompute: `highlighter` reads document.documentElement at call time,
+    // so its return value changes with the theme even though the closure
+    // reference and `value` do not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [highlighter, value, themeEpoch],
+  );
 
   const sharedFont =
     '[font-family:var(--font-mono)] text-sm leading-[1.5] whitespace-pre-wrap break-words';
@@ -53,7 +70,7 @@ export function HighlightedTextarea({
           // language grammar over this editor's mermaid source text — the
           // same trust boundary as MermaidDiagram/MermaidLightbox elsewhere
           // in this module, not third-party or network content.
-          dangerouslySetInnerHTML={{ __html: highlighter(value) }}
+          dangerouslySetInnerHTML={{ __html: highlightedHtml }}
         />
       )}
       <textarea
