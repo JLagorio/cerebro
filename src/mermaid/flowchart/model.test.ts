@@ -361,18 +361,39 @@ describe('style lines (M29.30)', () => {
     expect(m.lines[4].parsed.kind).toBe('opaque');
   });
 
-  it('nodeStyle reads the first style line as a record', () => {
+  it('nodeStyle reads a style line as a record', () => {
     const m = parseFlowchart(STYLED)!;
     expect(nodeStyle(m, 'A')).toEqual({ fill: '#f96', stroke: '#333', 'stroke-width': '2px' });
     expect(nodeStyle(m, 'B')).toEqual({});
   });
 
+  it('nodeStyle folds every style line for an id the way mermaid resolves them', () => {
+    // Measured on mermaid 11.16: this pair renders
+    // `fill:#000 !important;stroke:red !important` — last value per key wins,
+    // first position kept. Reporting the first line's `#f96` would show the
+    // colour UI a value the diagram does not render.
+    const two = 'flowchart TD\n  A --> B\n  style A fill:#f96,stroke:red\n  style A fill:#000';
+    expect(nodeStyle(parseFlowchart(two)!, 'A')).toEqual({ fill: '#000', stroke: 'red' });
+
+    const split = 'flowchart TD\n  A --> B\n  style A fill:#f96\n  style A stroke:blue,fill:#000';
+    expect(nodeStyle(parseFlowchart(split)!, 'A')).toEqual({ fill: '#000', stroke: 'blue' });
+
+    // Duplicates inside ONE line settle the same way.
+    const inline = 'flowchart TD\n  A --> B\n  style A fill:#f96,fill:#000';
+    expect(nodeStyle(parseFlowchart(inline)!, 'A')).toEqual({ fill: '#000' });
+  });
+
   it('refuses bodies whose characters mermaid does not lex as style components', () => {
-    // Verified against mermaid 11.16: `;` ENDS the style statement, so our
-    // canonical re-emission of a `;`-bearing value would smuggle the rest of
-    // the line into a brand-new vertex statement (`,color:#000` is a legal
-    // idString) — a phantom node appearing out of an unrelated colour edit.
-    // The rest are outright parse/lex errors upstream.
+    // Verified by rendering mermaid 11.16: `(` pushes the `text` lexer state,
+    // so `rgb(…)`/`var(…)` are parse errors that kill the whole diagram;
+    // `"`, `=`, `^`, `@`, `<`, `{`, `~` fail to lex or mean something
+    // structural; `,` is the separator itself.
+    //
+    // Two of these mermaid ACCEPTS — `fill:#f96;` renders `fill:#f96`
+    // (`encodeEntities`, utils.ts:895-903, deletes the trailing `;`) and
+    // `fill:#f96\,stroke:#333` renders two declarations, the first ending in a
+    // backslash. We still refuse them: the value set is deliberately tighter
+    // than mermaid's, and opacity costs only editability, never correctness.
     for (const body of [
       'fill:#f96;',
       'fill:"#f96"',

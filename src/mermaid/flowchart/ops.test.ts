@@ -192,6 +192,16 @@ describe('renameNode and node-meta (M29.29)', () => {
     expect(serialize(out)).not.toContain('A@{');
     expect(nodes(out).has('A')).toBe(false);
   });
+
+  it('deleteNode removes the style line that would resurrect the node', () => {
+    // Measured: `flowchart TD\n  style A fill:#f96` renders ONE node, A, in
+    // orange — the node the user just deleted, back as an unlabeled box.
+    const src = 'flowchart TD\n  A[Start] --> B\n  style A fill:#f96\n  style B fill:#0f0';
+    // B's own style line is left strictly alone — only A's is swept.
+    expect(serialize(deleteNode(parseFlowchart(src)!, 'A'))).toBe(
+      'flowchart TD\n  style B fill:#0f0',
+    );
+  });
 });
 
 describe('setNodeStyle (M29.30)', () => {
@@ -262,5 +272,80 @@ describe('setNodeStyle (M29.30)', () => {
     expect(nodeStyle(again, 'A')).toEqual({ fill: '#f96', 'stroke-width': '2px' });
     again.lines[2].dirty = true;
     expect(serialize(again)).toBe(once);
+  });
+
+  // Several style lines for one id: mermaid lets the LAST value for a key win
+  // (measured — see nodeStyle). Writing to the first line renders nothing.
+  describe('lands on the declaration that actually renders', () => {
+    const TWO = [
+      'flowchart TD',
+      '  A --> B',
+      '  style A fill:#f96,stroke:red',
+      '  style A fill:#000',
+    ].join('\n');
+
+    it('sets on the LAST line that already declares the key', () => {
+      const out = serialize(setNodeStyle(parseFlowchart(TWO)!, 'A', { fill: '#abcdef' }));
+      expect(out.split('\n')).toEqual([
+        'flowchart TD',
+        '  A --> B',
+        '  style A fill:#f96,stroke:red', // untouched — shadowed anyway
+        '  style A fill:#abcdef',
+      ]);
+      expect(nodeStyle(parseFlowchart(out)!, 'A')).toEqual({ fill: '#abcdef', stroke: 'red' });
+    });
+
+    it('appends a brand-new key to the LAST style line', () => {
+      const out = serialize(setNodeStyle(parseFlowchart(TWO)!, 'A', { color: '#111' }));
+      expect(out.split('\n')[2]).toBe('  style A fill:#f96,stroke:red');
+      expect(out.split('\n')[3]).toBe('  style A fill:#000,color:#111');
+    });
+
+    it('removes the key from EVERY line, deleting the ones that empty', () => {
+      const out = serialize(setNodeStyle(parseFlowchart(TWO)!, 'A', { fill: null }));
+      expect(out).toBe('flowchart TD\n  A --> B\n  style A stroke:red');
+      expect(nodeStyle(parseFlowchart(out)!, 'A')).toEqual({ stroke: 'red' });
+    });
+
+    it('leaves lines that do not carry the key completely alone', () => {
+      const src = [
+        'flowchart TD',
+        '  A --> B',
+        '  style A stroke:  red',
+        '  style A fill:#000',
+        '  style B fill:#0f0',
+      ].join('\n');
+      const out = serialize(setNodeStyle(parseFlowchart(src)!, 'A', { fill: '#abcdef' }));
+      const lines = out.split('\n');
+      expect(lines[2]).toBe('  style A stroke:  red'); // quirky spacing survives
+      expect(lines[3]).toBe('  style A fill:#abcdef');
+      expect(lines[4]).toBe('  style B fill:#0f0');
+    });
+  });
+
+  // The last boundary before the file: nothing a caller passes may emit a line
+  // this module cannot read back, or that mermaid cannot parse.
+  it('refuses patch entries it could not read back', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const patches: Record<string, string | null>[] = [
+      { fill: 'rgb(1,2,3)' }, // `(` pushes the text lexer state — parse error
+      { fill: 'var(--brand)' },
+      { fill: '#f96,stroke:#000' }, // declaration injection out of one key
+      { 'fill;x': '#f96' },
+      { fill: '' },
+      { fill: 'a"b' },
+    ];
+    for (const patch of patches) {
+      expect([patch, serialize(setNodeStyle(m, 'A', patch))]).toEqual([
+        patch,
+        'flowchart TD\n  A --> B',
+      ]);
+    }
+  });
+
+  it('normalizes what it does accept, and keeps the good half of a mixed patch', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const out = serialize(setNodeStyle(m, 'A', { ' fill ': ' #f96 ', stroke: 'rgb(0,0,0)' }));
+    expect(out).toBe('flowchart TD\n  A --> B\n  style A fill:#f96');
   });
 });

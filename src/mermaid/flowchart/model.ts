@@ -338,20 +338,31 @@ export function parseEdgeLine(trimmed: string): EdgeSegment[] | null {
 }
 
 /**
- * Characters a `style` declaration's value may carry. mermaid builds a
+ * Characters a `style` declaration's value may carry. mermaid builds one
  * declaration by concatenating `styleComponent`s — `NUM | NODE_STRING | COLON
- * | UNIT | SPACE | BRKT | STYLE | PCT` (flow.jison:594) — and anything outside
- * that set either fails to lex or means something structural, so the text we
- * read would not be the value mermaid gets.
+ * | SPACE | BRKT | STYLE` (flow.jison:594; the rule also lists `UNIT` and
+ * `PCT`, which no lexer rule ever returns — `%` reaches values through
+ * `NODE_STRING`, flow.jison:208). Characters outside that set are the reason
+ * to refuse:
  *
- * `;` is the sharp one, because it does not error: it TERMINATES the style
- * statement, so `fill:#f96;` declares `fill` and nothing more. Emit our
- * reading of it back with one more declaration appended and mermaid reads
- * `style A fill:#f96;,color:#000` as that style plus a brand-new vertex named
- * `,color:#000` (COMMA and COLON are `idStringToken`s, flow.jison:597) — a
- * phantom box grown out of a colour edit. `\` is excluded for a related
- * reason: `\,` is a `classDef` escape (flowDb.ts:415-421), NOT a `style` one,
- * so here it is a backslash followed by a real separator.
+ * - `(` pushes the `text` lexer state (flow.jison), so `rgb(0,0,0)`,
+ *   `var(--x)` and `calc(…)` are genuine parse errors that kill the diagram.
+ * - `"`, `=`, `^`, `~`, `@`, `<`, `{` either fail to lex or mean something
+ *   structural.
+ * - `,` is the separator itself, handled by the split above this.
+ * - `\` is a `classDef` escape (flowDb.ts:415-421), NOT a `style` one; in a
+ *   style line mermaid accepts `fill:#f96\,stroke:red` and renders TWO
+ *   declarations, the first ending in a literal backslash.
+ *
+ * The set is deliberately tighter than mermaid's: `;`, `!`, `'`, `/` and `\`
+ * all render fine, and refusing them costs only editability (the line goes
+ * opaque and its bytes survive), never correctness. Loosening it is a
+ * recorded, deliberate future call rather than an oversight.
+ *
+ * Note `;` in particular is NOT a phantom-node hazard: `encodeEntities`
+ * (utils.ts:895-903) deletes the trailing `;` from any `style … : … # … ;`
+ * line before parsing, so `style A fill:#f96;,color:#000` reaches the lexer as
+ * `style A fill:#f96,color:#000` and renders identically to it.
  */
 const STYLE_VALUE_SAFE = /^[A-Za-z0-9#%._ \t-]+$/;
 
@@ -370,6 +381,23 @@ function parseStyleDecls(text: string): [string, string][] | null {
     decls.push([key, value]);
   }
   return decls;
+}
+
+/**
+ * `key: value` normalized exactly as `parseStyleDecls` would read it back, or
+ * null when it would not — the last boundary before a style line reaches the
+ * file, the counterpart to `emitMetaValue`. Without it a caller can hand
+ * `setNodeStyle` a value like `rgb(1,2,3)` or `var(--brand)` and emit a line
+ * that kills the whole diagram, or `#f96,stroke:#000` and inject a second
+ * declaration out of one key.
+ *
+ * `value` may be null to validate a removal, whose key still has to be one we
+ * could have written.
+ */
+export function styleDecl(key: string, value: string | null): [string, string | null] | null {
+  const probe = parseStyleDecls(`${key}:${value ?? 'x'}`);
+  if (probe === null || probe.length !== 1) return null;
+  return [probe[0][0], value === null ? null : probe[0][1]];
 }
 
 function parseLine(rawLine: string): ParsedLine {
@@ -562,24 +590,29 @@ export function nodeMeta(model: FlowchartModel): Map<string, NodeMeta> {
 }
 
 /**
- * The FIRST style line's declarations for `id`, as a record ({} when
- * unstyled). Paired with `setNodeStyle`, which patches that same first line —
- * read and write always agree about which line owns the node's colours.
+ * What `id` is actually styled as: EVERY style line for the id, folded in
+ * source order, exactly as mermaid resolves them. `flowDb.addVertex` pushes
+ * each line's declarations onto the same `vertex.styles` array, so duplicates
+ * settle per key with the LAST value winning and the FIRST position kept —
+ * which is `withEntry`'s semantics, and the same shape as `nodeMeta` above.
+ * Verified against mermaid 11.16: `fill:#f96,stroke:red` + `fill:#000`
+ * renders `fill:#000 !important;stroke:red !important`.
  *
- * KNOWN EDGE: mermaid pushes EVERY style line's declarations onto the vertex
- * (flowDb.ts addVertex) and lets CSS settle the duplicates, so with two style
- * lines for one id the later `fill` is what renders while this view reports
- * the earlier one. Honouring that would mean one edit rewriting several lines,
- * which the surgical rule forbids; two style lines for one id stay a
- * hand-written arrangement the UI reads conservatively.
+ * Reading only the first line here would make the colour UI show a value the
+ * diagram does not render, and `setNodeStyle` writes to match this view.
+ *
+ * KNOWN GAP: a node coloured through `classDef` + `class`/`:::` reads as {}.
+ * mermaid applies class styles alongside these, but `classDef` authoring is
+ * out of scope this wave (spec D5) and those lines stay opaque, so the swatch
+ * UI will show such a node as unstyled.
  */
 export function nodeStyle(model: FlowchartModel, id: string): Record<string, string> {
+  let decls: [string, string][] = [];
   for (const line of model.lines) {
-    if (line.parsed.kind === 'style' && line.parsed.id === id) {
-      return Object.fromEntries(line.parsed.decls);
-    }
+    if (line.parsed.kind !== 'style' || line.parsed.id !== id) continue;
+    for (const [k, v] of line.parsed.decls) decls = withEntry(decls, k, v);
   }
-  return {};
+  return Object.fromEntries(decls);
 }
 
 export interface ResolvedNode {

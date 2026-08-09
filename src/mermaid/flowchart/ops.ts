@@ -1,5 +1,5 @@
 import type { EdgeEntry, FlowchartModel, ModelLine, NodeRef, Shape } from './model';
-import { nodes, withEntry, withMetaEntry } from './model';
+import { nodes, styleDecl, withEntry, withMetaEntry } from './model';
 
 /**
  * Pure flowchart operations (M29.15). Every function returns a new model and
@@ -231,6 +231,13 @@ export function deleteNode(model: FlowchartModel, id: string): FlowchartModel {
       // A lone `A@{ shape: cyl }` DECLARES A (M29.29), so leaving it behind
       // would leave the node rendering after a delete that claimed to remove it.
       next.lines.splice(i, 1);
+    } else if (parsed.kind === 'style' && parsed.id === id) {
+      // `style A …` declares A the same way (flowDb.addVertex mints a vertex
+      // for an unknown styled id), so left behind it brings the just-deleted
+      // node back as an unlabeled coloured box. `class A hot` and `click A …`
+      // have the same shape but stay opaque, so they cannot be swept here yet;
+      // `click` becomes understood in Stage F, which can extend this arm.
+      next.lines.splice(i, 1);
     } else if (parsed.kind === 'edges') {
       rebuildEdgeLines(next, i, (f, t) => f.id === id || t.id === id, id);
     }
@@ -286,15 +293,21 @@ function anchorLineFor(model: FlowchartModel, id: string): number {
 }
 
 /**
- * Patch a node's `style` line surgically (M29.30): change/add/remove exactly
- * the named declarations, keep unknown ones in order, delete the line when it
- * empties, create it (after the node) when absent. Unknown ids are a no-op —
- * upstream auto-creates a node for a styled undeclared id, which is exactly
- * the kind of surprise this layer exists to prevent.
+ * Patch a node's `style` declarations surgically (M29.30): change/add/remove
+ * exactly the named ones, keep unknown ones in order, delete a line when it
+ * empties, create one (after the node) when there is none. Unknown ids are a
+ * no-op — upstream auto-creates a node for a styled undeclared id, which is
+ * exactly the kind of surprise this layer exists to prevent.
  *
- * Multiple `style` lines for one id: the FIRST is patched and the rest stay
- * untouched, matching what `nodeStyle` reads back. Touching more than asked
- * would violate the surgical rule.
+ * Every write lands on the declaration that ACTUALLY RENDERS, because several
+ * `style` lines may name one id and mermaid lets the last value for a key win
+ * (see `nodeStyle`). So a set goes to the last line already declaring the key,
+ * and a removal strips the key from EVERY line — stripping one would leave an
+ * earlier duplicate rendering, and writing to the first would be a silent
+ * no-op. Still surgical: only lines carrying the key being changed are dirtied.
+ *
+ * Values are validated through `styleDecl` on the way out, so an emitted line
+ * is always one this module can read back and mermaid can parse.
  */
 export function setNodeStyle(
   model: FlowchartModel,
@@ -304,32 +317,56 @@ export function setNodeStyle(
   const next = clone(model);
   if (!nodes(next).has(id)) return next;
 
-  const apply = (decls: [string, string][]): [string, string][] =>
-    Object.entries(patch).reduce((acc, [key, value]) => withEntry(acc, key, value), decls);
+  const styleLines = (): number[] =>
+    next.lines.reduce<number[]>((acc, line, i) => {
+      if (line.parsed.kind === 'style' && line.parsed.id === id) acc.push(i);
+      return acc;
+    }, []);
+  const declsAt = (i: number): [string, string][] => {
+    const parsed = next.lines[i].parsed;
+    return parsed.kind === 'style' ? parsed.decls : [];
+  };
+  const writeAt = (i: number, decls: [string, string][]): void => {
+    const parsed = next.lines[i].parsed;
+    if (parsed.kind !== 'style') return; // unreachable; narrows the type
+    parsed.decls = decls;
+    next.lines[i].dirty = true;
+  };
 
-  const idx = next.lines.findIndex((l) => l.parsed.kind === 'style' && l.parsed.id === id);
-  if (idx !== -1) {
-    const parsed = next.lines[idx].parsed;
-    if (parsed.kind !== 'style') return next; // unreachable; narrows the type
-    const decls = apply(parsed.decls);
-    if (decls.length === 0) {
-      next.lines.splice(idx, 1);
-    } else {
-      parsed.decls = decls;
-      next.lines[idx].dirty = true;
+  for (const [rawKey, rawValue] of Object.entries(patch)) {
+    // One validation path for sets and removals alike, so the key we look up
+    // is always the key we would have written.
+    const decl = styleDecl(rawKey, rawValue);
+    if (decl === null) continue;
+    const [key, value] = decl;
+    const lines = styleLines();
+
+    if (value === null) {
+      // Back to front: splicing an emptied line shifts every later index.
+      for (let n = lines.length - 1; n >= 0; n -= 1) {
+        const i = lines[n];
+        if (!declsAt(i).some(([k]) => k === key)) continue;
+        const decls = withEntry(declsAt(i), key, null);
+        if (decls.length === 0) next.lines.splice(i, 1);
+        else writeAt(i, decls);
+      }
+      continue;
     }
-    return next;
-  }
 
-  const decls = apply([]);
-  if (decls.length === 0) return next;
-  const at = anchorLineFor(next, id);
-  const indent = next.lines[at]?.raw.match(/^\s*/)?.[0] ?? '  ';
-  next.lines.splice(at + 1, 0, {
-    raw: indent,
-    parsed: { kind: 'style', id, decls },
-    dirty: true,
-  });
+    const owner = [...lines].reverse().find((i) => declsAt(i).some(([k]) => k === key));
+    const target = owner ?? lines.at(-1);
+    if (target !== undefined) {
+      writeAt(target, withEntry(declsAt(target), key, value));
+      continue;
+    }
+    const at = anchorLineFor(next, id);
+    const indent = next.lines[at]?.raw.match(/^\s*/)?.[0] ?? '  ';
+    next.lines.splice(at + 1, 0, {
+      raw: indent,
+      parsed: { kind: 'style', id, decls: [[key, value]] },
+      dirty: true,
+    });
+  }
   return next;
 }
 
