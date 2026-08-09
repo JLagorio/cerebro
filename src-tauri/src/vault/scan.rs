@@ -40,9 +40,9 @@ fn timestamps(path: &Path) -> (String, String) {
     (iso_or_now(created), iso_or_now(modified))
 }
 
-/// Scan every `.md` file in the vault (skipping dot-directories, `views/`,
-/// and `attachments/`) into Entries with vault-relative forward-slash paths,
-/// sorted by path.
+/// Scan every `.md` and `.mmd` file in the vault (skipping dot-directories,
+/// `views/`, and `attachments/`) into Entries with vault-relative
+/// forward-slash paths, sorted by path.
 pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
     if !vault.is_dir() {
         return Err(format!("not a directory: {}", vault.display()));
@@ -58,7 +58,10 @@ pub fn scan_vault(vault: &Path) -> Result<Vec<Entry>, String> {
         if !item.file_type().is_file() {
             continue;
         }
-        if item.path().extension().and_then(|e| e.to_str()) != Some("md") {
+        if !matches!(
+            item.path().extension().and_then(|e| e.to_str()),
+            Some("md") | Some("mmd")
+        ) {
             continue;
         }
         let rel = rel_path(vault, item.path())?;
@@ -156,6 +159,11 @@ mod tests {
             "items/broken.md",
             "---\nstatus: [unclosed\n---\n\n# Broken item\n",
         );
+        testutil::write(
+            &vault,
+            "diagrams/pipeline.mmd",
+            "---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A[Ingest] --> B[Distill]\n",
+        );
         testutil::write(&vault, "views/all-items.yml", "name: All items\n");
         testutil::write(&vault, "attachments/readme.md", "# Not scanned\n");
         testutil::write(&vault, ".obsidian/workspace.md", "# Hidden\n");
@@ -171,6 +179,7 @@ mod tests {
         assert_eq!(
             paths,
             vec![
+                "diagrams/pipeline.mmd",
                 "items/atl-1.md",
                 "items/atl-2.md",
                 "items/broken.md",
@@ -183,6 +192,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&vault);
     }
 
+    // M29.20: a .mmd is RAW diagram source. Mermaid's own `---` config header
+    // is diagram syntax, so it must never parse as note frontmatter.
+    #[test]
+    fn mmd_files_scan_as_raw_untyped_entries() {
+        let vault = fixture_vault("scan-mmd");
+        let entries = scan_vault(&vault).unwrap();
+        let mmd = entries
+            .iter()
+            .find(|e| e.path == "diagrams/pipeline.mmd")
+            .unwrap();
+        assert_eq!(mmd.title, "Pipeline");
+        assert_eq!(mmd.entry_type, None);
+        assert!(mmd.properties.is_empty());
+        assert!(mmd.relationships.is_empty());
+        assert!(mmd.outgoing_links.is_empty());
+        assert_eq!(mmd.snippet, "flowchart TD");
+        assert!(mmd.parse_error.is_none());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
     #[test]
     fn skips_views_attachments_and_dot_dirs() {
         let vault = fixture_vault("scan-skips");
@@ -191,7 +220,7 @@ mod tests {
             !e.path.starts_with("views/")
                 && !e.path.starts_with("attachments/")
                 && !e.path.starts_with(".obsidian/")
-                && e.path.ends_with(".md")
+                && (e.path.ends_with(".md") || e.path.ends_with(".mmd"))
         }));
         let _ = std::fs::remove_dir_all(&vault);
     }

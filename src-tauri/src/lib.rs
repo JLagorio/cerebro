@@ -210,6 +210,15 @@ fn import_attachment(vault: String, source: String) -> Result<String, String> {
     vault::write::import_attachment(Path::new(&vault), &source)
 }
 
+/// Write a raw text file (`.mmd` only) into the vault; returns the actual
+/// path after `-2` stem dedupe (M29.22). The extension allowlist and the
+/// knowledge guard live in write.rs beside the dedupe, where they are
+/// unit-tested — this command stays thin on purpose.
+#[tauri::command(async)]
+fn write_text_file(vault: String, path: String, content: String) -> Result<String, String> {
+    vault::write::write_text_file(Path::new(&vault), &path, &content)
+}
+
 /// Save PNG bytes wherever the user points the native dialog (M29.4).
 /// Cancel is `Ok(None)` — not an error — mirroring `pick_files`.
 #[tauri::command]
@@ -362,6 +371,7 @@ pub fn run() {
             list_folders,
             pick_files,
             import_attachment,
+            write_text_file,
             export_png,
             start_watcher,
             read_connectors,

@@ -213,6 +213,19 @@ export function importAttachment(vault: string, source: string): Promise<string>
     : mock.importAttachment(vault, source);
 }
 
+/**
+ * Write a raw text file (`.mmd` only) into the vault, deduping the stem
+ * (`-2`, `-3`, …) when the path is taken; returns the vault-relative path
+ * actually written (M29.22). Both backends enforce the extension allowlist
+ * and refuse `knowledge/` — this is the door a mermaid block uses to move
+ * its source out into a standalone diagram file, not a general writer.
+ */
+export function writeTextFile(vault: string, path: string, content: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('write_text_file', { vault, path, content })
+    : mock.writeTextFile(vault, path, content);
+}
+
 // --- Mermaid diagram export (M29.4) -----------------------------------------
 
 /**

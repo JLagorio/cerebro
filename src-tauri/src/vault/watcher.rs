@@ -29,8 +29,8 @@ pub fn own_write_active(registered: Instant, now: Instant, window: Duration) -> 
     now.duration_since(registered) < window
 }
 
-/// Vault-relative paths that should trigger a rescan: `.md` or `.yml` files
-/// with no dot-prefixed component.
+/// Vault-relative paths that should trigger a rescan: `.md`, `.mmd`, or
+/// `.yml` files with no dot-prefixed component.
 pub fn is_relevant_path(path: &Path) -> bool {
     let hidden = path
         .components()
@@ -40,7 +40,7 @@ pub fn is_relevant_path(path: &Path) -> bool {
     }
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("md") | Some("yml")
+        Some("md") | Some("mmd") | Some("yml")
     )
 }
 
@@ -247,6 +247,7 @@ mod tests {
     #[test]
     fn only_md_and_yml_outside_dot_dirs_are_relevant() {
         assert!(is_relevant_path(Path::new("items/atl-1.md")));
+        assert!(is_relevant_path(Path::new("diagrams/pipeline.mmd")));
         assert!(is_relevant_path(Path::new("views/all-items.yml")));
         assert!(!is_relevant_path(Path::new("attachments/logo.png")));
         assert!(!is_relevant_path(Path::new(".obsidian/workspace.md")));
