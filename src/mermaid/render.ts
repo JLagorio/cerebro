@@ -10,8 +10,7 @@ import { buildThemeVariables, themeSignature } from './theme';
  * "Parse error on line N:" and nothing else structured.
  */
 export type RenderResult =
-  | { ok: true; svg: string }
-  | { ok: false; message: string; line: number | null };
+  { ok: true; svg: string } | { ok: false; message: string; line: number | null };
 
 export function extractErrorLine(message: string): number | null {
   const m = message.match(/error on line (\d+)/i);

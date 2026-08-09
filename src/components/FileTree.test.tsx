@@ -159,14 +159,22 @@ describe('FileTree', () => {
   // Docs-only mode prunes folders the record filter emptied. The prune used
   // to test only a folder's DIRECT children, so `records/` (whose files sit
   // one level deeper) survived and told the user it was an "Empty folder".
-  it('prunes record-only folders transitively in docs-only mode', () => {
+  it('prunes record-only folders transitively in docs-only mode', async () => {
+    // strategy/ carried the yml-only assertion until M29.8 gave it a doc
+    // (systems-map.md) — a synthetic Collection holding only collection.yml
+    // and a List keeps that case covered.
+    fs().set('roadmaps/collection.yml', 'name: Roadmaps\n');
+    fs().set('roadmaps/big-rocks.list.yml', 'name: Big rocks\n');
+    await useVaultStore.getState().openVault('/demo-vault');
     render(<FileTree root="" docsOnly onOpen={vi.fn()} />);
     const folders = screen.getAllByTestId('tree-folder').map((el) => el.textContent);
     expect(folders).not.toContain('Records');
     expect(folders).not.toContain('Types');
-    // strategy/ holds only collection.yml and Lists — a Collection, not an
+    // roadmaps/ holds only collection.yml and Lists — a Collection, not an
     // "Empty folder".
-    expect(folders).not.toContain('Strategy');
+    expect(folders).not.toContain('Roadmaps');
+    // strategy/ holds a doc now, so docs-only mode keeps it.
+    expect(folders).toContain('Strategy');
   });
 
   it('never claims a surviving docs-only folder is empty when it is not', () => {
