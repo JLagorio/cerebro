@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { createReactBlockSpec } from '@blocknote/react';
 import { Icon } from '@/components/ui/Icon';
+import { MermaidBlockView } from '@/mermaid/MermaidBlockView';
 
 /**
  * Custom blocks (M2.x docs polish). Both stay plain markdown on disk:
@@ -112,124 +113,6 @@ export const CalloutBlock = createReactBlockSpec(
   },
 );
 
-let mermaidId = 0;
-
-function MermaidView({
-  code,
-  onChangeCode,
-}: {
-  code: string;
-  onChangeCode: (code: string) => void;
-}) {
-  const [editing, setEditing] = useState(code.trim() === '');
-  const [draft, setDraft] = useState(code);
-  const [error, setError] = useState<string | null>(null);
-  const [svg, setSvg] = useState<string | null>(null);
-  const idRef = useRef(`cerebro-mermaid-${++mermaidId}`);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (code.trim() === '') {
-      setSvg(null);
-      return;
-    }
-    void (async () => {
-      try {
-        // Lazy import: mermaid is heavy and only needed when a diagram is
-        // actually on screen.
-        const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' });
-        const { svg: rendered } = await mermaid.render(idRef.current, code);
-        if (!cancelled) {
-          setSvg(rendered);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setSvg(null);
-          setError(err instanceof Error ? err.message.split('\n')[0] : 'Invalid diagram');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [code]);
-
-  const commit = () => {
-    setEditing(false);
-    if (draft !== code) onChangeCode(draft);
-  };
-
-  return (
-    <div
-      data-testid="mermaid-block"
-      contentEditable={false}
-      className="my-1 w-full rounded-lg border border-n-200 bg-n-0"
-    >
-      <div className="flex items-center gap-1.5 border-b border-n-100 px-2.5 py-1">
-        <Icon name="waypoints" size={13} color="var(--n-500)" />
-        <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">Mermaid</span>
-        {error !== null && (
-          <span className="min-w-0 flex-1 truncate text-xs text-danger-600">{error}</span>
-        )}
-        <span className="flex-1" />
-        <button
-          type="button"
-          // Without this the textarea blurs FIRST, commit() flips `editing`
-          // false, and the click then lands on the (now) "Edit" branch —
-          // reopening the source box the button just closed.
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            if (editing) commit();
-            else {
-              setDraft(code);
-              setEditing(true);
-            }
-          }}
-          className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
-        >
-          {editing ? 'Done' : 'Edit'}
-        </button>
-      </div>
-      {editing && (
-        <textarea
-          autoFocus
-          aria-label="Mermaid source"
-          value={draft}
-          placeholder={'graph TD\n  A[Idea] --> B[Shipped]'}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => e.stopPropagation()}
-          rows={Math.max(4, draft.split('\n').length + 1)}
-          className="w-full resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-sm leading-[1.5] text-n-800 outline-none"
-        />
-      )}
-      {!editing && svg !== null && (
-        <div
-          className="overflow-x-auto px-3 py-2 [&_svg]:max-w-full"
-          // dangerouslySetInnerHTML is safe here: mermaid sanitizes its own SVG output.
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-      )}
-      {!editing && svg === null && (
-        <button
-          type="button"
-          onClick={() => {
-            setDraft(code);
-            setEditing(true);
-          }}
-          className="w-full border-0 bg-transparent px-3 py-3 text-left text-sm text-n-400"
-        >
-          {error !== null
-            ? 'Fix the diagram source…'
-            : 'Empty diagram — click to add mermaid source'}
-        </button>
-      )}
-    </div>
-  );
-}
-
 export const MermaidBlock = createReactBlockSpec(
   {
     type: 'mermaid',
@@ -238,7 +121,7 @@ export const MermaidBlock = createReactBlockSpec(
   },
   {
     render: (props) => (
-      <MermaidView
+      <MermaidBlockView
         code={props.block.props.code as string}
         onChangeCode={(code) => props.editor.updateBlock(props.block, { props: { code } } as never)}
       />
