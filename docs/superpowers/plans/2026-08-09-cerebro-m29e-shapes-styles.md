@@ -2140,7 +2140,9 @@ Verification notes for the implementer, not assumptions: the first block is `Ide
 - [ ] **Step 2: Run the spec, then the full gate**
 
 ```bash
-PORT=5273 pnpm e2e -- diagrams.spec.ts     # expected: 5 passed
+PORT=5273 pnpm e2e diagrams.spec.ts        # expected: 7 passed
+# NO `--` before the filename: pnpm forwards it to Playwright, which then
+# ignores the filter and runs all 41 tests. (Measured at M29.34.)
 pnpm lint && pnpm typecheck && pnpm test:run && pnpm test:coverage && PORT=5273 pnpm e2e \
   && (cd src-tauri && cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnings)
 ```
@@ -2161,6 +2163,15 @@ git commit -m "test(mermaid): shapes, styles, and animated edges round-trip in e
 - `id@{ … }` single-line meta parses into ordered, unknown-key-preserving `NodeMeta`; multi-line blocks and bracket+meta hybrids go opaque and survive byte-for-byte (unit-proven). `nodes()` reports meta shape/label truthfully; `renameNode` lands on a meta label when one would win at render.
 - `style` lines parse; `setNodeStyle` patches exactly the named declarations, preserves unknown ones in order, deletes an emptied line, creates a missing one after its node, and refuses undeclared ids. `linkStyle`/`classDef`/`class`/`click` remain opaque and untouched.
 - The full edge surface — every stroke × head, both-way `o--o`/`x--x`/`<-->` families, lengths, `~~~` — parses with verbatim `raw` tokens; a dirty line re-emits untouched segments byte-true. `setEdgeArrow` rewrites one token at minimum length; `setEdgeAnimate` mints/reuses `eN` ids and manages the `animate` meta entry surgically.
-- The node toolbar opens a searchable palette over the full 49-shape registry (Basic/Process/Technical/Annotation, spec §4.4) whose picks follow D4, and a 12-swatch color menu writing portable hex `style` lines; the edge editor cycles heads, picks strokes, and toggles animation.
-- e2e proves real mermaid v11.16.1 accepts everything we write (zero-error re-renders) and the edits land on the (mock) disk.
+- The node toolbar opens a searchable palette over the full **48**-shape registry (Basic/Process/Technical/Annotation, spec §4.4)
+  — ~~49~~: `person` exists only in mermaid **11.16.1** and the app bundles
+  **11.16.0**, where it throws `No such shape` and kills the whole diagram.
+  `shapes.mermaid.test.ts` pins this as a version tripwire (measured M29.32) whose picks follow D4, and a 12-swatch color menu writing portable hex `style` lines; the edge editor cycles heads, picks strokes, and toggles animation.
+- e2e proves real mermaid **v11.16.0** (the bundled version, not the vendored
+  11.16.1) accepts what the canvas writes and that the edits land on the (mock)
+  disk. The *exhaustive* "everything we write" proof lives in the conformance
+  suites — `shapes.mermaid.test.ts` sweeps every writable shape spelling and
+  `controls.mermaid.test.ts` every stroke/head/animate form, both against real
+  bundled mermaid; the e2e's job is the click→file integration path through
+  real Chromium. (Reworded M29.34.)
 - Full gate green; coverage ratchet intact; ids never changed anywhere in this stage.

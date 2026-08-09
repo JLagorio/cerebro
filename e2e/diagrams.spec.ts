@@ -534,16 +534,27 @@ test('shapes, colors, and edge animation round-trip as surgical mermaid', async 
   const edge = host.locator('path[id*="L_Idea_Build"]').first();
   // locator.click() cannot be used here, and not because of anything the app
   // does: Idea sits directly above Build, so mermaid draws a PERFECTLY VERTICAL
-  // path (`d="M54.219,61.921L54.219,…"`) whose bounding box is zero pixels
-  // wide, and Playwright calls an empty bounding box "not visible". A human
-  // clicks this edge fine — the browser hit-tests the 2px stroke, not the box.
-  // So drive the real mouse at the segment's midpoint instead: still a fully
-  // hit-tested click (unlike `force: true`, which would skip the very check
-  // that proves the edge is reachable), just aimed by geometry. Safe because
-  // this segment is straight — a bent path's box centre need not be on it.
-  const edgeBox = await edge.boundingBox();
-  if (edgeBox === null) throw new Error('the Idea→Build edge path rendered with no bounding box');
-  await page.mouse.click(edgeBox.x + edgeBox.width / 2, edgeBox.y + edgeBox.height / 2);
+  // path (`d="M54.219,61.921L54.219,…"`). Playwright's visibility predicate is
+  // `width > 0 && height > 0` over the element's IN-PAGE getBoundingClientRect,
+  // which for a dead-vertical path is 0 wide — so the locator is "not visible"
+  // and click() times out. (Note this is a DIFFERENT box from Playwright's own
+  // boundingBox(), which uses the CDP box model and reports ~11px here because
+  // it includes the arrowhead marker's ink.) A human clicks this edge fine —
+  // the browser hit-tests the 2px stroke, not the box.
+  //
+  // So drive the real mouse at the centreline instead: still a fully hit-tested
+  // click (unlike `force: true`, which would skip the very check that proves
+  // the edge is reachable), just aimed by geometry we read ourselves rather
+  // than by an undocumented interaction between two different box definitions.
+  // scrollIntoViewIfNeeded first: page.mouse takes raw viewport coordinates and
+  // will NOT auto-scroll the way locator.click() does.
+  await host.scrollIntoViewIfNeeded();
+  const edgeRect = await edge.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, height: r.height };
+  });
+  // x IS the centreline for a vertical path; midpoint down its height.
+  await page.mouse.click(edgeRect.x, edgeRect.y + edgeRect.height / 2);
   // Confirm the edge editor actually opened before touching its controls.
   await expect(page.getByLabel('Edge label')).toBeVisible();
   await page.getByRole('button', { name: 'Animate edge' }).click();
