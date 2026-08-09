@@ -39,8 +39,10 @@ export function MermaidLightbox({
   // `e.preventDefault()` is silently ignored and the Dialog body scrolls
   // under the zoom. A native listener opted out of passive mode, attached
   // directly to the viewport, is the only way to actually stop it (code
-  // review, M29.5). `setScale` is stable and MIN/MAX_SCALE are constants, so
-  // the effect never needs to re-subscribe.
+  // review, M29.5). `open` is a dep, not just a guard: Dialog returns null
+  // while closed, so the viewport doesn't exist at mount — a caller that
+  // mounts with `open={false}` and flips it true later needs this effect to
+  // run again once the ref actually has something to attach to (re-review).
   useEffect(() => {
     const el = viewportRef.current;
     if (el === null) return;
@@ -51,7 +53,7 @@ export function MermaidLightbox({
     };
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
-  }, []);
+  }, [open]);
 
   // `savePng` resolves `null` on a user cancel (the Rust side returns
   // Ok(None)) — that is not a failure, but it is not a success either, so it
