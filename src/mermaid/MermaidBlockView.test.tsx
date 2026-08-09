@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,18 @@ import { MermaidBlockView } from './MermaidBlockView';
 vi.mock('./render', () => ({ renderMermaid: vi.fn() }));
 import { renderMermaid } from './render';
 const renderMock = vi.mocked(renderMermaid);
+
+/**
+ * The visual pane renders the `code` PROP directly, never a `draft` (M29.18
+ * defect 2) — an uncontrolled `onChangeCode={() => {}}` mock can no longer
+ * exercise it meaningfully, since nothing ever flows back in. Any test that
+ * needs to see the structural editor's content (as opposed to just its
+ * presence) needs an actual round trip, hence this real-state wrapper.
+ */
+function Controlled({ initialCode }: { initialCode: string }) {
+  const [code, setCode] = useState(initialCode);
+  return <MermaidBlockView code={code} onChangeCode={setCode} />;
+}
 
 describe('MermaidBlockView', () => {
   it('renders the diagram through the core service', async () => {
@@ -24,7 +37,7 @@ describe('MermaidBlockView', () => {
 
   it('an empty block offers the template grid; picking the flowchart one enters editing visually with its code', async () => {
     renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
-    render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    render(<Controlled initialCode="" />);
     expect(screen.getByTestId('mermaid-template-grid')).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Flowchart' }));
     // Flowcharts open visual-first (M29.18) — the structural editor, not the
@@ -53,11 +66,12 @@ describe('MermaidBlockView', () => {
       message: 'Parse error on line 2:\nExpecting …',
       line: 2,
     });
-    // Not flowchart-shaped: this exercises the plain code-editing path,
-    // untangled from M29.18's visual mode (a `graph TD` header would parse as
-    // visual-capable even with a broken second line, since a bad line just
-    // goes opaque rather than failing the whole model).
-    const code = 'sequenceDiagram\n  A-->';
+    // Flowchart-shaped on purpose (M29.18 defect 4): a bad second line goes
+    // opaque rather than failing the whole model, so this header STILL
+    // parses as visual-capable even though the render itself is broken —
+    // the exact case onErrorClick must force into code mode, since
+    // StructuralEditor has no last-good svg to show and would open blank.
+    const code = 'graph TD\n  A -->';
     render(<MermaidBlockView code={code} onChangeCode={() => {}} />);
     await waitFor(() => screen.getByTestId('mermaid-error'));
     // The header still has its own "Edit" button, so target the error card
@@ -66,6 +80,7 @@ describe('MermaidBlockView', () => {
     const textarea = screen.getByLabelText('Mermaid source');
     expect(textarea).toBeTruthy();
     expect((textarea as HTMLTextAreaElement).value).toBe(code);
+    expect(screen.queryByTestId('structural-host')).toBeNull();
   });
 
   it('opens the lightbox from the preview', async () => {
@@ -91,20 +106,20 @@ describe('MermaidBlockView editing (M29.9)', () => {
 
   const user = () => userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
 
-  // These three tests deliberately type a non-flowchart-shaped diagram
-  // (`sequenceDiagram`, not `graph TD`/`flowchart TD`): they exercise Stage
-  // B's debounce/error/cancel mechanics, which are diagram-type-agnostic, and
-  // a flowchart-shaped draft would flip `isVisualCapable` mid-session
-  // (M29.18) and swap the textarea out from under an in-flight `type()` call.
+  // Typing `graph TD` here — Stage B's own placeholder text — deliberately
+  // exercises the mid-session case M29.18's latching fix targets: `editMode`
+  // was captured as 'code' at the Blank click (entryMode('') is always
+  // 'code', nothing to parse yet) and must NOT auto-promote just because the
+  // draft becomes flowchart-shaped while the user is still typing.
 
   it('live-renders the draft after the debounce window', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
-    await user().type(screen.getByLabelText('Mermaid source'), 'sequenceDiagram');
+    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    await waitFor(() => expect(renderMock).toHaveBeenCalledWith('sequenceDiagram'));
+    await waitFor(() => expect(renderMock).toHaveBeenCalledWith('graph TD'));
     await waitFor(() =>
       expect(screen.getByTestId('mermaid-live-preview').innerHTML).toContain('data-fake="live"'),
     );
@@ -113,7 +128,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
   it('keeps the last good render and shows a lined error while the draft is broken', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
-    await user().type(screen.getByLabelText('Mermaid source'), 'sequenceDiagram');
+    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
     act(() => {
       vi.advanceTimersByTime(300);
     });
@@ -150,7 +165,7 @@ describe('MermaidBlockView editing (M29.9)', () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
     renderMock.mockResolvedValue({ ok: false, message: 'Parse error on line 2: bad', line: 2 });
-    await user().type(screen.getByLabelText('Mermaid source'), 'sequenceDiagram\n  A-->');
+    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD\n  A -->');
     act(() => {
       vi.advanceTimersByTime(300);
     });
@@ -189,5 +204,54 @@ describe('MermaidBlockView visual/code mode (M29.18)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Mermaid source')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Show code' })).toBeNull();
+  });
+
+  it('editMode is latched at entry, not re-decided on every keystroke (M29.18.1)', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+    // A non-flowchart-shaped code prop enters code mode at the door...
+    render(<MermaidBlockView code={'sequenceDiagram\n  A->>B: hi'} onChangeCode={() => {}} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const source = screen.getByLabelText('Mermaid source') as HTMLTextAreaElement;
+    // ...and typing a flowchart-shaped replacement mid-session — the exact
+    // placeholder text Stage B invites — must not yank the textarea away for
+    // the structural editor once the draft happens to become parseable.
+    await userEvent.clear(source);
+    await userEvent.type(source, 'flowchart TD\n  A[X] --> B[Y]');
+    expect(screen.getByLabelText('Mermaid source')).toBeTruthy();
+    expect(screen.queryByTestId('structural-host')).toBeNull();
+    // The toggle appears (now visual-capable), but promotion stays opt-in.
+    expect(screen.getByRole('button', { name: 'Show diagram' })).toBeTruthy();
+  });
+
+  it('visual mode renders the code prop directly, so an external code change (undo) is what "Show code" reflects', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
+
+    function ControlledBlock() {
+      const [code, setCode] = useState('flowchart TD\n  A[Start] --> B[End]');
+      return (
+        <>
+          <button onClick={() => setCode('flowchart TD\n  A[Undone] --> B[End]')}>
+            External edit
+          </button>
+          <MermaidBlockView code={code} onChangeCode={setCode} />
+        </>
+      );
+    }
+
+    render(<ControlledBlock />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(await screen.findByTestId('structural-host')).toBeTruthy();
+
+    // Simulate an external change landing mid-session (e.g. an undo
+    // elsewhere) — the visual pane holds no draft of its own to fight it.
+    await userEvent.click(screen.getByRole('button', { name: 'External edit' }));
+    await waitFor(() =>
+      expect(renderMock).toHaveBeenCalledWith('flowchart TD\n  A[Undone] --> B[End]'),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show code' }));
+    expect((screen.getByLabelText('Mermaid source') as HTMLTextAreaElement).value).toBe(
+      'flowchart TD\n  A[Undone] --> B[End]',
+    );
   });
 });

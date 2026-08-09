@@ -124,6 +124,18 @@ describe('StructuralEditor', () => {
     expect(onChangeCode).toHaveBeenLastCalledWith('flowchart TD\n  A[Start]\n  B[End]');
   });
 
+  it('Enter on an unchanged edge label is a no-op — no history churn', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('L_A_B_0')).not.toBeNull());
+    await userEvent.click(document.getElementById('L_A_B_0')!);
+    // Opens with an empty value (this edge starts unlabeled) — commit
+    // without typing anything.
+    await userEvent.type(screen.getByLabelText('Edge label'), '{Enter}');
+    expect(onChangeCode).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Edge label')).toBeNull();
+  });
+
   it('direction buttons rewrite the header only', async () => {
     const onChangeCode = vi.fn();
     render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);

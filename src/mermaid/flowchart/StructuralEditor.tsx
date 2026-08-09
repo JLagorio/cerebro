@@ -325,137 +325,155 @@ export function StructuralEditor({
         </button>
       </div>
 
-      <div
-        ref={hostRef}
-        data-testid="structural-host"
-        className="[&_svg]:h-auto [&_svg]:max-w-full"
-      />
-
-      {ghost !== null && (
-        <svg className="pointer-events-none absolute inset-0 h-full w-full">
-          <line
-            // Real pointer events always carry clientX/Y; jsdom's fallback
-            // (no PointerEvent constructor) does not, so this guards against
-            // NaN reaching the DOM under test rather than trusting the input.
-            x1={Number.isFinite(ghost.x1) ? ghost.x1 : 0}
-            y1={Number.isFinite(ghost.y1) ? ghost.y1 : 0}
-            x2={Number.isFinite(ghost.x2) ? ghost.x2 : 0}
-            y2={Number.isFinite(ghost.y2) ? ghost.y2 : 0}
-            stroke="var(--cortex-500)"
-            strokeWidth="1.5"
-            strokeDasharray="4 3"
-          />
-        </svg>
-      )}
-
-      {validSelected !== null && toolbarPos !== null && renaming === null && (
+      {/*
+        Own positioning context for the host: toolbarPos/ghost are measured
+        against hostRef.getBoundingClientRect() (see the bind effect and the
+        pointer handlers above), so every absolutely-positioned overlay that
+        reads those coordinates must share hostRef's origin exactly. The
+        outer container above adds a toolbar row and its own px-3/py-2
+        padding — anchoring overlays there instead put them ~12px left and
+        ~36px up from where the coordinates actually meant (M29.18 defect 3).
+        This wrapper holds nothing but the host, so its box and the host's
+        box coincide.
+      */}
+      <div className="relative">
         <div
-          data-testid="mermaid-node-toolbar"
-          className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-          style={{ left: toolbarPos.x, top: Math.max(0, toolbarPos.y) }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {SHAPE_CHOICES.map((c) => (
+          ref={hostRef}
+          data-testid="structural-host"
+          className="[&_svg]:h-auto [&_svg]:max-w-full"
+        />
+
+        {ghost !== null && (
+          <svg className="pointer-events-none absolute inset-0 h-full w-full">
+            <line
+              // Real pointer events always carry clientX/Y; jsdom's fallback
+              // (no PointerEvent constructor) does not, so this guards
+              // against NaN reaching the DOM under test rather than trusting
+              // the input.
+              x1={Number.isFinite(ghost.x1) ? ghost.x1 : 0}
+              y1={Number.isFinite(ghost.y1) ? ghost.y1 : 0}
+              x2={Number.isFinite(ghost.x2) ? ghost.x2 : 0}
+              y2={Number.isFinite(ghost.y2) ? ghost.y2 : 0}
+              stroke="var(--cortex-500)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+            />
+          </svg>
+        )}
+
+        {validSelected !== null && toolbarPos !== null && renaming === null && (
+          <div
+            data-testid="mermaid-node-toolbar"
+            className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
+            style={{ left: toolbarPos.x, top: Math.max(0, toolbarPos.y) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {SHAPE_CHOICES.map((c) => (
+              <button
+                key={c.shape}
+                type="button"
+                title={c.label}
+                aria-label={`Shape: ${c.label}`}
+                onClick={() => {
+                  if (validSelected === null) return;
+                  apply(setNodeShape(model, validSelected, c.shape));
+                }}
+                className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+              >
+                <Icon name={c.icon} size={13} color="var(--n-600)" />
+              </button>
+            ))}
+            <span className="mx-0.5 h-4 w-px bg-n-100" />
             <button
-              key={c.shape}
               type="button"
-              title={c.label}
-              aria-label={`Shape: ${c.label}`}
+              aria-label="Add connected node"
               onClick={() => {
                 if (validSelected === null) return;
-                apply(setNodeShape(model, validSelected, c.shape));
+                const added = addNode(model, 'New step');
+                apply(addEdge(added.model, validSelected, added.id));
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
             >
-              <Icon name={c.icon} size={13} color="var(--n-600)" />
+              <Icon name="plus" size={13} color="var(--n-600)" />
             </button>
-          ))}
-          <span className="mx-0.5 h-4 w-px bg-n-100" />
-          <button
-            type="button"
-            aria-label="Add connected node"
-            onClick={() => {
-              if (validSelected === null) return;
-              const added = addNode(model, 'New step');
-              apply(addEdge(added.model, validSelected, added.id));
-            }}
-            className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
-          >
-            <Icon name="plus" size={13} color="var(--n-600)" />
-          </button>
-          <button
-            type="button"
-            aria-label="Delete node"
-            onClick={() => {
-              if (validSelected === null) return;
-              apply(deleteNode(model, validSelected));
-              setSelected(null);
-              setToolbarPos(null);
-            }}
-            className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
-          >
-            <Icon name="trash-2" size={13} color="var(--danger-600)" />
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              aria-label="Delete node"
+              onClick={() => {
+                if (validSelected === null) return;
+                apply(deleteNode(model, validSelected));
+                setSelected(null);
+                setToolbarPos(null);
+              }}
+              className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+            >
+              <Icon name="trash-2" size={13} color="var(--danger-600)" />
+            </button>
+          </div>
+        )}
 
-      {renaming !== null && (
-        <input
-          autoFocus
-          aria-label="Node label"
-          value={renaming.value}
-          onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
-          onBlur={commitRename}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter') commitRename();
-            if (e.key === 'Escape') setRenaming(null);
-          }}
-          className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md border border-cortex-500 bg-n-0 px-2 py-1 text-sm text-n-800 shadow-sm outline-none"
-        />
-      )}
-
-      {edgeEditor !== null && (
-        <div
-          className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
-          onClick={(e) => e.stopPropagation()}
-        >
+        {renaming !== null && (
           <input
             autoFocus
-            aria-label="Edge label"
-            value={edgeEditor.value}
-            placeholder="label"
-            onChange={(e) => setEdgeEditor({ ...edgeEditor, value: e.target.value })}
+            aria-label="Node label"
+            value={renaming.value}
+            onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
+            onBlur={commitRename}
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === 'Enter') {
-                apply(
-                  setEdgeLabel(
-                    model,
-                    edgeEditor.edge,
-                    edgeEditor.value.trim() === '' ? null : edgeEditor.value,
-                  ),
-                );
-                setEdgeEditor(null);
-              }
-              if (e.key === 'Escape') setEdgeEditor(null);
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') setRenaming(null);
             }}
-            className="w-32 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+            className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md border border-cortex-500 bg-n-0 px-2 py-1 text-sm text-n-800 shadow-sm outline-none"
           />
-          <button
-            type="button"
-            aria-label="Delete edge"
-            onClick={() => {
-              apply(deleteEdge(model, edgeEditor.edge));
-              setEdgeEditor(null);
-            }}
-            className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+        )}
+
+        {edgeEditor !== null && (
+          <div
+            className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Icon name="trash-2" size={13} color="var(--danger-600)" />
-          </button>
-        </div>
-      )}
+            <input
+              autoFocus
+              aria-label="Edge label"
+              value={edgeEditor.value}
+              placeholder="label"
+              onChange={(e) => setEdgeEditor({ ...edgeEditor, value: e.target.value })}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  // No-op on an unchanged label: skip the apply so hitting
+                  // Enter without editing anything doesn't churn history.
+                  if (edgeEditor.value !== (edgeEditor.edge.label ?? '')) {
+                    apply(
+                      setEdgeLabel(
+                        model,
+                        edgeEditor.edge,
+                        edgeEditor.value.trim() === '' ? null : edgeEditor.value,
+                      ),
+                    );
+                  }
+                  setEdgeEditor(null);
+                }
+                if (e.key === 'Escape') setEdgeEditor(null);
+              }}
+              className="w-32 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"
+            />
+            <button
+              type="button"
+              aria-label="Delete edge"
+              onClick={() => {
+                apply(deleteEdge(model, edgeEditor.edge));
+                setEdgeEditor(null);
+              }}
+              className="rounded border-0 bg-transparent p-1 hover:bg-danger-50"
+            >
+              <Icon name="trash-2" size={13} color="var(--danger-600)" />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -10,6 +10,11 @@ import { renderMermaid } from './render';
 import { TEMPLATES } from './templates';
 import { useDebounced } from './useDebounced';
 
+/** Whichever mode a diagram source would open in, if an edit session started right now. */
+function entryMode(source: string): 'visual' | 'code' {
+  return parseFlowchart(source) !== null ? 'visual' : 'code';
+}
+
 /**
  * The mermaid block's body (M29.6) — moved out of editor/blocks.tsx so the
  * editor keeps only BlockNote glue. Rendering goes through the shared core;
@@ -25,16 +30,45 @@ export function MermaidBlockView({
   onChangeCode: (code: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // `draft` only matters in code mode: visual mode renders `code` directly
+  // (see the visual pane below) and every op commits through onChangeCode as
+  // it happens, so there is never anything uncommitted to hold in state.
   const [draft, setDraft] = useState(code);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
   // Stage C (M29.18): flowcharts get a visual/code toggle; every other
   // diagram type has no structural model to edit, so it never leaves code.
+  // `editMode` is LATCHED at each entry point (Edit, template pick, error
+  // click, Blank) from whatever source is about to be shown, then never
+  // auto-promoted mid-session: code-mode text becoming flowchart-shaped
+  // while the user is mid-keystroke must not yank the textarea out from
+  // under them (M29.18.1 — the placeholder literally invites typing
+  // `graph TD`). Only the explicit toggle button promotes code → visual; the
+  // demotion effect below is the one direction this flips on its own, as a
+  // safety net for source that stops parsing out from under a visual session.
   const [editMode, setEditMode] = useState<'visual' | 'code'>('visual');
-  const isVisualCapable = parseFlowchart(editing ? draft : code) !== null;
+  // The source actually on screen right now: `code` while the visual pane is
+  // showing (it never reads `draft`), `draft` while the code pane is.
+  const liveSource = editMode === 'visual' ? code : draft;
+  const isVisualCapable = parseFlowchart(liveSource) !== null;
+
+  // Safe demotion only: if the visual pane's source stops parsing as a
+  // flowchart out from under it (an external edit — undo, another surface —
+  // landing mid-session), fall back to code rather than let StructuralEditor
+  // show its own "can't edit this as a diagram" placeholder inside what's
+  // supposed to be a live editor. Never fires the other direction — that's
+  // the toggle button's job, not an effect's.
+  useEffect(() => {
+    if (editing && editMode === 'visual' && !isVisualCapable) {
+      setDraft(code);
+      setEditMode('code');
+    }
+  }, [editing, editMode, isVisualCapable, code]);
 
   const commit = () => {
     setEditing(false);
-    if (draft !== code) onChangeCode(draft);
+    // Only code mode ever holds an uncommitted draft — visual ops already
+    // landed through onChangeCode as they happened.
+    if (editMode === 'code' && draft !== code) onChangeCode(draft);
   };
 
   const cancel = () => {
@@ -51,13 +85,28 @@ export function MermaidBlockView({
       <div className="flex items-center gap-1.5 border-b border-n-100 px-2.5 py-1">
         <Icon name="waypoints" size={13} color="var(--n-500)" />
         <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">
-          {detectDiagramType(editing ? draft : code)}
+          {detectDiagramType(editing ? liveSource : code)}
         </span>
         {editing && isVisualCapable && (
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setEditMode(editMode === 'visual' ? 'code' : 'visual')}
+            onClick={() => {
+              if (editMode === 'visual') {
+                // Entering code mode: seed the textarea from the current
+                // source — visual ops commit straight through `code`, so
+                // `draft` may be stale, or never touched this session.
+                setDraft(code);
+                setEditMode('code');
+              } else {
+                // Entering visual mode: commit whatever's typed so far — the
+                // visual pane renders `code` directly, never `draft` — so
+                // cmd+z from here on targets real history, not a session
+                // with no external trace.
+                if (draft !== code) onChangeCode(draft);
+                setEditMode('visual');
+              }
+            }}
             className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
           >
             {editMode === 'visual' ? 'Show code' : 'Show diagram'}
@@ -74,6 +123,7 @@ export function MermaidBlockView({
             if (editing) commit();
             else {
               setDraft(code);
+              setEditMode(entryMode(code));
               setEditing(true);
             }
           }}
@@ -83,7 +133,7 @@ export function MermaidBlockView({
         </button>
       </div>
 
-      {editing && isVisualCapable && editMode === 'visual' && (
+      {editing && editMode === 'visual' && isVisualCapable && (
         <div
           onKeyDown={(e) => {
             // No Stage-B textarea here to swallow BlockNote hotkeys via
@@ -97,21 +147,15 @@ export function MermaidBlockView({
             }
           }}
         >
-          <StructuralEditor
-            code={draft}
-            onChangeCode={(next) => {
-              // Each visual operation (drag an edge, rename, delete…) commits
-              // immediately — its own BlockNote history step — rather than
-              // batching until Done, so cmd+z undoes one visual action at a
-              // time instead of the whole editing session.
-              setDraft(next);
-              onChangeCode(next);
-            }}
-          />
+          {/* Renders the `code` prop directly, never `draft` (M29.18.1 fix):
+              visual ops commit immediately through onChangeCode, so the prop
+              IS the live state, and an external code change (undo, another
+              surface) shows up here with no stale intermediary to fight. */}
+          <StructuralEditor code={code} onChangeCode={onChangeCode} />
         </div>
       )}
 
-      {editing && (!isVisualCapable || editMode === 'code') && (
+      {editing && (editMode === 'code' || !isVisualCapable) && (
         <div className="flex flex-wrap">
           <HighlightedTextarea
             autoFocus
@@ -143,6 +187,12 @@ export function MermaidBlockView({
             onExpand={(svg) => setLightboxSvg(svg)}
             onErrorClick={() => {
               setDraft(code);
+              // Forced, not entryMode(code): a broken render has nothing for
+              // the visual pane to show even when the header still parses as
+              // a flowchart (a bad line just goes opaque, per the model's own
+              // rules) — StructuralEditor holds its last-good svg and would
+              // open on a blank host (M29.18 defect 4).
+              setEditMode('code');
               setEditing(true);
             }}
           />
@@ -159,7 +209,16 @@ export function MermaidBlockView({
               key={t.id}
               type="button"
               onClick={() => {
+                const mode = entryMode(t.code);
                 setDraft(t.code);
+                setEditMode(mode);
+                // Picking a template that opens visual IS the first visual
+                // op: the pane renders `code`, not `draft` (M29.18.1), and
+                // there is no established `code` yet for it to read — an
+                // empty block always starts from "" — so commit here, same
+                // as every other op committing the instant it happens rather
+                // than waiting for Done.
+                if (mode === 'visual') onChangeCode(t.code);
                 setEditing(true);
               }}
               className="flex items-center gap-2 rounded-md border border-n-200 bg-n-0 px-2.5 py-2 text-left text-sm text-n-700 hover:border-n-300 hover:bg-n-25"
@@ -172,6 +231,7 @@ export function MermaidBlockView({
             type="button"
             onClick={() => {
               setDraft('');
+              setEditMode(entryMode(''));
               setEditing(true);
             }}
             className="flex items-center gap-2 rounded-md border border-dashed border-n-200 bg-transparent px-2.5 py-2 text-left text-sm text-n-500 hover:border-n-300"
