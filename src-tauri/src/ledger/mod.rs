@@ -26,6 +26,7 @@ pub mod index;
 pub mod manifest;
 pub mod migrate;
 pub mod project;
+pub mod reconcile;
 pub mod recovery;
 pub mod reduce;
 pub mod schema;

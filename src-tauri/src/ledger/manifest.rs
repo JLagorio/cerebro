@@ -90,6 +90,109 @@ pub fn load(vault: &Path) -> Result<Option<Manifest>, String> {
     Ok(Some(manifest))
 }
 
+/// The manifest entry a projection result targets, in the given state.
+pub fn entry_for(
+    projection: &super::reduce::ProjectionResult,
+    write_state: WriteState,
+    previous_content_hash: Option<String>,
+) -> ManifestEntry {
+    ManifestEntry {
+        belief_id: projection.belief_id.clone(),
+        projected_revision: projection.projected_revision,
+        belief_revision_event: projection.belief_revision_event.clone(),
+        generating_event: projection.generating_event.clone(),
+        projection_state_digest: projection.projection_state_digest.clone(),
+        content_hash: projection.content_hash.clone(),
+        write_state,
+        previous_content_hash,
+    }
+}
+
+/// The recoverable MANIFEST-FIRST write protocol (M23.2):
+///
+/// 1. compute the exact projection (the caller's `ProjectionResult`);
+/// 2. atomically store the entry with the target tuple, `pending`, and the
+///    prior file hash;
+/// 3. atomically write the projection file;
+/// 4. atomically mark the entry `complete` and clear the prior hash.
+///
+/// A crash between 2 and 3 leaves pending + prior/missing file
+/// (regenerate); between 3 and 4, pending + target file (finalize). When
+/// the bytes are ALREADY on disk the file write is skipped entirely — the
+/// manifest identity advances without moving anything the watcher or
+/// distiller could see.
+pub fn write_projection(
+    vault: &Path,
+    vault_rel: &str,
+    projection: &super::reduce::ProjectionResult,
+) -> Result<(), String> {
+    let file_path = vault.join(vault_rel);
+    let prior = match std::fs::read(&file_path) {
+        Ok(bytes) => Some(crate::ledger::sha256_hex(&bytes)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", file_path.display())),
+    };
+    let mut manifest = load(vault)?.unwrap_or(Manifest {
+        format: MANIFEST_FORMAT,
+        entries: BTreeMap::new(),
+    });
+
+    if prior.as_deref() == Some(projection.content_hash.as_str()) {
+        // Byte-identical: only the projection identity advances.
+        manifest.entries.insert(
+            vault_rel.to_string(),
+            entry_for(projection, WriteState::Complete, None),
+        );
+        save(vault, &manifest)?;
+        crate::crash::crash_point("projection-manifest-complete");
+        return Ok(());
+    }
+
+    manifest.entries.insert(
+        vault_rel.to_string(),
+        entry_for(projection, WriteState::Pending, prior),
+    );
+    save(vault, &manifest)?;
+    crate::crash::crash_point("projection-manifest-pending");
+
+    if let Some(parent) = file_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let temp = file_path.with_extension("md.cerebro-tmp");
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&temp).map_err(|e| e.to_string())?;
+        file.write_all(projection.bytes.as_bytes())
+            .map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&temp, &file_path).map_err(|e| e.to_string())?;
+    if let Some(parent) = file_path.parent() {
+        super::fsync_dir(parent)?;
+    }
+    crate::crash::crash_point("projection-file-written");
+
+    manifest.entries.insert(
+        vault_rel.to_string(),
+        entry_for(projection, WriteState::Complete, None),
+    );
+    save(vault, &manifest)?;
+    crate::crash::crash_point("projection-manifest-complete");
+    Ok(())
+}
+
+/// Mark one pending entry complete — the InterruptedFinalize recovery.
+pub fn complete_entry(vault: &Path, vault_rel: &str) -> Result<(), String> {
+    let mut manifest = load(vault)?.ok_or("no manifest to finalize")?;
+    let entry = manifest
+        .entries
+        .get_mut(vault_rel)
+        .ok_or_else(|| format!("no manifest entry for {vault_rel}"))?;
+    entry.write_state = WriteState::Complete;
+    entry.previous_content_hash = None;
+    save(vault, &manifest)
+}
+
 /// Atomically persist the manifest: temp write, fsync, rename, dir fsync.
 pub fn save(vault: &Path, manifest: &Manifest) -> Result<(), String> {
     let path = manifest_path(vault);
@@ -168,11 +271,175 @@ pub fn build_initial(
 mod tests {
     use super::super::migrate::migrate_vault;
     use super::super::migrate::tests::{corpus_copy, WRITER};
-    use super::super::reduce::{descriptor, reduce};
+    use super::super::reconcile::{classify_path, FileFact, PathClass};
+    use super::super::reduce::{descriptor, project_belief, reduce, ProjectionResult};
+    use super::super::schema::{self, BeliefBasis, SubjectRef};
     use super::super::writer::LedgerWriter;
     use super::super::{ledger_dir, read_ledger};
     use super::*;
     use crate::vault::testutil;
+
+    const BELIEF: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const ENTITY: &str = "cccccccccccccccccccccccccccccccc";
+    const REL: &str = "knowledge/concepts/acme.md";
+
+    /// Seed a vault ledger with one projection Belief and return its
+    /// current reducer projection.
+    fn seeded_projection(vault: &Path) -> ProjectionResult {
+        let mut writer = LedgerWriter::open(vault, WRITER).unwrap();
+        let store = writer.store_id().to_string();
+        let (schema_v, actor) = schema::tests::common("agent:run-1");
+        writer
+            .append(
+                schema::KIND_BELIEF_CREATED,
+                serde_json::to_value(&schema::BeliefCreated {
+                    schema: schema_v,
+                    batch_id: None,
+                    idempotency_key: None,
+                    actor,
+                    occurred_at: None,
+                    valid_from: None,
+                    valid_to: None,
+                    belief_id: BELIEF.into(),
+                    subject: SubjectRef::Resolved {
+                        entity_id: ENTITY.into(),
+                        aliases: vec!["concepts/acme.md".into()],
+                    },
+                    content: "# Acme\n\nActive vendor.\n".into(),
+                    fields: serde_json::json!({ "status": "active" }),
+                    basis: BeliefBasis::Unsupported {
+                        reason: "manifest fixture without observations".into(),
+                    },
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        drop(writer);
+        let read = read_ledger(&ledger_dir(vault)).unwrap();
+        let state = reduce(&read.frames, &store);
+        project_belief(&state, BELIEF).unwrap()
+    }
+
+    fn file_fact(vault: &Path) -> FileFact {
+        match std::fs::read(vault.join(REL)) {
+            Ok(bytes) => FileFact {
+                hash: Some(crate::ledger::sha256_hex(&bytes)),
+                parses: true,
+            },
+            Err(_) => FileFact::missing(),
+        }
+    }
+
+    #[test]
+    fn the_manifest_first_protocol_writes_and_byte_identity_skips_the_file() {
+        let vault = testutil::temp_vault("manifest-protocol");
+        let projection = seeded_projection(&vault);
+        write_projection(&vault, REL, &projection).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(vault.join(REL)).unwrap(),
+            projection.bytes
+        );
+        let entry = load(&vault).unwrap().unwrap().entries[REL].clone();
+        assert_eq!(entry.write_state, WriteState::Complete);
+        assert_eq!(entry.previous_content_hash, None);
+        assert_eq!(
+            classify_path(&file_fact(&vault), Some(&entry), Some(&projection), false),
+            PathClass::Match
+        );
+
+        // A byte-identical rewrite touches NOTHING the watcher can see.
+        let before = std::fs::metadata(vault.join(REL))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let bytes = std::fs::read(vault.join(REL)).unwrap();
+        write_projection(&vault, REL, &projection).unwrap();
+        let meta = std::fs::metadata(vault.join(REL)).unwrap();
+        assert_eq!(meta.modified().unwrap(), before, "mtime untouched");
+        assert_eq!(std::fs::read(vault.join(REL)).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    /// Child: seed nothing (the parent seeded), just re-project and write.
+    #[test]
+    #[ignore = "crash-scenario child body, spawned by the crash tests"]
+    fn crash_scenario_write_projection() {
+        let Ok(vault) = std::env::var("CEREBRO_CRASH_VAULT") else {
+            return;
+        };
+        let vault = std::path::PathBuf::from(vault);
+        let read = read_ledger(&ledger_dir(&vault)).unwrap();
+        let state = reduce(&read.frames, &read.store.store_id);
+        let projection = project_belief(&state, BELIEF).unwrap();
+        let _ = write_projection(&vault, REL, &projection);
+    }
+
+    #[test]
+    fn killed_at_every_manifest_step_recovers_through_the_classifier() {
+        for (point, expected) in [
+            ("projection-manifest-pending", PathClass::InterruptedWrite),
+            ("projection-file-written", PathClass::InterruptedFinalize),
+            ("projection-manifest-complete", PathClass::Match),
+        ] {
+            let vault = testutil::temp_vault(&format!("manifest-kill-{point}"));
+            let projection = seeded_projection(&vault);
+            let status = testutil::run_crash_scenario(
+                "ledger::manifest::tests::crash_scenario_write_projection",
+                point,
+                &vault,
+            );
+            assert!(!status.success(), "{point}: the child dies at the point");
+            let entry = load(&vault).unwrap().unwrap().entries[REL].clone();
+            let class = classify_path(&file_fact(&vault), Some(&entry), Some(&projection), false);
+            assert_eq!(class, expected, "{point}");
+            // Each recovery converges on Match with the exact bytes.
+            match class {
+                PathClass::InterruptedWrite => write_projection(&vault, REL, &projection).unwrap(),
+                PathClass::InterruptedFinalize => complete_entry(&vault, REL).unwrap(),
+                PathClass::Match => {}
+                other => panic!("{point}: {other:?}"),
+            }
+            let entry = load(&vault).unwrap().unwrap().entries[REL].clone();
+            assert_eq!(entry.write_state, WriteState::Complete);
+            assert_eq!(entry.previous_content_hash, None);
+            assert_eq!(
+                classify_path(&file_fact(&vault), Some(&entry), Some(&projection), false),
+                PathClass::Match,
+                "{point}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(vault.join(REL)).unwrap(),
+                projection.bytes,
+                "{point}"
+            );
+            let _ = std::fs::remove_dir_all(&vault);
+        }
+    }
+
+    #[test]
+    fn an_interrupted_overwrite_keeps_the_prior_hash_as_proof() {
+        let vault = testutil::temp_vault("manifest-prior");
+        let projection = seeded_projection(&vault);
+        // A prior file with DIFFERENT bytes sits at the path.
+        std::fs::create_dir_all(vault.join("knowledge/concepts")).unwrap();
+        std::fs::write(vault.join(REL), "old bytes\n").unwrap();
+        let prior_hash = crate::ledger::sha256_hex(b"old bytes\n");
+        let status = testutil::run_crash_scenario(
+            "ledger::manifest::tests::crash_scenario_write_projection",
+            "projection-manifest-pending",
+            &vault,
+        );
+        assert!(!status.success());
+        let entry = load(&vault).unwrap().unwrap().entries[REL].clone();
+        assert_eq!(entry.write_state, WriteState::Pending);
+        assert_eq!(entry.previous_content_hash, Some(prior_hash));
+        assert_eq!(
+            classify_path(&file_fact(&vault), Some(&entry), Some(&projection), false),
+            PathClass::InterruptedWrite,
+            "the prior hash proves the interrupted own write"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
 
     #[test]
     fn the_manifest_round_trips_atomically_and_refuses_alien_shapes() {
