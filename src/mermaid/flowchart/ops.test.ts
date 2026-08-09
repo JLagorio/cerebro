@@ -641,3 +641,120 @@ describe('setEdgeLabel writes a label mermaid can lex (M29.31)', () => {
     expect(out).toBe('flowchart TD\n  A -->|a/b| B');
   });
 });
+
+describe('setNodeShape — registry shapes (M29.32, D4)', () => {
+  it('classic 8 without a meta line still rewrites brackets (Stage C behavior)', () => {
+    const out = serialize(setNodeShape(model(), 'A', 'circle'));
+    expect(out).toContain('A((Start)) --> B{Choice}');
+  });
+
+  it('an exotic shape writes a meta line after the node, brackets untouched', () => {
+    const out = serialize(setNodeShape(model(), 'A', 'cloud'));
+    expect(out).toContain('A[Start] --> B{Choice}');
+    expect(out.split('\n')[2]).toBe('  A@{ shape: cloud }');
+  });
+
+  it('a classic-8 pick PATCHES the meta when a meta line exists', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B\n  A@{ shape: cloud }')!;
+    const out = serialize(setNodeShape(m, 'A', 'diamond'));
+    expect(out).toContain('A@{ shape: diam }');
+    expect(out).toContain('A[Start] --> B');
+  });
+
+  it('registry aliases resolve to brackets where possible', () => {
+    const out = serialize(setNodeShape(model(), 'A', 'database'));
+    expect(out).toContain('A[(Start)] --> B{Choice}');
+  });
+
+  it('a name outside the registry is refused — mermaid would throw at render', () => {
+    expect(serialize(setNodeShape(model(), 'A', 'blob'))).toBe(SRC);
+  });
+
+  // The E1/E2 reviews found this and scheduled the fix here: with a meta shape
+  // in play, rewriting brackets was a SILENT NO-OP, because meta wins at
+  // render. `A@{ shape: cloud }` + "make it a circle" used to emit
+  // `A((Start))` and go on rendering a cloud.
+  it('is no longer inert on a meta-shaped node — the M29.29/.30 gap', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B\n  A@{ shape: cloud }')!;
+    const out = serialize(setNodeShape(m, 'A', 'circle'));
+    expect(out).toBe('flowchart TD\n  A[Start] --> B\n  A@{ shape: circle }');
+    expect(nodes(parseFlowchart(out)!).get('A')?.metaShape).toBe('circle');
+  });
+
+  it('unknown meta keys survive, in order, around the shape it patches', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ pos: t, shape: cyl, w: 40 }')!;
+    const out = serialize(setNodeShape(m, 'A', 'hex'));
+    expect(out.split('\n')[2]).toBe('  A@{ pos: t, shape: hex, w: 40 }');
+  });
+
+  it('a wrong-case name is refused — mermaid throws "should be lowercase"', () => {
+    expect(serialize(setNodeShape(model(), 'A', 'Circle'))).toBe(SRC);
+    expect(serialize(setNodeShape(model(), 'A', 'DIAM'))).toBe(SRC);
+  });
+
+  it('ellipse is refused — broken upstream, and not in the registry at all', () => {
+    expect(serialize(setNodeShape(model(), 'A', 'ellipse'))).toBe(SRC);
+  });
+
+  it('an Object.prototype key is refused, not treated as a shape', () => {
+    for (const odd of ['toString', 'constructor', 'hasOwnProperty']) {
+      expect(serialize(setNodeShape(model(), 'A', odd))).toBe(SRC);
+    }
+  });
+
+  it('an id the diagram does not declare is a no-op — never a phantom node', () => {
+    expect(serialize(setNodeShape(model(), 'ZZZ', 'cloud'))).toBe(SRC);
+    expect(serialize(setNodeShape(model(), 'ZZZ', 'circle'))).toBe(SRC);
+  });
+
+  it('the shape lands on the LAST meta line declaring it, the one that renders', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ shape: cloud }\n  A@{ shape: hex }')!;
+    const out = serialize(setNodeShape(m, 'A', 'cyl'));
+    // Writing to the FIRST line would leave `shape: hex` still winning — the
+    // silent no-op M29.30 found for `style` lines, in its meta twin.
+    expect(out).toBe('flowchart TD\n  A --> B\n  A@{ shape: cloud }\n  A@{ shape: cyl }');
+    expect(nodes(parseFlowchart(out)!).get('A')?.metaShape).toBe('cyl');
+  });
+
+  it('with no shape key anywhere, the LAST meta line takes it', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ label: X }\n  A@{ pos: t }')!;
+    const out = serialize(setNodeShape(m, 'A', 'cloud'));
+    expect(out).toBe('flowchart TD\n  A --> B\n  A@{ label: X }\n  A@{ pos: t, shape: cloud }');
+  });
+
+  it('an id an edge also declares is refused on the meta path — position would decide', () => {
+    // The meta line would land BELOW the edge that declares id `A`, and
+    // mermaid resolves an `@{ }` id against the edges parsed so far
+    // (flowDb.ts:163) — so the shape would be read as EDGE meta and silently
+    // dropped. Refusing keeps the write honest; the bytes survive.
+    const src = 'flowchart TD\n  X A@--> B\n  A --> C';
+    const m = parseFlowchart(src)!;
+    expect(serialize(setNodeShape(m, 'A', 'cloud'))).toBe(src);
+  });
+
+  it('writes the canonical short name, never the alias it was handed', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ shape: cloud }')!;
+    for (const [alias, canonical] of [
+      ['database', 'cyl'],
+      ['cylinder', 'cyl'],
+      ['doublecircle', 'dbl-circ'],
+      ['paper-tape', 'flag'],
+      ['question', 'diam'],
+    ]) {
+      expect([alias, serialize(setNodeShape(m, 'A', alias)).split('\n')[2]]).toEqual([
+        alias,
+        `  A@{ shape: ${canonical} }`,
+      ]);
+    }
+  });
+
+  it('a bare node gains brackets for a classic 8, a meta line for the rest', () => {
+    const bare = parseFlowchart('flowchart TD\n  A --> B')!;
+    const withBrackets = serialize(setNodeShape(bare, 'A', 'hexagon'));
+    expect(withBrackets).toContain('A{{A}}');
+    expect(withBrackets).toContain('A --> B');
+    expect(serialize(setNodeShape(bare, 'A', 'cloud'))).toBe(
+      'flowchart TD\n  A --> B\n  A@{ shape: cloud }',
+    );
+  });
+});

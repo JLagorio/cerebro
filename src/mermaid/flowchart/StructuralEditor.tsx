@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
-import { nodes, parseFlowchart, serialize, type EdgeEntry, type Shape } from './model';
+import { nodes, parseFlowchart, serialize, type EdgeEntry } from './model';
 import {
   addEdge,
   addNode,
@@ -14,18 +14,9 @@ import {
   setLayoutEngine,
   setNodeShape,
 } from './ops';
+import { ShapePalette } from './ShapePalette';
+import { BRACKET_SHAPE_TO_REGISTRY, SHORT_NAME_FOR } from './shapes';
 import { bindFlowchartSvg, type FlowchartSvgBinding } from './svgBinding';
-
-const SHAPE_CHOICES: { shape: Shape; label: string; icon: string }[] = [
-  { shape: 'rect', label: 'Rectangle', icon: 'square' },
-  { shape: 'rounded', label: 'Rounded', icon: 'square-round-corner' },
-  { shape: 'stadium', label: 'Stadium', icon: 'rectangle-horizontal' },
-  { shape: 'diamond', label: 'Decision', icon: 'diamond' },
-  { shape: 'circle', label: 'Circle', icon: 'circle' },
-  { shape: 'cylinder', label: 'Database', icon: 'database' },
-  { shape: 'hexagon', label: 'Hexagon', icon: 'hexagon' },
-  { shape: 'subroutine', label: 'Subroutine', icon: 'square-stack' },
-];
 
 const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
 
@@ -63,6 +54,7 @@ export function StructuralEditor({
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
+  const [shapeOpen, setShapeOpen] = useState(false);
   const [ghost, setGhost] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
     null,
   );
@@ -114,6 +106,7 @@ export function StructuralEditor({
     setEdgeEditor(null);
     setSelected(null);
     setToolbarPos(null);
+    setShapeOpen(false);
   }, [code]);
 
   // Render, inject, and bind in one pass. The svg is written imperatively —
@@ -418,21 +411,38 @@ export function StructuralEditor({
             style={{ left: toolbarPos.x, top: toolbarPos.y }}
             onClick={(e) => e.stopPropagation()}
           >
-            {SHAPE_CHOICES.map((c) => (
-              <button
-                key={c.shape}
-                type="button"
-                title={c.label}
-                aria-label={`Shape: ${c.label}`}
-                onClick={() => {
-                  if (validSelected === null) return;
-                  apply(setNodeShape(model, validSelected, c.shape));
+            <button
+              type="button"
+              aria-label="Change shape"
+              title="Change shape"
+              onClick={() => setShapeOpen(true)}
+              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+            >
+              <Icon name="shapes" size={13} color="var(--n-600)" />
+            </button>
+            {shapeOpen && (
+              <ShapePalette
+                current={(() => {
+                  // What the node ACTUALLY renders as: a meta shape wins over
+                  // the brackets, which is the same precedence setNodeShape
+                  // writes by. A meta shape spelled as an alias resolves to its
+                  // short name so the right button lights up; one we do not
+                  // know marks NOTHING rather than falling back to the
+                  // brackets, which would point at a shape that isn't drawn.
+                  const resolved = nodes(model).get(validSelected);
+                  if (resolved === undefined) return null;
+                  if (resolved.metaShape !== undefined) {
+                    return SHORT_NAME_FOR[resolved.metaShape] ?? null;
+                  }
+                  return BRACKET_SHAPE_TO_REGISTRY[resolved.shape];
+                })()}
+                onPick={(name) => {
+                  setShapeOpen(false);
+                  apply(setNodeShape(model, validSelected, name));
                 }}
-                className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
-              >
-                <Icon name={c.icon} size={13} color="var(--n-600)" />
-              </button>
-            ))}
+                onClose={() => setShapeOpen(false)}
+              />
+            )}
             <span className="mx-0.5 h-4 w-px bg-n-100" />
             <button
               type="button"

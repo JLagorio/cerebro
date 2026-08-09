@@ -18,6 +18,7 @@ import {
   withEntry,
   withMetaEntry,
 } from './model';
+import { REGISTRY_TO_BRACKET, SHORT_NAME_FOR } from './shapes';
 
 /**
  * Pure flowchart operations (M29.15). Every function returns a new model and
@@ -92,14 +93,110 @@ export function renameNode(model: FlowchartModel, id: string, label: string): Fl
   return next;
 }
 
-export function setNodeShape(model: FlowchartModel, id: string, shape: Shape): FlowchartModel {
-  const withLabel = findLabelSite(model, id) === null ? renameNode(model, id, id) : clone(model);
-  const site = findLabelSite(withLabel, id);
-  if (site === null) return withLabel; // unreachable: rename just created a site
-  site.ref.shape = shape;
-  if (site.ref.label === null) site.ref.label = id;
-  withLabel.lines[site.line].dirty = true;
-  return withLabel;
+/** `id`'s `@{ … }` lines that annotate the NODE, in source order (edge meta excluded). */
+function nodeMetaLinesFor(model: FlowchartModel, id: string): number[] {
+  const edgeLines = new Set(edgeMetaLinesFor(model, id));
+  const out: number[] = [];
+  model.lines.forEach((line, i) => {
+    if (line.parsed.kind === 'node-meta' && line.parsed.id === id && !edgeLines.has(i)) out.push(i);
+  });
+  return out;
+}
+
+/** True when some edge line carries `id` as ITS id (`A e1@--> B`). */
+function declaresEdgeId(model: FlowchartModel, id: string): boolean {
+  return model.lines.some(
+    (l) => l.parsed.kind === 'edges' && l.parsed.segments.some((seg) => seg.id === id),
+  );
+}
+
+/**
+ * Where a shape write belongs among `id`'s meta lines, creating an empty one
+ * after the node's anchor when there is none.
+ *
+ * The LAST line already declaring `shape` wins, then the last line at all.
+ * Several `id@{ … }` lines may name one node and mermaid folds them PER KEY
+ * with the last value winning (`mergeMeta`, flowDb.ts:236-262), so writing to
+ * the first would leave a later `shape:` still rendering — the silent no-op
+ * M29.30 found for `style` lines, in its meta twin.
+ */
+function ensureShapeMetaLine(next: FlowchartModel, id: string): number {
+  const owners = nodeMetaLinesFor(next, id);
+  const declares = (i: number): boolean => {
+    const parsed = next.lines[i].parsed;
+    return parsed.kind === 'node-meta' && parsed.meta.entries.some(([k]) => k === 'shape');
+  };
+  const target = owners.filter(declares).at(-1) ?? owners.at(-1);
+  if (target !== undefined) return target;
+  const at = anchorLineFor(next, id);
+  const indent = next.lines[at]?.raw.match(/^\s*/)?.[0] ?? '  ';
+  next.lines.splice(at + 1, 0, {
+    raw: indent,
+    parsed: { kind: 'node-meta', id, meta: { entries: [] } },
+    dirty: true,
+  });
+  return at + 1;
+}
+
+/**
+ * D4 shape strategy (M29.32). A classic-8 target on a node with NO meta line
+ * rewrites brackets — exactly the Stage-C behavior, byte for byte. Everything
+ * else patches (or creates) the node's `@{ shape }` meta line and leaves the
+ * brackets alone: shape data WINS at render, so a node carrying
+ * `A@{ shape: cloud }` used to swallow every shape click silently (the gap the
+ * M29.29 and M29.30 reviews both logged), and rewriting a bracket pair nobody
+ * asked about violates the surgical rule besides.
+ *
+ * `shape` is whatever a caller hands us — a `Shape` literal, a registry short
+ * name, or a registry alias — and what we WRITE is always the canonical short
+ * name `SHORT_NAME_FOR` maps it to. Any spelling that table does not know is
+ * refused outright, because `flowDb.addVertex` THROWS on an unknown name, on
+ * any capital, and on any underscore (flowDb.ts:236-241), and a throw there
+ * takes the whole diagram down. Both lookup tables are null-prototype, so
+ * `toString` and friends are refused too rather than answered by Object.
+ */
+export function setNodeShape(
+  model: FlowchartModel,
+  id: string,
+  shape: Shape | string,
+): FlowchartModel {
+  // An id the diagram does not declare is a no-op, exactly as in setNodeStyle.
+  // Both paths below would otherwise CREATE the node — a definition line, or a
+  // lone `A@{ shape: … }`, which is a declaration in its own right (M29.29) —
+  // and "reshape a node that isn't there" has no honest reading. It also means
+  // `id` is always a token our own parser produced, so every line emitted here
+  // is one we can read straight back.
+  if (!nodes(model).has(id)) return clone(model);
+
+  const bracket = REGISTRY_TO_BRACKET[shape];
+  if (bracket !== undefined && !nodeMeta(model).has(id)) {
+    const withLabel = findLabelSite(model, id) === null ? renameNode(model, id, id) : clone(model);
+    const site = findLabelSite(withLabel, id);
+    if (site === null) return withLabel; // unreachable: rename just created a site
+    site.ref.shape = bracket;
+    if (site.ref.label === null) site.ref.label = id;
+    withLabel.lines[site.line].dirty = true;
+    return withLabel;
+  }
+
+  // Canonicalize on the way out: an alias renders the same shape but leaves a
+  // second spelling in the file for the same thing, and `undefined` here is
+  // every rejection at once — unknown name, wrong case, underscore, or an
+  // Object.prototype member (the table is null-prototype).
+  const registryName = SHORT_NAME_FOR[shape];
+  if (registryName === undefined) return clone(model);
+  // An id some edge also claims makes POSITION decide what an `@{ … }` line
+  // means (flowDb.ts:163, and `edgeMetaLines` in model.ts): below that edge the
+  // shape we wrote would be read as edge meta and silently dropped. We cannot
+  // reproduce that, so we decline — the bytes survive, which is never wrong.
+  if (declaresEdgeId(model, id)) return clone(model);
+  const next = clone(model);
+  const idx = ensureShapeMetaLine(next, id);
+  const line = next.lines[idx];
+  if (line.parsed.kind !== 'node-meta') return next; // unreachable; narrows the type
+  line.parsed.meta = withMetaEntry(line.parsed.meta, 'shape', registryName);
+  line.dirty = true;
+  return next;
 }
 
 export function newNodeId(model: FlowchartModel): string {

@@ -150,6 +150,37 @@ describe('StructuralEditor', () => {
     expect(onChangeCode.mock.calls[0][0]).toContain('layout: elk');
   });
 
+  it('the shape palette writes shape data for exotic shapes', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Cloud' }));
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  A[Start] --> B[End]\n  A@{ shape: cloud }',
+    );
+  });
+
+  it('the palette marks the shape the node already renders as', async () => {
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  A@{ shape: cloud }'}
+        onChangeCode={() => {}}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
+    expect(screen.getByRole('button', { name: 'Shape: Cloud' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    );
+    // A classic-8 node reads through its brackets, with no meta line at all.
+    expect(
+      screen.getByRole('button', { name: 'Shape: Rectangle' }).getAttribute('aria-pressed'),
+    ).toBe('false');
+  });
+
   it('toolbar={false} hides the built-in control row but keeps the host', async () => {
     render(
       <StructuralEditor code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} toolbar={false} />,
