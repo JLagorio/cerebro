@@ -452,10 +452,13 @@ mod tests {
         vw::rename_note(&vault, &rel, "records/soak-renamed.md").unwrap();
 
         // The soak's point: the chain over everything above VERIFIES.
-        // Twelve writes, thirteen events — the M23.4 verify is a field
-        // revision PLUS its attestation.
+        // Twelve writes, sixteen events. Thirteen are M23's — the verify is
+        // a field revision PLUS its attestation — and three are M24.4's
+        // governed concept write: `proposal.submitted`, then the apply batch
+        // (`belief.created` + `proposal.applied`) under its `batch.committed`
+        // marker.
         let read = read_ledger(&ledger_dir(&vault)).unwrap();
-        assert_eq!(read.records, baseline + 13, "no write lost, none doubled");
+        assert_eq!(read.records, baseline + 16, "no write lost, none doubled");
         let kinds: std::collections::BTreeSet<&str> =
             read.frames.iter().map(|f| f.kind.as_str()).collect();
         assert!(kinds.contains("vault.write"));
@@ -466,6 +469,11 @@ mod tests {
         assert!(kinds.contains("belief.created"));
         assert!(kinds.contains("belief.revised"));
         assert!(kinds.contains("belief.attested"));
+        // The M24.4 flip: that creation is the PROJECTION of an applied
+        // proposal, not a decision the adapter made on its own.
+        assert!(kinds.contains("proposal.submitted"));
+        assert!(kinds.contains("proposal.applied"));
+        assert!(kinds.contains("batch.committed"));
 
         // Bodies carry what the plan says they carry.
         let concept = read
@@ -507,7 +515,7 @@ mod tests {
         // Diagnostics agree, live.
         let status = status(Some(config.as_path()), &vault);
         assert_eq!(status.verdict, "valid");
-        assert_eq!(status.seq, Some(baseline + 13));
+        assert_eq!(status.seq, Some(baseline + 16));
         assert_eq!(status.head, Some(read.head_hash.clone()));
         assert_eq!(status.segments, 1);
         assert_eq!(status.anomalies, 0);
@@ -516,7 +524,7 @@ mod tests {
         // after every commit, not just at activate.
         let index = Index::open(&config, &read.store.store_id).unwrap();
         let remembered = index.remembered().unwrap().unwrap();
-        assert_eq!(remembered.head_seq, Some(baseline + 13));
+        assert_eq!(remembered.head_seq, Some(baseline + 16));
         assert_eq!(remembered.head_hash, read.head_hash);
 
         deactivate();

@@ -108,8 +108,21 @@ interface BeliefState {
 /** The durable proposal lifecycle — reducer state, never runtime cache. */
 interface ProposalRow {
   proposalId: string;
+  /**
+   * The submitted proposal, WHOLE. The review card, the pre-append
+   * revalidation, and the revert all read this record rather than a summary
+   * of it — which is also what makes run accumulation durable.
+   */
+  proposal: Json;
+  /** WHO proposed it: mutations are attributed to the proposer, not to the
+   * policy layer that authorized them. */
+  actor: string;
   state: string;
   commitSetId: string | null;
+  /** The frozen ordered member list the set's id was derived from. */
+  queuedMembers: string[];
+  /** The effective risk the CARD SAID when a human was asked. */
+  queuedRisk: string | null;
   decision: [string, string] | null;
   appliedEventId: string | null;
   revertPlan: Json | null;
@@ -618,8 +631,12 @@ function applyProposalSubmitted(state: EpistemicState, frame: VectorFrame, body:
   if (state.proposals.has(id)) throw new RefusedError('proposal is already submitted');
   state.proposals.set(id, {
     proposalId: id,
+    proposal: proposal as Json,
+    actor: ((body.actor as JsonObject).id as string) ?? '',
     state: 'submitted',
     commitSetId: null,
+    queuedMembers: [],
+    queuedRisk: null,
     decision: null,
     appliedEventId: null,
     revertPlan: null,
@@ -637,6 +654,8 @@ function applyProposalQueued(state: EpistemicState, frame: VectorFrame, body: Js
   }
   row.state = 'queued';
   row.commitSetId = body.commit_set_id as string;
+  row.queuedMembers = [...(body.member_proposal_ids as string[])];
+  row.queuedRisk = body.effective_risk as string;
   bumpVersion(state, 'proposal', row.proposalId, frame.event_id);
 }
 

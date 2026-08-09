@@ -59,7 +59,7 @@ pub struct SubmitError {
 }
 
 impl SubmitError {
-    fn schema_invalid(detail: impl Into<String>) -> SubmitError {
+    pub(crate) fn schema_invalid(detail: impl Into<String>) -> SubmitError {
         SubmitError {
             code: "schema_invalid",
             detail: detail.into(),
@@ -138,7 +138,7 @@ pub fn evaluate(table: &PolicyTable, proposal: &ProposalV1) -> Result<SubmitResu
 /// is a mapping between two of the artifact's own closed vocabularies, not
 /// a policy decision — the DECISION is which stage refused, and the table's
 /// `evaluation_order` owns that.
-fn rule_for(code: &str) -> &'static str {
+pub(crate) fn rule_for(code: &str) -> &'static str {
     match code {
         "risk_lowered" => "risk_ladder",
         "target_set_mismatch" => "target_set_exact",

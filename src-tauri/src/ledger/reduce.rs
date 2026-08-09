@@ -387,8 +387,27 @@ struct MigrationEpoch {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProposalRow {
     pub proposal_id: String,
+    /// The submitted proposal, WHOLE. The review card, the pre-append
+    /// revalidation, and the revert all read this record rather than a
+    /// summary of it — which is also what makes run accumulation durable:
+    /// a run's members are the submitted proposals carrying its `run_id`,
+    /// so a restart mid-run loses nothing and applies nothing.
+    pub proposal: Box<schema::ProposalV1>,
+    /// WHO proposed it. The mutations an application performs are
+    /// attributed to this actor, not to the policy layer that authorized
+    /// them — "system:policy wrote your knowledge base" would erase the
+    /// only authorship the ledger has.
+    pub actor: String,
     pub state: schema::ProposalState,
     pub commit_set_id: Option<String>,
+    /// The frozen ordered member list this set's id was derived from —
+    /// the only durable copy, so a queued set is resolvable after a restart
+    /// without guessing which permutation it was committed in.
+    pub queued_members: Vec<String>,
+    /// The effective risk the CARD SAID when a human was asked. If the world
+    /// moves and the same proposal would now be more dangerous, the approval
+    /// was given to a different question.
+    pub queued_risk: Option<schema::Risk>,
     /// The human's answer, once there is one.
     pub decision: Option<(String, schema::Decision)>,
     pub applied_event_id: Option<String>,
@@ -1000,8 +1019,12 @@ fn apply_proposal_submitted(
         id.clone(),
         ProposalRow {
             proposal_id: id.clone(),
+            proposal: body.proposal.clone(),
+            actor: body.actor.id.clone(),
             state: schema::ProposalState::Submitted,
             commit_set_id: None,
+            queued_members: Vec::new(),
+            queued_risk: None,
             decision: None,
             applied_event_id: None,
             revert_plan: None,
@@ -1031,6 +1054,8 @@ fn apply_proposal_queued(
         .expect("require_non_terminal proved it exists");
     row.state = schema::ProposalState::Queued;
     row.commit_set_id = Some(body.commit_set_id.clone());
+    row.queued_members = body.member_proposal_ids.clone();
+    row.queued_risk = Some(body.effective_risk);
     state.bump_version("proposal", &body.proposal_id, &frame.event_id);
     Ok(())
 }

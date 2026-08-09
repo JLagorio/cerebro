@@ -1816,7 +1816,7 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
         throw new RefusedError('proposal/commit set ids are not stable ids');
       }
       const members = body.member_proposal_ids as string[];
-      sortedUniqueIds(members, 'member_proposal_ids');
+      uniqueIds(members, 'member_proposal_ids');
       if (!members.includes(body.proposal_id as string)) {
         throw new RefusedError('a queued proposal must be a member of its own commit set');
       }
@@ -1852,7 +1852,7 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if (body.decision_id !== null && !isId128(body.decision_id)) {
         throw new RefusedError('decision_id is not a stable id');
       }
-      sortedUniqueIds(body.mutation_event_ids as string[], 'mutation_event_ids');
+      uniqueIds(body.mutation_event_ids as string[], 'mutation_event_ids');
       if ((body.mutation_event_ids as string[]).length === 0) {
         throw new RefusedError('an application that changed nothing is not an application');
       }
@@ -1883,12 +1883,31 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if (body.proposal_id === body.reverted_by_proposal_id) {
         throw new RefusedError('a proposal cannot revert itself');
       }
-      sortedUniqueIds(body.prior_applied_event_ids as string[], 'prior_applied_event_ids');
-      sortedUniqueIds(body.forward_event_ids as string[], 'forward_event_ids');
+      uniqueIds(body.prior_applied_event_ids as string[], 'prior_applied_event_ids');
+      uniqueIds(body.forward_event_ids as string[], 'forward_event_ids');
       break;
     }
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
+  }
+}
+
+/**
+ * Non-empty, duplicate-free ids in THEIR OWN ORDER.
+ *
+ * Deliberately not `sortedUniqueIds`. Two different orders here are two
+ * different things: a batch's members have a plan order the marker also
+ * preserves, and a commit set's members have the frozen order its id was
+ * derived from. Physical event ids are minted fresh at preallocation, so
+ * requiring those sorted would demand an ordering the writer cannot produce.
+ */
+function uniqueIds(ids: string[], what: string): void {
+  if (ids.length === 0) throw new RefusedError(`${what}: empty`);
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (!isId128(id)) throw new RefusedError(`${what}: not a stable id`);
+    if (seen.has(id)) throw new RefusedError(`${what}: duplicate`);
+    seen.add(id);
   }
 }
 

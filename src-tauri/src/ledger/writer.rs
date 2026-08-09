@@ -4,7 +4,11 @@
 //! PUBLIC-SURFACE TRIPWIRE (code-review check): this module exposes
 //! `LedgerWriter::{open, append, append_once, append_batch, head}`,
 //! `Committed`, `ExistingOrCommitted`, `BatchReceipt`, `member_ref`,
-//! `existing_writer_id`, and `writer_id` — and nothing else. No update, no
+//! `batch_self_ref`, `operation_digest`, `existing_writer_id`, and
+//! `writer_id` — and nothing else. (`operation_digest` is exposed READ-ONLY,
+//! for M24.4's stored revert plan: an inverse has to name the forward plan
+//! it undoes, and recomputing that hash in the policy layer would be the
+//! same rule written twice.) No update, no
 //! delete, no open-sealed-for-write exists here or anywhere. Appending is
 //! the only way in-app state reaches the ledger, and only this module can
 //! append (D3: enforced by construction).
@@ -627,7 +631,7 @@ fn content_hash(kind: &str, body: &serde_json::Value) -> Result<String, String> 
 /// SHA-256 over the canonical JSON of the SYMBOLIC member plan — bodies as
 /// submitted: batch id unstamped, member refs still ordinals. Stable across
 /// a retry that receives fresh physical ids, which is the whole point.
-fn operation_digest(events: &[(String, serde_json::Value)]) -> Result<String, String> {
+pub fn operation_digest(events: &[(String, serde_json::Value)]) -> Result<String, String> {
     let plan: Vec<serde_json::Value> = events
         .iter()
         .map(|(kind, body)| serde_json::json!({ "kind": kind, "body": body }))

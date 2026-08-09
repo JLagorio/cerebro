@@ -28,6 +28,33 @@ pub struct TargetVersion {
     pub version: u64,
 }
 
+/// Non-empty, duplicate-free ids in THEIR OWN ORDER.
+///
+/// Deliberately not `sorted_unique`. Two different orders here are two
+/// different things: a batch's members have a plan order that the marker's
+/// `member_event_ids` also preserves, and a commit set's members have the
+/// frozen order its id was derived from — sorting either would destroy the
+/// only durable record of it. Physical event ids are minted fresh at
+/// preallocation, so requiring THOSE sorted would demand an ordering the
+/// writer cannot produce at all.
+fn unique_ids(label: &str, ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Err(format!("{label} is empty"));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for id in ids {
+        if !is_id128(id) {
+            return Err(format!(
+                "{label} entry {id:?} is not a 128-bit hex event id"
+            ));
+        }
+        if !seen.insert(id.as_str()) {
+            return Err(format!("{label} repeats {id}"));
+        }
+    }
+    Ok(())
+}
+
 fn sorted_unique_versions(label: &str, versions: &[TargetVersion]) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     for entry in versions {
@@ -96,7 +123,9 @@ impl ProposalQueued {
         if !is_id128(&self.commit_set_id) {
             return Err("commit_set_id is not an id".into());
         }
-        super::ops::sorted_unique("member_proposal_ids", &self.member_proposal_ids)?;
+        // Order-preserving: this IS the frozen order the commit-set id was
+        // derived from, and the only durable copy of it.
+        unique_ids("member_proposal_ids", &self.member_proposal_ids)?;
         if !self.member_proposal_ids.contains(&self.proposal_id) {
             return Err("a queued proposal must be a member of its own commit set".into());
         }
@@ -197,7 +226,7 @@ impl ProposalApplied {
             }
         }
         // An application that changed nothing is not an application.
-        super::ops::sorted_unique("mutation_event_ids", &self.mutation_event_ids)?;
+        unique_ids("mutation_event_ids", &self.mutation_event_ids)?;
         sorted_unique_versions("resulting_versions", &self.resulting_versions)?;
         if let Some(plan) = &self.revert_plan {
             plan.validate()?;
@@ -293,8 +322,8 @@ impl ProposalReverted {
         if self.proposal_id == self.reverted_by_proposal_id {
             return Err("a proposal cannot revert itself".into());
         }
-        super::ops::sorted_unique("prior_applied_event_ids", &self.prior_applied_event_ids)?;
-        super::ops::sorted_unique("forward_event_ids", &self.forward_event_ids)?;
+        unique_ids("prior_applied_event_ids", &self.prior_applied_event_ids)?;
+        unique_ids("forward_event_ids", &self.forward_event_ids)?;
         sorted_unique_versions("resulting_versions", &self.resulting_versions)?;
         Ok(())
     }

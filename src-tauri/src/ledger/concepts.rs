@@ -8,10 +8,25 @@
 //! state, written through the M23.2 manifest-first protocol. Reduce,
 //! project, write, then acknowledge.
 //!
-//! This is a HARD-CODED low-risk auto-apply adapter, deliberately not a
-//! policy engine: the M24 declarative table replaces it. The MCP tool
-//! surface (validation, response prose) is unchanged — mcp.rs still calls
-//! the same `vault::write` entry points.
+//! M24.4 DELETED the hard-coded low-risk auto-apply decision this adapter
+//! shipped with. What remains here is SERVER ENRICHMENT — resolving
+//! wikilinks, diffing fields into patches, carrying aliases forward — and
+//! the enriched result is submitted as typed proposals whose risk the
+//! policy table computes. The MCP tool surface (arguments, response prose)
+//! is unchanged; mcp.rs still calls the same `vault::write` entry points.
+//!
+//! The visible consequence is deliberate: rewriting a concept a human has
+//! VERIFIED no longer applies silently. `target_has_attestation` floors that
+//! transition at HIGH, so it becomes a queued proposal — which is the whole
+//! reason `knowledge/` is agent-written and human-verified. Everything else
+//! still auto-applies, because create is LOW and revise/relation/alias are
+//! MEDIUM and the table says both rungs apply.
+//!
+//! `verify_concept` deliberately does NOT route through policy: it is the
+//! human's own act, and asking a person to approve their own review would
+//! be governance theatre. `append_log` likewise — the knowledge log is a
+//! system-appended index of what already happened, not a claim about the
+//! world.
 //!
 //! Rules carried from M22/M23:
 //! - a new Belief's ids are the SAME deterministic `migrate_id` formulas
@@ -34,7 +49,9 @@ use std::path::Path;
 use super::manifest;
 use super::migrate::{stem_of, wikilinks};
 use super::reduce::{project_belief, reduce, typed_from_value, EpistemicState, ProjectionResult};
-use super::schema::{self, Actor, BeliefBasis, PatchOp, RelationAction, RelationKind, SubjectRef};
+use super::schema::{
+    self, Actor, BeliefBasis, PatchOp, ProposalOp, RelationAction, RelationKind, SubjectRef,
+};
 use super::writer::LedgerWriter;
 use super::{ledger_dir, read_ledger, shadow};
 
@@ -268,52 +285,21 @@ fn intended_relations(
     out
 }
 
-fn relation_event(
-    actor: &Actor,
-    from: &str,
-    to: &str,
-    kind: RelationKind,
-    action: RelationAction,
-) -> (String, serde_json::Value) {
-    let (schema_v, batch_id, idempotency_key, actor) = common_body(actor.clone());
-    let body = schema::BeliefRelation {
-        schema: schema_v,
-        batch_id,
-        idempotency_key,
-        actor,
-        occurred_at: None,
-        valid_from: None,
-        valid_to: None,
+fn relation_op(from: &str, to: &str, kind: RelationKind, action: RelationAction) -> ProposalOp {
+    ProposalOp::EditRelation {
         relation_id: schema::derive_relation_id(from, to, kind),
         action,
         from: from.to_string(),
         to: to.to_string(),
         relation: kind,
-    };
-    (
-        schema::KIND_BELIEF_RELATION.to_string(),
-        serde_json::to_value(&body).expect("relation bodies serialize"),
-    )
+    }
 }
 
-fn alias_event(actor: &Actor, entity_id: &str, alias: &str) -> (String, serde_json::Value) {
-    let (schema_v, batch_id, idempotency_key, actor) = common_body(actor.clone());
-    let body = schema::EntityAliasAdded {
-        schema: schema_v,
-        batch_id,
-        idempotency_key,
-        actor,
-        occurred_at: None,
-        valid_from: None,
-        valid_to: None,
+fn alias_op(entity_id: &str, alias: &str) -> ProposalOp {
+    ProposalOp::AddEntityAlias {
         entity_id: entity_id.to_string(),
         alias: alias.to_string(),
-        normalized_alias: schema::normalize_alias_v1(alias),
-    };
-    (
-        schema::KIND_ENTITY_ALIAS_ADDED.to_string(),
-        serde_json::to_value(&body).expect("alias bodies serialize"),
-    )
+    }
 }
 
 /// String items of an `aliases:` field value.
@@ -351,12 +337,12 @@ fn write_concept_with(
     let state = current_state(writer, vault)?;
     let actor = write_actor(&fields);
 
-    let events = match state.projection_paths.get(krel) {
-        None => creation_events(&state, &store, krel, &actor, &fields, body)?,
-        Some(belief_id) => revision_events(&state, belief_id, &actor, &mut fields, body)?,
+    let ops = match state.projection_paths.get(krel) {
+        None => creation_ops(&state, &store, krel, &fields, body)?,
+        Some(belief_id) => revision_ops(&state, belief_id, &mut fields, body)?,
     };
 
-    if events.is_empty() {
+    if ops.is_empty() {
         // A byte-level no-op — the legacy path succeeded silently here, and
         // so do we; the projection is refreshed, nothing is committed.
         if let Some(belief_id) = state.projection_paths.get(krel) {
@@ -366,10 +352,11 @@ fn write_concept_with(
         return Ok(());
     }
 
-    commit(writer, events)?;
-    crate::crash::crash_point("concept-committed");
+    // THE DECISION IS THE TABLE'S NOW. Everything above this line is server
+    // enrichment; everything below is the M24 commit-set protocol, which
+    // owns the batch, the projection, and the acknowledgement.
+    route(writer, vault, &state, rel, krel, &actor, ops)?;
 
-    // Reduce, project, execute the manifest-first write, THEN acknowledge.
     let state = current_state(writer, vault)?;
     let belief_id = state
         .projection_paths
@@ -382,7 +369,150 @@ fn write_concept_with(
     if projection_is_stale(&state, &projection, &fields, body) {
         return Err(refusal_detail(&state, rel));
     }
-    write_projection(vault, rel, &projection)
+    Ok(())
+}
+
+/// Submit the enriched ops as one atomic commit set and interpret its
+/// outcome.
+///
+/// A concept write is all-or-nothing by nature: the Belief, its relation
+/// edits, and its new aliases describe one edit a person made in one file.
+/// Applying the Belief while a relation waited would leave the file saying
+/// something the graph does not.
+fn route(
+    writer: &mut LedgerWriter,
+    vault: &Path,
+    state: &EpistemicState,
+    rel: &str,
+    krel: &str,
+    actor: &Actor,
+    ops: Vec<(schema::ProposalOp, Vec<schema::ProposalTarget>)>,
+) -> Result<(), String> {
+    let table = crate::policy::table::PolicyTable::load()?;
+    // Derived, not minted: a retry at the same head produces the same
+    // proposal ids and the same commit-set id, so a lost acknowledgement
+    // replays instead of duplicating.
+    let head = writer
+        .head()
+        .map(|head| head.hash)
+        .unwrap_or_else(|| "genesis".to_string());
+    let run_id =
+        schema::sha256_first128(format!("cerebro-write-concept-run-v1\0{krel}\0{head}").as_bytes());
+
+    let mut ordered = Vec::with_capacity(ops.len());
+    for (index, (op, targets)) in ops.into_iter().enumerate() {
+        // The SERVER builds these, so declared risk is the table's base for
+        // the op it built. `declared_risk` exists to catch an AGENT
+        // understating what it is doing; the enrichment path has nothing to
+        // understate, and declaring anything lower would simply be
+        // `risk_lowered` against our own table.
+        let declared_risk = table
+            .op(op.kind())
+            .ok_or_else(|| format!("{} is not in the policy table", op.kind()))?
+            .base_risk;
+        let proposal_id = schema::sha256_first128(
+            format!("cerebro-write-concept-op-v1\0{run_id}\0{index}").as_bytes(),
+        );
+        let receipt = match &op {
+            schema::ProposalOp::CreateBelief { subject, .. } => {
+                let subject_id = match subject {
+                    schema::SubjectRef::Resolved { entity_id, .. } => entity_id.clone(),
+                    _ => return Err("a created concept's subject must be resolved".to_string()),
+                };
+                let index_head = state
+                    .beliefs
+                    .values()
+                    .map(|belief| belief.projection_head_event.clone())
+                    .next_back()
+                    .unwrap_or_else(|| crate::policy::candidates::EMPTY_INDEX_HEAD.to_string());
+                Some(crate::policy::candidates::mint(
+                    state,
+                    &index_head,
+                    &subject_id,
+                    krel,
+                    &[],
+                )?)
+            }
+            _ => None,
+        };
+        let proposal = schema::ProposalV1 {
+            schema: schema::PROPOSAL_SCHEMA,
+            proposal_id: proposal_id.clone(),
+            run_id: run_id.clone(),
+            targets,
+            op,
+            intended_use: schema::IntendedUse {
+                kind: schema::IntendedUseKind::ReversibleWork,
+                stakes: crate::policy::table::Risk::Low,
+                predicate_class: None,
+            },
+            basis: schema::ProposalBasis {
+                // The agent captured no observations (the M23 rule carried
+                // forward); the concept text is the new evidence.
+                transition_cause: schema::TransitionCause::NewEvidence,
+                evidence_refs: vec![],
+                coverage_refs: vec![],
+                authority_refs: vec![],
+                authority_route_refs: vec![],
+                addressed_contradictions: vec![],
+                absence_claim: false,
+            },
+            declared_risk,
+            reason: format!("write_concept {rel} (actor {})", actor.id),
+            candidate_search_receipt: receipt,
+        };
+        crate::policy::commit::submit_proposal(&table, writer, actor, &proposal)
+            .map_err(|e| format!("{}: {}", e.code, e.detail))?;
+        ordered.push(proposal_id);
+    }
+
+    let outcome = crate::policy::commit::commit_proposals(&table, writer, vault, &run_id, &ordered)
+        .map_err(|e| format!("{}: {}", e.code, e.detail))?;
+    match outcome.transition {
+        crate::policy::commit::TransitionCode::Apply => Ok(()),
+        crate::policy::commit::TransitionCode::InitialQueue => Err(queued_detail(&outcome)),
+        _ => Err(rejected_detail(&outcome)),
+    }
+}
+
+/// The message a queued concept write returns. It is a REFUSAL of the write,
+/// not of the proposal: the proposal is durable and waiting, and saying so
+/// beats reporting success for a file that did not change.
+fn queued_detail(outcome: &crate::policy::commit::CommitOutcome) -> String {
+    // The MAXIMUM, not the last: a mixed set queues because of its most
+    // dangerous member, and naming a MEDIUM peer would explain the wrong
+    // thing to whoever reads the message.
+    let risk = outcome
+        .results
+        .iter()
+        .filter_map(|result| match result {
+            crate::policy::submit::SubmitResult::Queued { effective_risk, .. } => {
+                Some(*effective_risk)
+            }
+            _ => None,
+        })
+        .max()
+        .map(|risk| risk.as_str())
+        .unwrap_or("HIGH");
+    format!(
+        "queued_for_review: this change is {risk} risk and is waiting for a human decision \
+         (commit set {})",
+        outcome.commit_set_id
+    )
+}
+
+fn rejected_detail(outcome: &crate::policy::commit::CommitOutcome) -> String {
+    let code = outcome
+        .results
+        .iter()
+        .find_map(|result| match result {
+            crate::policy::submit::SubmitResult::Rejected { rejection, .. } => {
+                Some(rejection.code.as_str().to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| "atomic_set_refused".to_string());
+    format!("{code}: write_concept was refused by policy")
 }
 
 /// Did the committed transition actually apply? The projected content must
@@ -411,65 +541,88 @@ fn refusal_detail(state: &EpistemicState, rel: &str) -> String {
         .unwrap_or_else(|| format!("write_concept did not apply for {rel}"))
 }
 
-fn creation_events(
+/// One op and the exact targets it names, at their current versions.
+type Staged = Vec<(ProposalOp, Vec<schema::ProposalTarget>)>;
+
+fn target(
+    state: &EpistemicState,
+    class: schema::TargetClass,
+    id: &str,
+    created_here: bool,
+) -> schema::ProposalTarget {
+    schema::ProposalTarget {
+        target_id: id.to_string(),
+        target_class: class,
+        // Null ONLY for what this proposal creates; anything else names the
+        // version it expects to find.
+        expected_version: if created_here {
+            None
+        } else {
+            state.version(class.as_str(), id)
+        },
+    }
+}
+
+fn creation_ops(
     state: &EpistemicState,
     store: &str,
     krel: &str,
-    actor: &Actor,
     fields: &serde_json::Map<String, serde_json::Value>,
     body: &str,
-) -> Result<Vec<(String, serde_json::Value)>, String> {
+) -> Result<Staged, String> {
     let belief_id = schema::migrate_id(store, "belief", krel);
     let entity_id = schema::migrate_id(store, "entity", krel);
-    let (schema_v, batch_id, idempotency_key, actor_owned) = common_body(actor.clone());
-    let created = schema::BeliefCreated {
-        schema: schema_v,
-        batch_id,
-        idempotency_key,
-        actor: actor_owned,
-        occurred_at: None,
-        valid_from: None,
-        valid_to: None,
-        belief_id: belief_id.clone(),
-        subject: SubjectRef::Resolved {
-            entity_id: entity_id.clone(),
-            aliases: vec![krel.to_string()],
+    let mut staged: Staged = vec![(
+        ProposalOp::CreateBelief {
+            belief_id: belief_id.clone(),
+            subject: SubjectRef::Resolved {
+                entity_id: entity_id.clone(),
+                aliases: vec![krel.to_string()],
+            },
+            content: concept_content(fields.is_empty(), body),
+            fields: serde_json::Value::Object(fields.clone()),
+            basis: BeliefBasis::Unsupported {
+                reason: AGENT_BASIS_REASON.to_string(),
+            },
+            // M24.7 replaces this with the reason the mint's dispositions
+            // justify; today the receipt's legs are the proof and this is
+            // the sentence that names why we are creating rather than
+            // revising.
+            distinctness_reason: format!("no committed projection holds {krel}"),
         },
-        content: concept_content(fields.is_empty(), body),
-        fields: serde_json::Value::Object(fields.clone()),
-        basis: BeliefBasis::Unsupported {
-            reason: AGENT_BASIS_REASON.to_string(),
-        },
-    };
-    let mut events = vec![(
-        schema::KIND_BELIEF_CREATED.to_string(),
-        serde_json::to_value(&created).map_err(|e| e.to_string())?,
+        vec![target(state, schema::TargetClass::Belief, &belief_id, true)],
     )];
     for (to, kind) in intended_relations(state, &belief_id, fields) {
-        events.push(relation_event(
-            actor,
-            &belief_id,
-            &to,
-            kind,
-            RelationAction::Add,
+        let op = relation_op(&belief_id, &to, kind, RelationAction::Add);
+        let relation_id = schema::derive_relation_id(&belief_id, &to, kind);
+        staged.push((
+            op,
+            vec![target(
+                state,
+                schema::TargetClass::Relation,
+                &relation_id,
+                true,
+            )],
         ));
     }
     for alias in alias_list(fields.get("aliases")) {
         let normalized = schema::normalize_alias_v1(&alias);
         if !normalized.is_empty() && !state.alias_registry.contains_key(&normalized) {
-            events.push(alias_event(actor, &entity_id, &alias));
+            staged.push((
+                alias_op(&entity_id, &alias),
+                vec![target(state, schema::TargetClass::Entity, &entity_id, true)],
+            ));
         }
     }
-    Ok(events)
+    Ok(staged)
 }
 
-fn revision_events(
+fn revision_ops(
     state: &EpistemicState,
     belief_id: &str,
-    actor: &Actor,
     fields: &mut serde_json::Map<String, serde_json::Value>,
     body: &str,
-) -> Result<Vec<(String, serde_json::Value)>, String> {
+) -> Result<Staged, String> {
     let belief = state
         .beliefs
         .get(belief_id)
@@ -480,7 +633,7 @@ fn revision_events(
     // Alias policy: an omitted `aliases` key carries the stored value
     // forward; a PRESENT key that drops a live registered alias is the
     // typed unsupported-removal refusal.
-    let mut alias_events: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut alias_ops: Staged = Vec::new();
     match fields.get("aliases") {
         None => {
             if let Some(stored) = current_fields.get("aliases") {
@@ -504,7 +657,15 @@ fn revision_events(
             for alias in alias_list(Some(value)) {
                 let normalized = schema::normalize_alias_v1(&alias);
                 if !normalized.is_empty() && !state.alias_registry.contains_key(&normalized) {
-                    alias_events.push(alias_event(actor, &belief.entity_id, &alias));
+                    alias_ops.push((
+                        alias_op(&belief.entity_id, &alias),
+                        vec![target(
+                            state,
+                            schema::TargetClass::Entity,
+                            &belief.entity_id,
+                            false,
+                        )],
+                    ));
                 }
             }
         }
@@ -520,23 +681,26 @@ fn revision_events(
         .filter(|r| r.live && r.from == belief_id)
         .map(|r| (r.to.clone(), r.relation))
         .collect();
-    let mut relation_events: Vec<(String, serde_json::Value)> = Vec::new();
-    for (to, kind) in intended.difference(&live) {
-        relation_events.push(relation_event(
-            actor,
-            belief_id,
-            to,
-            *kind,
-            RelationAction::Add,
-        ));
-    }
-    for (to, kind) in live.difference(&intended) {
-        relation_events.push(relation_event(
-            actor,
-            belief_id,
-            to,
-            *kind,
-            RelationAction::Remove,
+    let mut relation_ops: Staged = Vec::new();
+    for (to, kind, action) in intended
+        .difference(&live)
+        .map(|(to, kind)| (to, kind, RelationAction::Add))
+        .chain(
+            live.difference(&intended)
+                .map(|(to, kind)| (to, kind, RelationAction::Remove)),
+        )
+    {
+        let relation_id = schema::derive_relation_id(belief_id, to, *kind);
+        let created_here =
+            action == RelationAction::Add && !state.relations.contains_key(&relation_id);
+        relation_ops.push((
+            relation_op(belief_id, to, *kind, action),
+            vec![target(
+                state,
+                schema::TargetClass::Relation,
+                &relation_id,
+                created_here,
+            )],
         ));
     }
 
@@ -581,45 +745,27 @@ fn revision_events(
         });
     }
 
-    if patch.is_empty() && relation_events.is_empty() && alias_events.is_empty() {
+    if patch.is_empty() && relation_ops.is_empty() && alias_ops.is_empty() {
         return Ok(Vec::new());
     }
 
-    let (schema_v, batch_id, idempotency_key, actor_owned) = common_body(actor.clone());
-    let revised = schema::BeliefRevised {
-        schema: schema_v,
-        batch_id,
-        idempotency_key,
-        actor: actor_owned,
-        occurred_at: None,
-        valid_from: None,
-        valid_to: None,
-        belief_id: belief_id.to_string(),
-        patch,
-        basis: current.basis.clone(),
-    };
-    let mut events = vec![(
-        schema::KIND_BELIEF_REVISED.to_string(),
-        serde_json::to_value(&revised).map_err(|e| e.to_string())?,
-    )];
-    events.extend(relation_events);
-    events.extend(alias_events);
-    Ok(events)
-}
-
-/// One event goes through plain `append`; a multi-event transition is one
-/// logical batch — assertion-free here, but atomic all the same.
-fn commit(
-    writer: &mut LedgerWriter,
-    mut events: Vec<(String, serde_json::Value)>,
-) -> Result<(), String> {
-    if events.len() == 1 {
-        let (kind, body) = events.remove(0);
-        writer.append(&kind, body)?;
-    } else {
-        writer.append_batch(events, None)?;
+    // An empty patch with unchanged relations/aliases would be the
+    // support-only revision shape, which this adapter never produces: it
+    // captures no observations, so the basis carries forward untouched.
+    let mut staged: Staged = Vec::new();
+    if !patch.is_empty() {
+        staged.push((
+            ProposalOp::UpdateBelief {
+                belief_id: belief_id.to_string(),
+                patch,
+                basis: current.basis.clone(),
+            },
+            vec![target(state, schema::TargetClass::Belief, belief_id, false)],
+        ));
     }
-    Ok(())
+    staged.extend(relation_ops);
+    staged.extend(alias_ops);
+    Ok(staged)
 }
 
 fn write_projection(vault: &Path, rel: &str, projection: &ProjectionResult) -> Result<(), String> {
@@ -736,6 +882,37 @@ mod tests {
             .collect()
     }
 
+    /// Approve every queued set and resolve it — the human half of the
+    /// governed path, driven from the ledger exactly as the M24.9 review
+    /// surface will drive it (nothing here consults the runtime DB).
+    fn approve_and_resolve(writer: &mut LedgerWriter, vault: &Path) {
+        use crate::policy::commit;
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        let state = current_state(writer, vault).unwrap();
+        for set in commit::pending_sets(&state) {
+            for proposal_id in &set.ordered_proposal_ids {
+                commit::record_decision(
+                    writer,
+                    vault,
+                    proposal_id,
+                    schema::Decision::Approve,
+                    "human:me",
+                    None,
+                    "2026-08-09T11:00:00Z",
+                )
+                .unwrap();
+            }
+            commit::resolve_commit_set(
+                &table,
+                writer,
+                vault,
+                &set.run_id,
+                &set.ordered_proposal_ids,
+            )
+            .unwrap();
+        }
+    }
+
     fn concept_frontmatter() -> serde_json::Map<String, serde_json::Value> {
         fm(&[
             ("type", serde_json::json!("Reference")),
@@ -795,12 +972,13 @@ mod tests {
         let store = writer.store_id().to_string();
         super::super::migrate::migrate_vault(&mut writer, &vault.join("knowledge")).unwrap();
 
-        // status-model.md is migrated; rewrite it with a new body, a new
-        // relation to the pilot, and no aliases key.
-        let rel = "knowledge/systems/status-model.md";
+        // pick-queue-drain.md is migrated and UNVERIFIED, so the revise and
+        // relation-add rungs both auto-apply; rewrite it with a new body, a
+        // new relation to the pilot, and no aliases key.
+        let rel = "knowledge/systems/pick-queue-drain.md";
         let frontmatter = fm(&[
             ("type", serde_json::json!("Reference")),
-            ("title", serde_json::json!("Status model")),
+            ("title", serde_json::json!("Pick queue drain")),
             ("refines", serde_json::json!(["[[offline-window-pilot]]"])),
             (
                 "generated",
@@ -812,12 +990,12 @@ mod tests {
             &vault,
             rel,
             &frontmatter,
-            "# Status model\n\nRewritten.",
+            "# Pick queue drain\n\nRewritten.",
         )
         .unwrap();
 
         let state = current_state(&writer, &vault).unwrap();
-        let belief_id = schema::migrate_id(&store, "belief", "systems/status-model.md");
+        let belief_id = schema::migrate_id(&store, "belief", "systems/pick-queue-drain.md");
         let belief = state.beliefs.get(&belief_id).unwrap();
         assert_eq!(belief.current().revision, 2);
         // The relation exists and is live.
@@ -968,9 +1146,10 @@ mod tests {
         )
         .unwrap();
 
-        // The agent rewrites the verified concept: today's tool drops the
-        // stamp from fields, but the projection SAYS what happened instead
-        // of silently reverting to unverified — and the attestation stays.
+        // The agent rewrites the VERIFIED concept. Under M24 that is a HIGH
+        // transition (`target_has_attestation`), so it queues rather than
+        // applying — and the message says so instead of reporting a success
+        // the file did not get.
         let frontmatter = fm(&[
             ("type", serde_json::json!("Metric")),
             ("title", serde_json::json!("Sync error rate")),
@@ -979,14 +1158,25 @@ mod tests {
                 serde_json::json!({ "by": "agent:run-3", "at": "2026-08-09" }),
             ),
         ]);
-        write_concept_with(
+        let queued = write_concept_with(
             &mut writer,
             &vault,
             rel,
             &frontmatter,
             "# Sync error rate\n\nRewritten.",
         )
-        .unwrap();
+        .unwrap_err();
+        assert!(queued.starts_with("queued_for_review:"), "{queued}");
+        assert!(queued.contains("HIGH"), "{queued}");
+        // ...and nothing changed on disk while it waits.
+        assert!(std::fs::read_to_string(vault.join(rel))
+            .unwrap()
+            .contains("verified: { by: human:me"));
+
+        // A human approves, and the same set applies. Everything below this
+        // line is the M23 rendering contract, unchanged — reached through
+        // the governed path instead of around it.
+        approve_and_resolve(&mut writer, &vault);
 
         let state = current_state(&writer, &vault).unwrap();
         let belief_id = schema::migrate_id(&store, "belief", "metrics/sync-error-rate.md");
@@ -1036,10 +1226,13 @@ mod tests {
         .unwrap();
         let status = testutil::run_crash_scenario(
             "ledger::concepts::tests::crash_scenario_write_concept",
-            "concept-committed",
+            "commit-set-apply-committed",
             &vault,
         );
-        assert!(!status.success(), "the child dies after the commit");
+        assert!(
+            !status.success(),
+            "the child dies after the marker is durable, before projection"
+        );
 
         // The commit is durable; no file, no manifest entry — the exact
         // ledger-ahead-create shape, recovered by regenerating with ZERO

@@ -13,7 +13,11 @@
 //! internal typed boundary until M26 turns the surface on.
 
 pub mod authority;
+pub mod candidates;
+pub mod commit;
+pub mod expand;
 pub mod goldens;
+pub mod interpreter;
 pub mod rejection;
 pub mod risk;
 pub mod submit;
@@ -53,6 +57,64 @@ pub const OP_INVENTORY: &[&str] = &[
     "tombstone_belief",
     "update_belief",
 ];
+
+/// Synthetic proposals, shared by every policy test.
+///
+/// M24 exercises the whole skeleton with agents OFF, so every proposal in
+/// the suite is built here rather than arriving from a tool. One builder
+/// keeps the fixtures honest: a test that needs a different proposal changes
+/// a field, and cannot accidentally construct a shape the validator would
+/// have refused from a real caller.
+#[cfg(test)]
+pub mod fixtures {
+    use crate::ledger::schema::{
+        IntendedUse, IntendedUseKind, ProposalBasis, ProposalOp, ProposalTarget, ProposalV1,
+        TargetClass, TransitionCause, PROPOSAL_SCHEMA,
+    };
+
+    use super::table::Risk;
+
+    pub fn proposal(
+        proposal_id: &str,
+        run_id: &str,
+        op: ProposalOp,
+        targets: Vec<ProposalTarget>,
+        declared_risk: Risk,
+    ) -> ProposalV1 {
+        ProposalV1 {
+            schema: PROPOSAL_SCHEMA,
+            proposal_id: proposal_id.to_string(),
+            run_id: run_id.to_string(),
+            targets,
+            op,
+            intended_use: IntendedUse {
+                kind: IntendedUseKind::ReversibleWork,
+                stakes: Risk::Low,
+                predicate_class: None,
+            },
+            basis: ProposalBasis {
+                transition_cause: TransitionCause::NewEvidence,
+                evidence_refs: vec![],
+                coverage_refs: vec![],
+                authority_refs: vec![],
+                authority_route_refs: vec![],
+                addressed_contradictions: vec![],
+                absence_claim: false,
+            },
+            declared_risk,
+            reason: "a synthetic proposal".to_string(),
+            candidate_search_receipt: None,
+        }
+    }
+
+    pub fn target(class: TargetClass, id: &str, expected_version: Option<u64>) -> ProposalTarget {
+        ProposalTarget {
+            target_id: id.to_string(),
+            target_class: class,
+            expected_version,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
