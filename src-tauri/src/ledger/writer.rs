@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use super::frame::{Frame, FRAME_VERSION};
 use super::segment::{self, SegmentName, SegmentWriter, Tail};
-use super::{ledger_dir, new_id128, schema, sha256_hex, store};
+use super::{ledger_dir, members_digest, new_id128, schema, sha256_hex, store};
 
 /// Records per segment before rotation seals it and opens the next. Any
 /// value works; this one keeps segments small enough that recovery scans
@@ -604,17 +604,6 @@ fn operation_digest(events: &[(String, serde_json::Value)]) -> Result<String, St
         .collect();
     let canonical = serde_json::to_string(&plan).map_err(|e| e.to_string())?;
     Ok(sha256_hex(canonical.as_bytes()))
-}
-
-/// SHA-256 over the canonical member frame lines in order, each terminated
-/// with a newline — exactly the bytes the segment holds for them.
-fn members_digest<'a>(frames: impl Iterator<Item = &'a Frame>) -> Result<String, String> {
-    let mut bytes = Vec::new();
-    for frame in frames {
-        bytes.extend_from_slice(frame.to_line()?.as_bytes());
-        bytes.push(b'\n');
-    }
-    Ok(sha256_hex(&bytes))
 }
 
 /// Replace every `member_ref(ordinal)` placeholder string with the

@@ -1,0 +1,2598 @@
+//! The reducer (M22.3): folds committed frames in `seq` order into
+//! epistemic entity state.
+//!
+//! Rules that hold everywhere in this file:
+//! - Plumbing bodies (no `schema` key) index as events and create NOTHING
+//!   here. A body that CLAIMS schema membership and fails it produces a
+//!   deterministic anomaly row — never a panic, never a silent skip.
+//! - Atomicity is marker-based: batch members are buffered and applied only
+//!   when a valid `batch.committed` marker names the exact contiguous
+//!   ordered member set with a matching digest. Any invalid member refuses
+//!   the ENTIRE batch with zero entity-state effect.
+//! - Versions are reducer-owned: producers never stamp version claims; the
+//!   closed event-to-version matrix in the design is implemented here and
+//!   nowhere else.
+//! - Independence is positive and produced; unknown is never materialized.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use super::frame::Frame;
+use super::schema::{
+    self, AssertionBasis, AuthorityProvenance, BeliefBasis, EventBody, IndependenceProof,
+    ObservationKind, ObservationPayload, RelationAction, ResolutionChange, ResolverTier,
+    SubjectRef, TypedValue,
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Anomaly {
+    pub seq: u64,
+    pub event_id: String,
+    pub batch_id: Option<String>,
+    pub code: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceState {
+    pub source_id: String,
+    pub registration_event_id: String,
+    pub registration: schema::SourceRegistration,
+    /// Canonical body bytes, for the duplicate-re-registration check.
+    pub canonical: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityState {
+    pub entity_id: String,
+    pub registered_by_event_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AliasState {
+    pub normalized: String,
+    pub alias: String,
+    pub entity_id: String,
+    pub event_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObservationState {
+    pub event_id: String,
+    pub seq: u64,
+    pub kind: ObservationKind,
+    pub source_id: String,
+    pub source_registration_event_id: String,
+    pub subject: SubjectRef,
+    /// Current effective attachment (resolved subjects start attached).
+    pub effective_entity: Option<String>,
+    /// The attach/correct event currently in effect; None until attached.
+    pub effective_resolution_event: Option<String>,
+    pub authority: Option<AuthorityProvenance>,
+    pub assertion_basis: Option<AssertionBasis>,
+    pub actor: String,
+    pub lineage_parents: Vec<(schema::LineageKind, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RevisionState {
+    pub revision: u64,
+    pub event_id: String,
+    pub content: String,
+    pub fields: serde_json::Value,
+    pub basis: BeliefBasis,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BeliefState {
+    pub belief_id: String,
+    pub entity_id: String,
+    pub created_event_id: String,
+    pub revisions: Vec<RevisionState>,
+    /// Verification pointer: (attesting event, attested revision event).
+    pub attested: Option<(String, String)>,
+}
+
+impl BeliefState {
+    pub fn current(&self) -> &RevisionState {
+        self.revisions
+            .last()
+            .expect("a belief always has revision 1")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelationState {
+    pub relation_id: String,
+    pub from: String,
+    pub to: String,
+    pub relation: schema::RelationKind,
+    pub live: bool,
+    /// The add event currently making this relation live (resolver proofs
+    /// cite it); updated on re-add.
+    pub last_add_event_id: String,
+    pub last_event_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolutionRow {
+    pub seq: u64,
+    pub event_id: String,
+    pub observation_event_id: String,
+    pub action: String,
+    pub from_entity_id: Option<String>,
+    pub to_entity_id: String,
+    pub resolver_tier: ResolverTier,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndependenceRow {
+    pub event_id: String,
+    pub proof_kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BatchRow {
+    pub batch_id: String,
+    pub state: &'static str, // committed | refused | orphaned
+    pub marker_seq: Option<u64>,
+    pub member_count: u64,
+    pub operation_key: Option<String>,
+    pub members: Vec<(String, u64)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct MigrationEpoch {
+    store_uuid: String,
+    source_digest: String,
+    planned_output_count: u64,
+    completed: bool,
+}
+
+/// The whole reduced world. `Clone` is the batch staging mechanism: members
+/// fold into a scratch clone that replaces the state only when every member
+/// applies.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EpistemicState {
+    pub sources: BTreeMap<String, SourceState>,
+    pub source_keys: BTreeMap<String, String>,
+    pub registrations_by_event: BTreeMap<String, String>,
+    pub entities: BTreeMap<String, EntityState>,
+    pub alias_registry: BTreeMap<String, AliasState>,
+    pub alias_events: BTreeMap<String, (String, String)>,
+    pub observations: BTreeMap<String, ObservationState>,
+    /// Entity-registering events (belief.created / resolved-subject
+    /// observations): event id → (entity, preserved source aliases).
+    pub entity_registrations: BTreeMap<String, (String, Vec<String>)>,
+    pub beliefs: BTreeMap<String, BeliefState>,
+    pub belief_revision_events: BTreeMap<String, (String, u64)>,
+    pub relations: BTreeMap<String, RelationState>,
+    pub relation_add_events: BTreeMap<String, String>,
+    pub resolutions: Vec<ResolutionRow>,
+    pub independence: BTreeMap<(String, String), IndependenceRow>,
+    pub derived_belief_sources: Vec<(String, String)>,
+    /// (class, id) → (version, last event id). The closed matrix.
+    pub versions: BTreeMap<(String, String), (u64, String)>,
+    pub batches: Vec<BatchRow>,
+    pub anomalies: Vec<Anomaly>,
+    migration: Option<MigrationEpoch>,
+}
+
+impl EpistemicState {
+    fn create_version(&mut self, class: &str, id: &str, event_id: &str) {
+        self.versions.insert(
+            (class.to_string(), id.to_string()),
+            (1, event_id.to_string()),
+        );
+    }
+
+    fn bump_version(&mut self, class: &str, id: &str, event_id: &str) {
+        let entry = self
+            .versions
+            .entry((class.to_string(), id.to_string()))
+            .or_insert((0, String::new()));
+        entry.0 += 1;
+        entry.1 = event_id.to_string();
+    }
+
+    pub fn version(&self, class: &str, id: &str) -> Option<u64> {
+        self.versions
+            .get(&(class.to_string(), id.to_string()))
+            .map(|(v, _)| *v)
+    }
+}
+
+/// Event ids staged by the current batch — the "committed only" checks
+/// refuse these even though the scratch state already contains them.
+type Staged = BTreeSet<String>;
+
+/// Fold every frame into entity state. Never fails: refusals become
+/// deterministic anomaly rows.
+pub fn reduce(frames: &[Frame], store_id: &str) -> EpistemicState {
+    let mut state = EpistemicState::default();
+    let mut pending: BTreeMap<String, Vec<(Frame, EventBody)>> = BTreeMap::new();
+    let mut committed_batches: BTreeSet<String> = BTreeSet::new();
+
+    for frame in frames {
+        let decoded = match schema::decode_body(&frame.kind, &frame.body) {
+            Ok(Some(decoded)) => decoded,
+            Ok(None) => continue, // plumbing: indexable, zero entity state
+            Err(detail) => {
+                state.anomalies.push(Anomaly {
+                    seq: frame.seq,
+                    event_id: frame.event_id.clone(),
+                    batch_id: None,
+                    code: "schema".to_string(),
+                    detail,
+                });
+                continue;
+            }
+        };
+
+        match (decoded.batch_id().map(str::to_string), &decoded) {
+            (Some(batch_id), EventBody::BatchCommitted(marker)) => {
+                let members = pending.remove(&batch_id).unwrap_or_default();
+                commit_batch(
+                    &mut state,
+                    store_id,
+                    frame,
+                    &batch_id,
+                    (**marker).clone(),
+                    members,
+                    &mut committed_batches,
+                );
+            }
+            (Some(batch_id), _) => {
+                pending
+                    .entry(batch_id)
+                    .or_default()
+                    .push((frame.clone(), decoded));
+            }
+            (None, _) => {
+                let staged = Staged::new();
+                if let Err((code, detail)) = apply(&mut state, store_id, frame, &decoded, &staged) {
+                    state.anomalies.push(Anomaly {
+                        seq: frame.seq,
+                        event_id: frame.event_id.clone(),
+                        batch_id: None,
+                        code,
+                        detail,
+                    });
+                }
+            }
+        }
+    }
+
+    // Whatever is still buffered has no marker: orphaned, diagnosable,
+    // zero entity-state effect.
+    for (batch_id, members) in pending {
+        let first = &members[0].0;
+        state.anomalies.push(Anomaly {
+            seq: first.seq,
+            event_id: first.event_id.clone(),
+            batch_id: Some(batch_id.clone()),
+            code: "batch".to_string(),
+            detail: format!(
+                "batch {batch_id} has {} member(s) and no committed marker — orphaned",
+                members.len()
+            ),
+        });
+        state.batches.push(BatchRow {
+            batch_id,
+            state: "orphaned",
+            marker_seq: None,
+            member_count: members.len() as u64,
+            operation_key: None,
+            members: members
+                .iter()
+                .map(|(f, _)| (f.event_id.clone(), f.seq))
+                .collect(),
+        });
+    }
+    // Batch rows in deterministic order (fold order for committed/refused,
+    // then the BTreeMap-ordered orphans appended above — already stable).
+    state
+}
+
+/// Validate a marker against its buffered members and, if the batch is
+/// valid as a UNIT, fold the members in order.
+#[allow(clippy::too_many_arguments)]
+fn commit_batch(
+    state: &mut EpistemicState,
+    store_id: &str,
+    marker_frame: &Frame,
+    batch_id: &str,
+    marker: schema::BatchCommitted,
+    members: Vec<(Frame, EventBody)>,
+    committed_batches: &mut BTreeSet<String>,
+) {
+    let refuse = |state: &mut EpistemicState, detail: String| {
+        state.anomalies.push(Anomaly {
+            seq: marker_frame.seq,
+            event_id: marker_frame.event_id.clone(),
+            batch_id: Some(batch_id.to_string()),
+            code: "batch".to_string(),
+            detail,
+        });
+        state.batches.push(BatchRow {
+            batch_id: batch_id.to_string(),
+            state: "refused",
+            marker_seq: Some(marker_frame.seq),
+            member_count: members.len() as u64,
+            operation_key: marker.idempotency_key.clone(),
+            members: members
+                .iter()
+                .map(|(f, _)| (f.event_id.clone(), f.seq))
+                .collect(),
+        });
+    };
+
+    if committed_batches.contains(batch_id) {
+        refuse(
+            state,
+            format!("batch {batch_id} already has a committed marker — duplicate marker"),
+        );
+        return;
+    }
+    if let Err(detail) = marker.validate() {
+        refuse(state, format!("invalid marker: {detail}"));
+        return;
+    }
+    let ids_match = members.len() == marker.member_event_ids.len()
+        && members
+            .iter()
+            .zip(&marker.member_event_ids)
+            .all(|((frame, _), id)| &frame.event_id == id);
+    if !ids_match {
+        refuse(
+            state,
+            format!(
+                "marker names {} member(s); {} buffered in order — truncated, substituted, or \
+                 wrong order",
+                marker.member_event_ids.len(),
+                members.len()
+            ),
+        );
+        return;
+    }
+    let contiguous = members
+        .windows(2)
+        .all(|pair| pair[1].0.seq == pair[0].0.seq + 1)
+        && members
+            .last()
+            .is_some_and(|(last, _)| last.seq + 1 == marker_frame.seq);
+    if !contiguous {
+        refuse(
+            state,
+            "batch members are not one contiguous run ending at the marker — interleaved".into(),
+        );
+        return;
+    }
+    let digest = super::members_digest(members.iter().map(|(frame, _)| frame)).unwrap_or_default();
+    if digest != marker.members_digest {
+        refuse(
+            state,
+            "members digest mismatch — substituted or torn member".into(),
+        );
+        return;
+    }
+
+    // Two-phase: fold members into a scratch clone; any refusal drops the
+    // scratch and the whole batch has zero entity-state effect.
+    let mut scratch = state.clone();
+    let staged: Staged = members
+        .iter()
+        .map(|(frame, _)| frame.event_id.clone())
+        .collect();
+    for (ordinal, (frame, body)) in members.iter().enumerate() {
+        if let Err((code, detail)) = apply(&mut scratch, store_id, frame, body, &staged) {
+            state.anomalies.push(Anomaly {
+                seq: frame.seq,
+                event_id: frame.event_id.clone(),
+                batch_id: Some(batch_id.to_string()),
+                code,
+                detail: format!("batch member {ordinal}: {detail}"),
+            });
+            refuse(
+                state,
+                format!("member {ordinal} refused — whole batch has no effect"),
+            );
+            return;
+        }
+    }
+    *state = scratch;
+    committed_batches.insert(batch_id.to_string());
+    state.batches.push(BatchRow {
+        batch_id: batch_id.to_string(),
+        state: "committed",
+        marker_seq: Some(marker_frame.seq),
+        member_count: members.len() as u64,
+        operation_key: marker.idempotency_key.clone(),
+        members: members
+            .iter()
+            .map(|(f, _)| (f.event_id.clone(), f.seq))
+            .collect(),
+    });
+}
+
+type Refusal = (String, String);
+
+fn refused(detail: impl Into<String>) -> Refusal {
+    ("refused".to_string(), detail.into())
+}
+
+/// Apply one schema-v1 event. Structural validation first, then the
+/// state-dependent rules. Mutates `state` only on success when called for
+/// an unbatched event; batch members mutate a scratch clone.
+fn apply(
+    state: &mut EpistemicState,
+    store_id: &str,
+    frame: &Frame,
+    body: &EventBody,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    body.validate(store_id).map_err(refused)?;
+    match body {
+        EventBody::BatchCommitted(_) => Err(refused("a marker cannot be applied as a member")),
+        EventBody::SourceRegistered(b) => apply_source(state, frame, b),
+        EventBody::ObservationRecorded(b) => apply_observation(state, frame, b, staged),
+        EventBody::SubjectResolved(b) => apply_resolution(state, frame, b, staged),
+        EventBody::IndependenceRecorded(b) => apply_independence(state, frame, b),
+        EventBody::BeliefCreated(b) => apply_belief_created(state, frame, b),
+        EventBody::BeliefRevised(b) => apply_belief_revised(state, frame, b),
+        EventBody::BeliefRelation(b) => apply_relation(state, frame, b),
+        EventBody::BeliefAttested(b) => apply_attested(state, frame, b, staged),
+        EventBody::EntityAliasAdded(b) => apply_alias(state, frame, b),
+        EventBody::MigrationStarted(b) => apply_migration_started(state, b),
+        EventBody::MigrationCompleted(b) => apply_migration_completed(state, b),
+    }
+}
+
+fn apply_source(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::SourceRegistered,
+) -> Result<(), Refusal> {
+    let canonical = serde_json::to_string(&frame.body).map_err(|e| refused(e.to_string()))?;
+    if let Some(existing) = state.sources.get(&body.source_id) {
+        return Err(refused(if existing.canonical == canonical {
+            format!(
+                "source {} is already registered — one registration per source",
+                body.source_id
+            )
+        } else {
+            format!(
+                "source {} re-registered with different canonical bytes — refused",
+                body.source_id
+            )
+        }));
+    }
+    let key = body.registration.source_key().to_string();
+    if state.source_keys.contains_key(&key) {
+        return Err(refused(format!(
+            "source key {key:?} is already registered under another source id"
+        )));
+    }
+    state.sources.insert(
+        body.source_id.clone(),
+        SourceState {
+            source_id: body.source_id.clone(),
+            registration_event_id: frame.event_id.clone(),
+            registration: body.registration.clone(),
+            canonical,
+        },
+    );
+    state.source_keys.insert(key, body.source_id.clone());
+    state
+        .registrations_by_event
+        .insert(frame.event_id.clone(), body.source_id.clone());
+    state.create_version("source", &body.source_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_observation(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::ObservationRecorded,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    let payload = body.validate().map_err(refused)?;
+
+    // The registration pin: an earlier committed (or earlier-staged)
+    // registration event whose source id matches.
+    let pinned_source = state
+        .registrations_by_event
+        .get(&body.source_registration_event_id)
+        .ok_or_else(|| {
+            refused(format!(
+                "source_registration_event_id {} names no committed registration",
+                body.source_registration_event_id
+            ))
+        })?;
+    if pinned_source != &body.source_id {
+        return Err(refused(format!(
+            "registration event registers source {pinned_source}, not {}",
+            body.source_id
+        )));
+    }
+    let source = state
+        .sources
+        .get(&body.source_id)
+        .expect("pinned source exists");
+
+    // Authority is DERIVED from the registration and call path; the payload
+    // must claim exactly the derivation — no upgrade, no downgrade.
+    let (authority, assertion_basis) = if let Some(assertion) = payload.assertion() {
+        let derived =
+            schema::derive_authority(&source.registration, &body.actor.id, body.observation_kind);
+        if assertion.authority_provenance != derived {
+            return Err(refused(format!(
+                "authority_provenance {:?} disagrees with the registration-derived {:?} — \
+                 authority is provenance, not a caller-selected label",
+                assertion.authority_provenance, derived
+            )));
+        }
+        (Some(derived), Some(assertion.assertion_basis))
+    } else {
+        (None, None)
+    };
+
+    // Lineage: every parent an existing Observation (committed or earlier
+    // staged), in strictly ascending seq order.
+    let mut prev_seq: Option<u64> = None;
+    for edge in &body.lineage {
+        let parent = state
+            .observations
+            .get(&edge.parent_observation_event_id)
+            .ok_or_else(|| {
+                refused(format!(
+                    "lineage parent {} is not an Observation (attestations and other events can \
+                     never be evidence ancestry)",
+                    edge.parent_observation_event_id
+                ))
+            })?;
+        if prev_seq.is_some_and(|prev| parent.seq <= prev) {
+            return Err(refused(
+                "lineage edges must be in canonical ascending parent order".to_string(),
+            ));
+        }
+        prev_seq = Some(parent.seq);
+    }
+
+    // Derived-content Belief inputs: earlier COMMITTED creation/revision
+    // events, read-only.
+    if let ObservationPayload::DerivedContent(derived) = &payload {
+        for id in derived
+            .source_belief_revision_event_ids
+            .as_deref()
+            .unwrap_or(&[])
+        {
+            if staged.contains(id) {
+                return Err(refused(format!(
+                    "belief-revision source {id} is staged in this batch — committed only"
+                )));
+            }
+            if !state.belief_revision_events.contains_key(id) {
+                return Err(refused(format!(
+                    "belief-revision source {id} names no committed belief.created/belief.revised"
+                )));
+            }
+            state
+                .derived_belief_sources
+                .push((frame.event_id.clone(), id.clone()));
+        }
+    }
+
+    // A resolved subject may FIRST-REGISTER an unseen Entity; it never bumps
+    // an existing one merely by reference.
+    let effective_entity = match &body.subject {
+        SubjectRef::Resolved { entity_id, aliases } => {
+            if !state.entities.contains_key(entity_id) {
+                state.entities.insert(
+                    entity_id.clone(),
+                    EntityState {
+                        entity_id: entity_id.clone(),
+                        registered_by_event_id: frame.event_id.clone(),
+                    },
+                );
+                state.create_version("entity", entity_id, &frame.event_id);
+            }
+            state
+                .entity_registrations
+                .insert(frame.event_id.clone(), (entity_id.clone(), aliases.clone()));
+            Some(entity_id.clone())
+        }
+        _ => None,
+    };
+
+    state.observations.insert(
+        frame.event_id.clone(),
+        ObservationState {
+            event_id: frame.event_id.clone(),
+            seq: frame.seq,
+            kind: body.observation_kind,
+            source_id: body.source_id.clone(),
+            source_registration_event_id: body.source_registration_event_id.clone(),
+            subject: body.subject.clone(),
+            effective_entity,
+            effective_resolution_event: None,
+            authority,
+            assertion_basis,
+            actor: body.actor.id.clone(),
+            lineage_parents: body
+                .lineage
+                .iter()
+                .map(|e| (e.edge, e.parent_observation_event_id.clone()))
+                .collect(),
+        },
+    );
+    state.create_version("observation", &frame.event_id, &frame.event_id);
+    state.bump_version("source", &body.source_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_resolution(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::SubjectResolved,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if staged.contains(&body.observation_event_id) {
+        return Err(refused(
+            "subject resolution targets a same-batch Observation — committed only".to_string(),
+        ));
+    }
+    let observation = state
+        .observations
+        .get(&body.observation_event_id)
+        .ok_or_else(|| refused("subject resolution targets no committed Observation"))?
+        .clone();
+    if !matches!(observation.subject, SubjectRef::Unresolved { .. }) {
+        return Err(refused(
+            "only an originally unresolved Observation can be attached — `none` and resolved \
+             subjects are refused",
+        ));
+    }
+    let raw_ref = match &observation.subject {
+        SubjectRef::Unresolved { raw_ref, .. } => raw_ref.clone(),
+        _ => unreachable!("checked above"),
+    };
+
+    let (to_entity, from_entity, tier, basis, action) = match &body.change {
+        ResolutionChange::Attach {
+            entity_id,
+            resolver_tier,
+            basis_event_ids,
+        } => {
+            if observation.effective_resolution_event.is_some() {
+                return Err(refused(
+                    "attach on an already attached Observation — correction is the explicit door",
+                ));
+            }
+            (
+                entity_id.clone(),
+                None,
+                *resolver_tier,
+                basis_event_ids,
+                "attach",
+            )
+        }
+        ResolutionChange::Correct {
+            prior_resolution_event_id,
+            from_entity_id,
+            to_entity_id,
+            resolver_tier,
+            basis_event_ids,
+            ..
+        } => {
+            let current = observation
+                .effective_resolution_event
+                .as_deref()
+                .ok_or_else(|| refused("correction before any attachment — nothing to correct"))?;
+            if current != prior_resolution_event_id {
+                return Err(refused(format!(
+                    "correction pins prior resolution {prior_resolution_event_id}, but the \
+                     current effective resolution is {current} — stale prior"
+                )));
+            }
+            if observation.effective_entity.as_deref() != Some(from_entity_id.as_str()) {
+                return Err(refused(
+                    "correction from_entity does not match the current Entity",
+                ));
+            }
+            (
+                to_entity_id.clone(),
+                Some(from_entity_id.clone()),
+                *resolver_tier,
+                basis_event_ids,
+                "correct",
+            )
+        }
+    };
+
+    if !state.entities.contains_key(&to_entity) {
+        return Err(refused(format!("target Entity {to_entity} does not exist")));
+    }
+    for id in basis {
+        if staged.contains(id) {
+            return Err(refused(
+                "same-batch basis events are not permitted in resolution proofs",
+            ));
+        }
+    }
+    let correcting = action == "correct";
+    verify_tier_proof(state, tier, basis, &raw_ref, &to_entity, correcting)?;
+
+    let observation_entry = state
+        .observations
+        .get_mut(&body.observation_event_id)
+        .expect("observation exists");
+    observation_entry.effective_entity = Some(to_entity.clone());
+    observation_entry.effective_resolution_event = Some(frame.event_id.clone());
+    state.resolutions.push(ResolutionRow {
+        seq: frame.seq,
+        event_id: frame.event_id.clone(),
+        observation_event_id: body.observation_event_id.clone(),
+        action: action.to_string(),
+        from_entity_id: from_entity,
+        to_entity_id: to_entity,
+        resolver_tier: tier,
+    });
+    state.bump_version("observation", &body.observation_event_id, &frame.event_id);
+    Ok(())
+}
+
+/// The exact tier contract from the design. `correcting` switches exact_id
+/// from the raw_ref self-proof to a one-event Entity-registration proof.
+fn verify_tier_proof(
+    state: &EpistemicState,
+    tier: ResolverTier,
+    basis: &[String],
+    raw_ref: &str,
+    target_entity: &str,
+    correcting: bool,
+) -> Result<(), Refusal> {
+    match tier {
+        ResolverTier::ExactId => {
+            if correcting {
+                let event = &basis[0]; // cardinality 1 is structural
+                let (entity, _) = state.entity_registrations.get(event).ok_or_else(|| {
+                    refused("exact_id correction basis is not an Entity-registering event")
+                })?;
+                if entity != target_entity {
+                    return Err(refused(
+                        "exact_id correction basis registers a different Entity",
+                    ));
+                }
+            } else if raw_ref != target_entity {
+                return Err(refused(
+                    "exact_id attach requires raw_ref to equal the entity id exactly",
+                ));
+            }
+        }
+        ResolverTier::KnownAlias => {
+            let event = &basis[0];
+            let (entity, normalized) = state
+                .alias_events
+                .get(event)
+                .ok_or_else(|| refused("known_alias basis is not an entity.alias_added event"))?;
+            if normalized != &schema::normalize_alias_v1(raw_ref) {
+                return Err(refused(
+                    "known_alias basis does not match the normalized mention",
+                ));
+            }
+            if entity != target_entity {
+                return Err(refused("known_alias basis names a different Entity"));
+            }
+        }
+        ResolverTier::ExplicitRelation => {
+            let mut prev_to: Option<&str> = None;
+            for event in basis {
+                let relation_id = state.relation_add_events.get(event).ok_or_else(|| {
+                    refused("explicit_relation basis is not a belief.relation add event")
+                })?;
+                let relation = state.relations.get(relation_id).expect("indexed relation");
+                if !relation.live || &relation.last_add_event_id != event {
+                    return Err(refused(
+                        "explicit_relation basis relation is not currently live",
+                    ));
+                }
+                if let Some(prev) = prev_to {
+                    if relation.from != prev {
+                        return Err(refused("explicit_relation path is not continuous"));
+                    }
+                }
+                prev_to = Some(relation.to.as_str());
+            }
+            let terminal_belief = prev_to.expect("non-empty basis is structural");
+            let belief = state
+                .beliefs
+                .get(terminal_belief)
+                .ok_or_else(|| refused("explicit_relation path ends at no committed Belief"))?;
+            if belief.entity_id != target_entity {
+                return Err(refused(
+                    "explicit_relation path does not end at the target Entity's Belief",
+                ));
+            }
+        }
+        ResolverTier::NormalizedMatch => {
+            let event = &basis[0];
+            let (entity, aliases) = state.entity_registrations.get(event).ok_or_else(|| {
+                refused("normalized_match basis is not an Entity-registering event")
+            })?;
+            if entity != target_entity {
+                return Err(refused(
+                    "normalized_match basis registers a different Entity",
+                ));
+            }
+            let mention = schema::normalize_alias_v1(raw_ref);
+            if !aliases
+                .iter()
+                .any(|alias| schema::normalize_alias_v1(alias) == mention)
+            {
+                return Err(refused(
+                    "no preserved source alias in the basis event normalizes to the mention",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_independence(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::IndependenceRecorded,
+) -> Result<(), Refusal> {
+    let left = state
+        .observations
+        .get(&body.left_observation_event_id)
+        .ok_or_else(|| refused("left independence endpoint is not an Observation"))?
+        .clone();
+    let right = state
+        .observations
+        .get(&body.right_observation_event_id)
+        .ok_or_else(|| refused("right independence endpoint is not an Observation"))?
+        .clone();
+
+    let (proof_left, proof_right) = body.proof.registration_refs();
+    if proof_left != left.source_registration_event_id
+        || proof_right != right.source_registration_event_id
+    {
+        return Err(refused(
+            "proof registration refs do not match the endpoints' pinned registrations",
+        ));
+    }
+
+    // Shared ancestry proves known_same_lineage and wins over any claim.
+    let left_ancestors = ancestors(state, &left.event_id);
+    let right_ancestors = ancestors(state, &right.event_id);
+    if !left_ancestors.is_disjoint(&right_ancestors) {
+        return Err(refused(
+            "endpoints share lineage ancestry — known_same_lineage, never independent",
+        ));
+    }
+
+    let pair = ordered_pair(&left.event_id, &right.event_id);
+    if state.independence.contains_key(&pair) {
+        return Err(refused("independence for this pair is already recorded"));
+    }
+
+    let proof_kind = match &body.proof {
+        IndependenceProof::DistinctFirsthandOrigin { .. } => {
+            for endpoint in [&left, &right] {
+                if endpoint.authority != Some(AuthorityProvenance::TrustedHumanCapture) {
+                    return Err(refused(
+                        "distinct_firsthand_origin requires two trusted human captures",
+                    ));
+                }
+                if endpoint.assertion_basis != Some(AssertionBasis::Firsthand) {
+                    return Err(refused(
+                        "distinct_firsthand_origin requires assertion_basis firsthand on both",
+                    ));
+                }
+            }
+            let left_actor = registered_actor(state, &left.source_id);
+            let right_actor = registered_actor(state, &right.source_id);
+            match (left_actor, right_actor) {
+                (Some(a), Some(b)) if a != b => {}
+                _ => {
+                    return Err(refused(
+                        "distinct_firsthand_origin requires two DIFFERENT registered actors",
+                    ))
+                }
+            }
+            "distinct_firsthand_origin"
+        }
+        IndependenceProof::IndependentSystemArtifact { .. } => {
+            for endpoint in [&left, &right] {
+                if endpoint.authority != Some(AuthorityProvenance::RegisteredDirectArtifact) {
+                    return Err(refused(
+                        "independent_system_artifact requires two registered direct artifacts",
+                    ));
+                }
+            }
+            let left_domain = registered_domain(state, &left.source_id);
+            let right_domain = registered_domain(state, &right.source_id);
+            match (left_domain, right_domain) {
+                (Some(a), Some(b)) if a != b => {}
+                _ => {
+                    return Err(refused(
+                        "independent_system_artifact requires two DIFFERENT non-null \
+                         independence domains",
+                    ))
+                }
+            }
+            "independent_system_artifact"
+        }
+        IndependenceProof::HumanConfirmed { .. } => {
+            return Err(refused(
+                "human_confirmed independence is reserved until M24",
+            ))
+        }
+    };
+
+    state.independence.insert(
+        pair,
+        IndependenceRow {
+            event_id: frame.event_id.clone(),
+            proof_kind: proof_kind.to_string(),
+        },
+    );
+    state.bump_version("observation", &left.event_id, &frame.event_id);
+    state.bump_version("observation", &right.event_id, &frame.event_id);
+    Ok(())
+}
+
+fn registered_actor<'a>(state: &'a EpistemicState, source_id: &str) -> Option<&'a str> {
+    match &state.sources.get(source_id)?.registration {
+        schema::SourceRegistration::HumanActor { actor_id, .. } => Some(actor_id),
+        _ => None,
+    }
+}
+
+fn registered_domain<'a>(state: &'a EpistemicState, source_id: &str) -> Option<&'a str> {
+    state
+        .sources
+        .get(source_id)?
+        .registration
+        .independence_domain_id()
+}
+
+fn ordered_pair(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}
+
+/// Transitive lineage closure INCLUDING the observation itself.
+fn ancestors(state: &EpistemicState, event_id: &str) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![event_id.to_string()];
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if let Some(observation) = state.observations.get(&id) {
+            for (_, parent) in &observation.lineage_parents {
+                stack.push(parent.clone());
+            }
+        }
+    }
+    seen
+}
+
+fn validate_basis_links(state: &EpistemicState, basis: &BeliefBasis) -> Result<(), Refusal> {
+    if let BeliefBasis::Linked { links } = basis {
+        for link in links {
+            let observation = state
+                .observations
+                .get(&link.observation_event_id)
+                .ok_or_else(|| {
+                    refused(format!(
+                    "basis link {} is not an Observation — attestations and overrides are never \
+                     evidence",
+                    link.observation_event_id
+                ))
+                })?;
+            if matches!(
+                link.role,
+                schema::BasisRole::Supports | schema::BasisRole::Opposes
+            ) && !observation.kind.is_assertion()
+            {
+                return Err(refused(
+                    "supports/opposes may target only assertion Observations; context may target \
+                     any",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_belief_created(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefCreated,
+) -> Result<(), Refusal> {
+    if state.beliefs.contains_key(&body.belief_id) {
+        return Err(refused(format!("belief {} already exists", body.belief_id)));
+    }
+    validate_basis_links(state, &body.basis)?;
+    let SubjectRef::Resolved { entity_id, aliases } = &body.subject else {
+        return Err(refused("belief.created subject must be resolved"));
+    };
+    if !state.entities.contains_key(entity_id) {
+        state.entities.insert(
+            entity_id.clone(),
+            EntityState {
+                entity_id: entity_id.clone(),
+                registered_by_event_id: frame.event_id.clone(),
+            },
+        );
+        state.create_version("entity", entity_id, &frame.event_id);
+    }
+    state
+        .entity_registrations
+        .insert(frame.event_id.clone(), (entity_id.clone(), aliases.clone()));
+    state.beliefs.insert(
+        body.belief_id.clone(),
+        BeliefState {
+            belief_id: body.belief_id.clone(),
+            entity_id: entity_id.clone(),
+            created_event_id: frame.event_id.clone(),
+            revisions: vec![RevisionState {
+                revision: 1,
+                event_id: frame.event_id.clone(),
+                content: body.content.clone(),
+                fields: body.fields.clone(),
+                basis: body.basis.clone(),
+            }],
+            attested: None,
+        },
+    );
+    state
+        .belief_revision_events
+        .insert(frame.event_id.clone(), (body.belief_id.clone(), 1));
+    state.create_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_belief_revised(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefRevised,
+) -> Result<(), Refusal> {
+    validate_basis_links(state, &body.basis)?;
+    let belief = state
+        .beliefs
+        .get(&body.belief_id)
+        .ok_or_else(|| refused(format!("belief {} does not exist", body.belief_id)))?;
+    let prior = belief.current().clone();
+
+    let mut content = prior.content.clone();
+    let mut fields = prior.fields.clone();
+    let mut content_changed = false;
+    for op in &body.patch {
+        let changed = apply_patch_op(&mut content, &mut fields, op)?;
+        content_changed = content_changed || changed;
+    }
+    let basis_changed = serde_json::to_string(&body.basis).map_err(|e| refused(e.to_string()))?
+        != serde_json::to_string(&prior.basis).map_err(|e| refused(e.to_string()))?;
+    if !content_changed && !basis_changed {
+        return Err(refused(
+            "a revision that changes neither content nor canonical basis is a total no-op",
+        ));
+    }
+
+    let revision = prior.revision + 1;
+    let belief = state
+        .beliefs
+        .get_mut(&body.belief_id)
+        .expect("checked above");
+    belief.revisions.push(RevisionState {
+        revision,
+        event_id: frame.event_id.clone(),
+        content,
+        fields,
+        basis: body.basis.clone(),
+    });
+    state
+        .belief_revision_events
+        .insert(frame.event_id.clone(), (body.belief_id.clone(), revision));
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+/// One patch op against canonical belief state. Returns whether it changed
+/// anything. `before` must match prior state exactly — a stale patch is a
+/// refusal, never a merge.
+fn apply_patch_op(
+    content: &mut String,
+    fields: &mut serde_json::Value,
+    op: &schema::PatchOp,
+) -> Result<bool, Refusal> {
+    if op.field_path == "/body" {
+        let current = TypedValue::string(content);
+        if op.before != current {
+            return Err(refused("patch before-value does not match the prior body"));
+        }
+        let TypedValue::String { value } = &op.after else {
+            return Err(refused(
+                "the body is a string and cannot be removed or retyped",
+            ));
+        };
+        let changed = value != content;
+        *content = value.clone();
+        return Ok(changed);
+    }
+    // /fields/... — navigate below the fields object.
+    let tokens: Vec<String> = op
+        .field_path
+        .strip_prefix("/fields/")
+        .expect("structural validation pinned the prefix")
+        .split('/')
+        .map(|t| t.replace("~1", "/").replace("~0", "~"))
+        .collect();
+    let current = typed_at(fields, &tokens);
+    if op.before != current {
+        return Err(refused(format!(
+            "patch before-value does not match prior state at {}",
+            op.field_path
+        )));
+    }
+    let changed = op.before != op.after;
+    set_typed_at(fields, &tokens, &op.after)?;
+    Ok(changed)
+}
+
+/// The typed view of the value at a pointer path; Missing when absent.
+fn typed_at(fields: &serde_json::Value, tokens: &[String]) -> TypedValue {
+    let mut cursor = fields;
+    for token in tokens {
+        match cursor {
+            serde_json::Value::Object(map) => match map.get(token) {
+                Some(next) => cursor = next,
+                None => return TypedValue::Missing,
+            },
+            serde_json::Value::Array(items) => {
+                match token.parse::<usize>().ok().and_then(|i| items.get(i)) {
+                    Some(next) => cursor = next,
+                    None => return TypedValue::Missing,
+                }
+            }
+            _ => return TypedValue::Missing,
+        }
+    }
+    typed_from_value(cursor)
+}
+
+fn typed_from_value(value: &serde_json::Value) -> TypedValue {
+    match value {
+        serde_json::Value::Null => TypedValue::Null { value: () },
+        serde_json::Value::Bool(b) => TypedValue::Boolean { value: *b },
+        serde_json::Value::Number(n) => TypedValue::Number { value: n.clone() },
+        serde_json::Value::String(s) => TypedValue::String { value: s.clone() },
+        serde_json::Value::Array(items) => TypedValue::Array {
+            value: items.iter().map(typed_from_value).collect(),
+        },
+        serde_json::Value::Object(map) => TypedValue::Object {
+            value: map
+                .iter()
+                .map(|(k, v)| (k.clone(), typed_from_value(v)))
+                .collect(),
+        },
+    }
+}
+
+fn value_from_typed(value: &TypedValue) -> serde_json::Value {
+    match value {
+        TypedValue::Missing => serde_json::Value::Null, // callers handle Missing before this
+        TypedValue::Null { .. } => serde_json::Value::Null,
+        TypedValue::Boolean { value } => serde_json::Value::Bool(*value),
+        TypedValue::Number { value } => serde_json::Value::Number(value.clone()),
+        TypedValue::String { value } => serde_json::Value::String(value.clone()),
+        TypedValue::Array { value } => {
+            serde_json::Value::Array(value.iter().map(value_from_typed).collect())
+        }
+        TypedValue::Object { value } => serde_json::Value::Object(
+            value
+                .iter()
+                .map(|(k, v)| (k.clone(), value_from_typed(v)))
+                .collect(),
+        ),
+    }
+}
+
+/// Set (or remove, when `after` is Missing) the value at the path. Only the
+/// LAST segment may be created; a missing parent is a refusal.
+fn set_typed_at(
+    fields: &mut serde_json::Value,
+    tokens: &[String],
+    after: &TypedValue,
+) -> Result<(), Refusal> {
+    let (last, parents) = tokens
+        .split_last()
+        .expect("field paths have at least one token");
+    let mut cursor = fields;
+    for token in parents {
+        cursor = match cursor {
+            serde_json::Value::Object(map) => map
+                .get_mut(token)
+                .ok_or_else(|| refused(format!("patch parent {token:?} does not exist")))?,
+            serde_json::Value::Array(items) => token
+                .parse::<usize>()
+                .ok()
+                .and_then(|i| items.get_mut(i))
+                .ok_or_else(|| refused(format!("patch parent index {token:?} does not exist")))?,
+            _ => {
+                return Err(refused(format!(
+                    "patch parent {token:?} is not a container"
+                )))
+            }
+        };
+    }
+    match cursor {
+        serde_json::Value::Object(map) => {
+            if matches!(after, TypedValue::Missing) {
+                map.shift_remove(last);
+            } else {
+                map.insert(last.clone(), value_from_typed(after));
+            }
+            Ok(())
+        }
+        serde_json::Value::Array(items) => {
+            let index = last
+                .parse::<usize>()
+                .ok()
+                .filter(|i| *i < items.len())
+                .ok_or_else(|| refused(format!("patch index {last:?} is out of range")))?;
+            if matches!(after, TypedValue::Missing) {
+                items.remove(index);
+            } else {
+                items[index] = value_from_typed(after);
+            }
+            Ok(())
+        }
+        _ => Err(refused("patch target parent is not a container")),
+    }
+}
+
+fn apply_relation(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefRelation,
+) -> Result<(), Refusal> {
+    for endpoint in [&body.from, &body.to] {
+        if !state.beliefs.contains_key(endpoint) {
+            return Err(refused(format!(
+                "relation endpoint {endpoint} names no committed Belief — a relation can never \
+                 precede its endpoints"
+            )));
+        }
+    }
+    match body.action {
+        RelationAction::Add => {
+            if let Some(existing) = state.relations.get_mut(&body.relation_id) {
+                if existing.live {
+                    return Err(refused("relation is already live — duplicate add"));
+                }
+                existing.live = true;
+                existing.last_add_event_id = frame.event_id.clone();
+                existing.last_event_id = frame.event_id.clone();
+                state
+                    .relation_add_events
+                    .insert(frame.event_id.clone(), body.relation_id.clone());
+                state.bump_version("relation", &body.relation_id, &frame.event_id);
+            } else {
+                state.relations.insert(
+                    body.relation_id.clone(),
+                    RelationState {
+                        relation_id: body.relation_id.clone(),
+                        from: body.from.clone(),
+                        to: body.to.clone(),
+                        relation: body.relation,
+                        live: true,
+                        last_add_event_id: frame.event_id.clone(),
+                        last_event_id: frame.event_id.clone(),
+                    },
+                );
+                state
+                    .relation_add_events
+                    .insert(frame.event_id.clone(), body.relation_id.clone());
+                state.create_version("relation", &body.relation_id, &frame.event_id);
+            }
+        }
+        RelationAction::Remove => {
+            let existing = state
+                .relations
+                .get_mut(&body.relation_id)
+                .filter(|r| r.live)
+                .ok_or_else(|| refused("remove requires the matching LIVE relation"))?;
+            existing.live = false;
+            existing.last_event_id = frame.event_id.clone();
+            state.bump_version("relation", &body.relation_id, &frame.event_id);
+        }
+    }
+    Ok(())
+}
+
+fn apply_attested(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::BeliefAttested,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if staged.contains(&body.attested_belief_revision_event_id) {
+        return Err(refused(
+            "attestation must pin a COMMITTED revision, not a staged one",
+        ));
+    }
+    let (belief_id, revision_no) = state
+        .belief_revision_events
+        .get(&body.attested_belief_revision_event_id)
+        .ok_or_else(|| refused("attested_belief_revision_event_id names no committed revision"))?
+        .clone();
+    if belief_id != body.belief_id {
+        return Err(refused("the pinned revision belongs to a different Belief"));
+    }
+    let belief = state
+        .beliefs
+        .get(&body.belief_id)
+        .expect("revision index implies belief");
+    let revision = belief
+        .revisions
+        .iter()
+        .find(|r| r.revision == revision_no)
+        .expect("revision index is consistent");
+    let projected = super::project::project(&revision.content, &revision.fields);
+    let expected = schema::belief::attested_content_hash(projected.as_bytes());
+    if body.attested_content_hash != expected {
+        return Err(refused(
+            "attested_content_hash does not match the projection of the pinned revision — the \
+             id/hash pair must name the same committed revision",
+        ));
+    }
+    let belief = state
+        .beliefs
+        .get_mut(&body.belief_id)
+        .expect("checked above");
+    belief.attested = Some((
+        frame.event_id.clone(),
+        body.attested_belief_revision_event_id.clone(),
+    ));
+    state.bump_version("belief", &body.belief_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_alias(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::EntityAliasAdded,
+) -> Result<(), Refusal> {
+    if !state.entities.contains_key(&body.entity_id) {
+        return Err(refused(format!(
+            "alias registration names unknown Entity {}",
+            body.entity_id
+        )));
+    }
+    if let Some(existing) = state.alias_registry.get(&body.normalized_alias) {
+        return Err(refused(if existing.entity_id == body.entity_id {
+            format!(
+                "alias {:?} is already registered on this Entity",
+                body.normalized_alias
+            )
+        } else {
+            format!(
+                "alias {:?} is already live on a different Entity — refused, never guessed",
+                body.normalized_alias
+            )
+        }));
+    }
+    state.alias_registry.insert(
+        body.normalized_alias.clone(),
+        AliasState {
+            normalized: body.normalized_alias.clone(),
+            alias: body.alias.clone(),
+            entity_id: body.entity_id.clone(),
+            event_id: frame.event_id.clone(),
+        },
+    );
+    state.alias_events.insert(
+        frame.event_id.clone(),
+        (body.entity_id.clone(), body.normalized_alias.clone()),
+    );
+    state.bump_version("entity", &body.entity_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_migration_started(
+    state: &mut EpistemicState,
+    body: &schema::MigrationStarted,
+) -> Result<(), Refusal> {
+    if let Some(epoch) = &state.migration {
+        if !epoch.completed && epoch.source_digest != body.source_digest {
+            return Err(refused(
+                "migration source digest changed mid-epoch — reconciliation, never a second epoch",
+            ));
+        }
+        if epoch.source_digest == body.source_digest {
+            return Err(refused("migration already started for this corpus"));
+        }
+    }
+    state.migration = Some(MigrationEpoch {
+        store_uuid: body.store_uuid.clone(),
+        source_digest: body.source_digest.clone(),
+        planned_output_count: body.planned_output_count,
+        completed: false,
+    });
+    Ok(())
+}
+
+fn apply_migration_completed(
+    state: &mut EpistemicState,
+    body: &schema::MigrationCompleted,
+) -> Result<(), Refusal> {
+    let epoch = state
+        .migration
+        .as_mut()
+        .ok_or_else(|| refused("migration.completed without migration.started"))?;
+    if epoch.store_uuid != body.store_uuid || epoch.source_digest != body.source_digest {
+        return Err(refused(
+            "migration.completed does not agree with the started identity/digest",
+        ));
+    }
+    if body.output_count != epoch.planned_output_count {
+        return Err(refused(format!(
+            "migration.completed output_count {} disagrees with the started plan {}",
+            body.output_count, epoch.planned_output_count
+        )));
+    }
+    epoch.completed = true;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::writer::{member_ref, LedgerWriter};
+    use super::super::{ledger_dir, read_ledger, store};
+    use super::*;
+    use crate::ledger::schema::{
+        derive_relation_id, derive_source_id, Actor, AssertionFields, AssertionKind, BasisLink,
+        BasisRole, BeliefAttested, BeliefCreated, BeliefRelation, BeliefRevised, EntityAliasAdded,
+        HumanAssertionForm, HumanAssertionPayload, IndependenceRecorded, LineageEdge, LineageKind,
+        ObservationRecorded, PatchOp, Provenance, RelationKind, RelationshipToSubject, Scope,
+        SourceRegistered, SourceRegistration, SourceSnapshotPayload, SubjectResolved, SubjectRole,
+        BODY_SCHEMA,
+    };
+    use crate::vault::testutil;
+
+    const WRITER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
+
+    struct Rig {
+        vault: std::path::PathBuf,
+        writer: LedgerWriter,
+        store_id: String,
+    }
+
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.vault);
+        }
+    }
+
+    impl Rig {
+        fn new(label: &str) -> Rig {
+            let vault = testutil::temp_vault(label);
+            let writer = LedgerWriter::open(&vault, WRITER).unwrap();
+            let store_id = store::load(&ledger_dir(&vault)).unwrap().unwrap().store_id;
+            Rig {
+                vault,
+                writer,
+                store_id,
+            }
+        }
+
+        fn append<T: serde::Serialize>(&mut self, kind: &str, body: &T) -> String {
+            self.writer
+                .append(kind, serde_json::to_value(body).unwrap())
+                .unwrap()
+                .event_id
+        }
+
+        fn state(&self) -> EpistemicState {
+            let read = read_ledger(&ledger_dir(&self.vault)).unwrap();
+            reduce(&read.frames, &self.store_id)
+        }
+
+        /// Register a human actor source; returns (source_id, reg event id).
+        fn human_source(&mut self, actor_id: &str) -> (String, String) {
+            let registration = SourceRegistration::HumanActor {
+                source_key: String::new(),
+                actor_id: actor_id.to_string(),
+                authority_capability: schema::AuthorityCapability::HumanAssertion,
+                independence_domain_id: None,
+            };
+            self.register(registration)
+        }
+
+        /// Register a direct-artifact connector; returns (source_id, reg id).
+        fn direct_source(&mut self, instance: &str, domain: &str) -> (String, String) {
+            let registration = SourceRegistration::Connector {
+                source_key: String::new(),
+                connector_instance_id: instance.to_string(),
+                logical_scope_id: "scope".to_string(),
+                authority_capability: schema::AuthorityCapability::DirectSystemArtifact,
+                independence_domain_id: Some(domain.to_string()),
+            };
+            self.register(registration)
+        }
+
+        fn content_source(&mut self, service: &str) -> (String, String) {
+            let registration = SourceRegistration::Builtin {
+                source_key: String::new(),
+                service_id: service.to_string(),
+                authority_capability: schema::AuthorityCapability::ContentOnly,
+                independence_domain_id: None,
+            };
+            self.register(registration)
+        }
+
+        fn register(&mut self, mut registration: SourceRegistration) -> (String, String) {
+            let key = registration.derived_source_key().unwrap();
+            match &mut registration {
+                SourceRegistration::HumanActor { source_key, .. }
+                | SourceRegistration::Connector { source_key, .. }
+                | SourceRegistration::Builtin { source_key, .. }
+                | SourceRegistration::CerebroRuntime { source_key, .. }
+                | SourceRegistration::LegacyReference { source_key, .. } => {
+                    *source_key = key.clone()
+                }
+            }
+            let source_id = derive_source_id(&self.store_id, &key);
+            let body = SourceRegistered {
+                schema: BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: Actor {
+                    id: schema::ACTOR_SOURCE_REGISTRY.to_string(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                source_id: source_id.clone(),
+                registration,
+            };
+            let event = self.append(schema::KIND_SOURCE_REGISTERED, &body);
+            (source_id, event)
+        }
+    }
+
+    fn assertion(authority: schema::AuthorityProvenance, basis: AssertionBasis) -> AssertionFields {
+        AssertionFields {
+            assertion_kind: AssertionKind::Presence,
+            predicate: "status".into(),
+            value: TypedValue::string("active"),
+            scope: Scope::empty(),
+            relationship_to_subject: RelationshipToSubject {
+                role: SubjectRole::Unknown,
+            },
+            assertion_basis: basis,
+            authority_provenance: authority,
+            absence: None,
+        }
+    }
+
+    fn observation(
+        kind: ObservationKind,
+        source: &(String, String),
+        actor: &str,
+        subject: SubjectRef,
+        lineage: Vec<LineageEdge>,
+        payload: serde_json::Value,
+    ) -> ObservationRecorded {
+        ObservationRecorded {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: actor.to_string(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            observation_kind: kind,
+            source_id: source.0.clone(),
+            source_registration_event_id: source.1.clone(),
+            subject,
+            lineage,
+            provenance: Provenance::empty(),
+            payload,
+        }
+    }
+
+    fn snapshot_payload() -> serde_json::Value {
+        serde_json::to_value(SourceSnapshotPayload {
+            source_artifact_hash: None,
+            raw_pointer: "docs/a.md".into(),
+        })
+        .unwrap()
+    }
+
+    fn human_payload(basis: AssertionBasis) -> serde_json::Value {
+        serde_json::to_value(HumanAssertionPayload {
+            assertion: assertion(schema::AuthorityProvenance::TrustedHumanCapture, basis),
+            form: HumanAssertionForm::Standalone {
+                intended_belief_id: None,
+                corrects: None,
+                reason: None,
+            },
+        })
+        .unwrap()
+    }
+
+    fn extraction_payload(authority: schema::AuthorityProvenance) -> serde_json::Value {
+        serde_json::to_value(schema::ExtractedAssertionPayload {
+            assertion: assertion(authority, AssertionBasis::Reported),
+            extracted_text: "status is active".into(),
+            source_artifact_hash: "a".repeat(64),
+            extractor_version: "x1".into(),
+            raw_pointer: "mail/1".into(),
+        })
+        .unwrap()
+    }
+
+    const ENTITY: &str = "cccccccccccccccccccccccccccccccc";
+    const ENTITY_B: &str = "dddddddddddddddddddddddddddddddd";
+    const BELIEF: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    const BELIEF_B: &str = "ffffffffffffffffffffffffffffffff";
+
+    fn belief_created(belief_id: &str, entity_id: &str, basis: BeliefBasis) -> BeliefCreated {
+        BeliefCreated {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: belief_id.into(),
+            subject: SubjectRef::Resolved {
+                entity_id: entity_id.into(),
+                aliases: vec!["Acme Corp".into()],
+            },
+            content: "# Acme\n\nActive vendor.\n".into(),
+            fields: serde_json::json!({ "status": "active" }),
+            basis,
+        }
+    }
+
+    fn unsupported() -> BeliefBasis {
+        BeliefBasis::Unsupported {
+            reason: "migrated without observations".into(),
+        }
+    }
+
+    #[test]
+    fn sources_register_once_and_observations_pin_them() {
+        let mut rig = Rig::new("reduce-sources");
+        let human = rig.human_source("human:josef");
+        // A snapshot from the registered source.
+        let obs = observation(
+            ObservationKind::SourceSnapshot,
+            &human,
+            "agent:run-1",
+            SubjectRef::None,
+            vec![],
+            snapshot_payload(),
+        );
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &obs);
+        // A forged pin: registration event exists but registers another id.
+        let other = rig.content_source("svc.other");
+        let mut forged = observation(
+            ObservationKind::SourceSnapshot,
+            &human,
+            "agent:run-1",
+            SubjectRef::None,
+            vec![],
+            snapshot_payload(),
+        );
+        forged.source_registration_event_id = other.1.clone();
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &forged);
+        // A duplicate registration of the same source: refused.
+        let dup = SourceRegistration::HumanActor {
+            source_key: String::new(),
+            actor_id: "human:josef".into(),
+            authority_capability: schema::AuthorityCapability::HumanAssertion,
+            independence_domain_id: None,
+        };
+        rig.register(dup);
+
+        let state = rig.state();
+        assert_eq!(state.sources.len(), 2);
+        assert_eq!(state.observations.len(), 1);
+        assert_eq!(
+            state.version("source", &human.0),
+            Some(2),
+            "register + one observation"
+        );
+        assert_eq!(
+            state.anomalies.len(),
+            2,
+            "forged pin and duplicate registration: {:?}",
+            state.anomalies
+        );
+        assert!(state.anomalies[0].detail.contains("registers source"));
+        assert!(state.anomalies[1].detail.contains("already registered"));
+    }
+
+    #[test]
+    fn authority_is_derived_from_registration_never_claimed() {
+        let mut rig = Rig::new("reduce-authority");
+        let human = rig.human_source("human:josef");
+        let direct = rig.direct_source("conn-1", "domain-github");
+        let content = rig.content_source("svc.mail");
+
+        // Trusted human capture: right actor, right kind, right capability.
+        let ok = observation(
+            ObservationKind::HumanAssertion,
+            &human,
+            "human:josef",
+            SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec![],
+            },
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        );
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &ok);
+
+        // The same claim from the WRONG actor is a forgery.
+        let mut forged = ok.clone();
+        forged.actor = Actor {
+            id: "agent:sneaky".into(),
+        };
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &forged);
+
+        // Direct artifact: extraction from the direct-capability source.
+        let mut extraction = observation(
+            ObservationKind::ExtractedAssertion,
+            &direct,
+            "agent:run-1",
+            SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec![],
+            },
+            vec![],
+            extraction_payload(schema::AuthorityProvenance::RegisteredDirectArtifact),
+        );
+        // ...but it needs lineage; give it the trusted observation's parent.
+        let state = rig.state();
+        let parent = state
+            .observations
+            .keys()
+            .next()
+            .expect("one observation committed")
+            .clone();
+        extraction.lineage = vec![LineageEdge {
+            edge: LineageKind::ReportedBy,
+            parent_observation_event_id: parent.clone(),
+        }];
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &extraction);
+
+        // A content-only source cannot be upgraded to direct authority.
+        let mut upgraded = extraction.clone();
+        upgraded.source_id = content.0.clone();
+        upgraded.source_registration_event_id = content.1.clone();
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &upgraded);
+
+        // Nor may direct-artifact content downgrade itself.
+        let mut downgraded = extraction.clone();
+        downgraded.payload = extraction_payload(schema::AuthorityProvenance::AgentInferred);
+        rig.append(schema::KIND_OBSERVATION_RECORDED, &downgraded);
+
+        let state = rig.state();
+        assert_eq!(state.observations.len(), 2, "trusted + direct committed");
+        let refusals: Vec<&str> = state.anomalies.iter().map(|a| a.detail.as_str()).collect();
+        assert_eq!(refusals.len(), 3, "{refusals:?}");
+        assert!(
+            refusals.iter().all(|d| d.contains("authority")),
+            "{refusals:?}"
+        );
+    }
+
+    #[test]
+    fn beliefs_create_revise_and_refuse_stale_or_noop_patches() {
+        let mut rig = Rig::new("reduce-beliefs");
+        let created = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, unsupported()),
+        );
+        // A valid revision whose before matches.
+        let revise = BeliefRevised {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF.into(),
+            patch: vec![PatchOp {
+                field_path: "/fields/status".into(),
+                before: TypedValue::string("active"),
+                after: TypedValue::string("paused"),
+            }],
+            basis: unsupported(),
+        };
+        rig.append(schema::KIND_BELIEF_REVISED, &revise);
+        // A stale patch: before no longer matches.
+        rig.append(schema::KIND_BELIEF_REVISED, &revise);
+        // A total no-op: empty patch, unchanged basis.
+        let noop = BeliefRevised {
+            patch: vec![],
+            ..revise.clone()
+        };
+        rig.append(schema::KIND_BELIEF_REVISED, &noop);
+        // A support-only revision: empty patch, DIFFERENT basis.
+        let support_only = BeliefRevised {
+            patch: vec![],
+            basis: BeliefBasis::Unsupported {
+                reason: "still unsupported, different reason".into(),
+            },
+            ..revise.clone()
+        };
+        rig.append(schema::KIND_BELIEF_REVISED, &support_only);
+        // Removing a field via Missing.
+        let remove = BeliefRevised {
+            patch: vec![PatchOp {
+                field_path: "/fields/status".into(),
+                before: TypedValue::string("paused"),
+                after: TypedValue::Missing,
+            }],
+            basis: unsupported(),
+            ..revise.clone()
+        };
+        rig.append(schema::KIND_BELIEF_REVISED, &remove);
+
+        let state = rig.state();
+        let belief = state.beliefs.get(BELIEF).unwrap();
+        assert_eq!(belief.revisions.len(), 4, "create + 3 valid revisions");
+        assert_eq!(belief.current().fields, serde_json::json!({}));
+        assert_eq!(state.version("belief", BELIEF), Some(4));
+        assert_eq!(
+            state.version("entity", ENTITY),
+            Some(1),
+            "first-registered once"
+        );
+        assert_eq!(state.anomalies.len(), 2, "{:?}", state.anomalies);
+        assert!(state.anomalies[0].detail.contains("before-value"));
+        assert!(state.anomalies[1].detail.contains("no-op"));
+        assert_eq!(
+            state.belief_revision_events.get(&created),
+            Some(&(BELIEF.to_string(), 1))
+        );
+    }
+
+    #[test]
+    fn basis_links_point_at_assertions_or_context_only() {
+        let mut rig = Rig::new("reduce-basis");
+        let human = rig.human_source("human:josef");
+        let snapshot = observation(
+            ObservationKind::SourceSnapshot,
+            &human,
+            "agent:run-1",
+            SubjectRef::None,
+            vec![],
+            snapshot_payload(),
+        );
+        let snapshot_id = rig.append(schema::KIND_OBSERVATION_RECORDED, &snapshot);
+
+        // supports → snapshot: refused (not an assertion).
+        let bad = belief_created(
+            BELIEF,
+            ENTITY,
+            BeliefBasis::Linked {
+                links: vec![BasisLink {
+                    observation_event_id: snapshot_id.clone(),
+                    role: BasisRole::Supports,
+                }],
+            },
+        );
+        rig.append(schema::KIND_BELIEF_CREATED, &bad);
+        // context → snapshot: fine.
+        let good = belief_created(
+            BELIEF,
+            ENTITY,
+            BeliefBasis::Linked {
+                links: vec![BasisLink {
+                    observation_event_id: snapshot_id.clone(),
+                    role: BasisRole::Context,
+                }],
+            },
+        );
+        rig.append(schema::KIND_BELIEF_CREATED, &good);
+        // basis → an event that is no Observation at all (the belief event).
+        let state = rig.state();
+        let belief_event = state.beliefs.get(BELIEF).unwrap().created_event_id.clone();
+        let evidence_from_belief = belief_created(
+            BELIEF_B,
+            ENTITY_B,
+            BeliefBasis::Linked {
+                links: vec![BasisLink {
+                    observation_event_id: belief_event,
+                    role: BasisRole::Context,
+                }],
+            },
+        );
+        rig.append(schema::KIND_BELIEF_CREATED, &evidence_from_belief);
+
+        let state = rig.state();
+        assert_eq!(state.beliefs.len(), 1);
+        assert_eq!(state.anomalies.len(), 2);
+        assert!(state.anomalies[0].detail.contains("supports/opposes"));
+        assert!(state.anomalies[1].detail.contains("not an Observation"));
+    }
+
+    #[test]
+    fn relations_add_remove_readd_with_versions_and_endpoint_checks() {
+        let mut rig = Rig::new("reduce-relations");
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, unsupported()),
+        );
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF_B, ENTITY_B, unsupported()),
+        );
+        let relation_id = derive_relation_id(BELIEF, BELIEF_B, RelationKind::Refines);
+        let relation = |action| BeliefRelation {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            relation_id: relation_id.clone(),
+            action,
+            from: BELIEF.into(),
+            to: BELIEF_B.into(),
+            relation: RelationKind::Refines,
+        };
+        rig.append(schema::KIND_BELIEF_RELATION, &relation(RelationAction::Add));
+        rig.append(schema::KIND_BELIEF_RELATION, &relation(RelationAction::Add)); // dup
+        rig.append(
+            schema::KIND_BELIEF_RELATION,
+            &relation(RelationAction::Remove),
+        );
+        rig.append(
+            schema::KIND_BELIEF_RELATION,
+            &relation(RelationAction::Remove),
+        ); // dead
+        rig.append(schema::KIND_BELIEF_RELATION, &relation(RelationAction::Add)); // re-add
+                                                                                  // An endpoint that is no committed Belief.
+        let ghost = BeliefRelation {
+            relation_id: derive_relation_id(
+                BELIEF,
+                "9999999999999999999999999999999a",
+                RelationKind::Refines,
+            ),
+            to: "9999999999999999999999999999999a".into(),
+            ..relation(RelationAction::Add)
+        };
+        rig.append(schema::KIND_BELIEF_RELATION, &ghost);
+
+        let state = rig.state();
+        let rel = state.relations.get(&relation_id).unwrap();
+        assert!(rel.live);
+        assert_eq!(
+            state.version("relation", &relation_id),
+            Some(3),
+            "add, remove, re-add"
+        );
+        assert_eq!(state.anomalies.len(), 3);
+        assert!(state.anomalies[2].detail.contains("no committed Belief"));
+    }
+
+    #[test]
+    fn attestation_pins_the_exact_revision_and_its_projection_hash() {
+        let mut rig = Rig::new("reduce-attest");
+        let created = rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, unsupported()),
+        );
+        let projected = super::super::project::project(
+            "# Acme\n\nActive vendor.\n",
+            &serde_json::json!({ "status": "active" }),
+        );
+        let good_hash = schema::belief::attested_content_hash(projected.as_bytes());
+        let attest = |hash: String| BeliefAttested {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "human:josef".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: BELIEF.into(),
+            attested_belief_revision_event_id: created.clone(),
+            attested_content_hash: hash,
+        };
+        // A wrong hash: the id/hash pair must name the same revision.
+        rig.append(schema::KIND_BELIEF_ATTESTED, &attest("0".repeat(64)));
+        // The right hash.
+        rig.append(schema::KIND_BELIEF_ATTESTED, &attest(good_hash));
+
+        let state = rig.state();
+        let belief = state.beliefs.get(BELIEF).unwrap();
+        assert!(belief.attested.is_some());
+        assert_eq!(state.version("belief", BELIEF), Some(2));
+        assert_eq!(state.anomalies.len(), 1);
+        assert!(state.anomalies[0].detail.contains("projection"));
+    }
+
+    #[test]
+    fn aliases_register_once_per_key_and_never_move_entities() {
+        let mut rig = Rig::new("reduce-alias");
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, unsupported()),
+        );
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF_B, ENTITY_B, unsupported()),
+        );
+        let alias = |entity: &str, alias: &str| EntityAliasAdded {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "human:josef".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            entity_id: entity.into(),
+            alias: alias.into(),
+            normalized_alias: schema::normalize_alias_v1(alias),
+        };
+        rig.append(
+            schema::KIND_ENTITY_ALIAS_ADDED,
+            &alias(ENTITY, "Acme  Corp"),
+        );
+        // The same key on a DIFFERENT entity: refused, never guessed.
+        rig.append(
+            schema::KIND_ENTITY_ALIAS_ADDED,
+            &alias(ENTITY_B, "ACME CORP"),
+        );
+        // An unknown entity: refused.
+        rig.append(
+            schema::KIND_ENTITY_ALIAS_ADDED,
+            &alias("1111111111111111111111111111111a", "Other"),
+        );
+
+        let state = rig.state();
+        assert_eq!(state.alias_registry.len(), 1);
+        let stored = state.alias_registry.get("acme corp").unwrap();
+        assert_eq!(stored.alias, "Acme  Corp", "display bytes preserved");
+        assert_eq!(stored.entity_id, ENTITY);
+        assert_eq!(state.version("entity", ENTITY), Some(2));
+        assert_eq!(state.anomalies.len(), 2);
+    }
+
+    #[test]
+    fn subject_resolution_attaches_by_exact_tier_proofs_and_corrects_once() {
+        let mut rig = Rig::new("reduce-resolve");
+        let human = rig.human_source("human:josef");
+        // Two entities via beliefs; an alias on the first.
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, unsupported()),
+        );
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF_B, ENTITY_B, unsupported()),
+        );
+        let alias_event = rig.append(
+            schema::KIND_ENTITY_ALIAS_ADDED,
+            &EntityAliasAdded {
+                schema: BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: Actor {
+                    id: "human:josef".into(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                entity_id: ENTITY.into(),
+                alias: "Acme Corp".into(),
+                normalized_alias: "acme corp".into(),
+            },
+        );
+        // An unresolved mention of "ACME corp".
+        let mut unresolved = observation(
+            ObservationKind::HumanAssertion,
+            &human,
+            "human:josef",
+            SubjectRef::Unresolved {
+                raw_ref: "ACME corp".into(),
+                aliases: vec![],
+            },
+            vec![],
+            human_payload(AssertionBasis::Reported),
+        );
+        let obs_id = rig.append(schema::KIND_OBSERVATION_RECORDED, &unresolved);
+
+        let resolve =
+            |observation_event_id: &str, change: schema::ResolutionChange| SubjectResolved {
+                schema: BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: Actor {
+                    id: "agent:resolver".into(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                observation_event_id: observation_event_id.into(),
+                change,
+            };
+
+        // known_alias attach with the wrong entity first: refused.
+        rig.append(
+            schema::KIND_SUBJECT_RESOLVED,
+            &resolve(
+                &obs_id,
+                ResolutionChange::Attach {
+                    entity_id: ENTITY_B.into(),
+                    resolver_tier: ResolverTier::KnownAlias,
+                    basis_event_ids: vec![alias_event.clone()],
+                },
+            ),
+        );
+        // The right attach.
+        let attach = resolve(
+            &obs_id,
+            ResolutionChange::Attach {
+                entity_id: ENTITY.into(),
+                resolver_tier: ResolverTier::KnownAlias,
+                basis_event_ids: vec![alias_event.clone()],
+            },
+        );
+        let attach_event = rig.append(schema::KIND_SUBJECT_RESOLVED, &attach);
+        // A second attach: refused — correction is the explicit door.
+        rig.append(schema::KIND_SUBJECT_RESOLVED, &attach);
+
+        // Correction to ENTITY_B, exact_id tier: basis is B's registering
+        // event (its belief.created).
+        let state = rig.state();
+        let register_b = state
+            .entities
+            .get(ENTITY_B)
+            .unwrap()
+            .registered_by_event_id
+            .clone();
+        let correct = resolve(
+            &obs_id,
+            ResolutionChange::Correct {
+                prior_resolution_event_id: attach_event.clone(),
+                from_entity_id: ENTITY.into(),
+                to_entity_id: ENTITY_B.into(),
+                resolver_tier: ResolverTier::ExactId,
+                basis_event_ids: vec![register_b],
+                reason: "the mention names the vendor's subsidiary".into(),
+            },
+        );
+        let correct_event = rig.append(schema::KIND_SUBJECT_RESOLVED, &correct);
+        // A stale correction pinning the superseded attach: refused.
+        rig.append(schema::KIND_SUBJECT_RESOLVED, &correct);
+
+        // A resolved-subject observation can never be attached.
+        unresolved.subject = SubjectRef::Resolved {
+            entity_id: ENTITY.into(),
+            aliases: vec![],
+        };
+        let resolved_obs = rig.append(schema::KIND_OBSERVATION_RECORDED, &unresolved);
+        rig.append(
+            schema::KIND_SUBJECT_RESOLVED,
+            &resolve(
+                &resolved_obs,
+                ResolutionChange::Attach {
+                    entity_id: ENTITY.into(),
+                    resolver_tier: ResolverTier::ExactId,
+                    basis_event_ids: vec![],
+                },
+            ),
+        );
+
+        let state = rig.state();
+        let observation_state = state.observations.get(&obs_id).unwrap();
+        assert_eq!(
+            observation_state.effective_entity.as_deref(),
+            Some(ENTITY_B)
+        );
+        assert_eq!(
+            observation_state.effective_resolution_event.as_deref(),
+            Some(correct_event.as_str())
+        );
+        assert_eq!(
+            state.version("observation", &obs_id),
+            Some(3),
+            "record, attach, correct"
+        );
+        assert_eq!(
+            state.resolutions.len(),
+            2,
+            "history retained: attach + correct"
+        );
+        assert_eq!(state.anomalies.len(), 4, "{:?}", state.anomalies);
+    }
+
+    #[test]
+    fn independence_is_positive_produced_and_lineage_beats_claims() {
+        let mut rig = Rig::new("reduce-independence");
+        let josef = rig.human_source("human:josef");
+        let maya = rig.human_source("human:maya");
+        let subject = SubjectRef::Resolved {
+            entity_id: ENTITY.into(),
+            aliases: vec![],
+        };
+        let left = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &josef,
+                "human:josef",
+                subject.clone(),
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        let right = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &maya,
+                "human:maya",
+                subject.clone(),
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        let independence =
+            |left: &str, right: &str, left_reg: &str, right_reg: &str| IndependenceRecorded {
+                schema: BODY_SCHEMA,
+                batch_id: None,
+                idempotency_key: None,
+                actor: Actor {
+                    id: "system:prefilter".into(),
+                },
+                occurred_at: None,
+                valid_from: None,
+                valid_to: None,
+                left_observation_event_id: left.into(),
+                right_observation_event_id: right.into(),
+                proof: schema::IndependenceProof::DistinctFirsthandOrigin {
+                    left_source_registration_event_id: left_reg.into(),
+                    right_source_registration_event_id: right_reg.into(),
+                    rule_version: "prefilter-v1".into(),
+                },
+                reason: "distinct registered reporters".into(),
+            };
+        rig.append(
+            schema::KIND_INDEPENDENCE_RECORDED,
+            &independence(&left, &right, &josef.1, &maya.1),
+        );
+        // Duplicate pair: refused.
+        rig.append(
+            schema::KIND_INDEPENDENCE_RECORDED,
+            &independence(&left, &right, &josef.1, &maya.1),
+        );
+        // Same actor on both ends: never independent.
+        let left2 = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &josef,
+                "human:josef",
+                subject.clone(),
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        let right2 = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::HumanAssertion,
+                &josef,
+                "human:josef",
+                subject.clone(),
+                vec![],
+                human_payload(AssertionBasis::Firsthand),
+            ),
+        );
+        rig.append(
+            schema::KIND_INDEPENDENCE_RECORDED,
+            &independence(&left2, &right2, &josef.1, &josef.1),
+        );
+        // Shared ancestry: two extractions of one parent snapshot.
+        let direct = rig.direct_source("conn-1", "domain-a");
+        let direct2 = rig.direct_source("conn-2", "domain-b");
+        let parent = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::SourceSnapshot,
+                &direct,
+                "agent:run-1",
+                SubjectRef::None,
+                vec![],
+                snapshot_payload(),
+            ),
+        );
+        let lineage = vec![LineageEdge {
+            edge: LineageKind::DerivedFrom,
+            parent_observation_event_id: parent.clone(),
+        }];
+        let sib_left = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::ExtractedAssertion,
+                &direct,
+                "agent:run-1",
+                subject.clone(),
+                lineage.clone(),
+                extraction_payload(schema::AuthorityProvenance::RegisteredDirectArtifact),
+            ),
+        );
+        let sib_right = rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::ExtractedAssertion,
+                &direct2,
+                "agent:run-1",
+                subject.clone(),
+                lineage,
+                extraction_payload(schema::AuthorityProvenance::RegisteredDirectArtifact),
+            ),
+        );
+        let mut shared = independence(&sib_left, &sib_right, &direct.1, &direct2.1);
+        shared.proof = schema::IndependenceProof::IndependentSystemArtifact {
+            left_source_registration_event_id: direct.1.clone(),
+            right_source_registration_event_id: direct2.1.clone(),
+            rule_version: "prefilter-v1".into(),
+        };
+        rig.append(schema::KIND_INDEPENDENCE_RECORDED, &shared);
+
+        let state = rig.state();
+        assert_eq!(state.independence.len(), 1, "one positive fact");
+        assert_eq!(state.version("observation", &left), Some(2));
+        assert_eq!(state.version("observation", &right), Some(2));
+        let details: Vec<&str> = state.anomalies.iter().map(|a| a.detail.as_str()).collect();
+        assert_eq!(details.len(), 3, "{details:?}");
+        assert!(details[0].contains("already recorded"));
+        assert!(details[1].contains("DIFFERENT registered actors"));
+        assert!(details[2].contains("share lineage"));
+    }
+
+    #[test]
+    fn a_batch_applies_atomically_or_not_at_all() {
+        let mut rig = Rig::new("reduce-batch");
+        let human = rig.human_source("human:josef");
+        // A valid batch: observation + belief basing on it symbolically.
+        let obs_body = observation(
+            ObservationKind::HumanAssertion,
+            &human,
+            "human:josef",
+            SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec![],
+            },
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        );
+        let belief_body = belief_created(
+            BELIEF,
+            ENTITY,
+            BeliefBasis::Linked {
+                links: vec![BasisLink {
+                    observation_event_id: member_ref(0),
+                    role: BasisRole::Supports,
+                }],
+            },
+        );
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_OBSERVATION_RECORDED.to_string(),
+                        serde_json::to_value(&obs_body).unwrap(),
+                    ),
+                    (
+                        schema::KIND_BELIEF_CREATED.to_string(),
+                        serde_json::to_value(&belief_body).unwrap(),
+                    ),
+                ],
+                Some("op:capture"),
+            )
+            .unwrap();
+        // Mixed in: plumbing (creates nothing) and a reduce-invalid batch —
+        // a revision of a belief that does not exist is structurally fine
+        // and reduce-refused, so the WHOLE second batch must vanish.
+        rig.writer
+            .append("vault.write", serde_json::json!({ "path": "a.md" }))
+            .unwrap();
+        let ghost_revision = BeliefRevised {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "agent:run-1".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            belief_id: "9999999999999999999999999999999a".into(),
+            patch: vec![],
+            basis: unsupported(),
+        };
+        let second_obs = observation(
+            ObservationKind::HumanAssertion,
+            &human,
+            "human:josef",
+            SubjectRef::Resolved {
+                entity_id: ENTITY_B.into(),
+                aliases: vec![],
+            },
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        );
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_OBSERVATION_RECORDED.to_string(),
+                        serde_json::to_value(&second_obs).unwrap(),
+                    ),
+                    (
+                        schema::KIND_BELIEF_REVISED.to_string(),
+                        serde_json::to_value(&ghost_revision).unwrap(),
+                    ),
+                ],
+                Some("op:bad"),
+            )
+            .unwrap();
+
+        let state = rig.state();
+        assert_eq!(state.beliefs.len(), 1, "only the valid batch's belief");
+        assert_eq!(
+            state.observations.len(),
+            1,
+            "the refused batch's observation has zero effect"
+        );
+        assert!(!state.entities.contains_key(ENTITY_B));
+        let committed: Vec<_> = state
+            .batches
+            .iter()
+            .filter(|b| b.state == "committed")
+            .collect();
+        let refused: Vec<_> = state
+            .batches
+            .iter()
+            .filter(|b| b.state == "refused")
+            .collect();
+        assert_eq!((committed.len(), refused.len()), (1, 1));
+        // The belief's basis link names the observation's REAL event id.
+        let belief = state.beliefs.get(BELIEF).unwrap();
+        let BeliefBasis::Linked { links } = &belief.current().basis else {
+            panic!("linked basis");
+        };
+        assert!(state
+            .observations
+            .contains_key(&links[0].observation_event_id));
+    }
+
+    #[test]
+    fn members_without_a_marker_are_orphans_with_zero_effect() {
+        let mut rig = Rig::new("reduce-orphan");
+        let human = rig.human_source("human:josef");
+        let obs_body = observation(
+            ObservationKind::HumanAssertion,
+            &human,
+            "human:josef",
+            SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec![],
+            },
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        );
+        rig.writer
+            .append_batch(
+                vec![(
+                    schema::KIND_OBSERVATION_RECORDED.to_string(),
+                    serde_json::to_value(&obs_body).unwrap(),
+                )],
+                Some("op:torn"),
+            )
+            .unwrap();
+        // Tear the marker off, as a crash between member and marker would.
+        drop(std::mem::replace(
+            &mut rig.writer,
+            LedgerWriter::open(&testutil::temp_vault("reduce-orphan-tmp"), WRITER).unwrap(),
+        ));
+        let dir = ledger_dir(&rig.vault);
+        let read = read_ledger(&dir).unwrap();
+        let open_path = dir.join(read.segments.last().unwrap().file_name());
+        let bytes = std::fs::read(&open_path).unwrap();
+        let marker_start = bytes[..bytes.len() - 1]
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map(|i| i + 1)
+            .unwrap();
+        std::fs::write(&open_path, &bytes[..marker_start]).unwrap();
+
+        let read = read_ledger(&dir).unwrap();
+        let state = reduce(&read.frames, &rig.store_id);
+        assert!(state.observations.is_empty(), "orphans create nothing");
+        assert_eq!(state.batches.len(), 1);
+        assert_eq!(state.batches[0].state, "orphaned");
+        assert!(state.anomalies[0].detail.contains("orphaned"));
+    }
+
+    #[test]
+    fn a_malformed_schema_body_is_an_anomaly_never_a_panic() {
+        let mut rig = Rig::new("reduce-malformed");
+        // Plain append lets a schema-CLAIMING garbage body through (it has
+        // no idempotency key), which is exactly the reducer's problem.
+        rig.writer
+            .append(
+                schema::KIND_BELIEF_CREATED,
+                serde_json::json!({ "schema": 1, "garbage": true }),
+            )
+            .unwrap();
+        rig.writer
+            .append("belief.tombstoned", serde_json::json!({ "schema": 1 }))
+            .unwrap();
+        let state = rig.state();
+        assert!(state.beliefs.is_empty());
+        assert_eq!(state.anomalies.len(), 2);
+        assert!(state.anomalies.iter().all(|a| a.code == "schema"));
+        assert!(state.anomalies[1].detail.contains("reserved"));
+    }
+
+    #[test]
+    fn reducing_twice_from_zero_is_identical() {
+        let mut rig = Rig::new("reduce-deterministic");
+        let human = rig.human_source("human:josef");
+        rig.append(
+            schema::KIND_BELIEF_CREATED,
+            &belief_created(BELIEF, ENTITY, unsupported()),
+        );
+        rig.append(
+            schema::KIND_OBSERVATION_RECORDED,
+            &observation(
+                ObservationKind::SourceSnapshot,
+                &human,
+                "agent:run-1",
+                SubjectRef::None,
+                vec![],
+                snapshot_payload(),
+            ),
+        );
+        let read = read_ledger(&ledger_dir(&rig.vault)).unwrap();
+        let first = reduce(&read.frames, &rig.store_id);
+        let second = reduce(&read.frames, &rig.store_id);
+        assert_eq!(first, second);
+    }
+}

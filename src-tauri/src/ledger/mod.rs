@@ -20,7 +20,9 @@
 
 pub mod frame;
 pub mod index;
+pub mod project;
 pub mod recovery;
+pub mod reduce;
 pub mod schema;
 pub mod segment;
 pub mod shadow;
@@ -50,6 +52,21 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 /// crate; random hex needs none).
 pub(crate) fn new_id128() -> String {
     format!("{:032x}", rand::random::<u128>())
+}
+
+/// SHA-256 over the canonical member frame lines in order, each terminated
+/// with a newline — exactly the bytes the segment holds for them. Shared by
+/// the writer (stamping `batch.committed`) and the reducer (verifying it);
+/// one definition so they can never drift.
+pub(crate) fn members_digest<'a>(
+    frames: impl Iterator<Item = &'a frame::Frame>,
+) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    for frame in frames {
+        bytes.extend_from_slice(frame.to_line()?.as_bytes());
+        bytes.push(b'\n');
+    }
+    Ok(sha256_hex(&bytes))
 }
 
 /// Fsync a directory so a create/seal/rename inside it is durable, not just

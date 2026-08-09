@@ -46,7 +46,7 @@ pub use observation::{
     derive_authority, AbsenceRecord, AssertionBasis, AssertionFields, AssertionKind,
     AuthorityProvenance, DerivedContentPayload, ExtractedAssertionPayload, HumanAssertionForm,
     HumanAssertionPayload, ObservationKind, ObservationPayload, ObservationRecorded, Provenance,
-    Scope, SourceSnapshotPayload, Stage, SubjectRole, SystemEventPayload,
+    RelationshipToSubject, Scope, SourceSnapshotPayload, Stage, SubjectRole, SystemEventPayload,
 };
 pub use resolution::{ResolutionChange, ResolverTier, SubjectResolved};
 pub use source::{
