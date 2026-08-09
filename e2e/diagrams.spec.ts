@@ -433,3 +433,138 @@ test('a doc block opens full screen, and a rename flows back into the block', as
     })
     .toContain('Idea[Quasar]');
 });
+
+// M29.29–.33: shapes, colors, and edge animation are surgical text edits that
+// real mermaid accepts — the palette writes `@{ shape: … }`, the color menu a
+// `style` line, and the animate toggle mints an edge id plus its meta line.
+test('shapes, colors, and edge animation round-trip as surgical mermaid', async ({ page }) => {
+  // 90s, like the two journeys above rather than the file's older 60s: this one
+  // runs three full op → re-render → code → back-to-visual laps, so its
+  // per-assertion budgets sum higher than anything else in this file and a cold
+  // mermaid chunk would otherwise surface as a confusing outer timeout.
+  test.setTimeout(90_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  // -- Open the corpus doc through quick open ---------------------------
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpenInput = page.getByTestId('quick-open-input');
+  await expect(quickOpenInput).toBeVisible();
+  await quickOpenInput.fill('Systems map');
+  const result = page.getByTestId('quick-open-result').filter({ hasText: 'Systems map' }).first();
+  await expect(result).toBeVisible();
+  await result.click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 20_000 });
+
+  // -- Enter visual editing on the first (flowchart) block ---------------
+  const block = page.getByTestId('mermaid-block').first();
+  await block.getByRole('button', { name: 'Edit', exact: true }).click();
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // How this test proves REAL mermaid accepted an edit without reaching into
+  // mermaid's private svg internals (which Stage C deliberately kept out of our
+  // contract — svgBinding.ts binds by id scheme only): renderMermaid stamps
+  // every successful render with a fresh `cerebro-mermaid-<seq>` id and caches
+  // the result per source, so the id is a function of the CODE; StructuralEditor
+  // writes the svg into the host ONLY on success (`if (!r.ok) return` — it holds
+  // the last good render otherwise). A changed host svg id therefore means
+  // mermaid parsed and drew the edited source; an unchanged one means it refused.
+  const hostSvgId = () => host.locator('svg[id^="cerebro-mermaid-"]').getAttribute('id');
+
+  // -- Exotic shape: Idea becomes a cloud through the palette -------------
+  const beforeShape = await hostSvgId();
+  await host.locator('[id*="flowchart-Idea-"]').first().click();
+  await page.getByRole('button', { name: 'Change shape' }).click();
+  await page.getByLabel('Search shapes').fill('cloud');
+  await page.getByRole('button', { name: 'Shape: Cloud' }).click();
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeShape);
+
+  await page.getByRole('button', { name: 'Show code' }).click();
+  await expect(page.getByLabel('Mermaid source')).toHaveValue(/Idea@\{ shape: cloud \}/);
+  // The error banner lives in the CODE pane only — `mermaid-edit-error` belongs
+  // to LivePreview (MermaidBlockView.tsx), which the visual pane never mounts —
+  // so a count-0 check taken in visual mode is vacuously true and proves
+  // nothing. Here it is real: the preview renders the same source through the
+  // same renderer, so a visible preview svg with no banner is mermaid saying
+  // yes to `@{ shape: cloud }`.
+  await expect(
+    page.getByTestId('mermaid-live-preview').locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('mermaid-edit-error')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show diagram' }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Fill color: a style line appears and mermaid still renders ---------
+  const beforeStyle = await hostSvgId();
+  await host.locator('[id*="flowchart-Idea-"]').first().click();
+  await page.getByRole('button', { name: 'Node colors' }).click();
+  await page.getByRole('button', { name: 'Fill #eef1fe' }).click();
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeStyle);
+
+  await page.getByRole('button', { name: 'Show code' }).click();
+  await expect(page.getByLabel('Mermaid source')).toHaveValue(/style Idea fill:#eef1fe/);
+  await expect(
+    page.getByTestId('mermaid-live-preview').locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('mermaid-edit-error')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show diagram' }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Edge animate: the edge gains an id and its meta line ---------------
+  // `path[id*=…]`: the render id prefixes mermaid's own `L_<from>_<to>_<n>`
+  // (svgBinding.ts), and pinning the element to a path keeps the edge's label
+  // group out of the match.
+  const beforeAnimate = await hostSvgId();
+  const edge = host.locator('path[id*="L_Idea_Build"]').first();
+  // locator.click() cannot be used here, and not because of anything the app
+  // does: Idea sits directly above Build, so mermaid draws a PERFECTLY VERTICAL
+  // path (`d="M54.219,61.921L54.219,…"`) whose bounding box is zero pixels
+  // wide, and Playwright calls an empty bounding box "not visible". A human
+  // clicks this edge fine — the browser hit-tests the 2px stroke, not the box.
+  // So drive the real mouse at the segment's midpoint instead: still a fully
+  // hit-tested click (unlike `force: true`, which would skip the very check
+  // that proves the edge is reachable), just aimed by geometry. Safe because
+  // this segment is straight — a bent path's box centre need not be on it.
+  const edgeBox = await edge.boundingBox();
+  if (edgeBox === null) throw new Error('the Idea→Build edge path rendered with no bounding box');
+  await page.mouse.click(edgeBox.x + edgeBox.width / 2, edgeBox.y + edgeBox.height / 2);
+  // Confirm the edge editor actually opened before touching its controls.
+  await expect(page.getByLabel('Edge label')).toBeVisible();
+  await page.getByRole('button', { name: 'Animate edge' }).click();
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeAnimate);
+
+  await page.getByRole('button', { name: 'Show code' }).click();
+  const source = page.getByLabel('Mermaid source');
+  await expect(source).toHaveValue(/Idea\[Idea\] e1@--> Build\[Build\]/);
+  await expect(source).toHaveValue(/e1@\{ animate: true \}/);
+  await expect(
+    page.getByTestId('mermaid-live-preview').locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('mermaid-edit-error')).toHaveCount(0);
+
+  // -- And the mock fs eventually holds all three edits -------------------
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md')), {
+      timeout: 15_000,
+    })
+    .toContain('e1@{ animate: true }');
+  const raw = await page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md'));
+  expect(raw).toContain('Idea@{ shape: cloud }');
+  expect(raw).toContain('style Idea fill:#eef1fe');
+});
