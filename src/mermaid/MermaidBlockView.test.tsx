@@ -332,6 +332,12 @@ describe('MermaidBlockView full screen (M29.27)', () => {
     render(<MermaidBlockView code={'flowchart TD\n  A --> B'} onChangeCode={onChangeCode} />);
     await userEvent.click(screen.getByRole('button', { name: 'Open full screen' }));
     expect(screen.getByTestId('fullscreen-diagram-editor')).toBeTruthy();
+    // The wire is the whole point (spec D1): a structural op made full-screen
+    // commits through the BLOCK's own onChangeCode, so BlockNote history gives
+    // undo and the doc's autosave persists it — no second save path.
+    await userEvent.click(screen.getByRole('button', { name: 'Add node' }));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    expect(onChangeCode).toHaveBeenCalledWith('flowchart TD\n  A --> B\n  n1[New step]');
     // The dialog closes back to the block.
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByTestId('fullscreen-diagram-editor')).toBeNull();

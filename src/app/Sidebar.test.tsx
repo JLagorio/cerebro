@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Entry } from '@/engine/types';
+import type { Entry, Selection } from '@/engine/types';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
@@ -195,9 +195,19 @@ describe('Sidebar', () => {
   // M15: sidebar content is a function of the destination. Collections + 15
   // Types beside a settings form is ~25% of the window under navigation that
   // has no relationship to what is in view.
-  it('does not render at all on Settings, Pulse or the Inbox', () => {
-    for (const kind of ['settings', 'pulse', 'inbox'] as const) {
-      useNavStore.setState({ selection: { kind } });
+  // M18 added the Library (it lists nothing the tree contains) and M29.27 the
+  // diagram canvas (an infinite plane beside a tree reads as a pane). The list
+  // is Selections, not bare kinds, because `diagram` carries a path.
+  it('does not render at all on Settings, Pulse, the Inbox, the Library or a diagram', () => {
+    const surfaces: Selection[] = [
+      { kind: 'settings' },
+      { kind: 'pulse' },
+      { kind: 'inbox' },
+      { kind: 'library' },
+      { kind: 'diagram', path: 'diagrams/pipeline.mmd' },
+    ];
+    for (const selection of surfaces) {
+      useNavStore.setState({ selection });
       const { container } = render(<Sidebar onNewView={vi.fn()} />);
       expect(container.firstChild).toBeNull();
       cleanup();

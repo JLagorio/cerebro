@@ -334,7 +334,17 @@ export function Popover({
 
   const panel = (
     <div
-      className="fixed z-50"
+      // z-[1050] sits ABOVE the DS Dialog scrim (z-index 1000) and below the
+      // tooltip/toast band (z-[1100]) — the same ordering popovers already
+      // have on ordinary surfaces, now preserved inside a dialog too. At
+      // z-50 a menu opened from a full-screen Dialog (M29.27's block editor)
+      // portalled to document.body and lost the stacking contest to the
+      // scrim: invisible, unclickable, and still holding a dismiss layer, so
+      // the user's next Escape closed the popover they could not see instead
+      // of the dialog. Nothing renders between 50 and 1000 that this needs to
+      // stay under, and no popover is ever open while a dialog opens over it
+      // (every menu item closes its own surface first).
+      className="fixed z-[1050]"
       style={
         place === null
           ? { left: 0, top: 0, visibility: 'hidden' }

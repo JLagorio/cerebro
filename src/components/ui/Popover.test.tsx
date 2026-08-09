@@ -2,6 +2,7 @@ import { StrictMode, useRef, useState } from 'react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Dialog } from '@/components/ui/Dialog';
 import { Popover } from '@/components/ui/Popover';
 import { hasLayers, resetLayers } from '@/components/ui/layers';
 
@@ -317,5 +318,43 @@ describe('Popover stacking', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('menu')).toBeNull();
     expect(hasLayers()).toBe(false);
+  });
+});
+
+describe('Popover inside a Dialog (M29.27)', () => {
+  beforeEach(() => resetLayers());
+
+  /**
+   * A menu opened from inside a Dialog portals to document.body, so it stops
+   * being a descendant of the card and competes with the SCRIM in the root
+   * stacking context. At `z-50` it lost to the scrim's 1000: the panel was
+   * invisible and unclickable, yet still held a dismiss layer — so the next
+   * Escape closed the popover nobody could see instead of the dialog, and the
+   * click after that was swallowed as its outside-press. Found on M29.27's
+   * full-screen block editor, whose toolbar carries the layout menu.
+   *
+   * Tailwind is not loaded in jsdom, so the panel's z-index is read from its
+   * class; the scrim's comes from Dialog's own injected stylesheet. Comparing
+   * the two — rather than pinning a literal — fails if either side moves alone.
+   */
+  it('portals above the scrim of the dialog it was opened from', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open fullscreen title="Full screen">
+        <Harness />
+      </Dialog>,
+    );
+    await user.click(screen.getByTestId('trigger'));
+
+    const panel = screen.getByRole('menu').parentElement;
+    // Both spellings, so reverting to the bare `z-50` fails on the COMPARISON
+    // (50 is not > 1000) rather than on a regex that quietly matched nothing.
+    const declared = (panel?.className ?? '').match(/\bz-\[?(\d+)\]?/);
+    expect(declared).toBeTruthy();
+
+    const scrim = document.querySelector('.cb-dlg-scrim');
+    const scrimZ = Number(window.getComputedStyle(scrim as Element).zIndex);
+    expect(scrimZ).toBe(1000);
+    expect(Number(declared?.[1])).toBeGreaterThan(scrimZ);
   });
 });

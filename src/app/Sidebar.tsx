@@ -60,7 +60,10 @@ export interface SidebarProps {
  */
 // M29.27 adds `diagram` for a different reason again: the page IS a canvas
 // (spec D1), and an infinite plane beside a tree reads as a pane, not a
-// surface. Navigation back out is the topbar's, same as Settings.
+// surface. Navigation back out is the RAIL's, same as Settings — it is
+// mounted beside every surface (App.tsx) and holds Home/Inbox/Docs/Knowledge/
+// History/Library/Settings. The topbar has no way back at all: wordmark, ⌘K,
+// SyncBadge, CreateMenu, Avatar.
 const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library', 'workspace', 'diagram']);
 
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };

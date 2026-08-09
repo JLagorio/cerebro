@@ -35,6 +35,16 @@ const SAVE_DEBOUNCE_MS = 500;
  * over it. The latch, the "Show code" toggle and the demotion safety net all
  * live there now; this page keeps only the chrome and the file.
  *
+ * One honest cost of that body: the save chip now LAGS the keystroke. Typing
+ * in the code overlay reaches handleChange 250ms later (CodeOverlay's own
+ * debounce), so for that window a just-saved file still reads "Saved" while
+ * the buffer is dirty. The BYTES are safe either way — the overlay flushes
+ * from a layout cleanup, which React runs before this page's passive unmount
+ * save, so a navigation mid-keystroke still lands on the old path (M29.23).
+ * Only the label is late, and a dirty-signal prop plumbed up from the overlay
+ * would buy a 250ms chip correction at the cost of coupling the shared editor
+ * to one host's chrome.
+ *
  * Content is RAW end-to-end: readNote/saveNote pass `.mmd` bytes through
  * verbatim, so mermaid's own `---` config header survives every save.
  *
