@@ -291,7 +291,10 @@ test('a .mmd file opens as a diagram page and edits round-trip raw', async ({ pa
 // zoom cluster, floating code overlay with Auto-Update and Apply — and the
 // page's keyed debounced autosave still writes raw bytes underneath it all.
 test('the diagram page is a pan/zoom canvas with a floating code overlay', async ({ page }) => {
-  test.setTimeout(60_000);
+  // 90s, not the file's usual 60s: this journey's per-assertion budgets sum to
+  // ~85s, so a cold lazy-chunk run could blow the outer timeout and report that
+  // instead of the assertion that actually stalled.
+  test.setTimeout(90_000);
 
   // -- Boot (same as above) ---------------------------------------------
   await page.addInitScript(() => {
@@ -336,6 +339,11 @@ test('the diagram page is a pan/zoom canvas with a floating code overlay', async
   await expect(readout).toContainText('110%');
 
   // -- Overlay: Auto-Update streams edits onto the canvas ----------------
+  // Strict-mode trap for whoever writes the next journey here: once the panel
+  // is open, 'Hide code' is an AMBIGUOUS accessible name — the toolbar's text
+  // toggle and the overlay's close IconButton both carry it. Clicking it needs
+  // a scope, e.g. inside [data-testid="diagram-toolbar"]. ('Show code' is
+  // unambiguous, which is why this line needs none.)
   await page.getByRole('button', { name: 'Show code' }).click();
   const overlay = page.getByTestId('code-overlay');
   await expect(overlay).toBeVisible();
@@ -366,7 +374,8 @@ test('the diagram page is a pan/zoom canvas with a floating code overlay', async
 // wired to the block's own code channel — a structural rename made there
 // lands back in the block render and, through the doc's autosave, on disk.
 test('a doc block opens full screen, and a rename flows back into the block', async ({ page }) => {
-  test.setTimeout(60_000);
+  // 90s for the same reason as the journey above — this one sums to ~105s.
+  test.setTimeout(90_000);
 
   // -- Boot (same as above) ---------------------------------------------
   await page.addInitScript(() => {
