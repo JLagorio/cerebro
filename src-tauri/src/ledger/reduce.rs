@@ -1453,6 +1453,198 @@ fn apply_migration_completed(
     Ok(())
 }
 
+/// The canonical JSON view of reduced state for conformance vectors
+/// (M22.4): every table the TS reducer must reproduce, keys sorted by the
+/// BTreeMap iteration this state is built on. Refusal identity for parity
+/// is `(seq, event_id, batch_id, code)` — detail strings are prose for
+/// humans and are NOT part of the cross-implementation contract.
+pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
+    let sources: serde_json::Map<String, serde_json::Value> = state
+        .sources
+        .values()
+        .map(|s| {
+            (
+                s.source_id.clone(),
+                serde_json::json!({
+                    "source_key": s.registration.source_key(),
+                    "kind": s.registration.kind_str(),
+                    "capability": capability_name(s.registration.capability()),
+                    "independence_domain_id": s.registration.independence_domain_id(),
+                    "registration_event_id": s.registration_event_id,
+                }),
+            )
+        })
+        .collect();
+    let entities: serde_json::Map<String, serde_json::Value> = state
+        .entities
+        .values()
+        .map(|e| (e.entity_id.clone(), serde_json::json!(e.registered_by_event_id)))
+        .collect();
+    let aliases: serde_json::Map<String, serde_json::Value> = state
+        .alias_registry
+        .values()
+        .map(|a| {
+            (
+                a.normalized.clone(),
+                serde_json::json!({ "alias": a.alias, "entity_id": a.entity_id, "event_id": a.event_id }),
+            )
+        })
+        .collect();
+    let observations: serde_json::Map<String, serde_json::Value> = state
+        .observations
+        .values()
+        .map(|o| {
+            (
+                o.event_id.clone(),
+                serde_json::json!({
+                    "seq": o.seq,
+                    "kind": kind_name(o.kind),
+                    "source_id": o.source_id,
+                    "subject": subject_name(&o.subject),
+                    "effective_entity": o.effective_entity,
+                    "effective_resolution_event": o.effective_resolution_event,
+                    "authority": o.authority.map(authority_name),
+                    "lineage": o
+                        .lineage_parents
+                        .iter()
+                        .map(|(edge, parent)| serde_json::json!([edge_name(*edge), parent]))
+                        .collect::<Vec<_>>(),
+                }),
+            )
+        })
+        .collect();
+    let beliefs: serde_json::Map<String, serde_json::Value> = state
+        .beliefs
+        .values()
+        .map(|b| {
+            let current = b.current();
+            (
+                b.belief_id.clone(),
+                serde_json::json!({
+                    "entity_id": b.entity_id,
+                    "revision": current.revision,
+                    "content": current.content,
+                    "fields": current.fields,
+                    "basis": current.basis,
+                    "attested": b.attested.as_ref().map(|(e, r)| serde_json::json!([e, r])),
+                    "revision_events": b
+                        .revisions
+                        .iter()
+                        .map(|r| r.event_id.clone())
+                        .collect::<Vec<_>>(),
+                }),
+            )
+        })
+        .collect();
+    let relations: serde_json::Map<String, serde_json::Value> = state
+        .relations
+        .values()
+        .map(|r| {
+            (
+                r.relation_id.clone(),
+                serde_json::json!({
+                    "from": r.from,
+                    "to": r.to,
+                    "relation": r.relation.as_str(),
+                    "live": r.live,
+                }),
+            )
+        })
+        .collect();
+    serde_json::json!({
+        "sources": sources,
+        "entities": entities,
+        "aliases": aliases,
+        "observations": observations,
+        "beliefs": beliefs,
+        "relations": relations,
+        "resolutions": state
+            .resolutions
+            .iter()
+            .map(|r| serde_json::json!([
+                r.event_id,
+                r.observation_event_id,
+                r.action,
+                r.from_entity_id,
+                r.to_entity_id,
+                tier_name(r.resolver_tier),
+            ]))
+            .collect::<Vec<_>>(),
+        "independence": state
+            .independence
+            .iter()
+            .map(|((l, r), row)| serde_json::json!([l, r, row.proof_kind]))
+            .collect::<Vec<_>>(),
+        "derived_belief_sources": state
+            .derived_belief_sources
+            .iter()
+            .map(|(o, r)| serde_json::json!([o, r]))
+            .collect::<Vec<_>>(),
+        "versions": state
+            .versions
+            .iter()
+            .map(|((class, id), (version, _))| (format!("{class}:{id}"), serde_json::json!(version)))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "batches": state
+            .batches
+            .iter()
+            .map(|b| serde_json::json!([b.batch_id, b.state, b.member_count]))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn capability_name(c: schema::AuthorityCapability) -> &'static str {
+    match c {
+        schema::AuthorityCapability::ContentOnly => "content_only",
+        schema::AuthorityCapability::HumanAssertion => "human_assertion",
+        schema::AuthorityCapability::DirectSystemArtifact => "direct_system_artifact",
+    }
+}
+
+fn kind_name(k: ObservationKind) -> &'static str {
+    match k {
+        ObservationKind::SourceSnapshot => "source_snapshot",
+        ObservationKind::SystemEvent => "system_event",
+        ObservationKind::ExtractedAssertion => "extracted_assertion",
+        ObservationKind::DerivedContent => "derived_content",
+        ObservationKind::HumanAssertion => "human_assertion",
+    }
+}
+
+fn subject_name(s: &SubjectRef) -> serde_json::Value {
+    match s {
+        SubjectRef::Resolved { entity_id, .. } => serde_json::json!(["resolved", entity_id]),
+        SubjectRef::Unresolved { raw_ref, .. } => serde_json::json!(["unresolved", raw_ref]),
+        SubjectRef::None => serde_json::json!(["none"]),
+    }
+}
+
+fn authority_name(a: AuthorityProvenance) -> &'static str {
+    match a {
+        AuthorityProvenance::TrustedHumanCapture => "trusted_human_capture",
+        AuthorityProvenance::RegisteredDirectArtifact => "registered_direct_artifact",
+        AuthorityProvenance::AgentInferred => "agent_inferred",
+    }
+}
+
+fn edge_name(e: schema::LineageKind) -> &'static str {
+    match e {
+        schema::LineageKind::ReportedBy => "reported_by",
+        schema::LineageKind::DerivedFrom => "derived_from",
+        schema::LineageKind::CopiedFrom => "copied_from",
+        schema::LineageKind::SummarizedFrom => "summarized_from",
+    }
+}
+
+fn tier_name(t: ResolverTier) -> &'static str {
+    match t {
+        ResolverTier::ExactId => "exact_id",
+        ResolverTier::KnownAlias => "known_alias",
+        ResolverTier::ExplicitRelation => "explicit_relation",
+        ResolverTier::NormalizedMatch => "normalized_match",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::writer::{member_ref, LedgerWriter};

@@ -1,0 +1,144 @@
+{
+  "name": "plumbing",
+  "description": "Plumbing indexes with zero entity state; schema-claiming garbage and reserved kinds are deterministic anomalies, never panics.",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "2f1063d0fa179d4f3a95d0500894f4d482c085ba2db0fbf9e4479569bc67d26e",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "vault.write",
+      "body": {
+        "path": "a.md"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "2f1063d0fa179d4f3a95d0500894f4d482c085ba2db0fbf9e4479569bc67d26e",
+      "hash": "2e7f6efc0fcc20a619b8ab26a7513b4cb227eb76558f7e5dea4bdc9822902fef",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:run-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "belief_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": ["Acme Corp"]
+        },
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "2e7f6efc0fcc20a619b8ab26a7513b4cb227eb76558f7e5dea4bdc9822902fef",
+      "hash": "bef9923462dbcab6840af3ea9c6f6e64c56838af6f899cf0245c4d41e1621abb",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "vault.delete",
+      "body": {
+        "path": "a.md"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "bef9923462dbcab6840af3ea9c6f6e64c56838af6f899cf0245c4d41e1621abb",
+      "hash": "0305a03df8f26572cab0f5e975976485d2c80d3c06f8d81d674076a96cda9681",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "belief.created",
+      "body": {
+        "schema": 1,
+        "garbage": true
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "0305a03df8f26572cab0f5e975976485d2c80d3c06f8d81d674076a96cda9681",
+      "hash": "2a7896715f488b3a149d706492b10525fd9e5d054acab207a37ba06727464775",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "proposal.submitted",
+      "body": {
+        "schema": 1
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {},
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000002"
+    },
+    "aliases": {},
+    "observations": {},
+    "beliefs": {
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+        "entity_id": "cccccccccccccccccccccccccccccccc",
+        "revision": 1,
+        "content": "# Acme\n\nActive vendor.\n",
+        "fields": {
+          "status": "active"
+        },
+        "basis": {
+          "state": "unsupported",
+          "reason": "conformance fixture without observations"
+        },
+        "attested": null,
+        "revision_events": ["00000000000000000000000000000002"]
+      }
+    },
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
+      "entity:cccccccccccccccccccccccccccccccc": 1
+    },
+    "batches": []
+  },
+  "expected_refusals": [
+    {
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "batch_id": null,
+      "code": "schema",
+      "detail": "belief.created: unknown field `garbage`, expected one of `schema`, `batch_id`, `idempotency_key`, `actor`, `occurred_at`, `valid_from`, `valid_to`, `belief_id`, `subject`, `content`, `fields`, `basis`"
+    },
+    {
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "batch_id": null,
+      "code": "schema",
+      "detail": "kind proposal.submitted is reserved vocabulary — its body is defined in M24, not here"
+    }
+  ]
+}

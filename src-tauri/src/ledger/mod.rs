@@ -18,6 +18,8 @@
 //! (library/std/src/sys/fs/unix.rs:1381-1388). Exactly what a commit
 //! acknowledgement wants. Re-verify on toolchain bumps.
 
+#[cfg(test)]
+mod conformance;
 pub mod frame;
 pub mod index;
 pub mod project;

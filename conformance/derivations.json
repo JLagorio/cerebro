@@ -1,0 +1,110 @@
+{
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "normalize_alias_v1": [
+    {
+      "input": "Acme Corp",
+      "normalized": "acme corp"
+    },
+    {
+      "input": "  spaced  out\tname \n",
+      "normalized": "spaced out name"
+    },
+    {
+      "input": "ﬁle SYSTEM",
+      "normalized": "file system"
+    },
+    {
+      "input": "Ⅸ legion",
+      "normalized": "ix legion"
+    },
+    {
+      "input": "ΟΔΥΣΣΕΥΣ",
+      "normalized": "οδυσσευς"
+    },
+    {
+      "input": "Straße",
+      "normalized": "straße"
+    },
+    {
+      "input": "１２３ ｆｕｌｌwidth",
+      "normalized": "123 fullwidth"
+    },
+    {
+      "input": "é",
+      "normalized": "é"
+    },
+    {
+      "input": "İstanbul",
+      "normalized": "i̇stanbul"
+    },
+    {
+      "input": "A  B",
+      "normalized": "a b"
+    }
+  ],
+  "relation_ids": [
+    {
+      "from": "cccccccccccccccccccccccccccccccc",
+      "to": "dddddddddddddddddddddddddddddddd",
+      "relation": "supersedes",
+      "relation_id": "f5e49d4cabf578768e15c26ee2cc65cc"
+    },
+    {
+      "from": "dddddddddddddddddddddddddddddddd",
+      "to": "cccccccccccccccccccccccccccccccc",
+      "relation": "supersedes",
+      "relation_id": "99bf9d8e68d431ccf71b33105851c963"
+    },
+    {
+      "from": "cccccccccccccccccccccccccccccccc",
+      "to": "dddddddddddddddddddddddddddddddd",
+      "relation": "refines",
+      "relation_id": "fe6eed376a52e60a18c228912b5ff257"
+    },
+    {
+      "from": "cccccccccccccccccccccccccccccccc",
+      "to": "dddddddddddddddddddddddddddddddd",
+      "relation": "contradicts",
+      "relation_id": "9fd83c8dd911296c86e1c94e9dd6df9d"
+    }
+  ],
+  "sources": [
+    {
+      "kind": "human_actor",
+      "source_key": "human_actor:b1fefd22f9771d69b4cdf3d64e7c9696d66a54b4f531fe578fbfc6f1673d2ae9",
+      "source_id": "c8147897afd510dad9278f297ba49115"
+    },
+    {
+      "kind": "connector",
+      "source_key": "connector:ccf7cf50d49202c9100d89404fb944f06a5fb420ad8f794f9c924603cddae9ef",
+      "source_id": "d89318cdd73ee2a9db48ab151c0445eb"
+    },
+    {
+      "kind": "builtin",
+      "source_key": "builtin:46f5de86f277c58fc9658b1f58137311bbad6efa13a6b5bc9f6b3101256adebe",
+      "source_id": "5d871c5a591b9a75635682be36c5f1de"
+    }
+  ],
+  "migrate_ids": [
+    {
+      "class": "belief",
+      "identity": "systems/offline-guarantee.md",
+      "id": "fd39c8674a20a8f144fd2968445b8f06"
+    },
+    {
+      "class": "entity",
+      "identity": "systems/offline-guarantee.md",
+      "id": "1ab50c94887efb3023a02d203b34adbf"
+    }
+  ],
+  "attested_content": [
+    {
+      "content": "# Acme\n",
+      "fields": {
+        "type": "Reference"
+      },
+      "projected": "---\ntype: Reference\n---\n# Acme\n",
+      "hash": "69966dee2bb6a1256a41e13169b749a55f9dccf54e9e11b392af6934890e2d00"
+    }
+  ]
+}
