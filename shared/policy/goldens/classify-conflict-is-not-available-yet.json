@@ -1,0 +1,55 @@
+{
+  "name": "classify-conflict-is-not-available-yet",
+  "why": "M27 owns the classifier's structured outcome. Until its body, reducer, and vectors ship, the op is typed-unavailable rather than emitting an unnamed mutation. Capability noise is OPERATIONAL: the agent asked for something this build cannot do, which is not epistemic history.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dcaf000000000000000000000000000",
+    "run_id": "cdcaf000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "c04a5000000000000000000000000000",
+        "target_class": "comparison",
+        "expected_version": 7
+      },
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "classify_conflict",
+      "payload": {
+        "comparison_id": "c04a5000000000000000000000000000",
+        "outcome": "resolved_by_stage",
+        "basis_refs": [
+          "0b5e4000000000000000000000000000"
+        ]
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": null,
+    "escalated_by": [],
+    "rejection": "capability_unavailable",
+    "destiny": "operational"
+  }
+}

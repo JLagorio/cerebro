@@ -1,0 +1,48 @@
+{
+  "name": "absence-of-observations-cannot-tombstone",
+  "why": "The second silence cause. 'We searched and found nothing' is evidence about coverage, never grounds to destroy a record.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dabecebe00000000000000000000000",
+    "run_id": "cdabecebe00000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "tombstone_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "replacement_id": null,
+        "reason_code": "invalid"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "absence_of_observations",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "HIGH",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": "HIGH",
+    "escalated_by": [],
+    "rejection": "silence_transition_forbidden",
+    "destiny": "ledger"
+  }
+}

@@ -8,6 +8,7 @@ pub mod git_commands;
 pub mod knowledge;
 pub mod ledger;
 pub mod mcp;
+pub mod policy;
 pub mod roots;
 pub mod roots_commands;
 pub mod search;

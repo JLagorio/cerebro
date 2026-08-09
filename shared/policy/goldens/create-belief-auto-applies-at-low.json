@@ -1,0 +1,82 @@
+{
+  "name": "create-belief-auto-applies-at-low",
+  "why": "Creating a DRAFT belief is LOW \u2014 the gate on creation is the candidate receipt (M24.7), not the risk ladder.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dceae00000000000000000000000000",
+    "run_id": "cdceae00000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": null
+      },
+      {
+        "target_id": "e1717710000000000000000000000000",
+        "target_class": "entity",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "create_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "subject": "entity:onboarding",
+        "content": "Guided onboarding completes within 14 days.",
+        "fields": {},
+        "basis": {
+          "state": "unsupported",
+          "reason": "synthetic fixture"
+        },
+        "distinctness_reason": "no exact, alias, or scoped candidate matched"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "LOW",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": {
+      "receipt_id": "4ece1700000000000000000000000000",
+      "index_head": "bead0000000000000000000000000000",
+      "search_version": 1,
+      "exact": {
+        "query": "onboarding completion",
+        "candidate_ids": []
+      },
+      "aliases": {
+        "queries": [
+          "onboarding-completion"
+        ],
+        "candidate_ids": []
+      },
+      "scoped": {
+        "subject_id": "e1717700000000000000000000000000",
+        "scope": {},
+        "valid_interval": null,
+        "candidate_ids": []
+      },
+      "semantic": {
+        "status": "not_available",
+        "candidate_ids": []
+      },
+      "considered": []
+    }
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "LOW",
+    "escalated_by": []
+  }
+}

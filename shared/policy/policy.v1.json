@@ -1,0 +1,904 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "target_classes": [
+    "belief",
+    "comparison",
+    "entity",
+    "observation",
+    "proposal",
+    "relation",
+    "source"
+  ],
+  "predicates": [
+    "absence_coverage_complete",
+    "actor_matches_run",
+    "alias_unbound",
+    "basis_refs_valid",
+    "candidate_receipt_current",
+    "conflict_capability_available",
+    "exact_equivalence_proven",
+    "high_stakes_route_satisfied",
+    "independence_confirmable",
+    "open_contradictions_addressed",
+    "qualification_roles_present",
+    "revert_current_and_invertible",
+    "silence_transition_allowed",
+    "subject_correction_current",
+    "target_set_exact",
+    "trusted_observation_provenance",
+    "versions_current"
+  ],
+  "transitions": [
+    "alias_add",
+    "append",
+    "archive",
+    "conflict_classify",
+    "contest_open",
+    "create",
+    "deprecate",
+    "entity_merge",
+    "exact_merge",
+    "forward_revert",
+    "independence_confirm",
+    "mass_supersede",
+    "qualify",
+    "relation_add",
+    "relation_remove",
+    "revise",
+    "split",
+    "subject_correct",
+    "supersede",
+    "tombstone"
+  ],
+  "rejection_destinies": {
+    "absence_coverage_incomplete": "ledger",
+    "absence_coverage_mismatch": "ledger",
+    "alias_collision": "ledger",
+    "atomic_set_refused": "ledger",
+    "candidate_receipt_caller_authored": "ledger",
+    "candidate_receipt_missing": "ledger",
+    "candidate_receipt_stale": "ledger",
+    "candidate_unconsidered": "ledger",
+    "capability_unavailable": "operational",
+    "contradiction_edge_stale": "ledger",
+    "contradiction_preservation_required": "ledger",
+    "equivalence_not_proven": "ledger",
+    "equivalence_receipt_stale": "ledger",
+    "high_stakes_verification_required": "ledger",
+    "human_rejected": "ledger",
+    "idempotency_key_reused": "operational",
+    "illegal_transition": "ledger",
+    "independence_not_confirmable": "ledger",
+    "internal_cas_race": "operational",
+    "invalid_reference": "ledger",
+    "malformed_arguments": "operational",
+    "policy_precondition_stale": "ledger",
+    "qualification_missing": "ledger",
+    "revert_not_current": "ledger",
+    "revert_not_supported": "ledger",
+    "risk_lowered": "ledger",
+    "run_actor_mismatch": "operational",
+    "schema_invalid": "operational",
+    "self_ancestry": "ledger",
+    "silence_transition_forbidden": "ledger",
+    "stale_target_version": "ledger",
+    "subject_resolution_mismatch": "ledger",
+    "subject_resolution_stale": "ledger",
+    "target_set_mismatch": "ledger",
+    "untrusted_provenance": "ledger"
+  },
+  "transport_rejections": [
+    "malformed_arguments",
+    "run_actor_mismatch",
+    "schema_invalid"
+  ],
+  "writer_rejections": [
+    "idempotency_key_reused",
+    "internal_cas_race"
+  ],
+  "unbound_rejections": [
+    "self_ancestry"
+  ],
+  "evaluation_order": [
+    "capability",
+    "target_class",
+    "risk_declaration",
+    "silence"
+  ],
+  "thresholds": {
+    "lineage_fan_in_high": 5
+  },
+  "escalators": [
+    {
+      "signal": "target_has_attestation",
+      "floor": "HIGH"
+    },
+    {
+      "signal": "lineage_fan_in",
+      "above": "lineage_fan_in_high",
+      "floor": "HIGH"
+    }
+  ],
+  "capabilities": {
+    "conflict_classification": {
+      "available": false,
+      "arrives": "M27"
+    },
+    "contradiction_edges": {
+      "available": false,
+      "arrives": "M27"
+    },
+    "subject_correction": {
+      "available": true,
+      "arrives": "M22"
+    }
+  },
+  "conditional_capabilities": [
+    {
+      "op": "edit_relation",
+      "when": {
+        "action": "add",
+        "relation": "contradicts"
+      },
+      "capability": "contradiction_edges"
+    }
+  ],
+  "silence": {
+    "causes": [
+      "absence_of_observations",
+      "elapsed_time"
+    ],
+    "allowed_transitions": [
+      "append",
+      "revise"
+    ],
+    "rejection": "silence_transition_forbidden"
+  },
+  "absence": {
+    "required_coverage_dimensions": [
+      "index_current",
+      "retention_known",
+      "retrieval_attempted",
+      "scope_accessible",
+      "scope_known"
+    ],
+    "receipt_match_fields": [
+      "observation_window",
+      "query_strategy",
+      "search_scope",
+      "searched_domain"
+    ],
+    "incomplete_rejection": "absence_coverage_incomplete",
+    "mismatch_rejection": "absence_coverage_mismatch"
+  },
+  "high_stakes": {
+    "stakes": [
+      "CRITICAL",
+      "HIGH"
+    ],
+    "queue_rejection": "high_stakes_verification_required",
+    "malformed_rejection": "invalid_reference",
+    "stale_rejection": "policy_precondition_stale"
+  },
+  "contradiction_addressing": {
+    "required_for_ops": [
+      "mass_supersede",
+      "merge_beliefs_exact",
+      "merge_entities",
+      "split_belief",
+      "supersede_belief"
+    ],
+    "capability": "contradiction_edges",
+    "omitted_rejection": "contradiction_preservation_required",
+    "stale_rejection": "contradiction_edge_stale"
+  },
+  "risk_ladder": {
+    "LOW": {
+      "apply": "auto",
+      "journal": true
+    },
+    "MEDIUM": {
+      "apply": "auto",
+      "journal": true
+    },
+    "HIGH": {
+      "apply": "queued-human-card"
+    },
+    "CRITICAL": {
+      "apply": "queued-human-card",
+      "review": "diff"
+    }
+  },
+  "ops": {
+    "add_entity_alias": {
+      "target_classes": [
+        "entity"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "none",
+      "allowed_transitions": [
+        "alias_add"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "alias_unbound",
+        "basis_refs_valid",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "alias_collision",
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "append_observation": {
+      "target_classes": [
+        "entity",
+        "observation",
+        "source"
+      ],
+      "base_risk": "LOW",
+      "revert": "none",
+      "allowed_transitions": [
+        "append"
+      ],
+      "requires": [
+        "absence_coverage_complete",
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "trusted_observation_provenance",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "absence_coverage_incomplete",
+        "absence_coverage_mismatch",
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch",
+        "untrusted_provenance"
+      ]
+    },
+    "archive_belief": {
+      "target_classes": [
+        "belief"
+      ],
+      "base_risk": "HIGH",
+      "revert": "none",
+      "allowed_transitions": [
+        "archive"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "cache_source": {
+      "target_classes": [
+        "observation",
+        "source"
+      ],
+      "base_risk": "LOW",
+      "revert": "none",
+      "allowed_transitions": [
+        "append"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "trusted_observation_provenance",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch",
+        "untrusted_provenance"
+      ]
+    },
+    "classify_conflict": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "observation"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "none",
+      "allowed_transitions": [
+        "conflict_classify"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "conflict_capability_available",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "requires_capability": "conflict_classification",
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "confirm_observation_independence": {
+      "target_classes": [
+        "observation"
+      ],
+      "base_risk": "HIGH",
+      "revert": "none",
+      "allowed_transitions": [
+        "independence_confirm"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "independence_confirmable",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "independence_not_confirmable",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "contest_belief": {
+      "target_classes": [
+        "belief",
+        "observation"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "one_click",
+      "allowed_transitions": [
+        "contest_open"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "correct_observation_subject": {
+      "target_classes": [
+        "entity",
+        "observation"
+      ],
+      "base_risk": "HIGH",
+      "revert": "none",
+      "allowed_transitions": [
+        "subject_correct"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "silence_transition_allowed",
+        "subject_correction_current",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "requires_capability": "subject_correction",
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "subject_resolution_mismatch",
+        "subject_resolution_stale",
+        "target_set_mismatch"
+      ]
+    },
+    "create_belief": {
+      "target_classes": [
+        "belief",
+        "entity",
+        "observation"
+      ],
+      "base_risk": "LOW",
+      "revert": "none",
+      "allowed_transitions": [
+        "create"
+      ],
+      "requires": [
+        "absence_coverage_complete",
+        "actor_matches_run",
+        "basis_refs_valid",
+        "candidate_receipt_current",
+        "high_stakes_route_satisfied",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "absence_coverage_incomplete",
+        "absence_coverage_mismatch",
+        "atomic_set_refused",
+        "candidate_receipt_caller_authored",
+        "candidate_receipt_missing",
+        "candidate_receipt_stale",
+        "candidate_unconsidered",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "deprecate": {
+      "target_classes": [
+        "belief"
+      ],
+      "base_risk": "HIGH",
+      "revert": "none",
+      "allowed_transitions": [
+        "deprecate"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "edit_relation": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "observation",
+        "relation"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "one_click",
+      "allowed_transitions": [
+        "relation_add",
+        "relation_remove"
+      ],
+      "transition_selector": {
+        "field": "action",
+        "map": {
+          "add": "relation_add",
+          "remove": "relation_remove"
+        }
+      },
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "mass_supersede": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "observation",
+        "relation"
+      ],
+      "base_risk": "CRITICAL",
+      "revert": "none",
+      "allowed_transitions": [
+        "mass_supersede"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "open_contradictions_addressed",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "contradiction_edge_stale",
+        "contradiction_preservation_required",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "merge_beliefs_exact": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "observation",
+        "relation"
+      ],
+      "base_risk": "LOW",
+      "revert": "none",
+      "allowed_transitions": [
+        "exact_merge"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "exact_equivalence_proven",
+        "open_contradictions_addressed",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "contradiction_edge_stale",
+        "contradiction_preservation_required",
+        "equivalence_not_proven",
+        "equivalence_receipt_stale",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "merge_entities": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "entity",
+        "observation",
+        "relation"
+      ],
+      "base_risk": "CRITICAL",
+      "revert": "none",
+      "allowed_transitions": [
+        "entity_merge"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "open_contradictions_addressed",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "contradiction_edge_stale",
+        "contradiction_preservation_required",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "promote_draft": {
+      "target_classes": [
+        "belief"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "one_click",
+      "allowed_transitions": [
+        "qualify"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "qualification_roles_present",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "qualification_missing",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "revert_proposal": {
+      "target_classes": [
+        "belief",
+        "proposal",
+        "relation"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "none",
+      "allowed_transitions": [
+        "forward_revert"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "revert_current_and_invertible",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "revert_not_current",
+        "revert_not_supported",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "split_belief": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "entity",
+        "observation",
+        "relation"
+      ],
+      "base_risk": "HIGH",
+      "revert": "none",
+      "allowed_transitions": [
+        "split"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "open_contradictions_addressed",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "contradiction_edge_stale",
+        "contradiction_preservation_required",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "supersede_belief": {
+      "target_classes": [
+        "belief",
+        "comparison",
+        "observation",
+        "relation"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "one_click",
+      "allowed_transitions": [
+        "supersede"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "open_contradictions_addressed",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "capability_unavailable",
+        "contradiction_edge_stale",
+        "contradiction_preservation_required",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "tombstone_belief": {
+      "target_classes": [
+        "belief"
+      ],
+      "base_risk": "HIGH",
+      "revert": "none",
+      "allowed_transitions": [
+        "tombstone"
+      ],
+      "requires": [
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    },
+    "update_belief": {
+      "target_classes": [
+        "belief",
+        "observation"
+      ],
+      "base_risk": "MEDIUM",
+      "revert": "one_click",
+      "allowed_transitions": [
+        "revise"
+      ],
+      "requires": [
+        "absence_coverage_complete",
+        "actor_matches_run",
+        "basis_refs_valid",
+        "high_stakes_route_satisfied",
+        "silence_transition_allowed",
+        "target_set_exact",
+        "versions_current"
+      ],
+      "possible_rejections": [
+        "absence_coverage_incomplete",
+        "absence_coverage_mismatch",
+        "atomic_set_refused",
+        "high_stakes_verification_required",
+        "human_rejected",
+        "illegal_transition",
+        "invalid_reference",
+        "policy_precondition_stale",
+        "risk_lowered",
+        "silence_transition_forbidden",
+        "stale_target_version",
+        "target_set_mismatch"
+      ]
+    }
+  }
+}

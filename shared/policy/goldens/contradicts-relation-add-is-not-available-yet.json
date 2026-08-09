@@ -1,0 +1,60 @@
+{
+  "name": "contradicts-relation-add-is-not-available-yet",
+  "why": "A CONDITIONAL capability: the same op is fine for ordinary relations and gated only for `contradicts`, which drags in M27's comparison, classification, and open-edge expansion.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dcadcadd00000000000000000000000",
+    "run_id": "cdcadcadd00000000000000000000000",
+    "targets": [
+      {
+        "target_id": "4e1a7000000000000000000000000000",
+        "target_class": "relation",
+        "expected_version": null
+      },
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "5cce5000000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "edit_relation",
+      "payload": {
+        "relation_id": "4e1a7000000000000000000000000000",
+        "action": "add",
+        "from": "be11ef00000000000000000000000000",
+        "to": "5cce5000000000000000000000000000",
+        "relation": "contradicts"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "rejected",
+    "effective_risk": null,
+    "escalated_by": [],
+    "rejection": "capability_unavailable",
+    "destiny": "operational"
+  }
+}

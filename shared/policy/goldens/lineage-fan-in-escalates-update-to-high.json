@@ -1,0 +1,56 @@
+{
+  "name": "lineage-fan-in-escalates-update-to-high",
+  "why": "The second escalator. A belief many others lean on is load-bearing: editing it at the threshold+1 floors HIGH. The number lives in thresholds.lineage_fan_in_high, never in code.",
+  "signals": {
+    "lineage_fan_in": {
+      "count": 6
+    }
+  },
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9dfa0000000000000000000000000000",
+    "run_id": "cdfa0000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "update_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "patch": [],
+        "basis": {
+          "state": "unsupported",
+          "reason": "synthetic fixture"
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "queued",
+    "effective_risk": "HIGH",
+    "escalated_by": [
+      "lineage_fan_in"
+    ]
+  }
+}

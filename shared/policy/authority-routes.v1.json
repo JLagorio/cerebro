@@ -1,0 +1,132 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "routes": [
+    {
+      "authority_route_id": "route.committed_organizational_state",
+      "authority_rule_version": 1,
+      "predicate_classes": [
+        "committed_organizational_state"
+      ],
+      "state_stages": [
+        "approved",
+        "implemented"
+      ],
+      "criteria": [
+        {
+          "kind": "responsible_owner_firsthand",
+          "observation_kind": "human_assertion",
+          "registration_kind": "human_actor",
+          "authority_capability": "human_assertion",
+          "relationship_roles": [
+            "project_owner"
+          ],
+          "assertion_bases": [
+            "responsible_owner"
+          ]
+        }
+      ]
+    },
+    {
+      "authority_route_id": "route.intent_rationale",
+      "authority_rule_version": 1,
+      "predicate_classes": [
+        "intent_rationale"
+      ],
+      "state_stages": [
+        "planned",
+        "approved"
+      ],
+      "criteria": [
+        {
+          "kind": "responsible_owner_firsthand",
+          "observation_kind": "human_assertion",
+          "registration_kind": "human_actor",
+          "authority_capability": "human_assertion",
+          "relationship_roles": [
+            "project_owner"
+          ],
+          "assertion_bases": [
+            "firsthand",
+            "responsible_owner"
+          ]
+        },
+        {
+          "kind": "firsthand_observer",
+          "observation_kind": "human_assertion",
+          "registration_kind": "human_actor",
+          "authority_capability": "human_assertion",
+          "relationship_roles": [
+            "project_owner",
+            "team_member"
+          ],
+          "assertion_bases": [
+            "firsthand"
+          ]
+        }
+      ]
+    },
+    {
+      "authority_route_id": "route.observable_machine_state",
+      "authority_rule_version": 1,
+      "predicate_classes": [
+        "observable_machine_state"
+      ],
+      "state_stages": [
+        "implemented",
+        "validated",
+        "deployed"
+      ],
+      "criteria": [
+        {
+          "kind": "direct_artifact",
+          "observation_kind": "extracted_assertion",
+          "registration_kinds": [
+            "builtin",
+            "connector"
+          ],
+          "authority_capability": "direct_system_artifact",
+          "require_source_artifact_hash": true,
+          "require_raw_pointer": true
+        }
+      ]
+    },
+    {
+      "authority_route_id": "route.shipping_soc",
+      "authority_rule_version": 1,
+      "predicate_classes": [
+        "shipping_soc"
+      ],
+      "state_stages": [
+        "deployed",
+        "shipping"
+      ],
+      "criteria": [
+        {
+          "kind": "direct_artifact",
+          "observation_kind": "extracted_assertion",
+          "registration_kinds": [
+            "builtin",
+            "connector"
+          ],
+          "authority_capability": "direct_system_artifact",
+          "require_source_artifact_hash": true,
+          "require_raw_pointer": true
+        },
+        {
+          "kind": "responsible_owner_firsthand",
+          "observation_kind": "human_assertion",
+          "registration_kind": "human_actor",
+          "authority_capability": "human_assertion",
+          "relationship_roles": [
+            "project_owner"
+          ],
+          "assertion_bases": [
+            "firsthand",
+            "responsible_owner"
+          ]
+        }
+      ]
+    }
+  ]
+}

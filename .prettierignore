@@ -15,3 +15,10 @@ coverage
 
 # conformance vectors are Rust-generated canonical bytes (M22.4) — byte-compared against regeneration
 conformance/
+
+# The shared policy artifacts (M24.1) are hashed, not read: policy.v1.json is
+# byte-identity-checked against a committed digest that Rust and TS both
+# assert, and every authority-routes snapshot IS the canonical bytes its
+# filename hashes. A formatter that reflowed either would break the anchor
+# that proves both languages loaded the same rules.
+shared/policy/

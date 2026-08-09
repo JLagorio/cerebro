@@ -1,0 +1,62 @@
+{
+  "name": "attested-target-escalates-supersede-to-high",
+  "why": "The acceptance-matrix row. A human reviewed this belief, so superseding it stops being routine no matter what the proposal declares. The floor is deterministic and server-derived \u2014 never the agent's estimate.",
+  "signals": {
+    "target_has_attestation": {
+      "flag": true
+    }
+  },
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9daeed00000000000000000000000000",
+    "run_id": "cdaeed00000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "5cce5000000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      },
+      {
+        "target_id": "4e1a7000000000000000000000000000",
+        "target_class": "relation",
+        "expected_version": null
+      }
+    ],
+    "op": {
+      "kind": "supersede_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "successor_id": "5cce5000000000000000000000000000"
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "queued",
+    "effective_risk": "HIGH",
+    "escalated_by": [
+      "target_has_attestation"
+    ]
+  }
+}

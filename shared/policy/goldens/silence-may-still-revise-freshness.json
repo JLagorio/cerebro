@@ -1,0 +1,49 @@
+{
+  "name": "silence-may-still-revise-freshness",
+  "why": "The other half of the rule: elapsed time is allowed to move freshness, coverage, and attention. Silence is not forbidden \u2014 RESOLVING on it is.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9deee000000000000000000000000000",
+    "run_id": "cdeee000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "update_belief",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "patch": [],
+        "basis": {
+          "state": "unsupported",
+          "reason": "synthetic fixture"
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "elapsed_time",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
+    "escalated_by": []
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "name": "promote-draft-auto-applies-at-medium",
+  "why": "MEDIUM auto-applies AND journals, and promotion stores a one-click inverse \u2014 reversibility is per-op, never implied by the rung.",
+  "proposal": {
+    "schema": 1,
+    "proposal_id": "9de00000000000000000000000000000",
+    "run_id": "cde00000000000000000000000000000",
+    "targets": [
+      {
+        "target_id": "be11ef00000000000000000000000000",
+        "target_class": "belief",
+        "expected_version": 7
+      }
+    ],
+    "op": {
+      "kind": "promote_draft",
+      "payload": {
+        "belief_id": "be11ef00000000000000000000000000",
+        "qualification_profile": {
+          "type_id": "Metric",
+          "type_schema_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "required_roles": [
+            "evidence",
+            "owner"
+          ]
+        }
+      }
+    },
+    "intended_use": {
+      "kind": "reversible_work",
+      "stakes": "LOW",
+      "predicate_class": null
+    },
+    "basis": {
+      "transition_cause": "new_evidence",
+      "evidence_refs": [],
+      "coverage_refs": [],
+      "authority_refs": [],
+      "authority_route_refs": [],
+      "addressed_contradictions": [],
+      "absence_claim": false
+    },
+    "declared_risk": "MEDIUM",
+    "reason": "synthetic fixture",
+    "candidate_search_receipt": null
+  },
+  "expect": {
+    "verdict": "applied",
+    "effective_risk": "MEDIUM",
+    "escalated_by": []
+  }
+}
