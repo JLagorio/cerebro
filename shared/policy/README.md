@@ -126,6 +126,37 @@ come first in each language.
   `commit_set`. The fallback remains for table-decidable refusals, which have
   no predicate to name.
 
+- **A candidate receipt's id digests the SEARCH, never the dispositions.**
+  What the server found is the server's and is sealed; what it means
+  (`update | qualify | distinct`) is the proposer's and must stay free to
+  change. An id covering the judgement could not survive a proposer
+  disagreeing with a default, and one covering less than the legs would let a
+  fabricated search wear a real one's id. It is also what makes
+  `candidate_unconsidered` distinguishable from
+  `candidate_receipt_caller_authored`: stripping the judgement leaves the
+  search intact.
+- **`candidate_receipt_missing` and `candidate_unconsidered` are POLICY
+  refusals, not schema errors.** Both were checked in
+  `ledger/schema/proposal.rs` until M24.7 and therefore surfaced as
+  `schema_invalid` — operational — which put "the agent created without
+  searching" in the log with the typos instead of in the epistemic record.
+  The schema layer checks a receipt's SHAPE; the policy layer checks it
+  against the world. A create with no receipt now becomes a durable proposal
+  and is refused in the ledger, because a ledger refusal needs a proposal to
+  point at.
+- **The scoped/temporal leg is "every live Belief about this subject."**
+  Tombstoned ones are excluded — they are not something a create could have
+  been an update to — but superseded and archived ones are not: "there is
+  already a retired belief about this" is exactly the context a reviewer
+  wants. `scope` and `valid_interval` stay empty because a create's payload
+  carries no scope to search within; writing a guess would make the receipt
+  claim a narrower search than it ran.
+- **The receipt rules have no goldens.** They are decided against reducer
+  state and a vault index, which the mock has no counterpart for — the same
+  boundary the CAS fixtures declared with `rust_only`. Unlike CAS there is no
+  TS-side receipt validation at all to drift from, so the honest artifact is
+  the Rust test set, not a fixture the mock would skip.
+
 ## What is deliberately NOT here yet
 
 `self_ancestry` is registered in the destiny registry (so the registry is

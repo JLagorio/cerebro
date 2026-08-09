@@ -392,12 +392,18 @@ fn route(
     // Derived, not minted: a retry at the same head produces the same
     // proposal ids and the same commit-set id, so a lost acknowledgement
     // replays instead of duplicating.
-    let head = writer
-        .head()
-        .map(|head| head.hash)
+    let head = writer.head();
+    let head_hash = head
+        .as_ref()
+        .map(|head| head.hash.clone())
         .unwrap_or_else(|| "genesis".to_string());
-    let run_id =
-        schema::sha256_first128(format!("cerebro-write-concept-run-v1\0{krel}\0{head}").as_bytes());
+    let run_id = schema::sha256_first128(
+        format!("cerebro-write-concept-run-v1\0{krel}\0{head_hash}").as_bytes(),
+    );
+    // The head the search is minted against — derived from the chain head,
+    // so the receipt's claim about WHERE it looked is recomputable by anyone
+    // holding the ledger.
+    let index_head = crate::policy::candidates::index_head_of(head.as_ref());
 
     let mut ordered = Vec::with_capacity(ops.len());
     for (index, (op, targets)) in ops.into_iter().enumerate() {
@@ -414,23 +420,27 @@ fn route(
             format!("cerebro-write-concept-op-v1\0{run_id}\0{index}").as_bytes(),
         );
         let receipt = match &op {
-            schema::ProposalOp::CreateBelief { subject, .. } => {
-                let subject_id = match subject {
-                    schema::SubjectRef::Resolved { entity_id, .. } => entity_id.clone(),
+            schema::ProposalOp::CreateBelief {
+                subject, fields, ..
+            } => {
+                let (subject_id, mut queries) = match subject {
+                    schema::SubjectRef::Resolved { entity_id, aliases } => {
+                        (entity_id.clone(), aliases.clone())
+                    }
                     _ => return Err("a created concept's subject must be resolved".to_string()),
                 };
-                let index_head = state
-                    .beliefs
-                    .values()
-                    .map(|belief| belief.projection_head_event.clone())
-                    .next_back()
-                    .unwrap_or_else(|| crate::policy::candidates::EMPTY_INDEX_HEAD.to_string());
+                // The alias leg searches every spelling this concept claims,
+                // not just its path: an `aliases:` entry that already belongs
+                // to something else is precisely the duplicate §15 is for.
+                queries.extend(alias_list(fields.get("aliases")));
+                queries.sort();
+                queries.dedup();
                 Some(crate::policy::candidates::mint(
                     state,
                     &index_head,
                     &subject_id,
                     krel,
-                    &[],
+                    &queries,
                 )?)
             }
             _ => None,
@@ -584,11 +594,13 @@ fn creation_ops(
             basis: BeliefBasis::Unsupported {
                 reason: AGENT_BASIS_REASON.to_string(),
             },
-            // M24.7 replaces this with the reason the mint's dispositions
-            // justify; today the receipt's legs are the proof and this is
-            // the sentence that names why we are creating rather than
-            // revising.
-            distinctness_reason: format!("no committed projection holds {krel}"),
+            // The sentence a reviewer reads next to the receipt. It names
+            // what was searched rather than asserting novelty: the legs are
+            // the proof, and this says which question they answered.
+            distinctness_reason: format!(
+                "no committed belief holds the projection path {krel}, its declared aliases, or \
+                 this subject"
+            ),
         },
         vec![target(state, schema::TargetClass::Belief, &belief_id, true)],
     )];

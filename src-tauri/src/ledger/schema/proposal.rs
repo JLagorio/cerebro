@@ -413,17 +413,13 @@ impl CandidateSearchReceipt {
                 ));
             }
         }
-        // EVERY returned candidate must have a disposition. A search that
-        // surfaced a duplicate and then ignored it is worse than no search:
-        // it looks like diligence.
-        for candidate in self.returned_candidates() {
-            if !considered.contains(candidate) {
-                return Err(format!(
-                    "candidate_unconsidered: the search returned {candidate} and the proposal \
-                     never says what it decided about it"
-                ));
-            }
-        }
+        // NOTE: "every returned candidate has a disposition" is NOT checked
+        // here. It is `candidate_unconsidered`, a ledger-destined policy
+        // refusal (M24.7, `policy/preconditions.rs`) — a search that
+        // surfaced a duplicate and then ignored it is epistemic history
+        // worth keeping, and refusing it as a schema error would file it in
+        // the operational log instead. This layer checks SHAPE; the policy
+        // layer checks the receipt against the world.
         Ok(())
     }
 }
@@ -674,20 +670,17 @@ impl ProposalV1 {
         if let Some(receipt) = &self.candidate_search_receipt {
             receipt.validate()?;
         }
-        // A create without a receipt is the §15 failure this milestone
-        // exists to prevent; the receipt's presence is checked here and its
-        // freshness at append time (M24.7).
-        if matches!(self.op, ProposalOp::CreateBelief { .. })
-            && self.candidate_search_receipt.is_none()
-        {
-            return Err(
-                "candidate_receipt_missing: creating a Belief requires a server-minted candidate \
-                 search receipt"
-                    .into(),
-            );
-        }
+        // A create WITHOUT a receipt is the §15 failure this milestone
+        // exists to prevent — and it is a policy refusal
+        // (`candidate_receipt_missing`, ledger destiny), not a schema error.
+        // "The agent created without looking" is exactly the epistemic
+        // history the ledger is for; refusing it here would relabel it
+        // `schema_invalid` and file it in the operational log. M24.7
+        // evaluates presence, authorship, freshness, and dispositions
+        // together in `policy/preconditions.rs`.
+        //
         // Everything else must NOT carry one: a receipt on an update would
-        // be evidence of a search that decided nothing.
+        // be evidence of a search that decided nothing. That IS shape.
         if !matches!(self.op, ProposalOp::CreateBelief { .. })
             && self.candidate_search_receipt.is_some()
         {
@@ -861,11 +854,12 @@ mod tests {
             },
             distinctness_reason: "nothing matched".into(),
         };
+        // A create WITHOUT one is not a schema error: it is
+        // `candidate_receipt_missing`, a ledger-destined policy refusal
+        // (M24.7), so that "created without looking" lands in the epistemic
+        // record rather than the operational log. This layer lets it past.
         let p = proposal(create, vec![target(C, TargetClass::Belief, None)]);
-        assert!(p
-            .validate()
-            .unwrap_err()
-            .contains("candidate_receipt_missing"));
+        assert!(p.validate().is_ok());
 
         let mut p = proposal(
             supersede(),
@@ -909,18 +903,24 @@ mod tests {
     }
 
     #[test]
-    fn a_returned_candidate_with_no_disposition_is_refused() {
-        // The §15 failure mode: a search that surfaced a duplicate and then
-        // ignored it looks like diligence and is worse than no search.
+    fn a_receipt_is_checked_for_shape_here_and_for_truth_by_policy() {
+        // The division of labour. A returned candidate with no disposition
+        // is the §15 failure mode — a search that surfaced a duplicate and
+        // then ignored it looks like diligence — but it is
+        // `candidate_unconsidered`, a ledger refusal decided against the
+        // world in `policy/preconditions.rs`. What is checked HERE is shape:
+        // a disposition named twice is bytes that cannot mean one thing.
         let mut r = receipt(vec![]);
         r.exact.candidate_ids = vec![C.into()];
-        assert!(r.validate().unwrap_err().contains("candidate_unconsidered"));
-        r.considered = vec![ConsideredCandidate {
+        assert!(r.validate().is_ok(), "truth is policy's question");
+
+        let twice = ConsideredCandidate {
             candidate_id: C.into(),
             decision: CandidateDecision::Distinct,
             reason: "different scope".into(),
-        }];
-        assert!(r.validate().is_ok());
+        };
+        r.considered = vec![twice.clone(), twice];
+        assert!(r.validate().unwrap_err().contains("considered twice"));
     }
 
     #[test]

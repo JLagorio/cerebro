@@ -2153,6 +2153,60 @@ mod tests {
     const P3: &str = "0000000000000000000000000000000c";
 
     #[test]
+    fn creating_without_a_search_becomes_a_refusal_the_vault_keeps() {
+        // §15 END TO END, and the reason the check moved out of the schema
+        // layer in M24.7: a create with no receipt is a DURABLE proposal
+        // that is then refused in the ledger. "The agent created without
+        // looking" is epistemic history; refusing it as a malformed argument
+        // would have filed it in the operational log with the typos, where
+        // no Skeptic will ever read it.
+        let (vault, mut writer, _) = seeded("commit-no-receipt");
+        let fresh = "7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
+        let entity = "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e";
+        let create = ProposalOp::CreateBelief {
+            belief_id: fresh.into(),
+            subject: crate::ledger::schema::SubjectRef::Resolved {
+                entity_id: entity.into(),
+                aliases: vec!["untouched.md".into()],
+            },
+            content: "# Untouched\n".into(),
+            fields: serde_json::json!({}),
+            basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                reason: "fixture".into(),
+            },
+            distinctness_reason: "asserted, never searched".into(),
+        };
+        let p = proposal(
+            P1,
+            RUN,
+            create,
+            vec![target(TargetClass::Belief, fresh, None)],
+            Risk::Low,
+        );
+        // It submits: the refusal is ledger-destined, and a ledger refusal
+        // needs a proposal to point at.
+        submit_proposal(&table(), &mut writer, &actor(), &p).unwrap();
+
+        let outcome =
+            commit_proposals(&table(), &mut writer, &vault, RUN, &[P1.to_string()]).unwrap();
+        assert_eq!(outcome.transition, TransitionCode::InitialReject);
+        let SubmitResult::Rejected { rejection, .. } = &outcome.results[0] else {
+            panic!("expected a refusal, got {:?}", outcome.results[0]);
+        };
+        assert_eq!(rejection.code.as_str(), "candidate_receipt_missing");
+        assert_eq!(rejection.rule.as_str(), "candidate_receipt_current");
+        assert_eq!(rejection.code.destiny(&table()), Destiny::Ledger);
+
+        let state = state(&writer, &vault);
+        assert_eq!(state.proposals[P1].state, ProposalState::Rejected);
+        assert!(
+            !state.beliefs.contains_key(fresh),
+            "nothing was created — the refusal is the whole effect"
+        );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
     fn an_unqualified_promotion_parks_visibly_and_clears_when_the_roles_arrive() {
         // THE WHOLE PHASE, END TO END, through the vault's real YAML: the
         // gate refuses, the refusal leaves a worklist entry naming exactly

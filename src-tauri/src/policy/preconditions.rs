@@ -54,7 +54,7 @@ pub const PREDICATE_OWNERS: &[(&str, Option<&str>)] = &[
     ("actor_matches_run", Some("M24.5")),
     ("alias_unbound", Some("M24.4")), // expand: alias_collision
     ("basis_refs_valid", Some("M24.5")),
-    ("candidate_receipt_current", Some("M24.5")), // re-search; M24.7 mints
+    ("candidate_receipt_current", Some("M24.7")), // §15: mint, authorship, staleness
     ("conflict_capability_available", Some("M24.1")), // the table's capability stage
     ("exact_equivalence_proven", Some("M24.3")),  // EquivalenceReceipt::validate
     ("high_stakes_route_satisfied", None),        // M24.8
@@ -144,32 +144,86 @@ fn basis_refs_valid(state: &EpistemicState, proposal: &ProposalV1) -> Preconditi
     Ok(())
 }
 
-/// The candidate search, repeated at the CURRENT index head.
+/// §15 in one predicate: the candidate search, repeated at the CURRENT head
+/// (M24.7).
 ///
-/// This closes the new-duplicate window that target-id CAS cannot see: while
-/// a create sat in the queue, something else may have created the very thing
-/// it claims is new. A candidate the stored receipt never considered rejects
-/// the whole set — the immutable proposal is never silently refreshed,
-/// because then the record would say a human approved a search they never
-/// saw.
+/// A create is the one mutation with no target to compare against, so its
+/// protection is a RECEIPT — proof the server looked for what already exists
+/// before agreeing this is new. Four things can be wrong with one, and each
+/// has its own code because they mean different things to whoever reads the
+/// card:
+///
+/// - **missing** — created without looking. Ledger, not schema: "the agent
+///   did not search" is exactly the epistemic history this milestone exists
+///   to keep, and refusing it as a malformed argument would file it in the
+///   operational log with the typos.
+/// - **caller-authored** — the receipt asserts a search this server would
+///   not produce. A caller cannot be prevented from writing JSON; what it
+///   cannot do is make that JSON survive being recomputed here.
+/// - **stale** — the world moved. Something now exists that the search never
+///   saw, which is the window target-id CAS cannot see: a duplicate created
+///   while the card sat in the queue.
+/// - **unconsidered** — the search surfaced a candidate and the proposal
+///   never says what it decided about it. Worse than no search: it looks
+///   like diligence.
+///
+/// The immutable proposal is never silently refreshed — a re-minted receipt
+/// under the old id would make the record say a human approved a search they
+/// never saw.
 fn candidate_receipt_current(state: &EpistemicState, proposal: &ProposalV1) -> PreconditionResult {
     let ProposalOp::CreateBelief { subject, .. } = &proposal.op else {
         return Ok(());
     };
-    let Some(receipt) = &proposal.candidate_search_receipt else {
-        // Validation already refuses a create without one; this arm keeps
-        // the predicate total rather than assuming.
-        return Err(Box::new(PreconditionFailure {
-            code: "candidate_receipt_missing",
+    let refuse = |code: &'static str, expected: TypedValue, actual: TypedValue| {
+        Box::new(PreconditionFailure {
+            code,
             rule: "candidate_receipt_current",
-            expected: TypedValue::string("a server-minted receipt"),
-            actual: TypedValue::Missing,
-        }));
+            expected,
+            actual,
+        })
+    };
+
+    let Some(receipt) = &proposal.candidate_search_receipt else {
+        return Err(refuse(
+            "candidate_receipt_missing",
+            TypedValue::string("a server-minted candidate search"),
+            TypedValue::Missing,
+        ));
     };
     let subject_id = match subject {
         crate::ledger::schema::SubjectRef::Resolved { entity_id, .. } => entity_id.clone(),
+        // An unresolved subject cannot be searched for; the op's own
+        // validation already refuses one on a create.
         _ => return Ok(()),
     };
+
+    // AUTHORSHIP. The id is a digest of the legs, so recomputing it says
+    // whether these legs and this id were ever minted together.
+    let derived = super::candidates::derive_receipt_id(receipt).map_err(|detail| {
+        refuse(
+            "candidate_receipt_caller_authored",
+            TypedValue::string("a receipt this build can digest"),
+            TypedValue::string(&detail),
+        )
+    })?;
+    if derived != receipt.receipt_id {
+        return Err(refuse(
+            "candidate_receipt_caller_authored",
+            TypedValue::string(&derived),
+            TypedValue::string(&receipt.receipt_id),
+        ));
+    }
+    if receipt.search_version != super::candidates::SEARCH_VERSION {
+        // A receipt from a search this build no longer runs is not a search
+        // this build can vouch for.
+        return Err(refuse(
+            "candidate_receipt_caller_authored",
+            TypedValue::string(&super::candidates::SEARCH_VERSION.to_string()),
+            TypedValue::string(&receipt.search_version.to_string()),
+        ));
+    }
+
+    // The same search, run again, here.
     let fresh = super::candidates::mint(
         state,
         &receipt.index_head,
@@ -177,25 +231,58 @@ fn candidate_receipt_current(state: &EpistemicState, proposal: &ProposalV1) -> P
         &receipt.exact.query,
         &receipt.aliases.queries,
     )
-    .map_err(|detail| PreconditionFailure {
-        code: "candidate_receipt_stale",
-        rule: "candidate_receipt_current",
-        expected: TypedValue::string("a repeatable search"),
-        actual: TypedValue::string(&detail),
+    .map_err(|detail| {
+        refuse(
+            "candidate_receipt_stale",
+            TypedValue::string("a repeatable search"),
+            TypedValue::string(&detail),
+        )
     })?;
+    // A subject the receipt did not search under is a different search
+    // wearing this one's clothes.
+    if receipt.scoped.subject_id != subject_id {
+        return Err(refuse(
+            "candidate_receipt_caller_authored",
+            TypedValue::string(&subject_id),
+            TypedValue::string(&receipt.scoped.subject_id),
+        ));
+    }
+    // A candidate the receipt claims and the index does not hold was never
+    // returned by any search this server ran.
+    let live: std::collections::BTreeSet<&str> = fresh.returned_candidates().into_iter().collect();
+    for claimed in receipt.returned_candidates() {
+        if !live.contains(claimed) {
+            return Err(refuse(
+                "candidate_receipt_caller_authored",
+                TypedValue::string("a candidate the index returns"),
+                TypedValue::string(claimed),
+            ));
+        }
+    }
+
     let considered: std::collections::BTreeSet<&str> = receipt
         .considered
         .iter()
         .map(|c| c.candidate_id.as_str())
         .collect();
+    let claimed: std::collections::BTreeSet<&str> =
+        receipt.returned_candidates().into_iter().collect();
     for candidate in fresh.returned_candidates() {
+        if !claimed.contains(candidate) {
+            // The world moved: this exists now and the search never saw it.
+            return Err(refuse(
+                "candidate_receipt_stale",
+                TypedValue::string("no candidate the search did not return"),
+                TypedValue::string(candidate),
+            ));
+        }
         if !considered.contains(candidate) {
-            return Err(Box::new(PreconditionFailure {
-                code: "candidate_receipt_stale",
-                rule: "candidate_receipt_current",
-                expected: TypedValue::string("no candidate the receipt did not consider"),
-                actual: TypedValue::string(candidate),
-            }));
+            // The search saw it and the proposal says nothing about it.
+            return Err(refuse(
+                "candidate_unconsidered",
+                TypedValue::string("a disposition for every candidate"),
+                TypedValue::string(candidate),
+            ));
         }
     }
     Ok(())
@@ -410,6 +497,209 @@ mod tests {
         assert_eq!(updated.targets[0].expected_version, Some(7));
         assert_eq!(updated.op, stale.op, "the intent is unchanged");
         assert!(versions_current(&at_version(Some(7)), &updated).is_ok());
+    }
+
+    // --- §15: the create receipt (M24.7) --------------------------------
+
+    /// A world holding one Belief about `B`, projected at `churn.md`.
+    fn base_with_a_belief() -> EpistemicState {
+        use crate::ledger::reduce::{BeliefState, RevisionState};
+        let mut state = EpistemicState::default();
+        state.beliefs.insert(
+            A.to_string(),
+            BeliefState {
+                belief_id: A.into(),
+                entity_id: B.into(),
+                created_event_id: B.into(),
+                revisions: vec![RevisionState {
+                    event_id: B.into(),
+                    revision: 1,
+                    content: String::new(),
+                    fields: serde_json::json!({}),
+                    basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                        reason: "fixture".into(),
+                    },
+                }],
+                attested: None,
+                attestation_events: vec![],
+                path: None,
+                overrides: vec![],
+                override_head_event: None,
+                projection_head_event: B.into(),
+                qualification: crate::ledger::schema::Qualification::Draft,
+                lifecycle: crate::ledger::schema::Lifecycle::Active,
+                tombstoned_by: None,
+                open_contest_event: None,
+                qualification_head_event: None,
+                lifecycle_head_event: None,
+                contest_head_event: None,
+                entity_merge_event_ids: vec![],
+            },
+        );
+        state
+            .projection_paths
+            .insert("churn.md".to_string(), A.to_string());
+        state
+    }
+
+    const NEW_BELIEF: &str = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+
+    fn creation(receipt: Option<crate::ledger::schema::CandidateSearchReceipt>) -> ProposalV1 {
+        let mut p = proposal(
+            A,
+            B,
+            ProposalOp::CreateBelief {
+                belief_id: NEW_BELIEF.into(),
+                subject: crate::ledger::schema::SubjectRef::Resolved {
+                    entity_id: B.into(),
+                    aliases: vec!["churn.md".into()],
+                },
+                content: "# Churn\n".into(),
+                fields: serde_json::json!({}),
+                basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                    reason: "fixture".into(),
+                },
+                distinctness_reason: "nothing matched".into(),
+            },
+            vec![target(TargetClass::Belief, NEW_BELIEF, None)],
+            Risk::Low,
+        );
+        p.candidate_search_receipt = receipt;
+        p
+    }
+
+    fn minted(state: &EpistemicState) -> crate::ledger::schema::CandidateSearchReceipt {
+        super::super::candidates::mint(
+            state,
+            super::super::candidates::EMPTY_INDEX_HEAD,
+            B,
+            "churn.md",
+            &["churn.md".to_string()],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_search_this_server_ran_and_nothing_moved_passes() {
+        let empty = EpistemicState::default();
+        assert!(candidate_receipt_current(&empty, &creation(Some(minted(&empty)))).is_ok());
+    }
+
+    #[test]
+    fn creating_without_looking_is_a_ledger_refusal_not_a_schema_error() {
+        // The whole reason this check is here and not in the schema layer:
+        // "the agent created without searching" is epistemic history. Filing
+        // it as `schema_invalid` would put it in the operational log with
+        // the typos.
+        let failure =
+            candidate_receipt_current(&EpistemicState::default(), &creation(None)).unwrap_err();
+        assert_eq!(failure.code, "candidate_receipt_missing");
+        assert_eq!(failure.rule, "candidate_receipt_current");
+        let table = PolicyTable::load().unwrap();
+        assert_eq!(
+            table.destiny(failure.code),
+            Some(super::super::table::Destiny::Ledger)
+        );
+    }
+
+    #[test]
+    fn a_receipt_whose_id_does_not_match_its_legs_was_not_minted_here() {
+        let empty = EpistemicState::default();
+        let mut receipt = minted(&empty);
+        receipt.receipt_id = "f".repeat(32);
+        assert_eq!(
+            candidate_receipt_current(&empty, &creation(Some(receipt)))
+                .unwrap_err()
+                .code,
+            "candidate_receipt_caller_authored"
+        );
+    }
+
+    #[test]
+    fn a_receipt_claiming_a_candidate_the_index_never_returned_is_forged() {
+        // A caller cannot be stopped from writing JSON. What it cannot do is
+        // make that JSON survive the search being run again here.
+        let empty = EpistemicState::default();
+        let mut receipt = minted(&empty);
+        receipt.exact.candidate_ids = vec![A.to_string()];
+        receipt.considered = vec![crate::ledger::schema::ConsideredCandidate {
+            candidate_id: A.to_string(),
+            decision: crate::ledger::schema::CandidateDecision::Distinct,
+            reason: "invented".into(),
+        }];
+        receipt.receipt_id = super::super::candidates::derive_receipt_id(&receipt).unwrap();
+        let failure = candidate_receipt_current(&empty, &creation(Some(receipt))).unwrap_err();
+        assert_eq!(failure.code, "candidate_receipt_caller_authored");
+        assert_eq!(failure.actual, TypedValue::string(A));
+    }
+
+    #[test]
+    fn a_receipt_from_a_search_this_build_no_longer_runs_is_refused() {
+        let empty = EpistemicState::default();
+        let mut receipt = minted(&empty);
+        receipt.search_version = super::super::candidates::SEARCH_VERSION + 1;
+        receipt.receipt_id = super::super::candidates::derive_receipt_id(&receipt).unwrap();
+        assert_eq!(
+            candidate_receipt_current(&empty, &creation(Some(receipt)))
+                .unwrap_err()
+                .code,
+            "candidate_receipt_caller_authored"
+        );
+    }
+
+    #[test]
+    fn a_duplicate_that_appeared_after_the_search_makes_the_receipt_stale() {
+        // The window target-id CAS cannot see: while the card waited,
+        // something else created the very thing it calls new.
+        let receipt = minted(&EpistemicState::default());
+        let failure =
+            candidate_receipt_current(&base_with_a_belief(), &creation(Some(receipt))).unwrap_err();
+        assert_eq!(failure.code, "candidate_receipt_stale");
+        assert_eq!(failure.actual, TypedValue::string(A));
+    }
+
+    #[test]
+    fn a_candidate_the_search_returned_and_the_proposal_ignored_is_unconsidered() {
+        // Reachable ONLY because the receipt id digests the legs and not the
+        // dispositions: stripping the judgement leaves the search intact, so
+        // this is not forgery — it is a search that surfaced a duplicate and
+        // then said nothing about it, which looks like diligence.
+        let state = base_with_a_belief();
+        let mut receipt = minted(&state);
+        assert_eq!(receipt.returned_candidates(), vec![A]);
+        receipt.considered.clear();
+        let failure = candidate_receipt_current(&state, &creation(Some(receipt))).unwrap_err();
+        assert_eq!(failure.code, "candidate_unconsidered");
+        assert_eq!(failure.actual, TypedValue::string(A));
+    }
+
+    #[test]
+    fn a_proposer_may_disagree_with_the_servers_default_disposition() {
+        // Similarity alone never forces a merge. The server says "this
+        // exists, revise it"; a proposer may say "distinct, and here is why"
+        // and the ledger holds them to it.
+        let state = base_with_a_belief();
+        let mut receipt = minted(&state);
+        receipt.considered[0].decision = crate::ledger::schema::CandidateDecision::Distinct;
+        receipt.considered[0].reason = "a different reporting scope".into();
+        assert!(candidate_receipt_current(&state, &creation(Some(receipt))).is_ok());
+    }
+
+    #[test]
+    fn every_code_this_predicate_names_is_one_create_belief_declares() {
+        let table = PolicyTable::load().unwrap();
+        let rule = table.op("create_belief").unwrap();
+        for code in [
+            "candidate_receipt_missing",
+            "candidate_receipt_caller_authored",
+            "candidate_receipt_stale",
+            "candidate_unconsidered",
+        ] {
+            assert!(
+                rule.possible_rejections.iter().any(|r| r == code),
+                "{code} is refused by §15 and not declared by create_belief"
+            );
+        }
     }
 
     #[test]
