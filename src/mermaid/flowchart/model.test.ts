@@ -60,6 +60,13 @@ describe('parseFlowchart', () => {
     expect(model.lines[2].parsed.kind).toBe('opaque');
     expect(edges(model)).toHaveLength(1);
   });
+
+  it('an anonymous subgraph is opaque, not a phantom node', () => {
+    const model = parseFlowchart('flowchart TD\n  subgraph\n    A --> B\n  end')!;
+    expect(model.lines[1].parsed.kind).toBe('opaque');
+    expect(nodes(model).has('subgraph')).toBe(false);
+    expect(edges(model)).toContainEqual(expect.objectContaining({ from: 'A', to: 'B' }));
+  });
 });
 
 describe('serialize', () => {
@@ -67,5 +74,10 @@ describe('serialize', () => {
     for (const src of [SIMPLE, EXOTIC]) {
       expect(serialize(parseFlowchart(src)!)).toBe(src);
     }
+  });
+
+  it('round-trips an anonymous subgraph byte-identically', () => {
+    const src = 'flowchart TD\n  subgraph\n    A --> B\n  end';
+    expect(serialize(parseFlowchart(src)!)).toBe(src);
   });
 });

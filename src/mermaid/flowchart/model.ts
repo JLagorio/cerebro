@@ -216,6 +216,10 @@ function parseLine(rawLine: string): ParsedLine {
   const sub = trimmed.match(/^subgraph\s+(.+)$/);
   if (sub !== null) return { kind: 'subgraph-start', title: sub[1] };
   if (trimmed === 'end') return { kind: 'subgraph-end' };
+  // Anonymous subgraph (valid mermaid, no title): not structurally editable,
+  // so it goes opaque rather than falling into the node-token fallback below
+  // (which would otherwise mint a phantom node with id "subgraph").
+  if (trimmed === 'subgraph') return { kind: 'opaque' };
 
   if (ARROWS.some(([text]) => trimmed.includes(text))) {
     const segments = parseEdgeLine(trimmed);
