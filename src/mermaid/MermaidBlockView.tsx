@@ -22,10 +22,6 @@ export function MermaidBlockView({
   const [editing, setEditing] = useState(code.trim() === '');
   const [draft, setDraft] = useState(code);
   const [lightboxSvg, setLightboxSvg] = useState<string | null>(null);
-  // Hooks can't live in conditional JSX, so this runs every render even in
-  // view mode — cheap, and it means LivePreview always has a settled value
-  // the instant editing flips on.
-  const debouncedDraft = useDebounced(draft, 250);
 
   const commit = () => {
     setEditing(false);
@@ -88,7 +84,7 @@ export function MermaidBlockView({
             rows={Math.max(6, draft.split('\n').length + 1)}
             className="min-w-[260px] flex-1 basis-[280px] resize-y border-0 bg-n-25 px-3 py-2 [font-family:var(--font-mono)] text-sm leading-[1.5] text-n-800 outline-none"
           />
-          <LivePreview code={debouncedDraft} />
+          <LivePreview code={draft} />
         </div>
       )}
 
@@ -133,19 +129,28 @@ export function MermaidBlockView({
 /**
  * The edit-mode pane: renders the (debounced) draft, keeps the last good svg
  * when the draft breaks, and names the error's line.
+ *
+ * The debounce lives HERE, not in the parent: LivePreview mounts fresh at
+ * the start of every edit session, so `useDebounced`'s `useState(value)`
+ * seed makes its first render current immediately. Hoisting the debounce
+ * into MermaidBlockView (M29.9's first cut) let it survive Escape/Done —
+ * the debounced value from the closed session was still settling when the
+ * next edit session reopened, so the preview briefly showed a stale render
+ * for a draft the textarea no longer had.
  */
 function LivePreview({ code }: { code: string }) {
+  const debounced = useDebounced(code, 250);
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; line: number | null } | null>(null);
 
   useEffect(() => {
-    if (code.trim() === '') {
+    if (debounced.trim() === '') {
       setSvg(null);
       setError(null);
       return;
     }
     let stale = false;
-    void renderMermaid(code).then((r) => {
+    void renderMermaid(debounced).then((r) => {
       if (stale) return;
       if (r.ok) {
         setSvg(r.svg);
@@ -158,7 +163,7 @@ function LivePreview({ code }: { code: string }) {
     return () => {
       stale = true;
     };
-  }, [code]);
+  }, [debounced]);
 
   return (
     <div className="min-w-[260px] flex-1 basis-[280px] border-l border-n-100 px-3 py-2">

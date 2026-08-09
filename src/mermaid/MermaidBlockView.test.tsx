@@ -118,4 +118,29 @@ describe('MermaidBlockView editing (M29.9)', () => {
     expect(onChangeCode).toHaveBeenCalledTimes(1);
     expect(screen.queryByLabelText('Mermaid source')).toBeNull();
   });
+
+  it('does not resurrect a stale error when Edit reopens inside the debounce window (regression)', async () => {
+    render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    renderMock.mockResolvedValue({ ok: false, message: 'Parse error on line 2: bad', line: 2 });
+    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD\n  A -->');
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('mermaid-edit-error')).toBeTruthy());
+
+    await user().keyboard('{Escape}');
+    expect(screen.queryByLabelText('Mermaid source')).toBeNull();
+
+    // Reopen immediately — well inside the 250ms debounce window, where a
+    // debounce hoisted at the block level (rather than owned by the preview
+    // itself) would still be settling on the broken text from the closed
+    // session.
+    await user().click(screen.getByRole('button', { name: 'Edit' }));
+
+    // The textarea reflects the reverted (empty) draft...
+    expect((screen.getByLabelText('Mermaid source') as HTMLTextAreaElement).value).toBe('');
+    // ...and the fresh preview must match it immediately, not lag behind
+    // with the previous session's error.
+    expect(screen.queryByTestId('mermaid-edit-error')).toBeNull();
+  });
 });
