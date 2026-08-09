@@ -149,4 +149,12 @@ describe('StructuralEditor', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Layout: Dagre' }));
     expect(onChangeCode.mock.calls[0][0]).toContain('layout: elk');
   });
+
+  it('toolbar={false} hides the built-in control row but keeps the host', async () => {
+    render(
+      <StructuralEditor code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} toolbar={false} />,
+    );
+    expect(screen.queryByTestId('structural-toolbar')).toBeNull();
+    expect(screen.getByTestId('structural-host')).toBeTruthy();
+  });
 });

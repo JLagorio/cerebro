@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { useCanvasTransform } from '../CanvasViewport';
 import { renderMermaid } from '../render';
 import { nodes, parseFlowchart, serialize, type EdgeEntry, type Shape } from './model';
 import {
@@ -44,9 +45,16 @@ function isElk(code: string): boolean {
 export function StructuralEditor({
   code,
   onChangeCode,
+  toolbar = true,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
+  /**
+   * The built-in control row. The full-screen editor passes false — its
+   * DiagramToolbar owns those controls, and rendering both would be two
+   * direction rows (M29.26).
+   */
+  toolbar?: boolean;
 }) {
   const model = useMemo(() => parseFlowchart(code), [code]);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -59,6 +67,17 @@ export function StructuralEditor({
     null,
   );
   const dragFrom = useRef<string | null>(null);
+
+  // Inside a CanvasViewport the host is scaled, and getBoundingClientRect
+  // deltas are SCREEN px — dividing by the plane scale converts them to the
+  // plane coordinates CSS absolute positioning uses in here. Outside any
+  // viewport the context is the identity and this is a no-op (M29.26). Read
+  // through a ref: the bind effect below re-runs only on [code, model], so its
+  // handler closures would otherwise capture whatever scale was current when
+  // the diagram last changed.
+  const { scale } = useCanvasTransform();
+  const scaleRef = useRef(1);
+  scaleRef.current = scale;
 
   // A selection can outlive the node it points at — an external edit (undo,
   // another surface, a code-mode change) can delete the node between one
@@ -123,9 +142,10 @@ export function StructuralEditor({
             // parked the toolbar directly ON such a node — covering its
             // center, so the second click of a double-click rename landed on
             // toolbar buttons instead of the node (observed live, M29.19).
-            const above = box.top - hostBox.top - 34;
-            const y = above >= 0 ? above : box.bottom - hostBox.top + 6;
-            setToolbarPos({ x: box.left - hostBox.left, y });
+            const s = scaleRef.current;
+            const above = (box.top - hostBox.top) / s - 34;
+            const y = above >= 0 ? above : (box.bottom - hostBox.top) / s + 6;
+            setToolbarPos({ x: (box.left - hostBox.left) / s, y });
           }
         };
         el.ondblclick = (e) => {
@@ -141,12 +161,13 @@ export function StructuralEditor({
           const host = hostRef.current;
           if (host === null) return;
           const hostBox = host.getBoundingClientRect();
+          const s = scaleRef.current;
           dragFrom.current = id;
           setGhost({
-            x1: e.clientX - hostBox.left,
-            y1: e.clientY - hostBox.top,
-            x2: e.clientX - hostBox.left,
-            y2: e.clientY - hostBox.top,
+            x1: (e.clientX - hostBox.left) / s,
+            y1: (e.clientY - hostBox.top) / s,
+            x2: (e.clientX - hostBox.left) / s,
+            y2: (e.clientY - hostBox.top) / s,
           });
         });
       }
@@ -182,8 +203,11 @@ export function StructuralEditor({
       const host = hostRef.current;
       if (host === null) return;
       const hostBox = host.getBoundingClientRect();
+      const s = scaleRef.current;
       setGhost((g) =>
-        g === null ? null : { ...g, x2: e.clientX - hostBox.left, y2: e.clientY - hostBox.top },
+        g === null
+          ? null
+          : { ...g, x2: (e.clientX - hostBox.left) / s, y2: (e.clientY - hostBox.top) / s },
       );
     };
 
@@ -300,40 +324,42 @@ export function StructuralEditor({
       }}
       tabIndex={-1}
     >
-      <div
-        data-testid="structural-toolbar"
-        className="mb-1.5 flex items-center gap-1"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={() => apply(addNode(model, 'New step').model)}
-          className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+      {toolbar && (
+        <div
+          data-testid="structural-toolbar"
+          className="mb-1.5 flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
         >
-          + Node
-        </button>
-        <span className="mx-0.5 h-4 w-px bg-n-100" />
-        {DIRECTIONS.map((d) => (
           <button
-            key={d}
             type="button"
-            aria-label={`Direction ${d}`}
-            onClick={() => apply(setDirection(model, d))}
+            onClick={() => apply(addNode(model, 'New step').model)}
             className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
           >
-            {d}
+            + Node
           </button>
-        ))}
-        <span className="mx-0.5 h-4 w-px bg-n-100" />
-        <button
-          type="button"
-          aria-label={isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
-          onClick={() => apply(setLayoutEngine(model, isElk(code) ? 'dagre' : 'elk'))}
-          className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
-        >
-          {isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
-        </button>
-      </div>
+          <span className="mx-0.5 h-4 w-px bg-n-100" />
+          {DIRECTIONS.map((d) => (
+            <button
+              key={d}
+              type="button"
+              aria-label={`Direction ${d}`}
+              onClick={() => apply(setDirection(model, d))}
+              className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+            >
+              {d}
+            </button>
+          ))}
+          <span className="mx-0.5 h-4 w-px bg-n-100" />
+          <button
+            type="button"
+            aria-label={isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
+            onClick={() => apply(setLayoutEngine(model, isElk(code) ? 'dagre' : 'elk'))}
+            className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+          >
+            {isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
+          </button>
+        </div>
+      )}
 
       {/*
         Own positioning context for the host: toolbarPos/ghost are measured
