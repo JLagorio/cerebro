@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { resolveBundleLink, type Source } from '@/engine/okf';
+import { MermaidDiagram } from '@/mermaid/MermaidDiagram';
+import { MermaidLightbox } from '@/mermaid/MermaidLightbox';
 
 /**
  * Read-only markdown for knowledge concepts (M5).
@@ -146,6 +148,19 @@ const HEADING_CLASS: Record<number, string> = {
   3: 'mb-1.5 mt-5 text-md font-semibold text-n-800',
 };
 
+/** A concept's diagram: read-only render + lightbox. */
+function ConceptMermaid({ code }: { code: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+  return (
+    <div className="my-3">
+      <MermaidDiagram code={code} onExpand={(s) => setSvg(s)} />
+      {svg !== null && (
+        <MermaidLightbox open svg={svg} title="Diagram" onClose={() => setSvg(null)} />
+      )}
+    </div>
+  );
+}
+
 export function ConceptBody({
   markdown,
   sources,
@@ -179,6 +194,10 @@ export function ConceptBody({
         i += 1;
       }
       i += 1; // closing fence (or EOF — an unterminated fence still renders)
+      if (fence[1] === 'mermaid') {
+        blocks.push(<ConceptMermaid key={key++} code={code.join('\n')} />);
+        continue;
+      }
       blocks.push(
         <pre
           key={key++}
