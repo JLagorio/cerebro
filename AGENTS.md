@@ -36,10 +36,12 @@ Hooks (husky): pre-commit lints; pre-push runs the full gate. **Never
 - `demo-vault/` — the golden corpus. Dev, vitest, and Playwright all run
   against it; editing it churns e2e assertions, so treat changes as test
   changes.
-- **`docs/` is gitignored vendored reference, NOT documentation** —
-  `tolaria-main/` and friends are third-party repos kept for study. Never lint,
-  test, or grep them as project code. Milestone plan docs live in
-  `docs/archive/superpowers/plans/` and are force-added (`git add -f`).
+- **`docs/archive/` and `docs/examples/` are gitignored vendored reference,
+  NOT documentation** — third-party repos and material kept for study. Never
+  lint, test, or grep them as project code. Milestone plan and spec docs live
+  in `docs/superpowers/plans/` and `docs/superpowers/specs/` and are tracked
+  normally (the old `docs/archive/superpowers/` path and its `git add -f`
+  ritual are gone).
 - `scripts/` — seeders and mac packaging. Typechecked via `tsconfig.tools.json`.
 
 ## Conventions that will bite you
