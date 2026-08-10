@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { MermaidDiagram } from './MermaidDiagram';
@@ -170,5 +170,107 @@ describe('MermaidDiagram honours stored manual positions (M29.42)', () => {
         'M30,25C60,40 90,50 120,65',
       );
     });
+  });
+});
+
+/**
+ * Rendering is ASYNC, so `code` and the svg in the DOM disagree for a window on
+ * every edit — and manual layout reads positions out of one and writes them
+ * onto the other. They have to travel as a pair.
+ */
+describe('MermaidDiagram applies the code that produced the svg (M29.42)', () => {
+  const SVG_1 = [
+    '<svg viewBox="0 0 200 100" width="100%" style="max-width: 200px;">',
+    '<g class="node" id="flowchart-A-0" transform="translate(30, 20)"><rect/></g>',
+    '<g class="node" id="flowchart-B-1" transform="translate(130, 70)"><rect/></g>',
+    '<path class="flowchart-link" id="L_A_B_0" data-id="L_A_B_0"',
+    ' d="M30,25C60,40 90,50 120,65" marker-end="url(#e)"/>',
+    '</svg>',
+  ].join('');
+  const SVG_2 = SVG_1.replace('<svg ', '<svg data-gen="2" ');
+  const at = (x: number): string =>
+    `flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A ${x},20\n  A[Start] --> B[End]`;
+  const edgeD = (): string | null | undefined =>
+    document.getElementById('L_A_B_0')?.getAttribute('d');
+
+  it('does not place a newer code onto the svg still on screen', async () => {
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      svg: { left: 0, top: 0, width: 200, height: 100 },
+      'flowchart-A-0': { left: 20, top: 10, width: 20, height: 20 },
+      'flowchart-B-1': { left: 120, top: 60, width: 20, height: 20 },
+    };
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const key = this.tagName.toLowerCase() === 'svg' ? 'svg' : this.id;
+      const r = rects[key] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        ...r,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        x: r.left,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    try {
+      renderMock.mockResolvedValue({ ok: true, svg: SVG_1 });
+      const { rerender } = render(<MermaidDiagram code={at(280)} />);
+      await waitFor(() => expect(edgeD()).toBe('M270,23.33L140,66.67'));
+
+      // Hold the next render open: `code` is now the new one, the DOM is still
+      // the old one. Keying the pipeline off `code` re-ran it here and drew the
+      // new positions onto a picture about to be thrown away — measured, it
+      // rewrote the edge to M40,25L120,65 for the length of the window.
+      let release: ((r: { ok: true; svg: string }) => void) | null = null;
+      renderMock.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            release = resolve as typeof release;
+          }),
+      );
+      rerender(<MermaidDiagram code={at(50)} />);
+      expect(edgeD()).toBe('M270,23.33L140,66.67');
+
+      await act(async () => {
+        release?.({ ok: true, svg: SVG_2 });
+      });
+      await waitFor(() => expect(edgeD()).toBe('M60,26.25L120,63.75'));
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+      renderMock.mockReset();
+    }
+  });
+
+  /**
+   * MEASURED on React 19 while fixing the above: `dangerouslySetInnerHTML` is
+   * re-applied when the PROP OBJECT changes, not when the html string does, so
+   * a fresh object literal per render rebuilt this subtree on every re-render
+   * — wiping the manual transforms, and silently restoring the `href`s M29.38
+   * strips, which is the older and quieter half of the same hole.
+   */
+  it('keeps the svg subtree — transforms and stripped links — across a re-render', async () => {
+    const withLink = SVG_1.replace(
+      '<g class="node" id="flowchart-A-0"',
+      '<a href="notes/a.md"><g class="node" id="flowchart-A-0"',
+    ).replace('<rect/></g>\n', '<rect/></g></a>');
+    renderMock.mockResolvedValue({ ok: true, svg: withLink });
+    try {
+      const { rerender } = render(<MermaidDiagram code={at(50)} collapseHeight={480} />);
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      const node = document.getElementById('flowchart-A-0')!;
+      node.setAttribute('data-probe', 'survives');
+      const live = (): string[] =>
+        [...document.querySelectorAll('a')].flatMap((a) =>
+          [...a.attributes].filter((at2) => at2.localName === 'href').map((at2) => at2.value),
+        );
+      expect(live()).toEqual([]);
+
+      // Same svg, same code: a parent re-render for any other reason at all.
+      rerender(<MermaidDiagram code={at(50)} collapseHeight={481} />);
+      expect(document.getElementById('flowchart-A-0')?.getAttribute('data-probe')).toBe('survives');
+      expect(live()).toEqual([]);
+    } finally {
+      renderMock.mockReset();
+    }
   });
 });

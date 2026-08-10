@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
-import { StructuralEditor } from './StructuralEditor';
+import { StructuralEditor, type NodePlacer } from './StructuralEditor';
 
 // vi.mock factories run during static import resolution — before this
 // module's own top-level consts would otherwise initialize — so the fixture
@@ -1616,6 +1616,212 @@ describe('manual-mode gestures (M29.43)', () => {
       expect(onChangeCode).toHaveBeenCalledWith(`${CODE}\n  A --> B`);
     } finally {
       document.elementFromPoint = originalFromPoint;
+    }
+  });
+});
+
+/**
+ * Two orderings and one selector that the M29.42/.43 tests asserted in prose
+ * and nowhere in code — each reverted cleanly without failing anything.
+ */
+describe('manual layout: the orderings the comments claim (M29.42)', () => {
+  const MANUAL_SVG = [
+    '<svg viewBox="0 0 200 100" width="100%" style="max-width: 200px;">',
+    '<g class="node" id="flowchart-A-0" transform="translate(30, 20)"><rect/></g>',
+    '<g class="node" id="flowchart-B-1" transform="translate(130, 70)"><rect/></g>',
+    '<path class="flowchart-link" id="L_A_B_0" data-id="L_A_B_0" d="M30,25C60,40 90,50 120,65"/>',
+    '</svg>',
+  ].join('');
+
+  /**
+   * Rects that MOVE with the transform, which fixed stubs never do — and a
+   * fixed stub cannot see an ordering bug whose whole symptom is "measured
+   * before the thing moved". Translate-only and scale 1: enough for the editor,
+   * and manualLayout's own suite carries the full browser-faithful version.
+   */
+  function liveRects(locals: Record<string, { hw: number; hh: number }>): () => void {
+    const original = Element.prototype.getBoundingClientRect;
+    const box = (left: number, top: number, width: number, height: number): DOMRect =>
+      ({
+        left,
+        top,
+        width,
+        height,
+        right: left + width,
+        bottom: top + height,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    /** Where `el`'s group origin lands, summing the translates above it. */
+    const originOf = (el: Element): { x: number; y: number } => {
+      let x = 0;
+      let y = 0;
+      for (
+        let cur: Element | null = el;
+        cur !== null && cur.tagName.toLowerCase() !== 'svg';
+        cur = cur.parentElement
+      ) {
+        const t = cur.getAttribute('transform') ?? '';
+        for (const m of t.matchAll(/translate\(\s*(-?[\d.]+)(?:[\s,]+(-?[\d.]+))?\s*\)/g)) {
+          x += Number(m[1]);
+          y += Number(m[2] ?? 0);
+        }
+      }
+      return { x, y };
+    };
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.tagName.toLowerCase() === 'svg') return box(0, 0, 200, 100);
+      const local = locals[this.id];
+      if (local === undefined) return box(0, 0, 0, 0);
+      const origin = originOf(this);
+      return box(origin.x - local.hw, origin.y - local.hh, local.hw * 2, local.hh * 2);
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  }
+
+  it('places link badges off the MANUAL position, not the auto one', async () => {
+    mockSvg(MANUAL_SVG);
+    const restore = liveRects({
+      'flowchart-A-0': { hw: 10, hh: 10 },
+      'flowchart-B-1': { hw: 10, hh: 10 },
+    });
+    try {
+      render(
+        <StructuralEditor
+          code={[
+            'flowchart TD',
+            '  %% cerebro:layout manual',
+            '  %% cerebro:pos A 50,20',
+            '  A[Start] --> B[End]',
+            '  click A "notes/a.md"',
+          ].join('\n')}
+          onChangeCode={() => {}}
+          entries={ENTRIES}
+        />,
+      );
+      const badge = await screen.findByTestId('mermaid-link-badge');
+      // A is moved to plane x=50, so its right edge is 60 and the badge sits at
+      // 60 - 7. Measured before the manual pass ran, it would be pinned at
+      // 40 - 7 = 33 and stranded there for the life of the render.
+      expect(badge.style.left).toBe('53px');
+      expect(badge.style.top).toBe('3px');
+    } finally {
+      restore();
+    }
+  });
+
+  it('a drag whose frames could not place the node spends no undo step', async () => {
+    mockSvg(MANUAL_SVG);
+    const restore = liveRects({
+      'flowchart-A-0': { hw: 10, hh: 10 },
+      'flowchart-B-1': { hw: 10, hh: 10 },
+    });
+    const onChangeCode = vi.fn();
+    try {
+      render(
+        <StructuralEditor
+          code={'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]'}
+          onChangeCode={onChangeCode}
+        />,
+      );
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      const a = document.getElementById('flowchart-A-0')!;
+      const fire = (
+        target: Window | Element,
+        type: 'pointerdown' | 'pointermove' | 'pointerup',
+        coords: { clientX: number; clientY: number },
+      ): void => {
+        fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, ...coords }));
+      };
+      fire(a, 'pointerdown', { clientX: 30, clientY: 20 });
+      // The panel is hidden (or the block collapses) mid-gesture: nothing is
+      // measurable, so every frame refuses and the node never leaves its auto
+      // centre. `moved` is still true — the POINTER travelled — and writing the
+      // box on that alone pinned the node where it already was, for an undo step.
+      restore();
+      const hidden = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        return {
+          left: 0,
+          top: 0,
+          width: 0,
+          height: 0,
+          right: 0,
+          bottom: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+      try {
+        fire(window, 'pointermove', { clientX: 90, clientY: 20 });
+        fire(window, 'pointerup', { clientX: 90, clientY: 20 });
+      } finally {
+        Element.prototype.getBoundingClientRect = hidden;
+      }
+      expect(a.getAttribute('transform')).toBe('translate(30, 20)');
+      expect(onChangeCode).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it('offers a sibling toolbar its placement only while manual mode is on', async () => {
+    mockSvg(MANUAL_SVG);
+    const restore = liveRects({
+      'flowchart-A-0': { hw: 10, hh: 10 },
+      'flowchart-B-1': { hw: 10, hh: 10 },
+    });
+    const placerRef: { current: NodePlacer | null } = { current: null };
+    try {
+      const { rerender } = render(
+        <StructuralEditor
+          code={'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]'}
+          onChangeCode={() => {}}
+          placerRef={placerRef}
+        />,
+      );
+      // DiagramToolbar mints the node and asks this for a position; without it
+      // `+ Node` on the full-screen surface drops nodes at auto-layout spots.
+      await waitFor(() => expect(placerRef.current).not.toBeNull());
+
+      rerender(<StructuralEditor code={CODE} onChangeCode={() => {}} placerRef={placerRef} />);
+      await waitFor(() => expect(placerRef.current).toBeNull());
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not paint the connect handle as part of the selected node', async () => {
+    mockSvg(MANUAL_SVG);
+    const restore = liveRects({
+      'flowchart-A-0': { hw: 10, hh: 10 },
+      'flowchart-B-1': { hw: 10, hh: 10 },
+    });
+    try {
+      render(
+        <StructuralEditor
+          code={'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]'}
+          onChangeCode={() => {}}
+        />,
+      );
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      const a = document.getElementById('flowchart-A-0')!;
+      fireEvent.mouseEnter(a);
+      const handle = a.querySelector<SVGElement>('.cerebro-connect-handle')!;
+      expect(handle).toBeTruthy();
+
+      await userEvent.click(a);
+      // The node's own shape wears the selection outline; the handle keeps its
+      // own colours — it is an affordance sitting on the node, not part of it.
+      expect(a.querySelector<SVGElement>('rect')!.style.stroke).toBe('var(--cortex-500)');
+      expect(handle.style.stroke).toBe('');
+      expect(handle.getAttribute('fill')).toBe('var(--cortex-500)');
+    } finally {
+      restore();
     }
   });
 });

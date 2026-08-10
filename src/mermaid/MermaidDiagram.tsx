@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { applyStoredManualLayout } from './flowchart/manualLayout';
 import { renderMermaid, type RenderResult } from './render';
@@ -22,7 +22,14 @@ export function MermaidDiagram({
   onErrorClick?: () => void;
   collapseHeight?: number;
 }) {
-  const [result, setResult] = useState<RenderResult | null>(null);
+  // The svg and THE CODE THAT PRODUCED IT, together. Rendering is async, so a
+  // `code` prop that has already changed does not yet describe the svg in the
+  // DOM — and manual layout below reads positions out of `code` and writes them
+  // onto that svg. Kept apart, an edit applied the NEW code's positions to the
+  // OLD, already-transformed picture for one frame. They travel as a pair so
+  // that state is unrepresentable.
+  const [rendered, setRendered] = useState<{ code: string; result: RenderResult } | null>(null);
+  const result = rendered?.result ?? null;
   const themeEpoch = useThemeEpoch();
   const generation = useRef(0);
   // A rendered diagram must not be able to navigate the app away (M29.38).
@@ -33,6 +40,18 @@ export function MermaidDiagram({
   const renderedSvg = result !== null && result.ok ? result.svg : null;
   const svgRef = useInertDiagramLinks<HTMLDivElement>(renderedSvg);
 
+  /**
+   * MEASURED, and not what the docs imply: React 19 re-applies
+   * `dangerouslySetInnerHTML` whenever the PROP OBJECT differs, not whenever
+   * the html string does. A fresh `{{ __html: svg }}` literal per render
+   * therefore rebuilds this whole subtree on any re-render at all — throwing
+   * away every manual-layout transform we wrote into it, and (older, quieter)
+   * restoring the `href`s M29.38 strips, since that effect is keyed on the svg
+   * string too and would not re-run either. Memoized on the string, the
+   * subtree is rebuilt only when it genuinely changes.
+   */
+  const html = useMemo(() => ({ __html: renderedSvg ?? '' }), [renderedSvg]);
+
   // Manual layout in view mode (M29.42). A source carrying
   // `%% cerebro:layout manual` must honour its stored positions HERE too, or a
   // manual diagram snaps back to mermaid's auto geometry the moment the block
@@ -40,23 +59,25 @@ export function MermaidDiagram({
   // same reason the link strip uses one: the attribute writes land in the
   // commit that wrote the markup, so no frame ever paints the auto layout
   // first. The svg subtree is opaque to React, so those writes survive every
-  // re-render — and this effect re-runs exactly when the injected svg is
-  // replaced, which is the only thing that throws them away.
+  // re-render. The dependency is the PAIR, not the svg string: a position-only
+  // edit is inert to mermaid (measured, positions.mermaid.test.ts) so it comes
+  // back byte-identical, React leaves the subtree alone, and keying off the svg
+  // would silently never re-place the node the user just moved.
   //
   // What it deliberately does NOT fix: `onExpand(svg)` below hands the lightbox
   // the RAW svg string, so an expanded manual diagram still shows auto layout
   // (Stage G risk ledger item 9).
   useLayoutEffect(() => {
-    if (renderedSvg === null || svgRef.current === null) return;
-    applyStoredManualLayout(svgRef.current, code);
-  }, [renderedSvg, code, svgRef]);
+    if (rendered === null || !rendered.result.ok || svgRef.current === null) return;
+    applyStoredManualLayout(svgRef.current, rendered.code);
+  }, [rendered, svgRef]);
 
   useEffect(() => {
     const gen = ++generation.current;
     void renderMermaid(code).then((r) => {
       // A stale resolve must not clobber a newer render (code changed, or
       // the theme flipped while mermaid was working).
-      if (generation.current === gen) setResult(r);
+      if (generation.current === gen) setRendered({ code, result: r });
     });
   }, [code, themeEpoch]);
 
@@ -108,7 +129,7 @@ export function MermaidDiagram({
         className="overflow-auto [&_svg]:h-auto [&_svg]:max-w-full"
         style={{ maxHeight: collapseHeight }}
         // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.
-        dangerouslySetInnerHTML={{ __html: svg }}
+        dangerouslySetInnerHTML={html}
       />
       {onExpand !== undefined && (
         <button

@@ -39,14 +39,27 @@ import { bindFlowchartSvg } from './svgBinding';
  * a self-loop, an edge with an endpoint we could not measure, an element whose
  * space we cannot map — each is left exactly as rendered.
  *
- * THE FRAME IS PINNED (read this before writing drag code). `growViewBox`
- * rewrites the svg's viewBox, which CHANGES where a plane point lands on
- * screen. The session's client<->plane map is deliberately NOT refreshed when
- * that happens, because a drag that re-derives an ABSOLUTE plane point from the
- * cursor against a freshly-grown box feeds its own growth: grow left, the
- * cursor's plane x drops, the node moves further left, grow again. Drag with
- * DELTAS against the pinned scale (`clientDeltaToPlane`) and the gesture is
- * stable by construction.
+ * TWO FRAMES, AND THEY ARE NOT THE SAME FRAME. `growViewBox` rewrites the
+ * viewBox, which changes where a plane point lands on screen — i.e. it changes
+ * the svg's screen CTM. That splits the client<->plane map into two jobs with
+ * opposite requirements, and an earlier version of this module used one map for
+ * both, which was a shipping defect:
+ *
+ * - WRITES (plane -> an element's own space) must use a LIVE map, re-read in
+ *   the same batch as the element CTMs it is composed with. `session.frame` is
+ *   refreshed at the top of every write batch for exactly this reason. Mixing a
+ *   pinned svg CTM with live element CTMs displaces every point-mapped write —
+ *   each re-routed edge `d` and every edge-label transform — by the viewBox
+ *   origin shift, so edges detach from their nodes and slide further away with
+ *   each frame. (Node transforms survived it: they use only the linear part.)
+ * - A GESTURE (cursor -> plane) must PIN its map at pointerdown and never
+ *   re-read it, because a frame that re-derives an absolute plane point against
+ *   a freshly-grown box feeds its own growth: grow left, the cursor's plane x
+ *   drops, the node moves further left, grow again. Callers pin one with
+ *   `measurePlaneFrame` and drag deltas through it (`clientDeltaToPlane`).
+ *
+ * Pinning at BIND time serves neither job: a `CanvasViewport` fit or wheel-zoom
+ * lands after the bind effect, so the first drag would be off by the fit ratio.
  */
 
 /** A 2D point. Plane points are `PlanePoint`-shaped; client points are px. */
@@ -79,19 +92,28 @@ interface Mat {
   f: number;
 }
 
+/**
+ * The client<->plane mapping as of one measurement. Re-read for every write
+ * batch; PINNED for the duration of one pointer gesture. See the module
+ * docstring for why those are different requirements.
+ */
+export interface PlaneFrame {
+  clientFromPlane: Mat;
+  planeFromClient: Mat;
+  /** Client pixels per plane unit (includes any ancestor CSS zoom). */
+  scale: number;
+}
+
 export interface ManualLayoutSession {
   svg: SVGSVGElement;
   /** True when writes go through real screen CTMs rather than the fallback. */
   exact: boolean;
-  /** Client pixels per plane unit (includes any ancestor CSS zoom). */
-  scale: number;
-  /** plane -> client and back. PINNED at begin — see the module docstring. */
-  clientFromPlane: Mat;
-  planeFromClient: Mat;
+  /** The map used by the CURRENT write batch. Refreshed, never pinned. */
+  frame: PlaneFrame;
   /** Mermaid's OWN viewBox: the floor `growViewBox` never shrinks below. */
   vb: ViewBox;
   /** The size attributes exactly as mermaid wrote them, for growth ratios. */
-  sizes: { width: string | null; height: string | null; maxWidth: string };
+  sizes: { viewBox: string; width: string | null; height: string | null; maxWidth: string };
   /** Live node boxes in plane units — mutated as nodes move. */
   boxes: Map<string, Box>;
   /** Mermaid's auto centres, measured once on the pristine render. */
@@ -102,6 +124,12 @@ export interface ManualLayoutSession {
 
 /** Plane units of breathing room between the outermost node and the viewBox. */
 const PAD = 8;
+
+/**
+ * How far past mermaid's own box each SIDE may grow, as a multiple of that
+ * box's extent — so an axis can never exceed 4x what mermaid drew.
+ */
+const GROWTH_BUDGET = 1.5;
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -157,9 +185,7 @@ function screenCtmOf(el: Element): Mat | null {
   return Object.values(out).every((n) => Number.isFinite(n)) ? out : null;
 }
 
-function viewBoxOf(svg: SVGSVGElement): ViewBox | null {
-  // The attribute, not svg.viewBox.baseVal: jsdom implements only the former.
-  const raw = svg.getAttribute('viewBox');
+function parseViewBox(raw: string | null): ViewBox | null {
   if (raw === null) return null;
   const parts = raw
     .trim()
@@ -167,6 +193,11 @@ function viewBoxOf(svg: SVGSVGElement): ViewBox | null {
     .map(Number);
   if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
   return { x: parts[0], y: parts[1], w: parts[2], h: parts[3] };
+}
+
+function viewBoxOf(svg: SVGSVGElement): ViewBox | null {
+  // The attribute, not svg.viewBox.baseVal: jsdom implements only the former.
+  return parseViewBox(svg.getAttribute('viewBox'));
 }
 
 /** Border point of `box` on the ray from its centre toward `target`. */
@@ -183,13 +214,45 @@ export function rectBorderPoint(box: Box, target: Pt): Pt {
 }
 
 const NUM = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`;
-const TRANSLATE_ONLY = new RegExp(String.raw`^translate\(\s*(${NUM})(?:[\s,]+(${NUM}))?\s*\)$`);
+
+const TRANSLATE_TERM = new RegExp(String.raw`translate\(\s*(${NUM})(?:[\s,]+(${NUM}))?\s*\)`, 'g');
+
+/**
+ * A transform attribute's text as ONE translation — a CHAIN of them sums,
+ * because translations compose additively and because our own writes make
+ * chains: after one application a node group reads
+ * `translate(30, 20) translate(250, 0)`. Reading only a lone translate here is
+ * how a session begun over an ALREADY-TRANSFORMED DOM froze every node it
+ * touched (the `applyStoredManualLayout`-twice case: asked for x=50, stayed at
+ * 250). Null for anything that is not exclusively translates.
+ *
+ * `chain` is how many terms were found, so a caller can tell "mermaid's own
+ * lone translate" from "ours appended to it" and normalise.
+ */
+function parseTranslateChain(text: string | null): (Pt & { chain: number }) | null {
+  if (text === null || text.trim() === '') return { x: 0, y: 0, chain: 0 };
+  let x = 0;
+  let y = 0;
+  let chain = 0;
+  let consumed = 0;
+  TRANSLATE_TERM.lastIndex = 0;
+  for (let m = TRANSLATE_TERM.exec(text); m !== null; m = TRANSLATE_TERM.exec(text)) {
+    // Anything BETWEEN the terms that is not whitespace or a comma is another
+    // kind of transform, and this whole element is then out of our reach.
+    if (text.slice(consumed, m.index).trim() !== '') return null;
+    x += Number(m[1]);
+    y += Number(m[2] ?? '0');
+    chain += 1;
+    consumed = m.index + m[0].length;
+  }
+  if (chain === 0 || text.slice(consumed).trim() !== '') return null;
+  return { x, y, chain };
+}
 
 /** A transform attribute's text as a translation, or null if it is anything else. */
 function parseTranslate(text: string | null): Pt | null {
-  if (text === null || text.trim() === '') return { x: 0, y: 0 };
-  const m = text.trim().match(TRANSLATE_ONLY);
-  return m === null ? null : { x: Number(m[1]), y: Number(m[2] ?? '0') };
+  const t = parseTranslateChain(text);
+  return t === null ? null : { x: t.x, y: t.y };
 }
 
 /** The element's OWN transform as a translation, or null if it is anything else. */
@@ -229,7 +292,7 @@ function planeToParent(session: ManualLayoutSession, el: Element): Mat | null {
     const parent = el.parentElement;
     const ctm = parent === null ? null : screenCtmOf(parent);
     const inv = ctm === null ? null : invert(ctm);
-    return inv === null ? null : mul(inv, session.clientFromPlane);
+    return inv === null ? null : mul(inv, session.frame.clientFromPlane);
   }
   const anc = accumulatedTranslate(el, session.svg);
   return anc === null ? null : translation(-anc.x, -anc.y);
@@ -240,7 +303,7 @@ function planeToLocal(session: ManualLayoutSession, el: Element): Mat | null {
   if (session.exact) {
     const ctm = screenCtmOf(el);
     const inv = ctm === null ? null : invert(ctm);
-    return inv === null ? null : mul(inv, session.clientFromPlane);
+    return inv === null ? null : mul(inv, session.frame.clientFromPlane);
   }
   const anc = accumulatedTranslate(el, session.svg);
   const own = ownTranslate(el);
@@ -249,10 +312,81 @@ function planeToLocal(session: ManualLayoutSession, el: Element): Mat | null {
 }
 
 /**
- * Measures the pristine render into a session, or refuses (null) when there is
- * nothing measurable — no svg, no usable viewBox, or (fallback path) a
- * zero-size client box, which is what a hidden host and an unstubbed jsdom
- * both look like.
+ * The pristine size record, stashed on the svg the first time we measure it.
+ *
+ * `growViewBox` REWRITES the viewBox, so "mermaid's own box" cannot be read
+ * back off the element once we have touched it — a second session over the same
+ * DOM would take the grown box as its floor and ratchet: measured 298 -> 440.1
+ * -> 646.15 across three applications of the same positions. The record makes
+ * the whole pipeline idempotent across sessions on one DOM, and it disappears
+ * by itself whenever mermaid replaces the svg, which is exactly when it should.
+ */
+const AUTO_BOX_ATTR = 'data-cerebro-auto-box';
+
+interface AutoBox {
+  viewBox: string;
+  width: string | null;
+  height: string | null;
+  maxWidth: string;
+}
+
+function pristineBox(svg: SVGSVGElement): AutoBox {
+  const saved = svg.getAttribute(AUTO_BOX_ATTR);
+  if (saved !== null) {
+    try {
+      const parsed: unknown = JSON.parse(saved);
+      if (typeof parsed === 'object' && parsed !== null && 'viewBox' in parsed) {
+        return parsed as AutoBox;
+      }
+    } catch {
+      // Someone else's attribute, or ours mangled: re-record from what is
+      // there now. Worse than the truth, better than throwing in a render.
+    }
+  }
+  const fresh: AutoBox = {
+    viewBox: svg.getAttribute('viewBox') ?? '',
+    width: svg.getAttribute('width'),
+    height: svg.getAttribute('height'),
+    maxWidth: svg.style.maxWidth,
+  };
+  svg.setAttribute(AUTO_BOX_ATTR, JSON.stringify(fresh));
+  return fresh;
+}
+
+/**
+ * The client<->plane map as the DOM has it RIGHT NOW.
+ *
+ * Callers that write geometry re-read this every batch (a pinned copy composed
+ * with live element CTMs is the frame-mixing defect the module docstring
+ * describes). Callers driving a POINTER gesture call this once at pointerdown
+ * and pin the result for the whole drag.
+ */
+export function measurePlaneFrame(svg: SVGSVGElement): PlaneFrame | null {
+  const ctm = screenCtmOf(svg);
+  const ctmInv = ctm === null ? null : invert(ctm);
+  if (ctm !== null && ctmInv !== null) {
+    const scale = Math.hypot(ctm.a, ctm.b);
+    return scale > 0 ? { clientFromPlane: ctm, planeFromClient: ctmInv, scale } : null;
+  }
+  // The LIVE viewBox, not the pristine one: this describes what the browser is
+  // painting now, which is what a client coordinate has to be read against.
+  const vb = viewBoxOf(svg);
+  if (vb === null || vb.w <= 0) return null;
+  const r = svg.getBoundingClientRect();
+  if (r.width <= 0) return null;
+  // Uniform scale: mermaid never writes preserveAspectRatio="none", and a
+  // CanvasViewport zoom is uniform too.
+  const s = r.width / vb.w;
+  const clientFromPlane = { a: s, b: 0, c: 0, d: s, e: r.left - vb.x * s, f: r.top - vb.y * s };
+  const planeFromClient = invert(clientFromPlane);
+  if (planeFromClient === null || !(s > 0)) return null;
+  return { clientFromPlane, planeFromClient, scale: s };
+}
+
+/**
+ * Measures the render into a session, or refuses (null) when there is nothing
+ * measurable — no svg, no usable viewBox, or (fallback path) a zero-size client
+ * box, which is what a hidden host and an unstubbed jsdom both look like.
  */
 export function beginManualLayout(
   host: HTMLElement,
@@ -260,34 +394,16 @@ export function beginManualLayout(
 ): ManualLayoutSession | null {
   const svg = host.querySelector('svg');
   if (svg === null) return null;
-  const vb = viewBoxOf(svg);
+  const auto = pristineBox(svg);
+  const vb = parseViewBox(auto.viewBox);
   if (vb === null || vb.w <= 0 || vb.h <= 0) return null;
-
-  const ctm = screenCtmOf(svg);
-  const ctmInv = ctm === null ? null : invert(ctm);
-  let exact = true;
-  let clientFromPlane: Mat;
-  let planeFromClient: Mat;
-  if (ctm !== null && ctmInv !== null) {
-    clientFromPlane = ctm;
-    planeFromClient = ctmInv;
-  } else {
-    exact = false;
-    const r = svg.getBoundingClientRect();
-    if (r.width <= 0) return null;
-    // Uniform scale: mermaid never writes preserveAspectRatio="none", and a
-    // CanvasViewport zoom is uniform too.
-    const s = r.width / vb.w;
-    clientFromPlane = { a: s, b: 0, c: 0, d: s, e: r.left - vb.x * s, f: r.top - vb.y * s };
-    const inv = invert(clientFromPlane);
-    if (inv === null) return null;
-    planeFromClient = inv;
-  }
-  const scale = Math.hypot(clientFromPlane.a, clientFromPlane.b);
-  if (!(scale > 0)) return null;
+  const exact = screenCtmOf(svg) !== null;
+  const frame = measurePlaneFrame(svg);
+  if (frame === null) return null;
+  const { planeFromClient, scale } = frame;
 
   const boxes = new Map<string, Box>();
-  const auto = new Map<string, Pt>();
+  const centres = new Map<string, Pt>();
   const base = new Map<string, string>();
   for (const [id, el] of binding.nodeEls) {
     const r = el.getBoundingClientRect();
@@ -306,31 +422,48 @@ export function beginManualLayout(
       halfW: r.width / 2 / scale,
       halfH: r.height / 2 / scale,
     });
-    auto.set(id, { x: centre.x, y: centre.y });
-    base.set(id, el.getAttribute('transform') ?? '');
+    centres.set(id, { x: centre.x, y: centre.y });
+    base.set(id, normaliseBase(el.getAttribute('transform')));
   }
 
   return {
     svg,
     exact,
-    scale,
-    clientFromPlane,
-    planeFromClient,
+    frame,
     vb,
     sizes: {
-      width: svg.getAttribute('width'),
-      height: svg.getAttribute('height'),
-      maxWidth: svg.style.maxWidth,
+      viewBox: auto.viewBox,
+      width: auto.width,
+      height: auto.height,
+      maxWidth: auto.maxWidth,
     },
     boxes,
-    auto,
+    auto: centres,
     base,
   };
 }
 
-/** Client (viewport) coordinates -> plane coordinates. */
-export function clientToPlane(session: ManualLayoutSession, client: Pt): Pt {
-  return applyPoint(session.planeFromClient, client);
+/**
+ * Mermaid's transform kept VERBATIM, except that a chain of translates — which
+ * is what our own previous application leaves behind — collapses to one. Two
+ * reasons, both measured: the fallback arm can only reason about a base it can
+ * parse, and without the collapse the attribute grows by one `translate()` per
+ * session forever.
+ */
+function normaliseBase(raw: string | null): string {
+  const t = parseTranslateChain(raw);
+  if (t === null || t.chain <= 1) return raw ?? '';
+  return `translate(${t.x}, ${t.y})`;
+}
+
+/**
+ * Client (viewport) coordinates -> plane coordinates, through a frame the
+ * caller chose. Pass a frame PINNED at pointerdown for anything driven by a
+ * pointer; `session.frame` is refreshed per write batch and is not a stable
+ * reference for a gesture.
+ */
+export function clientToPlane(frame: PlaneFrame, client: Pt): Pt {
+  return applyPoint(frame.planeFromClient, client);
 }
 
 /**
@@ -339,8 +472,8 @@ export function clientToPlane(session: ManualLayoutSession, client: Pt): Pt {
  * drag frames must use this rather than differencing two `clientToPlane` calls
  * taken either side of a growth.
  */
-export function clientDeltaToPlane(session: ManualLayoutSession, delta: Pt): Pt {
-  return applyVector(session.planeFromClient, delta);
+export function clientDeltaToPlane(frame: PlaneFrame, delta: Pt): Pt {
+  return applyVector(frame.planeFromClient, delta);
 }
 
 /**
@@ -358,12 +491,12 @@ function nodeLocalFromPlane(session: ManualLayoutSession, el: SVGGElement, id: s
   if (session.exact) {
     const ctm = screenCtmOf(el);
     const inv = ctm === null ? null : invert(ctm);
-    return inv === null ? null : mul(inv, session.clientFromPlane);
+    return inv === null ? null : mul(inv, session.frame.clientFromPlane);
   }
   if (accumulatedTranslate(el, session.svg) === null) return null;
   // Pure-translate ancestry AND a pure-translate base mean local units ARE
   // plane units, so a delta transfers 1:1.
-  return parseTranslate(session.base.get(id) ?? '') === null ? null : IDENTITY;
+  return parseTranslateChain(session.base.get(id) ?? '') === null ? null : IDENTITY;
 }
 
 /** Sets one node's transform for a target centre. False = left untouched. */
@@ -396,6 +529,11 @@ export function rerouteEdge(
   const from = session.boxes.get(bound.from);
   const to = session.boxes.get(bound.to);
   if (from === undefined || to === undefined) return; // unbound endpoint: untouched
+  // Two nodes dropped on the same spot: every border anchor collapses onto the
+  // shared centre, so the segment would be `M x,y L x,y` — an invisible edge
+  // whose marker has no direction to orient to. Mermaid's own path is a worse
+  // fit but a visible one, so it stays until the nodes part again.
+  if (from.cx === to.cx && from.cy === to.cy) return;
   const local = planeToLocal(session, bound.el);
   if (local === null) return; // a space we cannot map: untouched
   const a = rectBorderPoint(from, { x: to.cx, y: to.cy });
@@ -456,25 +594,58 @@ export function growViewBox(session: ManualLayoutSession): boolean {
     maxX = Math.max(maxX, box.cx + box.halfW + PAD);
     maxY = Math.max(maxY, box.cy + box.halfH + PAD);
   }
+  // The CAP, and why one is needed at all. `%% cerebro:pos A 100000,0` is a
+  // legal position line (hand-edited, a bad merge, some future op), and growing
+  // to hold it writes a ~100000-unit viewBox: the svg fits to its container and
+  // every real node renders sub-pixel — the diagram goes BLANK. Without growth
+  // that same input clips ONE node and leaves the rest legible, so uncapped
+  // growth is the one place manual mode can destroy the render of a diagram it
+  // should mostly have left alone. Past the budget the outlier is simply
+  // clipped, which is precisely the no-growth behaviour.
+  minX = Math.max(minX, vb.x - GROWTH_BUDGET * vb.w);
+  maxX = Math.min(maxX, vb.x + vb.w + GROWTH_BUDGET * vb.w);
+  minY = Math.max(minY, vb.y - GROWTH_BUDGET * vb.h);
+  maxY = Math.min(maxY, vb.y + vb.h + GROWTH_BUDGET * vb.h);
   const next = {
     x: round2(minX),
     y: round2(minY),
     w: round2(maxX - minX),
     h: round2(maxY - minY),
   };
-  const text = `${next.x} ${next.y} ${next.w} ${next.h}`;
+  // Byte-for-byte back to mermaid's own string when nothing needs the room:
+  // rounding a real `0 0 108.625 445.3125` to two decimals would leave the
+  // "restored exactly" claim below a rounding error short of true.
+  const grew =
+    next.x !== round2(vb.x) ||
+    next.y !== round2(vb.y) ||
+    next.w !== round2(vb.w) ||
+    next.h !== round2(vb.h);
+  const text = grew ? `${next.x} ${next.y} ${next.w} ${next.h}` : session.sizes.viewBox;
   if (session.svg.getAttribute('viewBox') === text) return false;
   session.svg.setAttribute('viewBox', text);
+  if (!grew) {
+    // Nothing needs the room any more: hand mermaid's own strings back exactly
+    // as it wrote them, rather than a re-multiplied approximation of them.
+    setOrRemove(session.svg, 'width', session.sizes.width);
+    setOrRemove(session.svg, 'height', session.sizes.height);
+    session.svg.style.maxWidth = session.sizes.maxWidth;
+    return true;
+  }
   // Same plane-units-per-pixel as mermaid chose: the canvas gets bigger, the
   // diagram does not silently zoom. (A CSS max-width on the host then decides
   // whether the wider box is shown at size or fitted — either way, visible.)
-  const rx = next.w / vb.w;
-  const ry = next.h / vb.h;
-  scaleLength(session.svg, 'width', session.sizes.width, rx);
-  scaleLength(session.svg, 'height', session.sizes.height, ry);
+  scaleLength(session.svg, 'width', session.sizes.width, next.w / vb.w);
+  scaleLength(session.svg, 'height', session.sizes.height, next.h / vb.h);
   const maxWidth = session.sizes.maxWidth.match(new RegExp(String.raw`^\s*(${NUM})px\s*$`));
-  if (maxWidth !== null) session.svg.style.maxWidth = `${round2(Number(maxWidth[1]) * rx)}px`;
+  if (maxWidth !== null) {
+    session.svg.style.maxWidth = `${round2(Number(maxWidth[1]) * (next.w / vb.w))}px`;
+  }
   return true;
+}
+
+function setOrRemove(svg: SVGSVGElement, name: string, value: string | null): void {
+  if (value === null) svg.removeAttribute(name);
+  else svg.setAttribute(name, value);
 }
 
 /**
@@ -489,6 +660,19 @@ function scaleLength(svg: SVGSVGElement, name: string, base: string | null, rati
   svg.setAttribute(name, `${round2(Number(m[1]) * ratio)}${m[2] ?? ''}`);
 }
 
+/**
+ * Re-reads the client<->plane map so the batch about to run composes it with
+ * element CTMs measured in the SAME frame. False when the svg has become
+ * unmeasurable (detached, hidden) — in which case the batch writes nothing at
+ * all rather than writing through a stale map.
+ */
+function refreshFrame(session: ManualLayoutSession): boolean {
+  const frame = measurePlaneFrame(session.svg);
+  if (frame === null) return false;
+  session.frame = frame;
+  return true;
+}
+
 /** Moves one node and re-routes its incident bound edges (drag frames). */
 export function moveNode(
   session: ManualLayoutSession,
@@ -498,6 +682,7 @@ export function moveNode(
 ): void {
   const el = binding.nodeEls.get(id);
   if (el === undefined) return;
+  if (!refreshFrame(session)) return;
   if (!setNodeTransform(session, el, id, centre)) return;
   for (const bound of binding.edgeEls) {
     if (bound.from === id || bound.to === id) rerouteEdge(session, bound);
@@ -515,6 +700,7 @@ export function applyManualLayout(
   binding: FlowchartSvgBinding,
   positions: ReadonlyMap<string, Pt>,
 ): void {
+  if (!refreshFrame(session)) return;
   for (const [id, pt] of positions) {
     const el = binding.nodeEls.get(id);
     if (el !== undefined) setNodeTransform(session, el, id, pt);

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Entry } from '@/engine/types';
 import { CanvasViewport } from './CanvasViewport';
 import { CodeOverlay } from './CodeOverlay';
 import { DiagramToolbar } from './DiagramToolbar';
+import type { NodePlacer } from './flowchart/StructuralEditor';
 import { StructuralEditor } from './flowchart/StructuralEditor';
 import { parseFlowchart } from './flowchart/model';
 import { renderMermaid } from './render';
@@ -100,12 +101,19 @@ export function FullScreenDiagramEditor({
   // The read-only face is only mounted in code mode, so the ref is null the
   // rest of the time — StructuralEditor strips its own svg during binding.
   const readOnlyRef = useInertDiagramLinks<HTMLDivElement>(view.svg);
+  /**
+   * The toolbar mints nodes; only the editor beside it has measured the canvas
+   * well enough to place one. This ref is the whole contract between them —
+   * filled while manual mode is on, null otherwise (M29.42 review).
+   */
+  const placerRef = useRef<NodePlacer | null>(null);
 
   return (
     <div data-testid="fullscreen-diagram-editor" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <DiagramToolbar
         code={code}
         onChangeCode={onChangeCode}
+        placerRef={placerRef}
         title={title}
         mode={mode}
         showCode={showCode}
@@ -131,6 +139,7 @@ export function FullScreenDiagramEditor({
               toolbar={false}
               entries={entries}
               onOpenPath={onOpenPath}
+              placerRef={placerRef}
             />
           ) : (
             <div

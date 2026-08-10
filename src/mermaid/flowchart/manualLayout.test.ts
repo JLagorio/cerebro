@@ -9,6 +9,7 @@ import {
   clientDeltaToPlane,
   clientToPlane,
   growViewBox,
+  measurePlaneFrame,
   moveNode,
   rectBorderPoint,
 } from './manualLayout';
@@ -233,9 +234,9 @@ describe('clientToPlane', () => {
     stubRect(host.querySelector('#flowchart-B-1')!, { left: 240, top: 130, width: 40, height: 40 });
     const model = parseFlowchart(CODE)!;
     const session = beginManualLayout(host, bindFlowchartSvg(host, model))!;
-    expect(clientToPlane(session, { x: 140, y: 110 })).toEqual({ x: 50, y: 50 });
+    expect(clientToPlane(session.frame, { x: 140, y: 110 })).toEqual({ x: 50, y: 50 });
     // A DELTA is origin-free, which is what makes it survive a viewBox growth.
-    expect(clientDeltaToPlane(session, { x: 20, y: 10 })).toEqual({ x: 10, y: 5 });
+    expect(clientDeltaToPlane(session.frame, { x: 20, y: 10 })).toEqual({ x: 10, y: 5 });
   });
 });
 
@@ -471,5 +472,305 @@ describe('applyStoredManualLayout', () => {
     expect(host.querySelector('#flowchart-A-0')!.getAttribute('transform')).toBe(
       'translate(30, 20)',
     );
+  });
+});
+
+/**
+ * A BROWSER-FAITHFUL harness (M29.42 review). The fixtures above plant CONSTANT
+ * matrices, and a constant matrix cannot see the defect that shipped: it never
+ * changes when `growViewBox` rewrites the viewBox, so a pinned svg CTM and a
+ * live element CTM stay accidentally consistent. Here `getScreenCTM` and
+ * `getBoundingClientRect` are FUNCTIONS of the current DOM — recomputed on
+ * every call from the live viewBox, the live max-width, the container width
+ * (so fit-to-width is modelled), and the ancestor transform chain — exactly as
+ * a real browser computes them.
+ */
+interface Viewport {
+  left: number;
+  top: number;
+  /** The container. An svg whose max-width exceeds it is fitted, not clipped. */
+  width: number;
+}
+
+/** One element's LOCAL geometry: half extents, and its box's offset from the group origin. */
+interface LocalBox {
+  hw: number;
+  hh: number;
+  ox?: number;
+  oy?: number;
+}
+
+type M6 = { a: number; b: number; c: number; d: number; e: number; f: number };
+const M_ID: M6 = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+
+function m6(m: M6, n: M6): M6 {
+  return {
+    a: m.a * n.a + m.c * n.b,
+    b: m.b * n.a + m.d * n.b,
+    c: m.a * n.c + m.c * n.d,
+    d: m.b * n.c + m.d * n.d,
+    e: m.a * n.e + m.c * n.f + m.e,
+    f: m.b * n.e + m.d * n.f + m.f,
+  };
+}
+
+function transformMat(text: string | null): M6 {
+  let m = M_ID;
+  if (text === null) return m;
+  const re = /(translate|scale)\(\s*(-?[\d.]+(?:e-?\d+)?)(?:[\s,]+(-?[\d.]+(?:e-?\d+)?))?\s*\)/g;
+  for (let hit = re.exec(text); hit !== null; hit = re.exec(text)) {
+    const p = Number(hit[2]);
+    const q = hit[3] === undefined ? (hit[1] === 'scale' ? p : 0) : Number(hit[3]);
+    m = m6(m, hit[1] === 'translate' ? { ...M_ID, e: p, f: q } : { ...M_ID, a: p, d: q });
+  }
+  return m;
+}
+
+function domRect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    left,
+    top,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+/**
+ * @param ctm false plants ONLY the rects — the no-`getScreenCTM` fallback arm,
+ *   but with rects that move when the DOM does, which plain jsdom stubs never
+ *   do and which is what makes a cross-session test mean anything.
+ */
+function plantLiveGeometry(
+  host: HTMLElement,
+  viewport: Viewport,
+  locals: Record<string, LocalBox>,
+  opts: { ctm?: boolean } = {},
+): void {
+  const svg = host.querySelector('svg')!;
+  const vbNow = () =>
+    (svg.getAttribute('viewBox') ?? '0 0 1 1')
+      .trim()
+      .split(/[\s,]+/)
+      .map(Number);
+  const svgMat = (): M6 => {
+    const [x, y, w] = vbNow();
+    const declared = Number.parseFloat(svg.style.maxWidth);
+    const natural = Number.isFinite(declared) ? declared : w;
+    const s = Math.min(natural, viewport.width) / w;
+    return { a: s, b: 0, c: 0, d: s, e: viewport.left - x * s, f: viewport.top - y * s };
+  };
+  const chain = (el: Element): M6 => {
+    let m = M_ID;
+    for (let cur: Element | null = el; cur !== null && cur !== (svg as Element);) {
+      m = m6(transformMat(cur.getAttribute('transform')), m);
+      cur = cur.parentElement;
+    }
+    return m;
+  };
+  const ctmOf = (el: Element): M6 => (el === svg ? svgMat() : m6(svgMat(), chain(el)));
+  const rectOf = (el: Element): DOMRect => {
+    const m = ctmOf(el);
+    if (el === svg) {
+      const [, , w, h] = vbNow();
+      return domRect(viewport.left, viewport.top, w * m.a, h * m.d);
+    }
+    const local = locals[el.id];
+    if (local === undefined) return domRect(0, 0, 0, 0);
+    const w = 2 * local.hw * m.a;
+    const h = 2 * local.hh * m.d;
+    const cx = m.e + (local.ox ?? 0) * m.a;
+    const cy = m.f + (local.oy ?? 0) * m.d;
+    return domRect(cx - w / 2, cy - h / 2, w, h);
+  };
+  for (const el of [svg as Element, ...svg.querySelectorAll('*')]) {
+    Object.assign(el, { getBoundingClientRect: () => rectOf(el) });
+    if (opts.ctm !== false) Object.assign(el, { getScreenCTM: () => ctmOf(el) });
+  }
+}
+
+const NODES_20 = {
+  'flowchart-A-0': { hw: 10, hh: 10 },
+  'flowchart-B-1': { hw: 10, hh: 10 },
+};
+
+function liveSetup(viewport: Viewport, opts: { ctm?: boolean } = {}) {
+  const host = mount(SVG);
+  plantLiveGeometry(host, viewport, NODES_20, opts);
+  const model = parseFlowchart(CODE)!;
+  const binding = bindFlowchartSvg(host, model);
+  const session = beginManualLayout(host, binding)!;
+  return { host, binding, session, svg: host.querySelector('svg')! };
+}
+
+const manualCode = (x: number): string =>
+  `flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A ${x},20\n  A[Start] --> B[End]\n  B --> C[Ghost]`;
+
+describe('the write frame is LIVE, the gesture frame is PINNED', () => {
+  it('a growth that moves the viewBox origin does not displace the next frame', () => {
+    // Wide container: the grown svg is shown at size, so the origin moves and
+    // the scale does not — the cleanest possible view of the frame-mixing bug.
+    const { host, binding, session, svg } = liveSetup({ left: 0, top: 0, width: 10_000 });
+    expect(session.exact).toBe(true);
+
+    moveNode(session, binding, 'A', { x: -50, y: 20 });
+    expect(svg.getAttribute('viewBox')).toBe('-68 0 268 100');
+    expect(host.querySelector('#L_A_B_0')!.getAttribute('d')).toBe('M-40,22.78L120,67.22');
+
+    moveNode(session, binding, 'A', { x: -60, y: 20 });
+    expect(host.querySelector('#flowchart-A-0')!.getAttribute('transform')).toBe(
+      'translate(30, 20) translate(-90, 0)',
+    );
+    // Composing a PINNED svg CTM with LIVE element CTMs wrote M-118,22.63L52,67.37
+    // here — the truth displaced by exactly the -68 the first growth moved the
+    // viewBox origin, growing with every further frame until the edge had slid
+    // right off its own nodes.
+    expect(host.querySelector('#L_A_B_0')!.getAttribute('d')).toBe('M-50,22.63L120,67.37');
+    expect(
+      host.querySelector('g.label[data-id="L_A_B_0"]')!.parentElement!.getAttribute('transform'),
+    ).toBe('translate(35, 45)');
+  });
+
+  it('and does not displace it when the growth changes the SCALE instead', () => {
+    // Narrow container: the grown svg fits to width, so every element CTM
+    // rescales under us. Same writes, same truth.
+    const { host, binding, session } = liveSetup({ left: 0, top: 0, width: 200 });
+    moveNode(session, binding, 'A', { x: -50, y: 20 });
+    moveNode(session, binding, 'A', { x: -60, y: 20 });
+    expect(host.querySelector('#flowchart-A-0')!.getAttribute('transform')).toBe(
+      'translate(30, 20) translate(-90, 0)',
+    );
+    expect(host.querySelector('#L_A_B_0')!.getAttribute('d')).toBe('M-50,22.63L120,67.37');
+  });
+
+  it('measurePlaneFrame re-reads the map — which is why a gesture pins its own', () => {
+    const { binding, session, svg } = liveSetup({ left: 0, top: 0, width: 200 });
+    const pinned = measurePlaneFrame(svg)!;
+    expect(pinned.scale).toBe(1);
+
+    moveNode(session, binding, 'A', { x: 280, y: 20 }); // grows to 298 wide
+    const after = measurePlaneFrame(svg)!;
+    expect(after.scale).toBeCloseTo(200 / 298, 6);
+
+    // The gesture's contract: 60 client px is 60 plane units for the WHOLE
+    // drag, however much the box grew underneath it. Re-reading mid-gesture is
+    // what makes a drag chase its own tail.
+    expect(clientDeltaToPlane(pinned, { x: 60, y: 0 })).toEqual({ x: 60, y: 0 });
+    expect(clientDeltaToPlane(after, { x: 60, y: 0 }).x).toBeCloseTo((60 * 298) / 200, 6);
+  });
+});
+
+describe('a session begun over an ALREADY-TRANSFORMED dom', () => {
+  it('still moves the node, and neither the transform nor the box ratchets', () => {
+    const host = mount(SVG);
+    plantLiveGeometry(host, { left: 0, top: 0, width: 10_000 }, NODES_20);
+    const svg = host.querySelector('svg')!;
+    const a = () => host.querySelector('#flowchart-A-0')!.getAttribute('transform')!;
+
+    applyStoredManualLayout(host, manualCode(280));
+    expect(a()).toBe('translate(30, 20) translate(250, 0)');
+    const grown = svg.getAttribute('viewBox');
+    expect(grown).toBe('0 0 298 100');
+
+    // Second session: `base` is now a CHAIN. Reading only a lone translate here
+    // froze the node at its first drop point, and reading the grown box as the
+    // floor ratcheted it (measured 298 -> 440.1 -> 646.15).
+    applyStoredManualLayout(host, manualCode(50));
+    expect(a()).toBe('translate(280, 20) translate(-230, 0)');
+    expect(svg.getAttribute('viewBox')).toBe('0 0 200 100');
+
+    applyStoredManualLayout(host, manualCode(280));
+    expect(a()).toBe('translate(50, 20) translate(230, 0)');
+    expect(svg.getAttribute('viewBox')).toBe(grown);
+    // Never more than mermaid's own translate plus ours, however many sessions.
+    expect(a().match(/translate\(/g)).toHaveLength(2);
+  });
+
+  it('moves the node on the no-CTM fallback arm too', () => {
+    // The arm jsdom takes, but with rects that MOVE when the transform does.
+    const host = mount(SVG);
+    plantLiveGeometry(host, { left: 0, top: 0, width: 10_000 }, NODES_20, { ctm: false });
+    applyStoredManualLayout(host, manualCode(280));
+    applyStoredManualLayout(host, manualCode(50));
+    expect(host.querySelector('#flowchart-A-0')!.getAttribute('transform')).toBe(
+      'translate(280, 20) translate(-230, 0)',
+    );
+  });
+});
+
+describe('the node CENTRE is the group origin, not the bounding box centre', () => {
+  it('reads the origin even when the rendered box hangs off to one side', () => {
+    const host = mount(SVG);
+    // A's rendered box sits 20 plane units RIGHT of its group origin — an icon,
+    // a decoration, anything asymmetric. The origin is what mermaid positions
+    // and what `%% cerebro:pos` means, so it is what we must read back.
+    plantLiveGeometry(
+      host,
+      { left: 0, top: 0, width: 10_000 },
+      {
+        'flowchart-A-0': { hw: 10, hh: 10, ox: 20 },
+        'flowchart-B-1': { hw: 10, hh: 10 },
+      },
+    );
+    const model = parseFlowchart(CODE)!;
+    const binding = bindFlowchartSvg(host, model);
+    const session = beginManualLayout(host, binding)!;
+    // The bbox centre is (50, 20); the origin — the answer — is (30, 20).
+    expect(session.auto.get('A')).toEqual({ x: 30, y: 20 });
+
+    moveNode(session, binding, 'A', { x: 50, y: 20 });
+    expect(host.querySelector('#flowchart-A-0')!.getAttribute('transform')).toBe(
+      'translate(30, 20) translate(20, 0)',
+    );
+  });
+});
+
+describe('growth is capped', () => {
+  it('clips a runaway position rather than shrinking the whole diagram to nothing', () => {
+    const { binding, session, svg } = liveSetup({ left: 0, top: 0, width: 200 });
+    // A hand-edited or badly-merged `%% cerebro:pos A 100000,20`.
+    moveNode(session, binding, 'A', { x: 100_000, y: 20 });
+    // Uncapped this is a ~100000-unit box, every real node sub-pixel, the
+    // diagram blank. Capped, the outlier clips — the no-growth behaviour.
+    expect(svg.getAttribute('viewBox')).toBe('0 0 500 100');
+    expect(svg.style.maxWidth).toBe('500px');
+  });
+});
+
+describe('applyManualLayout straightens EVERY bound edge', () => {
+  it('including edges whose endpoints are both unstored', () => {
+    const { host, binding, session } = liveSetup({ left: 0, top: 0, width: 10_000 });
+    applyManualLayout(session, binding, new Map());
+    // Nothing moved, but manual mode is one consistent look: mermaid's curve is
+    // replaced by the straight segment between the auto positions.
+    expect(host.querySelector('#L_A_B_0')!.getAttribute('d')).toBe('M40,25L120,65');
+  });
+});
+
+describe('the last two honest-degradation cases', () => {
+  it('leaves an edge alone when both nodes sit on the same spot', () => {
+    const { host, binding, session } = liveSetup({ left: 0, top: 0, width: 10_000 });
+    moveNode(session, binding, 'A', { x: 130, y: 70 }); // exactly onto B
+    // A straight router has no direction here: M x,y L x,y draws nothing and
+    // leaves the arrowhead unoriented. Mermaid's curve is the better answer.
+    expect(host.querySelector('#L_A_B_0')!.getAttribute('d')).toBe('M30,25C60,30 90,50 120,65');
+  });
+
+  it('restores mermaid own viewBox string byte for byte, not to two decimals', () => {
+    const host = mount(SVG.replace('viewBox="0 0 200 100"', 'viewBox="0 0 148.625 100.3125"'));
+    plantLiveGeometry(host, { left: 0, top: 0, width: 10_000 }, NODES_20);
+    const svg = host.querySelector('svg')!;
+    const model = parseFlowchart(CODE)!;
+    const binding = bindFlowchartSvg(host, model);
+    const session = beginManualLayout(host, binding)!;
+    moveNode(session, binding, 'A', { x: 300, y: 20 }); // out, and back
+    expect(svg.getAttribute('viewBox')).not.toBe('0 0 148.625 100.3125');
+    moveNode(session, binding, 'A', { x: 30, y: 20 });
+    expect(svg.getAttribute('viewBox')).toBe('0 0 148.625 100.3125');
+    expect(svg.style.maxWidth).toBe('200px');
   });
 });

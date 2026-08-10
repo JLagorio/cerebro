@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { Entry } from '@/engine/types';
 import { useCanvasTransformRef } from '../CanvasViewport';
@@ -14,7 +14,9 @@ import {
   beginManualLayout,
   clientDeltaToPlane,
   clientToPlane,
+  measurePlaneFrame,
   moveNode,
+  type PlaneFrame,
   type ManualLayoutSession,
 } from './manualLayout';
 import {
@@ -53,6 +55,9 @@ import { bindFlowchartSvg, NODE_GROUP_SELECTOR, type FlowchartSvgBinding } from 
 
 const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
 
+/** Gives a just-minted node a manual position. See `StructuralEditor.placerRef`. */
+export type NodePlacer = (model: FlowchartModel, id: string) => FlowchartModel;
+
 /**
  * How far a press has to travel before it stops being a click and becomes a
  * manual-mode move. Client pixels, deliberately not plane units: this is about
@@ -79,6 +84,7 @@ export function StructuralEditor({
   toolbar = true,
   entries,
   onOpenPath,
+  placerRef,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
@@ -97,6 +103,13 @@ export function StructuralEditor({
   entries?: Entry[];
   /** What a record badge click does — hosts pass useOpenPath('in-place'). */
   onOpenPath?: (path: string) => void;
+  /**
+   * Filled with a placement function while manual mode is on, so a host that
+   * mints nodes from its OWN chrome (DiagramToolbar, on the full-screen
+   * surface) can give them a position instead of leaving them to auto layout.
+   * Null whenever there is nothing measured to place against.
+   */
+  placerRef?: MutableRefObject<NodePlacer | null>;
 }) {
   const model = useMemo(() => parseFlowchart(code), [code]);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -143,8 +156,17 @@ export function StructuralEditor({
     from: { x: number; y: number };
     /** The pointer position when the press landed, in client px. */
     startClient: { x: number; y: number };
+    /**
+     * The client<->plane map as it was at POINTERDOWN, pinned for the whole
+     * gesture. Not the session's: that one is re-read per write batch (it has
+     * to be — see manualLayout's docstring), and re-deriving the cursor against
+     * a box `moveNode` just grew is what makes a drag chase its own tail.
+     */
+    frame: PlaneFrame;
     /** Set once the pointer has travelled far enough to stop being a click. */
     moved: boolean;
+    /** Set once a frame actually PLACED the node — see the pointerup handler. */
+    placed: boolean;
   } | null>(null);
 
   // Inside a CanvasViewport the host is scaled, and getBoundingClientRect
@@ -258,13 +280,66 @@ export function StructuralEditor({
     if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
     const box = session.boxes.get(id);
     if (box === undefined) return;
+    // Measured HERE, not inherited from the bind effect. CanvasViewport's
+    // initialFit runs off a ResizeObserver, i.e. after beginManualLayout, and
+    // every wheel-zoom moves the map again without re-rendering this component
+    // (the transform arrives through a ref context on purpose) — so a gesture
+    // that trusted the bind-time map dragged at the wrong ratio on the first
+    // drag after opening full-screen, and after every zoom until the next
+    // model change.
+    const frame = measurePlaneFrame(session.svg);
+    if (frame === null) return;
     moveGesture.current = {
       id,
       from: { x: box.cx, y: box.cy },
       startClient: { x: e.clientX, y: e.clientY },
+      frame,
       moved: false,
+      placed: false,
     };
   }, []);
+
+  /**
+   * Gives an ALREADY-MINTED node a position, when the canvas is measurable.
+   *
+   * `at` is where the user put it, in client px — the drop point of a connect
+   * gesture that landed on empty canvas. Without one (a toolbar button, which
+   * points at nowhere in particular) the node goes to the centre of what the
+   * user can actually see: the host's box clipped to the window, so a node
+   * minted while the canvas is scrolled or zoomed lands in view rather than at
+   * some remembered origin. An unmeasurable host (jsdom, a hidden panel) keeps
+   * the node unpositioned — auto layout places it, which is a worse answer than
+   * a chosen position and a better one than a guessed one.
+   *
+   * It is its own function because the other caller is `DiagramToolbar` — a
+   * sibling component, on the full-screen surface, which is where manual layout
+   * actually gets used and where `+ Node` therefore must not drop nodes at
+   * whatever auto layout picks. It reaches this through `placerRef`, since only
+   * the editor holds the measured session.
+   */
+  const positionNewNode = useCallback(
+    (base: FlowchartModel, id: string, at?: { x: number; y: number }): FlowchartModel => {
+      const session = manualRef.current;
+      const host = hostRef.current;
+      if (session === null || host === null) return base;
+      let client = at;
+      if (client === undefined || !Number.isFinite(client.x) || !Number.isFinite(client.y)) {
+        const rect = host.getBoundingClientRect();
+        const left = Math.max(rect.left, 0);
+        const top = Math.max(rect.top, 0);
+        client = {
+          x: left + Math.min(rect.width, Math.max(window.innerWidth - left, 0)) / 2,
+          y: top + Math.min(rect.height, Math.max(window.innerHeight - top, 0)) / 2,
+        };
+      }
+      // Fresh, for the same reason beginMove measures its own: a zoom or a fit
+      // since the bind effect would otherwise drop the node somewhere else.
+      const frame = measurePlaneFrame(session.svg);
+      if (frame === null) return base;
+      return setNodePosition(base, id, clientToPlane(frame, client));
+    },
+    [],
+  );
 
   /**
    * `addNode`, plus a position when manual mode is on — composed into the SAME
@@ -272,37 +347,26 @@ export function StructuralEditor({
    * so the node carries a position from the moment it exists. Positioning it
    * after a measure pass instead would draw it at mermaid's auto spot for one
    * render and teleport it on the next.
-   *
-   * `at` is where the user put it, in client px — the drop point of a connect
-   * gesture that landed on empty canvas. Without one (a toolbar button, which
-   * points at nowhere in particular) the node goes to the centre of what the
-   * user can actually see: the host's box clipped to the window, so a node
-   * minted while the canvas is scrolled or zoomed lands in view rather than at
-   * some remembered origin. An unmeasurable host (jsdom, a hidden panel)
-   * degenerates to the plane origin — a position like any other, and still
-   * better than none.
    */
   const addNodeForMode = (
     base: FlowchartModel,
     at?: { x: number; y: number },
   ): { model: FlowchartModel; id: string } => {
     const added = addNode(base, 'New step');
-    const session = manualRef.current;
-    const host = hostRef.current;
-    if (!manual || session === null || host === null) return added;
-    let client = at;
-    if (client === undefined || !Number.isFinite(client.x) || !Number.isFinite(client.y)) {
-      const rect = host.getBoundingClientRect();
-      const left = Math.max(rect.left, 0);
-      const top = Math.max(rect.top, 0);
-      client = {
-        x: left + Math.min(rect.width, Math.max(window.innerWidth - left, 0)) / 2,
-        y: top + Math.min(rect.height, Math.max(window.innerHeight - top, 0)) / 2,
-      };
-    }
-    const pos = clientToPlane(session, client);
-    return { model: setNodePosition(added.model, added.id, pos), id: added.id };
+    if (!manual) return added;
+    return { model: positionNewNode(added.model, added.id, at), id: added.id };
   };
+
+  // The sibling toolbar's handle on the placement above. A ref, not a prop
+  // callback: the toolbar renders from the same `code` but has no session of
+  // its own, and nothing about this may cost a render.
+  useEffect(() => {
+    if (placerRef === undefined) return;
+    placerRef.current = manual ? (base, id) => positionNewNode(base, id) : null;
+    return () => {
+      placerRef.current = null;
+    };
+  }, [placerRef, manual, positionNewNode]);
 
   // Every popover keys off line/segment indices captured from a PAST render
   // of `code`. A code change — whether from an edit made here or from
@@ -361,6 +425,10 @@ export function StructuralEditor({
       // hole the moment one mounts this editor ungated. Idempotent: the second
       // pass inside the binding finds nothing left to remove.
       neutralizeDiagramLinks(hostRef.current);
+      // Before the early return, not after: the svg this session measured has
+      // just been replaced, so every box in it now describes a picture that is
+      // gone. A gesture reading it would move a node against stale geometry.
+      manualRef.current = null;
       if (model === null) return;
       const binding = bindFlowchartSvg(hostRef.current, model);
       bindingRef.current = binding;
@@ -505,7 +573,6 @@ export function StructuralEditor({
       // getBoundingClientRect — placing them first would pin every badge to the
       // position mermaid's auto layout chose and leave them stranded there. The
       // session is kept so a drag can move a node without re-measuring.
-      manualRef.current = null;
       const manualHost = hostRef.current;
       if (manualHost !== null && isManualLayout(model)) {
         const session = beginManualLayout(manualHost, binding);
@@ -558,6 +625,9 @@ export function StructuralEditor({
     });
     return () => {
       stale = true;
+      // Nothing may hold geometry for a picture this effect is done with —
+      // including on unmount, where there is no next pass to clear it.
+      manualRef.current = null;
     };
     // transformRef comes from context, so exhaustive-deps cannot see it is a
     // ref and asks for it by name. Harmless to give it: the provider's object
@@ -596,13 +666,13 @@ export function StructuralEditor({
           if (Math.hypot(dx, dy) < MOVE_THRESHOLD_PX) return;
           gesture.moved = true;
         }
-        const delta = clientDeltaToPlane(session, { x: dx, y: dy });
+        const delta = clientDeltaToPlane(gesture.frame, { x: dx, y: dy });
         // Transform + incident-edge writes only: no React state, no model
         // churn, nothing that could re-render this component mid-gesture.
-        moveNode(session, binding, gesture.id, {
-          x: gesture.from.x + delta.x,
-          y: gesture.from.y + delta.y,
-        });
+        const target = { x: gesture.from.x + delta.x, y: gesture.from.y + delta.y };
+        moveNode(session, binding, gesture.id, target);
+        const box = session.boxes.get(gesture.id);
+        gesture.placed ||= box !== undefined && box.cx === target.x && box.cy === target.y;
         return;
       }
       if (dragFrom.current === null) return;
@@ -625,7 +695,11 @@ export function StructuralEditor({
         // dealt with it. No edit, therefore no undo step for a still hand.
         if (!gesture.moved) return;
         const session = manualRef.current;
-        const box = session === null ? undefined : session.boxes.get(gesture.id);
+        // `moved` only says the POINTER travelled. When every frame refused —
+        // a space we cannot map, a node we could not measure — `setNodeTransform`
+        // left the box alone, and writing it here would spend an undo step
+        // pinning the node at the auto centre it never left.
+        const box = session === null || !gesture.placed ? undefined : session.boxes.get(gesture.id);
         // THE one model write of the entire drag — one onChangeCode, one undo
         // step — taken from the box the frames have been mutating, i.e. from
         // where the node actually is on screen rather than from where the last
@@ -895,7 +969,10 @@ export function StructuralEditor({
         <div
           ref={hostRef}
           data-testid="structural-host"
-          className="[&_svg]:h-auto [&_svg]:max-w-full"
+          // select-none: a manual-mode drag across labels otherwise paints the
+          // whole diagram in selection highlight. CanvasViewport carries the
+          // same pair for the full-screen surface; this is the inline one.
+          className="select-none [&_svg]:h-auto [&_svg]:max-w-full"
         />
 
         {ghost !== null && (

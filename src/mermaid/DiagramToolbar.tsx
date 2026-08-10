@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { Button } from '@/components/ui/Button';
 import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
@@ -12,6 +12,7 @@ import {
   setNodeShape,
 } from './flowchart/ops';
 import { ShapePalette } from './flowchart/ShapePalette';
+import type { NodePlacer } from './flowchart/StructuralEditor';
 import { copyPng, copySvg, savePng } from './export';
 import { renderMermaid } from './render';
 
@@ -38,6 +39,7 @@ const TEXT_BTN =
 export function DiagramToolbar({
   code,
   onChangeCode,
+  placerRef,
   title,
   mode,
   showCode,
@@ -46,6 +48,15 @@ export function DiagramToolbar({
 }: {
   code: string;
   onChangeCode: (code: string) => void;
+  /**
+   * The visual editor's manual-layout placement, when one is mounted beside
+   * this toolbar and manual mode is on (M29.42 review). `+ Node` and `+ Shape`
+   * here are the ONLY node-creation UI on the full-screen surface — which is
+   * the surface manual layout is actually used on — so without this they mint
+   * nodes that land wherever auto layout puts them while every other node
+   * stays pinned. Absent, or null, means auto mode: nothing to place against.
+   */
+  placerRef?: MutableRefObject<NodePlacer | null>;
   /**
    * For hosts with no chrome of their own (Stage H's WhiteboardView). The page
    * header and the block dialog already name the diagram, so both omit it.
@@ -107,7 +118,10 @@ export function DiagramToolbar({
           <button
             type="button"
             aria-label="Add node"
-            onClick={() => apply(addNode(model, 'New step').model)}
+            onClick={() => {
+              const added = addNode(model, 'New step');
+              apply(placerRef?.current?.(added.model, added.id) ?? added.model);
+            }}
             className={TEXT_BTN}
           >
             + Node
@@ -150,7 +164,8 @@ export function DiagramToolbar({
                   // emitted, so Cmd+Z takes the whole insertion back instead of
                   // leaving a stray node of the wrong shape behind.
                   const added = addNode(model, 'New step');
-                  apply(setNodeShape(added.model, added.id, name));
+                  const shaped = setNodeShape(added.model, added.id, name);
+                  apply(placerRef?.current?.(shaped, added.id) ?? shaped);
                 }}
                 onClose={() => setInsertOpen(false)}
               />

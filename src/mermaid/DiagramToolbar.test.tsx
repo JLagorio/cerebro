@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useUiStore } from '@/stores/uiStore';
 import { DiagramToolbar } from './DiagramToolbar';
+import type { FlowchartModel } from './flowchart/model';
+import { setNodePosition } from './flowchart/ops';
 
 vi.mock('./render', () => ({
   renderMermaid: vi.fn().mockResolvedValue({ ok: true, svg: '<svg data-fake="t"></svg>' }),
@@ -211,5 +213,43 @@ describe('DiagramToolbar', () => {
     // cancelled save, and only this asserts the distinction is still there.
     await waitFor(() => expect(vi.mocked(savePng)).toHaveBeenCalled());
     expect(useUiStore.getState().toasts).toEqual([]);
+  });
+});
+
+/**
+ * `+ Node` and `+ Shape` here are the ONLY node-creation UI on the full-screen
+ * surface (that host mounts `StructuralEditor toolbar={false}`), and that is
+ * the surface manual layout is actually used on — so both have to route
+ * through the editor's placement or every node minted there lands wherever
+ * auto layout put it while its neighbours stay pinned (M29.42 review).
+ */
+describe('DiagramToolbar places new nodes in manual mode', () => {
+  const MANUAL = 'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]';
+  const placerAt = (x: number, y: number) => ({
+    current: (model: FlowchartModel, id: string) => setNodePosition(model, id, { x, y }),
+  });
+
+  it('+ Node asks the editor beside it for a position', async () => {
+    const onChangeCode = mount({ code: MANUAL, placerRef: placerAt(40, 60) });
+    await userEvent.click(screen.getByRole('button', { name: 'Add node' }));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    const out = onChangeCode.mock.calls[0][0] as string;
+    expect(out).toMatch(/%% cerebro:pos .*n1 40,60/);
+  });
+
+  it('+ Shape does too, in the same single edit', async () => {
+    const onChangeCode = mount({ code: MANUAL, placerRef: placerAt(40, 60) });
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Hexagon' }));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    const out = onChangeCode.mock.calls[0][0] as string;
+    expect(out).toMatch(/%% cerebro:pos .*n1 40,60/);
+    expect(out).toContain('n1{{New step}}');
+  });
+
+  it('mints a plain node when nothing beside it is measuring (auto mode)', async () => {
+    const onChangeCode = mount({ code: MANUAL, placerRef: { current: null } });
+    await userEvent.click(screen.getByRole('button', { name: 'Add node' }));
+    expect(onChangeCode.mock.calls[0][0]).not.toContain('cerebro:pos');
   });
 });
