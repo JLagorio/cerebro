@@ -13,6 +13,7 @@ import {
   parseFlowchart,
   parseNodeToken,
   serialize,
+  subgraphs,
   withMetaEntry,
   type EdgeHead,
   type EdgeStroke,
@@ -988,5 +989,229 @@ describe('click lines', () => {
 
   it('round-trips click lines byte-identically when untouched', () => {
     expect(serialize(parseFlowchart(SRC)!)).toBe(SRC);
+  });
+});
+
+const SUBS = [
+  'flowchart TD',
+  '  subgraph ops[Operations Zone]',
+  '    direction LR',
+  '    A[Start] --> B',
+  '  end',
+  '  subgraph Alpha',
+  '    C',
+  '  end',
+  '  subgraph Outer Zone',
+  '    D --> E',
+  '    subgraph Inner Zone',
+  '      F',
+  '    end',
+  '  end',
+  '  B --> C',
+].join('\n');
+
+describe('subgraph-start parsing', () => {
+  it('splits the explicit id[Title] form and strips label quotes', () => {
+    const m = parseFlowchart('flowchart TD\n  subgraph s1["Quoted title"]\n  end')!;
+    expect(m.lines[1].parsed).toEqual({ kind: 'subgraph-start', id: 's1', title: 'Quoted title' });
+  });
+
+  it('keeps plain titles whole with a null id', () => {
+    const m = parseFlowchart(SUBS)!;
+    expect(m.lines[5].parsed).toEqual({ kind: 'subgraph-start', id: null, title: 'Alpha' });
+    expect(m.lines[8].parsed).toEqual({ kind: 'subgraph-start', id: null, title: 'Outer Zone' });
+  });
+
+  // MEASURED on 11.16.0: `subgraph s1 [T]` and `subgraph  s1[T]` both resolve
+  // to id `s1` — addSubGraph does `_id.text.trim()` and the lexer's
+  // `subgraph\b` rule leaves the padding to the whitespace token.
+  it('tolerates the padding mermaid tolerates around an explicit id', () => {
+    for (const raw of ['subgraph s1[T]', 'subgraph s1 [T]', 'subgraph  s1[T]', 'subgraph\ts1[T]']) {
+      const m = parseFlowchart(`flowchart TD\n  ${raw}\n  end`)!;
+      expect([raw, m.lines[1].parsed]).toEqual([
+        raw,
+        { kind: 'subgraph-start', id: 's1', title: 'T' },
+      ]);
+    }
+  });
+
+  // MEASURED: the lexer hands addSubGraph the string WITHOUT its quotes, so
+  // `subgraph "Quoted"` is the id `Quoted`, not `"Quoted"`.
+  it('strips the quotes off a bare quoted title, as the lexer does', () => {
+    const m = parseFlowchart('flowchart TD\n  subgraph "Two Words"\n  end')!;
+    expect(m.lines[1].parsed).toEqual({ kind: 'subgraph-start', id: null, title: 'Two Words' });
+  });
+
+  // MEASURED: `end;`, `end ;` and `end;;` all close a block (the lexer rule is
+  // `end\b\s*` and `;` is its own separator token). Reading `end;` as opaque
+  // would leave our block stack unbalanced on a document that renders fine.
+  it('closes on the separator-suffixed end forms mermaid closes on', () => {
+    for (const raw of ['end', 'end ', 'end;', 'end ;', 'end;;']) {
+      const m = parseFlowchart(`flowchart TD\n  subgraph s1[T]\n    A\n  ${raw}`)!;
+      expect([raw, m.lines[3].parsed.kind]).toEqual([raw, 'subgraph-end']);
+    }
+  });
+
+  it('round-trips every form byte-identically when untouched', () => {
+    expect(serialize(parseFlowchart(SUBS)!)).toBe(SUBS);
+    for (const src of [
+      'flowchart TD\n  subgraph s1["Quoted title"]\n  end',
+      'flowchart TD\n  subgraph  Padded \n  end;',
+      'flowchart TD\n  subgraph "Two Words"\n    A\n  end ;',
+      'flowchart TD\n  subgraph s1 [T]\n  end',
+    ]) {
+      expect([src, serialize(parseFlowchart(src)!)]).toEqual([src, src]);
+    }
+  });
+});
+
+describe('subgraphs()', () => {
+  it('lists blocks with effective ids mirroring mermaid: explicit, single-word, generated-by-close-order', () => {
+    const subs = subgraphs(parseFlowchart(SUBS)!);
+    expect(subs.map((s) => s.id)).toEqual(['ops', 'Alpha', 'subGraph3', 'subGraph2']);
+    // Close order: ops closes first (ordinal 0), Alpha second (1), Inner
+    // closes BEFORE Outer (2), Outer last (3) — flowDb's subCount ticks once
+    // per addSubGraph and jison reduces a subgraph at its `end`. MEASURED
+    // against getSubGraphs() on 11.16.0 in subgraphs.mermaid.test.ts.
+    expect(subs.map((s) => s.title)).toEqual([
+      'Operations Zone',
+      'Alpha',
+      'Outer Zone',
+      'Inner Zone',
+    ]);
+  });
+
+  it('reports line ranges, members (inner claims win), and own-depth direction', () => {
+    const subs = subgraphs(parseFlowchart(SUBS)!);
+    const ops = subs[0];
+    expect(ops).toMatchObject({ startLine: 1, endLine: 4, direction: 'LR' });
+    expect(ops.memberIds).toEqual(['A', 'B']);
+    const outer = subs.find((s) => s.title === 'Outer Zone')!;
+    expect(outer.memberIds).toEqual(['D', 'E']); // F belongs to Inner, which closed first
+    expect(outer.direction).toBeNull();
+  });
+
+  // MEASURED, and it is the whole reason the id text is read off `raw`:
+  // addSubGraph zeroes the id when the UNTRIMMED text carries whitespace
+  // (`if (_id === _title && /\s/.exec(_title.text))`), so one trailing space
+  // turns `Alpha` into `subGraph0`. A trailing `\r` does not count — mermaid
+  // normalizes CRLF before it parses.
+  it('lets stray whitespace zero the id exactly where mermaid does', () => {
+    const cases: [string, string][] = [
+      ['subgraph Alpha', 'Alpha'],
+      ['subgraph Alpha ', 'subGraph0'],
+      ['subgraph Alpha\t', 'subGraph0'],
+      ['subgraph  Padded', 'subGraph0'],
+      ['subgraph "Solo"', 'Solo'],
+      ['subgraph "Two Words"', 'subGraph0'],
+      ['subgraph "Solo" ', 'subGraph0'],
+    ];
+    for (const [raw, id] of cases) {
+      const subs = subgraphs(parseFlowchart(`flowchart TD\n  ${raw}\n    A\n  end`)!);
+      expect([raw, subs.map((s) => s.id)]).toEqual([raw, [id]]);
+    }
+    const crlf = subgraphs(parseFlowchart('flowchart TD\r\n  subgraph Alpha\r\n    A\r\n  end')!);
+    expect(crlf.map((s) => s.id)).toEqual(['Alpha']);
+  });
+
+  // MEASURED: a `click` statement inside a block claims NO membership (the
+  // block's node list stays empty), and neither does a `style` line. Only
+  // node tokens, `@{ … }` meta and edge endpoints do.
+  it('claims membership from the same statements mermaid does — not click, not style', () => {
+    const src = [
+      'flowchart TD',
+      '  A',
+      '  B',
+      '  C',
+      '  subgraph s1[T]',
+      '    click A "a.md"',
+      '    style B fill:#f96',
+      '    C@{ shape: cyl }',
+      '  end',
+    ].join('\n');
+    expect(subgraphs(parseFlowchart(src)!)[0].memberIds).toEqual(['C']);
+  });
+
+  // MEASURED: the LAST own-depth direction line wins (`direction LR` then
+  // `direction BT` renders BT). Reading the first would point every control at
+  // a declaration that does not render.
+  it('reads the LAST own-depth direction line, ignoring nested depths', () => {
+    const src = [
+      'flowchart TD',
+      '  subgraph o[O]',
+      '    direction LR',
+      '    subgraph i[I]',
+      '      direction RL',
+      '      A',
+      '    end',
+      '    direction BT',
+      '  end',
+    ].join('\n');
+    const subs = subgraphs(parseFlowchart(src)!);
+    expect(subs.map((s) => [s.title, s.direction])).toEqual([
+      ['O', 'BT'],
+      ['I', 'RL'],
+    ]);
+  });
+
+  // MEASURED: mermaid's direction rule is `.*direction\s+LR[^\n]*` — the whole
+  // LINE, wherever the keyword sits. `direction LR %% note` really is the
+  // block's direction, and so is a node label that happens to contain it.
+  it('reads the loose direction forms mermaid lexes, not just the tidy one', () => {
+    for (const raw of ['direction LR %% note', 'direction LR;', 'xx direction LR']) {
+      const src = `flowchart TD\n  subgraph s[S]\n    ${raw}\n    A\n  end`;
+      expect([raw, subgraphs(parseFlowchart(src)!)[0].direction]).toEqual([raw, 'LR']);
+    }
+  });
+
+  it('an anonymous bare `subgraph` block consumes an end AND an ordinal, but is not listed', () => {
+    // MEASURED and worth stating plainly: an anonymous block is NOT valid
+    // mermaid on 11.16.0 — `addSubGraph` reads `_id.text` off undefined and
+    // the whole diagram dies. We still pair its `end` and let it take an
+    // ordinal, because miscounting would shift every generated id after it;
+    // on a document that cannot render, the choice is unobservable anyway.
+    const src = 'flowchart TD\n  subgraph\n    X\n  end\n  subgraph Two Words\n    Y\n  end';
+    const subs = subgraphs(parseFlowchart(src)!);
+    expect(subs).toHaveLength(1);
+    expect(subs[0].id).toBe('subGraph1'); // the anonymous block took subGraph0
+  });
+
+  // The explicit id charset is far wider than a node's: MEASURED, the id of
+  // `subgraph Two Words[T]` really is `Two Words`, spaces and all, because
+  // the zeroing rule only fires on the BARE form. Reading it as a bare title
+  // would mis-key the block AND cost the next generated id its ordinal.
+  it('keeps a spaced explicit id, and still counts it toward later ordinals', () => {
+    const src = 'flowchart TD\n  subgraph Two Words[T]\n    X\n  end\n  subgraph A B\n    Y\n  end';
+    const subs = subgraphs(parseFlowchart(src)!);
+    expect(subs.map((s) => [s.id, s.title])).toEqual([
+      ['Two Words', 'T'],
+      ['subGraph1', 'A B'],
+    ]);
+  });
+
+  // An opener we cannot read at all still pairs its `end` and takes its
+  // ordinal — losing the pairing would hand the ops layer a range spanning
+  // someone else's `end`, which is how a dissolve deletes the wrong marker.
+  it('an unreadable opener pairs its end and takes its ordinal', () => {
+    const src = 'flowchart TD\n  subgraph \n    X\n  end\n  subgraph A B\n    Y\n  end';
+    expect(parseFlowchart(src)!.lines[1].parsed.kind).toBe('opaque');
+    expect(subgraphs(parseFlowchart(src)!).map((s) => s.id)).toEqual(['subGraph1']);
+  });
+
+  // Unbalanced markers mean a document mermaid REFUSES outright (both a stray
+  // `end` and an unclosed block are parse errors, MEASURED), so the honest
+  // answer is that there is nothing here to edit.
+  it('reports nothing at all when the block markers do not balance', () => {
+    expect(subgraphs(parseFlowchart('flowchart TD\n  A\n  end')!)).toHaveLength(0);
+    expect(subgraphs(parseFlowchart('flowchart TD\n  subgraph S\n    A')!)).toHaveLength(0);
+    expect(
+      subgraphs(parseFlowchart('flowchart TD\n  subgraph S\n    A\n  end\n  end')!),
+    ).toHaveLength(0);
+  });
+
+  it('marks which blocks spell their id out', () => {
+    const subs = subgraphs(parseFlowchart(SUBS)!);
+    expect(subs.map((s) => s.explicitId)).toEqual([true, false, false, false]);
+    expect(subs.map((s) => s.index)).toEqual([0, 1, 2, 3]);
   });
 });

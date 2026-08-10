@@ -8,15 +8,19 @@ import {
   nodes,
   parseFlowchart,
   serialize,
+  subgraphs,
 } from './model';
 import {
   addEdge,
   addNode,
+  createSubgraph,
   deleteEdge,
   deleteNode,
+  dissolveSubgraph,
   newEdgeId,
   newNodeId,
   renameNode,
+  renameSubgraph,
   setDirection,
   setEdgeAnimate,
   setEdgeArrow,
@@ -26,6 +30,7 @@ import {
   setNodeLink,
   setNodeShape,
   setNodeStyle,
+  setSubgraphDirection,
 } from './ops';
 
 const SRC = [
@@ -1500,5 +1505,282 @@ describe('setNodeLink sweep', () => {
         expect([name, blank, out.split('\n')]).toEqual([name, blank, untouched(src)]);
       }
     }
+  });
+});
+
+describe('createSubgraph', () => {
+  it('wraps contiguous lines in place — body bytes untouched', () => {
+    const src = 'flowchart TD\n  A[Start] --> B\n  C --> D\n  classDef hot fill:#f96';
+    const { model: out, id } = createSubgraph(parseFlowchart(src)!, ['C', 'D'], 'Phase 2');
+    expect(id).toBe('Phase_2');
+    expect(serialize(out)).toBe(
+      'flowchart TD\n  A[Start] --> B\n  subgraph Phase_2[Phase 2]\n  C --> D\n  end\n  classDef hot fill:#f96',
+    );
+  });
+
+  it('moves non-contiguous owned lines together, raw bytes preserved, others untouched', () => {
+    const src = [
+      'flowchart TD',
+      '  A[Start]',
+      '  %% keep me exactly here-ish',
+      '  B[Middle]',
+      '  A --> C',
+      '  A --> B',
+    ].join('\n');
+    const { model: out } = createSubgraph(parseFlowchart(src)!, ['A', 'B'], 'Grouped');
+    // Owned lines: A's def, B's def, and `A --> B` (both endpoints selected).
+    // `A --> C` touches an outsider and stays put. Moved lines keep their bytes.
+    expect(serialize(out)).toBe(
+      [
+        'flowchart TD',
+        '  subgraph Grouped[Grouped]',
+        '  A[Start]',
+        '  B[Middle]',
+        '  A --> B',
+        '  end',
+        '  %% keep me exactly here-ish',
+        '  A --> C',
+      ].join('\n'),
+    );
+  });
+
+  it('mints a bare reference for a selected node no movable line claims', () => {
+    const src = 'flowchart TD\n  A --> B\n  B --> C';
+    // B only appears on edge lines shared with outsiders — nothing movable
+    // claims it, so membership needs a minted bare reference in the body.
+    const { model: out } = createSubgraph(parseFlowchart(src)!, ['B'], 'Solo');
+    expect(serialize(out)).toBe(
+      'flowchart TD\n  A --> B\n  B --> C\n  subgraph Solo[Solo]\n  B\n  end',
+    );
+  });
+
+  // MEASURED, and it is why `click` is not in the movable set: a click
+  // statement inside a block claims NO membership (the block's node list stays
+  // empty), so moving one buys nothing — and a relocated click can land ABOVE
+  // its node's declaration, where `setLink` never runs and the link dies.
+  it('leaves click lines where they are and mints the membership instead', () => {
+    const src = 'flowchart TD\n  B\n  Z --> A\n  click A "a.md"';
+    const { model: out } = createSubgraph(parseFlowchart(src)!, ['A', 'B'], 'Grp');
+    expect(serialize(out)).toBe(
+      'flowchart TD\n  subgraph Grp[Grp]\n  A\n  B\n  end\n  Z --> A\n  click A "a.md"',
+    );
+  });
+
+  it('uniquifies the generated id against node ids and existing subgraphs', () => {
+    const src = 'flowchart TD\n  Phase_2[Clash]\n  X\n  Y';
+    const { id } = createSubgraph(parseFlowchart(src)!, ['X', 'Y'], 'Phase 2');
+    expect(id).toBe('Phase_2_2');
+  });
+
+  it('refuses to re-parent lines already inside a subgraph', () => {
+    const src = 'flowchart TD\n  subgraph ops[Ops]\n    A\n  end\n  B';
+    const m = parseFlowchart(src)!;
+    const { model: out, id } = createSubgraph(m, ['A', 'B'], 'Nope');
+    expect(id).toBeNull();
+    expect(serialize(out)).toBe(src);
+  });
+
+  it('refuses an empty selection, an unknown id, and a title that flattens to nothing', () => {
+    const src = 'flowchart TD\n  A --> B';
+    for (const [ids, title] of [
+      [[], 'X'],
+      [['Q'], 'X'],
+      [['A'], '   '],
+      [['A'], '\n'],
+    ] as [string[], string][]) {
+      const { model: out, id } = createSubgraph(parseFlowchart(src)!, ids, title);
+      expect([ids, title, id, serialize(out)]).toEqual([ids, title, null, src]);
+    }
+  });
+
+  // A document whose block markers do not balance is one mermaid refuses
+  // outright, so we cannot tell what is inside what — wrapping lines there
+  // could nest a marker inside a block we never saw.
+  it('refuses to group inside a document whose markers do not balance', () => {
+    const src = 'flowchart TD\n  subgraph S[S]\n    A\n  end\n  end\n  B';
+    const { model: out, id } = createSubgraph(parseFlowchart(src)!, ['B'], 'Nope');
+    expect(id).toBeNull();
+    expect(serialize(out)).toBe(src);
+  });
+});
+
+describe('renameSubgraph', () => {
+  it('retitles the explicit form in place', () => {
+    const m = parseFlowchart('flowchart TD\n  subgraph ops[Old]\n    A\n  end')!;
+    expect(serialize(renameSubgraph(m, 0, 'New name'))).toContain('subgraph ops[New name]');
+  });
+
+  it('converts a single-word block to explicit form so its id survives the retitle', () => {
+    const m = parseFlowchart(
+      'flowchart TD\n  subgraph Alpha\n    A\n  end\n  style Alpha fill:#eee',
+    )!;
+    const out = serialize(renameSubgraph(m, 0, 'Alpha Team'));
+    expect(out).toContain('subgraph Alpha[Alpha Team]');
+    expect(subgraphs(parseFlowchart(out)!)[0].id).toBe('Alpha');
+    expect(out).toContain('style Alpha fill:#eee'); // untouched, whatever it binds
+  });
+
+  it('quotes titles that need it', () => {
+    const m = parseFlowchart('flowchart TD\n  subgraph ops[Old]\n  end')!;
+    expect(serialize(renameSubgraph(m, 0, 'A (weird) name'))).toContain(
+      'subgraph ops["A (weird) name"]',
+    );
+  });
+
+  // The plan's rule — "a generated id never depended on the title" — is only
+  // half true: the ORDINAL does not, but the id is only generated while the
+  // title still carries whitespace. Retitling `Two Words` to `Solo` would
+  // re-key the block from `subGraph0` to `Solo`, so the explicit form pins it.
+  it('keeps a generated id generated, whatever the new title looks like', () => {
+    const src = 'flowchart TD\n  subgraph Two Words\n    A\n  end';
+    const stillBare = serialize(renameSubgraph(parseFlowchart(src)!, 0, 'Other Words'));
+    expect(stillBare).toContain('subgraph Other Words');
+    expect(subgraphs(parseFlowchart(stillBare)!)[0].id).toBe('subGraph0');
+
+    const pinned = serialize(renameSubgraph(parseFlowchart(src)!, 0, 'Solo'));
+    expect(pinned).toContain('subgraph subGraph0[Solo]');
+    expect(subgraphs(parseFlowchart(pinned)!)[0].id).toBe('subGraph0');
+  });
+
+  // The id text, not the display title, is what generated the id: one
+  // trailing space already did it, so the bare form can stay.
+  it('keeps the bare form when a padded title had already generated the id', () => {
+    const src = 'flowchart TD\n  subgraph Alpha \n    A\n  end';
+    expect(subgraphs(parseFlowchart(src)!)[0].id).toBe('subGraph0');
+    const out = serialize(renameSubgraph(parseFlowchart(src)!, 0, 'Other Words'));
+    expect(out).toBe('flowchart TD\n  subgraph Other Words\n    A\n  end');
+    expect(subgraphs(parseFlowchart(out)!)[0].id).toBe('subGraph0');
+  });
+
+  it('refuses a title that would emit a bracket pair mermaid cannot parse', () => {
+    // MEASURED: `subgraph s1[]` is a PARSE ERROR that kills the whole diagram.
+    const src = 'flowchart TD\n  subgraph ops[Old]\n  end';
+    for (const title of ['', '   ', '\n\t']) {
+      expect([title, serialize(renameSubgraph(parseFlowchart(src)!, 0, title))]).toEqual([
+        title,
+        src,
+      ]);
+    }
+  });
+
+  it('refuses when the id it would have to pin is not one we can spell', () => {
+    // A bare id outside the explicit-form charset cannot be written back as
+    // `id[Title]`, so the retitle would silently re-key the block.
+    const src = 'flowchart TD\n  subgraph a/b\n    A\n  end';
+    expect(subgraphs(parseFlowchart(src)!)[0].id).toBe('a/b');
+    expect(serialize(renameSubgraph(parseFlowchart(src)!, 0, 'New'))).toBe(src);
+  });
+
+  it('ignores an index that names no block', () => {
+    const src = 'flowchart TD\n  A --> B';
+    expect(serialize(renameSubgraph(parseFlowchart(src)!, 0, 'X'))).toBe(src);
+  });
+});
+
+describe('dissolveSubgraph', () => {
+  it("removes the markers and the block's own direction lines; body bytes untouched, indentation included", () => {
+    const src = [
+      'flowchart TD',
+      '  subgraph ops[Operations]',
+      '    direction LR',
+      '    A[Start] --> B',
+      '    subgraph inner[Inner]',
+      '      direction TB',
+      '      C',
+      '    end',
+      '    direction RL',
+      '  end',
+    ].join('\n');
+    const out = serialize(dissolveSubgraph(parseFlowchart(src)!, 0));
+    expect(out).toBe(
+      [
+        'flowchart TD',
+        '    A[Start] --> B', // original 4-space indent preserved
+        '    subgraph inner[Inner]',
+        '      direction TB', // inner's direction is inner's business
+        '      C',
+        '    end',
+      ].join('\n'),
+    );
+  });
+
+  it('ignores an index that names no block', () => {
+    const src = 'flowchart TD\n  A --> B';
+    expect(serialize(dissolveSubgraph(parseFlowchart(src)!, 0))).toBe(src);
+  });
+});
+
+describe('setSubgraphDirection', () => {
+  it('inserts, rewrites, and removes the own-depth direction line', () => {
+    const src = 'flowchart TD\n  subgraph ops[Operations]\n    A\n  end';
+    const m1 = setSubgraphDirection(parseFlowchart(src)!, 0, 'LR');
+    expect(serialize(m1)).toBe(
+      'flowchart TD\n  subgraph ops[Operations]\n    direction LR\n    A\n  end',
+    );
+    const m2 = setSubgraphDirection(parseFlowchart(serialize(m1))!, 0, 'BT');
+    expect(serialize(m2)).toContain('    direction BT');
+    const m3 = setSubgraphDirection(parseFlowchart(serialize(m2))!, 0, null);
+    expect(serialize(m3)).toBe(src);
+  });
+
+  it("never touches a nested block's direction line", () => {
+    const src =
+      'flowchart TD\n  subgraph o[O]\n    subgraph i[I]\n      direction RL\n      A\n    end\n  end';
+    const out = serialize(setSubgraphDirection(parseFlowchart(src)!, 0, 'LR'));
+    expect(out).toContain('      direction RL');
+    expect(out).toContain('    direction LR');
+  });
+
+  // MEASURED: the LAST own-depth direction line is the one that renders. A set
+  // that rewrote the first and left a second below it would be a silent no-op,
+  // and a clear that removed only the first would leave the block turned.
+  it('leaves exactly one direction line behind, and a clear takes every one', () => {
+    const src = [
+      'flowchart TD',
+      '  subgraph s[S]',
+      '    direction LR',
+      '    A',
+      '    direction BT',
+      '  end',
+    ].join('\n');
+    const set = serialize(setSubgraphDirection(parseFlowchart(src)!, 0, 'RL'));
+    expect(set.split('\n').filter((l) => l.includes('direction'))).toEqual(['    direction RL']);
+    expect(subgraphs(parseFlowchart(set)!)[0].direction).toBe('RL');
+    const cleared = serialize(setSubgraphDirection(parseFlowchart(src)!, 0, null));
+    expect(cleared).toBe('flowchart TD\n  subgraph s[S]\n    A\n  end');
+  });
+
+  // A direction site we do NOT own — a commented one, or a node label that
+  // happens to carry the phrase — still wins upstream if it comes last, so a
+  // new line has to go BELOW it or the write never renders.
+  it('writes below a direction site it does not own, so its own line wins', () => {
+    const src = 'flowchart TD\n  subgraph s[S]\n    A\n    direction LR %% note\n  end';
+    const out = serialize(setSubgraphDirection(parseFlowchart(src)!, 0, 'BT'));
+    expect(out).toBe(
+      'flowchart TD\n  subgraph s[S]\n    A\n    direction LR %% note\n    direction BT\n  end',
+    );
+    expect(subgraphs(parseFlowchart(out)!)[0].direction).toBe('BT');
+  });
+
+  it('ignores an index that names no block', () => {
+    const src = 'flowchart TD\n  A --> B';
+    expect(serialize(setSubgraphDirection(parseFlowchart(src)!, 0, 'LR'))).toBe(src);
+  });
+});
+
+describe('surgical property (subgraph ops)', () => {
+  it('every line an op did not claim is byte-identical afterward', () => {
+    const src = [
+      'flowchart TD',
+      '  %% comment',
+      '  A[Start] --> B',
+      '  subgraph ops[Operations]',
+      '    C --> D',
+      '  end',
+      '  linkStyle 0 stroke:#f66',
+    ].join('\n');
+    const before = src.split('\n');
+    const after = serialize(renameSubgraph(parseFlowchart(src)!, 0, 'Renamed')).split('\n');
+    for (const i of [0, 1, 2, 4, 5, 6]) expect(after[i]).toBe(before[i]);
   });
 });

@@ -114,7 +114,18 @@ export type ParsedLine =
   | { kind: 'style'; id: string; decls: [string, string][] }
   | { kind: 'edges'; segments: EdgeSegment[] }
   | { kind: 'click'; id: string; target: string }
-  | { kind: 'subgraph-start'; title: string }
+  /**
+   * A subgraph opener we understand. `id` is non-null ONLY for the explicit
+   * `subgraph id[Title]` form; the bare forms carry a null id because their
+   * EFFECTIVE id — what mermaid assigns and the cluster DOM carries — depends
+   * on close-order ordinals a single line cannot know. `subgraphs()` in
+   * `./views` is the one place that resolves it.
+   *
+   * `title` is the DISPLAY title: quotes stripped and trimmed, exactly as
+   * `addSubGraph` stores it. The whitespace that decides the effective id is
+   * read back off `raw`, never off this.
+   */
+  | { kind: 'subgraph-start'; id: string | null; title: string }
   | { kind: 'subgraph-end' }
   | { kind: 'opaque' };
 

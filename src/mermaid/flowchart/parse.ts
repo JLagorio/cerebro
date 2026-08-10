@@ -127,6 +127,67 @@ const OPAQUE_KEYWORDS = /^(classDef|class|style|linkStyle|direction|accTitle|acc
  */
 const CLICK_LINE = /^[^\S\r\n]*click[^\S\r\n]+([A-Za-z0-9_.-]+)[^\S\r\n]"([^"]+)"\r?$/;
 
+/**
+ * A subgraph opener, matched against the RAW line because the whitespace is
+ * load-bearing. `addSubGraph` (11.16.0) decides the id in four lines, and
+ * every one of them is MEASURED in `subgraphs.mermaid.test.ts`: it trims
+ * `_id.text` for the id, keeps `_title.text` untrimmed, throws the id away
+ * when the BARE form's untrimmed title matches `/\s/`, falls back to
+ * `'subGraph' + subCount`, and only THEN trims the title for display.
+ *
+ * The lexer rule is `subgraph\b` — it consumes NO whitespace — so exactly one
+ * whitespace character separates the keyword from the id text and everything
+ * after it, padding included, IS that text. Hence `subgraph  Padded` and
+ * `subgraph Alpha ` are both `subGraph<k>` while `subgraph Alpha` is `Alpha`.
+ * A trailing `\r` is not whitespace here: mermaid normalizes CRLF first.
+ */
+const SUBGRAPH_START_LINE = /^[^\S\r\n]*subgraph[^\S\r\n]([^\r\n]*)\r?$/;
+
+/**
+ * The explicit `id[Title]` form, read off the id text. Padding around the id
+ * is fine upstream (the id is trimmed), and the id charset is far wider than
+ * a node's — MEASURED, `subgraph Two Words[T]` really is the id `Two Words`.
+ * A leading `"` is excluded so the quoted BARE form (`subgraph "a[b]"`, whose
+ * id is `a[b]`) cannot be misread as an explicit one.
+ */
+const SUBGRAPH_EXPLICIT = /^\s*([^\s"[\]][^"[\]]*?)\s*\[(.+)\]$/;
+
+/**
+ * `end`, plus the separators mermaid's `end\b\s*` rule and its `;` token
+ * allow. MEASURED: `end;`, `end ;` and `end;;` all close a block on a
+ * document that renders — reading them as opaque would leave our block stack
+ * unbalanced while mermaid's is fine.
+ */
+const SUBGRAPH_END_LINE = /^end[\s;]*$/;
+
+/** One surrounding pair of double quotes off, exactly as the lexer takes them. */
+function stripQuotes(text: string): string {
+  return text.length >= 2 && text.startsWith('"') && text.endsWith('"') ? text.slice(1, -1) : text;
+}
+
+/**
+ * The bare-form id text as `addSubGraph` receives it — quotes off, `\r` off,
+ * padding INTACT — or null when the line is not a bare-form opener. The
+ * whitespace test that zeroes an id into `subGraph<k>` runs on this string,
+ * so `subgraphs()` reads it here rather than off the parsed display title.
+ */
+export function bareSubgraphIdText(raw: string): string | null {
+  const m = raw.match(SUBGRAPH_START_LINE);
+  if (m === null || m[1].trim() === '') return null;
+  return SUBGRAPH_EXPLICIT.test(m[1]) ? null : stripQuotes(m[1]);
+}
+
+/** `subgraph id[Title]` / `subgraph Title`, or null for a form we do not own. */
+function parseSubgraphStart(raw: string): ParsedLine | null {
+  const m = raw.match(SUBGRAPH_START_LINE);
+  if (m === null || m[1].trim() === '') return null;
+  const explicit = m[1].match(SUBGRAPH_EXPLICIT);
+  if (explicit !== null) {
+    return { kind: 'subgraph-start', id: explicit[1], title: stripQuotes(explicit[2]).trim() };
+  }
+  return { kind: 'subgraph-start', id: null, title: stripQuotes(m[1]).trim() };
+}
+
 /** Bracket pairs, longest opener first — order is load-bearing. */
 const SHAPES: [string, string, Shape][] = [
   ['((', '))', 'circle'],
@@ -491,13 +552,16 @@ function parseLine(rawLine: string): ParsedLine {
     };
   }
 
-  const sub = trimmed.match(/^subgraph\s+(.+)$/);
-  if (sub !== null) return { kind: 'subgraph-start', title: sub[1] };
-  if (trimmed === 'end') return { kind: 'subgraph-end' };
-  // Anonymous subgraph (valid mermaid, no title): not structurally editable,
-  // so it goes opaque rather than falling into the node-token fallback below
-  // (which would otherwise mint a phantom node with id "subgraph").
-  if (trimmed === 'subgraph') return { kind: 'opaque' };
+  const sub = parseSubgraphStart(rawLine);
+  if (sub !== null) return sub;
+  if (SUBGRAPH_END_LINE.test(trimmed)) return { kind: 'subgraph-end' };
+  // A `subgraph` line we could not read (anonymous, or a shape outside
+  // `parseSubgraphStart`): opaque rather than falling into the node-token
+  // fallback below, which would otherwise mint a phantom node with id
+  // "subgraph". `subgraphs()` still pairs it with an `end` — an opener we
+  // cannot EDIT is still an opener, and miscounting would shift every
+  // generated id after it.
+  if (/^subgraph\b/.test(trimmed)) return { kind: 'opaque' };
 
   // `id@{ … }` on one line — node metadata, or edge metadata for an edge id
   // (identical syntax; nodes()/ops tell them apart by what the id names).

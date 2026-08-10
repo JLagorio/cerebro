@@ -150,6 +150,23 @@ export function clickTarget(target: string): string | null {
   return safe.trim() === '' ? null : safe;
 }
 
+/**
+ * A subgraph title that can sit inside `subgraph id[…]` without taking the
+ * diagram down with it, or null when there is no title to write. MEASURED on
+ * 11.16.0: `subgraph s1[]` and `subgraph s1[""]` are PARSE ERRORS while
+ * `subgraph s1[ ]` renders with an empty label, and an unquoted `(` `@` in the
+ * title is fatal exactly as it is in a node label — so the same `quoteLabel`
+ * rules apply, over the same `flattenForLine` boundary.
+ *
+ * Null means "the caller must not write this line", the same contract
+ * `clickTarget` holds: `renameSubgraph` refuses a blank title rather than
+ * emit a bracket pair that cannot parse.
+ */
+export function subgraphTitle(title: string): string | null {
+  const flat = flattenForLine(title).trim();
+  return flat === '' ? null : quoteLabel(flat);
+}
+
 export function emitNodeRef(ref: NodeRef): string {
   if (ref.label === null) return ref.id;
   const [open, close] = SHAPE_BRACKETS[ref.shape ?? 'rect'];
@@ -193,8 +210,16 @@ function emitLine(line: ModelLine): string {
       const target = clickTarget(p.target);
       return target === null ? line.raw : `${indent}click ${p.id} "${target}"`;
     }
-    case 'subgraph-start':
-      return `${indent}subgraph ${p.title}`;
+    // The explicit form always, when we have an id: it pins the block's
+    // identity. `subgraphTitle` runs HERE as well as in the ops layer — the
+    // emitter validates its OUTPUT — because `subgraph s1[]` is a parse error
+    // that kills the whole diagram (MEASURED), and a title flattened to
+    // nothing would emit exactly that. Such a line keeps its original bytes.
+    case 'subgraph-start': {
+      const title = subgraphTitle(p.title);
+      if (p.id === null) return title === null ? line.raw : `${indent}subgraph ${title}`;
+      return `${indent}subgraph ${p.id}[${title ?? ' '}]`;
+    }
     case 'subgraph-end':
       return `${indent}end`;
     case 'opaque':

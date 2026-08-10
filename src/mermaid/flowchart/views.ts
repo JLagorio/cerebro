@@ -3,7 +3,8 @@
  * merged meta, folded styles, link ownership. Nothing here emits or mutates.
  */
 
-import type { EdgeArrow, FlowchartModel, NodeMeta, NodeRef, Shape } from './types';
+import { bareSubgraphIdText } from './parse';
+import type { Direction, EdgeArrow, FlowchartModel, NodeMeta, NodeRef, Shape } from './types';
 import { withEntry, withMetaEntry } from './types';
 
 /**
@@ -326,4 +327,152 @@ export function edgeAnimated(model: FlowchartModel, edge: EdgeEntry): boolean {
   if (edge.id === null) return false;
   const meta = edgeMeta(model).get(edge.id);
   return meta?.entries.some(([k, v]) => k === 'animate' && v === 'true') ?? false;
+}
+
+export interface SubgraphEntry {
+  /** Position in DOCUMENT order — the index every op in `./ops` takes. */
+  index: number;
+  /** Effective id — what mermaid assigns and the cluster DOM carries. */
+  id: string;
+  /** True when the source spells the id out (`subgraph id[Title]`). */
+  explicitId: boolean;
+  title: string;
+  startLine: number;
+  endLine: number;
+  /** Node ids this block claims — nested blocks' claims already removed. */
+  memberIds: string[];
+  /** Own-depth direction, the LAST one winning as mermaid resolves it. */
+  direction: Direction | null;
+}
+
+/**
+ * Mermaid's direction rule is `.*direction\s+<DIR>[^\n]*` — the WHOLE line,
+ * wherever the keyword sits. MEASURED on 11.16.0: `direction LR %% note`,
+ * `direction LR;` and even `xx direction LR` all set the block's direction,
+ * and a node label that happens to contain the phrase eats its own line. So
+ * reading is deliberately as loose as the lexer — no trailing word boundary
+ * either, because upstream has none (`direction TBX` really is TB).
+ */
+export const DIRECTION_SITE = /direction[^\S\r\n]+(TB|BT|RL|LR|TD)/;
+
+/**
+ * The lines a direction WRITE may touch: nothing but the statement itself,
+ * plus the `;` separator. Everything else `DIRECTION_SITE` matches is a line
+ * carrying other content too — a comment, a node declaration — and rewriting
+ * or deleting one of those to set a direction would destroy text the user
+ * wrote for another reason.
+ */
+export const OWNED_DIRECTION_LINE = /^\s*direction[^\S\r\n]+(TB|BT|RL|LR|TD)[\s;]*$/;
+
+/**
+ * The subgraph blocks of a model, in DOCUMENT order, with effective ids that
+ * mirror `flowDb.addSubGraph` on the BUNDLED 11.16.0 — every rule below
+ * measured against `getSubGraphs()` in `subgraphs.mermaid.test.ts`, not read
+ * out of a grammar file:
+ *
+ * - an explicit `subgraph id[Title]` id wins outright;
+ * - a bare title with NO whitespace in it IS the id, quotes stripped;
+ * - anything else is `subGraph<k>`, where k is the block's CLOSE-order
+ *   ordinal — jison reduces a subgraph at its `end`, so inner blocks number
+ *   before outer ones and every block consumes an ordinal whether it uses one
+ *   or not, openers we cannot even read included;
+ * - membership mirrors `makeUniq`: a node claimed by an earlier-CLOSED block
+ *   is not claimed again by a later one. Node tokens, `@{ … }` meta lines and
+ *   edge endpoints claim membership; `click` and `style` lines do NOT
+ *   (measured — a block holding only those has an empty node list).
+ *
+ * Unbalanced markers mean a document mermaid REFUSES outright (a stray `end`
+ * and an unclosed block are both parse errors), so the honest answer there is
+ * an empty list: there is nothing to edit in a diagram that cannot draw.
+ */
+export function subgraphs(model: FlowchartModel): SubgraphEntry[] {
+  interface Open {
+    startLine: number;
+    id: string | null;
+    /** null marks an opener we cannot read: it pairs and counts, nothing more. */
+    idText: string | null;
+    title: string | null;
+    refs: string[];
+    direction: Direction | null;
+  }
+  const stack: Open[] = [];
+  const closed: SubgraphEntry[] = [];
+  const claimed = new Set<string>();
+  let ordinal = 0;
+  let balanced = true;
+
+  model.lines.forEach((line, i) => {
+    const p = line.parsed;
+    const trimmed = line.raw.trim();
+    if (p.kind === 'subgraph-start') {
+      stack.push({
+        startLine: i,
+        id: p.id,
+        // Read off `raw`, because the padding that zeroes an id is exactly
+        // what the parsed display title has thrown away. A DIRTY bare opener
+        // still answers correctly: `renameSubgraph` only keeps the bare form
+        // when the new title re-derives the same id, so the stale raw and the
+        // pending title agree by construction. An opener we cannot re-read is
+        // unlisted rather than guessed at — it still pairs and counts.
+        idText: p.id !== null ? '' : bareSubgraphIdText(line.raw),
+        title: p.title,
+        refs: [],
+        direction: null,
+      });
+      return;
+    }
+    // An opener we refuse to OWN still opens a block: an anonymous `subgraph`,
+    // or a form outside `parseSubgraphStart`. Miscounting here would shift
+    // every generated id after it and break cluster binding, and losing the
+    // pairing would hand the ops layer a range that spans someone else's
+    // `end`. The same goes for a closer we do not own (`end x` really does
+    // close a block upstream, MEASURED).
+    if (p.kind === 'opaque' && /^subgraph\b/.test(trimmed)) {
+      stack.push({ startLine: i, id: null, idText: null, title: null, refs: [], direction: null });
+      return;
+    }
+    if (p.kind === 'subgraph-end' || (p.kind === 'opaque' && /^end\b/.test(trimmed))) {
+      const open = stack.pop();
+      if (open === undefined) {
+        balanced = false;
+        return;
+      }
+      const k = ordinal;
+      ordinal += 1;
+      if (open.title === null || open.idText === null) return; // pairs and counts, unlisted
+      const memberIds = open.refs.filter((id) => !claimed.has(id));
+      for (const id of memberIds) claimed.add(id);
+      closed.push({
+        index: 0, // fixed up below, once document order is known
+        id: open.id ?? (/\s/.test(open.idText) ? `subGraph${k}` : open.idText),
+        explicitId: open.id !== null,
+        title: open.title,
+        startLine: open.startLine,
+        endLine: i,
+        memberIds,
+        direction: open.direction,
+      });
+      return;
+    }
+    const top = stack[stack.length - 1];
+    if (top === undefined) return;
+    // Own-depth only, and the LAST one wins — measured, `direction LR` above
+    // `direction BT` renders BT. Reading the first would aim every control at
+    // a declaration the renderer ignores.
+    const dir = trimmed.match(DIRECTION_SITE);
+    if (dir !== null) top.direction = dir[1] as Direction;
+    // Membership: first appearance wins, so the order is the document's.
+    const add = (id: string): void => {
+      if (!top.refs.includes(id)) top.refs.push(id);
+    };
+    if (p.kind === 'node') add(p.node.id);
+    if (p.kind === 'node-meta') add(p.id);
+    if (p.kind === 'edges') {
+      for (const seg of p.segments) for (const r of [...seg.from, ...seg.to]) add(r.id);
+    }
+  });
+
+  if (!balanced || stack.length > 0) return [];
+  closed.sort((a, b) => a.startLine - b.startLine);
+  return closed.map((entry, index) => ({ ...entry, index }));
 }
