@@ -50,6 +50,7 @@ pub mod scope;
 pub mod settings;
 pub mod sink;
 pub mod status;
+pub mod surface;
 
 use std::path::{Path, PathBuf};
 

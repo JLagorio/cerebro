@@ -361,3 +361,57 @@ export function revertApplication(
       })
     : mock.revertApplication(vault, proposalId, appliedEventIds, reviewer);
 }
+
+// --- The control surface (M25.7) -------------------------------------------
+
+// Same module-graph rule as the review surface: the shapes live in mockIpc so
+// ipc imports it one way only.
+import type {
+  PipelineActivity,
+  PipelineBanner,
+  PipelineHeld,
+  PipelineLane,
+  PipelineMeter,
+  PipelineOverview,
+} from './mockIpc';
+
+export type {
+  PipelineActivity,
+  PipelineBanner,
+  PipelineHeld,
+  PipelineLane,
+  PipelineMeter,
+  PipelineOverview,
+};
+
+/** The pause, the meter, the lanes, recent activity, and every banner — one
+ * query, so the panel cannot render a paused pipeline beside a budget it read
+ * a second earlier. */
+export function pipelineOverview(vault: string): Promise<PipelineOverview> {
+  return inTauri() ? invokeTauri('pipeline_overview', { vault }) : mock.pipelineOverview(vault);
+}
+
+/** Subscription-wide, and persisted: one CLI account, one pause. */
+export function setGlobalPause(paused: boolean): Promise<void> {
+  return inTauri() ? invokeTauri('set_global_pause', { paused }) : mock.setGlobalPause(paused);
+}
+
+/** Per vault, because somebody may want scheduled agents at work and nothing
+ * at all in their journal. */
+export function setLaneEnabled(vault: string, lane: string, enabled: boolean): Promise<void> {
+  return inTauri()
+    ? invokeTauri('set_lane_enabled', { vault, lane, enabled })
+    : mock.setLaneEnabled(vault, lane, enabled);
+}
+
+/** Resolve a held pile: `baseline` accepts today's content as accounted for,
+ * `process` queues it. Either way the question is asked once. */
+export function resolveHeldItems(
+  vault: string,
+  which: 'baseline_held' | 'recovery_held',
+  choice: 'baseline' | 'process',
+): Promise<number> {
+  return inTauri()
+    ? invokeTauri('resolve_held_items', { vault, which, choice })
+    : mock.resolveHeldItems(vault, which, choice);
+}

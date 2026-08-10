@@ -816,3 +816,154 @@ export async function revertApplication(
   review.applications = review.applications.filter((a) => a.proposal_id !== proposalId);
   return 'apply';
 }
+
+// --- The control surface (M25.7) -------------------------------------------
+//
+// FIXED SHAPES, NO ENGINE. The mock serves whatever a spec seeds and computes
+// nothing: a second budget engine here would be the twin-implementation
+// defect `shared/policy/README.md` exists to prevent, arrived at from the
+// operational side. The real arithmetic is one SQLite transaction in
+// `runtime/budget.rs`, and TypeScript cannot hold that transaction open
+// across an `await` anyway.
+
+/** Today's ambient spend across EVERY vault against one subscription. */
+export interface PipelineMeter {
+  window_start_utc: string;
+  window_end_utc: string;
+  timezone_id: string;
+  ceiling_state: string;
+  ceiling_reasons: string[];
+  /** `exact` or `unknown` — a day whose spend was lost is not a day with
+   * budget left, and the meter says which rather than showing a zero. */
+  accounting_state: string;
+  runs_started: number;
+  max_daily_runs: number;
+  tokens_used: number;
+  max_daily_tokens: number;
+  output_tokens_used: number;
+  max_daily_output_tokens: number;
+  reserved_total_tokens: number;
+  reserved_output_tokens: number;
+}
+
+export interface PipelineLane {
+  lane: string;
+  priority: number;
+  enabled: boolean;
+}
+
+/** One Activity log row: run → tokens → proposals → applied/rejected. */
+export interface PipelineActivity {
+  run_id: string;
+  vault_id: string | null;
+  mode: string;
+  lane: string;
+  started_at: string;
+  ended_at: string | null;
+  outcome: string;
+  usage_state: string;
+  total_tokens: number;
+  output_tokens: number;
+  proposals_submitted: number;
+  applied: number;
+  rejected: number;
+}
+
+/** The three faces of failure keep three kinds. Merging them would tell a
+ * person neither "wait" nor "fix a file". */
+export interface PipelineBanner {
+  kind: string;
+  detail: string;
+  count: number;
+}
+
+export interface PipelineHeld {
+  baseline_held: number;
+  recovery_held: number;
+  pending_review: number;
+  pending: number;
+}
+
+export interface PipelineOverview {
+  global_pause: boolean;
+  runtime_status: string;
+  meter: PipelineMeter;
+  lanes: PipelineLane[];
+  activity: PipelineActivity[];
+  banners: PipelineBanner[];
+  held: PipelineHeld;
+}
+
+const LANES = ['filed', 'scheduled', 'agent', 'behind', 'refresh', 'stale', 'schema'];
+
+function emptyOverview(): PipelineOverview {
+  return {
+    global_pause: false,
+    runtime_status: 'ready',
+    meter: {
+      window_start_utc: '2026-08-09T00:00:00.000Z',
+      window_end_utc: '2026-08-10T00:00:00.000Z',
+      timezone_id: 'UTC',
+      ceiling_state: 'under_budget',
+      ceiling_reasons: [],
+      accounting_state: 'exact',
+      runs_started: 0,
+      max_daily_runs: 20,
+      tokens_used: 0,
+      max_daily_tokens: 200000,
+      output_tokens_used: 0,
+      max_daily_output_tokens: 40000,
+      reserved_total_tokens: 0,
+      reserved_output_tokens: 0,
+    },
+    lanes: LANES.map((lane, priority) => ({ lane, priority, enabled: true })),
+    activity: [],
+    banners: [],
+    held: { baseline_held: 0, recovery_held: 0, pending_review: 0, pending: 0 },
+  };
+}
+
+let pipeline: PipelineOverview = emptyOverview();
+
+/** Test-only seam, mirroring `window.__cerebroSeedReview`. */
+export function __seedPipeline(fixture: Partial<PipelineOverview>): void {
+  pipeline = { ...emptyOverview(), ...fixture };
+}
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __cerebroSeedPipeline: typeof __seedPipeline }).__cerebroSeedPipeline =
+    __seedPipeline;
+}
+
+export async function pipelineOverview(_vault: string): Promise<PipelineOverview> {
+  return pipeline;
+}
+
+export async function setGlobalPause(paused: boolean): Promise<void> {
+  pipeline = { ...pipeline, global_pause: paused };
+}
+
+export async function setLaneEnabled(
+  _vault: string,
+  lane: string,
+  enabled: boolean,
+): Promise<void> {
+  pipeline = {
+    ...pipeline,
+    lanes: pipeline.lanes.map((l) => (l.lane === lane ? { ...l, enabled } : l)),
+  };
+}
+
+export async function resolveHeldItems(
+  _vault: string,
+  which: string,
+  choice: string,
+): Promise<number> {
+  const held = { ...pipeline.held };
+  const moved = which === 'baseline_held' ? held.baseline_held : held.recovery_held;
+  if (which === 'baseline_held') held.baseline_held = 0;
+  else held.recovery_held = 0;
+  if (choice === 'process') held.pending += moved;
+  pipeline = { ...pipeline, held };
+  return moved;
+}

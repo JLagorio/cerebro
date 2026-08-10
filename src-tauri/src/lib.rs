@@ -173,6 +173,81 @@ fn revert_application(
     .unwrap_or_else(|| Err("no active ledger writer for this vault".to_string()))
 }
 
+/// The M25.7 control surface. One query, one shape: the pause, the meter,
+/// the lanes, recent activity, and every banner in one render — six round
+/// trips would let the panel show a paused pipeline beside a budget it read
+/// a second earlier.
+///
+/// A vault whose runtime DB is unavailable returns an error the caller shows
+/// rather than a fabricated empty overview: "we cannot tell you" and "there
+/// is nothing to tell" are different answers.
+#[tauri::command(async)]
+fn pipeline_overview(
+    app: tauri::AppHandle,
+    vault: String,
+) -> Result<runtime::surface::Overview, String> {
+    let dir = config_dir(&app)?;
+    let conn = runtime::open_existing(&dir)?;
+    let scope = runtime::open_vault(Path::new(&vault))
+        .ok_or("this vault is not registered with the runtime database")?;
+    runtime::surface::overview(
+        &conn,
+        &scope.vault_id,
+        scope.store_uuid.as_deref().unwrap_or_default(),
+        chrono::Utc::now(),
+    )
+}
+
+/// The subscription-wide pause. Persisted, so it survives a restart — a
+/// pause that forgot itself overnight would be the least trustworthy control
+/// in the app.
+#[tauri::command(async)]
+fn set_global_pause(app: tauri::AppHandle, paused: bool) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    runtime::settings::set_global_pause(&conn, paused)
+}
+
+/// One lane, for one vault. Lanes are per-vault by design: a person may want
+/// scheduled agents in their work vault and nothing at all in their journal.
+#[tauri::command(async)]
+fn set_lane_enabled(
+    app: tauri::AppHandle,
+    vault: String,
+    lane: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = runtime::open_vault(Path::new(&vault))
+        .ok_or("this vault is not registered with the runtime database")?;
+    runtime::settings::set_lane_enabled(&conn, &scope.vault_id, &lane, enabled)
+}
+
+/// Resolve the held pile. `baseline` accepts today's content as already
+/// accounted for; `process` queues it. Either decision is durable, and the
+/// question is asked once rather than on every launch.
+#[tauri::command(async)]
+fn resolve_held_items(
+    app: tauri::AppHandle,
+    vault: String,
+    which: String,
+    choice: String,
+) -> Result<usize, String> {
+    let conn = runtime::open_existing(&config_dir(&app)?)?;
+    let scope = runtime::open_vault(Path::new(&vault))
+        .ok_or("this vault is not registered with the runtime database")?;
+    let store = scope.store_uuid.as_deref().unwrap_or_default();
+    let choice = match choice.as_str() {
+        "baseline" => runtime::import::Choice::Baseline,
+        "process" => runtime::import::Choice::Process,
+        other => return Err(format!("unknown choice {other:?}")),
+    };
+    match which.as_str() {
+        "baseline_held" => runtime::import::resolve(&conn, &scope.vault_id, store, choice),
+        "recovery_held" => runtime::recovery::resolve(&conn, &scope.vault_id, store, choice),
+        other => Err(format!("unknown held pile {other:?}")),
+    }
+}
+
 /// The M23.7 reconciliation exits: `accept_current_files` adopts every
 /// representable diff through the capture valve in one logical batch;
 /// `restore_ledger_authority` regenerates every projection and closes the
@@ -531,6 +606,10 @@ pub fn run() {
             revertable_applications,
             decide_proposal,
             revert_application,
+            pipeline_overview,
+            set_global_pause,
+            set_lane_enabled,
+            resolve_held_items,
             create_note,
             set_note_title,
             list_views,

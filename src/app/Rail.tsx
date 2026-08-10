@@ -98,6 +98,7 @@ export function Rail() {
   // M24.9: what the base is holding until a person decides. A queued card
   // outlives the session that made it, so it needs a door and not a toast.
   const reviewActive = selection.kind === 'review';
+  const pipelineActive = selection.kind === 'pipeline';
   const homeActive = HOME_KINDS.has(selection.kind);
   // M15: the badge counts what the page will SHOW. It used to be the unfiltered
   // total while the page opened on a persisted period, so a rail reading
@@ -133,6 +134,12 @@ export function Rail() {
         label="Needs review"
         active={reviewActive}
         onClick={() => navigate({ kind: 'review' })}
+      />
+      <RailButton
+        icon="activity"
+        label="Background"
+        active={pipelineActive}
+        onClick={() => navigate({ kind: 'pipeline' })}
       />
       {inboxEnabled && (
         <RailButton

@@ -1368,6 +1368,10 @@ mod tests {
     /// owned by nothing.
     #[test]
     fn at_every_dispatch_kill_point_the_item_is_pending_or_leased_exactly_once() {
+        // This scenario clears the process-global status between runs, so it
+        // serialises with every other test that reads it — the same lock the
+        // status module hands out for exactly this reason.
+        let _lock = crate::runtime::status::test_lock();
         for (point, started) in [
             ("runtime-dispatch-begun", false),
             ("runtime-dispatch-claimed", false),
@@ -1441,6 +1445,10 @@ mod tests {
     /// reservation on a run still marked running.
     #[test]
     fn a_kill_during_finalization_leaves_the_run_recoverable_or_done() {
+        // This scenario clears the process-global status between runs, so it
+        // serialises with every other test that reads it — the same lock the
+        // status module hands out for exactly this reason.
+        let _lock = crate::runtime::status::test_lock();
         for (point, finalized) in [
             ("runtime-finalize-begun", false),
             ("runtime-finalize-committed", true),

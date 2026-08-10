@@ -538,6 +538,10 @@ mod tests {
     /// SET" true.
     #[test]
     fn a_kill_during_recovery_restores_everything_or_nothing() {
+        // This scenario clears the process-global status between runs, so it
+        // serialises with every other test that reads it — the same lock the
+        // status module hands out for exactly this reason.
+        let _lock = crate::runtime::status::test_lock();
         for (point, restored) in [
             ("runtime-recovery-begun", 0),
             ("runtime-recovery-committed", 2),
