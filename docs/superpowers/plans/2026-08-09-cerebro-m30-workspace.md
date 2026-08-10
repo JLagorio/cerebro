@@ -6,7 +6,18 @@
 
 **Architecture:** Roots are capability-gated (`{ knowledge, git, writable }`, probed from disk) and persisted in app-data. Two independent Rust data paths serve the UI: lazy per-directory listing for the tree (all file types, constant memory) and a `git ls-files`-filtered markdown index for the Docs tab. Everything is read-only — no file in this plan is ever written.
 
-**Tech Stack:** Rust (Tauri 2), React 19, Zustand. Four new runtime dependencies: `react-markdown`, `remark-gfm`, `shiki`, `react-virtuoso`.
+**Tech Stack:** Rust (Tauri 2), React 19, Zustand.
+
+**Dependencies — one genuinely new package, not four.** `@blocknote/code-block@0.46.2` already pulls the whole Shiki stack (`@shikijs/core`, `engine-javascript`, `langs`, `langs-precompiled`, `themes` at 3.23.0), and `remark-gfm@4.0.1` is already in the lockfile with the full micromark/mdast GFM extension set. So:
+
+| Package | Status | Add as |
+| --- | --- | --- |
+| `shiki` | already in the bundle via BlockNote | `^3.23.0` — **pin to match**, or you ship two highlighting engines |
+| `remark-gfm` | already in the lockfile | `^4.0.1` — dedupes to the existing copy |
+| `react-markdown` | new, but `unified`, `remark-parse`, `mdast-util-to-hast`, `vfile`, `property-information` and `unist-util-visit` are all already present | latest |
+| ~~`react-virtuoso`~~ | **deferred** — see M30.14 | — |
+
+Reusing BlockNote's Shiki is a coherence win, not just a size one: a `rust` fence in a vault note and a `rust` fence in a repo README then render identically.
 
 **Spec:** `docs/superpowers/specs/2026-08-09-cerebro-m30-workspace-design.md`
 
@@ -46,7 +57,7 @@ Instead the markdown index returns a **separate `IndexedDoc` type** carrying exa
 | `src/lib/mockRoots.ts` | In-memory backend mirroring every Rust guard |
 | `src/stores/rootsStore.ts` | Zustand store: mounted roots, expansion, open file |
 | `src/pages/WorkspacePage.tsx` | The surface |
-| `src/workspace/RootTree.tsx` | Lazy, virtualized tree |
+| `src/workspace/RootTree.tsx` | Lazy tree over a flat row list |
 | `src/workspace/treeRows.ts` | Pure tree flattener |
 | `src/workspace/FileViewer.tsx` | Routes a file to a viewer or a typed placeholder |
 | `src/workspace/DocViewer.tsx` | Markdown reading surface |
@@ -2533,9 +2544,10 @@ Create `src/workspace/treeRows.ts`:
 /**
  * The tree as a flat list of visible rows.
  *
- * Virtualization needs a flat, indexable list — a recursive component tree
- * cannot be windowed. Keeping the flatten pure also makes every ordering and
- * visibility rule testable without rendering anything.
+ * Flat because a recursive component tree cannot be windowed, and windowing is
+ * deferred rather than ruled out (M30.14) — this shape is what keeps that a
+ * one-file decision. Pure because it makes every ordering and visibility rule
+ * testable without rendering anything.
  */
 import type { DirEntry, Root } from '@/engine/roots';
 
@@ -2607,28 +2619,32 @@ Expected: PASS — 5 tests
 
 ```bash
 git add src/workspace/treeRows.ts src/workspace/treeRows.test.ts
-git commit -m "feat(workspace): the tree flattens to rows, so it can be windowed (M30.13)"
+git commit -m "feat(workspace): the tree flattens to rows, so windowing stays a one-file change (M30.13)"
 ```
 
 ---
 
-### Task M30.14: The virtualized tree component
+### Task M30.14: The tree component
 
 **Files:**
 - Create: `src/workspace/RootTree.tsx`
-- Modify: `package.json`
 
-- [ ] **Step 1: Add the dependency**
+> **Windowing is deliberately deferred.** The tree is already lazy — only
+> EXPANDED directories render, and in practice those hold well under a few
+> hundred entries. Virtualization pays off only in the pathological case, and
+> because `flattenTree` already returns a flat array, adding it later is a
+> change to **this file alone** with no API change anywhere else. That makes it
+> the cheapest decision in the plan to reverse, which is the reason not to make
+> it up front. If a real directory does hurt, add `react-virtuoso` (or
+> `@tanstack/react-virtual`) and swap the `<ul>` below for its list component —
+> `rows` is already exactly the input either one wants.
 
-Run: `pnpm add react-virtuoso`
-
-- [ ] **Step 2: Write the component**
+- [ ] **Step 1: Write the component**
 
 Create `src/workspace/RootTree.tsx`:
 
 ```tsx
 import { useState } from 'react';
-import { Virtuoso } from 'react-virtuoso';
 import { Icon } from '@/components/ui/Icon';
 import { useRootsStore } from '@/stores/rootsStore';
 import { flattenTree, nodeKey, type TreeRow } from './treeRows';
@@ -2670,58 +2686,61 @@ export function RootTree() {
       >
         {showIgnored ? 'Hide ignored' : 'Show ignored'}
       </button>
-      <Virtuoso
-        className="min-h-0 flex-1"
-        data={rows}
-        itemContent={(_, row) => (
-          <button
-            type="button"
-            data-testid="tree-row"
-            data-path={row.path}
-            data-root={row.rootId}
-            onClick={() => activate(row)}
-            style={{ paddingLeft: `${row.depth * 12 + 8}px` }}
-            className={`flex w-full min-w-0 items-center gap-1.5 border-0 bg-transparent py-1 pr-2 text-left text-sm hover:bg-n-50 ${
-              row.ignored ? 'text-n-400' : 'text-n-800'
-            }`}
-          >
-            <Icon
-              name={
-                row.isDir
-                  ? expanded[nodeKey(row.rootId, row.path)] === true
-                    ? 'chevron-down'
-                    : 'chevron-right'
-                  : 'file-text'
-              }
-              size={13}
-              color="var(--n-500)"
-            />
-            <span className="min-w-0 truncate">{row.label}</span>
-            {unavailable(row) && (
-              <span
-                data-testid="root-unavailable"
-                className="ml-auto flex-none rounded-sm bg-n-50 px-1 text-2xs text-n-500"
-              >
-                unavailable
-              </span>
-            )}
-          </button>
-        )}
-      />
+      {/* A plain list today. `rows` is already the flat, indexable shape a
+          windowing library consumes, so swapping this <ul> for one is a
+          local change if a directory ever gets big enough to need it. */}
+      <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-0">
+        {rows.map((row) => (
+          <li key={row.key}>
+            <button
+              type="button"
+              data-testid="tree-row"
+              data-path={row.path}
+              data-root={row.rootId}
+              onClick={() => activate(row)}
+              style={{ paddingLeft: `${row.depth * 12 + 8}px` }}
+              className={`flex w-full min-w-0 items-center gap-1.5 border-0 bg-transparent py-1 pr-2 text-left text-sm hover:bg-n-50 ${
+                row.ignored ? 'text-n-400' : 'text-n-800'
+              }`}
+            >
+              <Icon
+                name={
+                  row.isDir
+                    ? expanded[nodeKey(row.rootId, row.path)] === true
+                      ? 'chevron-down'
+                      : 'chevron-right'
+                    : 'file-text'
+                }
+                size={13}
+                color="var(--n-500)"
+              />
+              <span className="min-w-0 truncate">{row.label}</span>
+              {unavailable(row) && (
+                <span
+                  data-testid="root-unavailable"
+                  className="ml-auto flex-none rounded-sm bg-n-50 px-1 text-2xs text-n-500"
+                >
+                  unavailable
+                </span>
+              )}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 ```
 
-- [ ] **Step 3: Verify the page tests pass**
+- [ ] **Step 2: Verify the page tests pass**
 
 Run: `pnpm test:run src/pages/WorkspacePage.test.tsx`
 Expected: PASS — 2 tests (with the remaining stubs in place)
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/workspace/RootTree.tsx package.json pnpm-lock.yaml
+git add src/workspace/RootTree.tsx
 git commit -m "feat(workspace): a vanished root stays visible instead of vanishing twice (M30.14)"
 ```
 
@@ -2871,9 +2890,17 @@ git commit -m "feat(workspace): a refused mount is a card you read, not a toast 
 - Test: `src/workspace/highlighter.test.ts`
 - Modify: `package.json`
 
-- [ ] **Step 1: Add the dependency**
+- [ ] **Step 1: Add the dependency, pinned**
 
-Run: `pnpm add shiki`
+Run: `pnpm add shiki@^3.23.0`
+
+**The pin is load-bearing.** `@blocknote/code-block@0.46.2` already depends on
+`@shikijs/core`/`langs`/`themes` at 3.23.0. Matching that major lets pnpm keep
+ONE copy; resolving to a different major would ship two highlighting engines and
+two copies of the grammar set. Verify after installing:
+
+Run: `pnpm why shiki`
+Expected: a single resolved Shiki version shared with `@blocknote/code-block`.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -3177,7 +3204,13 @@ git commit -m "feat(workspace): a relative link is a place in the repo, not a de
 
 - [ ] **Step 1: Add the dependencies**
 
-Run: `pnpm add react-markdown remark-gfm`
+Run: `pnpm add react-markdown remark-gfm@^4.0.1`
+
+`remark-gfm@4.0.1` is already in the lockfile via BlockNote, so the pin dedupes
+rather than adding a second copy. `react-markdown` is the only genuinely new
+package here — and `unified`, `remark-parse`, `mdast-util-to-hast`, `vfile`,
+`property-information` and `unist-util-visit` are all already installed, so what
+it actually adds is the React glue you would otherwise hand-write.
 
 - [ ] **Step 2: Write the component**
 
@@ -3734,7 +3767,7 @@ git commit -m "test(workspace): mount, browse, follow a link, and see both roots
 | 3.1 Selection arm | M30.12 |
 | 3.2 Components | M30.12, M30.14, M30.15, M30.19 |
 | 3.3 Ignored-files toggle | M30.4 (backend), M30.13–M30.14 (UI) |
-| 3.4 Windowing | M30.14 |
+| 3.4 Windowing | M30.13 (flat rows), M30.14 (deferred, with the reason) |
 | 3.5 Unavailable roots | M30.14 |
 | 4.0 Rendering stack | M30.16, M30.18 |
 | 4.1 Reading experience | M30.17, M30.18 |

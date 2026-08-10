@@ -169,7 +169,7 @@ union already documents for `list.view` and `library.tab`.
 ### 3.2 Components
 
 - `src/pages/WorkspacePage.tsx` — the surface
-- `src/workspace/RootTree.tsx` — lazy, windowed tree
+- `src/workspace/RootTree.tsx` — lazy tree rendered from a flat row list (§3.4)
 - `src/workspace/FileViewer.tsx` — routes by file, in order: a typed refusal
   from `read_file_text` (§2.4) → the matching placeholder; `.md`/`.markdown` →
   `DocViewer`; an extension Shiki resolves to a language → `CodeViewer` with
@@ -190,15 +190,21 @@ per root. Ignored entries render dimmed rather than hidden when shown, so the
 toggle's effect is legible. (Tolaria's `gitignoredVisibility.ts` is the
 precedent.)
 
-### 3.4 Windowing
+### 3.4 Windowing — deferred, deliberately
 
-A directory can hold thousands of entries and Cerebro ships no virtualization
-library. **Decision: add `react-virtuoso`** (Tolaria's choice, so the dependency
-is already vetted against this stack) and window the tree's flattened visible
-rows.
+A directory *can* hold thousands of entries, and Cerebro ships no virtualization
+library. **Decision: ship without one, and revisit on evidence.**
 
-Lazy loading alone is insufficient: expanding one 5,000-file directory is a
-single `list_dir` call whose result still has to render.
+The tree is already lazy, so only EXPANDED directories render, and in practice
+those hold well under a few hundred entries. Windowing pays off only in the
+pathological case.
+
+What makes deferring safe rather than optimistic is the row model: the tree
+renders from a flat, indexable array produced by a pure flatten. That array is
+exactly the input `react-virtuoso` or `@tanstack/react-virtual` consumes, so
+adding windowing later is a change to **one component**, with no API change
+anywhere else. It is the cheapest decision in this spec to reverse, which is the
+reason not to make it up front.
 
 ### 3.5 Unavailable roots
 
@@ -242,9 +248,26 @@ Decisions:
   in editor machinery for a surface that must not be editable, and C′ can adopt
   it later for the edit surface without disturbing the viewer.
 
-**Dependency delta: `react-markdown`, `remark-gfm`, `shiki`, `react-virtuoso`**
-— four additions to a runtime list currently holding thirteen. All four are in
-Tolaria's dependency set, so they are already vetted against Tauri 2 + React 19.
+**Dependency delta: one genuinely new package.**
+
+Two of these are already in the tree. `@blocknote/code-block@0.46.2` — an
+existing dependency — pulls `@shikijs/core`, `engine-javascript`, `langs`,
+`langs-precompiled` and `themes` at 3.23.0; and `remark-gfm@4.0.1` is already in
+the lockfile with the full micromark/mdast GFM extension set.
+
+| Package | Status |
+| --- | --- |
+| `shiki` | already bundled via BlockNote — add at `^3.23.0` so pnpm keeps one copy |
+| `remark-gfm` | already in the lockfile — add at `^4.0.1` to dedupe |
+| `react-markdown` | the only real addition; `unified`, `remark-parse`, `mdast-util-to-hast`, `vfile` and `property-information` are already present, so it contributes the React glue and little else |
+
+Reusing BlockNote's Shiki is a correctness win before it is a size one: a `rust`
+fence in a vault note and a `rust` fence in a repo README then render through
+the same grammars and themes, instead of drifting apart.
+
+Note also that `mermaid@^11.16.0` is ALREADY a dependency — only the render
+integration is absent on this base. Registering a mermaid fence renderer later
+therefore needs no new package at all.
 
 BlockNote stays exactly where it is: the editor for vault notes. This spec adds
 a viewer beside it and changes nothing about the editing path.
