@@ -201,6 +201,9 @@ export type Selection =
   // conflict resolution when there is one); `pulse` is the committed history.
   | { kind: 'changes' }
   | { kind: 'pulse' }
+  // M24.9 — what the base is holding until a person decides. A place you can
+  // navigate back to, because a queued card outlives the session that made it.
+  | { kind: 'review' }
   // M17.9/M17.11 — skills and agents, which were reachable only by knowing
   // which folder they lived in. A capability nobody can find is one nobody has.
   // M18 — `tab` names which shelf is open and `path` the item being edited, so

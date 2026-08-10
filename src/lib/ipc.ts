@@ -300,48 +300,13 @@ export function ledgerStatus(vault: string): Promise<LedgerStatus> {
 
 // --- The review surface (M24.9) --------------------------------------------
 
-/** One target's expected-versus-current version, as a card shows it. */
-export interface CardTarget {
-  target_class: string;
-  target_id: string;
-  expected_version: number | null;
-  current_version: number | null;
-  /** The world moved under this card: approving it will refuse. */
-  stale: boolean;
-}
+// The card shapes live in mockIpc so the module graph stays a tree: ipc
+// imports the mock, and a type import pointing back would close a cycle that
+// vitest's module ordering can trip over. Re-exported here because the app
+// imports its IPC types from the IPC module.
+import type { CardTarget, ReviewCard, RevertableApplication } from './mockIpc';
 
-/** What a reviewer is being asked about. Mirrors policy/review.rs — every
- * field is typed, and `reason` is display text with no policy effect. */
-export interface ReviewCard {
-  proposal_id: string;
-  commit_set_id: string;
-  run_id: string;
-  actor: string;
-  op: string;
-  effective_risk: string;
-  /** The risk rung's review mode — `diff` on the CRITICAL rung. */
-  review: string | null;
-  /** Codes holding this beyond the risk ladder (M24.8). */
-  queued_for: string[];
-  intended_use_kind: string;
-  intended_use_stakes: string;
-  transition_cause: string;
-  evidence_refs: string[];
-  coverage_refs: string[];
-  authority_refs: string[];
-  targets: CardTarget[];
-  reason: string;
-  set_members: string[];
-  set_ready: boolean;
-}
-
-/** An applied change a human may still undo. */
-export interface RevertableApplication {
-  proposal_id: string;
-  op: string;
-  applied_event_id: string;
-  reason: string;
-}
+export type { CardTarget, ReviewCard, RevertableApplication };
 
 /** Cards awaiting a human. Rebuilt from the ledger on every call — nothing
  * is cached, so a wiped app-data directory cannot lose one. */

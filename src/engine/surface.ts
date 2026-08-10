@@ -256,6 +256,10 @@ export function resolveSurface(
       // The git surfaces draw their own layouts; they are not collections of
       // records and deliberately cannot be filtered or grouped.
       return { title: 'Changes', entries: [], presentation: defaultPresentation() };
+    case 'review':
+      // Same: review cards are proposals, not records, and nothing in the
+      // vault's filter vocabulary applies to them.
+      return { title: 'Needs review', entries: [], presentation: defaultPresentation() };
     case 'pulse':
       return { title: 'Pulse', entries: [], presentation: defaultPresentation() };
     // Neither holds records. Listed rather than defaulted so that the next

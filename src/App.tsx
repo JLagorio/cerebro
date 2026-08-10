@@ -13,6 +13,7 @@ import { QuickOpen } from '@/app/QuickOpen';
 import { ToastHost } from '@/app/ToastHost';
 import { DetailPanel } from '@/detail/DetailPanel';
 import { ChangesPage } from '@/pages/ChangesPage';
+import { ReviewPage } from '@/pages/ReviewPage';
 import { CollectionPage } from '@/pages/CollectionPage';
 import { ListPage } from '@/pages/ListPage';
 import { DiagramPage } from '@/pages/DiagramPage';
@@ -120,6 +121,8 @@ function CanvasOutlet() {
       return <TypePage selection={selection} />;
     case 'changes':
       return <ChangesPage />;
+    case 'review':
+      return <ReviewPage />;
     case 'pulse':
       return <PulsePage />;
     case 'library':
