@@ -47,12 +47,13 @@ Scratch files go in the session scratchpad, **never** in the repo (a scratch
 | G5 M29.44 e2e + gate | `6c29790` | DONE. **STAGE G COMPLETE** |
 | H1 M29.45 ViewType plumbing | `22041af` | DONE, reviewed |
 | H2 M29.46 view + useDiagramFile | `d8ea48a` `0eae807` `b8c476f` | DONE, reviewed |
-| H3 M29.47 record cards | `ab1dd19` | DONE, reviewed; polish round in flight |
+| H3 M29.47 record cards | `ab1dd19` + `27bdd21` | DONE, reviewed |
 | H4 M29.48 host wiring | `719faa6` | DONE, reviewed |
 | H5 M29.49 fossil sweep | `d5648ab` | DONE, reviewed |
 | H6 M29.50 e2e + gate | `d522f4b` | DONE, reviewed. **STAGE H COMPLETE** |
 
-**Baseline now: 185 files / 3046 passed / 2 skipped; e2e 45.** Lint, typecheck, format, build clean.
+**FINAL, wave complete: 185 files / 3051 passed / 2 skipped; e2e 45; coverage
+78.73 / 85.74 / 72.38 / 78.73 against floors 48/80/58/48; cargo 221 + clippy + fmt clean.** Lint, typecheck, format, build clean.
 (Wave started at 172 / 2584.)
 
 ## 3. Two structural decisions already taken (do not re-litigate)
