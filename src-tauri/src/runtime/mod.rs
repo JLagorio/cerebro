@@ -38,6 +38,7 @@
 pub mod budget;
 pub mod catchup;
 pub mod dispatch;
+pub mod health;
 pub mod import;
 pub mod normalize;
 pub mod operational;

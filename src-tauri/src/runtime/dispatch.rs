@@ -484,6 +484,22 @@ fn finalize_inner(
     )
     .map_err(|e| format!("scheduler: {e}"))?;
 
+    // The quota path, INSIDE the same transaction that requeued the work: a
+    // backoff written afterwards could be lost by a kill between the two, and
+    // the next dispatcher would walk straight back into the wall.
+    if outcome == RunOutcome::QuotaFailed {
+        if let Some(store) = &store_uuid {
+            super::health::record_quota_failure(
+                conn,
+                store,
+                "the CLI reported a usage or rate limit",
+                now,
+            )?;
+        }
+    } else if outcome.is_success() {
+        super::health::record_runtime_recovery(conn, now)?;
+    }
+
     if let (Some(vault_id), Some(store_uuid)) = (vault_id, store_uuid) {
         // A success resets the lane's failure counter; anything else adds to
         // it. Three in a row and the lane stops asking.
@@ -1047,6 +1063,122 @@ mod tests {
                 .ambient_tokens_used,
             100
         );
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_quota_death_requeues_backs_off_and_degrades_the_runtime_in_one_breath() {
+        // The acceptance row, end to end: one finalization transaction
+        // returns the claim, releases the reservation, sets the window
+        // backoff, and degrades runtime health — and the NEXT dispatch is
+        // refused by the backoff it just wrote.
+        let (dir, conn, vault) = fixture("dispatch-quota");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        let now = at("2026-08-09T10:00:00Z");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            now,
+        )
+        .unwrap() else {
+            panic!("dispatch");
+        };
+        finalize(
+            &conn,
+            &lease.run_id,
+            RunOutcome::QuotaFailed,
+            Some(Usage {
+                output_tokens: 17,
+                ..Usage::default()
+            }),
+            ItemOutcome::Requeue,
+            at("2026-08-09T10:02:00Z"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            crate::runtime::scheduler::get(&conn, &vault, "store", "a.md")
+                .unwrap()
+                .unwrap()
+                .state,
+            SchedulerState::Pending,
+            "a quota death does not consume the work it could not do"
+        );
+        let day = budget::read_day(&conn, &lease.window_start_utc).unwrap();
+        assert_eq!(day.reserved_total_tokens, 0);
+        assert_eq!(
+            day.ambient_tokens_used, 17,
+            "the tokens it DID spend before dying are counted"
+        );
+        let (state, _, _) =
+            crate::runtime::health::runtime_health(&conn, crate::runtime::health::COMPONENT_CLI)
+                .unwrap()
+                .unwrap();
+        assert_eq!(state, crate::runtime::health::RuntimeState::Degraded);
+
+        let next = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            at("2026-08-09T10:05:00Z"),
+        )
+        .unwrap();
+        assert_eq!(next, Dispatched::Deferred(vec![GateReason::QuotaBackoff]));
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_successful_run_says_the_runtime_is_working_again() {
+        let (dir, conn, vault) = fixture("dispatch-recovered");
+        let _lock = status::test_lock();
+        status::clear();
+        seed_item(&conn, &vault, "a.md");
+        crate::runtime::health::set_runtime_health(
+            &conn,
+            crate::runtime::health::COMPONENT_CLI,
+            crate::runtime::health::RuntimeState::Degraded,
+            None,
+            at("2026-08-09T09:00:00Z"),
+        )
+        .unwrap();
+        let now = at("2026-08-09T16:00:00Z");
+        let Dispatched::Started(lease) = claim(
+            &conn,
+            &vault,
+            "store",
+            "filed",
+            small(),
+            &["a.md".into()],
+            now,
+        )
+        .unwrap() else {
+            panic!("dispatch");
+        };
+        finalize(
+            &conn,
+            &lease.run_id,
+            RunOutcome::Succeeded,
+            Some(Usage::default()),
+            ItemOutcome::Consume,
+            now,
+        )
+        .unwrap();
+        let (state, _, _) =
+            crate::runtime::health::runtime_health(&conn, crate::runtime::health::COMPONENT_CLI)
+                .unwrap()
+                .unwrap();
+        assert_eq!(state, crate::runtime::health::RuntimeState::Healthy);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
     }
