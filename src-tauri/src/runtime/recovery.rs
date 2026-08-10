@@ -58,6 +58,24 @@ pub enum PriorDisposition {
 }
 
 impl PriorDisposition {
+    /// Route → destiny. The recovery column of the closed route matrix, and
+    /// the only place it is written: `Route::scheduler_state` names the same
+    /// thing in the schema's own vocabulary, and this test-covered mapping is
+    /// what keeps the two from drifting.
+    pub fn of_route(route: crate::ledger::schema::Route) -> PriorDisposition {
+        use crate::ledger::schema::Route;
+        match route {
+            Route::ClosedNoChange
+            | Route::ClosedNonMaterial
+            | Route::DeterministicProposalApplied
+            | Route::DeterministicProposalRejected
+            | Route::M26Completed => PriorDisposition::Consumed,
+            Route::DeterministicProposalQueued => PriorDisposition::PendingReview,
+            Route::M26Queued => PriorDisposition::PendingM26,
+            Route::FailedVisible => PriorDisposition::FailedVisible,
+        }
+    }
+
     fn restored_as(self) -> SchedulerState {
         match self {
             PriorDisposition::Consumed => SchedulerState::Consumed,
@@ -74,7 +92,11 @@ impl PriorDisposition {
 /// first place telemetry leaked back in.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Receipt {
-    pub item_key: String,
+    /// The receipt's DERIVED item id, not a path. Receipts are portable and
+    /// paths are not, which is exactly why the join below derives an id from
+    /// each current item rather than comparing strings that happen to look
+    /// alike.
+    pub item_id: String,
     pub artifact_hash: String,
     pub disposition: PriorDisposition,
 }
@@ -82,7 +104,11 @@ pub struct Receipt {
 /// The current state of one item on disk.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CurrentItem {
+    /// Where it lives — the scheduler's key.
     pub item_key: String,
+    /// What it IS — the portable id receipts are written against. Derived by
+    /// [`crate::ledger::schema::derive_item_id`] from store, source, and key.
+    pub item_id: String,
     pub artifact_hash: String,
     pub snapshot: Snapshot,
 }
@@ -116,12 +142,12 @@ pub fn plan(items: &[CurrentItem], receipts: &[Receipt]) -> Plan {
     for receipt in receipts {
         // Later receipts supersede earlier ones for the same item; the reader
         // hands them over in ledger order, so last wins.
-        by_item.insert(receipt.item_key.as_str(), receipt);
+        by_item.insert(receipt.item_id.as_str(), receipt);
     }
     let mut rows = Vec::with_capacity(items.len());
     let mut matched = 0usize;
     for item in items {
-        let state = match by_item.get(item.item_key.as_str()) {
+        let state = match by_item.get(item.item_id.as_str()) {
             Some(receipt) if receipt.artifact_hash == item.artifact_hash => {
                 matched += 1;
                 receipt.disposition.restored_as()
@@ -195,13 +221,42 @@ pub fn apply(
 
 /// Portable processing receipts in a vault's ledger, oldest first.
 ///
-/// **Empty until M25.3.** The `ingest.assessed` body, its validation, and its
-/// reducer arm land with the producer that writes them; a reader here now
-/// would be a second parser for bytes nothing emits. When that phase lands,
-/// this function is the only thing that changes, and every behaviour it
-/// drives is already covered by the tests below.
-pub fn receipts_in_ledger(_vault: &Path) -> Result<Vec<Receipt>, String> {
-    Ok(Vec::new())
+/// The M25.1 seam, filled by M25.3 now that `ingest.assessed` has a body.
+/// Decoding goes through the ONE schema decoder — there is no second parser
+/// here, which is why the reader waited for its producer.
+///
+/// A receipt whose route is not terminal for the item (a queued M26 row that
+/// a later receipt superseded) is still returned in order; the planner takes
+/// the last one per item, which is what supersession means.
+pub fn receipts_in_ledger(vault: &Path) -> Result<Vec<Receipt>, String> {
+    let dir = crate::ledger::ledger_dir(vault);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let read = match crate::ledger::read_ledger(&dir) {
+        Ok(read) => read,
+        // A ledger this app cannot read is not a ledger that proves work
+        // happened. Recovery holds everything, which is already the
+        // conservative answer.
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut receipts = Vec::new();
+    for frame in &read.frames {
+        if frame.kind != crate::ledger::schema::KIND_INGEST_ASSESSED {
+            continue;
+        }
+        let Ok(Some(crate::ledger::schema::EventBody::IngestAssessed(body))) =
+            crate::ledger::schema::decode_body(&frame.kind, &frame.body)
+        else {
+            continue;
+        };
+        receipts.push(Receipt {
+            item_id: body.item_id.clone(),
+            artifact_hash: body.artifact_hash.clone(),
+            disposition: PriorDisposition::of_route(body.route),
+        });
+    }
+    Ok(receipts)
 }
 
 /// Has this vault ever completed the one-shot upgrade in THIS database?
@@ -269,9 +324,14 @@ mod tests {
     use crate::vault::entry::Entry as VaultEntry;
     use crate::vault::testutil;
 
+    fn item_id(key: &str) -> String {
+        crate::ledger::schema::derive_item_id("store", "source", key)
+    }
+
     fn current(key: &str, hash: &str) -> CurrentItem {
         CurrentItem {
             item_key: key.to_string(),
+            item_id: item_id(key),
             artifact_hash: hash.repeat(64 / hash.len()),
             snapshot: normalize::snapshot(&VaultEntry::empty_for_test(key)),
         }
@@ -279,7 +339,7 @@ mod tests {
 
     fn receipt(key: &str, hash: &str, disposition: PriorDisposition) -> Receipt {
         Receipt {
-            item_key: key.to_string(),
+            item_id: item_id(key),
             artifact_hash: hash.repeat(64 / hash.len()),
             disposition,
         }
@@ -501,11 +561,23 @@ mod tests {
     }
 
     #[test]
-    fn the_receipt_reader_is_empty_until_its_producer_ships() {
-        // Named rather than silent: this is the M25.3 seam, and a test that
-        // asserts today's answer is what makes tomorrow's change visible.
+    fn a_vault_with_no_ledger_yields_no_receipts_rather_than_an_error() {
+        // Recovery must be able to run against a folder that has never been
+        // armed; "nothing was processed here" is a real answer.
         let dir = testutil::temp_vault("recovery-reader");
         assert_eq!(receipts_in_ledger(&dir).unwrap(), Vec::new());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_route_maps_to_exactly_one_recovery_destiny() {
+        // The two mappings that must never disagree: the schema's own
+        // `scheduler_state` and this one.
+        use crate::ledger::schema::Route;
+        for route in Route::ALL {
+            let expected = route.scheduler_state();
+            let actual = PriorDisposition::of_route(route).restored_as().as_str();
+            assert_eq!(actual, expected, "{}", route.as_str());
+        }
     }
 }

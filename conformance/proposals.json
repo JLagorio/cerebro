@@ -445,6 +445,7 @@
         "has_revert_plan": false
       }
     },
+    "ingest_receipts": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

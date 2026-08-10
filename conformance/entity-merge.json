@@ -1,6 +1,6 @@
 {
-  "name": "aliases",
-  "description": "Display bytes are preserved, the normalized key is the uniqueness domain, and an alias never moves or re-registers.",
+  "name": "entity-merge",
+  "description": "two entities collapse into a survivor with their beliefs reassigned; a repeat merge of an entity that no longer exists is refused",
   "store_id": "feedfacefeedfacefeedfacefeedface",
   "events": [
     {
@@ -82,111 +82,84 @@
       "seq": 3,
       "event_id": "00000000000000000000000000000003",
       "prev": "aec0f34a91f73626b307486217fa8e7d7e175c178c89754478b622208f7423ea",
-      "hash": "581a920819df38ae440fca87196b5f9c8be1ad99e87e4703e7bdf0ecd6ee1ee6",
+      "hash": "aeb0760a597dca7d6b5e0e11afa907fe60d66f25bf2de8d0c5850647b7262d14",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
-      "kind": "entity.alias_added",
+      "kind": "entity.merged",
       "body": {
         "schema": 1,
         "batch_id": null,
         "idempotency_key": null,
         "actor": {
-          "id": "human:josef"
+          "id": "system:ledger"
         },
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "entity_id": "cccccccccccccccccccccccccccccccc",
-        "alias": "Acme  Corp",
-        "normalized_alias": "acme corp"
+        "survivor_id": "cccccccccccccccccccccccccccccccc",
+        "merged_ids": [
+          "dddddddddddddddddddddddddddddddd"
+        ],
+        "reassignment_plan": {
+          "survivor_id": "cccccccccccccccccccccccccccccccc",
+          "merged_ids": [
+            "dddddddddddddddddddddddddddddddd"
+          ],
+          "affected_belief_ids": [
+            "ffffffffffffffffffffffffffffffff"
+          ],
+          "live_aliases": [],
+          "affected_relation_ids": [],
+          "plan_digest": "0884f9e192248134407dcd9965f0d6ea206cabf7ed32b0d14862332ebffbfb60"
+        },
+        "reassignment_digest": "0884f9e192248134407dcd9965f0d6ea206cabf7ed32b0d14862332ebffbfb60"
       }
     },
     {
       "v": 0,
       "seq": 4,
       "event_id": "00000000000000000000000000000004",
-      "prev": "581a920819df38ae440fca87196b5f9c8be1ad99e87e4703e7bdf0ecd6ee1ee6",
-      "hash": "927750f5259e829083f1f7a166deff805d19032ef1548de521148f73fc43fdf6",
+      "prev": "aeb0760a597dca7d6b5e0e11afa907fe60d66f25bf2de8d0c5850647b7262d14",
+      "hash": "73d5ad045df6944b31d6474f0b35534c492552db96842854378ee34bcca4ea9b",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
-      "kind": "entity.alias_added",
+      "kind": "entity.merged",
       "body": {
         "schema": 1,
         "batch_id": null,
         "idempotency_key": null,
         "actor": {
-          "id": "human:josef"
+          "id": "system:ledger"
         },
         "occurred_at": null,
         "valid_from": null,
         "valid_to": null,
-        "entity_id": "dddddddddddddddddddddddddddddddd",
-        "alias": "ACME CORP",
-        "normalized_alias": "acme corp"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 5,
-      "event_id": "00000000000000000000000000000005",
-      "prev": "927750f5259e829083f1f7a166deff805d19032ef1548de521148f73fc43fdf6",
-      "hash": "e2c09a2f6597fad57481071eaf2fea5069592eb62221481ca27b0268c1804f75",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "entity.alias_added",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "human:josef"
+        "survivor_id": "cccccccccccccccccccccccccccccccc",
+        "merged_ids": [
+          "dddddddddddddddddddddddddddddddd"
+        ],
+        "reassignment_plan": {
+          "survivor_id": "cccccccccccccccccccccccccccccccc",
+          "merged_ids": [
+            "dddddddddddddddddddddddddddddddd"
+          ],
+          "affected_belief_ids": [
+            "ffffffffffffffffffffffffffffffff"
+          ],
+          "live_aliases": [],
+          "affected_relation_ids": [],
+          "plan_digest": "0884f9e192248134407dcd9965f0d6ea206cabf7ed32b0d14862332ebffbfb60"
         },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "entity_id": "cccccccccccccccccccccccccccccccc",
-        "alias": "Acme Corp",
-        "normalized_alias": "acme corp"
-      }
-    },
-    {
-      "v": 0,
-      "seq": 6,
-      "event_id": "00000000000000000000000000000006",
-      "prev": "e2c09a2f6597fad57481071eaf2fea5069592eb62221481ca27b0268c1804f75",
-      "hash": "c2fcfa6fcf7fc13214f1651ba8352114bdb38504dc2cc1b012698953aebc6e0d",
-      "ingested_at": "2026-08-07T12:00:00.000Z",
-      "wall_clock_anomaly": false,
-      "kind": "entity.alias_added",
-      "body": {
-        "schema": 1,
-        "batch_id": null,
-        "idempotency_key": null,
-        "actor": {
-          "id": "human:josef"
-        },
-        "occurred_at": null,
-        "valid_from": null,
-        "valid_to": null,
-        "entity_id": "1111111111111111111111111111111a",
-        "alias": "Other",
-        "normalized_alias": "other"
+        "reassignment_digest": "0884f9e192248134407dcd9965f0d6ea206cabf7ed32b0d14862332ebffbfb60"
       }
     }
   ],
   "expected_state": {
     "sources": {},
     "entities": {
-      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000001",
-      "dddddddddddddddddddddddddddddddd": "00000000000000000000000000000002"
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000001"
     },
-    "aliases": {
-      "acme corp": {
-        "alias": "Acme  Corp",
-        "entity_id": "cccccccccccccccccccccccccccccccc",
-        "event_id": "00000000000000000000000000000003"
-      }
-    },
+    "aliases": {},
     "observations": {},
     "beliefs": {
       "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
@@ -206,8 +179,8 @@
         ],
         "projection": {
           "path": null,
-          "generating_event": "00000000000000000000000000000003",
-          "state_digest": "09d81a18131809af89d062f34af887e66ddb48526b76631f011cd575d37a72ef",
+          "generating_event": "00000000000000000000000000000001",
+          "state_digest": "a392ad2bf6ae7637365e6f4292b46617d8cd4b71dc82db3113ed7b786409ad50",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
@@ -227,7 +200,7 @@
         }
       },
       "ffffffffffffffffffffffffffffffff": {
-        "entity_id": "dddddddddddddddddddddddddddddddd",
+        "entity_id": "cccccccccccccccccccccccccccccccc",
         "revision": 1,
         "content": "# Acme\n\nActive vendor.\n",
         "fields": {
@@ -243,8 +216,8 @@
         ],
         "projection": {
           "path": null,
-          "generating_event": "00000000000000000000000000000002",
-          "state_digest": "b98dcd1a32ba123df215e566162b776669c3ced8db605a3efb7c842d80e9e9bd",
+          "generating_event": "00000000000000000000000000000003",
+          "state_digest": "eedf19c9332430346b8a7b309fa24a0e575e1d8bd0b1ef806fba5fb27565c402",
           "content_hash": "b7f4bf683454078369ed07cea4eb0db9337e6062d49a69e443f522991e05af0f",
           "review_event_ids": [],
           "active_overrides": [],
@@ -254,7 +227,9 @@
           "lifecycle_head": null,
           "tombstone_event": null,
           "contest_head": null,
-          "entity_merge_events": []
+          "entity_merge_events": [
+            "00000000000000000000000000000003"
+          ]
         },
         "governance": {
           "qualification": "draft",
@@ -270,9 +245,9 @@
     "derived_belief_sources": [],
     "versions": {
       "belief:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": 1,
-      "belief:ffffffffffffffffffffffffffffffff": 1,
+      "belief:ffffffffffffffffffffffffffffffff": 2,
       "entity:cccccccccccccccccccccccccccccccc": 2,
-      "entity:dddddddddddddddddddddddddddddddd": 1
+      "entity:dddddddddddddddddddddddddddddddd": 2
     },
     "batches": [],
     "proposals": {},
@@ -289,21 +264,7 @@
       "event_id": "00000000000000000000000000000004",
       "batch_id": null,
       "code": "refused",
-      "detail": "alias \"acme corp\" is already live on a different Entity — refused, never guessed"
-    },
-    {
-      "seq": 5,
-      "event_id": "00000000000000000000000000000005",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "alias \"acme corp\" is already registered on this Entity"
-    },
-    {
-      "seq": 6,
-      "event_id": "00000000000000000000000000000006",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "alias registration names unknown Entity 1111111111111111111111111111111a"
+      "detail": "merged entity dddddddddddddddddddddddddddddddd does not exist"
     }
   ]
 }

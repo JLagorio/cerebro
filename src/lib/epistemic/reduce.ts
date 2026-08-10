@@ -170,6 +170,18 @@ interface ReconciliationLogRow {
   action: string;
 }
 
+/** One committed `ingest.assessed` receipt (M25.3). */
+export interface IngestReceiptRow {
+  receiptId: string;
+  itemId: string;
+  sourceId: string;
+  artifactHash: string;
+  normalizerVersion: string;
+  processingEpoch: number;
+  route: string;
+  superseded: boolean;
+}
+
 export interface EpistemicState {
   sources: Map<string, SourceState>;
   sourceKeys: Map<string, string>;
@@ -185,6 +197,14 @@ export interface EpistemicState {
   relationAddEvents: Map<string, string>;
   /** The M24 proposal lifecycle — portable, not a runtime cache. */
   proposals: Map<string, ProposalRow>;
+  /**
+   * M25.3's portable processing receipts, keyed by receipt id.
+   *
+   * Structurally outside every evidence structure: a receipt id lives here
+   * and nowhere else, so it can never resolve as a basis link, a lineage
+   * parent, or a derived-content source.
+   */
+  ingestReceipts: Map<string, IngestReceiptRow>;
   resolutions: ResolutionRow[];
   independence: Map<string, { eventId: string; proofKind: string }>; // "left|right"
   derivedBeliefSources: [string, string][];
@@ -215,6 +235,7 @@ function emptyState(): EpistemicState {
     relations: new Map(),
     relationAddEvents: new Map(),
     proposals: new Map(),
+    ingestReceipts: new Map(),
     resolutions: [],
     independence: new Map(),
     derivedBeliefSources: [],
@@ -457,9 +478,107 @@ function apply(
       return applyProposalRejected(state, frame, body);
     case 'proposal.reverted':
       return applyProposalReverted(state, frame, body);
+    case 'ingest.assessed':
+      return applyIngestAssessed(state, frame, body, staged);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
+}
+
+/**
+ * `ingest.assessed` (M25.3) — the portable processing receipt.
+ *
+ * Every check is about ASSOCIATION, never about truth: does the source
+ * exist, do the Observations exist, does the proposal's state match the
+ * route the receipt claims, and does a successor supersede something that
+ * was really queued.
+ */
+function applyIngestAssessed(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const receiptId = body.receipt_id as string;
+  if (state.ingestReceipts.has(receiptId)) {
+    throw new RefusedError(
+      `receipt ${receiptId} is already recorded — identical bytes append once, never twice`,
+    );
+  }
+  const sourceId = body.source_id as string;
+  if (!state.sources.has(sourceId)) {
+    throw new RefusedError(`receipt names source ${sourceId} which has no committed registration`);
+  }
+  for (const id of body.observation_event_ids as string[]) {
+    if (!staged.has(id) && !state.observations.has(id)) {
+      throw new RefusedError(
+        `receipt names Observation ${id} which is neither committed nor a member of this batch`,
+      );
+    }
+  }
+  const route = body.route as string;
+  const expected: { [route: string]: string } = {
+    deterministic_proposal_applied: 'applied',
+    deterministic_proposal_queued: 'queued',
+    deterministic_proposal_rejected: 'rejected',
+  };
+  for (const id of body.proposal_ids as string[]) {
+    const row = state.proposals.get(id);
+    if (row === undefined) {
+      throw new RefusedError(`receipt names proposal ${id} which was never submitted`);
+    }
+    const want = expected[route];
+    if (want !== undefined && row.state !== want) {
+      throw new RefusedError(
+        `route ${route} claims proposal ${id} is ${want}, and it is ${row.state}`,
+      );
+    }
+  }
+  const supersedes = body.supersedes_receipt_id as string | null;
+  if (supersedes !== null) {
+    const prior = state.ingestReceipts.get(supersedes);
+    if (prior === undefined) {
+      throw new RefusedError(`receipt supersedes ${supersedes}, which is not a committed receipt`);
+    }
+    if (prior.route !== 'm26_queued') {
+      throw new RefusedError(
+        `only a queued M26 receipt can be superseded; ${supersedes} is ${prior.route}`,
+      );
+    }
+    if (prior.superseded) {
+      throw new RefusedError(
+        `receipt ${supersedes} is already superseded — one successor, not a chain of them`,
+      );
+    }
+    if (prior.processingEpoch !== (body.processing_epoch as number)) {
+      throw new RefusedError("a successor shares its queued receipt's processing epoch");
+    }
+    if (prior.itemId !== (body.item_id as string) || prior.sourceId !== sourceId) {
+      throw new RefusedError('a successor receipt must describe the same source item');
+    }
+  }
+  if (body.independence === 'known_independent' && state.independence.size === 0) {
+    throw new RefusedError(
+      'a receipt claims known_independent and this store holds no independence record',
+    );
+  }
+
+  if (supersedes !== null) {
+    const prior = state.ingestReceipts.get(supersedes);
+    if (prior !== undefined) prior.superseded = true;
+    bumpVersion(state, 'ingest_receipt', supersedes, frame.event_id);
+  }
+  state.ingestReceipts.set(receiptId, {
+    receiptId,
+    itemId: body.item_id as string,
+    sourceId,
+    artifactHash: body.artifact_hash as string,
+    normalizerVersion: body.normalizer_version as string,
+    processingEpoch: body.processing_epoch as number,
+    route,
+    superseded: false,
+  });
+  createVersion(state, 'ingest_receipt', receiptId, frame.event_id);
 }
 
 // --- M24 governed mutations -------------------------------------------------
@@ -1730,6 +1849,21 @@ export function vectorState(state: EpistemicState): Json {
           decision: p.decision === null ? null : ([p.decision[0], p.decision[1]] as Json[]),
           applied_event_id: p.appliedEventId,
           has_revert_plan: p.revertPlan !== null && p.revertPlan !== undefined,
+        };
+      }
+      return out;
+    })(),
+    ingest_receipts: (() => {
+      const out: JsonObject = {};
+      for (const [, r] of sorted([...state.ingestReceipts.entries()])) {
+        out[r.receiptId] = {
+          item_id: r.itemId,
+          source_id: r.sourceId,
+          artifact_hash: r.artifactHash,
+          normalizer_version: r.normalizerVersion,
+          processing_epoch: r.processingEpoch,
+          route: r.route,
+          superseded: r.superseded,
         };
       }
       return out;

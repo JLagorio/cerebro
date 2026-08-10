@@ -93,13 +93,18 @@ export function learnQueue(
     if (!isLearnable(entry)) continue;
     if (attempts[entry.path] === entry.modifiedAt) continue;
 
+    // M25.3 — the mtime era ends here. `commitOf`'s `behind` compares a
+    // FILESYSTEM timestamp against a frontmatter stamp, which is why a
+    // `git checkout` (every mtime rewritten, not one byte changed) used to
+    // flood this queue. Catch-up now decides "behind" by content hash, in
+    // `runtime/catchup.rs`, against a durable prior snapshot.
+    //
+    // `commitOf` itself SURVIVES: it still answers "is what the base learned
+    // current with this note", which is the question KnowledgeCommit.tsx
+    // renders. It just no longer manufactures work.
     const { state } = commitOf(entry, concepts);
     const reason: LearnReason | null =
-      filedSet.has(entry.path) && state !== 'committed'
-        ? 'filed'
-        : state === 'behind'
-          ? 'behind'
-          : null;
+      filedSet.has(entry.path) && state !== 'committed' ? 'filed' : null;
     if (reason === null) continue;
 
     jobs.push({ path: entry.path, title: entry.title, reason, modifiedAt: entry.modifiedAt });

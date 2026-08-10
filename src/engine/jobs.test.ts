@@ -224,7 +224,11 @@ describe('jobQueue', () => {
       filed: ['inbox/new.md'],
       now,
     });
-    expect(jobs.map((j) => j.kind)).toEqual(['filed', 'scheduled', 'behind', 'stale']);
+    // `behind` no longer appears here: M25.3 moved catching up on edits to a
+    // content-hash diff (`runtime/catchup.rs`), so an mtime that moved is no
+    // longer work. The lane itself survives — it is what that diff dispatches
+    // on — which is why the rank table still names it.
+    expect(jobs.map((j) => j.kind)).toEqual(['filed', 'scheduled', 'stale']);
   });
 
   it('a scheduled Agent record derives an agent job, ledgered like a skill, and never distils', () => {
@@ -278,7 +282,7 @@ describe('jobQueue', () => {
       }),
     ];
     const jobs = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
-    expect(jobs.map((j) => j.kind)).toEqual(['scheduled', 'agent', 'behind']);
+    expect(jobs.map((j) => j.kind)).toEqual(['scheduled', 'agent']);
   });
 
   it('derives a refresh for a stale cached source only while connectors are on', () => {
@@ -342,9 +346,10 @@ describe('jobQueue', () => {
       connectors: true,
     });
     expect(jobs.map((j) => j.kind)).toEqual(['refresh']);
-    // With connectors OFF there is no refresh to protect — behind proceeds.
+    // With connectors OFF there is no refresh to derive, and catching up on
+    // the edit is the content diff's job now — so there is nothing here.
     const off = jobQueue(entries, listConcepts(entries, TODAY), { ...EMPTY, now });
-    expect(off.map((j) => j.kind)).toEqual(['behind']);
+    expect(off.map((j) => j.kind)).toEqual([]);
   });
 
   it('refresh outranks a stale concept recheck — the copy is replaced before it is re-read', () => {

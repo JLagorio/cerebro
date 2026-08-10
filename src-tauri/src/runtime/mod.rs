@@ -36,6 +36,7 @@
 //! leaves the previous complete version, which the next open finishes.
 
 pub mod budget;
+pub mod catchup;
 pub mod dispatch;
 pub mod import;
 pub mod normalize;

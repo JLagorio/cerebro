@@ -25,6 +25,7 @@ pub mod batch;
 pub mod belief;
 pub mod entity_merge;
 pub mod independence;
+pub mod ingest;
 pub mod lifecycle;
 pub mod migration;
 pub mod normalize;
@@ -49,6 +50,10 @@ pub use belief::{
 };
 pub use entity_merge::{derive_plan_id, EntityMerged, EntityReassignmentPlan, LiveAlias};
 pub use independence::{IndependenceProof, IndependenceRecorded};
+pub use ingest::{
+    derive_item_id, derive_receipt_id, Independence, IngestAssessed, MaterialDimension,
+    PrefilterVerdict, Route,
+};
 pub use lifecycle::{
     BeliefContested, BeliefLifecycleChanged, BeliefQualificationChanged, BeliefTombstoned,
     ContestAction, FieldRole, Lifecycle, LifecycleCause, Qualification, QualificationCause,
@@ -129,6 +134,12 @@ pub const KIND_PROPOSAL_DECISION_RECORDED: &str = "proposal.decision_recorded";
 pub const KIND_PROPOSAL_APPLIED: &str = "proposal.applied";
 pub const KIND_PROPOSAL_REJECTED: &str = "proposal.rejected";
 pub const KIND_PROPOSAL_REVERTED: &str = "proposal.reverted";
+
+// The M25 additions. `ingest.assessed` is the PORTABLE processing receipt —
+// telemetry-free by construction, and structurally excluded from evidence
+// lineage and Support (see `ingest.rs`). The coverage vocabulary follows in
+// M25.4.
+pub const KIND_INGEST_ASSESSED: &str = "ingest.assessed";
 
 /// Reserved vocabulary: names fixed so nothing else ever claims them, with
 /// bodies deliberately undefined — a schema-v1 body under one of these is
@@ -300,6 +311,7 @@ pub enum EventBody {
     ProposalApplied(Box<ProposalApplied>),
     ProposalRejected(Box<ProposalRejected>),
     ProposalReverted(Box<ProposalReverted>),
+    IngestAssessed(Box<IngestAssessed>),
 }
 
 impl EventBody {
@@ -331,6 +343,7 @@ impl EventBody {
             EventBody::ProposalApplied(_) => KIND_PROPOSAL_APPLIED,
             EventBody::ProposalRejected(_) => KIND_PROPOSAL_REJECTED,
             EventBody::ProposalReverted(_) => KIND_PROPOSAL_REVERTED,
+            EventBody::IngestAssessed(_) => KIND_INGEST_ASSESSED,
         }
     }
 
@@ -362,6 +375,7 @@ impl EventBody {
             EventBody::ProposalApplied(b) => b.batch_id.as_deref(),
             EventBody::ProposalRejected(b) => b.batch_id.as_deref(),
             EventBody::ProposalReverted(b) => b.batch_id.as_deref(),
+            EventBody::IngestAssessed(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -393,6 +407,7 @@ impl EventBody {
             EventBody::ProposalApplied(b) => b.idempotency_key.as_deref(),
             EventBody::ProposalRejected(b) => b.idempotency_key.as_deref(),
             EventBody::ProposalReverted(b) => b.idempotency_key.as_deref(),
+            EventBody::IngestAssessed(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -428,6 +443,7 @@ impl EventBody {
             EventBody::ProposalApplied(b) => b.validate(),
             EventBody::ProposalRejected(b) => b.validate(),
             EventBody::ProposalReverted(b) => b.validate(),
+            EventBody::IngestAssessed(b) => b.validate(),
         }
     }
 
@@ -460,6 +476,7 @@ impl EventBody {
             EventBody::ProposalApplied(b) => serde_json::to_value(b),
             EventBody::ProposalRejected(b) => serde_json::to_value(b),
             EventBody::ProposalReverted(b) => serde_json::to_value(b),
+            EventBody::IngestAssessed(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -539,6 +556,7 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_PROPOSAL_APPLIED => EventBody::ProposalApplied(Box::new(gate(kind, body)?)),
         KIND_PROPOSAL_REJECTED => EventBody::ProposalRejected(Box::new(gate(kind, body)?)),
         KIND_PROPOSAL_REVERTED => EventBody::ProposalReverted(Box::new(gate(kind, body)?)),
+        KIND_INGEST_ASSESSED => EventBody::IngestAssessed(Box::new(gate(kind, body)?)),
         other => {
             return Err(format!(
                 "kind {other} carries a schema-v1 body but is not in this build's vocabulary"

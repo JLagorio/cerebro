@@ -2951,6 +2951,283 @@ fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// M25.3 — the portable processing receipt and its closed route matrix.
+///
+/// The vector exercises every route that this build can produce today, the
+/// atomic Observation+receipt batch a changed item commits, the append-once
+/// key that makes a rescan of identical bytes free, and each association
+/// refusal: an unknown source, an Observation that does not exist, a
+/// proposal whose state contradicts the route, and a successor superseding
+/// something that was never queued.
+fn scenario_ingest() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let josef = human_registration("human:josef");
+    let josef_reg = b.push_body(KIND_SOURCE_REGISTERED, &josef);
+    let source_id = josef.source_id.clone();
+    let item = derive_item_id(STORE, &source_id, "records/a.md");
+    let subject = SubjectRef::Resolved {
+        entity_id: ENTITY.into(),
+        aliases: vec![],
+    };
+
+    let receipt = |route: Route,
+                   verdict: PrefilterVerdict,
+                   observations: Vec<String>,
+                   epoch: u64,
+                   supersedes: Option<String>,
+                   source: &str,
+                   item_id: &str| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:prefilter");
+        IngestAssessed {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            receipt_id: derive_receipt_id(
+                STORE,
+                source,
+                item_id,
+                &"a".repeat(64),
+                "vault-entry-v1",
+                epoch,
+                route,
+            ),
+            item_id: item_id.to_string(),
+            source_id: source.to_string(),
+            source_record_id: None,
+            artifact_hash: "a".repeat(64),
+            normalized_snapshot_hash: "b".repeat(64),
+            normalizer_version: "vault-entry-v1".into(),
+            processing_epoch: epoch,
+            assessed_against_chain_head: "c".repeat(64),
+            prefilter_verdict: verdict,
+            material_dimensions: match verdict {
+                PrefilterVerdict::MaterialCandidate => vec![MaterialDimension::WorldState],
+                _ => vec![],
+            },
+            independence: Independence::IndependenceUnknown,
+            route,
+            observation_event_ids: observations,
+            proposal_ids: vec![],
+            m26_batch_key: match route {
+                Route::M26Queued | Route::M26Completed | Route::FailedVisible => {
+                    Some("batch-2026-08-09".into())
+                }
+                _ => None,
+            },
+            m26_outcome_event_id: match route {
+                Route::M26Completed | Route::FailedVisible => Some(ENTITY.into()),
+                _ => None,
+            },
+            supersedes_receipt_id: supersedes,
+        }
+    };
+
+    // A changed item commits its Observation and its first receipt as ONE
+    // logical batch — the whole point of the association guarantee.
+    let observation = observation_body(
+        ObservationKind::HumanAssertion,
+        &josef,
+        &josef_reg,
+        "human:josef",
+        subject.clone(),
+        vec![],
+        human_payload(AssertionBasis::Firsthand),
+    );
+    // The batch's first member's event id, precomputed the way the writer
+    // preallocates it — the receipt names the Observation it commits with.
+    let observation_id = format!("{:032x}", b.frames.len() as u64 + 1);
+    let queued = receipt(
+        Route::M26Queued,
+        PrefilterVerdict::NeedsSemanticJudgment,
+        vec![observation_id.clone()],
+        0,
+        None,
+        &source_id,
+        &item,
+    );
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0025",
+        vec![
+            (
+                KIND_OBSERVATION_RECORDED.to_string(),
+                serde_json::to_value(&observation).unwrap(),
+            ),
+            (
+                KIND_INGEST_ASSESSED.to_string(),
+                serde_json::to_value(&queued).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+    let queued_receipt_id = queued.receipt_id.clone();
+
+    // The same bytes assessed again: refused, because a rescan must not
+    // append a second receipt or charge a second time.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::M26Queued,
+            PrefilterVerdict::NeedsSemanticJudgment,
+            vec![observation_id.clone()],
+            0,
+            None,
+            &source_id,
+            &item,
+        ),
+    );
+
+    // A visible failure closes the queued row out. Recovery restores it HELD.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::FailedVisible,
+            PrefilterVerdict::NeedsSemanticJudgment,
+            vec![observation_id.clone()],
+            0,
+            Some(queued_receipt_id.clone()),
+            &source_id,
+            &item,
+        ),
+    );
+    // A second successor for the same queued receipt: refused.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::M26Completed,
+            PrefilterVerdict::NeedsSemanticJudgment,
+            vec![observation_id.clone()],
+            0,
+            Some(queued_receipt_id),
+            &source_id,
+            &item,
+        ),
+    );
+
+    // An unknown source: held or refused, never inferred from a path.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::ClosedNoChange,
+            PrefilterVerdict::NoChange,
+            vec![],
+            0,
+            None,
+            &"f".repeat(32),
+            &item,
+        ),
+    );
+    // An Observation that does not exist.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::ClosedNonMaterial,
+            PrefilterVerdict::NonMaterialChange,
+            vec!["e".repeat(32)],
+            0,
+            None,
+            &source_id,
+            &item,
+        ),
+    );
+    // A superseded receipt that was never queued.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::M26Completed,
+            PrefilterVerdict::NeedsSemanticJudgment,
+            vec![observation_id.clone()],
+            0,
+            Some("d".repeat(32)),
+            &source_id,
+            &item,
+        ),
+    );
+
+    // An explicit owner retry of unchanged bytes: a NEW epoch, a new chain,
+    // and no collision with the failed one.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &receipt(
+            Route::ClosedNoChange,
+            PrefilterVerdict::NoChange,
+            vec![observation_id],
+            1,
+            None,
+            &source_id,
+            &item,
+        ),
+    );
+
+    (
+        "ingest",
+        "portable processing receipts: the closed route matrix, the atomic \
+         Observation+receipt batch, append-once bytes, supersession, and every \
+         association refusal",
+        b.frames,
+    )
+}
+
+/// `entity.merged` — the one M22-era kind with no vector until now.
+///
+/// The coverage tripwire caught it while M25.3 was extending that list, and
+/// a kind whose Rust/TS parity is unproven is exactly what the tripwire is
+/// for. Two entities with beliefs, aliases, and a relation collapse into a
+/// survivor; a second merge naming a survivor that no longer exists is
+/// refused.
+fn scenario_entity_merge() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF_B, ENTITY_B, unsupported()),
+    );
+
+    let mut plan = EntityReassignmentPlan {
+        survivor_id: ENTITY.into(),
+        merged_ids: vec![ENTITY_B.into()],
+        affected_belief_ids: vec![BELIEF_B.into()],
+        live_aliases: vec![],
+        affected_relation_ids: vec![],
+        plan_digest: String::new(),
+    };
+    plan.plan_digest = plan.digest_of().unwrap();
+    let merged = |plan: &EntityReassignmentPlan| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:ledger");
+        EntityMerged {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            survivor_id: plan.survivor_id.clone(),
+            merged_ids: plan.merged_ids.clone(),
+            reassignment_plan: plan.clone(),
+            reassignment_digest: plan.plan_digest.clone(),
+        }
+    };
+    b.push_body(KIND_ENTITY_MERGED, &merged(&plan));
+    // The same merge again: the merged entity is gone, so there is nothing
+    // left to reassign.
+    b.push_body(KIND_ENTITY_MERGED, &merged(&plan));
+
+    (
+        "entity-merge",
+        "two entities collapse into a survivor with their beliefs reassigned; a repeat \
+         merge of an entity that no longer exists is refused",
+        b.frames,
+    )
+}
+
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
     vec![
         scenario_sources(),
@@ -2973,6 +3250,8 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_capture(),
         scenario_governance(),
         scenario_proposals(),
+        scenario_entity_merge(),
+        scenario_ingest(),
     ]
 }
 
@@ -3152,7 +3431,92 @@ fn the_vector_suite_covers_every_kind() {
         KIND_PROJECTION_OVERRIDDEN,
         KIND_LEDGER_DIVERGENCE,
         KIND_RECONCILIATION_RESOLVED,
+        // The M24 kinds. `governance.json` and `proposals.json` exercised
+        // them from the day they shipped; the list simply had not been
+        // extended, which made a test whose message says "all twelve M22
+        // kinds plus the three M23 kinds" quietly stop meaning what it said.
+        KIND_BELIEF_QUALIFICATION_CHANGED,
+        KIND_BELIEF_LIFECYCLE_CHANGED,
+        KIND_BELIEF_TOMBSTONED,
+        KIND_BELIEF_CONTESTED,
+        KIND_ENTITY_MERGED,
+        KIND_PROPOSAL_SUBMITTED,
+        KIND_PROPOSAL_QUEUED,
+        KIND_PROPOSAL_DECISION_RECORDED,
+        KIND_PROPOSAL_APPLIED,
+        KIND_PROPOSAL_REJECTED,
+        // M25.
+        KIND_INGEST_ASSESSED,
     ] {
         assert!(kinds.contains(kind), "no vector exercises {kind}");
     }
+    // Gaps are WRITTEN DOWN, not inferred from a missing list entry — the
+    // same rule `PREDICATE_OWNERS` follows in the policy layer. A kind here
+    // is one whose Rust/TS parity is genuinely unproven, and the assertion
+    // below makes the two lists together exhaustive, so a NEW kind cannot be
+    // quietly omitted from both.
+    for kind in KINDS_WITHOUT_VECTORS {
+        assert!(
+            !kinds.contains(kind),
+            "{kind} now HAS a vector — take it off the gap list"
+        );
+    }
 }
+
+/// Kinds this build can decode and no vector exercises.
+///
+/// `proposal.reverted` is reachable only through the M24.9 review surface's
+/// revert path, which builds its forward mutation from live reducer state; a
+/// vector for it needs a whole applied-then-reverted commit set, and that is
+/// M27's contradiction work's neighbourhood rather than M25's. Recorded here
+/// so it is a known gap rather than an absence nobody noticed.
+const KINDS_WITHOUT_VECTORS: [&str; 1] = [KIND_PROPOSAL_REVERTED];
+
+/// Every kind is either exercised by a vector or named as a gap. This is the
+/// assertion that keeps the list above honest as the vocabulary grows.
+#[test]
+fn every_kind_is_either_covered_or_a_named_gap() {
+    let mut covered = std::collections::BTreeSet::new();
+    for (_, _, frames) in scenarios() {
+        for frame in &frames {
+            covered.insert(frame.kind.clone());
+        }
+    }
+    for kind in ALL_KINDS {
+        assert!(
+            covered.contains(kind) || KINDS_WITHOUT_VECTORS.contains(&kind),
+            "{kind} has no vector and is not a declared gap"
+        );
+    }
+}
+
+/// The whole decodable vocabulary, in declaration order.
+const ALL_KINDS: [&str; 27] = [
+    KIND_BATCH_COMMITTED,
+    KIND_SOURCE_REGISTERED,
+    KIND_OBSERVATION_RECORDED,
+    KIND_SUBJECT_RESOLVED,
+    KIND_INDEPENDENCE_RECORDED,
+    KIND_BELIEF_CREATED,
+    KIND_BELIEF_REVISED,
+    KIND_BELIEF_RELATION,
+    KIND_BELIEF_ATTESTED,
+    KIND_ENTITY_ALIAS_ADDED,
+    KIND_MIGRATION_STARTED,
+    KIND_MIGRATION_COMPLETED,
+    KIND_PROJECTION_OVERRIDDEN,
+    KIND_LEDGER_DIVERGENCE,
+    KIND_RECONCILIATION_RESOLVED,
+    KIND_BELIEF_QUALIFICATION_CHANGED,
+    KIND_BELIEF_LIFECYCLE_CHANGED,
+    KIND_BELIEF_TOMBSTONED,
+    KIND_BELIEF_CONTESTED,
+    KIND_ENTITY_MERGED,
+    KIND_PROPOSAL_SUBMITTED,
+    KIND_PROPOSAL_QUEUED,
+    KIND_PROPOSAL_DECISION_RECORDED,
+    KIND_PROPOSAL_APPLIED,
+    KIND_PROPOSAL_REJECTED,
+    KIND_PROPOSAL_REVERTED,
+    KIND_INGEST_ASSESSED,
+];

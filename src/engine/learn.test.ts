@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isLearnable, learnQueue } from './learn';
-import { listConcepts } from './okf';
+import { commitOf, listConcepts } from './okf';
 import { makeEntry } from './testHelpers';
 
 const TODAY = '2026-07-28';
@@ -64,13 +64,18 @@ describe('learnQueue', () => {
     expect(learnQueue(entries, concepts, { filed: ['inbox/a.md'], attempts: {} })).toEqual([]);
   });
 
-  it('queues an edited note WITHOUT anyone reporting the edit', () => {
-    // The whole point: no close event, no dirty flag, no subscription. The
-    // note's mtime moved past the stamp on the concept that cites it.
+  it('no longer manufactures work from an mtime that moved (M25.3)', () => {
+    // This used to be the headline behaviour: an edited note queued itself
+    // because its mtime passed the stamp on the concept citing it. It is also
+    // why a `git checkout` — every mtime rewritten, not one byte changed —
+    // flooded the queue. Catching up on edits is now decided by CONTENT HASH
+    // in `runtime/catchup.rs`, against a durable prior snapshot.
     const entries = [note('projects/p/prd.md', { modifiedAt: '2026-07-29T08:00:00Z' })];
     const concepts = listConcepts([cites('knowledge/a.md', 'projects/p/prd.md')], TODAY);
-    const jobs = learnQueue(entries, concepts, NO_ATTEMPTS);
-    expect(jobs.map((j) => [j.path, j.reason])).toEqual([['projects/p/prd.md', 'behind']]);
+    expect(learnQueue(entries, concepts, NO_ATTEMPTS)).toEqual([]);
+    // And the DISPLAY question is untouched: the panel still says the base is
+    // behind this note.
+    expect(commitOf(entries[0], concepts).state).toBe('behind');
   });
 
   it('stops retrying a version it has already attempted', () => {
@@ -89,13 +94,13 @@ describe('learnQueue', () => {
     ).toHaveLength(1);
   });
 
-  it('answers filing before it catches up on edits', () => {
+  it('answers filing, and leaves catching up on edits to the content diff', () => {
     const entries = [
       note('projects/p/prd.md', { modifiedAt: '2026-07-30T08:00:00Z' }),
       note('inbox/a.md'),
     ];
     const concepts = listConcepts([cites('knowledge/a.md', 'projects/p/prd.md')], TODAY);
     const jobs = learnQueue(entries, concepts, { filed: ['inbox/a.md'], attempts: {} });
-    expect(jobs.map((j) => j.reason)).toEqual(['filed', 'behind']);
+    expect(jobs.map((j) => j.reason)).toEqual(['filed']);
   });
 });

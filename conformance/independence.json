@@ -1073,6 +1073,7 @@
     },
     "batches": [],
     "proposals": {},
+    "ingest_receipts": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

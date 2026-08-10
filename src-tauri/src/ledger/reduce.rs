@@ -100,6 +100,26 @@ pub struct CoverageAssessment {
     pub superseded: bool,
 }
 
+/// One committed `ingest.assessed` receipt, reduced (M25.3).
+///
+/// Deliberately NOT part of any evidence structure. A receipt is stored so a
+/// rebuilt runtime database can learn what has already been processed; it is
+/// never a basis link, never a lineage parent, and never a derived-content
+/// source, and the reducer refuses each of those explicitly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IngestReceiptState {
+    pub receipt_id: String,
+    pub item_id: String,
+    pub source_id: String,
+    pub artifact_hash: String,
+    pub normalizer_version: String,
+    pub processing_epoch: u64,
+    pub route: schema::Route,
+    /// A later receipt superseded this one (an M26 completion or a visible
+    /// failure closing out a queued row).
+    pub superseded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RevisionState {
     pub revision: u64,
@@ -501,6 +521,13 @@ pub struct EpistemicState {
     /// that read it are written and tested, and they refuse rather than
     /// assume, which is why an unfillable map is safe to ship.
     pub coverage_assessments: BTreeMap<String, CoverageAssessment>,
+    /// M25.3's portable processing receipts, keyed by `receipt_id`. Read by
+    /// runtime-DB recovery to rebuild what has already been processed;
+    /// structurally excluded from evidence.
+    pub ingest_receipts: BTreeMap<String, IngestReceiptState>,
+    /// `(source_id, item_id)` → the latest receipt for that item, so recovery
+    /// does not have to scan every receipt in the store.
+    pub ingest_latest: BTreeMap<(String, String), String>,
 }
 
 impl EpistemicState {
@@ -794,6 +821,7 @@ fn apply(
         EventBody::ProposalApplied(b) => apply_proposal_applied(state, frame, b),
         EventBody::ProposalRejected(b) => apply_proposal_rejected(state, frame, b),
         EventBody::ProposalReverted(b) => apply_proposal_reverted(state, frame, b),
+        EventBody::IngestAssessed(b) => apply_ingest_assessed(state, frame, b, staged),
     }
 }
 
@@ -1227,6 +1255,134 @@ fn apply_proposal_reverted(
     row.state = schema::ProposalState::Reverted;
     // History is never rewound: the original application event id stays.
     state.bump_version("proposal", &body.proposal_id, &frame.event_id);
+    Ok(())
+}
+
+/// `ingest.assessed` (M25.3) — the portable processing receipt.
+///
+/// Every check here is about ASSOCIATION, never about truth: does this source
+/// exist, do the Observations it names exist, does the proposal it claims to
+/// have applied actually say applied, and does an M26 successor supersede a
+/// receipt that was really queued. A receipt that passed all of that still
+/// asserts nothing about the world.
+fn apply_ingest_assessed(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::IngestAssessed,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if state.ingest_receipts.contains_key(&body.receipt_id) {
+        return Err(refused(format!(
+            "receipt {} is already recorded — identical bytes append once, never twice",
+            body.receipt_id
+        )));
+    }
+    if !state.sources.contains_key(&body.source_id) {
+        return Err(refused(format!(
+            "receipt names source {} which has no committed registration — a source \
+             reference is held or refused, never inferred",
+            body.source_id
+        )));
+    }
+    // Observations may be staged members of THIS batch (the changed item and
+    // its receipt commit together) or already committed. Anything else is a
+    // receipt pointing at work that does not exist.
+    for id in &body.observation_event_ids {
+        if !staged.contains(id) && !state.observations.contains_key(id) {
+            return Err(refused(format!(
+                "receipt names Observation {id} which is neither committed nor a member of \
+                 this batch"
+            )));
+        }
+    }
+    for id in &body.proposal_ids {
+        let Some(row) = state.proposals.get(id) else {
+            return Err(refused(format!(
+                "receipt names proposal {id} which was never submitted"
+            )));
+        };
+        let expected = match body.route {
+            schema::Route::DeterministicProposalApplied => Some(schema::ProposalState::Applied),
+            schema::Route::DeterministicProposalQueued => Some(schema::ProposalState::Queued),
+            schema::Route::DeterministicProposalRejected => Some(schema::ProposalState::Rejected),
+            // An M26 completion's proposal list is governed by its semantic
+            // outcome, which M26 validates; here they need only exist.
+            _ => None,
+        };
+        if let Some(expected) = expected {
+            if row.state != expected {
+                return Err(refused(format!(
+                    "route {} claims proposal {id} is {expected:?}, and it is {:?}",
+                    body.route.as_str(),
+                    row.state
+                )));
+            }
+        }
+    }
+    if let Some(prior_id) = &body.supersedes_receipt_id {
+        let Some(prior) = state.ingest_receipts.get(prior_id) else {
+            return Err(refused(format!(
+                "receipt supersedes {prior_id}, which is not a committed receipt"
+            )));
+        };
+        if prior.route != schema::Route::M26Queued {
+            return Err(refused(format!(
+                "only a queued M26 receipt can be superseded; {prior_id} is {}",
+                prior.route.as_str()
+            )));
+        }
+        if prior.superseded {
+            return Err(refused(format!(
+                "receipt {prior_id} is already superseded — one successor, not a chain of them"
+            )));
+        }
+        if prior.processing_epoch != body.processing_epoch {
+            return Err(refused(format!(
+                "a successor shares its queued receipt's processing epoch; {} names {}",
+                prior.processing_epoch, body.processing_epoch
+            )));
+        }
+        if prior.item_id != body.item_id || prior.source_id != body.source_id {
+            return Err(refused(
+                "a successor receipt must describe the same source item".to_string(),
+            ));
+        }
+    }
+    // Corroboration needs a POSITIVE recorded independence edge somewhere in
+    // this store; the schema layer already refuses the unknown case, and this
+    // is the state-dependent half.
+    if body.independence == schema::Independence::KnownIndependent && state.independence.is_empty()
+    {
+        return Err(refused(
+            "a receipt claims known_independent and this store holds no independence record"
+                .to_string(),
+        ));
+    }
+
+    if let Some(prior_id) = &body.supersedes_receipt_id {
+        if let Some(prior) = state.ingest_receipts.get_mut(prior_id) {
+            prior.superseded = true;
+        }
+        state.bump_version("ingest_receipt", prior_id, &frame.event_id);
+    }
+    state.ingest_receipts.insert(
+        body.receipt_id.clone(),
+        IngestReceiptState {
+            receipt_id: body.receipt_id.clone(),
+            item_id: body.item_id.clone(),
+            source_id: body.source_id.clone(),
+            artifact_hash: body.artifact_hash.clone(),
+            normalizer_version: body.normalizer_version.clone(),
+            processing_epoch: body.processing_epoch,
+            route: body.route,
+            superseded: false,
+        },
+    );
+    state.ingest_latest.insert(
+        (body.source_id.clone(), body.item_id.clone()),
+        body.receipt_id.clone(),
+    );
+    state.create_version("ingest_receipt", &body.receipt_id, &frame.event_id);
     Ok(())
 }
 
@@ -2872,6 +3028,26 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                     ])),
                     "applied_event_id": p.applied_event_id,
                     "has_revert_plan": p.revert_plan.is_some(),
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M25.3: portable processing receipts. In the vector contract because
+        // a rebuilt runtime database reads them to decide what has already
+        // been processed, and a Rust/TS disagreement about that is a
+        // disagreement about whether the app re-spends the owner's quota.
+        "ingest_receipts": state
+            .ingest_receipts
+            .values()
+            .map(|r| (
+                r.receipt_id.clone(),
+                serde_json::json!({
+                    "item_id": r.item_id,
+                    "source_id": r.source_id,
+                    "artifact_hash": r.artifact_hash,
+                    "normalizer_version": r.normalizer_version,
+                    "processing_epoch": r.processing_epoch,
+                    "route": r.route.as_str(),
+                    "superseded": r.superseded,
                 }),
             ))
             .collect::<serde_json::Map<String, serde_json::Value>>(),

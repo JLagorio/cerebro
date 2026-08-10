@@ -634,6 +634,118 @@ const OBSERVATION_KINDS = [
   'human_assertion',
 ];
 
+// M25.3's closed vocabularies. Sorted the way Rust's enums declare them, so
+// a value either matches exactly or is refused — never coerced.
+const PREFILTER_VERDICTS = [
+  'no_change',
+  'non_material_change',
+  'material_candidate',
+  'needs_semantic_judgment',
+];
+const MATERIAL_DIMENSIONS = ['attention', 'belief_state', 'evidence_state', 'world_state'];
+const INDEPENDENCE_STATES = ['independence_unknown', 'known_independent', 'known_same_lineage'];
+const INGEST_ROUTES = [
+  'closed_no_change',
+  'closed_non_material',
+  'deterministic_proposal_applied',
+  'deterministic_proposal_queued',
+  'deterministic_proposal_rejected',
+  'm26_queued',
+  'm26_completed',
+  'failed_visible',
+];
+
+/// Which verdicts each route may carry, and which refs it requires or
+/// forbids. The twin of `Route::allows` / `Route::proposals` etc. in
+/// `ledger/schema/ingest.rs`, proven equal by the shared vectors.
+const ROUTE_RULES: {
+  [route: string]: {
+    verdicts: string[];
+    observations: 'required' | 'free';
+    proposals: 'required' | 'forbidden' | 'free';
+    batchKey: 'required' | 'forbidden';
+    outcome: 'required' | 'forbidden';
+    supersedes: 'required' | 'forbidden';
+  };
+} = {
+  closed_no_change: {
+    verdicts: ['no_change'],
+    observations: 'free',
+    proposals: 'forbidden',
+    batchKey: 'forbidden',
+    outcome: 'forbidden',
+    supersedes: 'forbidden',
+  },
+  closed_non_material: {
+    verdicts: ['non_material_change'],
+    observations: 'required',
+    proposals: 'forbidden',
+    batchKey: 'forbidden',
+    outcome: 'forbidden',
+    supersedes: 'forbidden',
+  },
+  deterministic_proposal_applied: {
+    verdicts: ['material_candidate'],
+    observations: 'required',
+    proposals: 'required',
+    batchKey: 'forbidden',
+    outcome: 'forbidden',
+    supersedes: 'forbidden',
+  },
+  deterministic_proposal_queued: {
+    verdicts: ['material_candidate'],
+    observations: 'required',
+    proposals: 'required',
+    batchKey: 'forbidden',
+    outcome: 'forbidden',
+    supersedes: 'forbidden',
+  },
+  deterministic_proposal_rejected: {
+    verdicts: ['material_candidate'],
+    observations: 'required',
+    proposals: 'required',
+    batchKey: 'forbidden',
+    outcome: 'forbidden',
+    supersedes: 'forbidden',
+  },
+  m26_queued: {
+    verdicts: ['material_candidate', 'needs_semantic_judgment'],
+    observations: 'required',
+    proposals: 'forbidden',
+    batchKey: 'required',
+    outcome: 'forbidden',
+    supersedes: 'forbidden',
+  },
+  m26_completed: {
+    verdicts: ['material_candidate', 'needs_semantic_judgment'],
+    observations: 'required',
+    proposals: 'free',
+    batchKey: 'required',
+    outcome: 'required',
+    supersedes: 'required',
+  },
+  failed_visible: {
+    verdicts: ['material_candidate', 'needs_semantic_judgment'],
+    observations: 'required',
+    proposals: 'forbidden',
+    batchKey: 'required',
+    outcome: 'required',
+    supersedes: 'required',
+  },
+};
+
+/// Where recovery puts an item whose latest receipt took this route.
+export const ROUTE_SCHEDULER_STATE: { [route: string]: string } = {
+  closed_no_change: 'consumed',
+  closed_non_material: 'consumed',
+  deterministic_proposal_applied: 'consumed',
+  deterministic_proposal_queued: 'pending_review',
+  deterministic_proposal_rejected: 'consumed',
+  m26_queued: 'pending',
+  m26_completed: 'consumed',
+  failed_visible: 'recovery_held',
+};
+
 type Canonicalizer = (obj: JsonObject) => JsonObject;
 
 const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
@@ -977,6 +1089,36 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
       asString(id, 'forward event id'),
     ),
     resulting_versions: canonTargetVersions(obj.resulting_versions),
+  }),
+  // M25.3 — the portable processing receipt. Field order IS the canonical
+  // byte order, so this list mirrors `IngestAssessed`'s declaration exactly.
+  'ingest.assessed': (obj) => ({
+    ...canonCommon(obj),
+    receipt_id: asString(obj.receipt_id, 'receipt_id'),
+    item_id: asString(obj.item_id, 'item_id'),
+    source_id: asString(obj.source_id, 'source_id'),
+    source_record_id: asStringOrNull(obj.source_record_id, 'source_record_id'),
+    artifact_hash: asString(obj.artifact_hash, 'artifact_hash'),
+    normalized_snapshot_hash: asString(obj.normalized_snapshot_hash, 'normalized_snapshot_hash'),
+    normalizer_version: asString(obj.normalizer_version, 'normalizer_version'),
+    processing_epoch: asU64(obj.processing_epoch, 'processing_epoch'),
+    assessed_against_chain_head: asString(
+      obj.assessed_against_chain_head,
+      'assessed_against_chain_head',
+    ),
+    prefilter_verdict: oneOf(obj.prefilter_verdict, PREFILTER_VERDICTS, 'prefilter_verdict'),
+    material_dimensions: asArray(obj.material_dimensions, 'material_dimensions').map((d) =>
+      oneOf(d, MATERIAL_DIMENSIONS, 'material dimension'),
+    ),
+    independence: oneOf(obj.independence, INDEPENDENCE_STATES, 'independence'),
+    route: oneOf(obj.route, INGEST_ROUTES, 'route'),
+    observation_event_ids: asArray(obj.observation_event_ids, 'observations').map((id) =>
+      asString(id, 'observation event id'),
+    ),
+    proposal_ids: asArray(obj.proposal_ids, 'proposals').map((id) => asString(id, 'proposal id')),
+    m26_batch_key: asStringOrNull(obj.m26_batch_key, 'm26_batch_key'),
+    m26_outcome_event_id: asStringOrNull(obj.m26_outcome_event_id, 'm26_outcome_event_id'),
+    supersedes_receipt_id: asStringOrNull(obj.supersedes_receipt_id, 'supersedes_receipt_id'),
   }),
 };
 
@@ -1901,6 +2043,103 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       }
       uniqueIds(body.prior_applied_event_ids as string[], 'prior_applied_event_ids');
       uniqueIds(body.forward_event_ids as string[], 'forward_event_ids');
+      break;
+    }
+    case 'ingest.assessed': {
+      for (const [name, id] of [
+        ['receipt_id', body.receipt_id],
+        ['item_id', body.item_id],
+        ['source_id', body.source_id],
+      ] as [string, Json][]) {
+        if (!isId128(id)) throw new RefusedError(`${name} must be a 128-bit hex id`);
+      }
+      for (const [name, hash] of [
+        ['artifact_hash', body.artifact_hash],
+        ['normalized_snapshot_hash', body.normalized_snapshot_hash],
+      ] as [string, Json][]) {
+        if (!isSha256(hash)) throw new RefusedError(`${name} must be a lowercase SHA-256`);
+      }
+      if ((body.normalizer_version as string) === '') {
+        throw new RefusedError('normalizer_version must be non-empty');
+      }
+      if ((body.assessed_against_chain_head as string) === '') {
+        throw new RefusedError('assessed_against_chain_head must be non-empty');
+      }
+      if (body.source_record_id === '') {
+        throw new RefusedError('source_record_id is null or a value, never empty');
+      }
+      const route = body.route as string;
+      const verdict = body.prefilter_verdict as string;
+      const rules = ROUTE_RULES[route];
+      if (!rules.verdicts.includes(verdict)) {
+        throw new RefusedError(
+          `route ${route} cannot carry verdict ${verdict} — the route matrix is closed`,
+        );
+      }
+      const dimensions = body.material_dimensions as string[];
+      const sorted = [...dimensions].sort();
+      if (
+        sorted.join('\u0000') !== dimensions.join('\u0000') ||
+        new Set(dimensions).size !== dimensions.length
+      ) {
+        throw new RefusedError('material_dimensions must be sorted and duplicate-free');
+      }
+      if ((verdict === 'no_change' || verdict === 'non_material_change') && dimensions.length > 0) {
+        throw new RefusedError(`verdict ${verdict} names no material dimensions`);
+      }
+      if (verdict === 'material_candidate' && dimensions.length === 0) {
+        throw new RefusedError('material_candidate must name at least one material dimension');
+      }
+      if (
+        dimensions.includes('evidence_state') &&
+        body.independence === 'independence_unknown' &&
+        verdict === 'material_candidate'
+      ) {
+        throw new RefusedError(
+          'evidence-state materiality on a deterministic candidate needs a recorded independence fact',
+        );
+      }
+      for (const [name, ids] of [
+        ['observation_event_ids', body.observation_event_ids],
+        ['proposal_ids', body.proposal_ids],
+      ] as [string, string[]][]) {
+        sortedUniqueIds(ids, name);
+      }
+      const listRule = (rule: string, ids: string[], name: string) => {
+        if (rule === 'required' && ids.length === 0) {
+          throw new RefusedError(`route ${route} requires at least one ${name}`);
+        }
+        if (rule === 'forbidden' && ids.length > 0) {
+          throw new RefusedError(`route ${route} forbids ${name}`);
+        }
+      };
+      listRule(rules.observations, body.observation_event_ids as string[], 'observation_event_ids');
+      listRule(rules.proposals, body.proposal_ids as string[], 'proposal_ids');
+      const optionRule = (rule: string, value: Json, name: string) => {
+        if (rule === 'required' && value === null) {
+          throw new RefusedError(`route ${route} requires ${name}`);
+        }
+        if (rule === 'forbidden' && value !== null) {
+          throw new RefusedError(`route ${route} requires ${name} to be null`);
+        }
+      };
+      optionRule(rules.batchKey, body.m26_batch_key, 'm26_batch_key');
+      optionRule(rules.outcome, body.m26_outcome_event_id, 'm26_outcome_event_id');
+      optionRule(rules.supersedes, body.supersedes_receipt_id, 'supersedes_receipt_id');
+      for (const [name, id] of [
+        ['m26_outcome_event_id', body.m26_outcome_event_id],
+        ['supersedes_receipt_id', body.supersedes_receipt_id],
+      ] as [string, Json][]) {
+        if (id !== null && !isId128(id)) {
+          throw new RefusedError(`${name} must be a 128-bit hex id`);
+        }
+      }
+      if (body.m26_batch_key === '') {
+        throw new RefusedError('m26_batch_key is null or a value, never empty');
+      }
+      if (route === 'failed_visible' && (body.proposal_ids as string[]).length > 0) {
+        throw new RefusedError('failed_visible carries no proposal refs');
+      }
       break;
     }
     default:
