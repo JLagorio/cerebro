@@ -14,6 +14,7 @@ import {
   edgeMetaLinesFor,
   edges,
   emitArrow,
+  linkWriterLines,
   nodeMeta,
   nodes,
   styleDecl,
@@ -585,9 +586,19 @@ export function deleteNode(model: FlowchartModel, id: string): FlowchartModel {
     } else if (parsed.kind === 'style' && parsed.id === id) {
       // `style A …` declares A the same way (flowDb.addVertex mints a vertex
       // for an unknown styled id), so left behind it brings the just-deleted
-      // node back as an unlabeled coloured box. `class A hot` and `click A …`
-      // have the same shape but stay opaque, so they cannot be swept here yet;
-      // `click` becomes understood in Stage F, which can extend this arm.
+      // node back as an unlabeled coloured box.
+      next.lines.splice(i, 1);
+    } else if (parsed.kind === 'click' && parsed.id === id) {
+      // The arm the comment here used to promise Stage F would add (M29.36).
+      // An orphan click line does NOT resurrect the node — measured, `setLink`
+      // mints no vertex for an unknown id — so this is not the `style`
+      // resurrection bug. The damage is quieter: the deleted node's target
+      // stays in the user's file, `nodeLinks` keeps reporting a link for a
+      // node that is gone, and `newNodeId` hands the very same id to the next
+      // node created, which then inherits the link.
+      //
+      // `class A hot` and the opaque click VARIANTS still stay: we do not
+      // rewrite lines we do not understand, at a delete no less than anywhere.
       next.lines.splice(i, 1);
     } else if (parsed.kind === 'edges') {
       rebuildEdgeLines(next, i, (f, t) => f.id === id || t.id === id, id);
@@ -877,43 +888,40 @@ export function setNodeStyle(
 const OWNED_CLICK_ID = /^[A-Za-z0-9_.-]+$/;
 
 /**
- * The last line — OWNED OR OPAQUE — whose `click` statement names `id`, or -1.
- *
- * Peeking at an opaque line's raw text without owning it is the same move
- * `hasOpaqueMetaBlock` makes, and for the same reason: mermaid resolves the
- * LAST `setLink` for an id, and the variants we leave opaque (`href`, and a
- * comma id-list that happens to include `id`) write the very same slot —
- * measured. A new click line dropped ABOVE one of them would be a silent
- * no-op in the picture, which is the defect M29.30/.32/.33 each closed
- * somewhere else.
- *
- * `\b` is NOT the right terminator here — `.` and `-` are id characters, so it
- * would read `click A.x "y"` as naming `A`. The lookahead is the id charset
- * itself, which still lets a comma id-list (`click A,B "…"`) match, as it must.
- * Those same two characters are the only regex-special ones in the charset.
+ * The last line — OWNED OR OPAQUE — writing `id`'s link slot, or -1. Mermaid
+ * resolves the LAST `setLink`, so a line dropped above one of these would be
+ * the silent no-op M29.30/.32/.33 each closed somewhere else. `model.ts` owns
+ * the definition of "writes this slot" so this and `nodeLinks` cannot drift.
  */
-function lastClickLineFor(model: FlowchartModel, id: string): number {
-  const named = new RegExp(`^click\\s+${id.replace(/[.-]/g, '\\$&')}(?![A-Za-z0-9_.-])`);
-  let out = -1;
-  model.lines.forEach((line, i) => {
-    if (named.test(line.raw.trim())) out = i;
-  });
-  return out;
+function lastLinkLineFor(model: FlowchartModel, id: string): number {
+  return linkWriterLines(model, id).at(-1) ?? -1;
 }
 
 /**
  * Bind a node to a URL or vault-relative record path via an owned click line
  * (M29.36). One target per node: the last owned line MERMAID WOULD APPLY is
- * patched, every other owned one is dropped, and `null` clears them all.
- * Opaque click VARIANTS (`href`/`call`/tooltip/comma-list forms) are never
- * touched — if the user hand-wrote one it survives byte-for-byte and simply is
- * not what the editor reads (`nodeLinks` documents the divergence that
- * follows).
+ * patched, every other owned one is dropped.
+ *
+ * **`target` clears when it is `null` OR blank** — an empty or whitespace-only
+ * string is not a link, so it removes rather than writes (see the refusals
+ * below). The signature reads as though only `null` clears; it does not.
+ *
+ * Opaque click VARIANTS are never touched — if the user hand-wrote one it
+ * survives byte-for-byte. Where it also writes this link slot (`href`, or a
+ * comma id-list naming this id — `call`/callback forms do not), the two
+ * directions differ and the asymmetry is deliberate:
+ *
+ * - a SET wins, because it relocates BELOW the variant and mermaid resolves
+ *   the last writer;
+ * - a CLEAR cannot. It removes our lines and stops, so the picture stays
+ *   linked while the editor reports nothing. Not a bug to fix here — rewriting
+ *   a line we do not understand is the one thing this layer must never do —
+ *   but `nodeLinks(...).contested` announces it so a UI can.
  *
  * Why the LAST and not the first: mermaid resolves the last `setLink` for an
  * id (measured, `links.mermaid.test.ts`), so writing to the first would be the
  * silent no-op M29.30/.32/.33 each had to close in a different control. The
- * same fact places a NEW line below anything already claiming the id, and
+ * same fact places a NEW line below anything already writing the slot, and
  * disqualifies an owned line sitting above the node's first declaration, where
  * `setLink` finds no vertex at all.
  *
@@ -958,9 +966,11 @@ export function setNodeLink(
   //
   // - below the node's first declaration, because `setLink` only assigns to a
   //   vertex that already exists and a click line above it is simply dead;
-  // - the LAST click statement claiming the id, owned or not, because the
-  //   `href`, tooltip and comma-list variants write the very same slot and the
-  //   last one wins.
+  // - the LAST click statement WRITING THE LINK SLOT, owned or not, because
+  //   the `href`, tooltip and comma-list variants write the very same slot and
+  //   the last one wins. `linkWriterLines` draws that line: a `call` or
+  //   callback statement names the id but writes a handler, not a link, so it
+  //   is not a rival and nothing relocates around it.
   //
   // Fail either and patching in place would leave the picture pointing
   // somewhere else — the silent no-op three controls in this wave already
@@ -968,7 +978,7 @@ export function setNodeLink(
   // resolves: the one case this op relocates a line rather than patching it.
   const declared = nodes(next).has(id);
   const anchor = declared ? anchorLineFor(next, id) : -1;
-  const settled = lastClickLineFor(next, id);
+  const settled = lastLinkLineFor(next, id);
   const keep = owned.find((i) => i > anchor && i === settled);
   if (keep !== undefined) {
     const parsed = next.lines[keep].parsed;
@@ -986,10 +996,10 @@ export function setNodeLink(
   // Next to the node, matching its indent — the same anchor rule `setNodeStyle`
   // uses, and for a sharper reason here: a click line ABOVE its node's first
   // declaration is DEAD upstream (measured), and `anchorLineFor` never returns
-  // a position before the node exists. Below any click statement already
-  // naming this id, though, since the last one is what mermaid resolves.
+  // a position before the node exists. Below any statement already WRITING the
+  // slot, though, since the last of those is what mermaid resolves.
   if (declared) {
-    const at = Math.max(anchorLineFor(next, id), lastClickLineFor(next, id));
+    const at = Math.max(anchorLineFor(next, id), lastLinkLineFor(next, id));
     const indent = next.lines[at]?.raw.match(/^\s*/)?.[0] ?? '  ';
     next.lines.splice(at + 1, 0, {
       raw: indent,

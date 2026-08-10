@@ -988,20 +988,83 @@ export function nodeStyle(model: FlowchartModel, id: string): Record<string, str
 }
 
 /**
+ * Any click statement at all: the id-list token, then everything after it.
+ * Deliberately looser than `CLICK_LINE` — this reads lines we do NOT own, so
+ * it answers mermaid's lexing, not our ownership rules.
+ */
+const CLICK_STATEMENT = /^click[^\S\r\n]+(\S+)[^\S\r\n]+(.*)$/;
+
+/**
+ * Every line — OWNED OR OPAQUE — whose `click` statement writes `id`'s LINK
+ * slot, in source order. The one place that answers "who else is writing
+ * here", so `nodeLinks` and `setNodeLink` can never disagree about it.
+ *
+ * Reading an opaque line's raw text without OWNING it is the same move
+ * `hasOpaqueMetaBlock` makes. Two measured facts shape it:
+ *
+ * - `setLink` does `ids.split(',').forEach(…)` (flowDb.ts:551-559), so
+ *   `click A,B "both.md"` writes BOTH slots and an id in the TAIL of the list
+ *   counts exactly as much as the head. Matching only the head was the M29.36
+ *   review defect. `click A, B "x"` is NOT a list — the space ends the id
+ *   token and mermaid reduces the line to a callback, writing no link at all.
+ * - only the `STR` and `HREF STR` arms reach `setLink`; `call fn()` and a bare
+ *   callback name go to `setClickEvent` (flow.jison:541-555) and leave the
+ *   link untouched — measured, `click A "one.md"` + `click A call doThing()`
+ *   still resolves to `one.md`. Treating those as writers would relocate an
+ *   owned line for nothing.
+ *
+ * Whitespace is read loosely on purpose: a line mermaid rejects outright
+ * (`click A  "x"`) renders nothing at all, so mistaking it for a writer costs
+ * only a line's position in a document that already cannot draw.
+ */
+export function linkWriterLines(model: FlowchartModel, id: string): number[] {
+  const out: number[] = [];
+  model.lines.forEach((line, i) => {
+    const statement = line.raw.trim().match(CLICK_STATEMENT);
+    if (statement === null || !statement[1].split(',').includes(id)) return;
+    const rest = statement[2];
+    // `"href"[\s]` is upstream's own lexer rule, so `hrefx "y"` is not it.
+    if (rest.startsWith('"') || /^href[^\S\r\n]/.test(rest)) out.push(i);
+  });
+  return out;
+}
+
+export interface NodeLink {
+  /** The owned line carrying the target — the one an edit would rewrite. */
+  line: number;
+  target: string;
+  /**
+   * True when a click statement we do NOT own also writes this slot: an
+   * `href` form, or a comma id-list naming this id. It means two things a UI
+   * has to say out loud, both measured:
+   *
+   * - the render may disagree with `target` (the last writer wins, and that
+   *   writer might not be ours — until `setNodeLink` runs, which relocates
+   *   below it and takes the slot back);
+   * - **a CLEAR cannot fully clear.** `setNodeLink(…, null)` removes our
+   *   lines and must not touch an opaque one, so `click A "plain"` +
+   *   `click A href "href.md"` clears to a node the editor reports as
+   *   unlinked and mermaid still draws linked. The behaviour is right — we do
+   *   not rewrite lines we do not understand — but a control that offers
+   *   "remove link" without saying so would be lying.
+   */
+  contested: boolean;
+}
+
+/**
  * Every node with an OWNED click line → its target and the line carrying it.
  * Later lines win, which is what mermaid itself does: `setLink` assigns
  * `vertex.link` outright (flowDb.ts:551-559) — measured on 11.16.0, three
  * plain click lines for one id resolve to the third.
  *
- * TWO MEASURED DIVERGENCES the editor has to live with, both of them the
- * user's own hand-written variants and neither of them a render hazard:
+ * A node linked ONLY by a variant we do not own has NO ENTRY here at all, so
+ * "absent from this map" means "no link we can edit", never "no link".
+ * `contested` covers the other half: an entry that exists but is shared.
  *
- * - the `href` form writes the SAME slot, so `click A "plain"` followed by
- *   `click A href "other"` renders an anchor to `other` while this map says
- *   `plain`. Owning the href form would fix it and is not this stage's job;
- * - a click line ABOVE its node's first declaration is DEAD upstream
- *   (`setLink` only assigns to a vertex that already exists), while this map
- *   still reports it. `setNodeLink` never creates one there.
+ * One more measured divergence, not worth a flag: a click line ABOVE its
+ * node's first declaration is DEAD upstream (`setLink` only assigns to a
+ * vertex that already exists) while this map still reports it. `setNodeLink`
+ * never leaves one there, and `deleteNode` sweeps them.
  *
  * The editor is the thing that ACTS on these: render.ts pins `securityLevel:
  * 'strict'`, where mermaid attaches no click handlers (`setClickFun` returns
@@ -1010,13 +1073,21 @@ export function nodeStyle(model: FlowchartModel, id: string): Record<string, str
  * picture is not inert and a relative target is a live navigation inside the
  * app. Neutralizing that belongs to whoever binds the svg.
  */
-export function nodeLinks(model: FlowchartModel): Map<string, { line: number; target: string }> {
-  const out = new Map<string, { line: number; target: string }>();
+export function nodeLinks(model: FlowchartModel): Map<string, NodeLink> {
+  const owned = new Map<string, Set<number>>();
+  const out = new Map<string, NodeLink>();
   model.lines.forEach((line, i) => {
-    if (line.parsed.kind === 'click') {
-      out.set(line.parsed.id, { line: i, target: line.parsed.target });
-    }
+    if (line.parsed.kind !== 'click') return;
+    const { id, target } = line.parsed;
+    out.set(id, { line: i, target, contested: false });
+    const mine = owned.get(id) ?? new Set<number>();
+    mine.add(i);
+    owned.set(id, mine);
   });
+  for (const [id, entry] of out) {
+    const mine = owned.get(id) ?? new Set<number>();
+    entry.contested = linkWriterLines(model, id).some((i) => !mine.has(i));
+  }
   return out;
 }
 

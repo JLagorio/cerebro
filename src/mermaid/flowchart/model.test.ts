@@ -5,6 +5,7 @@ import {
   edges,
   emitArrow,
   emitNodeRef,
+  linkWriterLines,
   nodeLinks,
   nodeMeta,
   nodeStyle,
@@ -942,19 +943,47 @@ describe('click lines', () => {
     const model = parseFlowchart(
       'flowchart TD\n  A --> B\n  click A "one.md"\n  click A "two.md"',
     )!;
-    expect(nodeLinks(model).get('A')).toEqual({ line: 3, target: 'two.md' });
+    expect(nodeLinks(model).get('A')).toEqual({ line: 3, target: 'two.md', contested: false });
     expect(nodeLinks(model).has('B')).toBe(false);
   });
 
-  it('nodeLinks reports only OWNED lines, and says so', () => {
+  it('nodeLinks reports only OWNED lines, and flags the ones it shares', () => {
     // MEASURED: the `href` form writes the same vertex slot as the plain one
     // and the LAST of all of them wins, so on this document mermaid's picture
-    // anchors to href.md while the editor's reading says plain.md. Pinned as a
-    // known divergence rather than left to be discovered.
+    // anchors to href.md while the editor's reading says plain.md. `contested`
+    // is how a caller learns that BEFORE it offers to remove the link — a
+    // clear would take our line and leave the picture linked.
     const model = parseFlowchart(
       'flowchart TD\n  A --> B\n  click A "plain.md"\n  click A href "href.md"',
     )!;
-    expect(nodeLinks(model).get('A')).toEqual({ line: 2, target: 'plain.md' });
+    expect(nodeLinks(model).get('A')).toEqual({ line: 2, target: 'plain.md', contested: true });
+  });
+
+  it('linkWriterLines answers only for statements that reach setLink', () => {
+    // The shared definition of "writes this slot" behind both `nodeLinks`
+    // and `setNodeLink`, so the two can never disagree. All MEASURED.
+    const doc = (line: string): string => `flowchart TD\n  A --> B\n  ${line}`;
+    for (const line of [
+      'click A "x.md"',
+      'click A href "x.md"',
+      'click A "x.md" "tip"',
+      'click A href "x.md" _blank',
+      'click A,B "x.md"', // A is the head…
+      'click B,A "x.md"', // …and the tail counts the same
+      'click Z,A,Y "x.md"',
+    ]) {
+      expect([line, linkWriterLines(parseFlowchart(doc(line))!, 'A')]).toEqual([line, [2]]);
+    }
+    for (const line of [
+      'click A call doThing()', // setClickEvent, not setLink
+      'click A doThing',
+      'click A, B "x.md"', // the space ends the id token — a callback line
+      'click A.x "x.md"', // a different id entirely
+      'click AB "x.md"',
+      'click',
+    ]) {
+      expect([line, linkWriterLines(parseFlowchart(doc(line))!, 'A')]).toEqual([line, []]);
+    }
   });
 
   it('round-trips click lines byte-identically when untouched', () => {

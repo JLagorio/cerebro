@@ -156,6 +156,42 @@ describe('click conformance (M29.36)', () => {
   );
 
   it(
+    'which statements write the link slot — the evidence behind linkWriterLines',
+    async () => {
+      init();
+      const links = async (code: string): Promise<[unknown, unknown]> => {
+        const v = await vertices(code);
+        return [v.get('A')?.link, v.get('B')?.link];
+      };
+      const doc = (line: string): string =>
+        `flowchart TD\n  A --> B\n  click B "old.md"\n  ${line}`;
+
+      // A comma id-list writes EVERY slot in it — `setLink` does
+      // `ids.split(',').forEach(…)` — so an id in the TAIL is overwritten just
+      // as the head is. Reading only the head was the M29.36 review defect.
+      expect(await links(doc('click A,B "both.md"'))).toEqual(['both.md', 'both.md']);
+      expect(await links(doc('click B,A "both.md"'))).toEqual(['both.md', 'both.md']);
+      expect(await links(doc('click A,B href "both.md"'))).toEqual(['both.md', 'both.md']);
+      // …but a SPACE ends the id token, and the line reduces to a callback
+      // that writes no link at all. B keeps the earlier target.
+      expect(await links(doc('click A, B "x"'))).toEqual([undefined, 'old.md']);
+
+      // `call` and a bare callback name reach `setClickEvent`, never
+      // `setLink`, so they do NOT contest the slot and must not push a write
+      // below them.
+      const owned = 'flowchart TD\n  A --> B\n  click A "one.md"\n';
+      expect((await vertices(`${owned}  click A call doThing()`)).get('A')?.link).toBe('one.md');
+      expect((await vertices(`${owned}  click A doThing`)).get('A')?.link).toBe('one.md');
+      // A tooltip or `_blank` variant DOES write it.
+      expect((await vertices(`${owned}  click A "two.md" "tip"`)).get('A')?.link).toBe('two.md');
+      expect((await vertices(`${owned}  click A href "two.md" _blank`)).get('A')?.link).toBe(
+        'two.md',
+      );
+    },
+    TIMEOUT,
+  );
+
+  it(
     'a click line above its node is dead, and setNodeLink never leaves one there',
     async () => {
       init();
@@ -232,13 +268,33 @@ describe('click conformance (M29.36)', () => {
         ['comma-variant', 'flowchart TD\n  A --> B\n  click A,B "both.md"'],
         ['styled', 'flowchart TD\n  A --> B\n  style A fill:#f96\n  classDef hot fill:#f96'],
         ['tab-indent', 'flowchart TD\n\tsubgraph S\n\t\tA --> B\n\tend'],
+        // The M29.36 review's shapes: an owned line sandwiched by an unowned
+        // same-slot writer, and an id in the TAIL of a comma list rather than
+        // its head. Both were absent, and both hid live defects.
+        [
+          'owned-variant-owned',
+          'flowchart TD\n  A --> B\n  click A "one.md"\n  click A href "mid.md"\n  click A "two.md"',
+        ],
+        ['comma-tail', 'flowchart TD\n  A --> B\n  click B,A "both.md"'],
+        ['comma-tail-owned', 'flowchart TD\n  A --> B\n  click A "own.md"\n  click B,A "both.md"'],
+        ['callback-variant', 'flowchart TD\n  A --> B\n  click A "own.md"\n  click A call f()'],
+        ['noncanonical-owned', 'flowchart TD\n  A --> B\n  click  A\t"same.md"'],
       ];
+      // Every character `clickTarget`'s doc calls "measured safe" is here, so
+      // the claim is backed by a renderer rather than by a comment: `#`, `\`,
+      // `;`, `,` and non-ASCII used to live only in the pure sweep, which
+      // never starts mermaid.
       const TARGETS = [
         'projects/atlas/project.md',
         'my notes/a b.md',
         'weird"name.md',
         'a\nb.md',
         'a|b.md',
+        'a#b.md',
+        'a;b.md',
+        'a,b.md',
+        'a\\b.md',
+        'notes/é中—.md',
         'a %% b.md',
         'a[b]{c}.md',
         '  padded.md  ',

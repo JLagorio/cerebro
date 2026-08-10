@@ -216,6 +216,39 @@ describe('renameNode and node-meta (M29.29)', () => {
       'flowchart TD\n  style B fill:#0f0',
     );
   });
+
+  it('deleteNode sweeps the click lines it owns, and only those', () => {
+    // The arm `style` opened, extended now that `click` is understood
+    // (M29.36). An orphan click line does not RESURRECT the node — measured,
+    // `setLink` mints no vertex — but it keeps a target the user deleted in
+    // their file and makes `nodeLinks` report a link for a node that is gone.
+    const src = [
+      'flowchart TD',
+      '  B[Keep]',
+      '  A[Start] --> B',
+      '  click A "private/salary.md"',
+      '  click B "kept.md"',
+      '  click A href "opaque-variant.md"',
+    ].join('\n');
+    // B's link survives; so does the opaque variant, which is not ours to
+    // remove however much it names A.
+    expect(serialize(deleteNode(parseFlowchart(src)!, 'A'))).toBe(
+      'flowchart TD\n  B[Keep]\n  click B "kept.md"\n  click A href "opaque-variant.md"',
+    );
+  });
+
+  it('a recycled id cannot inherit the deleted node’s link', () => {
+    // `newNodeId` hands out the lowest free `n<N>` (ops.ts), so the id comes
+    // straight back. Left behind, the click line would make a brand-new node
+    // report a link to the old one's vault path.
+    const linked = setNodeLink(parseFlowchart('flowchart TD\n  n1[Old] --> B')!, 'n1', 'secret.md');
+    const deleted = deleteNode(linked, 'n1');
+    expect(nodeLinks(deleted).has('n1')).toBe(false);
+    const { model: reused, id } = addNode(deleted, 'Fresh');
+    expect(id).toBe('n1');
+    expect(serialize(reused)).not.toContain('secret.md');
+    expect(nodeLinks(reused).has('n1')).toBe(false);
+  });
 });
 
 describe('setNodeStyle (M29.30)', () => {
@@ -1131,8 +1164,18 @@ describe('setNodeLink', () => {
     ].join('\n');
     // Neither a set nor a clear may rewrite a line we do not understand.
     expect(serialize(setNodeLink(parseFlowchart(src)!, 'A', null))).toBe(src);
+    // The write lands below the last LINK writer — the comma list — and stops
+    // there. It does not need to clear the `call` line, which writes a
+    // handler, not a link (measured), so that line keeps its position too.
     expect(serialize(setNodeLink(parseFlowchart(src)!, 'A', 'mine.md'))).toBe(
-      `${src}\n  click A "mine.md"`,
+      [
+        'flowchart TD',
+        '  A --> B',
+        '  click A href "https://example.com" _blank',
+        '  click A,B "both.md"',
+        '  click A "mine.md"',
+        '  click A call doThing()',
+      ].join('\n'),
     );
   });
 
@@ -1206,6 +1249,78 @@ describe('setNodeLink', () => {
       `${list}\n  click A "a.md"`,
     );
   });
+
+  it('a comma id-list claims every id in it, not just the head', () => {
+    // MEASURED on 11.16.0: `setLink` does `ids.split(',').forEach(…)`, so
+    // `click A,B "both.md"` writes B's slot too and last-wins applies to it —
+    // `click B "old.md"` above it renders as `both.md`, not `old.md`. An op
+    // that only recognized the HEAD of the list would patch B's line in place
+    // and be silently overruled by the picture.
+    const src = 'flowchart TD\n  A --> B\n  click B "old.md"\n  click A,B "both.md"';
+    expect(serialize(setNodeLink(parseFlowchart(src)!, 'B', 'new.md'))).toBe(
+      'flowchart TD\n  A --> B\n  click A,B "both.md"\n  click B "new.md"',
+    );
+    // With no owned line at all, the new one still lands below the list.
+    const bare = 'flowchart TD\n  A --> B\n  click A,B "both.md"';
+    expect(serialize(setNodeLink(parseFlowchart(bare)!, 'B', 'new.md'))).toBe(
+      `${bare}\n  click B "new.md"`,
+    );
+    // The href form of the same list writes the same slots.
+    const href = 'flowchart TD\n  A --> B\n  click B "old.md"\n  click A,B href "both.md"';
+    expect(serialize(setNodeLink(parseFlowchart(href)!, 'B', 'new.md'))).toBe(
+      'flowchart TD\n  A --> B\n  click A,B href "both.md"\n  click B "new.md"',
+    );
+    // `click A, B "x"` is NOT a list — the space ends the id token and the
+    // line becomes a callback (measured: neither A nor B gets a link), so it
+    // must not push B's line anywhere.
+    const spaced = 'flowchart TD\n  A --> B\n  click B "old.md"\n  click A, B "x"';
+    expect(serialize(setNodeLink(parseFlowchart(spaced)!, 'B', 'new.md'))).toBe(
+      'flowchart TD\n  A --> B\n  click B "new.md"\n  click A, B "x"',
+    );
+  });
+
+  it('a callback click line does not claim the link slot', () => {
+    // MEASURED: `click A "one.md"` followed by `click A call doThing()` leaves
+    // A.link === "one.md". `call` and a bare callback name reduce to
+    // `setClickEvent` (flow.jison:541-549), which never touches the link. So
+    // the owned line is patched WHERE IT STANDS — relocating it below would
+    // move a line for no semantic gain.
+    const call = 'flowchart TD\n  A --> B\n  click A "one.md"\n  click A call doThing()';
+    expect(serialize(setNodeLink(parseFlowchart(call)!, 'A', 'new.md'))).toBe(
+      'flowchart TD\n  A --> B\n  click A "new.md"\n  click A call doThing()',
+    );
+    const bare = 'flowchart TD\n  A --> B\n  click A "one.md"\n  click A doThing';
+    expect(serialize(setNodeLink(parseFlowchart(bare)!, 'A', 'new.md'))).toBe(
+      'flowchart TD\n  A --> B\n  click A "new.md"\n  click A doThing',
+    );
+    // A tooltip or `_blank` variant DOES write the slot (measured), so those
+    // still push the write below them.
+    const tip = 'flowchart TD\n  A --> B\n  click A "one.md"\n  click A "two.md" "tip"';
+    expect(serialize(setNodeLink(parseFlowchart(tip)!, 'A', 'new.md'))).toBe(
+      'flowchart TD\n  A --> B\n  click A "two.md" "tip"\n  click A "new.md"',
+    );
+  });
+
+  it('a clear cannot clear a contested slot, and nodeLinks says so beforehand', () => {
+    // The asymmetry F4 has to build an honest control around: a SET relocates
+    // below the unowned writer and wins, but a CLEAR must not touch an opaque
+    // line, so the picture stays linked while the editor reports nothing.
+    for (const variant of ['click A href "href.md"', 'click A,B "both.md"']) {
+      const src = `flowchart TD\n  A --> B\n  click A "plain.md"\n  ${variant}`;
+      const model = parseFlowchart(src)!;
+      expect([variant, nodeLinks(model).get('A')?.contested]).toEqual([variant, true]);
+      // The clear leaves the variant behind — correct, and now announced.
+      expect([variant, serialize(setNodeLink(model, 'A', null))]).toEqual([
+        variant,
+        `flowchart TD\n  A --> B\n  ${variant}`,
+      ]);
+    }
+    // Uncontested is the ordinary case, and a callback line does not contest.
+    const plain = parseFlowchart('flowchart TD\n  A --> B\n  click A "plain.md"')!;
+    expect(nodeLinks(plain).get('A')?.contested).toBe(false);
+    const cb = parseFlowchart('flowchart TD\n  A --> B\n  click A "p.md"\n  click A call f()')!;
+    expect(nodeLinks(cb).get('A')?.contested).toBe(false);
+  });
 });
 
 /**
@@ -1246,7 +1361,33 @@ describe('setNodeLink sweep', () => {
     ['edge-id', 'flowchart TD\n  A e1@--> B\n  e1@{ animate: true }'],
     ['tab-indent', 'flowchart TD\n\tsubgraph S\n\t\tA --> B\n\tend'],
     ['id-with-dot-dash', 'flowchart TD\n  A --> B\n  click A.x-y "other.md"'],
+    // The three shapes the M29.36 review found MISSING — each one hid a live
+    // defect from this sweep because every earlier document linked `A` as the
+    // head of its only list, and none sandwiched an unowned writer.
+    [
+      'owned-variant-owned',
+      'flowchart TD\n  A --> B\n  click A "one.md"\n  click A href "mid.md"\n  click A "two.md"',
+    ],
+    ['owned-then-variant', 'flowchart TD\n  A --> B\n  click A "one.md"\n  click A href "x.md"'],
+    ['comma-tail', 'flowchart TD\n  A --> B\n  click B,A "both.md"'],
+    ['comma-tail-owned', 'flowchart TD\n  A --> B\n  click A "own.md"\n  click B,A "both.md"'],
+    // Legal but non-canonical spacing: two spaces after `click`, a TAB before
+    // the string. Owned, and rewritten canonically the moment it goes dirty,
+    // so the fixed-point assertion below finally sees a reformat.
+    ['noncanonical-owned', 'flowchart TD\n  A --> B\n  click  A\t"same.md"'],
   ];
+
+  /**
+   * Which lines write A's link slot, by MERMAID's rules — re-derived here from
+   * the grammar rather than imported, so this sweep is an independent oracle
+   * and not a second run of the implementation it is checking.
+   */
+  const linkWriters = (code: string): number[] =>
+    code.split('\n').flatMap((line, i) => {
+      const m = line.trim().match(/^click\s+(\S+)\s+(.*)$/);
+      if (m === null || !m[1].split(',').includes('A')) return [];
+      return m[2].startsWith('"') || /^href\s/.test(m[2]) ? [i] : [];
+    });
 
   const TARGETS: [string, string][] = [
     ['projects/atlas/project.md', 'projects/atlas/project.md'],
@@ -1332,6 +1473,19 @@ describe('setNodeLink sweep', () => {
           where,
           serialize(setNodeLink(parseFlowchart(out)!, 'A', null)).split('\n'),
         ]).toEqual([where, before]);
+        // 7. THE LINE WE WROTE IS THE ONE MERMAID RESOLVES: no other statement
+        //    writing A's slot may sit below it. This is what the review found
+        //    missing — without it the relocation rule was proven only by the
+        //    single conformance test, and every mutation of it survived the
+        //    fast suite people actually run.
+        //    The parse locates OUR line (check 2 already proved there is
+        //    exactly one); the ordering rule itself is checked against the
+        //    independently derived writer list.
+        const mine = parseFlowchart(out)!.lines.findIndex(
+          (l) => l.parsed.kind === 'click' && l.parsed.id === 'A',
+        );
+        expect([where, mine]).not.toEqual([where, -1]);
+        expect([where, linkWriters(out).at(-1)]).toEqual([where, mine]);
         checked += 1;
       }
     }
