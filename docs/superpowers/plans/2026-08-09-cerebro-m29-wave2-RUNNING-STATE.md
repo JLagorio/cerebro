@@ -45,9 +45,14 @@ Scratch files go in the session scratchpad, **never** in the repo (a scratch
 | G3 M29.42 render pipeline | `d6adea5` + `2a8dcf1` | DONE, reviewed |
 | G4 M29.43 drag + toggle | `8d5dcfa` (+ `2a8dcf1`) | DONE, reviewed |
 | G5 M29.44 e2e + gate | `6c29790` | DONE. **STAGE G COMPLETE** |
-| H1–H6 M29.45–.50 | — | TODO |
+| H1 M29.45 ViewType plumbing | `22041af` | DONE, reviewed |
+| H2 M29.46 view + useDiagramFile | `d8ea48a` `0eae807` `b8c476f` | DONE, reviewed |
+| H3 M29.47 record cards | `ab1dd19` | DONE, reviewed; polish round in flight |
+| H4 M29.48 host wiring | `719faa6` | DONE, reviewed |
+| H5 M29.49 fossil sweep | `d5648ab` | DONE, reviewed |
+| H6 M29.50 e2e + gate | `d522f4b` | DONE, reviewed. **STAGE H COMPLETE** |
 
-**Baseline now: 182 files / 2980 passed / 2 skipped; e2e 43.** Lint, typecheck, format, build clean.
+**Baseline now: 185 files / 3046 passed / 2 skipped; e2e 45.** Lint, typecheck, format, build clean.
 (Wave started at 172 / 2584.)
 
 ## 3. Two structural decisions already taken (do not re-litigate)
@@ -112,6 +117,33 @@ as the appetite; a fallback is a materially lesser product and is the user's cal
 
 If G1 fails: finish Stage H in full, document G's findings, and report both. Stopping
 at the gate is an **expected, reportable outcome — not a failure.**
+
+## 5b. WAVE COMPLETE — what remains open
+
+All three stages (F M29.35-.39, G M29.40-.44, H M29.45-.50) are implemented, reviewed
+and gated. **Not merged, not pushed.** The branch is `m29-mermaid`.
+
+Follow-ups recorded rather than silently taken:
+
+- **The "no type special-casing" invariant is asserted NOWHERE in the repo.** Replacing
+  a `f.kind === 'status'` capability check with `entry.type === 'Work item'` passes all
+  37 tests in that file. Implementations are correct; the gap is that every status-kind
+  field in `demo-vault/types/*` and `src/test/factories.ts` is literally named `status`.
+  Closing it means adding a fixture type with a differently-named status field to the
+  golden corpus — a corpus change, deliberately not made unreviewed at wave's end.
+- **`demo-vault/` carries two prose edits** from the M29.49 sweep
+  (`strategy/okr-tree.list.yml:19`, `delivery/how-we-schedule.md:28`). Verified
+  unasserted by any spec, but it is a golden-corpus change made by a test commit.
+- **A fresh whiteboard opens at 400% zoom** — the empty seed renders a 76x36 svg so
+  `CanvasViewport`'s initialFit clamps to MAX_SCALE. Self-corrects once a node exists;
+  nobody has looked at it on a real screen.
+- **Whiteboard on a Type screen and on a root-level List are unit-covered only** — the
+  e2e exercises the List-in-a-collection host.
+- **A record node added from the host bar carries no manual-layout position** (the
+  toolbar's placer lives on `FullScreenDiagramEditor`'s internal ref). It lands at its
+  dagre position and the user drags it once. Deliberate; a feature-sized change to close.
+- **One M29.28 exit criterion is still UNVERIFIED by design**: the packaged-app check
+  that `Save PNG...` opens the native macOS dialog. Needs `./scripts/mac-build.sh`.
 
 ## 6. Open follow-ups (carried, not yet done)
 
