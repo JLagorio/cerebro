@@ -42,12 +42,12 @@ Scratch files go in the session scratchpad, **never** in the repo (a scratch
 | F5 M29.39 insert palette + e2e | `80ad6b1` + `213d496` + `0b1b34d` + `68a0a19` | DONE, reviewed. **STAGE F COMPLETE** |
 | G1 M29.40 spike | `1f98c1b` | **GATE PASSED — verdict PROCEED** (all 4 criteria YES) |
 | G2 M29.41 position model | `bca6474` + `74939ee` | DONE, reviewed |
-| G3 M29.42 render pipeline | `d6adea5` | DONE; review in flight |
-| G4 M29.43 drag + toggle | `8d5dcfa` | DONE; review pending |
-| G5 M29.44 e2e + gate | — | TODO |
+| G3 M29.42 render pipeline | `d6adea5` + `2a8dcf1` | DONE, reviewed |
+| G4 M29.43 drag + toggle | `8d5dcfa` (+ `2a8dcf1`) | DONE, reviewed |
+| G5 M29.44 e2e + gate | `6c29790` | DONE. **STAGE G COMPLETE** |
 | H1–H6 M29.45–.50 | — | TODO |
 
-**Baseline now: 182 files / 2961 passed / 2 skipped.** Lint, typecheck, format, build clean.
+**Baseline now: 182 files / 2980 passed / 2 skipped; e2e 43.** Lint, typecheck, format, build clean.
 (Wave started at 172 / 2584.)
 
 ## 3. Two structural decisions already taken (do not re-litigate)
@@ -82,6 +82,23 @@ adds a way to change what mermaid emits, test what the NEXT layer does with it.
 because every document in both corpora linked the same node id. A 42-document sweep
 missed a diagram-killing rename because every rename used the same two titles. Vary
 STRUCTURE *and* SPELLING, and mutation-test the sweep itself.
+
+## 4b. TWO DEFECTS A GREEN GATE DID NOT CATCH — read before trusting any suite
+
+**1. The shipping code path had never been exercised.** `beginManualLayout` takes its
+exact/CTM arm whenever `getScreenCTM` exists — always in a browser, never in jsdom. So
+100% of the drag tests ran the fallback arm. M29.42/.43 passed unit, lint, typecheck,
+coverage, e2e AND cargo while the feature was broken in every real browser: the module
+composed a PINNED svg matrix with LIVE element matrices, and `growViewBox` invalidated
+the pin, so every re-routed edge and label detached from its nodes mid-drag and the node
+itself could vanish under the cursor. Found only by a reviewer planting a *live*
+`getScreenCTM` harness. **If a branch is unreachable in jsdom, assume it is untested.**
+
+**2. React 19 re-applies the raw-HTML prop when the PROP OBJECT differs, not when the
+html string does.** A fresh `{{ __html: svg }}` literal per render rebuilt the whole svg
+subtree on every re-render — wiping manual transforms and **restoring the link hrefs
+M29.38 strips** (that effect is keyed on the svg string, so it did not re-run either).
+Memoize the prop on the string. Found by accident while chasing an unrelated test.
 
 ## 5. STAGE G IS GATED — READ BEFORE STARTING IT
 
