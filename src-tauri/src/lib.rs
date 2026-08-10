@@ -480,6 +480,11 @@ fn start_watcher(
         if let Err(e) = runtime::sink::arm(&dir) {
             eprintln!("runtime db unavailable, operational refusals go unrecorded: {e}");
         }
+        // M25.1: one database serves every vault, so an opening vault
+        // registers itself before anything writes a row that has to say
+        // which folder it belongs to. Failing here is degraded, not fatal,
+        // for the same reason the line above is.
+        let _ = runtime::open_vault(&vault_path);
     }
     vault::watcher::start(app, state.inner(), vault_path)
 }
