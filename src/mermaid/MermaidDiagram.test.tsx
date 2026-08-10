@@ -87,3 +87,88 @@ describe('MermaidDiagram cannot navigate the app away (M29.38)', () => {
     expect(liveTargets(view)).toEqual([]);
   });
 });
+
+/**
+ * View mode is not a lesser citizen: a manual-layout diagram that only honoured
+ * its stored positions inside the structural editor would snap back to auto
+ * geometry every time the block was deselected, and on every reload.
+ */
+describe('MermaidDiagram honours stored manual positions (M29.42)', () => {
+  const MANUAL_SVG = [
+    '<svg viewBox="0 0 200 100" width="100%" style="max-width: 200px;">',
+    '<g class="node" id="flowchart-A-0" transform="translate(30, 20)"><rect/></g>',
+    '<g class="node" id="flowchart-B-1" transform="translate(130, 70)"><rect/></g>',
+    '<path class="flowchart-link" id="L_A_B_0" data-id="L_A_B_0"',
+    ' d="M30,25C60,40 90,50 120,65" marker-end="url(#e)"/>',
+    '</svg>',
+  ].join('');
+
+  // The component measures inside its own layout effect, before a test can
+  // reach any element, so the stub has to be on the prototype and keyed.
+  function withStubbedRects(run: () => Promise<void>): Promise<void> {
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      svg: { left: 0, top: 0, width: 200, height: 100 },
+      'flowchart-A-0': { left: 20, top: 10, width: 20, height: 20 },
+      'flowchart-B-1': { left: 120, top: 60, width: 20, height: 20 },
+    };
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const key = this.tagName.toLowerCase() === 'svg' ? 'svg' : this.id;
+      const r = rects[key] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        ...r,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        x: r.left,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    // A leaked prototype stub poisons every later test in the file.
+    return run().finally(() => {
+      Element.prototype.getBoundingClientRect = original;
+    });
+  }
+
+  it('applies stored positions, straightens the edge, and grows the viewBox', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: MANUAL_SVG });
+    await withStubbedRects(async () => {
+      render(
+        <MermaidDiagram
+          code={
+            'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 280,20\n  A[Start] --> B[End]'
+          }
+        />,
+      );
+      await waitFor(() => {
+        expect(document.getElementById('flowchart-A-0')?.getAttribute('transform')).toBe(
+          'translate(30, 20) translate(250, 0)',
+        );
+      });
+      const edge = document.getElementById('L_A_B_0');
+      // A is now RIGHT of B: dx=-150 dy=50 -> s=min(10/150, 10/50)=1/15.
+      expect(edge?.getAttribute('d')).toBe('M270,23.33L140,66.67');
+      expect(edge?.getAttribute('marker-end')).toBe('url(#e)');
+      // Without this the node is not merely clipped, it VANISHES (M29.40).
+      const svg = document.querySelector('[data-testid="mermaid-diagram"] svg');
+      expect(svg?.getAttribute('viewBox')).toBe('0 0 298 100');
+      expect((svg as SVGSVGElement | null)?.style.maxWidth).toBe('298px');
+    });
+  });
+
+  it('leaves an auto-layout diagram exactly as mermaid drew it', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: MANUAL_SVG });
+    await withStubbedRects(async () => {
+      render(<MermaidDiagram code={'flowchart TD\n  A[Start] --> B[End]'} />);
+      await waitFor(() =>
+        expect(screen.getAllByTestId('mermaid-diagram').length).toBeGreaterThan(0),
+      );
+      expect(document.getElementById('flowchart-A-0')?.getAttribute('transform')).toBe(
+        'translate(30, 20)',
+      );
+      expect(document.getElementById('L_A_B_0')?.getAttribute('d')).toBe(
+        'M30,25C60,40 90,50 120,65',
+      );
+    });
+  });
+});

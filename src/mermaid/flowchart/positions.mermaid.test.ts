@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import mermaid from 'mermaid';
 import { parseFlowchart, serialize, storedPositions, isManualLayout } from './model';
 import { clearPositions, setManualLayout, setNodePosition } from './ops';
+import { NODE_GROUP_SELECTOR } from './svgBinding';
 
 /**
  * Conformance, not unit testing (M29.41). The `%% cerebro:pos` /
@@ -215,6 +216,113 @@ describe('cerebro marker comments are inert to mermaid (M29.41)', () => {
       expect(serialize(clearPositions(reread))).toBe(
         'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B{Choice}\n  B --> C',
       );
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * The other half of the manual-layout contract (M29.42): not what mermaid
+ * IGNORES, but what it EMITS. `manualLayout.ts` writes into this DOM, and every
+ * claim below is one it would silently misbehave on if 11.16.0 disagreed — so
+ * each is measured here rather than read off the vendored 11.16.1 source or
+ * inherited from the plan, which has already been wrong about this subtree
+ * (`g.root` is absent entirely under ELK; hand-drawn nodes are `g.rough-node`).
+ */
+describe('the svg DOM manual layout writes into (M29.42)', () => {
+  const FLOW = 'flowchart TD\n  A[Start] --> B{Choice}\n  B -->|yes| C[Done]';
+
+  async function renderedDom(code: string): Promise<SVGSVGElement> {
+    seq += 1;
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    try {
+      const { svg } = await mermaid.render(`dom${seq}`, code, host);
+      const holder = document.createElement('div');
+      holder.innerHTML = svg;
+      return holder.querySelector('svg')!;
+    } finally {
+      host.remove();
+    }
+  }
+
+  it(
+    'sizes the svg the way growViewBox assumes: width=100%, a px max-width, no height',
+    async () => {
+      init();
+      const svg = await renderedDom(FLOW);
+      expect(svg.getAttribute('width')).toBe('100%');
+      expect(svg.getAttribute('style')).toMatch(/max-width:\s*[\d.]+px/);
+      // No height attribute at all: the box is the viewBox's aspect ratio, so
+      // growing the viewBox is what makes room, and nothing else has to move.
+      expect(svg.getAttribute('height')).toBeNull();
+      const vb = svg
+        .getAttribute('viewBox')!
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+      expect(vb).toHaveLength(4);
+      expect(vb.every((n) => Number.isFinite(n))).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'positions every node group with a LONE translate, under ancestors carrying none',
+    async () => {
+      init();
+      const svg = await renderedDom(FLOW);
+      const groups = [...svg.querySelectorAll(NODE_GROUP_SELECTOR)];
+      expect(groups).toHaveLength(3);
+      for (const el of groups) {
+        // The base transform the manual pipeline appends to (nodes.ts:97).
+        expect(el.getAttribute('transform')).toMatch(/^translate\(-?[\d.]+,\s*-?[\d.]+\)$/);
+        // And nothing between it and the root scales or rotates the plane — the
+        // reason the no-CTM fallback is allowed to treat plane units as local.
+        for (
+          let cur = el.parentElement;
+          cur !== null && cur !== (svg as Element);
+          cur = cur.parentElement
+        ) {
+          expect(cur.getAttribute('transform')).toBeNull();
+        }
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'keeps both markers, and stays childless, when d is replaced',
+    async () => {
+      init();
+      const svg = await renderedDom('flowchart TD\n  A <--> B');
+      const path = svg.querySelector('path.flowchart-link')!;
+      const before = [path.getAttribute('marker-start'), path.getAttribute('marker-end')];
+      expect(before[0]).toMatch(/^url\(#/);
+      expect(before[1]).toMatch(/^url\(#/);
+      path.setAttribute('d', 'M0,0L10,10');
+      expect([path.getAttribute('marker-start'), path.getAttribute('marker-end')]).toEqual(before);
+      // One path per edge, no overlay and no hit-target child: replacing `d`
+      // leaves no fragment of mermaid's curve behind.
+      expect(path.children).toHaveLength(0);
+      expect(svg.querySelectorAll('path.flowchart-link')).toHaveLength(1);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'keys the edge label off the same data-id the path carries',
+    async () => {
+      init();
+      const svg = await renderedDom('flowchart TD\n  A -->|go| B');
+      const path = svg.querySelector('path.flowchart-link')!;
+      const dataId = path.getAttribute('data-id');
+      expect(dataId).toBe('L_A_B_0');
+      const inner = svg.querySelector(`g.edgeLabels g.label[data-id="${dataId}"]`);
+      expect(inner).not.toBeNull();
+      // The OUTER group is the one mermaid itself translates (edges.js:292),
+      // and the one moveEdgeLabel writes.
+      expect(inner!.parentElement!.getAttribute('class')).toContain('edgeLabel');
     },
     TIMEOUT,
   );

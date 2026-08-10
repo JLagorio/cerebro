@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import { applyStoredManualLayout } from './flowchart/manualLayout';
 import { renderMermaid, type RenderResult } from './render';
 import { useInertDiagramLinks } from './svgLinks';
 import { useThemeEpoch } from './useThemeEpoch';
@@ -29,9 +30,26 @@ export function MermaidDiagram({
   // simply null on the loading and error faces, where there is no svg to
   // strip. The dependency is the svg itself, so the strip re-runs each time
   // React rewrites the subtree with a new render.
-  const svgRef = useInertDiagramLinks<HTMLDivElement>(
-    result !== null && result.ok ? result.svg : null,
-  );
+  const renderedSvg = result !== null && result.ok ? result.svg : null;
+  const svgRef = useInertDiagramLinks<HTMLDivElement>(renderedSvg);
+
+  // Manual layout in view mode (M29.42). A source carrying
+  // `%% cerebro:layout manual` must honour its stored positions HERE too, or a
+  // manual diagram snaps back to mermaid's auto geometry the moment the block
+  // leaves edit mode, and again after every reload. `useLayoutEffect` for the
+  // same reason the link strip uses one: the attribute writes land in the
+  // commit that wrote the markup, so no frame ever paints the auto layout
+  // first. The svg subtree is opaque to React, so those writes survive every
+  // re-render — and this effect re-runs exactly when the injected svg is
+  // replaced, which is the only thing that throws them away.
+  //
+  // What it deliberately does NOT fix: `onExpand(svg)` below hands the lightbox
+  // the RAW svg string, so an expanded manual diagram still shows auto layout
+  // (Stage G risk ledger item 9).
+  useLayoutEffect(() => {
+    if (renderedSvg === null || svgRef.current === null) return;
+    applyStoredManualLayout(svgRef.current, code);
+  }, [renderedSvg, code, svgRef]);
 
   useEffect(() => {
     const gen = ++generation.current;

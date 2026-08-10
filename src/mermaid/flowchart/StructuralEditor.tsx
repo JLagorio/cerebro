@@ -9,7 +9,9 @@ import { GroupBar } from './GroupBar';
 import { IconPicker } from './IconPicker';
 import { LinkBadges, type LinkBadge } from './LinkBadges';
 import { LinkPopover } from './LinkPopover';
+import { applyManualLayout, beginManualLayout, type ManualLayoutSession } from './manualLayout';
 import {
+  isManualLayout,
   linkWriterLines,
   nodeLinks,
   nodeMeta,
@@ -17,6 +19,7 @@ import {
   nodes,
   parseFlowchart,
   serialize,
+  storedPositions,
   subgraphs,
   type EdgeEntry,
 } from './model';
@@ -81,6 +84,8 @@ export function StructuralEditor({
   const model = useMemo(() => parseFlowchart(code), [code]);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const bindingRef = useRef<FlowchartSvgBinding | null>(null);
+  /** The live manual-layout measurement, null in auto mode (M29.42). */
+  const manualRef = useRef<ManualLayoutSession | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
@@ -326,6 +331,23 @@ export function StructuralEditor({
             setSubToolbarPos({ x: (box.left - hostBox.left) / s, y });
           }
         };
+      }
+
+      // Manual layout (M29.42): after render + bind, take over geometry. This
+      // is imperative work inside the React-free svg subtree, under exactly the
+      // same rules as the handler wiring above. It runs BEFORE the badge block
+      // below and not after it, because the badges are measured ONCE here off
+      // getBoundingClientRect — placing them first would pin every badge to the
+      // position mermaid's auto layout chose and leave them stranded there. The
+      // session is kept so a drag can move a node without re-measuring.
+      manualRef.current = null;
+      const manualHost = hostRef.current;
+      if (manualHost !== null && isManualLayout(model)) {
+        const session = beginManualLayout(manualHost, binding);
+        if (session !== null) {
+          applyManualLayout(session, binding, storedPositions(model));
+          manualRef.current = session;
+        }
       }
 
       // Link badges (M29.38): one per node with an OWNED click line that the

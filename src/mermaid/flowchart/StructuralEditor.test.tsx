@@ -1272,3 +1272,92 @@ describe('link affordances (M29.38)', () => {
     );
   });
 });
+
+/**
+ * The editor half of the manual pipeline (M29.42). The drag that WRITES a
+ * position is M29.43's; what this locks is that the bind pass reads the
+ * marker, measures, and takes geometry over — and that it does so before the
+ * link badges are measured, which is the ordering a first draft got wrong.
+ */
+describe('StructuralEditor honours stored manual positions (M29.42)', () => {
+  const MANUAL_SVG = [
+    '<svg viewBox="0 0 200 100" width="100%" style="max-width: 200px;">',
+    '<g class="node" id="flowchart-A-0" transform="translate(30, 20)"><rect/></g>',
+    '<g class="node" id="flowchart-B-1" transform="translate(130, 70)"><rect/></g>',
+    '<path class="flowchart-link" id="L_A_B_0" data-id="L_A_B_0"',
+    ' d="M30,25C60,40 90,50 120,65" marker-end="url(#e)"/>',
+    '</svg>',
+  ].join('');
+
+  // The bind effect measures inside its own async pass, so the stub has to be
+  // on the prototype and keyed; a leak here poisons every later test.
+  function stubRects(): () => void {
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      svg: { left: 0, top: 0, width: 200, height: 100 },
+      'flowchart-A-0': { left: 20, top: 10, width: 20, height: 20 },
+      'flowchart-B-1': { left: 120, top: 60, width: 20, height: 20 },
+    };
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const key = this.tagName.toLowerCase() === 'svg' ? 'svg' : this.id;
+      const r = rects[key] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        ...r,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        x: r.left,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  }
+
+  it('translates the stored node and straightens the edge after binding', async () => {
+    mockSvg(MANUAL_SVG);
+    const restore = stubRects();
+    try {
+      render(
+        <StructuralEditor
+          code={
+            'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 50,20\n  A[Start] --> B[End]'
+          }
+          onChangeCode={() => {}}
+        />,
+      );
+      await waitFor(() =>
+        expect(document.getElementById('flowchart-A-0')?.getAttribute('transform')).toBe(
+          'translate(30, 20) translate(20, 0)',
+        ),
+      );
+      expect(document.getElementById('L_A_B_0')?.getAttribute('d')).toBe('M60,26.25L120,63.75');
+      expect(document.getElementById('L_A_B_0')?.getAttribute('marker-end')).toBe('url(#e)');
+    } finally {
+      restore();
+    }
+  });
+
+  it('leaves an auto-layout diagram exactly as mermaid drew it', async () => {
+    mockSvg(MANUAL_SVG);
+    const restore = stubRects();
+    try {
+      render(
+        <StructuralEditor
+          code={'flowchart TD\n  %% cerebro:pos A 50,20\n  A[Start] --> B[End]'}
+          onChangeCode={() => {}}
+        />,
+      );
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      expect(document.getElementById('flowchart-A-0')?.getAttribute('transform')).toBe(
+        'translate(30, 20)',
+      );
+      expect(document.getElementById('L_A_B_0')?.getAttribute('d')).toBe(
+        'M30,25C60,40 90,50 120,65',
+      );
+    } finally {
+      restore();
+    }
+  });
+});
