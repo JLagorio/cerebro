@@ -1252,7 +1252,7 @@ fn expand_error(table: &PolicyTable, error: ExpandError) -> SubmitError {
 /// Fixtures the commit tests and the crash-scenario children share, so a
 /// child process seeds exactly the world its parent staged.
 #[cfg(test)]
-mod tests_support {
+pub(crate) mod tests_support {
     use super::*;
     use crate::ledger::reduce::project_belief;
     use crate::ledger::schema::{BeliefBasis, ProposalOp, SubjectRef, TombstoneReason};

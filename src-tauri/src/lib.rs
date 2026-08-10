@@ -116,6 +116,62 @@ fn update_frontmatter(
     vault::write::update_frontmatter(Path::new(&vault), &path, &patch)
 }
 
+/// The M24.9 review surface. Every read rebuilds from the ledger — nothing
+/// here is cached, so a wiped app-data directory cannot lose a card.
+#[tauri::command(async)]
+fn review_queue(vault: String) -> Result<Vec<policy::review::ReviewCard>, String> {
+    policy::review::cards(Path::new(&vault))
+}
+
+#[tauri::command(async)]
+fn revertable_applications(
+    vault: String,
+) -> Result<Vec<policy::review::RevertableApplication>, String> {
+    policy::review::undoable(Path::new(&vault))
+}
+
+/// Approve or reject one card. A rejection needs a reason; the set resolves
+/// the moment its last member has a decision.
+#[tauri::command(async)]
+fn decide_proposal(
+    vault: String,
+    proposal_id: String,
+    approve: bool,
+    reviewer: String,
+    reason: Option<String>,
+) -> Result<Option<String>, String> {
+    let vault = Path::new(&vault);
+    ledger::shadow::with_writer(vault, |writer| {
+        policy::review::decide(
+            writer,
+            vault,
+            &proposal_id,
+            approve,
+            &reviewer,
+            reason.as_deref(),
+        )
+        .map(|outcome| outcome.map(|o| o.transition.as_str().to_string()))
+    })
+    .unwrap_or_else(|| Err("no active ledger writer for this vault".to_string()))
+}
+
+/// Undo an applied change by appending a NEW forward mutation. The caller
+/// hands back the applied event it was shown; nothing is rewound.
+#[tauri::command(async)]
+fn revert_application(
+    vault: String,
+    proposal_id: String,
+    applied_event_ids: Vec<String>,
+    reviewer: String,
+) -> Result<String, String> {
+    let vault = Path::new(&vault);
+    ledger::shadow::with_writer(vault, |writer| {
+        policy::review::revert(writer, vault, &proposal_id, &applied_event_ids, &reviewer)
+            .map(|outcome| outcome.transition.as_str().to_string())
+    })
+    .unwrap_or_else(|| Err("no active ledger writer for this vault".to_string()))
+}
+
 /// The M23.7 reconciliation exits: `accept_current_files` adopts every
 /// representable diff through the capture valve in one logical batch;
 /// `restore_ledger_authority` regenerates every projection and closes the
@@ -446,6 +502,10 @@ pub fn run() {
             verify_concept,
             capture_concept_edit,
             resolve_reconciliation,
+            review_queue,
+            revertable_applications,
+            decide_proposal,
+            revert_application,
             create_note,
             set_note_title,
             list_views,
