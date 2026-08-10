@@ -76,7 +76,7 @@ The spike answers three questions with evidence, on the real app against real me
 - **(b) Marker refs survive `d` replacement.** After setting a new `d`, are `marker-start`/`marker-end` attribute values unchanged AND do the arrowheads still *render* (attribute surviving is guaranteed by the DOM contract; pixels are what we're checking — a broken `url(#…)` re-resolution or a non-`orient=auto` marker would show here)?
 - **(c) Drag can feel right.** With a 50-node diagram, can we update one node's transform plus straight-line re-routes for its incident edges every frame at 60fps (avg frame ≤ 16.7ms, p95 ≤ 33ms), doing transform/`d`-only DOM writes with zero React involvement?
 
-- [ ] **Step 1: Write the throwaway spike spec**
+- [x] **Step 1: Write the throwaway spike spec**
 
 Create `e2e/_spike-manual-layout.spec.ts`. This is scaffolding, not a test — assertions are loose on purpose; the deliverable is the console output and the screenshots you eyeball.
 
@@ -241,7 +241,7 @@ test('spike c: 50-node drag at 60fps', async ({ page }) => {
 });
 ```
 
-- [ ] **Step 2: Run the spike**
+- [x] **Step 2: Run the spike**
 
 ```bash
 PORT=5273 pnpm e2e -- _spike-manual-layout.spec.ts
@@ -249,7 +249,7 @@ PORT=5273 pnpm e2e -- _spike-manual-layout.spec.ts
 
 Open `spike-dagre.png` and `spike-elk.png` and *look*: are arrowheads sitting at the ends of the straight lines, pointed along them? Is the moved node clean (no ghost of its old position, no clipped half-node at the viewBox edge)? Are labels at midpoints? Record the console reports.
 
-- [ ] **Step 3: Write the findings into this plan's NOTES section and judge the gate**
+- [x] **Step 3: Write the findings into this plan's NOTES section and judge the gate**
 
 **Exit criteria — all three must be YES to proceed to Task G2:**
 
@@ -265,7 +265,7 @@ The fallback scope is **per-node OFFSET nudging**: keep M29.41's model work unch
 
 **The implementer does NOT choose this branch.** Commit the NOTES (including which criterion failed and the evidence), delete the spike file, and report to the coordinator: *"M29.40 gate failed on (x); options are fallback scope as written, defer Stage G, or a redesign; awaiting scope decision."* Then stop.
 
-- [ ] **Step 4: Delete the spike, commit the findings**
+- [x] **Step 4: Delete the spike, commit the findings**
 
 ```bash
 rm e2e/_spike-manual-layout.spec.ts spike-dagre.png spike-elk.png
@@ -1741,12 +1741,149 @@ git commit -m "test(mermaid): manual layout round-trips through drag, disk, and 
 
 ## NOTES — M29.40 spike findings (filled in by the implementer, committed with the M29.40 commit)
 
-> Template. Replace every ⟨…⟩; delete nothing else.
+**Method.** Seven throwaway Playwright probes against the real app on real mermaid
+(`e2e/_spike-manual-layout.spec.ts`, deleted with this commit): dagre flowchart, ELK
+flowchart, icon+image nodes, subgraph nesting, edge variants (`<-->` / `-.->` / `==>` /
+self-loop / parallel pair), `look: handDrawn`, and a 50-node/60-edge perf loop. All seven
+green. Every screenshot was re-fitted (viewBox rewritten to the content bbox, rendered at
+3–6×) before being eyeballed, because at the shipped size the arrowheads are 8px.
 
-- **Date / machine:** ⟨date, hardware summary⟩
-- **(a) Post-render re-layout (dagre):** ⟨YES/NO — arrowheads, orientation, labels, leftovers, viewBox clipping; describe the screenshot⟩
-- **(a) Post-render re-layout (ELK):** ⟨YES/NO — same checklist⟩
-- **(b) Markers survive `d` replacement:** ⟨YES/NO — markerReport summary + rendered-arrowhead observation⟩
-- **(c) 50-node drag perf:** ⟨YES/NO — avg ms, p95 ms, frame count⟩
-- **Surprises / deviations from the plan's assumptions:** ⟨anything the plan must absorb — g.root transform shapes, ELK DOM differences, marker quirks⟩
-- **Verdict:** ⟨PROCEED to M29.41+ | GATE FAILED on (…) — reported to coordinator, awaiting scope decision⟩
+One deliberate departure from the spike snippet in Step 1: geometry was NOT done with
+`getBoundingClientRect` + viewBox arithmetic. A node's center in an edge path's own user
+space is `pathEl.getScreenCTM().inverse() × nodeEl.getScreenCTM()` applied to the node's
+local origin (node shapes are drawn centered on that origin — `nodes.ts:97`). That is exact
+under nested group transforms and under CanvasViewport scaling, and it is what Task G3
+should use; the snippet's arithmetic silently assumes node plane == svg viewBox plane,
+which is true for every diagram measured here but is not guaranteed by anything.
+
+- **Date / machine:** 2026-08-09, Apple Silicon macOS (Darwin 24.6.0), headless Chromium
+  via Playwright against `PORT=5273 pnpm dev`. **Bundled mermaid 11.16.0** (the DOM contract
+  above is cited against vendored 11.16.1; every version-sensitive claim below was
+  re-measured on the bundled build). Machine load average across the runs: 1-min 7.4–19.2,
+  5-min 13–18, 15-min 24 — five or six other agent sessions were live on this box, so the
+  perf figures below are a **floor, not the real ceiling**.
+
+- **(a) Post-render re-layout (dagre): YES.** `flowchart TD Idea→Build→Review→{Done,Build}`,
+  demo corpus fence 1. Appending ` translate(120, 80)` to the node group's existing
+  `transform` moved it by exactly (120, 80) — measured delta `{dx: 120, dy: 80}`, no rounding
+  drift, no re-render. All four edges re-routed to `M x1,y1 L x2,y2` between bbox-border
+  anchors: every one has `getTotalLength()` equal to the analytic segment length to <0.5px
+  (so nothing of the old Bézier survives in the `d`), each `path.flowchart-link` has zero
+  child elements, and `g.edgePaths` holds **exactly one path per edge** — there is no second
+  overlay element, no hit-target path, no line-jump group, so there is no fragment of the old
+  curve to leave behind. Both edge labels ("rework", "ship") moved to the new midpoints by
+  setting the transform on the label's PARENT `g.edgeLabel` (mermaid's own move — `edges.js:292`).
+  Arrowheads render at the segment ends, oriented along the segment, in every case: verified
+  by eye at 6× on `Idea→Build` (a diagonal, the orientation-sensitive one), `Review→Build`,
+  `Build→Review` (lands on the diamond's top vertex) and `Review→Done`.
+  **Clipping: REAL, and noted per the exit criterion.** This diagram's viewBox is
+  `0 0 108.625 445.3125` and the svg carries `style="max-width: 108.625px"` with the UA's
+  `overflow: hidden`, so a node dragged +120px to the right lands entirely OUTSIDE the box and
+  **vanishes**. It is not a partial clip; it is total. It is also entirely a viewBox problem:
+  rewriting `viewBox` to the content bbox plus `width`/`height`/`max-width` — three attribute
+  writes on the same DOM, no re-render — brought the moved node and its edge back with no
+  other change. Task G3 must grow the box; if it does not, the first drag toward any edge of
+  a narrow diagram loses the node.
+- **(a) Post-render re-layout (ELK): YES.** Demo corpus fence 4 (`config: layout: elk`,
+  `flowchart LR A→{B,C}, {B,C}→D, D→E`). Same result: exact (120, 80) translate, all five
+  orthogonal ELK routes replaced by clean straight border-to-border segments, all
+  `totalLength` == analytic length, arrowheads present and correctly oriented (checked at 3×
+  on the two diagonals). Labels: this fence has none. No clipping here — the diagram is wide
+  and the moved node stayed inside — but that is luck of the geometry, not a difference in kind.
+  Aesthetically ELK is exactly the downgrade risk-ledger item 5 predicts: the orthogonal
+  routing is completely gone. It reads as a different diagram, not a nudged one.
+- **(b) Markers survive `d` replacement: YES.** Every entry of every `markerReport` across all
+  four re-routing probes (dagre 4 edges, ELK 5, icon/image 3, subgraph 5, variants 5) reports
+  `survived: true` — `marker-start`/`marker-end` are byte-identical before and after
+  `setAttribute('d', …)`, as the DOM contract promised. The pixels agree: arrowheads render in
+  every screenshot after replacement. The `url(#…)` resolves to a live `<marker>` in every case;
+  it is `orient="auto"`, `markerUnits="userSpaceOnUse"`, `refX=5`, `markerWidth=8` — i.e. the
+  `pointEnd` marker (`markers.js:314-330`), and `orient="auto"` is exactly why the arrowheads
+  re-orient along the new segment for free. Two notes worth carrying forward: (1) the markers
+  are appended to the svg root, NOT inside `<defs>` (`inDefs: false`) — harmless, but anything
+  that ever rebuilds the svg subtree must not drop them; (2) `marker-start` is exercised, not
+  just assumed: the `A <--> B` probe carries `…-pointStart` and it survives and renders too,
+  and `-.->` / `==>` keep their `edge-pattern-dotted` / `edge-thickness-thick` classes and
+  render dotted/thick after the `d` swap.
+- **(c) 50-node drag perf: YES, with the load caveat stated.** 50 nodes / 60 edges, generated
+  through the code overlay. The dragged node is the **highest-degree** node (n5, degree 4), not
+  an arbitrary one. Three modes × three rounds, 178 measured frames each:
+
+  | mode | edges re-routed/frame | frame interval avg | p95 | js+layout per frame (avg) |
+  |---|---|---|---|---|
+  | CONTROL (rAF only, no DOM work) | 0 | 8.33 ms | 10.2–10.3 ms | 0.02 ms |
+  | WORK (transform + incident edges) | 4 | 8.29–8.34 ms | 9.9–10.2 ms | 0.24 ms |
+  | ALL-60 (absurd worst case) | 60 | 8.29–8.34 ms | 9.8–10.0 ms | 0.62 ms |
+
+  Budget is avg ≤ 16.7 ms / p95 ≤ 33 ms: met with ~2× headroom on the frame interval and ~70×
+  on the work itself. The **control is the point**: an empty rAF loop on this machine also runs
+  at 8.33 ms, so the frame cadence is the browser's, not ours — our per-frame cost is
+  indistinguishable from zero even when re-routing all 60 edges every frame. `js/frame` is the
+  synchronous cost of `setAttribute` alone (0.05 ms work / 0.18 ms all-60); `flush/frame` adds a
+  forced `getBoundingClientRect()` so the measured window includes the style+layout recalc our
+  writes dirtied (0.19 ms / 0.45 ms). Caveats, honestly: headless Chromium drives rAF at 120 Hz
+  and does not composite to a real display, so **paint** cost is understated; and the box was at
+  load 7–19 throughout, which makes these a floor. Neither caveat is close to mattering — even
+  if a real display halved the frame rate and paint tripled the cost, the work is single-digit
+  percent of a 16.7 ms budget. Zero React involvement: the loop touches only `transform` and `d`.
+
+- **Surprises / deviations from the plan's assumptions:**
+  1. **ELK has NO `g.root`, and its containers hang off the svg, not off a wrapper.** The DOM
+     contract's "`createLayoutElementGroups` builds `g.root > (g.clusters, g.edgePaths,
+     g.edgeLabels, g.nodes)`" is true for dagre and **false for ELK on 11.16.0**. ELK emits
+     `g.subgraphs`, `g.nodes`, `g.edges.edgePaths` (two classes — note `edges`), `g.edgeLabels`
+     as **direct children of the `<svg>`**, siblings of the (empty) wrapper `g`, with `g.root`
+     absent entirely (`svg.querySelectorAll('g.root').length === 0`). Node ancestry is
+     `g.node < g.nodes` flat; edge ancestry is `path < g.edges.edgePaths`. Task G3's
+     `accumulatedTranslate` walk must not assume `g.root` exists or that nodes and edges share a
+     container. The CTM method above is immune to this and is the recommended fix.
+  2. **Subgraphs do NOT nest `g.root`.** A two-cluster dagre diagram still produces exactly ONE
+     `g.root`, one flat `g.nodes` holding all five nodes, and one flat `g.edgePaths`; no group in
+     any measured diagram carried a `transform` attribute at all. All five edges bound, including
+     the two that cross cluster boundaries, and all re-routed cleanly. The `accumulatedTranslate`
+     ancestry walk therefore has nothing to accumulate in the common case — build it as a safety
+     net, not as the mechanism.
+  3. **Risk-ledger item 3 is factually WRONG about `handDrawn`, and the real problem is
+     elsewhere and larger.** Measured on 11.16.0: `look: handDrawn` edges ARE still
+     `path.flowchart-link` (they merely gain a `transition` class), so the ledger's premise —
+     "handDrawn-look edges … render as `g` groups rather than `path.flowchart-link`" — is false.
+     What actually breaks is the NODES: handDrawn draws every node as **`g.rough-node`**
+     (`class="rough-node default"`, `data-look="handDrawn"`, id scheme unchanged), which is a
+     FOURTH class absent from `NODE_GROUP_SELECTOR`. In a handDrawn diagram
+     `NODE_GROUP_SELECTOR` matches **zero** nodes. Consequences: (i) Stage G manual layout would
+     be a silent no-op on such a diagram — arguably safer than the described visible
+     disconnection, but silent; (ii) **pre-existing and outside Stage G**: the structural editor
+     is ALREADY inert on handDrawn diagrams on this branch today — no selection, no rename, no
+     delete, no drag-to-connect, no link badges — the exact failure M29.39 fixed for icon/image
+     nodes, one class short. Nothing in `src/` mentions `rough-node` or `handDrawn`. The app
+     exposes no "look" control, so this only reaches users through hand-authored source.
+     Reported to the coordinator as a scope decision; it is not a Stage G exit criterion.
+  4. **Everything else in the ledger measured as-described, not worse.** Self-loops (`A --> A`)
+     do get a bindable id (`L_A_A_0`) but a straight-line router would collapse them to a
+     zero-length segment, so they must be skipped by `from === to` — the probe skips them, and
+     the loop then stays at the node's old position and visibly detaches, exactly as item 3 says.
+     Parallel edges (`B --> C` twice, ids `L_B_C_0` and `L_B_C_2`, matching
+     `counterForOccurrence`) both re-route onto the identical segment and stack invisibly —
+     item 7, exactly. Bbox anchoring on a diamond lands on the shape's true vertex on the
+     vertical axis and inside the outline off-axis — item 8, exactly. Clusters neither move nor
+     resize when a child is dragged out — item 4, exactly (and the screenshot of it is not
+     pretty, but it is what was promised).
+  5. **Icon and image nodes translate correctly.** `g.icon-shape` and `g.image-shape` both
+     accept an appended translate with an exact measured delta, and both serve as edge anchors
+     through the same bbox path as `g.node`. Use `NODE_GROUP_SELECTOR`, never bare `g.node` —
+     the spike snippet in Step 1 above uses `g.node[id*="flowchart-"]` and would have silently
+     dropped both.
+  6. **Label z-order.** `g.edgeLabels` precedes `g.nodes` in document order, so an edge label
+     moved to a midpoint that happens to fall on a node renders BEHIND that node. Cosmetic,
+     visible in the variants screenshot, not a blocker.
+  7. **The naive spike-snippet id regex is fine.** `data-id` on the path is the bare
+     `L_<from>_<to>_<n>` with no render-id prefix, and `g.edgeLabels g.label[data-id="…"]` keyed
+     off the same string found the label for every edge in every probe. Both plan claims hold on
+     11.16.0.
+
+- **Verdict:** **PROCEED to M29.41+** — (a-dagre) YES, (a-ELK) YES, (b) YES, (c) YES.
+  Two conditions the coordinator must carry into G2+: Task G3 **must** grow the svg viewBox
+  (and `width`/`height`/`max-width`) or the first outward drag on a narrow diagram makes the
+  node disappear; and surprise 3 (`g.rough-node`) is a risk-ledger inaccuracy whose real form
+  is a pre-existing structural-editor defect outside this stage — reported, awaiting a scope
+  decision, not fixed here.
