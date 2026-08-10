@@ -39,11 +39,15 @@ Scratch files go in the session scratchpad, **never** in the repo (a scratch
 | doc: anonymous subgraph | `32c2802` | DONE |
 | refactor: EdgeEditor out | `3f5ffc1` | DONE, counts identical |
 | F4 M29.38 canvas affordances | `0f2ab4f` + `3b04c2a` + `079da7c` | DONE, reviewed, gates green |
-| F5 M29.39 insert palette + e2e | `80ad6b1` | DONE, **STAGE F COMPLETE**; review in flight |
-| G1–G5 M29.40–.44 | — | TODO, **G1 is a GATE** |
+| F5 M29.39 insert palette + e2e | `80ad6b1` + `213d496` + `0b1b34d` + `68a0a19` | DONE, reviewed. **STAGE F COMPLETE** |
+| G1 M29.40 spike | `1f98c1b` | **GATE PASSED — verdict PROCEED** (all 4 criteria YES) |
+| G2 M29.41 position model | `bca6474` + `74939ee` | DONE, reviewed |
+| G3 M29.42 render pipeline | `d6adea5` | DONE; review in flight |
+| G4 M29.43 drag + toggle | `8d5dcfa` | DONE; review pending |
+| G5 M29.44 e2e + gate | — | TODO |
 | H1–H6 M29.45–.50 | — | TODO |
 
-**Baseline now: 180 files / 2796 passed / 2 skipped.** Lint, typecheck, format, build clean.
+**Baseline now: 182 files / 2961 passed / 2 skipped.** Lint, typecheck, format, build clean.
 (Wave started at 172 / 2584.)
 
 ## 3. Two structural decisions already taken (do not re-litigate)
@@ -134,6 +138,17 @@ at the gate is an **expected, reportable outcome — not a failure.**
 5. **Verify every claim yourself** — run the gates, in the worktree, with the `cd`.
 6. Implementers have overruled the coordinator with measurement twice, correctly. Ask
    them to push back rather than comply silently.
+
+## 7b. SHARED-WORKTREE HAZARD — run ONE implementer at a time
+
+The husky **pre-commit hook runs `pnpm lint` over the WHOLE TREE**, so any agent
+mid-edit blocks every other agent's commit. One agent waited ~20 minutes for a
+clean tree (it correctly refused `--no-verify`). Concurrent implementers also make
+`format:check` and the suite report each other's in-flight work as failures, which
+costs real time to disambiguate.
+
+**Reviewers may run concurrently** (read-only, or mutation-testing in their OWN
+`git worktree add` under the scratchpad). **Implementers must be serialized.**
 
 ## 8. Machine conditions
 
