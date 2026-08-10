@@ -1117,7 +1117,7 @@
       "event_id": "00000000000000000000000000000014",
       "batch_id": null,
       "code": "refused",
-      "detail": "human_confirmed independence requires M24's HIGH proposal and decision validator — reserved, refused until it ships"
+      "detail": "human_confirmed independence is produced by the M24 approval path and validated against the approved decision it names; no caller may assert it"
     }
   ]
 }

@@ -494,7 +494,7 @@ pub fn derive_receipt_id(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::super::tests::{common, ID_A, ID_B, ID_C, SHA_A};
     use super::*;
 

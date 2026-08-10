@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "rule_version": 1,
+  "distinct_firsthand_origin": {
+    "authority_provenance": "trusted_human_capture",
+    "assertion_basis": "firsthand",
+    "registration_kind": "human_actor",
+    "require_distinct_bound_actor": true,
+    "require_distinct_independence_domain": false,
+    "require_distinct_source_artifact_hash": false
+  },
+  "independent_system_artifact": {
+    "authority_provenance": "registered_direct_artifact",
+    "assertion_basis": null,
+    "registration_kind": null,
+    "authority_capability": "direct_system_artifact",
+    "require_distinct_bound_actor": false,
+    "require_distinct_independence_domain": true,
+    "require_distinct_source_artifact_hash": true
+  }
+}

@@ -20,6 +20,7 @@ preemptively.)
 | `policy.v1.sha256` | SHA-256 of `policy.v1.json`'s bytes. Rust and TS each hash what they loaded and compare against this file — the only way two processes in two languages assert the *same* bytes rather than each asserting self-consistency. |
 | `authority-routes.v1.json` | The current predicate- and stage-specific authority routes (D11). |
 | `authority-routes/<hash>.json` | Immutable content-addressed snapshots. A queued proposal pins `(route_id, rule_version, artifact_hash)`, so an approval tomorrow is evaluated against the rule the agent was actually shown. |
+| `independence-rules.v1.json` + `.sha256` | The two deterministic positive-independence predicates (M25.5), loaded by `src-tauri/src/ingest/independence.rs`. `rule_version` is bumped by ANY predicate change and pinned into every event the producer emits. |
 | `goldens/*.json` | Proposal + preconditions → expected verdict + destiny. Replayed by `cargo test` and `pnpm test:run` from these same files. A fixture may declare `signals` (server-derived escalators) and `versions` (`"<class>/<id>": n`, the M22 `state_versions` its expected-version CAS runs against). Declaring `versions` requires `rust_only: true` — CAS is out of the mock's scope by declaration, so the TS runner skips it loudly rather than the directory quietly missing the case. |
 
 The whole directory is `.prettierignore`d: the bytes are hashed, and a
@@ -185,6 +186,35 @@ come first in each language.
   whole of M24 the map is empty, so every high-stakes proposal queues — the
   behaviour the spec asks for, arrived at by the rule rather than by a
   special case.
+
+- **The REDUCER does not load `independence-rules.v1.json`.** It validates
+  that a proof carries a non-empty `rule_version` and nothing more. Making
+  reducer validation depend on the artifact's CONTENTS would make every
+  conformance vector's expected refusals artifact-version-dependent, so a
+  rule-version bump would rewrite the parity contract for reasons that have
+  nothing to do with parity. The artifact governs PRODUCTION; the vectors
+  govern agreement. This is the one place a shared artifact is deliberately
+  read by one side only, and it is why.
+- **A missing independence domain is unknown, not "probably different".**
+  Both distinctness predicates require the field present on BOTH endpoints
+  and different. Two exports of one upstream system are two files and one
+  observation; letting an absent domain pass would let a copy vouch for its
+  original, which is the failure independence exists to prevent.
+- **`human_confirmed` stays refused, for a new reason.** M22 wrote "reserved
+  until M24 ships"; M24 shipped. What makes the proof true is that a specific
+  HIGH proposal was APPROVED by a person, and that is reducer state rather
+  than body shape — so the body-level validator refuses it and says why,
+  rather than accepting two ids as evidence that somebody agreed.
+
+- **The absence rule's required dimensions stayed at five.** M25.4 gave
+  assessments all seven dimensions, and the table still requires
+  `index_current, retention_known, retrieval_attempted, scope_accessible,
+  scope_known` for a formal absence claim. Connection and health are about
+  whether the source could be reached AT ALL, which the other five already
+  fail without; adding them would refuse absence claims that are genuinely
+  complete. What DID change is the meaning of "established": a dimension
+  counts only when it says `yes`, because `unknown` is an answer and it is
+  not "we checked and it holds".
 
 ## What is deliberately NOT here yet
 

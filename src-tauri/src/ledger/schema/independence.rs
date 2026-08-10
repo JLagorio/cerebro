@@ -94,11 +94,31 @@ impl IndependenceRecorded {
                 }
                 Ok(())
             }
-            IndependenceProof::HumanConfirmed { .. } => Err(
-                "human_confirmed independence requires M24's HIGH proposal and decision \
-                 validator — reserved, refused until it ships"
-                    .into(),
-            ),
+            IndependenceProof::HumanConfirmed {
+                proposal_id,
+                decision_event_id,
+                ..
+            } => {
+                // M25.5 revisits the M22 note that said this waits for M24.
+                // M24 shipped, and the refusal STAYS — for a different and
+                // better reason. Everything checkable from the body alone is
+                // checked here: two real refs, distinct from each other. What
+                // makes `human_confirmed` true is that a specific HIGH
+                // proposal was APPROVED by a person, and that is reducer
+                // state, not body shape. Until the reducer joins those two
+                // refs to an approved decision, accepting the body would let
+                // any caller mint corroboration by naming two ids.
+                if !is_id128(proposal_id) || !is_id128(decision_event_id) {
+                    return Err(
+                        "human_confirmed independence pins a proposal and a decision by id".into(),
+                    );
+                }
+                Err(
+                    "human_confirmed independence is produced by the M24 approval path and \
+                     validated against the approved decision it names; no caller may assert it"
+                        .into(),
+                )
+            }
         }
     }
 }
@@ -164,13 +184,14 @@ mod tests {
     }
 
     #[test]
-    fn human_confirmed_is_reserved_until_m24() {
+    fn human_confirmed_is_never_asserted_by_a_caller() {
         let reserved = event(IndependenceProof::HumanConfirmed {
             left_source_registration_event_id: ID_C.into(),
             right_source_registration_event_id: ID_D.into(),
             proposal_id: ID_A.into(),
             decision_event_id: ID_B.into(),
         });
-        assert!(reserved.validate().unwrap_err().contains("M24"));
+        let err = reserved.validate().unwrap_err();
+        assert!(err.contains("no caller may assert it"), "{err}");
     }
 }

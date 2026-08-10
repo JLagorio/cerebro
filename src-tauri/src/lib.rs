@@ -5,6 +5,7 @@ pub mod crash;
 pub mod demo;
 pub mod git;
 pub mod git_commands;
+pub mod ingest;
 pub mod knowledge;
 pub mod ledger;
 pub mod mcp;
