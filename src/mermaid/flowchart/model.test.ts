@@ -5,6 +5,7 @@ import {
   edges,
   emitArrow,
   emitNodeRef,
+  isManualLayout,
   linkWriterLines,
   nodeLinks,
   nodeMeta,
@@ -13,6 +14,7 @@ import {
   parseFlowchart,
   parseNodeToken,
   serialize,
+  storedPositions,
   subgraphs,
   withMetaEntry,
   type EdgeHead,
@@ -1213,5 +1215,126 @@ describe('subgraphs()', () => {
     const subs = subgraphs(parseFlowchart(SUBS)!);
     expect(subs.map((s) => s.explicitId)).toEqual([true, false, false, false]);
     expect(subs.map((s) => s.index)).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('cerebro pos/layout comments (M29.41)', () => {
+  const MANUAL = [
+    'flowchart TD',
+    '  %% cerebro:layout manual',
+    '  %% cerebro:pos A 120,40 B 300,200',
+    '  A[Start] --> B{Choice}',
+    '  %% an ordinary comment stays opaque',
+  ].join('\n');
+
+  it('parses the layout marker and the positions line as understood kinds', () => {
+    const model = parseFlowchart(MANUAL)!;
+    expect(model.lines[1].parsed).toEqual({ kind: 'layout-mode', manual: true });
+    const pos = model.lines[2].parsed;
+    expect(pos.kind).toBe('pos-comment');
+    if (pos.kind === 'pos-comment') {
+      expect(pos.positions.get('A')).toEqual({ x: 120, y: 40 });
+      expect(pos.positions.get('B')).toEqual({ x: 300, y: 200 });
+    }
+    expect(model.lines[4].parsed.kind).toBe('opaque');
+  });
+
+  it('exposes isManualLayout and storedPositions', () => {
+    const model = parseFlowchart(MANUAL)!;
+    expect(isManualLayout(model)).toBe(true);
+    expect(storedPositions(model).get('B')).toEqual({ x: 300, y: 200 });
+    const auto = parseFlowchart(SIMPLE)!;
+    expect(isManualLayout(auto)).toBe(false);
+    expect(storedPositions(auto).size).toBe(0);
+  });
+
+  it('malformed cerebro lines go opaque — never guessed at', () => {
+    for (const bad of [
+      '%% cerebro:pos A 12', // missing y
+      '%% cerebro:pos A twelve,40', // non-numeric
+      '%% cerebro:pos A 12,40 B', // odd token count
+      '%% cerebro:layout automatic', // unknown mode
+      '%% cerebro:pos', // no body at all
+      '%% cerebro:pos A 1,2,3', // a third coordinate
+      '%% cerebro:pos A 1, 2', // the comma is not a separator
+      '%% cerebro:pos A+B 1,2', // an id outside ID_PATTERN
+      '%% cerebro:pos A 1,2 extra', // trailing junk
+      '%% cerebro:layout manual extra', // trailing junk on the marker
+      '%% cerebro:pos A 1e3,2', // exponent form — not a coordinate we emit
+      '%%{ cerebro:pos A 1,2 }%%', // the DIRECTIVE form is never ours
+    ]) {
+      const m = parseFlowchart(`flowchart TD\n  ${bad}\n  A --> B`)!;
+      expect(m.lines[1].parsed.kind, bad).toBe('opaque');
+      expect(storedPositions(m).size, bad).toBe(0);
+      expect(isManualLayout(m), bad).toBe(false);
+      expect(serialize(m), bad).toBe(`flowchart TD\n  ${bad}\n  A --> B`);
+    }
+  });
+
+  it('round-trips untouched cerebro lines byte-identically — weird spacing included', () => {
+    const quirky = 'flowchart TD\n  %%  cerebro:pos  B 10,20   A 5,6\n  A --> B';
+    expect(serialize(parseFlowchart(quirky)!)).toBe(quirky);
+    expect(storedPositions(parseFlowchart(quirky)!).get('A')).toEqual({ x: 5, y: 6 });
+    // No space after the marker, and a tab as the separator: both are the same
+    // comment to mermaid (measured in positions.mermaid.test.ts), so both are
+    // the same line to us.
+    const tight = 'flowchart TD\n%%cerebro:pos\tA\t1,2\n  A --> B';
+    expect(serialize(parseFlowchart(tight)!)).toBe(tight);
+    expect(storedPositions(parseFlowchart(tight)!).get('A')).toEqual({ x: 1, y: 2 });
+  });
+
+  // The phantom-node trap every other owned line kind answers to: a marker
+  // declares NOTHING to mermaid (measured), so it may not declare anything to
+  // us either — an id here must not mint a node the user never wrote, which
+  // rename and delete would then happily act on.
+  it('a position mints no node', () => {
+    const m = parseFlowchart('flowchart TD\n  %% cerebro:pos ghost 1,2 A 3,4\n  A --> B')!;
+    expect([...nodes(m).keys()]).toEqual(['A', 'B']);
+    expect(
+      subgraphs(
+        parseFlowchart('flowchart TD\n  subgraph S\n    %% cerebro:pos g 1,2\n    A\n  end')!,
+      )[0].memberIds,
+    ).toEqual(['A']);
+  });
+
+  it('reads decimals and negatives, and keeps them until the line is rewritten', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A -12.5,0 B 0,-3\n  A --> B';
+    const pos = storedPositions(parseFlowchart(src)!);
+    expect(pos.get('A')).toEqual({ x: -12.5, y: 0 });
+    expect(pos.get('B')).toEqual({ x: 0, y: -3 });
+    expect(serialize(parseFlowchart(src)!)).toBe(src);
+  });
+
+  // Which duplicate wins is not a detail downstream can guess at: the pipeline
+  // reads `storedPositions` and the writer patches the same map, so they have
+  // to agree. Last wins, and the line collapses onto that value the first time
+  // it is rewritten.
+  it('a repeated id inside one line resolves to its LAST value', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A 1,2 B 5,5 A 3,4\n  A --> B';
+    expect(storedPositions(parseFlowchart(src)!).get('A')).toEqual({ x: 3, y: 4 });
+  });
+
+  // Two pos lines is a hand-authored shape, not one we write. The reader must
+  // name a winner, because the writer aims at exactly that line — a reader and
+  // a writer that disagree here is how a control ships as a silent no-op.
+  it('the FIRST pos line wins when a document carries two', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A 1,1\n  %% cerebro:pos A 9,9 B 2,2\n  A --> B';
+    const pos = storedPositions(parseFlowchart(src)!);
+    expect(pos.get('A')).toEqual({ x: 1, y: 1 });
+    expect(pos.has('B')).toBe(false);
+  });
+
+  it('markers survive in every structural position, CRLF included', () => {
+    for (const src of [
+      '%% cerebro:pos A 1,2\nflowchart TD\n  A --> B',
+      '---\nconfig:\n  layout: elk\n---\nflowchart LR\n  %% cerebro:layout manual\n  A --> B',
+      'flowchart TD\n  subgraph S1[P]\n    %% cerebro:pos A 1,2\n    A --> B\n  end',
+      'flowchart TD\n  A --> B\n  %% cerebro:pos A 1,2',
+      'flowchart TD\r\n  %% cerebro:pos A 1,2\r\n  A --> B\r',
+    ]) {
+      const m = parseFlowchart(src)!;
+      expect(serialize(m), src).toBe(src);
+      expect(storedPositions(m).size + (isManualLayout(m) ? 1 : 0), src).toBeGreaterThan(0);
+    }
   });
 });

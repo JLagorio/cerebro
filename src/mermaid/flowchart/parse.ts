@@ -14,6 +14,7 @@ import type {
   NodeMeta,
   NodeRef,
   ParsedLine,
+  PlanePoint,
   Shape,
 } from './types';
 import { buildMeta } from './types';
@@ -507,9 +508,88 @@ export function styleDecl(key: string, value: string | null): [string, string | 
   return [probe[0][0], value === null ? null : probe[0][1]];
 }
 
+const POS_LINE = /^%%\s*cerebro:pos\s+(\S.*)$/;
+const LAYOUT_LINE = /^%%\s*cerebro:layout\s+manual\s*$/;
+const POS_COORD = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/;
+
+/** An id `ID_PATTERN` consumes WHOLE — the node-token charset, both ends anchored. */
+function isOwnedId(id: string): boolean {
+  const m = id.match(ID_PATTERN);
+  return m !== null && m[0] === id;
+}
+
+/**
+ * Our two marker comments (M29.41). Anything that is not a byte-perfect match
+ * for the grammar returns null and the caller keeps the line opaque — a
+ * half-written `%% cerebro:pos A 12` must never be "repaired" into data, and a
+ * line we disown keeps its bytes, which is never wrong.
+ *
+ * Both are plain `%%` comments, never the `%%{ … }%%` directive form. That is
+ * the load-bearing claim of the whole format and it is MEASURED rather than
+ * reasoned (`positions.mermaid.test.ts`): a marker inserted at EVERY line index
+ * of a dagre flowchart, a frontmatter+ELK one, a `subgraph`-with-`direction`
+ * one and a CRLF one leaves mermaid's vertices, edges, subgraph membership,
+ * directions AND rendered svg bytes untouched — keyword ids (`end`,
+ * `subgraph`, `direction`, `click`) inside a subgraph block included. The
+ * measurement was not optional: the same wave found a `%%`-commented
+ * `direction` line behaving the OPPOSITE way round from the obvious reading
+ * (mermaid ignores it, our own reader did not), so "it's a comment" is exactly
+ * the class of claim that has been wrong here.
+ *
+ * Ids are space-separated and cannot contain whitespace or commas, so the
+ * token stream is unambiguous; an odd token count means we misread something
+ * and refuse the WHOLE line rather than half of it.
+ */
+function parseCerebroComment(trimmed: string): ParsedLine | null {
+  if (LAYOUT_LINE.test(trimmed)) return { kind: 'layout-mode', manual: true };
+  const m = trimmed.match(POS_LINE);
+  if (m === null) return null;
+  const tokens = m[1].trim().split(/\s+/);
+  if (tokens.length % 2 !== 0) return null;
+  const positions = new Map<string, PlanePoint>();
+  for (let i = 0; i < tokens.length; i += 2) {
+    const id = tokens[i];
+    const coord = tokens[i + 1].match(POS_COORD);
+    if (!isOwnedId(id) || coord === null) return null;
+    // A repeated id keeps its LAST value — the reading `storedPositions`
+    // hands the pipeline, and the one a rewrite collapses the line onto.
+    positions.set(id, { x: Number(coord[1]), y: Number(coord[2]) });
+  }
+  return { kind: 'pos-comment', positions };
+}
+
+/**
+ * One `<id> <x>,<y>` token pair, or null when we could not read it back — the
+ * last boundary before a positions line reaches the file, the counterpart to
+ * `styleDecl` and `clickTarget`, and it validates by ASKING THE PARSER rather
+ * than by mirroring its rules.
+ *
+ * The stakes are higher here than for a style value: a positions line is
+ * SHARED. One unreadable token takes the whole line opaque on the next parse
+ * and every OTHER node's coordinates with it, so a hostile id (`A B`, a
+ * newline, `A+B`) or an unrepresentable number must be refused rather than
+ * written. `1e21` is the reachable one — it is a perfectly finite integer whose
+ * decimal spelling is `1e+21`, which `POS_COORD` rightly refuses; a finiteness
+ * check alone would have let it through.
+ *
+ * Rounding lives here so the op and the emitter can never round differently.
+ */
+export function posToken(id: string, pos: PlanePoint): string | null {
+  const x = Math.round(pos.x);
+  const y = Math.round(pos.y);
+  const token = `${id} ${x},${y}`;
+  const probe = parseCerebroComment(`%% cerebro:pos ${token}`);
+  if (probe === null || probe.kind !== 'pos-comment' || probe.positions.size !== 1) return null;
+  const read = probe.positions.get(id);
+  return read !== undefined && read.x === x && read.y === y ? token : null;
+}
+
 function parseLine(rawLine: string): ParsedLine {
   const trimmed = rawLine.trim();
-  if (trimmed === '' || trimmed.startsWith('%%')) return { kind: 'opaque' };
+  if (trimmed === '') return { kind: 'opaque' };
+  // Our own markers are the ONLY comments we ever own; every other `%%` line
+  // stays opaque exactly as it always has.
+  if (trimmed.startsWith('%%')) return parseCerebroComment(trimmed) ?? { kind: 'opaque' };
 
   // `style <id> k:v,…`, tested BEFORE the keyword blocklist so that every
   // other shape of `style` line — a bare `style`, `style[X]`, an uppercase

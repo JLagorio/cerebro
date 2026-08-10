@@ -11,6 +11,7 @@ import type {
   ModelLine,
   NodeMeta,
   NodeRef,
+  PlanePoint,
   Shape,
 } from './types';
 import { withEntry, withMetaEntry } from './types';
@@ -506,4 +507,30 @@ export function subgraphs(model: FlowchartModel): SubgraphEntry[] {
   if (!balanced || stack.length > 0) return [];
   closed.sort((a, b) => a.startLine - b.startLine);
   return closed.map((entry, index) => ({ ...entry, index }));
+}
+
+/** True when the diagram carries the `%% cerebro:layout manual` marker (M29.41). */
+export function isManualLayout(model: FlowchartModel): boolean {
+  return model.lines.some((l) => l.parsed.kind === 'layout-mode');
+}
+
+/**
+ * Stored node positions — ABSOLUTE plane coordinates of node CENTRES, defined
+ * on `PlanePoint`.
+ *
+ * The FIRST pos line wins. Two of them is a hand-authored shape we never
+ * write, but the reader still has to name a winner, because `setNodePosition`
+ * aims at exactly the line named here: a reader and a writer that disagree
+ * about which declaration is live is how three separate controls in this wave
+ * shipped as silent no-ops. `clearPositions` and `deleteNode` therefore reach
+ * EVERY site, not just this one — a removal that missed a later line would
+ * bring the "cleared" positions straight back on the next read.
+ *
+ * The result is a copy: a caller mutating it must not be able to edit the file.
+ */
+export function storedPositions(model: FlowchartModel): Map<string, PlanePoint> {
+  for (const line of model.lines) {
+    if (line.parsed.kind === 'pos-comment') return new Map(line.parsed.positions);
+  }
+  return new Map();
 }

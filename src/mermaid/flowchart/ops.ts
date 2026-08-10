@@ -23,6 +23,7 @@ import {
   linkWriterLines,
   nodeMeta,
   nodes,
+  posToken,
   styleDecl,
   subgraphTitleText,
   subgraphs,
@@ -620,9 +621,89 @@ export function deleteNode(model: FlowchartModel, id: string): FlowchartModel {
       // `class A hot` and the opaque click VARIANTS still stay: we do not
       // rewrite lines we do not understand, at a delete no less than anywhere.
       next.lines.splice(i, 1);
+    } else if (parsed.kind === 'pos-comment' && parsed.positions.has(id)) {
+      // Node ids are REUSABLE — `newNodeId` hands out the lowest free one — so
+      // a leftover `B 10,10` would silently teleport whatever node next takes
+      // the id `B`. Positions are one more trace to sweep, alongside the meta,
+      // style and click companions above. EVERY pos line is swept, not just
+      // the one `storedPositions` reads: a coordinate hiding on a second line
+      // becomes live the moment the first one is emptied.
+      parsed.positions.delete(id);
+      if (parsed.positions.size === 0) next.lines.splice(i, 1);
+      else next.lines[i].dirty = true;
     } else if (parsed.kind === 'edges') {
       rebuildEdgeLines(next, i, (f, t) => f.id === id || t.id === id, id);
     }
+  }
+  return next;
+}
+
+/**
+ * Stores a node's position (M29.41): absolute plane coordinates of the node
+ * CENTRE — see `PlanePoint`. One `%% cerebro:pos` line holds every position; it
+ * is patched in place (the FIRST one, which is the line `storedPositions`
+ * reads) or created right after the header — after the layout-mode marker when
+ * that sits on the header, so the cerebro block stays contiguous and the diff
+ * stays one line.
+ *
+ * A position `posToken` could not read back is REFUSED outright rather than
+ * written: the positions line is shared, and one unreadable token would cost
+ * every other node on it its coordinates. The refusal is silent because the
+ * only caller is a drag whose id came out of this very model — an id or a
+ * coordinate that fails here is a bug upstream, not a user mistake to report.
+ */
+export function setNodePosition(
+  model: FlowchartModel,
+  id: string,
+  pos: { x: number; y: number },
+): FlowchartModel {
+  const next = clone(model);
+  if (posToken(id, pos) === null) return next;
+  const rounded = { x: Math.round(pos.x), y: Math.round(pos.y) };
+  for (const line of next.lines) {
+    if (line.parsed.kind === 'pos-comment') {
+      line.parsed.positions.set(id, rounded);
+      line.dirty = true;
+      return next;
+    }
+  }
+  let at = headerIndex(next) + 1;
+  if (next.lines[at]?.parsed.kind === 'layout-mode') at += 1;
+  next.lines.splice(at, 0, {
+    raw: `  ${lineEnding(next)}`,
+    parsed: { kind: 'pos-comment', positions: new Map([[id, rounded]]) },
+    dirty: true,
+  });
+  return next;
+}
+
+/** Removes every stored position — every pos line, not just the live one. */
+export function clearPositions(model: FlowchartModel): FlowchartModel {
+  const next = clone(model);
+  for (let i = next.lines.length - 1; i >= 0; i -= 1) {
+    if (next.lines[i].parsed.kind === 'pos-comment') next.lines.splice(i, 1);
+  }
+  return next;
+}
+
+/**
+ * Toggles the manual-layout marker. OFF removes only the marker — stored
+ * positions are deliberately RETAINED so toggling back on restores the hand
+ * layout (spec D7). Idempotent both ways.
+ */
+export function setManualLayout(model: FlowchartModel, on: boolean): FlowchartModel {
+  const next = clone(model);
+  if (on) {
+    if (next.lines.some((l) => l.parsed.kind === 'layout-mode')) return next;
+    next.lines.splice(headerIndex(next) + 1, 0, {
+      raw: `  ${lineEnding(next)}`,
+      parsed: { kind: 'layout-mode', manual: true },
+      dirty: true,
+    });
+    return next;
+  }
+  for (let i = next.lines.length - 1; i >= 0; i -= 1) {
+    if (next.lines[i].parsed.kind === 'layout-mode') next.lines.splice(i, 1);
   }
   return next;
 }

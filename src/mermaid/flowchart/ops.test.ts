@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   edgeAnimated,
   edges,
+  isManualLayout,
   nodeLinks,
   nodeMeta,
   nodeStyle,
   nodes,
   parseFlowchart,
   serialize,
+  storedPositions,
   subgraphs,
 } from './model';
 import {
@@ -17,6 +19,7 @@ import {
   canDissolveSubgraph,
   canRenameSubgraph,
   canSetSubgraphDirection,
+  clearPositions,
   createSubgraph,
   deleteEdge,
   deleteNode,
@@ -30,8 +33,10 @@ import {
   setEdgeArrow,
   setEdgeLabel,
   setLayoutEngine,
+  setManualLayout,
   setNodeIcon,
   setNodeLink,
+  setNodePosition,
   setNodeShape,
   setNodeStyle,
   setSubgraphDirection,
@@ -2023,5 +2028,331 @@ describe('subgraph op defects the review caught', () => {
       'G',
     );
     expect(serialize(made)).toBe('flowchart TD\r\n  subgraph G[G]\r\n  A\r\n  end\r\n  B');
+  });
+});
+
+describe('setNodePosition / clearPositions / setManualLayout (M29.41)', () => {
+  it('creates the positions line right after the header on first use', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B')!;
+    const out = serialize(setNodePosition(m, 'B', { x: 300.4, y: 199.6 }));
+    expect(out).toBe('flowchart TD\n  %% cerebro:pos B 300,200\n  A[Start] --> B');
+  });
+
+  it('patches the one existing line — sorted by id, rounded to integers', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos B 10,20\n  A --> B';
+    const out = serialize(setNodePosition(parseFlowchart(src)!, 'A', { x: 5.5, y: 6.4 }));
+    expect(out).toBe('flowchart TD\n  %% cerebro:pos A 6,6 B 10,20\n  A --> B');
+  });
+
+  it('keeps the cerebro block contiguous: pos lands after a layout marker on the header', () => {
+    const src = 'flowchart TD\n  %% cerebro:layout manual\n  A --> B';
+    const out = serialize(setNodePosition(parseFlowchart(src)!, 'A', { x: 1, y: 2 }));
+    expect(out).toBe('flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 1,2\n  A --> B');
+  });
+
+  it('setManualLayout writes and removes the marker; positions survive off', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B')!;
+    const on = serialize(setManualLayout(m, true));
+    expect(on).toBe('flowchart TD\n  %% cerebro:layout manual\n  A --> B');
+    const withPos = serialize(setNodePosition(parseFlowchart(on)!, 'A', { x: 9, y: 9 }));
+    const off = serialize(setManualLayout(parseFlowchart(withPos)!, false));
+    expect(off).toBe('flowchart TD\n  %% cerebro:pos A 9,9\n  A --> B');
+    expect(serialize(setManualLayout(parseFlowchart(off)!, false))).toBe(off); // idempotent
+    expect(serialize(setManualLayout(parseFlowchart(on)!, true))).toBe(on); // idempotent
+  });
+
+  it('clearPositions removes the positions line and nothing else', () => {
+    const src = 'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 9,9\n  A --> B';
+    expect(serialize(clearPositions(parseFlowchart(src)!))).toBe(
+      'flowchart TD\n  %% cerebro:layout manual\n  A --> B',
+    );
+  });
+
+  it('deleteNode drops the node from the positions line too — no zombie coords', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A 9,9 B 10,10\n  A[Start] --> B[End]';
+    const out = serialize(deleteNode(parseFlowchart(src)!, 'B'));
+    expect(out).toContain('%% cerebro:pos A 9,9');
+    expect(out).not.toContain('B 10,10');
+    const single = 'flowchart TD\n  %% cerebro:pos B 10,10\n  A --> B';
+    const gone = serialize(deleteNode(parseFlowchart(single)!, 'B'));
+    expect(gone).not.toContain('cerebro:pos'); // an emptied line is removed entirely
+  });
+
+  it('an untouched positions line stays byte-identical through unrelated ops', () => {
+    const src = 'flowchart TD\n  %%  cerebro:pos  B 10,20   A 5,6\n  A[Old] --> B';
+    const out = serialize(renameNode(parseFlowchart(src)!, 'A', 'New'));
+    expect(out).toContain('%%  cerebro:pos  B 10,20   A 5,6');
+  });
+
+  // The reader and the writer have to name the SAME line, or the control is a
+  // silent no-op on any hand-authored document that carries two.
+  it('writes to the pos line the reader honours', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A 1,1\n  %% cerebro:pos A 9,9 B 2,2\n  A --> B';
+    const out = serialize(setNodePosition(parseFlowchart(src)!, 'A', { x: 7, y: 7 }));
+    expect(out).toBe(
+      'flowchart TD\n  %% cerebro:pos A 7,7\n  %% cerebro:pos A 9,9 B 2,2\n  A --> B',
+    );
+    expect(storedPositions(parseFlowchart(out)!).get('A')).toEqual({ x: 7, y: 7 });
+    // …and a clear has to reach EVERY site, or the "removed" positions come
+    // straight back the next time the file is read.
+    expect(serialize(clearPositions(parseFlowchart(src)!))).toBe('flowchart TD\n  A --> B');
+    expect(
+      storedPositions(parseFlowchart(serialize(clearPositions(parseFlowchart(src)!)))!).size,
+    ).toBe(0);
+  });
+
+  // deleteNode already sweeps a node's meta, style and click companions; a
+  // stale coordinate is one more trace, and id reuse (`newNodeId`) makes it a
+  // teleport rather than a cosmetic leftover.
+  it('deleteNode sweeps EVERY pos line, not just the first', () => {
+    const src =
+      'flowchart TD\n  %% cerebro:pos B 1,1\n  %% cerebro:pos A 2,2 B 3,3\n  A[Start] --> B[End]';
+    const out = serialize(deleteNode(parseFlowchart(src)!, 'B'));
+    expect(out).toBe('flowchart TD\n  %% cerebro:pos A 2,2\n  A[Start]');
+    expect(storedPositions(parseFlowchart(out)!).has('B')).toBe(false);
+  });
+
+  // Same trap as the two-pos-line case, on the other marker: `isManualLayout`
+  // is true while ANY marker survives, so a toggle-off that stopped at the
+  // first would report success and leave the diagram in manual mode.
+  it('setManualLayout(false) clears EVERY marker', () => {
+    const src = 'flowchart TD\n  %% cerebro:layout manual\n  A --> B\n  %% cerebro:layout manual';
+    const off = serialize(setManualLayout(parseFlowchart(src)!, false));
+    expect(off).toBe('flowchart TD\n  A --> B');
+    expect(isManualLayout(parseFlowchart(off)!)).toBe(false);
+    // …and turning it back on writes exactly one.
+    expect(serialize(setManualLayout(parseFlowchart(off)!, true))).toBe(
+      'flowchart TD\n  %% cerebro:layout manual\n  A --> B',
+    );
+  });
+
+  it('a created line takes the document line ending', () => {
+    const src = 'flowchart TD\r\n  A --> B';
+    expect(serialize(setNodePosition(parseFlowchart(src)!, 'A', { x: 1, y: 2 }))).toBe(
+      'flowchart TD\r\n  %% cerebro:pos A 1,2\r\n  A --> B',
+    );
+    expect(serialize(setManualLayout(parseFlowchart(src)!, true))).toBe(
+      'flowchart TD\r\n  %% cerebro:layout manual\r\n  A --> B',
+    );
+  });
+
+  // The emitter validates its OUTPUT, not just its caller's input: a value we
+  // could not read back would take the WHOLE line opaque on the next parse and
+  // every other node's coordinates with it.
+  it('refuses a position it could not read back', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A 1,2\n  A --> B';
+    for (const bad of [
+      { id: 'A B', pos: { x: 1, y: 2 } },
+      { id: 'A\nB', pos: { x: 1, y: 2 } },
+      { id: '', pos: { x: 1, y: 2 } },
+      { id: 'A+B', pos: { x: 1, y: 2 } },
+      { id: 'A', pos: { x: Number.NaN, y: 2 } },
+      { id: 'A', pos: { x: 1, y: Number.POSITIVE_INFINITY } },
+      { id: 'A', pos: { x: 1e21, y: 2 } },
+    ]) {
+      const out = serialize(setNodePosition(parseFlowchart(src)!, bad.id, bad.pos));
+      expect(out, `${bad.id} ${bad.pos.x},${bad.pos.y}`).toBe(src);
+      expect(parseFlowchart(out)!.lines[1].parsed.kind).toBe('pos-comment');
+    }
+  });
+
+  // Belt and braces for the same boundary, from the other side: a hostile
+  // entry reaching the emitter directly must cost only itself.
+  it('a hostile entry cannot take the rest of the line with it', () => {
+    const model = parseFlowchart('flowchart TD\n  %% cerebro:pos A 1,2 B 3,4\n  A --> B')!;
+    const parsed = model.lines[1].parsed;
+    expect(parsed.kind).toBe('pos-comment');
+    if (parsed.kind !== 'pos-comment') return;
+    parsed.positions.set('oops id', { x: 5, y: 6 });
+    parsed.positions.set('C', { x: Number.NaN, y: 0 });
+    model.lines[1].dirty = true;
+    const out = serialize(model);
+    expect(out).toBe('flowchart TD\n  %% cerebro:pos A 1,2 B 3,4\n  A --> B');
+    const back = storedPositions(parseFlowchart(out)!);
+    expect(back.get('A')).toEqual({ x: 1, y: 2 });
+    expect(back.get('B')).toEqual({ x: 3, y: 4 });
+  });
+
+  // The one unemittable value `parse` itself can hand the emitter: a digit run
+  // whose rounded value spells itself `1e+23`. It costs ITSELF and nothing
+  // else, and a line with nothing left to say keeps its own bytes.
+  it('an unemittable coordinate that came from the file costs only itself', () => {
+    const shared = 'flowchart TD\n  %% cerebro:pos A 99999999999999999999999,0 B 3,4\n  A --> B';
+    const out = serialize(setNodePosition(parseFlowchart(shared)!, 'B', { x: 3, y: 4 }));
+    expect(out).toBe('flowchart TD\n  %% cerebro:pos B 3,4\n  A --> B');
+    expect(storedPositions(parseFlowchart(out)!).get('B')).toEqual({ x: 3, y: 4 });
+    // Nothing left to say → the line keeps its own bytes rather than emitting
+    // a naked `%% cerebro:pos`, which our own parser would disown.
+    const alone = 'flowchart TD\n  %% cerebro:pos A 99999999999999999999999,0\n  A --> B';
+    const model = parseFlowchart(alone)!;
+    model.lines[1].dirty = true;
+    expect(serialize(model)).toBe(alone);
+  });
+
+  it('rewriting a line rounds the decimals it read', () => {
+    const src = 'flowchart TD\n  %% cerebro:pos A 1.4,2.6 B 3,4\n  A --> B';
+    const out = serialize(setNodePosition(parseFlowchart(src)!, 'B', { x: 9, y: 9 }));
+    expect(out).toBe('flowchart TD\n  %% cerebro:pos A 1,3 B 9,9\n  A --> B');
+  });
+});
+
+/**
+ * The adversarial sweep (M29.41). Breadth alone is not coverage — two earlier
+ * sweeps in this wave passed while a control was dead because every document
+ * shared one node id — so the corpus varies STRUCTURE (where the markers sit,
+ * frontmatter, subgraphs, CRLF, a malformed neighbour, two pos lines) and
+ * SPELLING (every document uses different ids, including dotted, dashed and
+ * prefix-colliding ones) and every assertion below is on a VALUE, never on
+ * "something changed".
+ */
+describe('cerebro position ops — adversarial sweep (M29.41)', () => {
+  const DOCS: [string, string][] = [
+    ['plain', 'flowchart TD\n  A[Start] --> B{Choice}\n  B --> C[Done]'],
+    ['pos-only', 'flowchart LR\n  %% cerebro:pos n1 10,20 n2 -5,7\n  n1[One] --> n2'],
+    ['layout-only', 'flowchart TD\n  %% cerebro:layout manual\n  Start --> Finish'],
+    [
+      'both',
+      'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos a-b 3,4 x.y 1,2\n  x.y --> a-b',
+    ],
+    ['pos-above-header', '%% cerebro:pos Zebra 5,5\nflowchart RL\n  Zebra --> Yak'],
+    ['layout-at-eof', 'flowchart TD\n  w1 --> w2\n  %% cerebro:layout manual'],
+    [
+      'two-layout-markers',
+      'flowchart TD\n  %% cerebro:layout manual\n  k1 --> k2\n  %% cerebro:layout manual',
+    ],
+    [
+      'pos-in-subgraph',
+      'flowchart TD\n  subgraph S1[Phase]\n    %% cerebro:pos in1 1,1\n    in1 --> in2\n  end\n  in2 --> out1',
+    ],
+    ['pos-at-eof', 'flowchart TD\n  p --> q\n  %% cerebro:pos p 0,0 q 40,40'],
+    [
+      'frontmatter',
+      '---\nconfig:\n  layout: elk\n---\nflowchart LR\n  %% cerebro:pos alpha 1,2\n  alpha --> beta',
+    ],
+    ['crlf', 'flowchart TD\r\n  %% cerebro:pos m1 3,4\r\n  m1[Mm] --> m2\r'],
+    [
+      'malformed-neighbour',
+      'flowchart TD\n  %% cerebro:pos BAD 1\n  %% cerebro:pos good1 7,8\n  good1 --> good2',
+    ],
+    [
+      'two-pos-lines',
+      'flowchart TD\n  %% cerebro:pos dup 1,1\n  %% cerebro:pos dup 9,9 other 2,2\n  dup --> other',
+    ],
+    ['quirky-spacing', 'flowchart TD\n  %%  cerebro:pos  zz 10,20   aa 5,6\n  aa --> zz'],
+    ['prefix-ids', 'flowchart TD\n  %% cerebro:pos A 1,2 AB 3,4 ABC 5,6\n  A --> AB --> ABC'],
+    [
+      'no-markers',
+      'flowchart TD\n  subgraph Two Words\n    q1 --> q2\n  end\n  style q1 fill:#f96\n  click q1 "x.md"',
+    ],
+  ];
+
+  /** Every `%%`-comment line that looks like ours, owned or not, in order. */
+  function cerebroLines(code: string): string[] {
+    return code.split('\n').filter((l) => /%%\s*cerebro:/.test(l));
+  }
+
+  /** Every line that is NOT one of ours — the bytes no position op may touch. */
+  function otherLines(code: string): string[] {
+    return code.split('\n').filter((l) => !/%%\s*cerebro:/.test(l));
+  }
+
+  /** The cerebro-looking lines our parser refuses to own — opaque, forever. */
+  function opaqueCerebroLines(code: string): string[] {
+    const model = parseFlowchart(code);
+    if (model === null) return ['<unparseable>'];
+    return model.lines
+      .filter((l) => /%%\s*cerebro:/.test(l.raw) && l.parsed.kind === 'opaque')
+      .map((l) => l.raw);
+  }
+
+  /** The contiguous changed chunk between two documents, prefix/suffix trimmed. */
+  function delta(before: string, after: string): { removed: string[]; added: string[] } {
+    const a = before.split('\n');
+    const b = after.split('\n');
+    let p = 0;
+    while (p < a.length && p < b.length && a[p] === b[p]) p += 1;
+    let s = 0;
+    while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) {
+      s += 1;
+    }
+    return { removed: a.slice(p, a.length - s), added: b.slice(p, b.length - s) };
+  }
+
+  it.each(DOCS)('%s parses and serializes byte-identically', (_name, src) => {
+    const model = parseFlowchart(src);
+    expect(model).not.toBeNull();
+    expect(serialize(model!)).toBe(src);
+  });
+
+  it.each(DOCS)('%s survives setNodePosition on every one of its ids', (name, src) => {
+    const ids = [...nodes(parseFlowchart(src)!).keys()];
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      const before = parseFlowchart(src)!;
+      const priors = storedPositions(before);
+      const out = serialize(setNodePosition(before, id, { x: 111.5, y: -222.4 }));
+      const why = `${name}/${id}`;
+      // The effect, asserted as a VALUE: a refusal shows up here, not as a
+      // skipped assertion.
+      expect(storedPositions(parseFlowchart(out)!).get(id), why).toEqual({ x: 112, y: -222 });
+      // Nobody else moved.
+      for (const [other, pt] of priors) {
+        if (other !== id) expect(storedPositions(parseFlowchart(out)!).get(other), why).toEqual(pt);
+      }
+      expect(otherLines(out), why).toEqual(otherLines(src));
+      expect(opaqueCerebroLines(out), why).toEqual(opaqueCerebroLines(src));
+      const d = delta(src, out);
+      expect(d.removed.length, why).toBeLessThanOrEqual(1);
+      expect(d.added.length, why).toBe(1);
+      expect(serialize(parseFlowchart(out)!), why).toBe(out);
+    }
+  });
+
+  it.each(DOCS)('%s survives clearPositions and setManualLayout both ways', (name, src) => {
+    const cleared = serialize(clearPositions(parseFlowchart(src)!));
+    expect(storedPositions(parseFlowchart(cleared)!).size, name).toBe(0);
+    expect(isManualLayout(parseFlowchart(cleared)!), name).toBe(
+      isManualLayout(parseFlowchart(src)!),
+    );
+    expect(otherLines(cleared), name).toEqual(otherLines(src));
+    expect(opaqueCerebroLines(cleared), name).toEqual(opaqueCerebroLines(src));
+
+    const on = serialize(setManualLayout(parseFlowchart(src)!, true));
+    expect(isManualLayout(parseFlowchart(on)!), name).toBe(true);
+    expect(storedPositions(parseFlowchart(on)!), name).toEqual(
+      storedPositions(parseFlowchart(src)!),
+    );
+    expect(otherLines(on), name).toEqual(otherLines(src));
+    expect(delta(src, on).added.length, name).toBeLessThanOrEqual(1);
+
+    const off = serialize(setManualLayout(parseFlowchart(on)!, false));
+    expect(isManualLayout(parseFlowchart(off)!), name).toBe(false);
+    // Positions are RETAINED on the way off — that is the whole point of the
+    // toggle (spec D7), and a sweep that only checked the marker would miss it.
+    expect(storedPositions(parseFlowchart(off)!), name).toEqual(
+      storedPositions(parseFlowchart(src)!),
+    );
+  });
+
+  it.each(DOCS)('%s leaves no zombie coordinates behind a delete', (name, src) => {
+    for (const id of [...nodes(parseFlowchart(src)!).keys()]) {
+      const priors = storedPositions(parseFlowchart(src)!);
+      const out = serialize(deleteNode(parseFlowchart(src)!, id));
+      const why = `${name}/${id}`;
+      expect(parseFlowchart(out), why).not.toBeNull();
+      expect(storedPositions(parseFlowchart(out)!).has(id), why).toBe(false);
+      for (const [other, pt] of priors) {
+        if (other !== id) expect(storedPositions(parseFlowchart(out)!).get(other), why).toEqual(pt);
+      }
+      expect(opaqueCerebroLines(out), why).toEqual(opaqueCerebroLines(src));
+      expect(serialize(parseFlowchart(out)!), why).toBe(out);
+    }
+  });
+
+  it.each(DOCS)('%s keeps every cerebro line byte-identical through a rename', (name, src) => {
+    for (const id of [...nodes(parseFlowchart(src)!).keys()]) {
+      const out = serialize(renameNode(parseFlowchart(src)!, id, 'Renamed'));
+      expect(cerebroLines(out), `${name}/${id}`).toEqual(cerebroLines(src));
+    }
   });
 });

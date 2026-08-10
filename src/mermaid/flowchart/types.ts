@@ -98,6 +98,18 @@ export function withMetaEntry(meta: NodeMeta, key: string, value: string | null)
   return buildMeta(withEntry(meta.entries, key, value));
 }
 
+/**
+ * A stored node position (M29.41): the ABSOLUTE point, in the rendered SVG's
+ * user-coordinate space (the plane the root `viewBox` describes), where the
+ * centre of the node's bounding box must sit once our manual transform is
+ * applied. Deliberately NOT an offset from auto layout — auto layout moves with
+ * every edit and every engine flip, so an offset would drift silently.
+ */
+export interface PlanePoint {
+  x: number;
+  y: number;
+}
+
 export interface EdgeSegment {
   from: NodeRef[];
   to: NodeRef[];
@@ -127,6 +139,16 @@ export type ParsedLine =
    */
   | { kind: 'subgraph-start'; id: string | null; title: string }
   | { kind: 'subgraph-end' }
+  /**
+   * `%% cerebro:pos <id> <x>,<y> …` (M29.41) — ONE line holds every stored
+   * position. An ordinary mermaid comment, MEASURED inert at every line index
+   * of four structurally different documents in `positions.mermaid.test.ts`;
+   * a repeated id resolves to its LAST value, which is what `storedPositions`
+   * reads and what a rewrite collapses the line onto.
+   */
+  | { kind: 'pos-comment'; positions: Map<string, PlanePoint> }
+  /** `%% cerebro:layout manual` — presence IS manual mode (M29.41). */
+  | { kind: 'layout-mode'; manual: true }
   | { kind: 'opaque' };
 
 export interface ModelLine {

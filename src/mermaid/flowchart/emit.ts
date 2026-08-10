@@ -3,6 +3,7 @@
  * something `./parse` reads straight back.
  */
 
+import { posToken } from './parse';
 import type { EdgeHead, EdgeStroke, FlowchartModel, ModelLine, NodeRef, Shape } from './types';
 
 export const SHAPE_BRACKETS: Record<Shape, [string, string]> = {
@@ -292,6 +293,31 @@ function emitLine(line: ModelLine): string {
     }
     case 'subgraph-end':
       return `${indent}end`;
+    // Sorted by CODE UNIT for a deterministic emit: the same positions always
+    // produce the same bytes, on every machine. (`localeCompare` would not —
+    // it is ICU- and locale-dependent, and orders `A` against `a` differently
+    // from the collation the rest of this file assumes. A file format cannot
+    // afford a sort whose answer depends on the box it ran on.)
+    //
+    // `posToken` runs HERE as well as in `setNodePosition` — the emitter
+    // validates its OUTPUT, not just its caller's input. An entry it refuses
+    // is DROPPED rather than written, because a positions line is shared: one
+    // unreadable token would take the whole line opaque on the next parse and
+    // every other node's coordinates with it. Dropping costs that one entry;
+    // writing it would cost all of them. This is reachable without any hand
+    // mutation — `parse` accepts `999…999,0`, whose rounded value spells
+    // itself `1e+23`. A line with nothing left to say keeps its own bytes,
+    // exactly as an unemittable `click` target does.
+    case 'pos-comment': {
+      const body = [...p.positions.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([id, pt]) => posToken(id, pt))
+        .filter((token) => token !== null)
+        .join(' ');
+      return body === '' ? line.raw : `${indent}%% cerebro:pos ${body}`;
+    }
+    case 'layout-mode':
+      return `${indent}%% cerebro:layout manual`;
     case 'opaque':
       return line.raw;
   }
