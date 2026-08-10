@@ -5,6 +5,7 @@ import {
   edges,
   emitArrow,
   emitNodeRef,
+  nodeLinks,
   nodeMeta,
   nodeStyle,
   nodes,
@@ -55,11 +56,14 @@ describe('parseFlowchart', () => {
     expect(e[1]).toMatchObject({ from: 'B', to: 'C', label: 'yes' });
   });
 
-  it('classifies styling, clicks, and comments as opaque', () => {
+  it('classifies styling and comments as opaque', () => {
     const model = parseFlowchart(EXOTIC)!;
     const kinds = model.lines.map((l) => l.parsed.kind);
-    // frontmatter (4 lines) + comment + classDef + class + click = 8 opaque
-    expect(kinds.filter((k) => k === 'opaque').length).toBeGreaterThanOrEqual(8);
+    // frontmatter (4 lines) + comment + classDef + class = 7 opaque. Was 8
+    // until M29.36 made the plain-link `click B "…"` an understood kind —
+    // the floor drops by exactly that one line, the fixture is unchanged.
+    expect(kinds.filter((k) => k === 'opaque').length).toBeGreaterThanOrEqual(7);
+    expect(kinds.filter((k) => k === 'click').length).toBe(1);
   });
 
   it('expands & groups and chains into individual edges', () => {
@@ -842,5 +846,118 @@ describe('meta bodies with duplicate keys (M29.32 review)', () => {
   it('distinct keys are unaffected', () => {
     const m = parseFlowchart('flowchart TD\n  A --> B\n  A@{ shape: cyl, label: x }')!;
     expect(m.lines[2].parsed.kind).toBe('node-meta');
+  });
+});
+
+/**
+ * The plain-link `click` form (M29.36). Every claim below was MEASURED against
+ * the bundled mermaid 11.16.0 and is pinned in `links.mermaid.test.ts`; the
+ * whitespace rules in particular are far tighter than they look, and the plan
+ * this task came from had them wrong.
+ */
+describe('click lines', () => {
+  const SRC = [
+    'flowchart TD',
+    '  A[Start] --> B',
+    '  click A "https://example.com"',
+    '  click B "projects/atlas/project.md"',
+    '  click B call doThing()',
+    '  click A href "https://example.com"',
+    '  click A "https://example.com" "a tooltip"',
+    '  click A,B "https://example.com"',
+    '  click A  "two-spaces.md"',
+    '  click A "trailing-space.md" ', // the trailing space is load-bearing
+    '  click A ""',
+    '  click',
+  ].join('\n');
+
+  it('owns exactly the plain `click <id> "<target>"` form; every variant stays opaque', () => {
+    const model = parseFlowchart(SRC)!;
+    const kinds = model.lines.map((l) => l.parsed.kind);
+    expect(kinds[2]).toBe('click');
+    expect(kinds[3]).toBe('click');
+    // call / href / tooltip / comma-list: legal mermaid, not ours.
+    //
+    // The last four are the ones the plan got wrong, all MEASURED as PARSE
+    // ERRORS on 11.16.0 — mermaid's lexer pops the `click` state on exactly
+    // ONE whitespace character (`<click>[\s\n]`, flow.jison:112) and the
+    // grammar has no rule for a SPACE after the string, so `click A  "x"`,
+    // a trailing space, and an empty target each kill the whole diagram.
+    // Owning a line the renderer rejects is the boundary violation
+    // `parseMetaBody` already refuses duplicate keys over.
+    //
+    // The bare `click` matters most: without an explicit guard the node-token
+    // fallback would mint a phantom node with id "click" (the same trap the
+    // anonymous `subgraph` line already documents).
+    expect(kinds.slice(4)).toEqual(Array(8).fill('opaque'));
+  });
+
+  it('parses id and target', () => {
+    const model = parseFlowchart(SRC)!;
+    expect(model.lines[2].parsed).toEqual({
+      kind: 'click',
+      id: 'A',
+      target: 'https://example.com',
+    });
+    expect(model.lines[3].parsed).toEqual({
+      kind: 'click',
+      id: 'B',
+      target: 'projects/atlas/project.md',
+    });
+  });
+
+  it('no click-shaped line ever mints a node — owned or opaque', () => {
+    // The `Foo--oBar` scar, applied to a new construct: a parser that reports
+    // nodes mermaid does not have is a parser that will rename or delete
+    // something the user never wrote. Measured: mermaid's vertices for this
+    // document's rendering subset are exactly A and B.
+    expect([...nodes(parseFlowchart(SRC)!).keys()].sort()).toEqual(['A', 'B']);
+    // …and the id charset can never smuggle one in either.
+    for (const line of ['click', 'click A,B "x.md"', 'CLICK A "x.md"', 'clickety A "x.md"']) {
+      const m = parseFlowchart(`flowchart TD\n  A --> B\n  ${line}`)!;
+      expect([line, [...nodes(m).keys()].sort()]).toEqual([line, ['A', 'B']]);
+    }
+  });
+
+  it('tolerates a trailing CR, because mermaid normalizes CRLF before parsing', () => {
+    const m = parseFlowchart('flowchart TD\r\n  A --> B\r\n  click A "u.md"\r')!;
+    expect(m.lines[2].parsed).toMatchObject({ kind: 'click', target: 'u.md' });
+  });
+
+  it('a whitespace-only target is not a link', () => {
+    // `click A " "` parses, but `utils.formatUrl` returns undefined for a
+    // blank url so mermaid attaches nothing. Reporting a link there would be
+    // the model claiming a fact the render does not have.
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  click A "   "')!;
+    expect(m.lines[2].parsed.kind).toBe('opaque');
+  });
+
+  it('classDef and class stay opaque — the keyword regex still matches longest-first', () => {
+    const model = parseFlowchart('flowchart TD\n  A\n  classDef hot fill:#f96\n  class A hot')!;
+    expect(model.lines[2].parsed.kind).toBe('opaque');
+    expect(model.lines[3].parsed.kind).toBe('opaque');
+  });
+
+  it('nodeLinks maps each linked node to its target (last click line wins, like mermaid)', () => {
+    const model = parseFlowchart(
+      'flowchart TD\n  A --> B\n  click A "one.md"\n  click A "two.md"',
+    )!;
+    expect(nodeLinks(model).get('A')).toEqual({ line: 3, target: 'two.md' });
+    expect(nodeLinks(model).has('B')).toBe(false);
+  });
+
+  it('nodeLinks reports only OWNED lines, and says so', () => {
+    // MEASURED: the `href` form writes the same vertex slot as the plain one
+    // and the LAST of all of them wins, so on this document mermaid's picture
+    // anchors to href.md while the editor's reading says plain.md. Pinned as a
+    // known divergence rather than left to be discovered.
+    const model = parseFlowchart(
+      'flowchart TD\n  A --> B\n  click A "plain.md"\n  click A href "href.md"',
+    )!;
+    expect(nodeLinks(model).get('A')).toEqual({ line: 2, target: 'plain.md' });
+  });
+
+  it('round-trips click lines byte-identically when untouched', () => {
+    expect(serialize(parseFlowchart(SRC)!)).toBe(SRC);
   });
 });

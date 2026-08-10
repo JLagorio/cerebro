@@ -10,6 +10,7 @@ import type {
 } from './model';
 import {
   DEFAULT_ARROW,
+  clickTarget,
   edgeMetaLinesFor,
   edges,
   emitArrow,
@@ -869,6 +870,138 @@ export function setNodeStyle(
       dirty: true,
     });
   }
+  return next;
+}
+
+/** Exactly the ids `CLICK_LINE` can read back — see the refusal below. */
+const OWNED_CLICK_ID = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * The last line — OWNED OR OPAQUE — whose `click` statement names `id`, or -1.
+ *
+ * Peeking at an opaque line's raw text without owning it is the same move
+ * `hasOpaqueMetaBlock` makes, and for the same reason: mermaid resolves the
+ * LAST `setLink` for an id, and the variants we leave opaque (`href`, and a
+ * comma id-list that happens to include `id`) write the very same slot —
+ * measured. A new click line dropped ABOVE one of them would be a silent
+ * no-op in the picture, which is the defect M29.30/.32/.33 each closed
+ * somewhere else.
+ *
+ * `\b` is NOT the right terminator here — `.` and `-` are id characters, so it
+ * would read `click A.x "y"` as naming `A`. The lookahead is the id charset
+ * itself, which still lets a comma id-list (`click A,B "…"`) match, as it must.
+ * Those same two characters are the only regex-special ones in the charset.
+ */
+function lastClickLineFor(model: FlowchartModel, id: string): number {
+  const named = new RegExp(`^click\\s+${id.replace(/[.-]/g, '\\$&')}(?![A-Za-z0-9_.-])`);
+  let out = -1;
+  model.lines.forEach((line, i) => {
+    if (named.test(line.raw.trim())) out = i;
+  });
+  return out;
+}
+
+/**
+ * Bind a node to a URL or vault-relative record path via an owned click line
+ * (M29.36). One target per node: the last owned line MERMAID WOULD APPLY is
+ * patched, every other owned one is dropped, and `null` clears them all.
+ * Opaque click VARIANTS (`href`/`call`/tooltip/comma-list forms) are never
+ * touched — if the user hand-wrote one it survives byte-for-byte and simply is
+ * not what the editor reads (`nodeLinks` documents the divergence that
+ * follows).
+ *
+ * Why the LAST and not the first: mermaid resolves the last `setLink` for an
+ * id (measured, `links.mermaid.test.ts`), so writing to the first would be the
+ * silent no-op M29.30/.32/.33 each had to close in a different control. The
+ * same fact places a NEW line below anything already claiming the id, and
+ * disqualifies an owned line sitting above the node's first declaration, where
+ * `setLink` finds no vertex at all.
+ *
+ * Two refusals:
+ *
+ * - a blank target is not a link — `clickTarget` refuses it and the op clears
+ *   instead, because `click A ""` is a parse error that kills the diagram;
+ * - an id outside the owned charset is refused, because `click A B "x"` is a
+ *   CALLBACK statement upstream and opaque to us: emitting one would be this
+ *   layer writing a line it immediately disowns.
+ *
+ * And one refusal deliberately NOT carried:
+ *
+ * - an UNDECLARED id is allowed, unlike `setNodeShape`/`setNodeIcon`. Those
+ *   refuse because an `id@{ … }` line for an unknown id CREATES a node; a
+ *   click line provably does not (measured: `setLink` and `setClass` both skip
+ *   an id with no vertex), so there is no phantom to prevent — and refusing
+ *   would make "create a node, then link it" a silent no-op.
+ */
+export function setNodeLink(
+  model: FlowchartModel,
+  id: string,
+  target: string | null,
+): FlowchartModel {
+  const next = clone(model);
+  if (!OWNED_CLICK_ID.test(id)) return next;
+
+  const owned: number[] = [];
+  next.lines.forEach((l, i) => {
+    if (l.parsed.kind === 'click' && l.parsed.id === id) owned.push(i);
+  });
+  const safe = target === null ? null : clickTarget(target);
+
+  if (safe === null) {
+    // Back to front: splicing shifts every later index.
+    for (let n = owned.length - 1; n >= 0; n -= 1) next.lines.splice(owned[n], 1);
+    return next;
+  }
+
+  // The survivor must be the line mermaid actually APPLIES — two conditions,
+  // both measured:
+  //
+  // - below the node's first declaration, because `setLink` only assigns to a
+  //   vertex that already exists and a click line above it is simply dead;
+  // - the LAST click statement claiming the id, owned or not, because the
+  //   `href`, tooltip and comma-list variants write the very same slot and the
+  //   last one wins.
+  //
+  // Fail either and patching in place would leave the picture pointing
+  // somewhere else — the silent no-op three controls in this wave already
+  // shipped. So every owned line is dropped and a fresh one written where it
+  // resolves: the one case this op relocates a line rather than patching it.
+  const declared = nodes(next).has(id);
+  const anchor = declared ? anchorLineFor(next, id) : -1;
+  const settled = lastClickLineFor(next, id);
+  const keep = owned.find((i) => i > anchor && i === settled);
+  if (keep !== undefined) {
+    const parsed = next.lines[keep].parsed;
+    if (parsed.kind === 'click') {
+      parsed.target = safe;
+      next.lines[keep].dirty = true;
+    }
+    for (let n = owned.length - 1; n >= 0; n -= 1) {
+      if (owned[n] !== keep) next.lines.splice(owned[n], 1);
+    }
+    return next;
+  }
+  for (let n = owned.length - 1; n >= 0; n -= 1) next.lines.splice(owned[n], 1);
+
+  // Next to the node, matching its indent — the same anchor rule `setNodeStyle`
+  // uses, and for a sharper reason here: a click line ABOVE its node's first
+  // declaration is DEAD upstream (measured), and `anchorLineFor` never returns
+  // a position before the node exists. Below any click statement already
+  // naming this id, though, since the last one is what mermaid resolves.
+  if (declared) {
+    const at = Math.max(anchorLineFor(next, id), lastClickLineFor(next, id));
+    const indent = next.lines[at]?.raw.match(/^\s*/)?.[0] ?? '  ';
+    next.lines.splice(at + 1, 0, {
+      raw: indent,
+      parsed: { kind: 'click', id, target: safe },
+      dirty: true,
+    });
+    return next;
+  }
+  // Nothing to sit next to. `anchorLineFor` would fall back to the header and
+  // borrow its (empty) indent, so an undeclared id gets the end of the
+  // document instead — inert either way, but not wedged above the diagram.
+  next.lines.push({ raw: '  ', parsed: { kind: 'click', id, target: safe }, dirty: true });
   return next;
 }
 

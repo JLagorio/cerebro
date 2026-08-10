@@ -2,9 +2,10 @@
  * The line-oriented flowchart model (M29.14).
  *
  * Every source line is either UNDERSTOOD (header, node definition, edge line —
- * chains and & groups included — subgraph markers, `@{ … }` metadata, `style`)
- * or OPAQUE (frontmatter, comments, classDef/class/linkStyle/click, and
- * anything the parser is not 100% sure about, a half-owned `style` body
+ * chains and & groups included — subgraph markers, `@{ … }` metadata, `style`,
+ * the plain-link `click` form) or OPAQUE (frontmatter, comments,
+ * classDef/class/linkStyle, every other `click` variant, and anything the
+ * parser is not 100% sure about, a half-owned `style` body
  * included). Serialization re-emits `raw` for every non-dirty line,
  * so opaque content survives byte-for-byte BY CONSTRUCTION — the invariant the
  * whole structural editor stands on.
@@ -198,6 +199,7 @@ export type ParsedLine =
   | { kind: 'node-meta'; id: string; meta: NodeMeta }
   | { kind: 'style'; id: string; decls: [string, string][] }
   | { kind: 'edges'; segments: EdgeSegment[] }
+  | { kind: 'click'; id: string; target: string }
   | { kind: 'subgraph-start'; title: string }
   | { kind: 'subgraph-end' }
   | { kind: 'opaque' };
@@ -212,7 +214,35 @@ export interface FlowchartModel {
   lines: ModelLine[];
 }
 
-const OPAQUE_KEYWORDS = /^(classDef|class|style|linkStyle|click|direction|accTitle|accDescr)\b/;
+// `classDef` must stay ahead of `class`: the engine tries alternatives left to
+// right, and while `\b` would anyway reject the `class` branch against
+// `classDef…` (the following `D` is a word character), the explicit order makes
+// the intent unmissable and costs nothing. `click` left this list in M29.36
+// WITHOUT becoming free-form: the guard in `parseLine` sends every click shape
+// that is not the plain-link form straight to opaque before any fallback runs.
+const OPAQUE_KEYWORDS = /^(classDef|class|style|linkStyle|direction|accTitle|accDescr)\b/;
+
+/**
+ * The plain-link click line, and only that (M29.36, spec D3). Matched against
+ * the RAW line rather than a trimmed one, because mermaid's whitespace rules
+ * here are exact and unforgiving — every one of these MEASURED on the bundled
+ * 11.16.0 (`links.mermaid.test.ts`):
+ *
+ * - `click  A "x"` renders — the lexer's `"click"[\s]+` is greedy;
+ * - `click A  "x"` is a PARSE ERROR — `<click>[\s\n]` pops the click state on
+ *   exactly ONE whitespace character (flow.jison:112) and no grammar rule
+ *   accepts a SPACE between CLICK and STR (flow.jison:551);
+ * - `click A "x" ` — one trailing space — is a PARSE ERROR for the same
+ *   reason, so `$` may not be reached through `.trim()`;
+ * - `click A ""` is a PARSE ERROR, hence `[^"]+` and not `[^"]*`;
+ * - a trailing `\r` is fine: mermaid normalizes CRLF before it parses.
+ *
+ * Being this strict is the same boundary `parseMetaBody` holds when it refuses
+ * a duplicate key: a line the renderer rejects is a line about which we have
+ * no facts, and `nodeLinks` reporting one would be the model claiming a link
+ * on a document that cannot draw at all.
+ */
+const CLICK_LINE = /^[^\S\r\n]*click[^\S\r\n]+([A-Za-z0-9_.-]+)[^\S\r\n]"([^"]+)"\r?$/;
 
 /** Bracket pairs, longest opener first — order is load-bearing. */
 const SHAPES: [string, string, Shape][] = [
@@ -581,6 +611,25 @@ function parseLine(rawLine: string): ParsedLine {
   }
   if (OPAQUE_KEYWORDS.test(trimmed)) return { kind: 'opaque' };
 
+  // The plain-link click form is ours (M29.36, spec D3): `click <id> "<target>"`.
+  // Everything else the grammar allows — call/callback forms, `href`, a second
+  // tooltip string, `_blank`-style targets, comma id-lists (flow.jison:541-555)
+  // — stays opaque: renders fine, not editable.
+  //
+  // A blank target is dropped too, one step below CLICK_LINE's own `[^"]+`:
+  // `click A "   "` parses, but `utils.formatUrl` returns undefined for a
+  // whitespace-only url, so mermaid attaches no link and neither may we.
+  //
+  // The trailing guard is load-bearing: without it a bare or half-typed
+  // `click` line would fall to the node-token parser and mint a phantom node
+  // with id "click" — a node the user never wrote, which rename and delete
+  // would then happily act on.
+  const click = rawLine.match(CLICK_LINE);
+  if (click !== null && click[2].trim() !== '') {
+    return { kind: 'click', id: click[1], target: click[2] };
+  }
+  if (/^click\b/.test(trimmed)) return { kind: 'opaque' };
+
   const header = trimmed.match(/^(flowchart|graph)\s+(TD|TB|LR|RL|BT)\s*$/);
   if (header !== null) {
     return {
@@ -743,6 +792,34 @@ function emitMetaValue(value: string): string {
   return /[,:{}^]|\s#|^[#'&*!]|^\s|\s$|^$/.test(cleaned) ? `"${cleaned}"` : cleaned;
 }
 
+/**
+ * A click target that can sit inside `click <id> "…"` without taking the
+ * diagram or this parser down with it. Null means "there is no link here" —
+ * the caller must remove the line rather than write one.
+ *
+ * Three hazards, all MEASURED on the bundled 11.16.0 (`links.mermaid.test.ts`):
+ *
+ * - a line break ends the LINE before mermaid ever sees it, so `flattenForLine`
+ *   runs first (see its comment — the same boundary every other emitter here
+ *   answers to). Without it, `click A "a<LF>b.md"` splits into two lines that
+ *   OUR OWN parser reads as opaque junk and the link silently vanishes;
+ * - `"` closes the target string and has no escape, so it is substituted
+ *   rather than dropped — substituting is lossless where quoting cannot be;
+ * - an EMPTY target is a parse error (`click A ""` kills the whole diagram)
+ *   and a whitespace-only one is a link mermaid discards (`utils.formatUrl`
+ *   returns undefined for a blank url). Neither is a link, so both come back
+ *   as null. This matters because Stage H feeds user-controlled vault paths
+ *   through here: a caller must not be able to hand us a string that emits a
+ *   line the renderer rejects.
+ *
+ * Everything else survives verbatim — spaces, `|`, `#`, `%%`, brackets,
+ * backslashes and non-ASCII all measured safe inside the quoted target.
+ */
+export function clickTarget(target: string): string | null {
+  const safe = flattenForLine(target).replaceAll('"', "'");
+  return safe.trim() === '' ? null : safe;
+}
+
 export function emitNodeRef(ref: NodeRef): string {
   if (ref.label === null) return ref.id;
   const [open, close] = SHAPE_BRACKETS[ref.shape ?? 'rect'];
@@ -774,6 +851,17 @@ function emitLine(line: ModelLine): string {
         )} ${seg.to.map(emitNodeRef).join(' & ')}`;
       }
       return out;
+    }
+    // Exactly one space on each side of the id: mermaid's click state pops on
+    // ONE whitespace character, so `click A  "x"` is a parse error (measured).
+    //
+    // `clickTarget` runs here as well as in `setNodeLink` — the emitter
+    // validates its OUTPUT, not just its caller's input. A target it refuses
+    // cannot be written at all (`click A ""` kills the diagram), so such a
+    // line keeps its original bytes; only a hand-mutated model reaches that.
+    case 'click': {
+      const target = clickTarget(p.target);
+      return target === null ? line.raw : `${indent}click ${p.id} "${target}"`;
     }
     case 'subgraph-start':
       return `${indent}subgraph ${p.title}`;
@@ -897,6 +985,39 @@ export function nodeStyle(model: FlowchartModel, id: string): Record<string, str
     for (const [k, v] of line.parsed.decls) decls = withEntry(decls, k, v);
   }
   return Object.fromEntries(decls);
+}
+
+/**
+ * Every node with an OWNED click line → its target and the line carrying it.
+ * Later lines win, which is what mermaid itself does: `setLink` assigns
+ * `vertex.link` outright (flowDb.ts:551-559) — measured on 11.16.0, three
+ * plain click lines for one id resolve to the third.
+ *
+ * TWO MEASURED DIVERGENCES the editor has to live with, both of them the
+ * user's own hand-written variants and neither of them a render hazard:
+ *
+ * - the `href` form writes the SAME slot, so `click A "plain"` followed by
+ *   `click A href "other"` renders an anchor to `other` while this map says
+ *   `plain`. Owning the href form would fix it and is not this stage's job;
+ * - a click line ABOVE its node's first declaration is DEAD upstream
+ *   (`setLink` only assigns to a vertex that already exists), while this map
+ *   still reports it. `setNodeLink` never creates one there.
+ *
+ * The editor is the thing that ACTS on these: render.ts pins `securityLevel:
+ * 'strict'`, where mermaid attaches no click handlers (`setClickFun` returns
+ * early unless the level is 'loose', flowDb.ts:498). It does still emit a real
+ * `<a href="…">` around the node label even at strict — measured — so the
+ * picture is not inert and a relative target is a live navigation inside the
+ * app. Neutralizing that belongs to whoever binds the svg.
+ */
+export function nodeLinks(model: FlowchartModel): Map<string, { line: number; target: string }> {
+  const out = new Map<string, { line: number; target: string }>();
+  model.lines.forEach((line, i) => {
+    if (line.parsed.kind === 'click') {
+      out.set(line.parsed.id, { line: i, target: line.parsed.target });
+    }
+  });
+  return out;
 }
 
 export interface ResolvedNode {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   edgeAnimated,
   edges,
+  nodeLinks,
   nodeMeta,
   nodeStyle,
   nodes,
@@ -22,6 +23,7 @@ import {
   setEdgeLabel,
   setLayoutEngine,
   setNodeIcon,
+  setNodeLink,
   setNodeShape,
   setNodeStyle,
 } from './ops';
@@ -1029,5 +1031,320 @@ describe('setNodeIcon', () => {
     // The line is still one our own parser owns — the substitution cost the
     // node no editability.
     expect(nodeMeta(parseFlowchart(out)!).get('A')?.icon).toBe("lucide:a'b");
+  });
+});
+
+describe('setNodeLink', () => {
+  it('appends a click line for an unlinked node', () => {
+    const m = parseFlowchart('flowchart TD\n  A[Start] --> B')!;
+    const out = serialize(setNodeLink(m, 'A', 'projects/atlas/project.md'));
+    expect(out).toBe('flowchart TD\n  A[Start] --> B\n  click A "projects/atlas/project.md"');
+  });
+
+  it('patches an existing click line in place', () => {
+    const m = parseFlowchart(
+      'flowchart TD\n  A --> B\n  click A "old.md"\n  classDef hot fill:#f96',
+    )!;
+    const out = serialize(setNodeLink(m, 'A', 'https://example.com'));
+    expect(out.split('\n')[2]).toBe('  click A "https://example.com"');
+    expect(out.split('\n')[3]).toBe('  classDef hot fill:#f96'); // untouched, byte-identical
+  });
+
+  it('null removes every owned click line for the node', () => {
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  click A "one.md"\n  click A "two.md"')!;
+    expect(serialize(setNodeLink(m, 'A', null))).toBe('flowchart TD\n  A --> B');
+  });
+
+  it('a double quote in the target is substituted, never emitted raw', () => {
+    // Same boundary rule as setEdgeLabel's pipe: `"` closes the target string
+    // in mermaid's grammar, so a literal one would truncate the line into
+    // garbage. Substitute at the last boundary before the file.
+    const m = parseFlowchart('flowchart TD\n  A')!;
+    const out = serialize(setNodeLink(m, 'A', 'weird"name.md'));
+    expect(out).toContain('click A "weird\'name.md"');
+    // …and the line we wrote is still one our own parser owns.
+    expect(nodeLinks(parseFlowchart(out)!).get('A')?.target).toBe("weird'name.md");
+  });
+
+  it('a newline in the target is flattened, never allowed to split the line', () => {
+    // The exposure `flattenForLine` exists for (M29.35), reached through a new
+    // door: Stage H feeds user-controlled vault paths into this op. Emitted
+    // raw, the LF would turn one click line into two lines our own parser
+    // reads as opaque junk — the link would vanish from the model while the
+    // bytes stayed in the file.
+    const m = parseFlowchart('flowchart TD\n  A')!;
+    const out = serialize(setNodeLink(m, 'A', 'notes/a\nb.md'));
+    expect(out.split('\n')).toHaveLength(3);
+    expect(nodeLinks(parseFlowchart(out)!).get('A')?.target).toBe('notes/a b.md');
+    // CRLF collapses to ONE space, as everywhere else.
+    const crlf = serialize(setNodeLink(parseFlowchart('flowchart TD\n  A')!, 'A', 'a\r\nb.md'));
+    expect(crlf).toBe('flowchart TD\n  A\n  click A "a b.md"');
+  });
+
+  it('an empty or blank target clears the link instead of emitting one', () => {
+    // MEASURED on 11.16.0: `click A ""` is a PARSE ERROR that kills the whole
+    // diagram, and `click A "   "` renders but attaches nothing
+    // (`utils.formatUrl` returns undefined for a blank url). Neither is a
+    // link, so neither may be written — the same call `emitEdgeLabel` makes
+    // when it treats an empty label as "no label".
+    const m = parseFlowchart('flowchart TD\n  A --> B\n  click A "old.md"')!;
+    // A lone `"` is NOT blank — it substitutes to `'`, a legal if odd target —
+    // so it is deliberately absent from this list.
+    for (const blank of ['', '   ', '\n', '\r\n', '\t']) {
+      expect([blank, serialize(setNodeLink(m, 'A', blank))]).toEqual([
+        blank,
+        'flowchart TD\n  A --> B',
+      ]);
+    }
+  });
+
+  it('writes to the LAST owned line, the one mermaid resolves', () => {
+    // Three plain click lines for one id resolve to the third upstream
+    // (measured). Patching the first and deleting the rest would still leave
+    // one winner, but it loses to an opaque `href` variant sitting between
+    // them and to a node declared later — so the survivor is the last.
+    const src = [
+      'flowchart TD',
+      '  click A "dead-above-the-node.md"',
+      '  A --> B',
+      '  click A href "opaque-variant.md"',
+      '  click A "live.md"',
+    ].join('\n');
+    const out = serialize(setNodeLink(parseFlowchart(src)!, 'A', 'new.md'));
+    expect(out).toBe(
+      [
+        'flowchart TD',
+        '  A --> B',
+        '  click A href "opaque-variant.md"',
+        '  click A "new.md"',
+      ].join('\n'),
+    );
+  });
+
+  it('never touches a click VARIANT it does not own', () => {
+    const src = [
+      'flowchart TD',
+      '  A --> B',
+      '  click A href "https://example.com" _blank',
+      '  click A,B "both.md"',
+      '  click A call doThing()',
+    ].join('\n');
+    // Neither a set nor a clear may rewrite a line we do not understand.
+    expect(serialize(setNodeLink(parseFlowchart(src)!, 'A', null))).toBe(src);
+    expect(serialize(setNodeLink(parseFlowchart(src)!, 'A', 'mine.md'))).toBe(
+      `${src}\n  click A "mine.md"`,
+    );
+  });
+
+  it('does not refuse an undeclared id — a click line mints no node', () => {
+    // The refusals `setNodeShape`/`setNodeIcon` carry exist because an
+    // `id@{ … }` line for an unknown id CREATES a node. MEASURED on 11.16.0, a
+    // click line does not: `setLink` and `setClass` both skip an id with no
+    // vertex, so `click Z "…"` is inert, not a phantom. Refusing here would
+    // instead make Stage H's "create a node, then link it" a silent no-op.
+    const out = serialize(setNodeLink(parseFlowchart('flowchart TD\n  A --> B')!, 'Z', 'z.md'));
+    expect(out).toBe('flowchart TD\n  A --> B\n  click Z "z.md"');
+    expect([...nodes(parseFlowchart(out)!).keys()].sort()).toEqual(['A', 'B']);
+  });
+
+  it('refuses an id it could not read back', () => {
+    // Output validation, not input taste: `click A B "x"` is a CALLBACK line
+    // upstream (flow.jison:549) and opaque to us, so emitting one would be
+    // this layer writing a line it immediately disowns.
+    for (const id of ['A B', 'A,B', '', 'A"B']) {
+      const before = parseFlowchart('flowchart TD\n  A --> B')!;
+      expect([id, serialize(setNodeLink(before, id, 'x.md'))]).toEqual([
+        id,
+        'flowchart TD\n  A --> B',
+      ]);
+    }
+  });
+
+  it('leaves every other line byte-identical, opaque ones included', () => {
+    const src = [
+      '---',
+      'config:',
+      '  layout: elk',
+      '---',
+      'flowchart TD',
+      '  %% keep me',
+      '  A[Start] --> B{Choice}',
+      '  classDef hot fill:#f96',
+      '  style A fill: #f96 , stroke:#333',
+      '  click A "old.md"',
+      '  click B call doThing()',
+    ].join('\n');
+    const after = serialize(setNodeLink(parseFlowchart(src)!, 'A', 'new.md')).split('\n');
+    const before = src.split('\n');
+    expect(after.length).toBe(before.length);
+    after.forEach((line, i) => {
+      if (i === 9) return;
+      expect([i, line]).toEqual([i, before[i]]);
+    });
+    expect(after[9]).toBe('  click A "new.md"');
+  });
+
+  it('places a new line next to its node, matching indent, never above it', () => {
+    // A click line ABOVE its node's first declaration is DEAD upstream
+    // (measured: `setLink` only assigns to a vertex that already exists), so
+    // the anchor rule `setNodeStyle` uses applies here for the same reason.
+    const src = 'flowchart TD\n  subgraph S\n      A[Start] --> B\n  end\n  C --> D';
+    const out = serialize(setNodeLink(parseFlowchart(src)!, 'A', 'a.md'));
+    expect(out.split('\n')[3]).toBe('      click A "a.md"');
+  });
+
+  it('does not mistake a longer id for the one being linked', () => {
+    // `.` and `-` are id characters, so a `\b` terminator would read
+    // `click A.x-y "…"` as a statement about `A` and place the new line below
+    // an unrelated node's link.
+    const src = 'flowchart TD\n  A --> B\n  click A.x-y "other.md"';
+    const out = serialize(setNodeLink(parseFlowchart(src)!, 'A', 'a.md'));
+    expect(out).toBe('flowchart TD\n  A --> B\n  click A "a.md"\n  click A.x-y "other.md"');
+    // …but a comma id-list genuinely names A, and must still push us below it.
+    const list = 'flowchart TD\n  A --> B\n  click A,B "both.md"';
+    expect(serialize(setNodeLink(parseFlowchart(list)!, 'A', 'a.md'))).toBe(
+      `${list}\n  click A "a.md"`,
+    );
+  });
+});
+
+/**
+ * Adversarial round-trip sweep for `setNodeLink` (M29.36). DOCUMENTS, not
+ * tokens — the `Foo--oBar` scar is that a 107-input token sweep passed while a
+ * whole-document one would have caught a silent rename. Real mermaid renders
+ * the same corpus in `links.mermaid.test.ts`; this half is the byte contract.
+ */
+describe('setNodeLink sweep', () => {
+  const DOCS: [string, string][] = [
+    ['bare', 'flowchart TD\n  A --> B'],
+    ['labeled', 'flowchart TD\n  A[Start] --> B{Choice}'],
+    ['definition-line', 'flowchart TD\n  A[Start]\n  A --> B'],
+    ['meta-shape', 'flowchart TD\n  A --> B\n  A@{ shape: cyl }'],
+    ['lone-meta', 'flowchart TD\n  A@{ icon: "lucide:rocket", form: rounded, pos: b }'],
+    ['in-subgraph', 'flowchart TD\n  subgraph S\n    A --> B\n  end'],
+    ['frontmatter', '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B'],
+    ['crlf', 'flowchart TD\r\n  A --> B\r\n  C --> A'],
+    ['chain', 'flowchart TD\n  A --> B --> C'],
+    ['group', 'flowchart TD\n  A & B --> C'],
+    ['existing-click', 'flowchart TD\n  A --> B\n  click A "old.md"'],
+    ['two-clicks', 'flowchart TD\n  A --> B\n  click A "one.md"\n  click A "two.md"'],
+    ['click-above-node', 'flowchart TD\n  click A "above.md"\n  A --> B'],
+    ['href-variant', 'flowchart TD\n  A --> B\n  click A href "x.md"'],
+    ['comma-variant', 'flowchart TD\n  A --> B\n  click A,B "both.md"'],
+    ['call-variant', 'flowchart TD\n  A --> B\n  click A call doThing()'],
+    ['tooltip-variant', 'flowchart TD\n  A --> B\n  click A "x.md" "a tip"'],
+    // Lines mermaid itself rejects (measured): the model must not own them,
+    // and the op must not disturb them.
+    ['unrenderable-click', 'flowchart TD\n  A --> B\n  click A  "two-spaces.md"'],
+    ['bare-click', 'flowchart TD\n  A --> B\n  click'],
+    ['trailing-blank', 'flowchart TD\n  A --> B\n'],
+    ['comments', 'flowchart TD\n  %% note\n  A --> B\n  %% tail'],
+    [
+      'styled',
+      'flowchart TD\n  A --> B\n  style A fill:#f96\n  classDef hot fill:#f96\n  class A hot',
+    ],
+    ['edge-id', 'flowchart TD\n  A e1@--> B\n  e1@{ animate: true }'],
+    ['tab-indent', 'flowchart TD\n\tsubgraph S\n\t\tA --> B\n\tend'],
+    ['id-with-dot-dash', 'flowchart TD\n  A --> B\n  click A.x-y "other.md"'],
+  ];
+
+  const TARGETS: [string, string][] = [
+    ['projects/atlas/project.md', 'projects/atlas/project.md'],
+    ['https://example.com/a?b=c#d', 'https://example.com/a?b=c#d'],
+    ['my notes/a b.md', 'my notes/a b.md'],
+    ['weird"name.md', "weird'name.md"],
+    ['a\nb.md', 'a b.md'],
+    ['a\r\nb.md', 'a b.md'],
+    ['a|b.md', 'a|b.md'],
+    ['a#b.md', 'a#b.md'],
+    ['a %% b.md', 'a %% b.md'],
+    ['a[b]{c}.md', 'a[b]{c}.md'],
+    ['a,b.md', 'a,b.md'],
+    ['a;b.md', 'a;b.md'],
+    ['a\\b.md', 'a\\b.md'],
+    ['notes/é中—.md', 'notes/é中—.md'],
+    ['javascript:alert(1)', 'javascript:alert(1)'],
+    [`${'x'.repeat(400)}.md`, `${'x'.repeat(400)}.md`],
+    ['  padded.md  ', '  padded.md  '],
+    ["'single'.md", "'single'.md"],
+    ['A --> B', 'A --> B'],
+    // A target that is itself a click line: the quotes substitute, so it can
+    // never close the string early and mint a second statement.
+    ['click A "nested.md"', "click A 'nested.md'"],
+  ];
+
+  /** Every line except the ones this op is allowed to add, move, or delete. */
+  const untouched = (code: string): string[] => {
+    const model = parseFlowchart(code)!;
+    return model.lines
+      .filter((l) => !(l.parsed.kind === 'click' && l.parsed.id === 'A'))
+      .map((l) => l.raw);
+  };
+
+  const ownedTargets = (code: string): string[] => {
+    const model = parseFlowchart(code)!;
+    return model.lines.flatMap((l) =>
+      l.parsed.kind === 'click' && l.parsed.id === 'A' ? [l.parsed.target] : [],
+    );
+  };
+
+  it('every document round-trips byte-identically before anything touches it', () => {
+    for (const [name, src] of DOCS) {
+      expect([name, serialize(parseFlowchart(src)!)]).toEqual([name, src]);
+    }
+  });
+
+  it('sets, re-reads, and clears across the whole cross product', () => {
+    let checked = 0;
+    for (const [docName, src] of DOCS) {
+      const before = untouched(src);
+      const beforeNodes = [...nodes(parseFlowchart(src)!).keys()].sort();
+      for (const [input, expected] of TARGETS) {
+        const where = `${docName} + ${JSON.stringify(input).slice(0, 40)}`;
+        const out = serialize(setNodeLink(parseFlowchart(src)!, 'A', input));
+
+        // 1. Every line the op had no business touching is byte-identical,
+        //    opaque click VARIANTS and unrenderable click lines included.
+        expect([where, untouched(out)]).toEqual([where, before]);
+        // 2. Exactly one owned line survives, carrying exactly what we asked
+        //    for. This is the anti-vacuity check: it cannot pass on a no-op.
+        expect([where, ownedTargets(out)]).toEqual([where, [expected]]);
+        // 3. The written line is one our own parser reads back, and reading it
+        //    back and re-emitting it changes nothing.
+        expect([where, serialize(parseFlowchart(out)!)]).toEqual([where, out]);
+        expect([where, nodeLinks(parseFlowchart(out)!).get('A')?.target]).toEqual([
+          where,
+          expected,
+        ]);
+        // 4. No node is invented and none goes missing — the invariant the
+        //    `Foo--oBar` rename bug would have failed.
+        expect([where, [...nodes(parseFlowchart(out)!).keys()].sort()]).toEqual([
+          where,
+          beforeNodes,
+        ]);
+        // 5. Setting the same target twice is a fixed point.
+        expect([where, serialize(setNodeLink(parseFlowchart(out)!, 'A', input))]).toEqual([
+          where,
+          out,
+        ]);
+        // 6. Clearing lands exactly on the document minus its owned lines.
+        expect([
+          where,
+          serialize(setNodeLink(parseFlowchart(out)!, 'A', null)).split('\n'),
+        ]).toEqual([where, before]);
+        checked += 1;
+      }
+    }
+    expect(checked).toBe(DOCS.length * TARGETS.length);
+    expect(checked).toBeGreaterThan(400);
+  });
+
+  it('a blank target clears every document without ever writing a line', () => {
+    for (const [name, src] of DOCS) {
+      for (const blank of ['', '  ', '\n', '\t']) {
+        const out = serialize(setNodeLink(parseFlowchart(src)!, 'A', blank));
+        expect([name, blank, out.split('\n')]).toEqual([name, blank, untouched(src)]);
+      }
+    }
   });
 });
