@@ -4,6 +4,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { IconButton } from '@/components/ui/IconButton';
 import { useUiStore } from '@/stores/uiStore';
 import { copyPng, copySvg, savePng } from './export';
+import { useInertDiagramLinks } from './svgLinks';
 
 const MIN_SCALE = 0.25;
 const MAX_SCALE = 4;
@@ -31,6 +32,12 @@ export function MermaidLightbox({
     null,
   );
   const viewportRef = useRef<HTMLDivElement>(null);
+  // A rendered diagram must not be able to navigate the app away (M29.38).
+  // `open ? svg : null` for the same reason the wheel effect below depends
+  // on `open`: Dialog returns null while closed, so the canvas is destroyed
+  // and recreated without this component ever unmounting — an `[svg]`
+  // dependency alone would not fire on the reopen that rebuilt it.
+  const canvasRef = useInertDiagramLinks<HTMLDivElement>(open ? svg : null);
 
   const zoomBy = (factor: number) =>
     setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s * factor)));
@@ -135,6 +142,7 @@ export function MermaidLightbox({
         }}
       >
         <div
+          ref={canvasRef}
           data-testid="lightbox-canvas"
           className="[&_svg]:h-auto [&_svg]:max-w-none"
           style={{

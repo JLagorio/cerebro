@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { renderMermaid, type RenderResult } from './render';
+import { useInertDiagramLinks } from './svgLinks';
 import { useThemeEpoch } from './useThemeEpoch';
 
 /**
@@ -23,6 +24,14 @@ export function MermaidDiagram({
   const [result, setResult] = useState<RenderResult | null>(null);
   const themeEpoch = useThemeEpoch();
   const generation = useRef(0);
+  // A rendered diagram must not be able to navigate the app away (M29.38).
+  // Called before the early returns below, as every hook must be: the ref is
+  // simply null on the loading and error faces, where there is no svg to
+  // strip. The dependency is the svg itself, so the strip re-runs each time
+  // React rewrites the subtree with a new render.
+  const svgRef = useInertDiagramLinks<HTMLDivElement>(
+    result !== null && result.ok ? result.svg : null,
+  );
 
   useEffect(() => {
     const gen = ++generation.current;
@@ -77,6 +86,7 @@ export function MermaidDiagram({
   return (
     <div className="group relative w-full" data-testid="mermaid-diagram">
       <div
+        ref={svgRef}
         className="overflow-auto [&_svg]:h-auto [&_svg]:max-w-full"
         style={{ maxHeight: collapseHeight }}
         // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.

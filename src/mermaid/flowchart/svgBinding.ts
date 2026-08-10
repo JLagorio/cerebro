@@ -1,3 +1,4 @@
+import { neutralizeDiagramLinks } from '../svgLinks';
 import type { EdgeEntry, FlowchartModel } from './model';
 import { edges, nodes, subgraphs } from './model';
 
@@ -182,20 +183,19 @@ export function bindFlowchartSvg(
     if (hit !== undefined && !clusterEls.has(hit.id)) clusterEls.set(hit.id, el);
   }
 
-  // Neutralize mermaid's own anchors (M29.38). MEASURED on 11.16.0: at
-  // `securityLevel: 'strict'` mermaid attaches no click HANDLER, but a `click`
-  // line still emits a real `<a href="…">` that WRAPS the node `<g>` bound
-  // above. A default action is not propagation, so the node handler's
-  // `stopPropagation()` never touched it — clicking a linked node merely to
-  // SELECT it followed the link, and inside the Tauri webview that takes the
-  // whole app off the SPA. `javascript:` targets are already dropped by
-  // sanitizeUrl; a vault-relative or absolute one is live navigation. The
-  // EDITOR owns click semantics here (M29.36) and the badge is the hit target,
-  // so no href in this subtree survives — including one around a node the
-  // model could not resolve, which is just as navigable. The anchor element
-  // itself stays: it carries mermaid's own layout, and removing it would
-  // reparent the very groups just bound.
-  for (const a of container.querySelectorAll('a[href]')) a.removeAttribute('href');
+  // Neutralize mermaid's own anchors (M29.38). At `securityLevel: 'strict'`
+  // mermaid attaches no click HANDLER, but a `click` line still emits a real
+  // anchor that WRAPS the node `<g>` bound above. A default action is not
+  // propagation, so the node handler's `stopPropagation()` never touched it —
+  // clicking a linked node merely to SELECT it followed the link, and inside
+  // the Tauri webview that takes the whole app off the SPA. The EDITOR owns
+  // click semantics here (M29.36) and the badge is the hit target, so no link
+  // in this subtree survives — including one around a node the model could
+  // not resolve, which is just as navigable. Shared with the read-only
+  // viewers, which have exactly the same problem and no binding pass to hang
+  // it on; `../svgLinks` documents what was measured and why the attribute
+  // goes rather than the click being intercepted.
+  neutralizeDiagramLinks(container);
 
   return { nodeEls, edgeEls, clusterEls };
 }

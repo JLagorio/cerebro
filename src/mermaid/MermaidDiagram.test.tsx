@@ -53,3 +53,37 @@ describe('MermaidDiagram', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 });
+
+/**
+ * The doc-canvas view injects mermaid's svg straight into the page, and a
+ * hand-written `click A "notes/x.md"` line makes that svg carry a real anchor
+ * even at securityLevel 'strict' (measured in svgLinks.mermaid.test.ts).
+ * Following it inside the Tauri webview takes the whole app off the SPA.
+ */
+describe('MermaidDiagram cannot navigate the app away (M29.38)', () => {
+  const linked = (gen: string, target: string): string =>
+    `<svg data-gen="${gen}"><g class="nodes">` +
+    `<a href="${target}" data-look="classic"><g class="node clickable"/></a>` +
+    `<a xlink:href="${target}"><g class="node clickable"/></a></g></svg>`;
+
+  const liveTargets = (root: ParentNode): string[] =>
+    [...root.querySelectorAll('a')].flatMap((a) =>
+      [...a.attributes].filter((at) => at.localName === 'href').map((at) => at.value),
+    );
+
+  it('strips every link target — on the first render AND on the next one', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: linked('1', 'notes/a.md') });
+    const { rerender } = render(<MermaidDiagram code={'graph TD\n  A --> B'} />);
+    const view = await screen.findByTestId('mermaid-diagram');
+    await waitFor(() => expect(view.querySelector('svg')?.getAttribute('data-gen')).toBe('1'));
+    expect(view.querySelectorAll('a')).toHaveLength(2);
+    expect(liveTargets(view)).toEqual([]);
+
+    // A diagram re-renders whenever its code changes, and React writes the
+    // whole subtree again — restoring the anchors a mount-only fix stripped.
+    renderMock.mockResolvedValue({ ok: true, svg: linked('2', 'https://example.com/') });
+    rerender(<MermaidDiagram code={'graph TD\n  A --> C'} />);
+    await waitFor(() => expect(view.querySelector('svg')?.getAttribute('data-gen')).toBe('2'));
+    expect(liveTargets(view)).toEqual([]);
+  });
+});

@@ -113,3 +113,42 @@ describe('FullScreenDiagramEditor', () => {
     expect(screen.getByText('Pipeline')).toBeTruthy();
   });
 });
+
+/**
+ * The read-only face carries `[&_svg]:pointer-events-none`, but that is a
+ * hit-testing property for panning — it stops a MOUSE and nothing else, while
+ * an SVG `<a href>` is keyboard-focusable and activates on Enter. The target
+ * itself has to go (M29.38).
+ */
+describe('FullScreenDiagramEditor read-only face cannot navigate the app away (M29.38)', () => {
+  const linked = (gen: string, target: string): string =>
+    `<svg data-gen="${gen}"><g class="nodes">` +
+    `<a href="${target}"><g class="node clickable"/></a>` +
+    `<a xlink:href="${target}"><g class="node clickable"/></a></g></svg>`;
+
+  const liveTargets = (root: ParentNode): string[] =>
+    [...root.querySelectorAll('a')].flatMap((a) =>
+      [...a.attributes].filter((at) => at.localName === 'href').map((at) => at.value),
+    );
+
+  it('strips every link target, and again when the source changes', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: linked('1', 'notes/a.md') });
+    const { rerender } = render(<FullScreenDiagramEditor code={SEQ} onChangeCode={() => {}} />);
+    const face = await screen.findByTestId('fullscreen-readonly-diagram');
+    await waitFor(() => expect(face.querySelector('svg')?.getAttribute('data-gen')).toBe('1'));
+    expect(face.querySelectorAll('a')).toHaveLength(2);
+    expect(liveTargets(face)).toEqual([]);
+
+    renderMock.mockResolvedValue({ ok: true, svg: linked('2', 'https://example.com/') });
+    rerender(<FullScreenDiagramEditor code={`${SEQ}\n  B->>A: y`} onChangeCode={() => {}} />);
+    await waitFor(() =>
+      expect(
+        screen
+          .getByTestId('fullscreen-readonly-diagram')
+          .querySelector('svg')
+          ?.getAttribute('data-gen'),
+      ).toBe('2'),
+    );
+    expect(liveTargets(screen.getByTestId('fullscreen-readonly-diagram'))).toEqual([]);
+  });
+});

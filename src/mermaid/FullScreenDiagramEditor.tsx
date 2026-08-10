@@ -6,6 +6,7 @@ import { DiagramToolbar } from './DiagramToolbar';
 import { StructuralEditor } from './flowchart/StructuralEditor';
 import { parseFlowchart } from './flowchart/model';
 import { renderMermaid } from './render';
+import { useInertDiagramLinks } from './svgLinks';
 import { useThemeEpoch } from './useThemeEpoch';
 
 /**
@@ -95,6 +96,10 @@ export function FullScreenDiagramEditor({
       stale = true;
     };
   }, [code, mode, themeEpoch]);
+  // A rendered diagram must not be able to navigate the app away (M29.38).
+  // The read-only face is only mounted in code mode, so the ref is null the
+  // rest of the time — StructuralEditor strips its own svg during binding.
+  const readOnlyRef = useInertDiagramLinks<HTMLDivElement>(view.svg);
 
   return (
     <div data-testid="fullscreen-diagram-editor" className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -129,6 +134,7 @@ export function FullScreenDiagramEditor({
             />
           ) : (
             <div
+              ref={readOnlyRef}
               data-testid="fullscreen-readonly-diagram"
               // pointer-events-none on the injected svg: CanvasViewport's
               // NO_PAN list exempts g.node/g.edgePaths/g.edgeLabels because the
@@ -136,7 +142,11 @@ export function FullScreenDiagramEditor({
               // face has no node interactions at all, so without this a drag
               // starting on any node — most of the canvas on a dense diagram —
               // would refuse to pan. Purely a hit-testing property: no layout
-              // effect, so initialFit still measures the same box.
+              // effect, so initialFit still measures the same box. It is NOT
+              // what makes a linked node safe, either — pointer-events stops
+              // a mouse and nothing else, and an SVG `<a href>` is keyboard
+              // focusable; `useInertDiagramLinks` above is what removes the
+              // target (M29.38).
               className="p-3 [&_svg]:pointer-events-none [&_svg]:h-auto [&_svg]:max-w-none"
               // Safe: strict-mode mermaid output, the same sanitized sink as
               // MermaidDiagram/MermaidLightbox/LivePreview.

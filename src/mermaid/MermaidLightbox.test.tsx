@@ -62,3 +62,53 @@ describe('MermaidLightbox', () => {
     expect(useUiStore.getState().toasts).toEqual([]);
   });
 });
+
+/**
+ * The lightbox shows the SAME svg the inline view did, anchors and all, and
+ * it is the surface a reader is most likely to click around in.
+ */
+describe('MermaidLightbox cannot navigate the app away (M29.38)', () => {
+  const linked = (gen: string, target: string): string =>
+    `<svg data-gen="${gen}"><g class="nodes">` +
+    `<a href="${target}"><g class="node clickable"/></a>` +
+    `<a xlink:href="${target}"><g class="node clickable"/></a></g></svg>`;
+
+  const liveTargets = (root: ParentNode): string[] =>
+    [...root.querySelectorAll('a')].flatMap((a) =>
+      [...a.attributes].filter((at) => at.localName === 'href').map((at) => at.value),
+    );
+
+  it('strips every link target, and again when a different diagram is shown', () => {
+    const { rerender } = render(
+      <MermaidLightbox open svg={linked('1', 'notes/a.md')} title="D" onClose={() => {}} />,
+    );
+    const canvas = screen.getByTestId('lightbox-canvas');
+    expect(canvas.querySelectorAll('a')).toHaveLength(2);
+    expect(liveTargets(canvas)).toEqual([]);
+
+    rerender(
+      <MermaidLightbox
+        open
+        svg={linked('2', 'https://example.com/')}
+        title="D"
+        onClose={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId('lightbox-canvas').querySelector('svg')?.getAttribute('data-gen'),
+    ).toBe('2');
+    expect(liveTargets(screen.getByTestId('lightbox-canvas'))).toEqual([]);
+  });
+
+  it('and on a REOPEN, which rebuilds the canvas without remounting this component', () => {
+    const svg = linked('1', 'notes/a.md');
+    const { rerender } = render(
+      <MermaidLightbox open={false} svg={svg} title="D" onClose={() => {}} />,
+    );
+    expect(screen.queryByTestId('lightbox-canvas')).toBeNull();
+    rerender(<MermaidLightbox open svg={svg} title="D" onClose={() => {}} />);
+    const canvas = screen.getByTestId('lightbox-canvas');
+    expect(canvas.querySelectorAll('a')).toHaveLength(2);
+    expect(liveTargets(canvas)).toEqual([]);
+  });
+});

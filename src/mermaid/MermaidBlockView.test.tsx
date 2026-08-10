@@ -137,6 +137,44 @@ describe('MermaidBlockView editing (M29.9)', () => {
     );
   });
 
+  // The code pane's preview is a read-only sink like any other, and it
+  // re-renders on every pause in typing — so the strip has to survive the
+  // rewrite, not just the first paint (M29.38).
+  it('a link in the live preview cannot navigate the app away, before or after a retype', async () => {
+    const linked = (gen: string, target: string): string =>
+      `<svg data-gen="${gen}"><g class="nodes">` +
+      `<a href="${target}"><g class="node clickable"/></a>` +
+      `<a xlink:href="${target}"><g class="node clickable"/></a></g></svg>`;
+    const liveTargets = (root: ParentNode): string[] =>
+      [...root.querySelectorAll('a')].flatMap((a) =>
+        [...a.attributes].filter((at) => at.localName === 'href').map((at) => at.value),
+      );
+
+    renderMock.mockResolvedValue({ ok: true, svg: linked('1', 'notes/a.md') });
+    render(<MermaidBlockView code="" onChangeCode={() => {}} />);
+    await user().click(screen.getByRole('button', { name: 'Blank' }));
+    await user().type(screen.getByLabelText('Mermaid source'), 'graph TD');
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    const preview = await screen.findByTestId('mermaid-live-preview');
+    await waitFor(() => expect(preview.querySelector('svg')?.getAttribute('data-gen')).toBe('1'));
+    expect(preview.querySelectorAll('a')).toHaveLength(2);
+    expect(liveTargets(preview)).toEqual([]);
+
+    renderMock.mockResolvedValue({ ok: true, svg: linked('2', 'https://example.com/') });
+    await user().type(screen.getByLabelText('Mermaid source'), '\n  A --> B');
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('mermaid-live-preview').querySelector('svg')?.getAttribute('data-gen'),
+      ).toBe('2'),
+    );
+    expect(liveTargets(screen.getByTestId('mermaid-live-preview'))).toEqual([]);
+  });
+
   it('keeps the last good render and shows a lined error while the draft is broken', async () => {
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     await user().click(screen.getByRole('button', { name: 'Blank' }));
