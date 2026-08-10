@@ -64,6 +64,16 @@ pub(crate) fn new_id128() -> String {
     format!("{:032x}", rand::random::<u128>())
 }
 
+/// A durable run id for the runtime DB (M25.2).
+///
+/// The same 128-bit shape as every other derived id here, minted rather than
+/// derived because a run has no content to hash. Deliberately NOT the
+/// process-local `u64` that tags stream events: that counter restarts at zero
+/// on every launch, so two sessions would collide on their first run.
+pub fn new_run_id() -> String {
+    new_id128()
+}
+
 /// SHA-256 over the canonical member frame lines in order, each terminated
 /// with a newline — exactly the bytes the segment holds for them. Shared by
 /// the writer (stamping `batch.committed`) and the reducer (verifying it);

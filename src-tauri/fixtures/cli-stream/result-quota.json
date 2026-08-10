@@ -1,0 +1,21 @@
+{
+  "type": "result",
+  "subtype": "error_during_execution",
+  "is_error": true,
+  "duration_ms": 2140,
+  "duration_api_ms": 1902,
+  "num_turns": 1,
+  "result": "API Error: Claude AI usage limit reached. Your limit resets at 3pm.",
+  "session_id": "00000000-0000-4000-8000-000000000002",
+  "total_cost_usd": 0.0031,
+  "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 8213,
+    "output_tokens": 17,
+    "server_tool_use": { "web_search_requests": 0 },
+    "service_tier": "standard"
+  },
+  "permission_denials": [],
+  "uuid": "00000000-0000-4000-8000-0000000000bb"
+}

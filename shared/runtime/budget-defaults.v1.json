@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "artifact_version": 1,
+  "defaults": {
+    "max_daily_runs": 20,
+    "max_daily_tokens": 200000,
+    "max_daily_output_tokens": 40000,
+    "max_ambient_run_tokens": 20000,
+    "max_ambient_run_output_tokens": 4000,
+    "max_consecutive_failures": 3,
+    "max_run_elapsed_seconds": 600,
+    "warning_ppm": 800000
+  }
+}

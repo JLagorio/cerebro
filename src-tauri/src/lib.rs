@@ -408,7 +408,26 @@ fn run_agent(
     // therefore cannot argue with it.
     request.mcp_token = Some(mcp_state.run_token(request.actor.as_deref(), request.scope.clone())?);
     let dir = config_dir(&app)?;
-    agent::stream(app.clone(), state.inner(), Path::new(&vault), request, &dir)
+    // M25.2: attended chat is METERED and never gated. The run is recorded
+    // with its tokens; no reservation, no lease, and no ceiling can refuse it.
+    let scope = runtime::open_vault(Path::new(&vault));
+    let meter = agent::meter::Meter {
+        data_dir: dir.clone(),
+        run_id: ledger::new_run_id(),
+        mode: agent::meter::Mode::Attended,
+        vault_id: scope.as_ref().map(|s| s.vault_id.clone()),
+        store_uuid: scope.as_ref().and_then(|s| s.store_uuid.clone()),
+        started_at: chrono::Utc::now(),
+        elapsed_limit_seconds: None,
+    };
+    agent::stream(
+        app.clone(),
+        state.inner(),
+        Path::new(&vault),
+        request,
+        &dir,
+        Some(meter),
+    )
 }
 
 /// Empty string = the vault has no connectors.json (a real state Settings

@@ -22,3 +22,8 @@ conformance/
 # filename hashes. A formatter that reflowed either would break the anchor
 # that proves both languages loaded the same rules.
 shared/policy/
+
+# The shipped budget ceilings (M25.2) are compiled in and hashed against a
+# committed digest, for the same reason: a reflow would change the bytes and
+# therefore change what tomorrow costs, silently.
+shared/runtime/

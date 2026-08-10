@@ -6,6 +6,9 @@
 //! renders. Nothing about the conversation leaves the machine except through
 //! the CLI the user already installed and signed into.
 
+pub mod meter;
+pub mod usage;
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -699,6 +702,7 @@ pub fn stream(
     vault: &Path,
     req: AgentRequest,
     config_dir: &Path,
+    meter: Option<meter::Meter>,
 ) -> Result<u64, String> {
     let binary = find_binary().ok_or(
         "Claude Code was not found on this machine. Install it from https://claude.com/claude-code, then reopen cerebro.",
@@ -755,12 +759,26 @@ pub fn stream(
     let stderr = child.stderr.take();
     state.insert(child, run);
 
+    // M25.2: the elapsed watchdog. `live` goes false the moment the reader
+    // sees EOF, so a run that finishes in nine seconds does not leave a
+    // thread parked for the remaining ten minutes.
+    let live = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let aborted = match &meter {
+        Some(meter) => meter::arm_watchdog(meter, state, run, live.clone()),
+        None => std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
     let run_config = config_path.clone();
     // The reader owns the child's afterlife: it reaps the map entry at EOF,
     // in the same breath as the terminal Done (M17.3).
     let reaper = state.clone();
     std::thread::spawn(move || {
         let mut session_id: Option<String> = None;
+        // M25.2: what this run cost, accumulated as the stream is read. It
+        // never reaches `translate` or the event channel — the panel has no
+        // business knowing about tokens, and a number the renderer can see is
+        // a number that ends up somewhere portable.
+        let mut tally = meter::Tally::default();
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if line.trim().is_empty() {
                 continue;
@@ -771,10 +789,12 @@ pub fn stream(
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
+            tally.observe(&value);
             for event in translate(&value, &mut session_id) {
                 let _ = app.emit(AGENT_EVENT, TaggedEvent { run, event });
             }
         }
+        live.store(false, std::sync::atomic::Ordering::Relaxed);
 
         // stderr is only worth surfacing when the stream produced nothing —
         // the CLI writes warnings there on perfectly good runs.
@@ -802,6 +822,18 @@ pub fn stream(
         // residency with the run — the sweep at the next spawn is only the
         // backstop for a crash between here and there.
         let _ = std::fs::remove_file(&run_config);
+        // Close the books BEFORE the slot is freed and before `Done`: a
+        // listener that reacts to `Done` by asking for the next dispatch must
+        // see this run's tokens already debited, or the budget it is gated on
+        // is one run out of date.
+        if let Some(meter) = &meter {
+            meter::finish(
+                meter,
+                &tally,
+                aborted.load(std::sync::atomic::Ordering::Relaxed),
+                chrono::Utc::now(),
+            );
+        }
         // Reap BEFORE the terminal Done, so anything that reacts to Done by
         // starting the next run already sees the slot free.
         reaper.finish(run);

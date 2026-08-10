@@ -1,0 +1,14 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "result": "Done.",
+  "session_id": "00000000-0000-4000-8000-000000000003",
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 20,
+    "zeta_tokens": 999,
+    "quantum_tokens": { "entangled": 3 }
+  },
+  "future_top_level_field": "the CLI is somebody else's program"
+}

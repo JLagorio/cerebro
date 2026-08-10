@@ -42,3 +42,11 @@ unicode-normalization = "0.1"
 # Ordered maps for schema-v1 TypedValue objects (M22.1). Already in-tree as
 # serde_json's preserve_order backend; used directly for typed recursion.
 indexmap = { version = "2", features = ["serde"] }
+# The local-day budget window (M25.2). A "day" is the half-open interval
+# between consecutive LOCAL midnights converted to UTC, which needs the IANA
+# database to stay honest across DST (23- and 25-hour days are real) and to
+# honour a timezone the owner set that is not this machine's.
+# `iana-time-zone` reads the system zone ID once, at the first settings
+# version; `chrono-tz` resolves that ID's transitions.
+chrono-tz = "0.10"
+iana-time-zone = "0.1"

@@ -35,6 +35,8 @@
 //! ([`status`]), and never half-creates tables. A process killed mid-step
 //! leaves the previous complete version, which the next open finishes.
 
+pub mod budget;
+pub mod dispatch;
 pub mod import;
 pub mod normalize;
 pub mod operational;
@@ -339,6 +341,31 @@ fn step(conn: &Connection, migration: &Migration) -> Result<(), String> {
             ))
         }
     }
+}
+
+/// Connect to an EXISTING, current runtime database without migrating it.
+///
+/// [`open`] is the app's front door: it integrity-checks, migrates, and marks
+/// the file open. That is right once at startup and wrong on a hot path — a
+/// `quick_check` scales with the file, and a reader thread closing out a run
+/// should not be able to trigger a schema migration as a side effect. This
+/// refuses anything that is not already at the current version, so a caller
+/// that skipped the front door finds out rather than writing into a schema it
+/// does not understand.
+pub fn open_existing(data_dir: &Path) -> Result<Connection, String> {
+    let path = runtime_db_path(data_dir);
+    if !path.exists() {
+        return Err(format!("{}: no runtime database", path.display()));
+    }
+    let conn = connect(&path)?;
+    let version = user_version(&conn)?;
+    if version != USER_VERSION {
+        return Err(format!(
+            "{}: runtime db is at user_version {version}, this build speaks {USER_VERSION}",
+            path.display()
+        ));
+    }
+    Ok(conn)
 }
 
 /// Remove the open marker — a clean close. Anything else leaves it behind and
