@@ -22,3 +22,4 @@
 
 pub mod independence;
 pub mod prefilter;
+pub mod resolver;
