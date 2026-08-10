@@ -1,4 +1,5 @@
 import { Icon } from '@/components/ui/Icon';
+import { isVaultPath, isWebUrl } from './linkTargets';
 
 export interface LinkBadge {
   /** The node id this badge belongs to. */
@@ -11,9 +12,6 @@ export interface LinkBadge {
   y: number;
 }
 
-/** A target the badge hands to `window.open`; everything else is a vault path. */
-const URL_RE = /^https?:\/\//;
-
 /**
  * The hit target for a node's link (M29.38).
  *
@@ -25,9 +23,23 @@ const URL_RE = /^https?:\/\//;
  * CanvasViewport zoom instead of drifting off its node).
  *
  * Only `http(s)` ever reaches `window.open`, and never with an opener to
- * hijack. Everything else is a vault path handed to the host's own router —
- * or, where the host gave none, nothing at all: degradation, never a crash.
+ * hijack. A scheme-less target is a vault path handed to the host's own router
+ * — or, where the host gave none, nothing at all: degradation, never a crash.
+ * A target that is NEITHER (`mailto:`, `tel:`, `file:` — hand-written only,
+ * since the popover offers no such thing) disables the badge and says why,
+ * rather than asking the router to open a doc called `mailto:x@y.com`.
  */
+/** What the badge says about itself — a refusal names itself, as everywhere else here. */
+function badgeTitle(b: LinkBadge): string {
+  if (!isWebUrl(b.target) && !isVaultPath(b.target)) {
+    return `${b.target} — not a web address or a vault path, so the editor cannot open it`;
+  }
+  if (b.contested) {
+    return `${b.target} — another click line also links this node, so the diagram may open something else`;
+  }
+  return b.target;
+}
+
 export function LinkBadges({
   badges,
   onOpenPath,
@@ -43,18 +55,15 @@ export function LinkBadges({
           type="button"
           data-testid="mermaid-link-badge"
           aria-label={`Open link on ${b.id}`}
-          title={
-            b.contested
-              ? `${b.target} — another click line also links this node, so the diagram may open something else`
-              : b.target
-          }
-          className="absolute z-10 flex h-4 w-4 items-center justify-center rounded-full border border-n-200 bg-n-0 shadow-sm hover:bg-n-50"
+          disabled={!isWebUrl(b.target) && !isVaultPath(b.target)}
+          title={badgeTitle(b)}
+          className="absolute z-10 flex h-4 w-4 items-center justify-center rounded-full border border-n-200 bg-n-0 shadow-sm hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40"
           style={{ left: b.x, top: b.y }}
           onClick={(e) => {
             e.stopPropagation();
-            if (URL_RE.test(b.target)) {
+            if (isWebUrl(b.target)) {
               window.open(b.target, '_blank', 'noopener,noreferrer');
-            } else {
+            } else if (isVaultPath(b.target)) {
               onOpenPath?.(b.target);
             }
           }}

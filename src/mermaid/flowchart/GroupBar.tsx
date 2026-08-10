@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { FlowchartModel } from './model';
 import { canCreateSubgraph, createSubgraph, SUBGRAPH_REFUSAL_TEXT } from './ops';
 
@@ -38,7 +39,10 @@ export function GroupBar({
   // the button asks. Anything else and an empty box would read as a blank-title
   // refusal for a group that would have landed fine.
   const effective = title.trim() === '' ? DEFAULT_TITLE : title.trim();
-  const refusal = canCreateSubgraph(model, ids, effective);
+  // Walks every line, and this bar re-renders with its parent — which the
+  // canvas re-renders on selection changes and, before the ref-context fix,
+  // once per pan frame. Memoized on what the answer actually depends on.
+  const refusal = useMemo(() => canCreateSubgraph(model, ids, effective), [model, ids, effective]);
 
   const group = (): void => {
     if (refusal !== null) return;

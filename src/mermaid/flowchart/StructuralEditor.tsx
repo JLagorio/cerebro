@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/Icon';
 import type { Entry } from '@/engine/types';
 import { useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
+import { neutralizeDiagramLinks } from '../svgLinks';
 import { EdgeEditor } from './EdgeEditor';
 import { GroupBar } from './GroupBar';
 import { IconPicker } from './IconPicker';
@@ -179,6 +180,12 @@ export function StructuralEditor({
     setSubTitle('');
     setMulti([]);
     setGroupTitle('');
+    // Badges are read off the OLD model and pinned to the OLD picture. Holding
+    // them until the async re-render lands leaves a badge that can fire
+    // onOpenPath with the target of a node this edit deleted — so they go with
+    // the rest of the selection state and come back when the bind effect has
+    // fresh geometry to place them by.
+    setBadges([]);
   }, [code]);
 
   // Render, inject, and bind in one pass. The svg is written imperatively —
@@ -199,6 +206,14 @@ export function StructuralEditor({
       if (!r.ok) return; // the block view surfaces errors; here we hold the last svg
       // Safe: mermaid runs at securityLevel 'strict' and sanitizes its output.
       hostRef.current.innerHTML = r.svg;
+      // Before the model check, not after: `bindFlowchartSvg` strips mermaid's
+      // own anchors, but the unparseable-header branch below returns without
+      // ever binding — and that svg carries exactly the same live `href` a
+      // click follows straight out of the SPA. Unreachable through today's two
+      // hosts, which both gate on parseFlowchart(code) !== null, but it is a
+      // hole the moment one mounts this editor ungated. Idempotent: the second
+      // pass inside the binding finds nothing left to remove.
+      neutralizeDiagramLinks(hostRef.current);
       if (model === null) return;
       const binding = bindFlowchartSvg(hostRef.current, model);
       bindingRef.current = binding;
@@ -269,17 +284,18 @@ export function StructuralEditor({
         });
       }
 
-      // Clusters (M29.38). The DOM contract is MEASURED on the bundled 11.16.0
-      // (subgraphs.mermaid.test.ts): node groups are NOT descendants of their
-      // cluster — they sit in a sibling `g.nodes` layer — so a click inside a
-      // block's box lands either on a node or on the cluster's own rect. The
-      // target is asked anyway rather than the tree we hope for: which layout
-      // engine drew this is not something this handler should have to know.
+      // Clusters (M29.38). A click on a node inside a block cannot reach this
+      // handler, for two independent reasons, and neither needs a target check:
+      // MEASURED on the bundled 11.16.0 (subgraphs.mermaid.test.ts) node groups
+      // are NOT descendants of their cluster — they sit in a sibling `g.nodes`
+      // layer — and even where a layout engine did nest them, the node handler
+      // above calls stopPropagation() before an ancestor ever hears the event.
+      // A `closest('g.node')` guard stood here and could not fail; it is gone
+      // rather than left as code that reads like it is protecting something.
       const blocks = subgraphs(model);
       for (const [sgId, el] of binding.clusterEls) {
         el.style.cursor = 'pointer';
         el.onclick = (e) => {
-          if (((e.target as Element | null)?.closest('g.node') ?? null) !== null) return;
           e.stopPropagation();
           const idx = blocks.findIndex((s) => s.id === sgId);
           if (idx === -1) return;

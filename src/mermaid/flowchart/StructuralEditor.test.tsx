@@ -8,8 +8,8 @@ import { StructuralEditor } from './StructuralEditor';
 // module's own top-level consts would otherwise initialize — so the fixture
 // has to be declared through vi.hoisted() to exist by the time the factory
 // (which eagerly evaluates mockResolvedValue's argument) runs.
-const { FIXTURE_SVG, ANIMATED_SVG, CLUSTERED_SVG, NESTED_SVG, SLASH_SVG, override } = vi.hoisted(
-  () => {
+const { FIXTURE_SVG, ANIMATED_SVG, CLUSTERED_SVG, NESTED_SVG, SLASH_SVG, BARE_SVG, override } =
+  vi.hoisted(() => {
     const nodeEls = [
       '<g class="node" id="flowchart-A-0"><rect width="10" height="10"/></g>',
       '<g class="node" id="flowchart-B-1"><rect width="10" height="10"/></g>',
@@ -31,11 +31,13 @@ const { FIXTURE_SVG, ANIMATED_SVG, CLUSTERED_SVG, NESTED_SVG, SLASH_SVG, overrid
       CLUSTERED_SVG: `<svg viewBox="0 0 300 150">${cluster('ops')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
       NESTED_SVG: `<svg viewBox="0 0 300 150">${cluster('outer')}${cluster('inner')}${nodeEls}</svg>`,
       SLASH_SVG: `<svg viewBox="0 0 300 150">${cluster('a/b')}${nodeEls}</svg>`,
+      // A BARE opener's effective id is its own title text — so the cluster's
+      // DOM id is `Operations`, not a generated ordinal.
+      BARE_SVG: `<svg viewBox="0 0 300 150">${cluster('Operations')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
       /** Which svg the mocked renderer hands back next, when a test pins one. */
       override: { svg: null as string | null },
     };
-  },
-);
+  });
 
 vi.mock('../render', () => ({
   renderMermaid: vi.fn((code: string) =>
@@ -684,14 +686,28 @@ describe('subgraph affordances (M29.38)', () => {
     expect(onChangeCode.mock.lastCall?.[0]).toContain('subgraph ops[Delivery]');
   });
 
+  // The fixture is a BARE opener on purpose. `renameSubgraph` re-emits it as
+  // the QUOTED `subgraph "Operations"`, so apply's byte guard does NOT catch
+  // this one — an explicit `subgraph ops[Operations]` re-emits identically and
+  // would let the test pass with the component's own guard deleted.
   it('Enter on an unchanged subgraph title is a no-op — no history churn', async () => {
-    mockSvg(CLUSTERED_SVG);
+    mockSvg(BARE_SVG);
     const onChangeCode = vi.fn();
-    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
-    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
-    await userEvent.click(document.getElementById('ops')!);
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  subgraph Operations\n    A[Start] --> B[End]\n  end'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('Operations')).not.toBeNull());
+    await userEvent.click(document.getElementById('Operations')!);
+    expect((screen.getByLabelText('Subgraph title') as HTMLInputElement).value).toBe('Operations');
     await userEvent.type(screen.getByLabelText('Subgraph title'), '{Enter}');
     expect(onChangeCode).not.toHaveBeenCalled();
+    // …and a real retitle of the same bare block still writes.
+    await userEvent.clear(screen.getByLabelText('Subgraph title'));
+    await userEvent.type(screen.getByLabelText('Subgraph title'), 'Delivery{Enter}');
+    expect(onChangeCode.mock.lastCall?.[0]).toContain('subgraph Operations[Delivery]');
   });
 
   it('the direction the block already has costs no undo step', async () => {
@@ -700,7 +716,10 @@ describe('subgraph affordances (M29.38)', () => {
     const code = [
       'flowchart TD',
       '  subgraph ops[Operations]',
-      '    direction LR',
+      // Deliberately NOT canonical: `setSubgraphDirection` would normalize the
+      // spacing, so apply's byte guard cannot catch this one and the
+      // component's own no-op guard is what makes the click free.
+      '    direction   LR',
       '    A[Start] --> B[End]',
       '  end',
     ].join('\n');
@@ -857,11 +876,81 @@ describe('subgraph affordances (M29.38)', () => {
       screen.getByRole('button', { name }).focus();
       await userEvent.keyboard('{Backspace}{Delete}');
     }
+    expect(outerKeyDown).not.toHaveBeenCalled();
+  });
+
+  // The BUTTON, not the title box: the input carries its own stopPropagation,
+  // so focusing it proves nothing about the container guard around it — and a
+  // selection that REFUSES leaves the button disabled, which dispatches no
+  // keystrokes at all. Both mistakes made this test unable to fail.
+  it('keys pressed on the group bar itself never reach the canvas', async () => {
+    const outerKeyDown = vi.fn();
+    render(
+      <div onKeyDown={outerKeyDown}>
+        <StructuralEditor
+          code={'flowchart TD\n  A[One]\n  B[Two]\n  C[Three]'}
+          onChangeCode={() => {}}
+        />
+      </div>,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
     fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true });
-    fireEvent.click(document.getElementById('flowchart-C-2')!, { shiftKey: true });
-    screen.getByLabelText('New subgraph title').focus();
+    fireEvent.click(document.getElementById('flowchart-B-1')!, { shiftKey: true });
+    const group = screen.getByRole('button', { name: 'Group into subgraph' });
+    expect(group.hasAttribute('disabled')).toBe(false);
+    group.focus();
     await userEvent.keyboard('{Backspace}{Delete}');
     expect(outerKeyDown).not.toHaveBeenCalled();
+  });
+
+  // The defect Popover.tsx documents verbatim: "a name typed into a popover's
+  // rename box was silently discarded by the very click the user made to accept
+  // it". Enter was the only commit, and both ways out of this toolbar threw the
+  // typed title away.
+  it('a typed subgraph title survives the background click that closes the toolbar', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    const title = screen.getByLabelText('Subgraph title');
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Delivery');
+    await userEvent.click(screen.getByTestId('structural-host'));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    expect(onChangeCode.mock.calls[0][0]).toContain('subgraph ops[Delivery]');
+  });
+
+  // A press on a SIBLING control is not leaving the toolbar, so the pending
+  // title is folded into that control's own op — one onChangeCode, one undo
+  // step, and neither the title nor the click is lost.
+  it('a direction click carries the pending title instead of discarding it', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    const title = screen.getByLabelText('Subgraph title');
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Delivery');
+    await userEvent.click(screen.getByRole('button', { name: 'Subgraph direction LR' }));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    const out = onChangeCode.mock.calls[0][0] as string;
+    expect(out).toContain('subgraph ops[Delivery]');
+    expect(out).toContain('direction LR');
+  });
+
+  it('Escape discards the typed title — a cancel stays a cancel', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    const title = screen.getByLabelText('Subgraph title');
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Delivery{Escape}');
+    expect(screen.queryByTestId('mermaid-subgraph-toolbar')).toBeNull();
+    expect(onChangeCode).not.toHaveBeenCalled();
   });
 });
 
@@ -970,6 +1059,56 @@ describe('link affordances (M29.38)', () => {
     await userEvent.click(document.getElementById('flowchart-A-0')!);
     expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
     expect(screen.getByTestId('mermaid-link-badge')).toBeTruthy();
+  });
+
+  // The badge's classifier and the popover's are now the same predicate
+  // (./linkTargets). A hand-written scheme the editor cannot route is neither a
+  // web address nor a vault path, and routing it as a path asked the app to
+  // open a doc called `mailto:…`.
+  it('a target that is neither a URL nor a vault path disables the badge, and says why', async () => {
+    const onOpenPath = vi.fn();
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start]\n  click A "mailto:x@y.com"'}
+        onChangeCode={() => {}}
+        onOpenPath={onOpenPath}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('mermaid-link-badge')).not.toBeNull());
+    const badge = screen.getByTestId('mermaid-link-badge');
+    expect(badge.hasAttribute('disabled')).toBe(true);
+    expect(badge.getAttribute('title')).toContain('cannot open it');
+    await userEvent.click(badge);
+    expect(onOpenPath).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    openSpy.mockRestore();
+  });
+
+  // Badges are read off the OLD model and pinned to the OLD picture, and the
+  // re-render that replaces them is async — so a badge held across a code
+  // change can fire onOpenPath with a deleted node's target.
+  it('a code change clears the badges rather than leaving a stale one clickable', async () => {
+    const code = 'flowchart TD\n  A[Start] --> B[End]\n  click A "notes/a.md"';
+    const { rerender } = render(<StructuralEditor code={code} onChangeCode={() => {}} />);
+    await waitFor(() => expect(screen.queryByTestId('mermaid-link-badge')).not.toBeNull());
+    // An external edit (undo, code mode, another surface) deletes A outright.
+    rerender(<StructuralEditor code={'flowchart TD\n  B[End]'} onChangeCode={() => {}} />);
+    expect(screen.queryByTestId('mermaid-link-badge')).toBeNull();
+  });
+
+  // The unparseable-header branch returns BEFORE bindFlowchartSvg, so the strip
+  // that lives in the binding never ran on it. Unreachable through today's two
+  // hosts — both gate on parseFlowchart(code) !== null — but a hole the moment
+  // one mounts this editor ungated.
+  it('a diagram the editor cannot model is injected with its anchors already dead', async () => {
+    const linked = `<svg viewBox="0 0 200 100"><g class="root"><a xlink:href="notes/a.md"><g class="node"><rect width="10" height="10"/></g></a><a href="https://example.com/"><rect/></a></g></svg>`;
+    mockSvg(linked);
+    render(<StructuralEditor code={'sequenceDiagram\n  A->>B: hi'} onChangeCode={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('structural-host').innerHTML).not.toBe(''));
+    // The editor is in its render-only fallback — no model, no binding pass.
+    expect(screen.getByText(/syntax the visual editor does not own/)).toBeTruthy();
+    expect(document.querySelectorAll('a[href], a[*|href]')).toHaveLength(0);
   });
 
   // A node linked ONLY by a click form the editor does not own has NO nodeLinks

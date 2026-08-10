@@ -3,9 +3,8 @@ import { Icon } from '@/components/ui/Icon';
 import { Popover } from '@/components/ui/Popover';
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
+import { isWebUrl } from './linkTargets';
 
-/** A target the badge may hand to `window.open`. Everything else is a vault path. */
-const URL_RE = /^https?:\/\/\S+$/;
 const MAX_RESULTS = 8;
 
 /**
@@ -49,7 +48,9 @@ export function LinkPopover({
 }) {
   const [query, setQuery] = useState('');
   const q = query.trim();
-  const isUrl = URL_RE.test(q);
+  // The same predicate the badge classifies stored targets with, so this can
+  // never offer a target the badge would then refuse to open (./linkTargets).
+  const isUrl = isWebUrl(q);
 
   const matches = useMemo(() => {
     if (entries === undefined || q === '' || isUrl) return [];

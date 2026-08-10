@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { type Direction, type FlowchartModel, subgraphs } from './model';
 import {
@@ -47,28 +48,52 @@ export function SubgraphToolbar({
   apply: (next: FlowchartModel | null) => void;
   onClose: () => void;
 }) {
-  const entry = subgraphs(model)[index];
+  // Three of the four reads below walk every line and none of them depends on
+  // the title, so they are memoized past the keystrokes in the box — the same
+  // per-render-cost argument this file's canvas already carries about the
+  // selection-sync effect. `renameRefusal` genuinely changes per keystroke and
+  // is left alone.
+  const entry = useMemo(() => subgraphs(model)[index], [model, index]);
+  const dissolveRefusal = useMemo(() => canDissolveSubgraph(model, index), [model, index]);
+  const directionRefusal = useMemo(() => canSetSubgraphDirection(model, index), [model, index]);
   const renameRefusal = canRenameSubgraph(model, index, title);
-  const dissolveRefusal = canDissolveSubgraph(model, index);
-  const directionRefusal = canSetSubgraphDirection(model, index);
   // A retitle that would land on the title already there is not a refusal, but
-  // it IS a no-op — and `renameSubgraph` re-emits the opener, which reformats a
-  // hand-written bare block into the explicit form for a click that moved
-  // nothing. apply's byte guard only catches it when the line was already
-  // canonical, so the guard belongs here too.
+  // it IS a no-op — and `renameSubgraph` re-emits the opener, which REWRITES a
+  // hand-written bare `subgraph Operations` into the quoted
+  // `subgraph "Operations"` for a click that moved nothing. apply's byte guard
+  // only catches this when the line was already canonical, so the guard belongs
+  // here too.
   const renameIsNoop = entry !== undefined && title === entry.title;
 
+  /**
+   * The model with any pending retitle already folded in.
+   *
+   * Every action on this toolbar starts from HERE, so a title typed and not yet
+   * committed is carried BY the click that leaves the box rather than discarded
+   * by it — and in one op, one onChangeCode, one undo step. Without it the
+   * title box was the defect `Popover` documents verbatim: "a name typed into a
+   * popover's rename box was silently discarded by the very click the user made
+   * to accept it". Every direction click, and the background click that closes
+   * the toolbar, threw the typed title away.
+   */
+  const withPendingRename = (): FlowchartModel =>
+    renameRefusal !== null || renameIsNoop ? model : renameSubgraph(model, index, title);
+
   const commitRename = (): void => {
-    if (renameRefusal !== null || renameIsNoop) return;
-    apply(renameSubgraph(model, index, title));
+    // apply's byte guard makes the nothing-pending case a true no-op.
+    apply(withPendingRename());
   };
 
   const setDirection = (dir: Direction | null): void => {
     if (directionRefusal !== null || entry === undefined) return;
     // Same no-op rule: the direction on screen is already this one, and
-    // rewriting the line would cost an undo step for nothing.
-    if (entry.direction === dir) return;
-    apply(setSubgraphDirection(model, index, dir));
+    // rewriting the line would cost an undo step for nothing — a foreign or
+    // non-canonical site (`direction   LR`) would be normalized for free.
+    if (entry.direction === dir) {
+      commitRename();
+      return;
+    }
+    apply(setSubgraphDirection(withPendingRename(), index, dir));
   };
 
   return (
@@ -81,6 +106,17 @@ export function SubgraphToolbar({
       // onKeyDown and delete the SELECTED NODE — the leak M29.33 measured on
       // the edge editor, which this surface would have reintroduced.
       onKeyDown={(e) => e.stopPropagation()}
+      // Focus LEAVING the whole toolbar commits the pending title. On the
+      // container rather than the input, and gated on relatedTarget, because a
+      // press on a sibling control is not leaving: those fold the pending
+      // rename into their own op instead, so a direction click applies both
+      // edits rather than committing the title and losing the click that
+      // triggered it. Escape unmounts without a focusout, which is how a
+      // cancel stays a cancel.
+      onBlur={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget)) return;
+        commitRename();
+      }}
     >
       <div className="flex items-center gap-1">
         <input
@@ -145,6 +181,9 @@ export function SubgraphToolbar({
           }
           onClick={() => {
             if (dissolveRefusal !== null) return;
+            // The one action that does NOT carry a pending rename: the block is
+            // about to stop existing, and naming it on the way out would be
+            // dead bytes in the same commit that deletes them.
             apply(dissolveSubgraph(model, index));
             onClose();
           }}
