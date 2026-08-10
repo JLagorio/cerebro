@@ -10,7 +10,15 @@ import {
   type EdgeHead,
   type EdgeStroke,
 } from './model';
-import { canAnimateEdge, setEdgeAnimate, setEdgeArrow, setNodeStyle } from './ops';
+import {
+  canAnimateEdge,
+  renameNode,
+  setEdgeAnimate,
+  setEdgeArrow,
+  setEdgeLabel,
+  setNodeIcon,
+  setNodeStyle,
+} from './ops';
 import { STYLE_SWATCHES } from './NodeStyleMenu';
 
 /**
@@ -419,6 +427,59 @@ describe('edge control conformance (M29.33)', () => {
         }
       }
       expect(bad).toEqual([]);
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * The shared emitter boundary (M29.35 review). Every control that writes
+ * user-typed text — rename, edge label, icon — funnels through `quoteLabel` /
+ * `quoteEdgeLabel` / `emitMetaValue`, and each of those quotes what mermaid
+ * cannot take bare. A LINE BREAK is the one input quoting cannot rescue, and
+ * the damage is asymmetric enough that only a measurement settles it: through
+ * a meta value mermaid REFUSES the document outright, while through brackets
+ * it accepts one that costs our own model an edge. Proven here rather than
+ * reasoned about, and over every writer at once, because the boundary is
+ * shared and the next stages pour URLs, vault paths and record titles through
+ * exactly these functions.
+ */
+describe('shared emitter boundaries (M29.35)', () => {
+  it(
+    'a line break in any user string is flattened before it reaches the file',
+    async () => {
+      init();
+      const typed = 'first\nsecond';
+      const emitted: string[] = [];
+
+      // Meta `label:` — the path that used to emit a document mermaid throws on.
+      emitted.push(
+        serialize(renameNode(parseFlowchart('flowchart TD\n  A@{ label: hi }')!, 'A', typed)),
+      );
+      // Brackets — the path mermaid accepted while our own parser lost the edge.
+      emitted.push(
+        serialize(renameNode(parseFlowchart('flowchart TD\n  A[Start] --> B')!, 'A', typed)),
+      );
+      // Icon value.
+      emitted.push(
+        serialize(setNodeIcon(parseFlowchart('flowchart TD\n  A --> B')!, 'A', `lucide:${typed}`)),
+      );
+      // Edge label.
+      const em = parseFlowchart('flowchart TD\n  A --> B')!;
+      emitted.push(serialize(setEdgeLabel(em, edges(em)[0], typed)));
+
+      for (const out of emitted) {
+        expect(await parseError(out), out).toBeNull();
+        // No line was split: our parser reads back every line as one it owns,
+        // and nothing went opaque behind our backs.
+        const again = parseFlowchart(out);
+        expect(again, out).not.toBeNull();
+        expect(serialize(again!), out).toBe(out);
+        expect(out.includes('\n' + 'second'), out).toBe(false);
+      }
+
+      // …and the diagram still holds the same nodes it started with.
+      expect([...(await vertexIds(emitted[1]))].sort()).toEqual(['A', 'B']);
     },
     TIMEOUT,
   );

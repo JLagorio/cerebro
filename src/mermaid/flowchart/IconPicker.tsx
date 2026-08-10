@@ -141,8 +141,10 @@ export function IconPicker({
             // Activity because someone pressed Enter on an unfiltered grid is
             // an edit nobody asked for (ShapePalette's rule, same reason).
             if (e.key !== 'Enter' || q === '') return;
+            // `matches[0]` is typed `string` without noUncheckedIndexedAccess,
+            // so ONE null check does the whole job — ShapePalette's shape.
             const first = matches[0] ?? freeText;
-            if (first !== undefined && first !== null) onPick(`lucide:${first}`);
+            if (first !== null) onPick(`lucide:${first}`);
           }}
           className="w-full flex-none rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
         />

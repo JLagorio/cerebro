@@ -658,6 +658,34 @@ export function parseFlowchart(code: string): FlowchartModel | null {
 }
 
 /**
+ * The one character no quoting can rescue, at every emitter at once.
+ *
+ * A line break breaks the LINE-ORIENTED MODEL itself, before mermaid ever sees
+ * it: `parseFlowchart` splits on `\n`, so a newline emitted inside a line
+ * silently turns one `ModelLine` into two and every line index the ops layer
+ * holds goes stale. MEASURED on 11.16.0, both halves of the damage are real
+ * and they are different:
+ *
+ * - through a meta value, `A@{ label: a<LF>b }` is a PARSE ERROR — "end of the
+ *   stream or a document separator is expected (2:1)" — which kills the whole
+ *   diagram, not just the line;
+ * - through brackets, `A[a<LF>b] --> B` is a document mermaid accepts happily,
+ *   while OUR parser reads two opaque lines and the edge disappears from
+ *   `edges()`.
+ *
+ * So it is substituted at the last boundary before the file, exactly as
+ * `setEdgeLabel` substitutes `|` and every emitter below substitutes `"`.
+ * Substituting is lossless where quoting cannot be; dropping the text silently
+ * would not be. CRLF collapses to a single space, not two.
+ *
+ * `style` values need no such call: `STYLE_VALUE_SAFE` already excludes every
+ * line terminator, and `styleDecl` refuses anything it would not read back.
+ */
+function flattenForLine(text: string): string {
+  return text.replace(/\r\n|[\r\n]/g, ' ');
+}
+
+/**
  * Bracket labels: quote whatever mermaid's `text` lexer state cannot take
  * bare. Measured char by char against 11.16.0 — `"()@[]{|}` are parse errors
  * unquoted and every one of them but `"` itself is fine inside quotes, so
@@ -666,7 +694,8 @@ export function parseFlowchart(code: string): FlowchartModel | null {
  * `@` was the gap: `A[a@b]` kills the whole diagram, which made a rename to
  * any label carrying an `@` (an email, a handle) a render-stopper.
  */
-function quoteLabel(label: string): string {
+function quoteLabel(rawLabel: string): string {
+  const label = flattenForLine(rawLabel);
   return /[|()[\]{}&"@]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
 }
 
@@ -682,7 +711,8 @@ function quoteLabel(label: string): string {
  * `setEdgeLabel` substitutes `|` → `/` before this ever runs — the Stage-C
  * scar, kept on purpose. Everything else is preserved, never dropped.
  */
-function quoteEdgeLabel(label: string): string {
+function quoteEdgeLabel(rawLabel: string): string {
+  const label = flattenForLine(rawLabel);
   return /[()[\]{}"@]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
 }
 
@@ -697,16 +727,19 @@ function emitEdgeLabel(label: string | null): string {
  * per `flow.jison:57`, fine quoted per `flow.jison:52`), a comment-opening
  * ` #`, a leading YAML sigil, or edge whitespace/emptiness.
  *
- * Only `"` is substituted (→ `'`), because it is the quote character itself
- * and has no escape inside `[^\"]+` — the same last-boundary discipline as
- * setEdgeLabel's pipe. Everything else is PRESERVED by quoting rather than
- * dropped: quoting is lossless, dropping silently loses what the user typed.
+ * Two characters are substituted rather than quoted, because quoting cannot
+ * save either: `"` is the quote character itself and has no escape inside
+ * `[^\"]+`, and a line break would end the LINE (see `flattenForLine` above —
+ * a newline here is a parse error that kills the diagram, which is why the
+ * claim below is only true once it has been flattened). Everything else is
+ * PRESERVED by quoting rather than dropped: quoting is lossless, dropping
+ * silently loses what the user typed.
  *
  * Every branch here emits something `parseMetaBody` can read back, so an edit
  * never costs a line its structural editability.
  */
 function emitMetaValue(value: string): string {
-  const cleaned = value.replaceAll('"', "'");
+  const cleaned = flattenForLine(value).replaceAll('"', "'");
   return /[,:{}^]|\s#|^[#'&*!]|^\s|\s$|^$/.test(cleaned) ? `"${cleaned}"` : cleaned;
 }
 

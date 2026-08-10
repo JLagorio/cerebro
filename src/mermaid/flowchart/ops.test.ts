@@ -854,6 +854,46 @@ describe('setNodeIcon', () => {
     expect(out).not.toContain('icon');
   });
 
+  // REGRESSION (M29.35 review): a `node-meta` line DECLARES its node, unlike
+  // the `style`/`animate` companions this splice rule was borrowed from — so
+  // clearing the icon off mermaid's own documented icon-node form deleted the
+  // node. The exact input below is what a user pastes in from mermaid's docs.
+  it('clearing the icon off a node whose ONLY line is that meta line keeps the node', () => {
+    const src = 'flowchart TD\n  A@{ icon: "lucide:rocket", form: rounded, pos: b }';
+    const out = serialize(setNodeIcon(parseFlowchart(src)!, 'A', null));
+    expect(out).toBe('flowchart TD\n  A');
+    expect([...nodes(parseFlowchart(out)!).keys()]).toEqual(['A']);
+  });
+
+  it('the rescued declaration keeps its indent, inside a subgraph too', () => {
+    const src = 'flowchart TD\n  subgraph S\n    A@{ icon: "lucide:zap" }\n  end';
+    expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null))).toBe(
+      'flowchart TD\n  subgraph S\n    A\n  end',
+    );
+  });
+
+  it('two emptied lines still leave exactly one declaration', () => {
+    const src = 'flowchart TD\n  A@{ icon: "lucide:zap" }\n  A@{ icon: "lucide:star" }';
+    const out = serialize(setNodeIcon(parseFlowchart(src)!, 'A', null));
+    expect(out).toBe('flowchart TD\n  A');
+  });
+
+  it('but a node declared elsewhere gains no redundant line', () => {
+    // The rescue fires only when the node would otherwise be gone — every
+    // other shape of declaration (brackets, a bare edge ref, a surviving meta
+    // line) already keeps it, so the emptied line just goes.
+    for (const [src, want] of [
+      ['flowchart TD\n  A[Start]\n  A@{ icon: "lucide:zap" }', 'flowchart TD\n  A[Start]'],
+      ['flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap" }', 'flowchart TD\n  A --> B'],
+      [
+        'flowchart TD\n  A@{ shape: hex }\n  A@{ icon: "lucide:zap" }',
+        'flowchart TD\n  A@{ shape: hex }',
+      ],
+    ]) {
+      expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null)), src).toBe(want);
+    }
+  });
+
   it('null on a node with no meta line is a no-op', () => {
     const src = 'flowchart TD\n  A[Start] --> B';
     expect(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null))).toBe(src);
@@ -938,10 +978,46 @@ describe('setNodeIcon', () => {
   // when the icon goes — removing more than asked is the surgical rule's whole
   // point.
   it('an image on the same node keeps its form/pos when the icon is cleared', () => {
-    const m = parseFlowchart('flowchart TD\n  A@{ img: "a.png", icon: "lucide:zap", pos: t }')!;
+    const m = parseFlowchart(
+      'flowchart TD\n  A@{ img: "a.png", icon: "lucide:zap", form: circle, pos: t }',
+    )!;
     // (`a.png` needs no quotes, and a dirtied line re-emits every value through
     // emitMetaValue — Stage E's canonical spacing/quoting, unchanged here.)
-    expect(serialize(setNodeIcon(m, 'A', null))).toBe('flowchart TD\n  A@{ img: a.png, pos: t }');
+    expect(serialize(setNodeIcon(m, 'A', null))).toBe(
+      'flowchart TD\n  A@{ img: a.png, form: circle, pos: t }',
+    );
+  });
+
+  // A newline is the one input quoting cannot rescue: `parseFlowchart` splits
+  // on it, so an emitted one turns a single ModelLine into two. Measured on
+  // 11.16.0 — through a meta `label:` it is a PARSE ERROR that kills the whole
+  // diagram; through brackets mermaid accepts it and OUR model loses the edge.
+  it('a newline in any emitted value is flattened, never allowed to split a line', () => {
+    const meta = serialize(
+      renameNode(parseFlowchart('flowchart TD\n  A@{ label: hi }')!, 'A', 'a\nb'),
+    );
+    expect(meta).toBe('flowchart TD\n  A@{ label: a b }');
+
+    const bracket = serialize(
+      renameNode(parseFlowchart('flowchart TD\n  A[Start] --> B')!, 'A', 'a\nb'),
+    );
+    expect(bracket).toBe('flowchart TD\n  A[a b] --> B');
+    // The edge is still an edge, which is the part a split line silently cost.
+    expect(edges(parseFlowchart(bracket)!)).toHaveLength(1);
+
+    const icon = serialize(
+      setNodeIcon(parseFlowchart('flowchart TD\n  A --> B')!, 'A', 'lucide:a\nb'),
+    );
+    expect(icon.split('\n')).toHaveLength(3);
+    expect(nodeMeta(parseFlowchart(icon)!).get('A')?.icon).toBe('lucide:a b');
+
+    // CRLF collapses to ONE space, not two.
+    const crlf = serialize(renameNode(parseFlowchart('flowchart TD\n  A[Start]')!, 'A', 'a\r\nb'));
+    expect(crlf).toBe('flowchart TD\n  A[a b]');
+
+    // An edge label answers to the same boundary.
+    const em = parseFlowchart('flowchart TD\n  A --> B')!;
+    expect(serialize(setEdgeLabel(em, edges(em)[0], 'a\nb'))).toBe('flowchart TD\n  A -->|a b| B');
   });
 
   it('an icon value carrying a quote is substituted, never emitted raw', () => {

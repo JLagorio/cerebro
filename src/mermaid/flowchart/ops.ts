@@ -234,6 +234,28 @@ export function setNodeShape(
   return next;
 }
 
+/*
+ * WHAT A PICKER SHOWS AND WHAT MERMAID DRAWS — the one rule, stated once
+ * (M29.35 review), so no control has to re-decide it.
+ *
+ * A node can carry `img`, `icon` and `shape` at the same time, and mermaid
+ * resolves them in that order: `getTypeFromVertex` (flowDb.ts:972-988) returns
+ * the image shape if there is an image, else an icon shape if there is an
+ * icon, else the `shape`/bracket type. Measured on the bundled 11.16.0.
+ *
+ * So a pick that is currently out-ranked — a shape chosen on a node that also
+ * has an icon, an icon chosen on a node that also has an image — is written
+ * and KEPT, and it takes effect the moment the out-ranking key is removed. It
+ * is LATENT, not dead, which is exactly what separates it from the silent
+ * no-ops M29.30/.32/.33 each had to close: those could never render, however
+ * the document changed, which is why THEY are refusals and this is not.
+ *
+ * The pickers therefore reflect the MODEL — what the node carries — and not
+ * the resolved drawing. Surfacing "this is set but out-ranked" on the canvas
+ * is a UI affordance nothing here provides yet; it belongs to Stage F4, which
+ * owns canvas affordances, and is recorded as open rather than pretended.
+ */
+
 /** The keys that exist only to present an icon — meaningless without one. */
 const ICON_PRESENTATION = ['form', 'pos'];
 
@@ -248,10 +270,11 @@ const ICON_PRESENTATION = ['form', 'pos'];
  * MEASURED on the bundled 11.16.0 (icons.mermaid.test.ts), because all three
  * of these are claims about mermaid and not preferences:
  *
- * - An icon BEATS a shape: `getTypeFromVertex` (flowDb.ts:975-988) checks
- *   `vertex.icon` before `vertex.type`, so a node carrying both draws the icon.
- *   `form` picks between the `icon`/`iconSquare`/`iconCircle`/`iconRounded`
- *   shapes; all four are in 11.16.0's registry.
+ * - An icon BEATS a shape, and an image beats both — the precedence stated
+ *   above. A shape already on the node is kept, not cleared: it is latent, and
+ *   draws again as soon as the icon goes. `form` picks between the
+ *   `icon`/`iconSquare`/`iconCircle`/`iconRounded` shapes; all four are in
+ *   11.16.0's registry.
  * - Several meta lines for one node fold PER KEY, LAST value winning — so a
  *   set goes to the last line already carrying `icon` and a clear strips EVERY
  *   line. Writing to the first would be the silent no-op M29.30/.32/.33 each
@@ -286,6 +309,16 @@ export function setNodeIcon(
     // icon, but they are still the user's bytes and "remove icon" must not
     // quietly become "tidy up" — the same surgical rule setEdgeAnimate's OFF
     // path keeps when it leaves an edge id behind.
+    //
+    // This is why the two paths look asymmetric: with an icon present, the
+    // clear DOES take an explicitly authored `form: circle` with it, while
+    // with no icon it leaves the very same key alone. The asymmetry is the
+    // point. `form`/`pos` describe how an icon is presented, so while there is
+    // an icon they are part of the thing being removed and leaving them would
+    // strand settings for a decoration that no longer exists; with no icon
+    // they were never ours to touch, and this op would just be tidying up
+    // after a user who did not ask. Only the setting a REMOVAL implies is
+    // removed — never a neighbouring one that merely looks unused.
     if (nodeMeta(next).get(id)?.icon === undefined) return next;
     // `pos` is icon AND image presentation, and `img` wins over `icon` at
     // render (flowDb.ts:972-974), so on a node carrying both, stripping the
@@ -293,7 +326,10 @@ export function setNodeIcon(
     // more than asked is exactly what the surgical rule forbids.
     const hasImage = owners.some((i) => metaAt(i)?.entries.some(([k]) => k === 'img') === true);
     const drop = hasImage ? ['icon'] : ['icon', ...ICON_PRESENTATION];
-    // Back to front: splicing an emptied line shifts every later index.
+    let emptied: { at: number; indent: string } | null = null;
+    // Back to front: splicing an emptied line shifts every later index. The
+    // last assignment to `emptied` is therefore the LOWEST index touched, and
+    // every index below it is still valid.
     for (let n = owners.length - 1; n >= 0; n -= 1) {
       const i = owners[n];
       const meta = metaAt(i);
@@ -301,12 +337,34 @@ export function setNodeIcon(
       let stripped = meta;
       for (const key of drop) stripped = withMetaEntry(stripped, key, null);
       if (stripped.entries.length === 0) {
+        emptied = { at: i, indent: next.lines[i].raw.match(/^\s*/)?.[0] ?? '  ' };
         next.lines.splice(i, 1);
       } else {
         const parsed = next.lines[i].parsed;
         if (parsed.kind === 'node-meta') parsed.meta = stripped;
         next.lines[i].dirty = true;
       }
+    }
+    // Deleting an emptied companion line is safe for `style` and for edge
+    // `animate`, whose lines never declare their subject — but a `node-meta`
+    // line DOES declare a node (`nodes()` in model.ts: "a lone
+    // `A@{ shape: cyl }` is a real declaration"). On mermaid's own documented
+    // icon-node form — `A@{ icon: "lucide:rocket", form: rounded, pos: b }` as
+    // the node's ONLY line — the splice therefore took the node with it, and
+    // "Remove icon" deleted the node. Ask the model whether it survived, and
+    // if not, leave the declaration behind as a bare token.
+    //
+    // MEASURED on the bundled 11.16.0, because the obvious alternative is a
+    // trap: mermaid keeps the vertex for BOTH `A` and an empty `A@{ }` body,
+    // but `parseMetaBody` refuses an empty body, so `A@{ }` goes OPAQUE here
+    // and the node would vanish from `nodes()` — still drawn, no longer
+    // editable. The bare token is the only form both readers agree on.
+    if (emptied !== null && !nodes(next).has(id)) {
+      next.lines.splice(emptied.at, 0, {
+        raw: emptied.indent,
+        parsed: { kind: 'node', node: { id, label: null, shape: null } },
+        dirty: true,
+      });
     }
     return next;
   }

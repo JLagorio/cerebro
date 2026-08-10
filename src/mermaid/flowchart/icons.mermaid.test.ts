@@ -53,6 +53,16 @@ interface Vertex {
   type?: string;
 }
 
+/** mermaid's own vertex ids for a document — the "did a node vanish" oracle. */
+async function vertexIds(code: string): Promise<Set<string>> {
+  const { mermaidAPI } = mermaid as unknown as {
+    mermaidAPI: { getDiagramFromText: (t: string) => Promise<{ db: unknown }> };
+  };
+  const diagram = await mermaidAPI.getDiagramFromText(code);
+  const db = diagram.db as { getVertices: () => Map<string, Vertex> };
+  return new Set(db.getVertices().keys());
+}
+
 /** mermaid's own resolved vertex for `id` — the oracle for "which line won". */
 async function vertex(code: string, id: string): Promise<Vertex | undefined> {
   const { mermaidAPI } = mermaid as unknown as {
@@ -84,6 +94,9 @@ const FORMS: [string, string][] = [
   ['definition-line', 'flowchart TD\n  A[Start]\n  A --> B'],
   ['meta-with-shape', 'flowchart TD\n  A --> B\n  A@{ shape: cyl }'],
   ['meta-with-icon', 'flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap", form: circle, pos: t }'],
+  // A's ONLY line — mermaid's own documented icon-node form, and the one that
+  // used to lose the node on a clear (M29.35 review).
+  ['lone-icon-meta', 'flowchart TD\n  A@{ icon: "lucide:rocket", form: rounded, pos: b }'],
   ['two-meta-lines', 'flowchart TD\n  A --> B\n  A@{ icon: "lucide:zap" }\n  A@{ shape: hex }'],
   ['in-subgraph', 'flowchart TD\n  subgraph S\n    A --> B\n  end'],
   ['frontmatter', '---\nconfig:\n  layout: dagre\n---\nflowchart TD\n  A --> B'],
@@ -165,6 +178,49 @@ describe('icon conformance (M29.35)', () => {
         }
       }
       expect(broken).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'clearing an icon never costs mermaid a vertex',
+    async () => {
+      init();
+      const missing: string[] = [];
+      for (const [form, src] of FORMS) {
+        const before = await vertexIds(src);
+        const after = await vertexIds(serialize(setNodeIcon(parseFlowchart(src)!, 'A', null)));
+        for (const id of before) if (!after.has(id)) missing.push(`${form}: lost ${id}`);
+      }
+      expect(missing).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  // The claim the whole feature rests on, asserted against the REAL pack
+  // rather than a mock: render.test.ts stubs both mermaid and the pack, so a
+  // wrong export or a wrong `name` would leave every icon in the app drawing
+  // the placeholder box with a green suite. This registers the same pack
+  // render.ts registers, the same way, and looks for the glyph's own bytes.
+  it(
+    'the pack render.ts registers really does draw the glyph it names',
+    async () => {
+      init();
+      const CODE = 'flowchart TD\n  A@{ icon: "lucide:rocket", form: rounded }\n  A --> B';
+      const unregistered = await renderOk(CODE);
+      const { icons } = await import('@iconify-json/lucide');
+      const paths = [...icons.icons.rocket.body.matchAll(/d="([^"]+)"/g)].map((m) => m[1]);
+      expect(paths.length).toBeGreaterThan(0);
+      // Nothing of the glyph is there before registration — the placeholder
+      // box, exactly as the safety claim above says, and no error.
+      for (const d of paths) expect(unregistered.includes(d), `unregistered drew ${d}`).toBe(false);
+
+      // The registration render.ts performs, byte for byte.
+      mermaid.registerIconPacks([
+        { name: 'lucide', loader: () => import('@iconify-json/lucide').then((m) => m.icons) },
+      ]);
+      const registered = await renderOk(CODE);
+      for (const d of paths) expect(registered.includes(d), `registered lost ${d}`).toBe(true);
     },
     TIMEOUT,
   );

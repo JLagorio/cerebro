@@ -29,7 +29,9 @@ async function loadMermaid(): Promise<typeof import('mermaid').default> {
     mermaid.registerLayoutLoaders(elkLayouts);
     // Icon packs (M29.35, spec D6): registration is cheap — the loader is
     // the lazy part, fetched+cached by mermaid only when a diagram actually
-    // uses a `lucide:` icon (the pack JSON is ~1MB, so it gets its own chunk).
+    // uses a `lucide:` icon. Measured, because this repo deals in measured
+    // figures: the pack ships 577 KB of JSON and builds to a 583 KB chunk
+    // (89 KB gzipped) of its own, fetched on first icon and never before.
     // `name` overrides the pack's own prefix and is what `@{ icon: "lucide:x" }`
     // resolves against; mermaid's fallbackPrefix is '', so an UNPREFIXED name
     // resolves to nothing. An unknown icon or a typo'd pack renders mermaid's
