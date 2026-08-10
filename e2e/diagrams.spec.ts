@@ -732,3 +732,177 @@ test('stage F: group, icon, and record link, end to end', async ({ page }) => {
   expect(raw2).toContain('n1{{New step}}');
   expect(raw2).toContain('Idea@{ icon: "lucide:rocket"');
 });
+
+// M29.44: Stage G end to end — auto-layout off, a real drag, and the whole
+// round trip. The loop under test is toggle -> drag -> FILE -> reopen ->
+// toggle back, and every leg is checked twice: real mermaid re-rendered (the
+// host svg id is a function of the source, so a new id means mermaid parsed
+// and drew our comment lines), and the bytes on the (mock) disk say what the
+// gesture meant. The last leg is the one worth the most: toggling auto-layout
+// back ON must RETAIN the stored positions in the file while no longer
+// applying them to the geometry (spec D7) — "forgotten" and "handed back to
+// mermaid" look identical on screen and are opposites in the file.
+test('manual layout: a drag writes positions, they survive a reopen, auto returns', async ({
+  page,
+}) => {
+  // 120s like the Stage F journey: this one runs four render laps (toggle,
+  // drag, reopen, toggle back) plus two document navigations, and a cold
+  // mermaid chunk would otherwise surface as an outer timeout instead of the
+  // assertion that actually stalled.
+  test.setTimeout(120_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  const openDoc = async (name: string) => {
+    await page.keyboard.press('ControlOrMeta+k');
+    const quickOpenInput = page.getByTestId('quick-open-input');
+    await expect(quickOpenInput).toBeVisible();
+    await quickOpenInput.fill(name);
+    const row = page.getByTestId('quick-open-result').filter({ hasText: name }).first();
+    await expect(row).toBeVisible();
+    await row.click();
+  };
+  const readFile = () =>
+    page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md') ?? '');
+
+  await openDoc('Systems map');
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 20_000 });
+
+  const block = page.getByTestId('mermaid-block').first();
+  await block.getByRole('button', { name: 'Edit', exact: true }).click();
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 20_000 });
+  // Same proof-of-acceptance device the two journeys above document.
+  const hostSvgId = () => host.locator('svg[id^="cerebro-mermaid-"]').getAttribute('id');
+  const build = host.locator('[id*="flowchart-Build-"]').first();
+  // Two translates, whitespace-tolerant: ours is APPENDED to mermaid's own
+  // (`${base} translate(dx, dy)` in manualLayout.ts), so the pair is the
+  // signature of "our pipeline touched this node". One translate is mermaid's
+  // untouched positionNode output. MEASURED on the corpus flowchart:
+  // auto is `translate(54.21875, 132.25)`; after the drag below it is
+  // `translate(54.21875, 132.25) translate(119.78, 59.75)`.
+  const OURS = /translate\([^)]*\)\s*translate\(/;
+  const MERMAIDS_ALONE = /^\s*translate\([^)]*\)\s*$/;
+  // Sums a `translate(a, b) translate(c, d)` chain back into one plane point:
+  // mermaid's own translate IS the node centre (nodes.ts:97) and ours is the
+  // delta onto the stored position, so the sum must BE the stored position.
+  const planeCentre = async (locator: typeof build) => {
+    const t = (await locator.getAttribute('transform')) ?? '';
+    const parts = [...t.matchAll(/translate\(\s*(-?[\d.]+)\s*,?\s*(-?[\d.]+)\s*\)/g)];
+    return parts.reduce((acc, m) => ({ x: acc.x + Number(m[1]), y: acc.y + Number(m[2]) }), {
+      x: 0,
+      y: 0,
+    });
+  };
+
+  // -- Auto-layout OFF: the marker reaches the file, mermaid still draws ---
+  const autoCentre = await planeCentre(build);
+  await expect(build).toHaveAttribute('transform', MERMAIDS_ALONE);
+  const beforeManual = await hostSvgId();
+  await page.getByRole('button', { name: 'Auto-layout: On' }).click();
+  await expect.poll(hostSvgId, { timeout: 20_000 }).not.toBe(beforeManual);
+  // The control shows the state it is now IN, not the command it would run.
+  await expect(page.getByRole('button', { name: 'Auto-layout: Off' })).toBeVisible();
+  await expect.poll(readFile, { timeout: 15_000 }).toContain('%% cerebro:layout manual');
+  // Turning it on pins NOTHING by itself: positions are recorded by dragging,
+  // not by a mode switch (risk-ledger item 6 — no snapshot-everything).
+  expect(await readFile()).not.toContain('%% cerebro:pos');
+
+  // -- Under the threshold it is still a click, not a move ----------------
+  // 2px of hand tremor must leave the file alone, or select and double-click
+  // rename would each cost an undo step (MOVE_THRESHOLD_PX = 3).
+  const box = (await build.boundingBox())!;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  await page.mouse.move(cx + 2, cy);
+  await page.mouse.up();
+  // Bounded negative: give the autosave debounce room to have fired.
+  await page.waitForTimeout(1_000);
+  expect(await readFile()).not.toContain('%% cerebro:pos');
+
+  // -- Drag Build 120 right and 60 down -----------------------------------
+  // page.mouse, not locator.dragTo: the gesture under test has a 3px
+  // click/drag threshold and re-routes edges per frame, so it needs real
+  // intermediate moves rather than one synthetic jump.
+  const beforeDrag = await hostSvgId();
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step += 1) {
+    await page.mouse.move(cx + (120 * step) / 8, cy + (60 * step) / 8);
+  }
+  await page.mouse.up();
+  // A new svg id = real mermaid parsed and drew a source carrying BOTH our
+  // comment lines. (A `%% cerebro:pos` line mermaid choked on would leave the
+  // last good render in the host and this poll would time out.)
+  await expect.poll(hostSvgId, { timeout: 20_000 }).not.toBe(beforeDrag);
+
+  // -- The drag is in the FILE, as one line, with real coordinates --------
+  await expect.poll(readFile, { timeout: 15_000 }).toMatch(/%% cerebro:pos\s+Build\s+-?\d+,-?\d+/);
+  const raw = await readFile();
+  const stored = raw.match(/%% cerebro:pos\s+Build\s+(-?\d+),(-?\d+)/)!;
+  const pos = { x: Number(stored[1]), y: Number(stored[2]) };
+  // The distance travelled reached the file — not merely "a line appeared".
+  // Plane units, so a diagram rendered below 1:1 stores MORE than the client
+  // pixels dragged, never fewer; the bounds are one-sided for that reason.
+  // (MEASURED at the corpus's 1:1 scale: `%% cerebro:pos Build 174,192` from
+  // an auto centre of 54.22,132.25 — exactly the 120,60 dragged.)
+  expect(pos.x - autoCentre.x).toBeGreaterThanOrEqual(100);
+  expect(pos.y - autoCentre.y).toBeGreaterThanOrEqual(50);
+  // One drag, one line, one node: the sibling nodes were not swept along.
+  expect(raw.match(/%% cerebro:pos/g)).toHaveLength(1);
+  expect(raw).not.toMatch(/%% cerebro:pos[^\n]*\bIdea\b/);
+
+  // -- Reopen: view mode renders the STORED position ----------------------
+  // Not page.reload(): that resets the in-memory mock fs, so the fake disk
+  // would forget the drag along with everything else. Closing and reopening
+  // the document is a fresh read of the persisting mock disk through the full
+  // parse -> render -> apply pipeline in VIEW mode (MermaidDiagram), which is
+  // the code path a real reload exercises.
+  await openDoc('Welcome');
+  await openDoc('Systems map');
+  const viewBuild = page
+    .getByTestId('mermaid-diagram')
+    .first()
+    .locator('[id*="flowchart-Build-"]')
+    .first();
+  await expect(viewBuild).toHaveAttribute('transform', OURS, { timeout: 20_000 });
+  // …and not just SOME delta: the two translates sum to the coordinates on
+  // disk, so what the file says is where the node is.
+  const viewCentre = await planeCentre(viewBuild);
+  expect(Math.abs(viewCentre.x - pos.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(viewCentre.y - pos.y)).toBeLessThanOrEqual(1);
+
+  // -- Auto-layout back ON: marker gone, positions RETAINED, geometry back -
+  await block.getByRole('button', { name: 'Edit', exact: true }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 20_000 });
+  await expect(build).toHaveAttribute('transform', OURS, { timeout: 20_000 });
+  const beforeAuto = await hostSvgId();
+  await page.getByRole('button', { name: 'Auto-layout: Off' }).click();
+  await expect.poll(hostSvgId, { timeout: 20_000 }).not.toBe(beforeAuto);
+  await expect(page.getByRole('button', { name: 'Auto-layout: On' })).toBeVisible();
+  await expect.poll(readFile, { timeout: 15_000 }).not.toContain('%% cerebro:layout manual');
+  // The whole point of the OFF path: remembered, not erased. The line is still
+  // there, byte for byte, waiting for the next time manual mode comes on.
+  const afterAuto = await readFile();
+  expect(afterAuto).toContain(`%% cerebro:pos Build ${pos.x},${pos.y}`);
+  // Remembered but no longer APPLIED: mermaid's own single translate is back,
+  // which is what "geometry handed back to the engine" looks like in the DOM.
+  await expect(build).toHaveAttribute('transform', MERMAIDS_ALONE, { timeout: 20_000 });
+});
