@@ -72,26 +72,49 @@ function counterForOccurrence(occurrenceIndex: number): number {
 }
 
 /**
- * Every group mermaid draws a NODE as. Three classes, not one — MEASURED on
- * the bundled 11.16.0 (M29.39), and cited: all four icon handlers pass
- * `'icon-shape default'` to labelHelper (rendering-elements/shapes/icon.ts:22,
- * iconSquare.ts:26, iconCircle.ts:22, iconRounded.ts:26) and imageSquare.ts:46
- * passes `'image-shape default'`. Every shape in our own registry was rendered
- * and checked; all of them still say `node`, so these five handlers are the
- * whole exception list.
+ * Every group mermaid draws a NODE as. FOUR classes, because the class depends
+ * on TWO independent axes and reading only one of them is how this went wrong
+ * twice:
  *
- * Matching `g.node` alone made an icon node UNREACHABLE from the canvas the
- * moment M29.35's icon control was used on it: no toolbar, no rename, no
- * delete, no drag-to-connect, no link badge — and no way to take the icon back
- * off, because the only control that removes it lives behind the very
- * selection it had just destroyed. Found by M29.39's end-to-end journey.
+ * - the SHAPE picks the handler. The four icon handlers pass
+ *   `'icon-shape default'` to labelHelper and imageSquare passes
+ *   `'image-shape default'`; every other shape in our registry says `node`.
+ * - the LOOK picks the prefix, for everything that is not an icon or an image.
+ *   `getNodeClasses` (rendering-elements/shapes/util.ts) is
+ *   `(node.look === 'handDrawn' ? 'rough-node' : 'node') + ' ' + …`, so a
+ *   document with `look: handDrawn` in its config frontmatter draws EVERY
+ *   ordinary node as `rough-node default`. `rough-node` is the only `rough-*`
+ *   class in the whole rendering-util tree.
  *
- * The id filter still does the real work — the id scheme is what this module
- * contracts on, and it is identical for icon nodes. It is also what keeps an
- * icon's inner `g.icon-shape2` decoration out: that group carries no id.
+ * All four MEASURED on the bundled 11.16.0 (asserted in
+ * `icons.mermaid.test.ts`), including the combination: in one handDrawn
+ * document an icon node is `icon-shape default` while its neighbour is
+ * `rough-node default`, so the axes really are independent and both arms have
+ * to coexist. Two measured negatives worth keeping: `look: neo` is NOT rough
+ * (`node default`), and handDrawn leaves `g.cluster` and `path.flowchart-link`
+ * alone — only the node class moves.
+ *
+ * Why it matters, twice over. Matching `g.node` alone made an icon node
+ * unreachable the moment M29.35's icon control was used on it — no toolbar, no
+ * rename, no delete, no drag-to-connect, no link badge, and no way to take the
+ * icon back off, because the only control that removes it lives behind the very
+ * selection it had just destroyed (found by M29.39's e2e). And it lost EVERY
+ * node of a hand-drawn document: `parseFlowchart` holds the frontmatter opaque
+ * but still finds the header, so the editor mounts, binds nothing, and offers a
+ * canvas where no gesture does anything. That one is not ours to have caused —
+ * nothing in the app writes `look:`, so it arrives only in hand-authored or
+ * pasted source — but it is ours to have missed.
+ *
+ * The id filter still does the real work: the id scheme is what this module
+ * contracts on, and it is identical across all four. It is also what keeps an
+ * icon's inner `g.icon-shape2` decoration out — that group carries no id.
  */
-export const NODE_GROUP_SELECTOR =
-  'g.node[id*="flowchart-"], g.icon-shape[id*="flowchart-"], g.image-shape[id*="flowchart-"]';
+export const NODE_GROUP_SELECTOR = [
+  'g.node[id*="flowchart-"]',
+  'g.rough-node[id*="flowchart-"]',
+  'g.icon-shape[id*="flowchart-"]',
+  'g.image-shape[id*="flowchart-"]',
+].join(', ');
 
 /** Groups edges(model) by exact (from, to), preserving each pair's own encounter order. */
 function groupByPair(pairs: EdgeEntry[]): Map<string, EdgeEntry[]> {

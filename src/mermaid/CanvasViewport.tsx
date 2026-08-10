@@ -59,15 +59,21 @@ export function useCanvasTransformRef(): React.RefObject<CanvasTransform> {
  * click-to-select own those gestures), form controls, and anything that marks
  * itself `data-no-pan` (the zoom cluster; the code overlay defends itself too).
  *
- * A node is THREE classes, not one. MEASURED on the bundled mermaid 11.16.0
- * (M29.39, asserted in flowchart/icons.mermaid.test.ts): a node carrying an
- * icon is drawn as `icon-shape default` and one carrying an image as
- * `image-shape default` — never `node`. With only `g.node` here, a
- * connect-drag started on an icon node panned the canvas out from under
- * itself, which is precisely the failure this selector exists to prevent.
+ * A node is FOUR classes, not one, and they come from two independent axes:
+ * the SHAPE picks the handler (`icon-shape default` for any icon, `image-shape
+ * default` for an image) and the LOOK picks the prefix for everything else
+ * (`rough-node default` under `look: handDrawn`). Both MEASURED on the bundled
+ * mermaid 11.16.0 — see the long note on NODE_GROUP_SELECTOR in
+ * flowchart/svgBinding.ts, which this list deliberately mirrors rather than
+ * imports: that selector also filters on the flowchart id scheme, which is
+ * meaningless here, and this viewport is generic on purpose.
+ *
+ * With only `g.node`, a connect-drag started on an icon node panned the canvas
+ * out from under itself, and in a hand-drawn document EVERY drag did — which is
+ * precisely the failure this selector exists to prevent.
  */
 const NO_PAN =
-  'g.node, g.icon-shape, g.image-shape, g.edgePaths *, g.edgeLabels *, button, input, textarea, select, [data-no-pan]';
+  'g.node, g.rough-node, g.icon-shape, g.image-shape, g.edgePaths *, g.edgeLabels *, button, input, textarea, select, [data-no-pan]';
 
 function startsPan(target: EventTarget | null): boolean {
   return !(target instanceof Element) || target.closest(NO_PAN) === null;

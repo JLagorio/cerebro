@@ -117,11 +117,14 @@ describe('CanvasViewport', () => {
               itself, which is the exact failure this test was written for. */}
           <g className="icon-shape default" data-testid="icon" />
           <g className="image-shape default" data-testid="image" />
+          {/* And `look: handDrawn` re-prefixes every ORDINARY node at once, so
+              without this one every drag in a hand-drawn diagram panned. */}
+          <g className="rough-node default" data-testid="rough" />
         </svg>
         <div data-no-pan data-testid="island" />
       </CanvasViewport>,
     );
-    for (const id of ['n', 'icon', 'image', 'island']) {
+    for (const id of ['n', 'icon', 'image', 'rough', 'island']) {
       fireEvent.pointerDown(screen.getByTestId(id), { button: 0, clientX: 0, clientY: 0 });
       fireEvent.pointerMove(screen.getByTestId('canvas-viewport'), { clientX: 40, clientY: 40 });
       expect(plane().style.transform).toBe('translate(0px, 0px) scale(1)');

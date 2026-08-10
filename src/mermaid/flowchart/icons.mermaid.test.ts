@@ -33,6 +33,9 @@ import { NODE_GROUP_SELECTOR } from './svgBinding';
 
 const TIMEOUT = 60_000;
 
+/** Config frontmatter that flips mermaid's whole node-class prefix. */
+const HAND_DRAWN = '---\nconfig:\n  look: handDrawn\n---\n';
+
 function polyfill(): void {
   // jsdom implements no SVG layout; every shape handler sizes itself from the
   // label's bbox. Fixed values keep renders comparable and finite.
@@ -40,6 +43,13 @@ function polyfill(): void {
     .SVGElement.prototype;
   proto.getBBox = () => ({ x: 0, y: 0, width: 60, height: 20 });
   proto.getComputedTextLength = () => 60;
+  // `imageSquare` awaits `img.decode()`, which jsdom does not implement — the
+  // whole render throws `img.decode is not a function` without this. Same
+  // reason as the two above: jsdom has no layout and no image pipeline, and a
+  // fixed stand-in keeps the DOM shape measurable.
+  (
+    globalThis as unknown as { HTMLImageElement: { prototype: Record<string, unknown> } }
+  ).HTMLImageElement.prototype.decode = () => Promise.resolve();
 }
 
 function init(): void {
@@ -227,34 +237,90 @@ describe('icon conformance (M29.35)', () => {
   );
 
   /**
-   * The claim M29.35 never made and M29.39 had to pay for: an icon node is
-   * still a node the EDITOR can reach.
+   * The claim M29.35 never made, M29.39 paid for, and M29.39's review caught
+   * me under-measuring: an icon node is still a node the EDITOR can reach.
    *
-   * Mermaid draws it as `<g class="icon-shape default">`, never `g.node` — all
-   * four icon handlers pass that literal to labelHelper (icon.ts:22,
-   * iconSquare.ts:26, iconCircle.ts:22, iconRounded.ts:26). `svgBinding`
-   * matched `g.node` alone, so putting an icon on a node deleted every canvas
-   * affordance it had, the one that removes the icon included. The id scheme is
-   * unchanged, which is why the fix is a selector and not a new contract; this
-   * asserts the selector against real output so a version that renames the
-   * class fails here rather than in the app.
+   * `NODE_GROUP_SELECTOR` is a claim about mermaid's DOM, so it is measured
+   * here rather than asserted against a fixture. Two INDEPENDENT axes decide a
+   * node's class, and the first pass varied only one of them:
+   *
+   * - the SHAPE picks the handler — all four icon handlers pass
+   *   `'icon-shape default'` to labelHelper, imageSquare passes
+   *   `'image-shape default'`, everything else says `node`;
+   * - the LOOK picks the prefix for everything that is not an icon or an image
+   *   — `getNodeClasses` (rendering-elements/shapes/util.ts) reads
+   *   `node.look === 'handDrawn' ? 'rough-node' : 'node'`.
+   *
+   * Varying only shapes proved "these five handlers are the whole exception
+   * list", which was FALSE: `look: handDrawn` moved every ordinary node to
+   * `rough-node` and the selector matched 0 of 2. The combined row below is the
+   * one that keeps both arms honest — in a single hand-drawn document the icon
+   * node is `icon-shape default` while its neighbour is `rough-node default`.
    */
+  const NODE_CLASS_CASES: [string, string, string][] = [
+    ['plain', 'flowchart TD\n  A[Start] --> B', 'node default'],
+    ['icon', 'flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket" }', 'icon-shape default'],
+    [
+      'icon square',
+      'flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket", form: square }',
+      'icon-shape default',
+    ],
+    [
+      'icon circle',
+      'flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket", form: circle }',
+      'icon-shape default',
+    ],
+    [
+      'icon rounded',
+      'flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket", form: rounded }',
+      'icon-shape default',
+    ],
+    // Not something we ever write — but a user can hand-author it in the code
+    // pane, and then it is a node the canvas has to be able to select.
+    [
+      'image',
+      'flowchart TD\n  A[Start] --> B\n  A@{ img: "https://x/y.png" }',
+      'image-shape default',
+    ],
+    ['exotic shape', 'flowchart TD\n  A[Start] --> B\n  A@{ shape: cyl }', 'node default'],
+    ['handDrawn', `${HAND_DRAWN}flowchart TD\n  A[Start] --> B`, 'rough-node default'],
+    [
+      'handDrawn + exotic shape',
+      `${HAND_DRAWN}flowchart TD\n  A[Start] --> B\n  A@{ shape: cyl }`,
+      'rough-node default',
+    ],
+    // The two axes at once: A is an icon, B (below) is rough, same document.
+    [
+      'handDrawn + icon',
+      `${HAND_DRAWN}flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket" }`,
+      'icon-shape default',
+    ],
+    // A measured NEGATIVE: only handDrawn is rough. `look: neo` is not.
+    ['look neo', `---\nconfig:\n  look: neo\n---\nflowchart TD\n  A[Start] --> B`, 'node default'],
+  ];
+
   it(
-    'an icon node is still bindable — mermaid draws it as g.icon-shape, not g.node',
+    'NODE_GROUP_SELECTOR matches every class mermaid draws a node as',
     async () => {
       init();
-      for (const form of ['square', 'circle', 'rounded']) {
-        const svg = await renderOk(
-          `flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket", form: ${form} }`,
-        );
+      for (const [name, code, expected] of NODE_CLASS_CASES) {
+        // Every one of these mounts the editor, so every one of them must bind:
+        // parseFlowchart holds config frontmatter opaque but still finds the
+        // header, which is exactly how a hand-drawn document got a canvas with
+        // nothing bound in it.
+        expect(parseFlowchart(code), name).not.toBeNull();
+        const svg = await renderOk(code);
         const host = document.createElement('div');
-        // Test fixture: mermaid's own sanitized output, rendered above.
+        // Test fixture: mermaid's own sanitized output, rendered just above.
         host.innerHTML = svg;
-        const group = [...host.querySelectorAll('g[id]')].find((g) =>
-          (g.getAttribute('id') ?? '').includes('flowchart-A-'),
+        const groups = [...host.querySelectorAll('g[id]')].filter((g) =>
+          (g.getAttribute('id') ?? '').includes('flowchart-'),
         );
-        expect(group?.getAttribute('class'), form).toBe('icon-shape default');
-        expect(host.querySelectorAll(NODE_GROUP_SELECTOR).length, form).toBe(2);
+        const a = groups.find((g) => (g.getAttribute('id') ?? '').includes('flowchart-A-'));
+        expect(a?.getAttribute('class'), name).toBe(expected);
+        // BOTH nodes, not just A — the combined row is only meaningful if the
+        // rough neighbour is matched too.
+        expect(host.querySelectorAll(NODE_GROUP_SELECTOR).length, name).toBe(groups.length);
       }
     },
     TIMEOUT,

@@ -36,8 +36,10 @@ describe('bindFlowchartSvg', () => {
   // Found by M29.39's e2e: setting an icon made the node unreachable from the
   // canvas — no toolbar, no rename, no delete, no link badge, and no way to
   // take the icon back off. A one-way trapdoor for the control M29.35 shipped.
-  it('binds icon and image nodes, which mermaid does NOT draw as g.node', () => {
-    const model = parseFlowchart('flowchart TD\n  A[One] --> B[Two]\n  B --> C[Three]')!;
+  it('binds every class mermaid draws a node as, not just g.node', () => {
+    const model = parseFlowchart(
+      'flowchart TD\n  A[One] --> B[Two]\n  B --> C[Three]\n  C --> D[Four]',
+    )!;
     const host = document.createElement('div');
     // Test fixture: fixed literal SVG markup, not user-supplied content.
     host.innerHTML = [
@@ -45,14 +47,35 @@ describe('bindFlowchartSvg', () => {
       '  <g class="icon-shape default" id="flowchart-A-0"><rect/></g>',
       '  <g class="icon-shape2"><path/></g>',
       '  <g class="image-shape default" id="flowchart-B-1"><rect/></g>',
-      '  <g class="node default" id="flowchart-C-2"><rect/></g>',
+      '  <g class="rough-node default" id="flowchart-C-2"><rect/></g>',
+      '  <g class="node default" id="flowchart-D-3"><rect/></g>',
       '</svg>',
     ].join('\n');
     const binding = bindFlowchartSvg(host, model);
-    expect([...binding.nodeEls.keys()].sort()).toEqual(['A', 'B', 'C']);
+    expect([...binding.nodeEls.keys()].sort()).toEqual(['A', 'B', 'C', 'D']);
     // The icon's inner `icon-shape2` group carries no id at all, so the id
     // filter keeps it out rather than binding a node to its own decoration.
     expect(binding.nodeEls.get('A')?.getAttribute('class')).toBe('icon-shape default');
+  });
+
+  // `rough-node` on its own line because it is the one that takes a WHOLE
+  // document: `look: handDrawn` re-prefixes every ordinary node at once, and
+  // `parseFlowchart` holds the config frontmatter opaque while still finding
+  // the header — so the editor mounts over a diagram it has bound nothing in.
+  it('binds a hand-drawn document, where EVERY node is a rough-node', () => {
+    const model = parseFlowchart(
+      '---\nconfig:\n  look: handDrawn\n---\nflowchart TD\n  A[One] --> B[Two]',
+    );
+    expect(model, 'the editor mounts on this, so the binding has to work').not.toBeNull();
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = [
+      '<svg viewBox="0 0 100 100">',
+      '  <g class="rough-node default" id="flowchart-A-0"><rect/></g>',
+      '  <g class="rough-node default" id="flowchart-B-1"><rect/></g>',
+      '</svg>',
+    ].join('\n');
+    expect([...bindFlowchartSvg(host, model!).nodeEls.keys()].sort()).toEqual(['A', 'B']);
   });
 
   it('ignores svg elements that match nothing in the model', () => {
