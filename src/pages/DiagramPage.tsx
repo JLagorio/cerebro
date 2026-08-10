@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
 import type { SaveState } from '@/editor/NoteBodyEditor';
 import type { Selection } from '@/engine/types';
-import { readNote, saveNote } from '@/lib/ipc';
 import { humanize } from '@/lib/mockParse';
 import { detectDiagramType } from '@/mermaid/detect';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
+import { useDiagramFile } from '@/mermaid/useDiagramFile';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useNavStore } from '@/stores/navStore';
-import { useUiStore } from '@/stores/uiStore';
 import { useEntry, useVaultStore } from '@/stores/vaultStore';
 
 export type DiagramSelection = Extract<Selection, { kind: 'diagram' }>;
@@ -23,9 +21,6 @@ const SAVE_LABEL: Record<SaveState, string | null> = {
   saved: 'Saved',
   failed: "Couldn't save",
 };
-
-/** How long a pause in editing waits before the source flushes to disk. */
-const SAVE_DEBOUNCE_MS = 500;
 
 /**
  * Full-page editor for a standalone `.mmd` file (M29.21).
@@ -46,27 +41,23 @@ const SAVE_DEBOUNCE_MS = 500;
  * would buy a 250ms chip correction at the cost of coupling the shared editor
  * to one host's chrome.
  *
- * Content is RAW end-to-end: readNote/saveNote pass `.mmd` bytes through
- * verbatim, so mermaid's own `---` config header survives every save.
+ * The file itself — read-once, debounce-save, flush-on-unmount, and the raw
+ * `.mmd` byte contract that keeps mermaid's `---` config header intact — is
+ * `useDiagramFile` since M29.46, shared verbatim with the whiteboard view.
+ * The no-live-reload choice travels with it (DocPage's M17.4 reconcile
+ * problem, consciously deferred): the watcher's rescan still updates the
+ * entry (title, tree), only the open buffer stays put.
  *
- * v1 deliberately takes no external live-reload: the file is read once per
- * path, and an edit made outside the app while the page is open wins or
- * loses on last-write like any plain editor. The watcher's rescan still
- * updates the entry (title, tree) — only the open buffer stays put. This is
- * DocPage's M17.4 reconcile problem, consciously deferred.
- *
- * App.tsx mounts this KEYED on the path, and the save machinery depends on
- * it: the pending-debounce flush runs as an unmount cleanup, and only a true
+ * App.tsx mounts this KEYED on the path, and that is still load-bearing: the
+ * hook's pending-debounce flush runs as an unmount cleanup, and only a true
  * unmount guarantees that cleanup still belongs to the file it was editing.
- * An unkeyed diagram→diagram navigation re-rendered first — re-pointing
- * `flushRef` at the new path — and THEN ran the old effect's cleanup, which
- * wrote the old file's bytes into the new one and dropped the pending edit.
+ * An unkeyed diagram→diagram navigation re-rendered first — re-pointing the
+ * flush at the new path — and THEN ran the old effect's cleanup, which wrote
+ * the old file's bytes into the new one and dropped the pending edit.
  */
 export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   const entry = useEntry(selection.path);
-  const vaultPath = useVaultStore((s) => s.vaultPath);
   const navigate = useNavStore((s) => s.navigate);
-  const toast = useUiStore((s) => s.toast);
   // M29.38 — the link popover's record search and what a link badge opens.
   // `in-place`, not `navigate`: this page IS the canvas the user is standing
   // on, and M9.3's backdrop jump is for surfaces that have none. The detail
@@ -74,99 +65,10 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   const entries = useVaultStore((s) => s.entries);
   const openPath = useOpenPath('in-place');
 
-  // null while loading; the editors only mount on real content.
-  const [code, setCode] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>('idle');
-  // The read failed — renamed, trashed, or unreadable. The tombstone keys on
-  // THIS, not on the entry lookup: the file is the truth in a files-first
-  // app, so the page attempts the read regardless of whether the scanner has
-  // adopted the path yet (a just-created .mmd opens fine pre-rescan), and
-  // only a failed read means there is nothing here to edit.
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  // The save pipeline lives in refs so the debounce and the unmount flush
-  // always see the newest source without re-arming effects per keystroke.
-  const latest = useRef('');
-  const timer = useRef<number | null>(null);
-  const saving = useRef(false);
-  const queued = useRef(false);
-
-  const flushRef = useRef<() => Promise<void>>(async () => {});
-  flushRef.current = async () => {
-    if (vaultPath === null) return;
-    if (saving.current) {
-      // A save is already on the wire; run again with the newer bytes when
-      // it lands rather than racing two writes to the same file.
-      queued.current = true;
-      return;
-    }
-    saving.current = true;
-    setSaveState('saving');
-    try {
-      await saveNote(vaultPath, selection.path, latest.current);
-      saving.current = false;
-      if (queued.current) {
-        queued.current = false;
-        await flushRef.current();
-      } else {
-        setSaveState('saved');
-      }
-    } catch {
-      saving.current = false;
-      queued.current = false;
-      setSaveState('failed');
-      toast("Couldn't save diagram");
-    }
-  };
-
-  const handleChange = (next: string) => {
-    latest.current = next;
-    setCode(next);
-    setSaveState('dirty');
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      void flushRef.current();
-    }, SAVE_DEBOUNCE_MS);
-  };
-
-  // Load once per mount (the App.tsx key makes a path change a fresh mount).
-  // The entry mode is latched by FullScreenDiagramEditor, from the source it
-  // mounts with — which is this load's result, so the rule is unchanged.
-  useEffect(() => {
-    let cancelled = false;
-    setCode(null);
-    setSaveState('idle');
-    setLoadFailed(false);
-    if (vaultPath === null) return;
-    void readNote(vaultPath, selection.path)
-      .then((raw) => {
-        if (cancelled) return;
-        latest.current = raw;
-        setCode(raw);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [vaultPath, selection.path]);
-
-  // A pending debounce must not die with the page: flush it on unmount. This
-  // is only safe BECAUSE App.tsx keys the page on the path — a path change
-  // is a real unmount, so the flushRef this cleanup reads was last assigned
-  // by the dying instance and still closes over ITS path and bytes. (Without
-  // the key, the new path's render reassigned flushRef before this ran.)
-  useEffect(() => {
-    return () => {
-      if (timer.current !== null) {
-        window.clearTimeout(timer.current);
-        timer.current = null;
-        void flushRef.current();
-      }
-    };
-  }, []);
+  // The whole file lifecycle. The entry mode is latched by
+  // FullScreenDiagramEditor, from the source it mounts with — which is this
+  // load's result, so the M29.21 rule is unchanged.
+  const { code, loadFailed, saveState, handleChange } = useDiagramFile(selection.path);
 
   // Only a FAILED READ tombstones the page (see loadFailed above): an entry
   // the scanner has not adopted yet still opens, and an entry that lingers
