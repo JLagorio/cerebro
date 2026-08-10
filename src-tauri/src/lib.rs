@@ -6,6 +6,8 @@ pub mod git;
 pub mod git_commands;
 pub mod knowledge;
 pub mod mcp;
+pub mod roots;
+pub mod roots_commands;
 pub mod search;
 pub mod vault;
 
@@ -372,7 +374,13 @@ pub fn run() {
             git_commands::git_resolve_conflict,
             git_commands::git_commit_conflict_resolution,
             git_commands::git_abort_conflict,
-            git_commands::git_provider_status
+            git_commands::git_provider_status,
+            roots_commands::list_roots,
+            roots_commands::mount_root,
+            roots_commands::unmount_root,
+            roots_commands::list_dir,
+            roots_commands::read_file_text,
+            roots_commands::index_root_markdown
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
