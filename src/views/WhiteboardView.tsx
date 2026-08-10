@@ -224,6 +224,19 @@ function WhiteboardCanvas({
    * Spec D10: node + label + binding is ONE `onChangeCode`, therefore one undo
    * step. A refusal is a true no-op — no commit, nothing to undo — and says so
    * rather than throwing (the store-layer ethos, AGENTS.md).
+   *
+   * KNOWN LIMITATION, deliberate (M29.48): the new node gets no stored manual
+   * position. The seed asks for manual layout, but `applyManualLayout` only
+   * moves nodes the source already places, so this one lands wherever dagre
+   * put it and the user drags it once — after which the drag stores a position
+   * like any other. Placing it properly means the toolbar's `NodePlacer`,
+   * which lives on `FullScreenDiagramEditor`'s internal `placerRef` and is
+   * armed only while the structural editor is mounted in manual mode. Reaching
+   * it from out here is a second additive prop to a Stage D file plus a
+   * "not placeable right now" branch for the demoted (code-mode) canvas, and
+   * "where should a record added from a BAR land" is a product question the
+   * toolbar's viewport-centre answer does not obviously settle. Left to a
+   * stage that can decide it; the current behaviour is safe and self-correcting.
    */
   const addRecord = (entry: Entry) => {
     setAdding(false);

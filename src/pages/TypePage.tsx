@@ -378,6 +378,21 @@ export function TypePage({ selection }: { selection: TypeSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+          // M29.48: where a whiteboard tab keeps its canvas. A Type screen's
+          // saved views are real views (M12.3), so its whiteboards land beside
+          // the Type doc that owns them. A GHOST type — a name only records
+          // carry, with no doc of its own (`docPath: null`) — has no folder to
+          // be beside, and its canvases go to a top-level whiteboards/ rather
+          // than beside a `types/` doc that does not exist.
+          whiteboardHost={{
+            folder:
+              listing.docPath !== null && listing.docPath.includes('/')
+                ? listing.docPath.slice(0, listing.docPath.lastIndexOf('/'))
+                : '',
+            // The OPEN TAB names the canvas: two whiteboard tabs are two
+            // drawings.
+            viewName: activeView.name,
+          }}
           // M12.4b: the header menu's Filter seeds a rule on the open tab.
           onFilterField={(field) =>
             changeView({

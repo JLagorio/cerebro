@@ -427,6 +427,18 @@ export function ListPage({ selection }: { selection: ListSelection }) {
           onPresentationChange={changePresentation}
           onOrderBy={(field) => changePresentation(toggleSort(presentation, field))}
           onZoomChange={(zoom) => changePresentation({ ...presentation, zoom })}
+          // M29.48: where a whiteboard tab keeps its canvas. The folder of the
+          // List's OWN file — `delivery` for a list in a Collection, '' for a
+          // root-level one, which has no collection folder to speak of and
+          // lands in a top-level whiteboards/. `list.path` comes from the
+          // scan, so this is the folder the file actually lives in rather than
+          // a reconstruction from the collection name.
+          whiteboardHost={{
+            folder: list.path.includes('/') ? list.path.slice(0, list.path.lastIndexOf('/')) : '',
+            // The OPEN TAB names the canvas, not the List: two whiteboard tabs
+            // are two drawings.
+            viewName: activeView.name,
+          }}
           // M12.4b: the header menu's Filter seeds a rule; the toolbar's
           // filter pill is where it gets refined.
           onFilterField={(field) =>

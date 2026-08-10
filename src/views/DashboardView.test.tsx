@@ -57,6 +57,11 @@ const lists = (): ListFile[] => [
     'name: Overview\nsource:\n  type: Work item\nviews:\n  - id: board\n    name: Board\n    presentation:\n      type: dashboard\n',
     { path: 'overview.list.yml' },
   ),
+  parseListYaml(
+    'sketches',
+    'name: Sketches\nsource:\n  type: Work item\nviews:\n  - id: sketch\n    name: Sketch\n    presentation:\n      type: whiteboard\n      whiteboard:\n        file: whiteboards/sketch.mmd\n',
+    { path: 'sketches.list.yml' },
+  ),
 ];
 
 const view = (blocks: DashboardBlock[]): Presentation => ({
@@ -149,6 +154,32 @@ describe('DashboardView', () => {
     );
     expect(screen.getByText(/cannot show another dashboard/)).toBeTruthy();
     expect(screen.queryAllByTestId('dashboard-view')).toHaveLength(1);
+  });
+
+  /**
+   * Stated, not forgotten (M29.48): only the two PAGE hosts pass a
+   * `whiteboardHost`, so a block embedding a whiteboard tab draws the "lives
+   * on their list" face. `hasBlocks` above guards dashboard-in-dashboard
+   * recursion; this is the neighbouring question — a whiteboard is an EDITOR,
+   * and a 300px read-only tile of one raises "whose autosave, whose keyboard?"
+   * The face says where to go instead of pretending to be a canvas.
+   *
+   * The pointer in the fixture is deliberate: even with a file to open, the
+   * block declines. Nothing is created either — the block passes no
+   * `onPresentationChange`, so there is nowhere to persist a pointer to.
+   */
+  it('sends a whiteboard block back to the list that owns it', () => {
+    const entries = vault();
+    useVaultStore.setState({ entries, views: lists() });
+    render(
+      <DashboardView
+        entries={records(entries)}
+        presentation={view([{ id: 'b1', kind: 'view', list: 'sketches' }])}
+        schema={buildSchema(entries)}
+      />,
+    );
+    expect(screen.getByTestId('whiteboard-unavailable')).toBeTruthy();
+    expect(screen.getByText('Whiteboards live on their list')).toBeTruthy();
   });
 
   it('spans a wide block across the grid', () => {

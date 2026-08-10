@@ -1,11 +1,22 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Entry } from '@/engine/types';
+import { resetMockFs } from '@/lib/mockIpc';
 import { TypePage } from '@/pages/TypePage';
 import { VIEW_KINDS } from '@/views/viewKinds';
 import { fixtureVault, makeEntry } from '@/test/factories';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
+
+/**
+ * jsdom cannot render mermaid, and the whiteboard tests below are about WHERE
+ * a canvas lands rather than what it draws. The stand-in keeps the shared
+ * editor's contract and nothing else.
+ */
+vi.mock('@/mermaid/FullScreenDiagramEditor', () => ({
+  FullScreenDiagramEditor: () => <div data-testid="fake-editor" />,
+}));
 
 let patches: { path: string; patch: Record<string, unknown> }[];
 
@@ -301,5 +312,100 @@ describe('TypePage — property configuration (M12.8: floating, never an aside)'
         patch: { fields: { uses_pronouns: { kind: 'text' } } },
       });
     });
+  });
+});
+
+/**
+ * The tenth kind's host on a Type screen (M29.48).
+ *
+ * A Type's saved views are real views (M12.3), so a whiteboard is one of the
+ * tabs it can hold — and its canvas lands beside the Type DOC that owns those
+ * views. A type with no doc of its own has no folder to be beside, so its
+ * canvases go to a top-level whiteboards/.
+ *
+ * Measured on the mock disk rather than on a captured prop: the created path
+ * IS the contract, and the host's `folder` has no other observable.
+ */
+describe('TypePage hosts a whiteboard tab (M29.48)', () => {
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  // Captured before the stub below replaces it — per-test state, not a
+  // permanent amputation of the store for whatever runs after.
+  const realRescan = useVaultStore.getState().rescan;
+
+  /** Work item, declaring a whiteboard tab, with its doc wherever asked. */
+  const typeDoc = (path: string): Entry =>
+    makeEntry({
+      path,
+      title: 'Work item',
+      type: 'Type',
+      properties: {
+        fields: { status: { kind: 'status' } },
+        statuses: [{ id: 'todo', group: 'active', color: '#7E8699' }],
+        views: [{ id: 'sketch', name: 'Sketch', presentation: { type: 'whiteboard' } }],
+      } as unknown as Entry['properties'],
+    });
+
+  function setupType(entries: Entry[], view?: string) {
+    resetMockFs();
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entries,
+      views: [],
+      status: 'ready',
+      // Create-on-open rescans so the file tree sees the new canvas (M29.46).
+      // A real rescan here would reload `entries` from the demo corpus and
+      // delete the fixture type mid-test; the assertions read the disk it
+      // wrote to instead.
+      rescan: vi.fn(async () => {}),
+    });
+    render(
+      <TypePage
+        selection={{ kind: 'type', name: 'Work item', ...(view === undefined ? {} : { view }) }}
+      />,
+    );
+  }
+
+  // Unmount FIRST: putting the real action back is a store notification, and a
+  // still-mounted WhiteboardView subscribes to `rescan` — restoring it over a
+  // live tree re-renders outside act(). Vitest runs afterEach hooks
+  // last-registered-first, so this one precedes the file-level `cleanup`.
+  afterEach(() => {
+    cleanup();
+    useVaultStore.setState({ rescan: realRescan });
+  });
+
+  // Settled first, asserted second: create-on-open ends by persisting the
+  // pointer and opening the editor on it, and waiting for that keeps every
+  // state update inside act().
+  const opened = () => screen.findByTestId('fake-editor');
+
+  it('creates the canvas beside the Type doc that owns the views', async () => {
+    setupType([typeDoc('types/work-item.md')], 'sketch');
+    await opened();
+    expect(fs().get('types/whiteboards/sketch.mmd')).toContain('flowchart TD');
+  });
+
+  it('a Type doc at the vault root gets a top-level whiteboards/', async () => {
+    setupType([typeDoc('work-item.md')], 'sketch');
+    await opened();
+    expect(fs().get('whiteboards/sketch.mmd')).toBeTruthy();
+  });
+
+  /**
+   * A GHOST type — a name only records carry, with no `type: Type` doc
+   * (typeCatalog.ts's `docPath: null`). It has no saved views either, so its
+   * whiteboard is reached the only way it can be: switching the open tab's
+   * layout. There is no folder that belongs to it, and inventing one (`types/`,
+   * say) would put the canvas beside a doc that does not exist.
+   */
+  it('a type with no doc of its own falls back to the vault root', async () => {
+    setupType([makeEntry({ path: 'items/a.md', title: 'Alpha', type: 'Work item' })]);
+    fireEvent.click(screen.getByTestId('view-tab-all'));
+    fireEvent.click(screen.getByText('Change layout…'));
+    fireEvent.click(screen.getByTestId('view-switch-whiteboard'));
+    await opened();
+    // Named after the open tab, which for a type with no saved views is the
+    // derived default one.
+    expect(fs().get('whiteboards/table.mmd')).toBeTruthy();
   });
 });
