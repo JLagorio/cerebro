@@ -22,7 +22,7 @@
 - **Clusters:** a subgraph renders as `<g class="cluster …" id="<domId>">` — `packages/mermaid/src/rendering-util/rendering-elements/clusters.js:22-27` (`.attr('class', 'cluster ' + node.cssClasses).attr('id', node.domId)`). Subgraph nodes built in `flowDb.getData()` carry **no `domId` field** (`packages/mermaid/src/diagrams/flowchart/flowDb.ts:1198-1213` — the `isGroup: true` push has no `domId`), and `packages/mermaid/src/rendering-util/render.ts:67-72` then computes `node.domId = `${diagramId}-${node.domId || node.id}``. So a cluster's DOM id is **`<renderId>-<subgraphId>` exactly — no `flowchart-` prefix, no counter**, unlike node groups (`<renderId>-flowchart-<id>-<n>`). `stripRenderId` in svgBinding already handles the render-id prefix; cluster matching is then an EXACT match against known subgraph ids.
 - **Subgraph ids** (`flowDb.ts:674-745`, `addSubGraph`): `subgraph id[Title]` → explicit id. `subgraph OneWord` → id = `OneWord` (id text === title text, no whitespace). `subgraph Two Words` → whitespace in the id text zeroes it (`flowDb.ts:681-683`) and the id becomes `'subGraph' + subCount` (`flowDb.ts:725`). `subCount` increments once per `addSubGraph` call (`flowDb.ts:728`), and the jison reduction for a subgraph fires at its `end` — so **generated ordinals follow CLOSE order, inner-before-outer**, and anonymous `subgraph`/`end` blocks consume an ordinal too. Membership dedupe: a node already claimed by an earlier-added (= inner, closed-first) subgraph is removed from a later one (`makeUniq`, `flowDb.ts:743`).
 - **`direction` inside subgraphs:** lexer `flow.jison:140-144`, and `direction` is also a legal TOP-level statement (`flow.jison:388`, rule at `622-631`) that calls `setDirection` — so a `direction TD` line orphaned by dissolving its subgraph would silently override the header's direction. Dissolve must remove it (decided below).
-- **`click` grammar** (`flow.jison:107-114` lexer, `541-555` rules): `click <id> "<target>"` is the plain-link form (`CLICK STR` → `yy.setLink`, flowDb.ts:553-562). Variants — `call`/`CALLBACKNAME`, `href`, tooltip second string, `_blank`-style `LINK_TARGET`, comma id-lists — all exist and are NOT ours; they stay opaque. **At `securityLevel: 'strict'` (our render.ts), mermaid does not attach click interactivity** (`flowDb.ts:500` gates the handler path; links get sabotaged sanitization rather than working navigation). This is fine and deliberate: **the editor owns click semantics** — M29.38's badge is the navigation hit target, mermaid's render is just the picture. Say this in code comments too; the next reader will otherwise "fix" it.
+- **`click` grammar** (`flow.jison:107-114` lexer, `541-555` rules): `click <id> "<target>"` is the plain-link form (`CLICK STR` → `yy.setLink`, flowDb.ts:553-562). Variants — `call`/`CALLBACKNAME`, `href`, tooltip second string, `_blank`-style `LINK_TARGET`, comma id-lists — all exist and are NOT ours; they stay opaque. **CORRECTED 2026-08-09 during M29.36 — the claim that stood here was measured FALSE on the bundled 11.16.0, and it was repeated in four other places in this plan.** At `securityLevel: 'strict'` mermaid attaches no click *handler* (`flowDb.ts:500` does gate that path), but it DOES emit a real anchor that **wraps the node `<g>` the binding layer resolves**: `<a href="notes/a.md" data-look="classic"><g class="node default clickable" id="flowchart-A-…">`. A `javascript:` target is neutralised (sanitizeUrl drops the attribute), but a vault-relative or absolute target is **live navigation** — inside the Tauri webview it takes the whole app off the SPA. **The picture is NOT inert.** The editor still owns click semantics and M29.38's badge is still the intended hit target, but M29.38 must ALSO neutralize the anchor (`preventDefault` on it, or strip `href` in `bindFlowchartSvg`): `StructuralEditor.tsx:187` calls `stopPropagation()` and **not** `preventDefault()`, so clicking a linked node merely to select it follows the link. This is live today for hand-authored click lines, independent of `setNodeLink`. Do not write the old claim into code comments.
 - **Icons** (verified against v11.16.1): `mermaid.registerIconPacks([{ name, loader }])` is on the default export (`packages/mermaid/src/mermaid.ts:467,485`); `name` overrides the pack's own prefix; loaders are lazy and cached; an unregistered pack renders an 80×80 blue "?" box, **not an error**; icon names REQUIRE the `pack:` prefix (fallbackPrefix is `''`); meta keys are `icon` / `form` (square|circle|rounded) / `pos` (t|b) / `h` (default 48) / `w`.
 
 ## Repo traps (read before coding)
@@ -595,8 +595,10 @@ const OPAQUE_KEYWORDS = /^(classDef|class|linkStyle|direction|accTitle|accDescr)
  * Every node with an OWNED click line → its target. Later lines win, which is
  * what mermaid itself does (`setLink` overwrites, flowDb.ts:553). NOTE the
  * editor is the ONLY thing that honors these at runtime: render.ts pins
- * securityLevel 'strict', where mermaid deliberately attaches no interactivity
- * (flowDb.ts:500) — the picture is inert, the M29.38 badge is the hit target.
+ * securityLevel 'strict', where mermaid attaches no click HANDLER
+ * (flowDb.ts:500) — but it still emits a live `<a href>` wrapping the node
+ * (measured, M29.36; see the corrected note at the top of this plan), so the
+ * M29.38 badge is the hit target AND that anchor must be neutralized.
  */
 export function nodeLinks(model: FlowchartModel): Map<string, { line: number; target: string }> {
   const out = new Map<string, { line: number; target: string }>();
@@ -1732,8 +1734,10 @@ Bind-effect additions (inside the `renderMermaid(...).then` after the existing n
 
       // Link badges: one per owned click line whose node is bound. Computed
       // here (the only place with fresh geometry) and rendered as React
-      // overlays — the badge, not the node, is the navigation hit target;
-      // mermaid at securityLevel strict attaches no interactivity of its own.
+      // overlays — the badge, not the node, is the navigation hit target.
+      // NOTE (corrected M29.36): mermaid at strict attaches no click HANDLER
+      // but DOES wrap the node in a live `<a href>`, so this task must also
+      // neutralize that anchor — see the corrected note at the top of the plan.
       const hostBox = hostRef.current.getBoundingClientRect();
       const nextBadges: { id: string; target: string; x: number; y: number }[] = [];
       for (const [nid, link] of nodeLinks(model)) {
@@ -2045,7 +2049,7 @@ git commit -m "feat(mermaid): insert palette + e2e proof of icons, groups, links
 - [ ] `setNodeIcon` writes/patches/clears `@{ icon, form, pos }` through the node-meta machinery; unknown keys and key order survive; the line dies when emptied. All byte-assertions green.
 - [ ] `IconPicker` (in `src/mermaid/flowchart/`): 60+ curated names, EACH proven present in both lucide-react and the iconify pack by a test; free-text `lucide:x`; preview via the app `Icon`; clear action.
 - [ ] Model owns `click <id> "<target>"` — and ONLY that form; `classDef`/`class` remain opaque (ordering proven); a bare `click` line cannot mint a phantom node; byte-identical round-trips.
-- [ ] Comments in `model.ts` and `StructuralEditor.tsx` state plainly that at securityLevel strict mermaid attaches no click interactivity and the editor's badge is the navigation surface.
+- [ ] Comments in `model.ts` and `StructuralEditor.tsx` state plainly that at securityLevel strict mermaid attaches no click HANDLER but still emits a live `<a href>` wrapping the node (measured M29.36), that the editor's badge is the navigation surface, and that the anchor is neutralized so selecting a linked node cannot navigate the webview away from the app.
 - [ ] `setNodeLink` appends/patches/removes; quote substitution at the boundary.
 - [ ] `subgraphs()` mirrors flowDb's effective-id rules including close-order ordinals and anonymous blocks; `subgraph-start` round-trips all three source forms.
 - [ ] `createSubgraph` wraps contiguous runs in place, relocates non-contiguous owned lines with raw bytes intact, mints bare references for unclaimed members, refuses re-parenting; `renameSubgraph` preserves effective ids; `dissolveSubgraph` deletes markers + own direction line and nothing else; `setSubgraphDirection` inserts/rewrites/removes at own depth only.
