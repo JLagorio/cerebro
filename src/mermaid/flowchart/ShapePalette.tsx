@@ -23,11 +23,24 @@ const CATEGORIES = ['Basic', 'Process', 'Technical', 'Annotation'] as const;
  */
 export function ShapePalette({
   current,
+  supersededByIcon = null,
   onPick,
   onClose,
 }: {
   /** Registry short name of the node's current shape, for the pressed state. */
   current: string | null;
+  /**
+   * The icon this node carries, when it has one (M29.38). Render precedence is
+   * `img` > `icon` > `shape` — MEASURED in `icons.mermaid.test.ts`: mermaid's
+   * `getTypeFromVertex` checks `vertex.icon` before `vertex.type`, so a node
+   * with both draws the icon and the shape never appears.
+   *
+   * NOT a refusal. The shape is LATENT, not dead: it is written, kept, and
+   * drawn again the moment the icon is removed, so refusing the pick would
+   * throw away an edit the user will get. But lighting a shape up as though it
+   * were on screen when it is not is the palette lying, so it says so instead.
+   */
+  supersededByIcon?: string | null;
   onPick: (shape: string) => void;
   onClose: () => void;
 }) {
@@ -83,6 +96,15 @@ export function ShapePalette({
           }}
           className="w-full flex-none rounded border border-n-200 bg-n-0 px-1.5 py-1 text-xs text-n-800 outline-none focus:border-cortex-500"
         />
+        {supersededByIcon !== null && (
+          <div
+            data-testid="shape-superseded-note"
+            className="flex-none rounded bg-n-50 px-1.5 py-1 text-2xs leading-snug text-n-500"
+          >
+            {supersededByIcon} is drawn instead of a shape. A shape picked here is kept and appears
+            when the icon is removed.
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {CATEGORIES.map((cat) => {
             const inCat = visible.filter((s) => s.category === cat);

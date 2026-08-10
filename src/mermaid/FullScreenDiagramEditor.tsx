@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { Entry } from '@/engine/types';
 import { CanvasViewport } from './CanvasViewport';
 import { CodeOverlay } from './CodeOverlay';
 import { DiagramToolbar } from './DiagramToolbar';
@@ -40,10 +41,16 @@ export function FullScreenDiagramEditor({
   // binding (eslint.config.js) — the PROP keeps its real name for callers.
   embedded: _embedded = false,
   overlay,
+  entries,
+  onOpenPath,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
   title?: string;
+  /** Vault entries for the structural editor's link popover (M29.38); pure pass-through. */
+  entries?: Entry[];
+  /** What a link badge click does — hosts pass useOpenPath('in-place'); pure pass-through. */
+  onOpenPath?: (path: string) => void;
   /** Stage-H forward contract (spec D1): fill the given container, assume no page chrome. */
   embedded?: boolean;
   /** Stage-H forward contract (spec D1): rendered INSIDE the CanvasViewport plane, so hosts
@@ -113,7 +120,13 @@ export function FullScreenDiagramEditor({
             to paint the doomed frame.
           */}
           {mode === 'visual' && flowchartCapable ? (
-            <StructuralEditor code={code} onChangeCode={onChangeCode} toolbar={false} />
+            <StructuralEditor
+              code={code}
+              onChangeCode={onChangeCode}
+              toolbar={false}
+              entries={entries}
+              onOpenPath={onOpenPath}
+            />
           ) : (
             <div
               data-testid="fullscreen-readonly-diagram"

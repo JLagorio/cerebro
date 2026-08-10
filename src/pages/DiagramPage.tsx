@@ -8,6 +8,7 @@ import { readNote, saveNote } from '@/lib/ipc';
 import { humanize } from '@/lib/mockParse';
 import { detectDiagramType } from '@/mermaid/detect';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
+import { useOpenPath } from '@/app/useOpenPath';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useEntry, useVaultStore } from '@/stores/vaultStore';
@@ -66,6 +67,12 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
   const vaultPath = useVaultStore((s) => s.vaultPath);
   const navigate = useNavStore((s) => s.navigate);
   const toast = useUiStore((s) => s.toast);
+  // M29.38 — the link popover's record search and what a link badge opens.
+  // `in-place`, not `navigate`: this page IS the canvas the user is standing
+  // on, and M9.3's backdrop jump is for surfaces that have none. The detail
+  // panel mounts app-globally (App.tsx), so openDetail works from here.
+  const entries = useVaultStore((s) => s.entries);
+  const openPath = useOpenPath('in-place');
 
   // null while loading; the editors only mount on real content.
   const [code, setCode] = useState<string | null>(null);
@@ -218,7 +225,12 @@ export function DiagramPage({ selection }: { selection: DiagramSelection }) {
            handleChange, the same channel the old panes used, so the keyed
            debounced autosave (M29.23) is untouched. The editor owns no
            persistence; this page is the only writer. */
-        <FullScreenDiagramEditor code={code} onChangeCode={handleChange} />
+        <FullScreenDiagramEditor
+          code={code}
+          onChangeCode={handleChange}
+          entries={entries}
+          onOpenPath={openPath}
+        />
       )}
     </div>
   );

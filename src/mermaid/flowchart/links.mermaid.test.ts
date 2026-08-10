@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import mermaid from 'mermaid';
 import { nodeLinks, nodes, parseFlowchart, serialize } from './model';
 import { setNodeLink } from './ops';
+import { bindFlowchartSvg } from './svgBinding';
 
 /**
  * Conformance, not unit testing (M29.36) — the click-line twin of
@@ -242,6 +243,23 @@ describe('click conformance (M29.36)', () => {
       // sanitizeUrl does strip the obvious weapon, at least.
       const js = await renderSvg('flowchart TD\n  A[Start] --> B\n  click A "javascript:alert(1)"');
       expect(js.includes('javascript:')).toBe(false);
+
+      // WHERE the anchor sits is what decided M29.38's fix: it WRAPS the node
+      // `<g>` the binding layer resolves and hangs its onclick on. Following a
+      // link is a DEFAULT ACTION, not propagation, so the node handler's
+      // `stopPropagation()` never touched it — only `preventDefault()` or a
+      // removed href does. Hence `bindFlowchartSvg` strips the attribute.
+      const host = document.createElement('div');
+      // Mermaid's own strict-mode output, the same sanitized sink the editor
+      // injects into.
+      host.innerHTML = rel;
+      const anchor = host.querySelector('a[href]')!;
+      expect(anchor.namespaceURI).toBe('http://www.w3.org/2000/svg');
+      expect(anchor.querySelector('g.node')).not.toBeNull();
+      const model = parseFlowchart('flowchart TD\n  A[Start] --> B\n  click A "notes/a.md"')!;
+      const binding = bindFlowchartSvg(host, model);
+      expect(binding.nodeEls.get('A')?.closest('a')).toBe(anchor);
+      expect(host.querySelectorAll('a[href]')).toHaveLength(0);
     },
     TIMEOUT,
   );

@@ -9,6 +9,7 @@ import {
   renameSubgraph,
   setSubgraphDirection,
 } from './ops';
+import { bindFlowchartSvg } from './svgBinding';
 
 /**
  * Conformance, not unit testing (M29.37). Everything here is a CLAIM ABOUT THE
@@ -525,6 +526,83 @@ describe('subgraph conformance (M29.37)', () => {
       expect(checked).toBeGreaterThan(400);
       expect(grouped).toBeGreaterThan(60);
       expect(refused).toBeGreaterThan(50);
+    },
+    TIMEOUT,
+  );
+});
+
+/**
+ * The cluster DOM contract M29.38's canvas binding stands on, MEASURED on the
+ * bundled 11.16.0 rather than read off the vendored 11.16.1 source — this wave
+ * has been bitten by that gap once already, and a mis-keyed cluster is a
+ * control that silently never finds the block it names.
+ *
+ * What the render actually emits:
+ *
+ * - `<g class="cluster" id="<renderId>-<subgraphId>">`. The id is the
+ *   effective subgraph id EXACTLY — no `flowchart-` prefix and no counter,
+ *   unlike a node group (`<renderId>-flowchart-<id>-<n>`). The vendored source
+ *   writes `'cluster ' + node.cssClasses`, i.e. a TRAILING SPACE when there
+ *   are no classes; the bundled build hands back a bare `cluster`. `g.cluster`
+ *   covers both, which is why the binding matches on the class SELECTOR and
+ *   not on the attribute text.
+ * - node groups are NOT descendants of their cluster: they live in a sibling
+ *   `g.nodes` layer, so the only thing a click inside a block's box can land
+ *   on is a node or the cluster's own `<rect>`.
+ */
+describe('the cluster DOM contract (M29.38)', () => {
+  let seq = 0;
+  async function renderSvg(code: string): Promise<string> {
+    seq += 1;
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    try {
+      const { svg } = await mermaid.render(`cluster${seq}`, code, host);
+      return svg;
+    } finally {
+      host.remove();
+    }
+  }
+
+  it(
+    'a cluster id is `<renderId>-<subgraphId>`, and bindFlowchartSvg resolves every block',
+    async () => {
+      init();
+      const code = [
+        'flowchart TD',
+        '  subgraph ops[Operations]',
+        '    A[Start] --> B[End]',
+        '  end',
+        '  subgraph Two Words',
+        '    C[Lone]',
+        '  end',
+        '  subgraph Solo',
+        '    D[Dee]',
+        '  end',
+      ].join('\n');
+      const host = document.createElement('div');
+      // Mermaid's own strict-mode output, injected the same way the editor does.
+      host.innerHTML = await renderSvg(code);
+
+      const clusters = [...host.querySelectorAll<SVGGElement>('g.cluster')];
+      expect(clusters.map((c) => c.id).sort()).toEqual([
+        'cluster1-Solo',
+        'cluster1-ops',
+        'cluster1-subGraph1',
+      ]);
+      // No node group is inside a cluster group — the layers are siblings.
+      expect(clusters.some((c) => c.querySelector('g.node') !== null)).toBe(false);
+
+      const model = parseFlowchart(code)!;
+      const binding = bindFlowchartSvg(host, model);
+      expect([...binding.clusterEls.keys()].sort()).toEqual(['Solo', 'ops', 'subGraph1']);
+      // …and those are exactly the ids our model computed, so the binding is
+      // an exact-equality lookup and not a heuristic.
+      expect(
+        subgraphs(model)
+          .map((s) => s.id)
+          .sort(),
+      ).toEqual(['Solo', 'ops', 'subGraph1']);
     },
     TIMEOUT,
   );

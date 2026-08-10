@@ -1,5 +1,5 @@
 import type { EdgeEntry, FlowchartModel } from './model';
-import { edges, nodes } from './model';
+import { edges, nodes, subgraphs } from './model';
 
 /**
  * Maps mermaid's rendered flowchart SVG back to model ids (M29.16).
@@ -53,6 +53,12 @@ import { edges, nodes } from './model';
 export interface FlowchartSvgBinding {
   nodeEls: Map<string, SVGGElement>;
   edgeEls: (EdgeEntry & { el: SVGPathElement })[];
+  /**
+   * Cluster groups by EFFECTIVE subgraph id (M29.38). Unmatched clusters are
+   * absent rather than guessed at — same contract as nodes and edges: an
+   * element we cannot resolve renders fine, it just is not editable.
+   */
+  clusterEls: Map<string, SVGGElement>;
 }
 
 /**
@@ -159,5 +165,37 @@ export function bindFlowchartSvg(
     if (entry !== undefined) edgeEls.push({ ...entry, el });
   }
 
-  return { nodeEls, edgeEls };
+  // Clusters (M29.38). DOM contract MEASURED on the BUNDLED 11.16.0, not read
+  // off the vendored 11.16.1 source (see subgraphs.mermaid.test.ts): a
+  // subgraph renders as `<g class="cluster" id="<renderId>-<subgraphId>">` —
+  // the id is the effective subgraph id EXACTLY, with no `flowchart-` prefix
+  // and no counter, unlike a node group. So after stripRenderId this is an
+  // exact-equality lookup against the ids `subgraphs()` computes (which mirror
+  // flowDb's close-order ordinals). Node groups are NOT descendants of the
+  // cluster — they sit in a sibling `g.nodes` layer — so a cluster's own box
+  // is the only thing a click on it can land on.
+  const clusterEls = new Map<string, SVGGElement>();
+  const knownSubs = subgraphs(model);
+  for (const el of container.querySelectorAll<SVGGElement>('g.cluster')) {
+    const domId = stripRenderId(el.id);
+    const hit = knownSubs.find((s) => s.id === domId);
+    if (hit !== undefined && !clusterEls.has(hit.id)) clusterEls.set(hit.id, el);
+  }
+
+  // Neutralize mermaid's own anchors (M29.38). MEASURED on 11.16.0: at
+  // `securityLevel: 'strict'` mermaid attaches no click HANDLER, but a `click`
+  // line still emits a real `<a href="…">` that WRAPS the node `<g>` bound
+  // above. A default action is not propagation, so the node handler's
+  // `stopPropagation()` never touched it — clicking a linked node merely to
+  // SELECT it followed the link, and inside the Tauri webview that takes the
+  // whole app off the SPA. `javascript:` targets are already dropped by
+  // sanitizeUrl; a vault-relative or absolute one is live navigation. The
+  // EDITOR owns click semantics here (M29.36) and the badge is the hit target,
+  // so no href in this subtree survives — including one around a node the
+  // model could not resolve, which is just as navigable. The anchor element
+  // itself stays: it carries mermaid's own layout, and removing it would
+  // reparent the very groups just bound.
+  for (const a of container.querySelectorAll('a[href]')) a.removeAttribute('href');
+
+  return { nodeEls, edgeEls, clusterEls };
 }

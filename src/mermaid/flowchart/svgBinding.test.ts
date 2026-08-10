@@ -191,3 +191,98 @@ describe('bindFlowchartSvg and user-authored edge ids (M29.31)', () => {
     expect(binding.edgeEls[0]).toMatchObject({ from: 'B', to: 'C', id: 'e1' });
   });
 });
+
+// MEASURED on the BUNDLED 11.16.0 (see subgraphs.mermaid.test.ts, "the cluster
+// DOM contract"): a subgraph renders as `<g class="cluster" id="<renderId>-<id>">`
+// — no `flowchart-` prefix and no counter, unlike a node group — and node
+// groups are NOT descendants of it; they live in a sibling `g.nodes` layer.
+describe('cluster binding (M29.38)', () => {
+  const CLUSTER_SVG = [
+    '<svg id="cerebro-mermaid-7" viewBox="0 0 100 100">',
+    '  <g class="cluster" id="cerebro-mermaid-7-ops"><rect/></g>',
+    // The trailing space the vendored source writes when cssClasses is empty
+    // (`'cluster ' + node.cssClasses`) — the bundled build trims it away, so
+    // both spellings are in the fixture and both must bind.
+    '  <g class="cluster " id="cerebro-mermaid-7-subGraph1"><rect/></g>',
+    '  <g class="cluster" id="cerebro-mermaid-7-mystery"><rect/></g>',
+    '  <g class="node default" id="cerebro-mermaid-7-flowchart-A-0"><rect/></g>',
+    '</svg>',
+  ].join('\n');
+
+  it('maps cluster groups to effective subgraph ids — explicit AND generated', () => {
+    const model = parseFlowchart(
+      [
+        'flowchart TD',
+        '  subgraph ops[Operations]',
+        '    A[Start]',
+        '  end',
+        '  subgraph Two Words',
+        '    B',
+        '  end',
+      ].join('\n'),
+    )!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = CLUSTER_SVG;
+    const binding = bindFlowchartSvg(host, model);
+    expect([...binding.clusterEls.keys()].sort()).toEqual(['ops', 'subGraph1']);
+    expect(binding.clusterEls.has('mystery')).toBe(false); // unmatched → unbound, renders fine
+    expect(binding.nodeEls.has('A')).toBe(true); // node binding untouched
+  });
+
+  it('binds nothing when the document has no readable blocks', () => {
+    const model = parseFlowchart('flowchart TD\n  A[Start]')!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = CLUSTER_SVG;
+    expect(bindFlowchartSvg(host, model).clusterEls.size).toBe(0);
+  });
+});
+
+// A LIVE navigation bug, measured on the bundled 11.16.0 (links.mermaid.test.ts):
+// at securityLevel 'strict' mermaid attaches no click HANDLER but still wraps
+// every clickable node group in a real `<a href="…">`. A default action is not
+// propagation, so the node handler's stopPropagation() never touched it, and
+// clicking a linked node merely to SELECT it navigated the whole Tauri webview
+// off the SPA. Live today for hand-authored click lines.
+describe('bindFlowchartSvg neutralizes mermaid anchors (M29.38)', () => {
+  const LINKED_SVG = [
+    '<svg id="cerebro-mermaid-9" viewBox="0 0 100 100">',
+    '  <g class="nodes">',
+    '    <a href="notes/a.md" data-look="classic">',
+    '      <g class="node default clickable" id="cerebro-mermaid-9-flowchart-A-0"><rect/></g>',
+    '    </a>',
+    '    <a href="https://example.com/">',
+    '      <g class="node default clickable" id="cerebro-mermaid-9-flowchart-B-1"><rect/></g>',
+    '    </a>',
+    '  </g>',
+    '</svg>',
+  ].join('\n');
+
+  it('strips every href so no click can navigate the app away', () => {
+    const model = parseFlowchart(
+      'flowchart TD\n  A --> B\n  click A "notes/a.md"\n  click B "https://example.com/"',
+    )!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = LINKED_SVG;
+    expect(host.querySelectorAll('a[href]')).toHaveLength(2);
+    const binding = bindFlowchartSvg(host, model);
+    expect(host.querySelectorAll('a[href]')).toHaveLength(0);
+    // The anchors themselves stay — they carry mermaid's own layout — and the
+    // node groups inside them are still bound and still clickable.
+    expect(host.querySelectorAll('a')).toHaveLength(2);
+    expect([...binding.nodeEls.keys()].sort()).toEqual(['A', 'B']);
+  });
+
+  it('strips an anchor the model knows nothing about too', () => {
+    // An unbound node is still a node mermaid drew an anchor around, and an
+    // href we leave behind is an href a click follows.
+    const model = parseFlowchart('flowchart TD\n  Z[Zed]')!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = LINKED_SVG;
+    bindFlowchartSvg(host, model);
+    expect(host.querySelectorAll('a[href]')).toHaveLength(0);
+  });
+});

@@ -1,36 +1,93 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Entry } from '@/engine/types';
 import { StructuralEditor } from './StructuralEditor';
 
 // vi.mock factories run during static import resolution — before this
 // module's own top-level consts would otherwise initialize — so the fixture
 // has to be declared through vi.hoisted() to exist by the time the factory
 // (which eagerly evaluates mockResolvedValue's argument) runs.
-const { FIXTURE_SVG, ANIMATED_SVG } = vi.hoisted(() => {
-  const nodeEls = [
-    '<g class="node" id="flowchart-A-0"><rect width="10" height="10"/></g>',
-    '<g class="node" id="flowchart-B-1"><rect width="10" height="10"/></g>',
-    '<g class="node" id="flowchart-C-2"><rect width="10" height="10"/></g>',
-  ].join('');
-  return {
-    FIXTURE_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
-    // A user-authored edge id renders VERBATIM as the path's own DOM id and
-    // the `L_<from>_<to>_<n>` path is not emitted at all (getEdgeId,
-    // utils.ts:946 — see svgBinding.ts). Carrying both here would let the
-    // animate toggle "prove" two-way behavior against a binding real mermaid
-    // never produces.
-    ANIMATED_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="e1"/></svg>`,
-  };
-});
+const { FIXTURE_SVG, ANIMATED_SVG, CLUSTERED_SVG, NESTED_SVG, SLASH_SVG, override } = vi.hoisted(
+  () => {
+    const nodeEls = [
+      '<g class="node" id="flowchart-A-0"><rect width="10" height="10"/></g>',
+      '<g class="node" id="flowchart-B-1"><rect width="10" height="10"/></g>',
+      '<g class="node" id="flowchart-C-2"><rect width="10" height="10"/></g>',
+    ].join('');
+    // Cluster shape MEASURED on the bundled 11.16.0 (subgraphs.mermaid.test.ts):
+    // `<g class="cluster" id="<renderId>-<subgraphId>">`, holding its own rect,
+    // with node groups in a SIBLING layer rather than inside it.
+    const cluster = (id: string): string =>
+      `<g class="cluster" id="${id}"><rect width="120" height="80"/></g>`;
+    return {
+      FIXTURE_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
+      // A user-authored edge id renders VERBATIM as the path's own DOM id and
+      // the `L_<from>_<to>_<n>` path is not emitted at all (getEdgeId,
+      // utils.ts:946 — see svgBinding.ts). Carrying both here would let the
+      // animate toggle "prove" two-way behavior against a binding real mermaid
+      // never produces.
+      ANIMATED_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="e1"/></svg>`,
+      CLUSTERED_SVG: `<svg viewBox="0 0 300 150">${cluster('ops')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
+      NESTED_SVG: `<svg viewBox="0 0 300 150">${cluster('outer')}${cluster('inner')}${nodeEls}</svg>`,
+      SLASH_SVG: `<svg viewBox="0 0 300 150">${cluster('a/b')}${nodeEls}</svg>`,
+      /** Which svg the mocked renderer hands back next, when a test pins one. */
+      override: { svg: null as string | null },
+    };
+  },
+);
 
 vi.mock('../render', () => ({
   renderMermaid: vi.fn((code: string) =>
-    Promise.resolve({ ok: true, svg: code.includes('e1@') ? ANIMATED_SVG : FIXTURE_SVG }),
+    Promise.resolve({
+      ok: true,
+      svg: override.svg ?? (code.includes('e1@') ? ANIMATED_SVG : FIXTURE_SVG),
+    }),
   ),
 }));
 
+/** Pin the svg the mocked renderer returns for this test only. */
+function mockSvg(svg: string): void {
+  override.svg = svg;
+}
+
+afterEach(() => {
+  override.svg = null;
+});
+
 const CODE = 'flowchart TD\n  A[Start] --> B[End]';
+
+/** Minimal Entry shape — only the fields resolveTarget and the popover read. */
+const entry = (path: string, title: string, filename: string, folder: string): Entry =>
+  ({
+    path,
+    filename,
+    folder,
+    project: null,
+    title,
+    type: null,
+    properties: {},
+    relationships: {},
+    outgoingLinks: [],
+    snippet: '',
+    createdAt: '',
+    modifiedAt: '',
+    parseError: null,
+  }) satisfies Entry;
+
+const ENTRIES: Entry[] = [
+  entry('projects/atlas/project.md', 'Atlas', 'project.md', 'projects/atlas'),
+  entry('notes/atlas-retro.md', 'Atlas retro', 'atlas-retro.md', 'notes'),
+];
+
+const CLUSTERED_CODE = [
+  'flowchart TD',
+  '  subgraph ops[Operations]',
+  '    A[Start] --> B[End]',
+  '  end',
+  '  C[Lone]',
+  '  click C "projects/atlas/project.md"',
+].join('\n');
 
 describe('StructuralEditor', () => {
   it('renders the diagram and selects a node on click', async () => {
@@ -561,11 +618,375 @@ describe('StructuralEditor', () => {
     expect(onChangeCode).not.toHaveBeenCalled();
   });
 
+  // Render precedence is img > icon > shape (MEASURED, icons.mermaid.test.ts):
+  // a node with both draws the icon and the shape never appears. The pick is
+  // still retained — it applies the moment the icon goes — so the palette stays
+  // live and says so rather than lighting up a shape nothing is drawing.
+  it('the shape palette says when an icon out-ranks the shape', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  A@{ shape: cloud, icon: "lucide:rocket" }'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
+    expect(screen.getByTestId('shape-superseded-note').textContent).toContain('lucide:rocket');
+    // Latent, not refused: the pick still lands.
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Database' }));
+    expect(onChangeCode.mock.calls[0][0]).toContain('shape: cyl');
+  });
+
   it('toolbar={false} hides the built-in control row but keeps the host', async () => {
     render(
       <StructuralEditor code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} toolbar={false} />,
     );
     expect(screen.queryByTestId('structural-toolbar')).toBeNull();
     expect(screen.getByTestId('structural-host')).toBeTruthy();
+  });
+});
+
+describe('subgraph affordances (M29.38)', () => {
+  it('clicking a cluster (not a node inside it) opens the subgraph toolbar', async () => {
+    mockSvg(CLUSTERED_SVG);
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    expect(screen.getByTestId('mermaid-subgraph-toolbar')).toBeTruthy();
+    // The box opens on the block's own title, so a retitle starts from what is
+    // there rather than from empty.
+    expect((screen.getByLabelText('Subgraph title') as HTMLInputElement).value).toBe('Operations');
+  });
+
+  it('dissolve removes the markers through a surgical edit', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Dissolve subgraph' }));
+    const out = onChangeCode.mock.calls[0][0] as string;
+    expect(out).not.toContain('subgraph');
+    expect(out).toContain('    A[Start] --> B[End]'); // body bytes intact, indentation included
+  });
+
+  it('renaming a block through the toolbar keeps its id', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    const title = screen.getByLabelText('Subgraph title');
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Delivery{Enter}');
+    expect(onChangeCode.mock.lastCall?.[0]).toContain('subgraph ops[Delivery]');
+  });
+
+  it('Enter on an unchanged subgraph title is a no-op — no history churn', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    await userEvent.type(screen.getByLabelText('Subgraph title'), '{Enter}');
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  it('the direction the block already has costs no undo step', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    const code = [
+      'flowchart TD',
+      '  subgraph ops[Operations]',
+      '    direction LR',
+      '    A[Start] --> B[End]',
+      '  end',
+    ].join('\n');
+    render(<StructuralEditor code={code} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    const lr = screen.getByRole('button', { name: 'Subgraph direction LR' });
+    expect(lr.getAttribute('aria-pressed')).toBe('true');
+    await userEvent.click(lr);
+    expect(onChangeCode).not.toHaveBeenCalled();
+    // …and a different one still writes.
+    await userEvent.click(screen.getByRole('button', { name: 'Subgraph direction BT' }));
+    expect(onChangeCode.mock.calls[0][0]).toContain('direction BT');
+  });
+
+  it('shift-clicking two nodes offers Group into subgraph', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor code={'flowchart TD\n  A[One]\n  B[Two]'} onChangeCode={onChangeCode} />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    // fireEvent, not userEvent: userEvent v14 has no per-click modifier option —
+    // Shift is keyboard state, and fireEvent states it directly on the
+    // MouseEvent, which is exactly what the imperative onclick reads.
+    fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true });
+    fireEvent.click(document.getElementById('flowchart-B-1')!, { shiftKey: true });
+    expect(screen.getByTestId('mermaid-group-bar').textContent).toContain('2 selected');
+    // A shift-click builds a selection; it must not open the single-node toolbar.
+    expect(screen.queryByTestId('mermaid-node-toolbar')).toBeNull();
+    await userEvent.type(screen.getByLabelText('New subgraph title'), 'Grouped');
+    await userEvent.click(screen.getByRole('button', { name: 'Group into subgraph' }));
+    const out = onChangeCode.mock.calls[0][0] as string;
+    expect(out).toContain('subgraph Grouped[Grouped]');
+    expect(out).toContain('end');
+  });
+
+  // The two surfaces share the canvas and must never be open together — a
+  // cluster click is a fresh selection, and a plain node click drops a pending
+  // multi-selection rather than leaving a bar hanging over an unrelated pick.
+  it('a cluster click and a plain node click each clear a pending multi-selection', async () => {
+    mockSvg(CLUSTERED_SVG);
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true });
+    fireEvent.click(document.getElementById('flowchart-B-1')!, { shiftKey: true });
+    expect(screen.getByTestId('mermaid-group-bar')).toBeTruthy();
+    await userEvent.click(document.getElementById('ops')!);
+    expect(screen.queryByTestId('mermaid-group-bar')).toBeNull();
+    expect(screen.getByTestId('mermaid-subgraph-toolbar')).toBeTruthy();
+
+    fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true });
+    fireEvent.click(document.getElementById('flowchart-B-1')!, { shiftKey: true });
+    expect(screen.getByTestId('mermaid-group-bar')).toBeTruthy();
+    expect(screen.queryByTestId('mermaid-subgraph-toolbar')).toBeNull();
+    await userEvent.click(document.getElementById('flowchart-C-2')!);
+    expect(screen.queryByTestId('mermaid-group-bar')).toBeNull();
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+  });
+
+  // Carried from the F3 review: these predicates exist so a control can go dead
+  // WITH a reason instead of swallowing the click. A disabled control that does
+  // not say why is only half a fix.
+  it('grouping a node that already belongs to a block is refused, and says why', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true }); // inside ops
+    fireEvent.click(document.getElementById('flowchart-C-2')!, { shiftKey: true }); // outside
+    const group = screen.getByRole('button', { name: 'Group into subgraph' });
+    expect(group.hasAttribute('disabled')).toBe(true);
+    expect(group.getAttribute('title')).toContain('already belongs');
+    expect(screen.getByTestId('mermaid-group-bar').textContent).toContain('already belongs');
+    await userEvent.click(group);
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  it('dissolving a nested block whose direction would leak is refused, and says why', async () => {
+    mockSvg(NESTED_SVG);
+    const onChangeCode = vi.fn();
+    const code = [
+      'flowchart TD',
+      '  subgraph outer[Outer]',
+      '    subgraph inner[Inner]',
+      '      direction LR %% keep this note',
+      '      A[Start]',
+      '    end',
+      '  end',
+    ].join('\n');
+    render(<StructuralEditor code={code} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('inner')).not.toBeNull());
+    await userEvent.click(document.getElementById('inner')!);
+    const dissolve = screen.getByRole('button', { name: 'Dissolve subgraph' });
+    expect(dissolve.hasAttribute('disabled')).toBe(true);
+    expect(dissolve.getAttribute('title')).toContain('re-directing');
+    await userEvent.click(dissolve);
+    expect(onChangeCode).not.toHaveBeenCalled();
+    // The OUTER block has no such line at its own depth and stays live.
+    await userEvent.click(document.getElementById('outer')!);
+    expect(screen.getByRole('button', { name: 'Dissolve subgraph' }).hasAttribute('disabled')).toBe(
+      false,
+    );
+  });
+
+  it('a blank subgraph title is refused in place rather than emitting a killer line', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    const title = screen.getByLabelText('Subgraph title');
+    await userEvent.clear(title);
+    expect(screen.getByTestId('mermaid-subgraph-toolbar').textContent).toContain('needs a title');
+    expect(title.getAttribute('aria-invalid')).toBe('true');
+    await userEvent.type(title, '{Enter}');
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  // `subgraph a/b` really is the id `a/b` (MEASURED, M29.37) and no explicit
+  // form can spell it, so any retitle would silently re-key the block.
+  it('a retitle that cannot keep an unspellable id is refused, and says why', async () => {
+    mockSvg(SLASH_SVG);
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  subgraph a/b\n    A[Start]\n  end'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('a/b')).not.toBeNull());
+    await userEvent.click(document.getElementById('a/b')!);
+    const title = screen.getByLabelText('Subgraph title');
+    await userEvent.clear(title);
+    await userEvent.type(title, 'Renamed{Enter}');
+    expect(screen.getByTestId('mermaid-subgraph-toolbar').textContent).toContain('id');
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  // A portal is not involved here, but the leak is the same one: Backspace on
+  // any control inside an overlay reaches the editor's own onKeyDown, which
+  // deletes the SELECTED NODE.
+  it('keys pressed inside the subgraph surfaces never reach the canvas', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const outerKeyDown = vi.fn();
+    render(
+      <div onKeyDown={outerKeyDown}>
+        <StructuralEditor code={CLUSTERED_CODE} onChangeCode={() => {}} />
+      </div>,
+    );
+    await waitFor(() => expect(document.getElementById('ops')).not.toBeNull());
+    await userEvent.click(document.getElementById('ops')!);
+    for (const name of ['Subgraph direction LR', 'Dissolve subgraph']) {
+      screen.getByRole('button', { name }).focus();
+      await userEvent.keyboard('{Backspace}{Delete}');
+    }
+    fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true });
+    fireEvent.click(document.getElementById('flowchart-C-2')!, { shiftKey: true });
+    screen.getByLabelText('New subgraph title').focus();
+    await userEvent.keyboard('{Backspace}{Delete}');
+    expect(outerKeyDown).not.toHaveBeenCalled();
+  });
+});
+
+describe('link affordances (M29.38)', () => {
+  it('a linked node shows a badge; clicking a record badge opens in place', async () => {
+    mockSvg(CLUSTERED_SVG);
+    const onOpenPath = vi.fn();
+    render(
+      <StructuralEditor code={CLUSTERED_CODE} onChangeCode={() => {}} onOpenPath={onOpenPath} />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('mermaid-link-badge')).not.toBeNull());
+    await userEvent.click(screen.getByTestId('mermaid-link-badge'));
+    expect(onOpenPath).toHaveBeenCalledWith('projects/atlas/project.md');
+  });
+
+  it('a record badge with no host router is inert rather than a crash', async () => {
+    mockSvg(CLUSTERED_SVG);
+    render(<StructuralEditor code={CLUSTERED_CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(screen.queryByTestId('mermaid-link-badge')).not.toBeNull());
+    await userEvent.click(screen.getByTestId('mermaid-link-badge'));
+    expect(screen.getByTestId('mermaid-link-badge')).toBeTruthy();
+  });
+
+  it('a URL badge opens a new window, guarded', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const code = 'flowchart TD\n  A[Start]\n  click A "https://example.com"';
+    render(<StructuralEditor code={code} onChangeCode={() => {}} />);
+    await waitFor(() => expect(screen.queryByTestId('mermaid-link-badge')).not.toBeNull());
+    await userEvent.click(screen.getByTestId('mermaid-link-badge'));
+    expect(openSpy).toHaveBeenCalledWith('https://example.com', '_blank', 'noopener,noreferrer');
+    openSpy.mockRestore();
+  });
+
+  it('the node toolbar link button binds a record through the popover', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start]'}
+        onChangeCode={onChangeCode}
+        entries={ENTRIES}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node link' }));
+    await userEvent.type(screen.getByLabelText('Link target'), 'atlas');
+    await userEvent.click(screen.getByRole('button', { name: 'Link to Atlas' }));
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  A[Start]\n  click A "projects/atlas/project.md"',
+    );
+  });
+
+  it('the link popover joins the mutual-close set on the node toolbar', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} entries={ENTRIES} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node link' }));
+    expect(screen.getByTestId('mermaid-link-popover')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Change shape' }));
+    expect(screen.queryByTestId('mermaid-link-popover')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Node link' }));
+    expect(screen.queryByTestId('shape-palette')).toBeNull();
+    expect(screen.getByTestId('mermaid-link-popover')).toBeTruthy();
+  });
+
+  it('the link trigger announces the popover it owns', async () => {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    const trigger = screen.getByRole('button', { name: 'Node link' });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Node link' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+  });
+
+  it('Backspace inside the link popover does not delete the node', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} entries={ENTRIES} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node link' }));
+    await userEvent.keyboard('{Backspace}{Delete}');
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  // A LIVE bug this task closes: at securityLevel 'strict' mermaid attaches no
+  // click HANDLER but still wraps the node group in a real `<a href>`, and
+  // following a link is a DEFAULT ACTION that the node handler's
+  // stopPropagation() never touched. Clicking a linked node merely to SELECT it
+  // navigated the whole webview off the SPA.
+  it('the rendered picture carries no live href for a click to follow', async () => {
+    const linked = `<svg viewBox="0 0 200 100"><g class="nodes"><a href="notes/a.md"><g class="node" id="flowchart-A-0"><rect width="10" height="10"/></g></a></g></svg>`;
+    mockSvg(linked);
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start]\n  click A "notes/a.md"'}
+        onChangeCode={() => {}}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    expect(document.querySelectorAll('a[href]')).toHaveLength(0);
+    // Selecting still works, and the badge is the hit target instead.
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+    expect(screen.getByTestId('mermaid-link-badge')).toBeTruthy();
+  });
+
+  // A node linked ONLY by a click form the editor does not own has NO nodeLinks
+  // entry, so "absent" must not be read as "unlinked".
+  it('a link the editor does not own is reported in the popover', async () => {
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  click A href "notes/a.md"'}
+        onChangeCode={() => {}}
+        entries={ENTRIES}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node link' }));
+    expect(screen.getByTestId('mermaid-link-contested').textContent).toContain(
+      'cannot be edited here',
+    );
   });
 });

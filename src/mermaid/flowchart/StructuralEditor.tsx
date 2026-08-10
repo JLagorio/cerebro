@@ -1,10 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
+import type { Entry } from '@/engine/types';
 import { useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
 import { EdgeEditor } from './EdgeEditor';
+import { GroupBar } from './GroupBar';
 import { IconPicker } from './IconPicker';
-import { nodeMeta, nodeStyle, nodes, parseFlowchart, serialize, type EdgeEntry } from './model';
+import { LinkBadges, type LinkBadge } from './LinkBadges';
+import { LinkPopover } from './LinkPopover';
+import {
+  linkWriterLines,
+  nodeLinks,
+  nodeMeta,
+  nodeStyle,
+  nodes,
+  parseFlowchart,
+  serialize,
+  subgraphs,
+  type EdgeEntry,
+} from './model';
 import { NodeStyleMenu } from './NodeStyleMenu';
 import {
   addEdge,
@@ -14,10 +28,12 @@ import {
   setDirection,
   setLayoutEngine,
   setNodeIcon,
+  setNodeLink,
   setNodeShape,
   setNodeStyle,
 } from './ops';
 import { ShapePalette } from './ShapePalette';
+import { SubgraphToolbar } from './SubgraphToolbar';
 import { BRACKET_SHAPE_TO_REGISTRY, SHORT_NAME_FOR } from './shapes';
 import { bindFlowchartSvg, type FlowchartSvgBinding } from './svgBinding';
 
@@ -40,6 +56,8 @@ export function StructuralEditor({
   code,
   onChangeCode,
   toolbar = true,
+  entries,
+  onOpenPath,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
@@ -49,6 +67,15 @@ export function StructuralEditor({
    * direction rows (M29.26).
    */
   toolbar?: boolean;
+  /**
+   * Vault entries for the link popover's record search (M29.38). This surface
+   * has no store access by design — it is code in, code out — so the vault
+   * arrives as a prop or not at all. Without it the popover is URL-only:
+   * degradation, never a crash, because hosts without a vault exist.
+   */
+  entries?: Entry[];
+  /** What a record badge click does — hosts pass useOpenPath('in-place'). */
+  onOpenPath?: (path: string) => void;
 }) {
   const model = useMemo(() => parseFlowchart(code), [code]);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -60,6 +87,17 @@ export function StructuralEditor({
   const [shapeOpen, setShapeOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  // Cluster selection (M29.38) is held as a POSITION in subgraphs(model) — the
+  // handle every subgraph op takes — not as an id: a generated `subGraph<k>`
+  // id is a close-order ordinal that an edit elsewhere in the document can
+  // silently re-key.
+  const [selectedSub, setSelectedSub] = useState<number | null>(null);
+  const [subToolbarPos, setSubToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  const [subTitle, setSubTitle] = useState('');
+  const [multi, setMulti] = useState<string[]>([]);
+  const [groupTitle, setGroupTitle] = useState('');
+  const [badges, setBadges] = useState<LinkBadge[]>([]);
   const [ghost, setGhost] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(
     null,
   );
@@ -94,6 +132,19 @@ export function StructuralEditor({
   const validSelected =
     selected !== null && model !== null && nodes(model).has(selected) ? selected : null;
 
+  // The block list every cluster control resolves against. Memoized on the
+  // model because subgraphs() walks every line and three surfaces read it.
+  const subs = useMemo(() => (model === null ? [] : subgraphs(model)), [model]);
+  // Same staleness guard as validSelected, one level out: an external edit can
+  // dissolve the block a toolbar is pointing at between two renders, and an
+  // index past the end must not reach an op.
+  const validSelectedSub = selectedSub !== null && selectedSub < subs.length ? selectedSub : null;
+  const validMulti = useMemo(() => {
+    if (model === null) return [];
+    const known = nodes(model);
+    return multi.filter((id) => known.has(id));
+  }, [multi, model]);
+
   const apply = (next: ReturnType<typeof parseFlowchart>) => {
     if (next === null) return;
     const out = serialize(next);
@@ -122,6 +173,12 @@ export function StructuralEditor({
     setShapeOpen(false);
     setStyleOpen(false);
     setIconOpen(false);
+    setLinkOpen(false);
+    setSelectedSub(null);
+    setSubToolbarPos(null);
+    setSubTitle('');
+    setMulti([]);
+    setGroupTitle('');
   }, [code]);
 
   // Render, inject, and bind in one pass. The svg is written imperatively —
@@ -149,6 +206,24 @@ export function StructuralEditor({
         el.style.cursor = 'pointer';
         el.onclick = (e) => {
           e.stopPropagation();
+          // Shift-click builds a MULTI-selection (M29.38) and must not open the
+          // single-node toolbar: the group bar is the surface for two or more
+          // nodes, and two overlays claiming the same click is the state that
+          // made M29.33's keystroke leak reachable.
+          if (e.shiftKey) {
+            setSelected(null);
+            setToolbarPos(null);
+            setEdgeEditor(null);
+            setSelectedSub(null);
+            setSubToolbarPos(null);
+            setMulti((m) => (m.includes(id) ? m.filter((x) => x !== id) : [...m, id]));
+            return;
+          }
+          // A plain click is a fresh, single selection: it drops any pending
+          // multi-selection and any cluster the toolbar was pointing at.
+          setMulti([]);
+          setSelectedSub(null);
+          setSubToolbarPos(null);
           setSelected(id);
           // The mirror of the edge handler below, which has always cleared the
           // selection. Without it the two surfaces sat open at once — and the
@@ -192,6 +267,69 @@ export function StructuralEditor({
             y2: (e.clientY - hostBox.top) / s,
           });
         });
+      }
+
+      // Clusters (M29.38). The DOM contract is MEASURED on the bundled 11.16.0
+      // (subgraphs.mermaid.test.ts): node groups are NOT descendants of their
+      // cluster — they sit in a sibling `g.nodes` layer — so a click inside a
+      // block's box lands either on a node or on the cluster's own rect. The
+      // target is asked anyway rather than the tree we hope for: which layout
+      // engine drew this is not something this handler should have to know.
+      const blocks = subgraphs(model);
+      for (const [sgId, el] of binding.clusterEls) {
+        el.style.cursor = 'pointer';
+        el.onclick = (e) => {
+          if (((e.target as Element | null)?.closest('g.node') ?? null) !== null) return;
+          e.stopPropagation();
+          const idx = blocks.findIndex((s) => s.id === sgId);
+          if (idx === -1) return;
+          setSelected(null);
+          setToolbarPos(null);
+          setEdgeEditor(null);
+          setMulti([]);
+          setSelectedSub(idx);
+          setSubTitle(blocks[idx].title);
+          const host = hostRef.current;
+          if (host !== null) {
+            const hostBox = host.getBoundingClientRect();
+            const box = el.getBoundingClientRect();
+            // Same scale conversion and same above/below flip as the node
+            // toolbar: screen deltas become plane coordinates, and a block with
+            // no headroom gets its controls underneath rather than on top of
+            // its own title.
+            const s = transformRef.current.scale;
+            const above = (box.top - hostBox.top) / s - 34;
+            const y = above >= 0 ? above : (box.bottom - hostBox.top) / s + 6;
+            setSubToolbarPos({ x: (box.left - hostBox.left) / s, y });
+          }
+        };
+      }
+
+      // Link badges (M29.38): one per node with an OWNED click line that the
+      // binding could resolve. Computed HERE because this is the only place
+      // with fresh geometry, in the same plane coordinates every other overlay
+      // uses — so they scale with a CanvasViewport zoom instead of drifting off
+      // their nodes. The badge, not the node, is the navigation hit target:
+      // clicking a node selects it, which is why bindFlowchartSvg strips
+      // mermaid's own `<a href>` off the picture.
+      const badgeHost = hostRef.current;
+      if (badgeHost !== null) {
+        const hostBox = badgeHost.getBoundingClientRect();
+        const s = transformRef.current.scale;
+        const next: LinkBadge[] = [];
+        for (const [nid, link] of nodeLinks(model)) {
+          const nodeEl = binding.nodeEls.get(nid);
+          if (nodeEl === undefined) continue;
+          const box = nodeEl.getBoundingClientRect();
+          next.push({
+            id: nid,
+            target: link.target,
+            contested: link.contested,
+            x: (box.right - hostBox.left) / s - 7,
+            y: (box.top - hostBox.top) / s - 7,
+          });
+        }
+        setBadges(next);
       }
 
       // Bound edge entries carry their own line/seg/from/to/label directly
@@ -300,9 +438,13 @@ export function StructuralEditor({
   useEffect(() => {
     const binding = bindingRef.current;
     if (binding === null) return;
+    // A multi-selected node wears the same outline as a singly-selected one:
+    // the group bar says how many are picked, but only the canvas can say WHICH.
+    const outlined = new Set(validMulti);
+    if (validSelected !== null) outlined.add(validSelected);
     for (const [id, el] of binding.nodeEls) {
       for (const shapeEl of el.querySelectorAll<SVGElement>('rect, circle, polygon, path')) {
-        if (id === validSelected) {
+        if (outlined.has(id)) {
           shapeEl.style.stroke = 'var(--cortex-500)';
           shapeEl.style.strokeWidth = '2.5px';
         } else {
@@ -325,6 +467,18 @@ export function StructuralEditor({
     );
   }
 
+  // Read only while the popover is open — nodeLinks walks every line, and this
+  // renders on every selection and drag frame. `contested` has two readings
+  // (see nodeLinks): an owned line someone else also writes over, or — when
+  // there is no owned line at all — a node linked ONLY by a click form we do
+  // not own, where "absent from the map" must not be shown as "unlinked".
+  const openLink =
+    linkOpen && validSelected !== null ? nodeLinks(model).get(validSelected) : undefined;
+  const linkContested =
+    linkOpen && validSelected !== null
+      ? (openLink?.contested ?? linkWriterLines(model, validSelected).length > 0)
+      : false;
+
   const commitRename = () => {
     if (renaming === null) return;
     apply(renameNode(model, renaming.id, renaming.value));
@@ -337,6 +491,9 @@ export function StructuralEditor({
       onClick={() => {
         setSelected(null);
         setToolbarPos(null);
+        setMulti([]);
+        setSelectedSub(null);
+        setSubToolbarPos(null);
       }}
       onKeyDown={(e) => {
         if (
@@ -444,6 +601,7 @@ export function StructuralEditor({
               onClick={() => {
                 setStyleOpen(false);
                 setIconOpen(false);
+                setLinkOpen(false);
                 setShapeOpen(true);
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
@@ -466,6 +624,13 @@ export function StructuralEditor({
                   }
                   return BRACKET_SHAPE_TO_REGISTRY[resolved.shape];
                 })()}
+                // Render precedence is img > icon > shape (MEASURED,
+                // icons.mermaid.test.ts), so a node carrying an icon draws the
+                // icon and its shape never appears. The pick is LATENT, not
+                // dead — it applies the moment the icon goes — so nothing is
+                // refused here; the palette just stops pretending the shape it
+                // lights up is the one on screen.
+                supersededByIcon={nodeMeta(model).get(validSelected)?.icon ?? null}
                 onPick={(name) => {
                   setShapeOpen(false);
                   apply(setNodeShape(model, validSelected, name));
@@ -482,6 +647,7 @@ export function StructuralEditor({
               onClick={() => {
                 setShapeOpen(false);
                 setIconOpen(false);
+                setLinkOpen(false);
                 setStyleOpen(true);
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
@@ -512,6 +678,7 @@ export function StructuralEditor({
               onClick={() => {
                 setShapeOpen(false);
                 setStyleOpen(false);
+                setLinkOpen(false);
                 setIconOpen(true);
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
@@ -531,6 +698,34 @@ export function StructuralEditor({
                   apply(setNodeIcon(model, validSelected, icon));
                 }}
                 onClose={() => setIconOpen(false)}
+              />
+            )}
+            <button
+              type="button"
+              aria-label="Node link"
+              title="Node link"
+              aria-haspopup="dialog"
+              aria-expanded={linkOpen}
+              onClick={() => {
+                setShapeOpen(false);
+                setStyleOpen(false);
+                setIconOpen(false);
+                setLinkOpen(true);
+              }}
+              className="rounded border-0 bg-transparent p-1 hover:bg-n-50"
+            >
+              <Icon name="link" size={13} color="var(--n-600)" />
+            </button>
+            {linkOpen && (
+              <LinkPopover
+                entries={entries}
+                current={openLink?.target ?? null}
+                contested={linkContested}
+                onPick={(target) => {
+                  setLinkOpen(false);
+                  apply(setNodeLink(model, validSelected, target));
+                }}
+                onClose={() => setLinkOpen(false)}
               />
             )}
             <span className="mx-0.5 h-4 w-px bg-n-100" />
@@ -576,6 +771,37 @@ export function StructuralEditor({
               if (e.key === 'Escape') setRenaming(null);
             }}
             className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md border border-cortex-500 bg-n-0 px-2 py-1 text-sm text-n-800 shadow-sm outline-none"
+          />
+        )}
+
+        <LinkBadges badges={badges} onOpenPath={onOpenPath} />
+
+        {validSelectedSub !== null && subToolbarPos !== null && (
+          <SubgraphToolbar
+            model={model}
+            index={validSelectedSub}
+            pos={subToolbarPos}
+            title={subTitle}
+            onChangeTitle={setSubTitle}
+            apply={apply}
+            onClose={() => {
+              setSelectedSub(null);
+              setSubToolbarPos(null);
+            }}
+          />
+        )}
+
+        {validMulti.length >= 2 && (
+          <GroupBar
+            model={model}
+            ids={validMulti}
+            title={groupTitle}
+            onChangeTitle={setGroupTitle}
+            apply={apply}
+            onGrouped={() => {
+              setMulti([]);
+              setGroupTitle('');
+            }}
           />
         )}
 

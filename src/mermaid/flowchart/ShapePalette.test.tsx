@@ -87,6 +87,30 @@ describe('ShapePalette', () => {
     expect(screen.getByLabelText('Search shapes').getAttribute('type')).toBe('search');
   });
 
+  // Render precedence is img > icon > shape (MEASURED, icons.mermaid.test.ts),
+  // so a node with an icon draws the icon and the shape never appears. The pick
+  // is still LATENT rather than dead — it applies the moment the icon goes — so
+  // the palette stays live and says so instead of refusing.
+  it('says so when an icon out-ranks the shape being picked', async () => {
+    const onPick = vi.fn();
+    render(
+      <ShapePalette
+        current="cloud"
+        supersededByIcon="lucide:rocket"
+        onPick={onPick}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId('shape-superseded-note').textContent).toContain('lucide:rocket');
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Database' }));
+    expect(onPick).toHaveBeenCalledWith('cyl');
+  });
+
+  it('says nothing when the shape is what renders', () => {
+    render(<ShapePalette current="cloud" onPick={() => {}} onClose={() => {}} />);
+    expect(screen.queryByTestId('shape-superseded-note')).toBeNull();
+  });
+
   it('every one of the 48 registry shapes is reachable', () => {
     render(<ShapePalette current={null} onPick={() => {}} onClose={() => {}} />);
     const buttons = screen

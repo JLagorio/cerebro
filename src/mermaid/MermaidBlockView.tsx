@@ -3,6 +3,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Icon } from '@/components/ui/Icon';
 import { writeTextFile } from '@/lib/ipc';
 import { slugify } from '@/lib/slug';
+import { useOpenPath } from '@/app/useOpenPath';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { detectDiagramType } from './detect';
@@ -57,6 +58,12 @@ export function MermaidBlockView({
   code: string;
   onChangeCode: (code: string) => void;
 }) {
+  // M29.38 — the link popover's record search and what a link badge opens.
+  // `in-place`, not `navigate`: this surface IS the backdrop, and yanking a
+  // reader out of the doc they are reading to give a record one would throw
+  // that doc away (M9.3).
+  const entries = useVaultStore((s) => s.entries);
+  const openPath = useOpenPath('in-place');
   const [editing, setEditing] = useState(false);
   // `draft` only matters in code mode: visual mode renders `code` directly
   // (see the visual pane below) and every op commits through onChangeCode as
@@ -198,7 +205,12 @@ export function MermaidBlockView({
               visual ops commit immediately through onChangeCode, so the prop
               IS the live state, and an external code change (undo, another
               surface) shows up here with no stale intermediary to fight. */}
-          <StructuralEditor code={code} onChangeCode={onChangeCode} />
+          <StructuralEditor
+            code={code}
+            onChangeCode={onChangeCode}
+            entries={entries}
+            onOpenPath={openPath}
+          />
         </div>
       )}
 
@@ -309,7 +321,12 @@ export function MermaidBlockView({
           title={`${detectDiagramType(code)} — full screen`}
           onClose={() => setFullScreen(false)}
         >
-          <FullScreenDiagramEditor code={code} onChangeCode={onChangeCode} />
+          <FullScreenDiagramEditor
+            code={code}
+            onChangeCode={onChangeCode}
+            entries={entries}
+            onOpenPath={openPath}
+          />
         </Dialog>
       )}
     </div>

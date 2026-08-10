@@ -1129,6 +1129,31 @@ export type SubgraphRefusal =
   | 'unpinnable-id'
   | 'foreign-direction-would-leak';
 
+/**
+ * What each refusal MEANS, in one sentence a canvas control can hand to a
+ * user (M29.38). It lives beside the union rather than in the component that
+ * shows it because a `Record<SubgraphRefusal, string>` is exhaustive-checked:
+ * a tenth refusal cannot be added without deciding what it says, which is the
+ * whole point of typing them in the first place. No JSX, no styling — the
+ * surfaces own how it is shown, only the wording is settled here.
+ */
+export const SUBGRAPH_REFUSAL_TEXT: Record<SubgraphRefusal, string> = {
+  'empty-selection': 'Select at least one node to group.',
+  'unknown-node': 'One of the selected nodes is no longer in the diagram.',
+  'blank-title': 'A subgraph needs a title — mermaid cannot draw a blank one.',
+  'unbalanced-document':
+    'The subgraph markers in this diagram do not pair up, so nothing here can be regrouped safely.',
+  'already-grouped':
+    'A selected node already belongs to another subgraph, and mermaid cannot put it in two.',
+  'line-inside-subgraph':
+    'A line this group would move lives inside another subgraph — move it out first.',
+  'no-such-block': 'That subgraph is no longer in the diagram.',
+  'unpinnable-id':
+    'This title would change the block’s id, and the id cannot be written out explicitly — every style, class and link naming it would break.',
+  'foreign-direction-would-leak':
+    'A direction line in here is not ours to delete, and ungrouping would leave it re-directing the subgraph outside.',
+};
+
 /** The document's line ending, read off the lines themselves. */
 function lineEnding(model: FlowchartModel): string {
   return model.lines.some((l) => l.raw.endsWith('\r')) ? '\r' : '';
