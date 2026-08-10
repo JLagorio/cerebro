@@ -336,3 +336,33 @@ describe('sort page (M16.26)', () => {
     expect(screen.getByText(new RegExp(`${MAX_SORT_KEYS} keys is the maximum`))).toBeTruthy();
   });
 });
+
+/**
+ * The root page's rows were all ungated except Group and Rows, so the tenth
+ * view kind (M29.45) arrived showing five of them — and one, Properties,
+ * configures a record layout the whiteboard does not have. A canvas is a
+ * `.mmd` file; nothing on it reads `columns`. That is the calendar's M16.3
+ * bug ("a control that changes nothing"), reached through an ungated row
+ * rather than a wrong capability, which is why it survived the capability
+ * table this milestone built.
+ */
+describe('the root page on a canvas (M29.46)', () => {
+  it('does not offer Properties on a whiteboard, which draws no columns', () => {
+    setup({ type: 'whiteboard' });
+    expect(screen.queryByText('Properties')).toBeNull();
+  });
+
+  /** Filter, Sort and Load limit stay: they decide which records the canvas
+   *  can place (M29.47), so they are live controls there, not dead ones. */
+  it('keeps the rows that decide which records the canvas can place', () => {
+    setup({ type: 'whiteboard' });
+    expect(screen.getByText('Filter')).toBeTruthy();
+    expect(screen.getByText('Sort')).toBeTruthy();
+    expect(screen.getByText('Load limit')).toBeTruthy();
+  });
+
+  it('still offers Properties on a table', () => {
+    setup({ type: 'table' });
+    expect(screen.getByText('Properties')).toBeTruthy();
+  });
+});
