@@ -83,6 +83,7 @@ export function Rail() {
   const docsActive = selection.kind === 'docs' || selection.kind === 'doc';
   const settingsActive = selection.kind === 'settings';
   const libraryActive = selection.kind === 'library';
+  const workspaceActive = selection.kind === 'workspace';
   const inboxActive = selection.kind === 'inbox';
   const knowledgeActive = selection.kind === 'knowledge';
   // M9.4: the two git surfaces share a rail slot's worth of "history".
@@ -137,6 +138,15 @@ export function Rail() {
           M8.1: no review badge. A count here is the chrome nagging you to
           drain a queue; the same number lives on the "Needs review" row in
           the Knowledge sidebar, where it describes a destination instead. */}
+      {/* M30 — mounted repositories. Its own room rather than a section of
+          Docs: Docs means untyped vault notes (`isDocEntry`), and a surface
+          that renders .ts files cannot mean that. */}
+      <RailButton
+        icon="folder-tree"
+        label="Workspace"
+        active={workspaceActive}
+        onClick={() => navigate({ kind: 'workspace' })}
+      />
       <RailButton
         icon="brain"
         label="Knowledge"

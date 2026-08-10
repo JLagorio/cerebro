@@ -260,6 +260,12 @@ export function resolveSurface(
     // rendering an empty table.
     case 'library':
       return { title: 'Library', entries: [], presentation: defaultPresentation() };
+    // M30 — mounted repositories hold FILES, not records. Repo markdown is
+    // indexed as `IndexedDoc` and never enters `vaultStore`, so there is no
+    // entry set to report here and reporting one would invent a query the
+    // surface deliberately lacks.
+    case 'workspace':
+      return { title: 'Workspace', entries: [], presentation: defaultPresentation() };
     case 'settings':
       return { title: 'Settings', entries: [], presentation: defaultPresentation() };
   }
