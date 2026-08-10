@@ -415,6 +415,16 @@ test('a doc block opens full screen, and a rename flows back into the block', as
   const host = page.getByTestId('structural-host');
   await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
 
+  // -- The dialog's own toolbar can insert a node WITH a shape (M29.39) --
+  // This surface mounts StructuralEditor with toolbar={false}, so its controls
+  // are DiagramToolbar's. `+ Shape` shipped on the inline block's toolbar first
+  // and had to be lifted here; whether the button is reachable at all depends
+  // on props this host passes (mode/model), which no component test sees.
+  await page.getByRole('button', { name: '+ Shape' }).click();
+  await page.getByLabel('Search shapes').fill('hexagon');
+  await page.getByRole('button', { name: 'Shape: Hexagon' }).click();
+  await expect(host).toContainText('New step', { timeout: 15_000 });
+
   // -- Rename by double-click, same gesture as the inline editor ---------
   await host.locator('[id*="flowchart-Idea-"]').dblclick();
   const labelInput = page.getByLabel('Node label');
@@ -432,6 +442,8 @@ test('a doc block opens full screen, and a rename flows back into the block', as
       timeout: 15_000,
     })
     .toContain('Idea[Quasar]');
+  const raw = await page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md'));
+  expect(raw).toContain('n1{{New step}}');
 });
 
 // M29.29–.33: shapes, colors, and edge animation are surgical text edits that

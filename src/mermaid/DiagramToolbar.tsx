@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { MenuItem, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { useUiStore } from '@/stores/uiStore';
 import { parseFlowchart, serialize, type FlowchartModel } from './flowchart/model';
-import { addNode, setDirection, setLayoutEngine } from './flowchart/ops';
+import { addNode, setDirection, setLayoutEngine, setNodeShape } from './flowchart/ops';
+import { ShapePalette } from './flowchart/ShapePalette';
 import { copyPng, copySvg, savePng } from './export';
 import { renderMermaid } from './render';
 
@@ -59,6 +60,15 @@ export function DiagramToolbar({
   const model = useMemo(() => parseFlowchart(code), [code]);
   const [layoutOpen, setLayoutOpen] = useState(false);
   const layoutAnchor = useRef<HTMLButtonElement | null>(null);
+  const [insertOpen, setInsertOpen] = useState(false);
+
+  // Same rule the inline editor's popovers keep: a surface opened against one
+  // reading of the source does not outlive that reading. Routine here rather
+  // than exotic — the diagram page streams code-overlay edits into `code` on
+  // every debounce tick while Auto-update is on.
+  useEffect(() => {
+    setInsertOpen(false);
+  }, [code]);
 
   const apply = (next: FlowchartModel | null) => {
     if (next !== null) onChangeCode(serialize(next));
@@ -96,6 +106,50 @@ export function DiagramToolbar({
           >
             + Node
           </button>
+          {/*
+            Its own wrapper, and that is what anchors the palette: a Popover
+            with no anchorRef measures the nearest positioned ancestor of where
+            it was written — which without this span is the whole toolbar row,
+            so the palette would open at the far left under the title. (The
+            layout menu below takes the other route, an explicit anchorRef;
+            ShapePalette does not expose one, and wrapping is the primitive's
+            other documented contract.)
+          */}
+          <span className="relative">
+            <button
+              type="button"
+              title="Insert a node with a shape"
+              aria-haspopup="dialog"
+              aria-expanded={insertOpen}
+              // A toggle: Popover's click-away counts a press on the anchor as
+              // inside, so without this the button could open the palette but
+              // never close it. Closing the LAYOUT menu is not this handler's
+              // job — that popover anchors to its own button, so this press is
+              // an outside press by its own reckoning and it dismisses itself.
+              onClick={() => setInsertOpen((open) => !open)}
+              className={TEXT_BTN}
+            >
+              + Shape
+            </button>
+            {insertOpen && (
+              <ShapePalette
+                // Nothing is current: this palette describes a node that does
+                // not exist yet, so lighting up Rectangle (what `addNode`
+                // happens to mint) would claim a choice nobody has made.
+                current={null}
+                onPick={(name) => {
+                  setInsertOpen(false);
+                  // ONE apply, therefore one onChangeCode, therefore one undo
+                  // step (spec D10): the intermediate rectangle is never
+                  // emitted, so Cmd+Z takes the whole insertion back instead of
+                  // leaving a stray node of the wrong shape behind.
+                  const added = addNode(model, 'New step');
+                  apply(setNodeShape(added.model, added.id, name));
+                }}
+                onClose={() => setInsertOpen(false)}
+              />
+            )}
+          </span>
           <span className="mx-0.5 h-4 w-px bg-n-100" />
           {DIRECTIONS.map((d) => (
             <button

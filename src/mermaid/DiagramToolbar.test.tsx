@@ -60,6 +60,78 @@ describe('DiagramToolbar', () => {
     );
   });
 
+  // M29.39 shipped `+ Shape` on the inline block's toolbar only, which left the
+  // richer insert on the LESSER surface — the diagram page and the full-screen
+  // dialog both mount this toolbar with `StructuralEditor toolbar={false}`, so
+  // they had `+ Node` and nothing else.
+  it('+ Shape inserts a node of the chosen shape in ONE undo step', async () => {
+    const onChangeCode = mount();
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Hexagon' }));
+    // addNode + setNodeShape composed into a single emission: one BlockNote
+    // history entry, so one Cmd+Z takes the whole insertion back rather than
+    // leaving a stray rectangle behind (spec D10).
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    expect(onChangeCode.mock.calls[0][0]).toBe(
+      'flowchart TD\n  A[Start] --> B[End]\n  n1{{New step}}',
+    );
+  });
+
+  it('the insert trigger announces the popover it owns, and toggles it shut', async () => {
+    mount();
+    const trigger = screen.getByRole('button', { name: '+ Shape' });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(trigger);
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Shape' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    expect(screen.queryByTestId('shape-palette')).toBeNull();
+  });
+
+  it('the insert palette and the layout menu never sit open together', async () => {
+    mount();
+    await userEvent.click(screen.getByRole('button', { name: 'Layout engine' }));
+    expect(screen.getByRole('menu', { name: 'Layout engine' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    expect(screen.queryByRole('menu', { name: 'Layout engine' })).toBeNull();
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Layout engine' }));
+    expect(screen.queryByTestId('shape-palette')).toBeNull();
+  });
+
+  // The diagram page streams code overlay edits into `code` on every debounce
+  // tick, so an external change under an open palette is routine here, not
+  // exotic. Same rule the inline editor's four popovers keep.
+  it('an external code change closes the insert palette', async () => {
+    const onChangeCode = vi.fn();
+    const { rerender } = render(
+      <DiagramToolbar
+        code={FLOW}
+        onChangeCode={onChangeCode}
+        mode="visual"
+        showCode={false}
+        onToggleShowCode={() => {}}
+        onEditVisually={null}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
+    rerender(
+      <DiagramToolbar
+        code={`${FLOW}\n  B --> C[Ship]`}
+        onChangeCode={onChangeCode}
+        mode="visual"
+        showCode={false}
+        onToggleShowCode={() => {}}
+        onEditVisually={null}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId('shape-palette')).toBeNull());
+  });
+
   it('hides the structural cluster over a read-only canvas, shows Edit visually when offered', () => {
     const onEditVisually = vi.fn();
     mount({ code: 'sequenceDiagram\n  A->>B: x', mode: 'code', onEditVisually });
