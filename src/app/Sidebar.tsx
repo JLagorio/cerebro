@@ -52,8 +52,13 @@ export interface SidebarProps {
  * matter; the library holds the machinery that acts on it. Showing them side
  * by side implied a skill lives in a Collection, which it does not, and left a
  * type row highlighted while you edited a trigger.
+ *
+ * M30 adds the workspace surface, which brings its OWN tree of mounted roots.
+ * Two file trees side by side is the worst version of both: Collections and
+ * Types describe the vault's subject matter and say nothing about a mounted
+ * repository, so beside a repo tree they are pure width.
  */
-const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library']);
+const SIDEBARLESS = new Set(['settings', 'pulse', 'inbox', 'library', 'workspace']);
 
 type TypeDialog = { mode: 'new' } | { mode: 'rename' | 'style' | 'delete'; listing: TypeListing };
 

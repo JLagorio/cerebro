@@ -138,6 +138,20 @@ interface UiState {
   // Sidebar "Types" section collapse (M3); persisted.
   typesOpen: boolean;
   setTypesOpen(v: boolean): void;
+
+  /**
+   * Per-filetype icons and colour in the workspace tree (M30.22); persisted.
+   *
+   * On by default because shape and colour are what make a repo tree scannable
+   * before you read a single name. Off gives one neutral glyph per kind, for
+   * when the colour is noise rather than signal.
+   */
+  workspaceFileIcons: boolean;
+  setWorkspaceFileIcons(v: boolean): void;
+
+  /** Show gitignored entries in the workspace tree (M30); persisted. */
+  workspaceShowIgnored: boolean;
+  setWorkspaceShowIgnored(v: boolean): void;
   /**
    * The open sidebar-tree context menu (M10), keyed by node id.
    *
@@ -296,6 +310,8 @@ const PAGES_OPEN_KEY = 'cerebro.docPagesOpen';
 const TREE_ORDER_KEY = 'cerebro.treeOrder';
 const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
+const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
+const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
 const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
 const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
@@ -667,6 +683,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   setTypesOpen: (v) => {
     storeString(TYPES_OPEN_KEY, String(v));
     set({ typesOpen: v });
+  },
+
+  workspaceFileIcons: loadString(FILE_ICONS_KEY, 'true') === 'true',
+  setWorkspaceFileIcons: (v) => {
+    storeString(FILE_ICONS_KEY, String(v));
+    set({ workspaceFileIcons: v });
+  },
+
+  workspaceShowIgnored: loadString(SHOW_IGNORED_KEY, 'false') === 'true',
+  setWorkspaceShowIgnored: (v) => {
+    storeString(SHOW_IGNORED_KEY, String(v));
+    set({ workspaceShowIgnored: v });
   },
 
   inboxEnabled: loadString(INBOX_ENABLED_KEY, 'true') === 'true',

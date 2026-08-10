@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useTheme } from '@/hooks/useTheme';
 import { useRootsStore } from '@/stores/rootsStore';
 import { classifyHref, resolveRelative } from './docLinks';
 import { highlight } from './highlighter';
@@ -16,19 +17,25 @@ const FENCE_LANG = /language-(\w+)/;
  * `mermaid` is already a dependency on this base, so that costs no new package.
  */
 function Fence({ lang, code }: { lang: string | null; code: string }) {
+  const theme = useTheme();
   const [nodes, setNodes] = useState<ReactNode | null>(null);
 
   useEffect(() => {
     let live = true;
-    void highlight(code, lang).then((out) => {
+    setNodes(null);
+    void highlight(code, lang, theme).then((out) => {
       if (live) setNodes(out);
     });
     return () => {
       live = false;
     };
-  }, [code, lang]);
+  }, [code, lang, theme]);
 
-  return <div className="overflow-x-auto">{nodes ?? <pre className="m-0">{code}</pre>}</div>;
+  return (
+    <div className="code-surface my-3 overflow-x-auto rounded-md p-3 text-[13px] leading-[1.6]">
+      {nodes ?? <pre className="m-0 whitespace-pre">{code}</pre>}
+    </div>
+  );
 }
 
 /**
@@ -50,7 +57,7 @@ export function DocViewer({
     <article
       data-testid="doc-viewer"
       data-path={path}
-      className="mx-auto min-h-0 w-full max-w-[70ch] flex-1 overflow-y-auto px-6 py-8 text-[15px] leading-7"
+      className="doc-prose mx-auto min-h-0 w-full max-w-[72ch] flex-1 overflow-y-auto px-8 py-8 text-[15px] leading-7"
     >
       <Markdown
         remarkPlugins={[remarkGfm]}

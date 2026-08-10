@@ -7,11 +7,21 @@
  * ships Shiki transitively via `@blocknote/code-block`, so the direct
  * dependency is pinned to the same major to keep exactly one copy.
  *
- * Output is REACT NODES, not an HTML string. `codeToHast` plus
- * `hast-util-to-jsx-runtime` means no raw-HTML injection API is used anywhere
- * in the viewer, so a repository file cannot inject markup into the app even
- * if Shiki's escaping were ever wrong. That is worth the extra hop: every byte
- * rendered here comes from a file we did not write.
+ * ## One theme at a time, chosen by the app's theme
+ *
+ * Shiki can emit DUAL-theme output — every span carrying a `--shiki-dark`
+ * custom property alongside its light colour — but that only renders if a
+ * stylesheet maps those properties under a dark selector. Cerebro has no such
+ * rule, so dual output painted light-theme code on a white card inside a dark
+ * app. Highlighting with a single theme resolved from `data-theme` needs no
+ * CSS contract at all: the colours Shiki emits are the colours you see.
+ *
+ * ## React nodes, not an HTML string
+ *
+ * `codeToHast` plus `hast-util-to-jsx-runtime` means no raw-HTML injection API
+ * is used anywhere in the viewer, so a repository file cannot inject markup
+ * even if Shiki's escaping were ever wrong. Every byte rendered here comes
+ * from a file we did not write.
  *
  * Languages load on demand — bundling every grammar Shiki ships would dwarf
  * the rest of the app.
@@ -20,52 +30,92 @@ import type { ReactNode } from 'react';
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime';
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import type { Highlighter } from 'shiki';
+import type { ResolvedTheme } from '@/hooks/useTheme';
 
 const EXTENSIONS: Record<string, string> = {
   rs: 'rust',
   ts: 'typescript',
   tsx: 'tsx',
+  mts: 'typescript',
+  cts: 'typescript',
   js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
   jsx: 'jsx',
   json: 'json',
+  jsonc: 'jsonc',
   toml: 'toml',
   yml: 'yaml',
   yaml: 'yaml',
   css: 'css',
+  scss: 'scss',
   html: 'html',
+  xml: 'xml',
+  svg: 'xml',
   sh: 'shell',
   bash: 'shell',
   zsh: 'shell',
+  fish: 'shell',
   py: 'python',
+  rb: 'ruby',
+  go: 'go',
+  java: 'java',
+  kt: 'kotlin',
+  swift: 'swift',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  php: 'php',
   sql: 'sql',
+  graphql: 'graphql',
+  gql: 'graphql',
   md: 'markdown',
   markdown: 'markdown',
+  vue: 'vue',
+  svelte: 'svelte',
+  lua: 'lua',
+  r: 'r',
+  diff: 'diff',
+  patch: 'diff',
 };
 
 const FILENAMES: Record<string, string> = {
   dockerfile: 'docker',
   makefile: 'make',
+  '.gitignore': 'ini',
+  '.gitattributes': 'ini',
+  '.editorconfig': 'ini',
+  '.npmrc': 'ini',
+  '.prettierrc': 'json',
+  '.eslintrc': 'json',
 };
+
+/** The Shiki theme for a resolved app theme. */
+export function themeFor(theme: ResolvedTheme): string {
+  return theme === 'dark' ? 'github-dark' : 'github-light';
+}
 
 /** The Shiki language id for a path, or null to render as plain text. */
 export function languageFor(path: string): string | null {
   const filename = path.split('/').pop() ?? path;
-  const byName = FILENAMES[filename.toLowerCase()];
+  const lower = filename.toLowerCase();
+  const byName = FILENAMES[lower];
   if (byName !== undefined) return byName;
-  // A leading-dot file like `.env.example` has no meaningful extension.
-  if (filename.startsWith('.')) return null;
-  const ext = filename.includes('.') ? filename.split('.').pop() : undefined;
-  return ext === undefined ? null : (EXTENSIONS[ext.toLowerCase()] ?? null);
+  // A leading-dot file with no further dot (`.env`) has no extension to read.
+  const cut = lower.lastIndexOf('.');
+  if (cut <= 0) return null;
+  return EXTENSIONS[lower.slice(cut + 1)] ?? null;
 }
 
 let instance: Promise<Highlighter> | null = null;
-const loaded = new Set<string>();
+const loadedLangs = new Set<string>();
+const loadedThemes = new Set<string>();
 
 async function highlighter(): Promise<Highlighter> {
   if (instance === null) {
-    instance = import('shiki').then((shiki) =>
-      shiki.createHighlighter({ themes: ['github-light', 'github-dark'], langs: [] }),
-    );
+    instance = import('shiki').then((shiki) => shiki.createHighlighter({ themes: [], langs: [] }));
   }
   return instance;
 }
@@ -73,7 +123,7 @@ async function highlighter(): Promise<Highlighter> {
 /** Unstyled fallback: the file's text, as text. */
 function plain(code: string): ReactNode {
   return (
-    <pre className="shiki-plain m-0">
+    <pre className="shiki-plain m-0 whitespace-pre">
       <code>{code}</code>
     </pre>
   );
@@ -84,18 +134,24 @@ function plain(code: string): ReactNode {
  * unstyled text rather than failing — a viewer that shows nothing is worse
  * than one that shows plain code.
  */
-export async function highlight(code: string, lang: string | null): Promise<ReactNode> {
+export async function highlight(
+  code: string,
+  lang: string | null,
+  theme: ResolvedTheme,
+): Promise<ReactNode> {
   if (lang === null) return plain(code);
+  const shikiTheme = themeFor(theme);
   try {
     const hl = await highlighter();
-    if (!loaded.has(lang)) {
-      await hl.loadLanguage(lang as Parameters<typeof hl.loadLanguage>[0]);
-      loaded.add(lang);
+    if (!loadedThemes.has(shikiTheme)) {
+      await hl.loadTheme(shikiTheme as Parameters<typeof hl.loadTheme>[0]);
+      loadedThemes.add(shikiTheme);
     }
-    const hast = hl.codeToHast(code, {
-      lang,
-      themes: { light: 'github-light', dark: 'github-dark' },
-    });
+    if (!loadedLangs.has(lang)) {
+      await hl.loadLanguage(lang as Parameters<typeof hl.loadLanguage>[0]);
+      loadedLangs.add(lang);
+    }
+    const hast = hl.codeToHast(code, { lang, theme: shikiTheme });
     return toJsxRuntime(hast, { Fragment, jsx, jsxs });
   } catch {
     return plain(code);

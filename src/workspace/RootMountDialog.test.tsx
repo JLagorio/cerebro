@@ -6,7 +6,14 @@ import { RootMountDialog } from './RootMountDialog';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({ roots: [], expanded: {}, children: {}, open: null, docs: [] });
+  useRootsStore.setState({
+    roots: [],
+    expanded: {},
+    children: {},
+    open: null,
+    tabs: [],
+    docs: [],
+  });
 });
 
 describe('RootMountDialog', () => {

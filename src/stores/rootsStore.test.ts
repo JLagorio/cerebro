@@ -4,7 +4,14 @@ import { useRootsStore } from './rootsStore';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({ roots: [], expanded: {}, children: {}, open: null, docs: [] });
+  useRootsStore.setState({
+    roots: [],
+    expanded: {},
+    children: {},
+    open: null,
+    tabs: [],
+    docs: [],
+  });
 });
 
 describe('loadRoots', () => {

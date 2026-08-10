@@ -95,6 +95,45 @@ test.describe('workspace', () => {
     await expect(viewer).toHaveAttribute('data-lang', 'rust');
   });
 
+  test('opening files stacks tabs, and closing one falls back left', async ({ page }) => {
+    await boot(page);
+    await seedRepos(page);
+    await openWorkspace(page);
+
+    await page.getByTestId('tree-row').filter({ hasText: 'alpha' }).click();
+    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await expect(page.getByTestId('tab')).toHaveCount(1);
+
+    await page.getByTestId('tree-row').filter({ hasText: 'src' }).click();
+    await page.getByTestId('tree-row').filter({ hasText: 'main.rs' }).click();
+    await expect(page.getByTestId('tab')).toHaveCount(2);
+
+    // Re-opening a file focuses its tab rather than adding a duplicate.
+    await page.getByTestId('tree-row').filter({ hasText: 'README.md' }).click();
+    await expect(page.getByTestId('tab')).toHaveCount(2);
+    await expect(page.getByTestId('doc-viewer')).toHaveAttribute('data-path', 'README.md');
+
+    await page.getByLabel('Close README.md').click();
+    await expect(page.getByTestId('tab')).toHaveCount(1);
+    await expect(page.getByTestId('code-viewer')).toBeVisible();
+  });
+
+  test('file icons can be turned off from the explorer settings', async ({ page }) => {
+    await boot(page);
+    await seedRepos(page);
+    await openWorkspace(page);
+
+    await page.getByTestId('workspace-settings').click();
+    const toggle = page.getByTestId('toggle-file-icons');
+    await expect(toggle).toHaveAttribute('data-checked', 'true');
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('data-checked', 'false');
+
+    // The tree still renders; only the glyphs changed.
+    await expect(page.getByTestId('tree-row')).toHaveCount(2);
+  });
+
   test('the docs tab bubbles markdown from every mounted root', async ({ page }) => {
     await boot(page);
     await seedRepos(page);

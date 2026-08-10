@@ -2,11 +2,19 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetMockRoots, seedFile, seedRoot } from '@/lib/mockRoots';
 import { useRootsStore } from '@/stores/rootsStore';
+import { useUiStore } from '@/stores/uiStore';
 import { RootTree } from './RootTree';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({ roots: [], expanded: {}, children: {}, open: null, docs: [] });
+  useRootsStore.setState({
+    roots: [],
+    expanded: {},
+    children: {},
+    open: null,
+    tabs: [],
+    docs: [],
+  });
 });
 
 describe('RootTree', () => {
@@ -60,11 +68,39 @@ describe('RootTree', () => {
     expect(screen.getByTestId('root-unavailable')).toBeTruthy();
   });
 
-  it('toggles the show-ignored control', () => {
+  it('gives a file its own icon, and drops to a neutral one when icons are off', async () => {
+    seedRoot({ path: '/repos/alpha', label: 'alpha' });
+    seedFile('/repos/alpha', 'main.rs', 'fn main() {}');
+    await useRootsStore.getState().loadRoots();
+
+    useUiStore.setState({ workspaceFileIcons: true });
+    const withIcons = render(<RootTree />);
+    fireEvent.click(screen.getByText('alpha'));
+    await waitFor(() => expect(screen.getByText('main.rs')).toBeTruthy());
+    // A .rs file is code-coloured, so the row carries more than one glyph.
+    expect(withIcons.container.querySelectorAll('svg').length).toBeGreaterThan(1);
+    withIcons.unmount();
+
+    useUiStore.setState({ workspaceFileIcons: false });
     render(<RootTree />);
-    const toggle = screen.getByTestId('toggle-ignored');
-    expect(toggle.textContent).toBe('Show ignored');
-    fireEvent.click(toggle);
-    expect(toggle.textContent).toBe('Hide ignored');
+    expect(screen.getByText('main.rs')).toBeTruthy();
+  });
+
+  it('marks the open file as the active row', async () => {
+    seedRoot({ path: '/repos/alpha', label: 'alpha' });
+    seedFile('/repos/alpha', 'README.md', '# Alpha');
+    await useRootsStore.getState().loadRoots();
+
+    render(<RootTree />);
+    fireEvent.click(screen.getByText('alpha'));
+    await waitFor(() => expect(screen.getByText('README.md')).toBeTruthy());
+    fireEvent.click(screen.getByText('README.md'));
+
+    await waitFor(() => {
+      const row = screen
+        .getAllByTestId('tree-row')
+        .find((r) => r.getAttribute('data-path') === 'README.md');
+      expect(row?.getAttribute('data-active')).toBe('true');
+    });
   });
 });

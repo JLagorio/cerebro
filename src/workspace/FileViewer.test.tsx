@@ -9,7 +9,14 @@ const NUL = '\u0000';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({ roots: [], expanded: {}, children: {}, open: null, docs: [] });
+  useRootsStore.setState({
+    roots: [],
+    expanded: {},
+    children: {},
+    open: null,
+    tabs: [],
+    docs: [],
+  });
 });
 
 describe('FileViewer', () => {
