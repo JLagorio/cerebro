@@ -170,6 +170,38 @@ interface ReconciliationLogRow {
   action: string;
 }
 
+/** One committed `coverage.fact_recorded` (M25.4). */
+export interface CoverageFactRow {
+  factId: string;
+  sourceId: string;
+  subjectId: string | null;
+  predicateClass: string | null;
+  dimension: string;
+  state: string;
+  asOf: string;
+}
+
+/** One `coverage.assessed`, uncollapsed. */
+export interface CoverageAssessmentRow {
+  assessmentId: string;
+  sourceId: string;
+  subjectId: string | null;
+  predicateClass: string | null;
+  dimensions: JsonObject;
+  hasRetrievalReceipt: boolean;
+  superseded: boolean;
+}
+
+/** One coverage gap. Open until the LAST affected dimension is restored. */
+export interface CoverageGapRow {
+  gapId: string;
+  cause: string;
+  component: string | null;
+  sourceId: string | null;
+  remaining: string[];
+  closed: boolean;
+}
+
 /** One committed `ingest.assessed` receipt (M25.3). */
 export interface IngestReceiptRow {
   receiptId: string;
@@ -205,6 +237,10 @@ export interface EpistemicState {
    * parent, or a derived-content source.
    */
   ingestReceipts: Map<string, IngestReceiptRow>;
+  /** M25.4's coverage record — facts, assessments, and gaps, uncollapsed. */
+  coverageFacts: Map<string, CoverageFactRow>;
+  coverageAssessments: Map<string, CoverageAssessmentRow>;
+  coverageGaps: Map<string, CoverageGapRow>;
   resolutions: ResolutionRow[];
   independence: Map<string, { eventId: string; proofKind: string }>; // "left|right"
   derivedBeliefSources: [string, string][];
@@ -236,6 +272,9 @@ function emptyState(): EpistemicState {
     relationAddEvents: new Map(),
     proposals: new Map(),
     ingestReceipts: new Map(),
+    coverageFacts: new Map(),
+    coverageAssessments: new Map(),
+    coverageGaps: new Map(),
     resolutions: [],
     independence: new Map(),
     derivedBeliefSources: [],
@@ -480,6 +519,14 @@ function apply(
       return applyProposalReverted(state, frame, body);
     case 'ingest.assessed':
       return applyIngestAssessed(state, frame, body, staged);
+    case 'coverage.fact_recorded':
+      return applyCoverageFact(state, frame, body);
+    case 'coverage.assessed':
+      return applyCoverageAssessed(state, frame, body, staged);
+    case 'coverage.gap':
+      return applyCoverageGap(state, frame, body, staged);
+    case 'coverage.restored':
+      return applyCoverageRestored(state, frame, body, staged);
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
@@ -579,6 +626,250 @@ function applyIngestAssessed(
     superseded: false,
   });
   createVersion(state, 'ingest_receipt', receiptId, frame.event_id);
+}
+
+// --- M25.4 coverage ---------------------------------------------------------
+
+const COVERAGE_DIMENSION_ORDER = [
+  'source_connected',
+  'source_healthy',
+  'scope_known',
+  'scope_accessible',
+  'retention_known',
+  'index_current',
+  'retrieval_attempted',
+];
+
+function applyCoverageFact(state: EpistemicState, frame: VectorFrame, body: JsonObject): void {
+  const factId = body.fact_id as string;
+  if (state.coverageFacts.has(factId)) {
+    throw new RefusedError(
+      `coverage fact ${factId} is already recorded — one fact per id, append once`,
+    );
+  }
+  const sourceId = body.source_id as string;
+  const source = state.sources.get(sourceId);
+  if (source === undefined) {
+    throw new RefusedError(
+      `coverage fact names source ${sourceId} which has no committed registration`,
+    );
+  }
+  if (source.registrationEventId !== body.source_registration_event_id) {
+    throw new RefusedError(
+      `coverage fact pins registration ${body.source_registration_event_id} and source ${sourceId} was registered by ${source.registrationEventId}`,
+    );
+  }
+  const subject = body.subject as JsonObject;
+  const entityId = subject.entity_id as string | null;
+  if (entityId !== null && !state.entities.has(entityId)) {
+    throw new RefusedError(
+      `coverage fact names entity ${entityId}, which this store does not know`,
+    );
+  }
+  state.coverageFacts.set(factId, {
+    factId,
+    sourceId,
+    subjectId: entityId,
+    predicateClass: subject.predicate_class as string | null,
+    dimension: body.dimension as string,
+    state: body.state as string,
+    asOf: body.as_of as string,
+  });
+  createVersion(state, 'coverage_fact', factId, frame.event_id);
+  bumpVersion(state, 'source', sourceId, frame.event_id);
+}
+
+function applyCoverageAssessed(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const assessmentId = body.assessment_id as string;
+  if (state.coverageAssessments.has(assessmentId)) {
+    throw new RefusedError(`assessment ${assessmentId} is already recorded — append once`);
+  }
+  const sourceId = body.source_id as string;
+  if (!state.sources.has(sourceId)) {
+    throw new RefusedError(
+      `assessment names source ${sourceId} which has no committed registration`,
+    );
+  }
+  const subject = body.subject as JsonObject;
+  const entityId = subject.entity_id as string | null;
+  const predicateClass = subject.predicate_class as string | null;
+  if (entityId !== null && !state.entities.has(entityId)) {
+    throw new RefusedError(`assessment names entity ${entityId}, which this store does not know`);
+  }
+  const dimensions = body.dimensions as JsonObject;
+  for (const name of COVERAGE_DIMENSION_ORDER) {
+    const d = dimensions[name] as JsonObject;
+    for (const factId of d.basis_event_ids as string[]) {
+      if (staged.has(factId)) {
+        throw new RefusedError(
+          `${name}: basis ${factId} is a member of this batch — a basis is committed history, not a promise made alongside the claim`,
+        );
+      }
+      const fact = state.coverageFacts.get(factId);
+      if (fact === undefined) {
+        throw new RefusedError(`${name}: basis ${factId} is not a committed coverage fact`);
+      }
+      if (fact.dimension !== name) {
+        throw new RefusedError(
+          `${name}: basis ${factId} establishes ${fact.dimension}, not this dimension`,
+        );
+      }
+      if (fact.state !== d.state) {
+        throw new RefusedError(
+          `${name}: basis ${factId} says ${fact.state}, and the assessment says ${d.state}`,
+        );
+      }
+      if (fact.sourceId !== sourceId) {
+        throw new RefusedError(`${name}: basis ${factId} is about a different source`);
+      }
+      if (fact.subjectId !== entityId || fact.predicateClass !== predicateClass) {
+        throw new RefusedError(`${name}: basis ${factId} is about a different subject`);
+      }
+    }
+    const basis = d.basis_event_ids as string[];
+    if (basis.length > 0) {
+      const newest = basis
+        .map((id) => state.coverageFacts.get(id)?.asOf ?? '')
+        .reduce((a, b) => (a > b ? a : b), '');
+      if (d.as_of !== newest) {
+        throw new RefusedError(
+          `${name}: as_of is ${d.as_of} and its newest basis fact is ${newest}`,
+        );
+      }
+    }
+  }
+  const supersedes = body.supersedes_assessment_id as string | null;
+  if (supersedes !== null) {
+    const prior = state.coverageAssessments.get(supersedes);
+    if (prior === undefined) {
+      throw new RefusedError(
+        `assessment supersedes ${supersedes}, which is not a committed assessment`,
+      );
+    }
+    if (prior.superseded) {
+      throw new RefusedError(`assessment ${supersedes} is already superseded`);
+    }
+    if (
+      prior.sourceId !== sourceId ||
+      prior.subjectId !== entityId ||
+      prior.predicateClass !== predicateClass
+    ) {
+      throw new RefusedError('an assessment supersedes one about the same source and subject');
+    }
+    prior.superseded = true;
+    bumpVersion(state, 'coverage_assessment', supersedes, frame.event_id);
+  }
+  state.coverageAssessments.set(assessmentId, {
+    assessmentId,
+    sourceId,
+    subjectId: entityId,
+    predicateClass,
+    dimensions,
+    hasRetrievalReceipt: body.retrieval_receipt !== null,
+    superseded: false,
+  });
+  createVersion(state, 'coverage_assessment', assessmentId, frame.event_id);
+}
+
+function applyCoverageGap(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const gapId = body.gap_id as string;
+  if (state.coverageGaps.has(gapId)) {
+    throw new RefusedError(
+      `gap ${gapId} is already open — append once, so a retry cannot duplicate an episode`,
+    );
+  }
+  const sourceId = body.source_id as string | null;
+  if (sourceId !== null && !state.sources.has(sourceId)) {
+    throw new RefusedError(`gap names source ${sourceId} which has no committed registration`);
+  }
+  const assessmentId = body.assessment_id as string | null;
+  if (assessmentId !== null) {
+    if (staged.has(assessmentId)) {
+      throw new RefusedError('a gap cites a COMMITTED assessment, not one staged beside it');
+    }
+    const assessment = state.coverageAssessments.get(assessmentId);
+    if (assessment === undefined) {
+      throw new RefusedError(`gap cites assessment ${assessmentId}, which is not committed`);
+    }
+    if (assessment.superseded) {
+      throw new RefusedError(`gap cites assessment ${assessmentId}, which a later one replaced`);
+    }
+    if (sourceId !== assessment.sourceId) {
+      throw new RefusedError('a gap and the assessment it cites are about the same source');
+    }
+  }
+  const cause = body.cause as JsonObject;
+  state.coverageGaps.set(gapId, {
+    gapId,
+    cause: cause.kind as string,
+    component: cause.component as string | null,
+    sourceId,
+    remaining: [...(body.affected_dimensions as string[])],
+    closed: false,
+  });
+  createVersion(state, 'coverage_gap', gapId, frame.event_id);
+}
+
+function applyCoverageRestored(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+  staged: Set<string>,
+): void {
+  const gapId = body.gap_id as string;
+  const gap = state.coverageGaps.get(gapId);
+  if (gap === undefined) {
+    throw new RefusedError(`restoration names gap ${gapId}, which was never opened`);
+  }
+  if (gap.closed) {
+    throw new RefusedError(
+      `gap ${gapId} is already closed — a closed episode cannot be closed twice`,
+    );
+  }
+  const dimensions = body.restored_dimensions as string[];
+  for (const dimension of dimensions) {
+    if (!gap.remaining.includes(dimension)) {
+      throw new RefusedError(
+        `restoration names ${dimension}, which this gap does not still affect`,
+      );
+    }
+  }
+  const assessmentId = body.assessment_id as string | null;
+  if (gap.cause === 'source') {
+    if (assessmentId === null) {
+      throw new RefusedError('a source gap is restored by a newer assessment, not by an assertion');
+    }
+    if (staged.has(assessmentId)) {
+      throw new RefusedError('a restoration cites a COMMITTED assessment');
+    }
+    const assessment = state.coverageAssessments.get(assessmentId);
+    if (assessment === undefined) {
+      throw new RefusedError(
+        `restoration cites assessment ${assessmentId}, which is not committed`,
+      );
+    }
+    for (const dimension of dimensions) {
+      const state_ = (assessment.dimensions[dimension] as JsonObject).state as string;
+      if (state_ !== 'yes') {
+        throw new RefusedError(
+          `restoration claims ${dimension} recovered and the cited assessment says ${state_}`,
+        );
+      }
+    }
+  }
+  gap.remaining = gap.remaining.filter((d) => !dimensions.includes(d));
+  gap.closed = gap.remaining.length === 0;
+  bumpVersion(state, 'coverage_gap', gapId, frame.event_id);
 }
 
 // --- M24 governed mutations -------------------------------------------------
@@ -1849,6 +2140,53 @@ export function vectorState(state: EpistemicState): Json {
           decision: p.decision === null ? null : ([p.decision[0], p.decision[1]] as Json[]),
           applied_event_id: p.appliedEventId,
           has_revert_plan: p.revertPlan !== null && p.revertPlan !== undefined,
+        };
+      }
+      return out;
+    })(),
+    coverage_facts: (() => {
+      const out: JsonObject = {};
+      for (const [, f] of sorted([...state.coverageFacts.entries()])) {
+        out[f.factId] = {
+          source_id: f.sourceId,
+          subject_id: f.subjectId,
+          predicate_class: f.predicateClass,
+          dimension: f.dimension,
+          state: f.state,
+          as_of: f.asOf,
+        };
+      }
+      return out;
+    })(),
+    coverage_assessments: (() => {
+      const out: JsonObject = {};
+      for (const [, a] of sorted([...state.coverageAssessments.entries()])) {
+        const dimensions: JsonObject = {};
+        // Sorted by NAME, matching Rust's BTreeMap serialization — the
+        // declaration order is the schema's, and the vector's is alphabetical.
+        for (const name of [...COVERAGE_DIMENSION_ORDER].sort()) {
+          dimensions[name] = a.dimensions[name];
+        }
+        out[a.assessmentId] = {
+          source_id: a.sourceId,
+          subject_id: a.subjectId,
+          predicate_class: a.predicateClass,
+          dimensions,
+          has_retrieval_receipt: a.hasRetrievalReceipt,
+          superseded: a.superseded,
+        };
+      }
+      return out;
+    })(),
+    coverage_gaps: (() => {
+      const out: JsonObject = {};
+      for (const [, g] of sorted([...state.coverageGaps.entries()])) {
+        out[g.gapId] = {
+          cause: g.cause,
+          component: g.component,
+          source_id: g.sourceId,
+          remaining: [...g.remaining].sort(),
+          closed: g.closed,
         };
       }
       return out;

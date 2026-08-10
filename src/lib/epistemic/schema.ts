@@ -746,6 +746,186 @@ export const ROUTE_SCHEDULER_STATE: { [route: string]: string } = {
   failed_visible: 'recovery_held',
 };
 
+// --- M25.4 coverage ---------------------------------------------------------
+
+const COVERAGE_DIMENSIONS = [
+  'source_connected',
+  'source_healthy',
+  'scope_known',
+  'scope_accessible',
+  'retention_known',
+  'index_current',
+  'retrieval_attempted',
+];
+const DIMENSION_STATES = ['yes', 'no', 'unknown', 'not_applicable'];
+const PRODUCER_KINDS = [
+  'connector_adapter',
+  'builtin_adapter',
+  'vault_indexer',
+  'retrieval_engine',
+];
+export const ACTOR_VAULT_INDEXER = 'system:vault-indexer';
+export const ACTOR_RETRIEVAL_ENGINE = 'system:retrieval-engine';
+
+/** Which dimension each fact variant establishes, and which state it means. */
+const FACT_VARIANTS: {
+  [kind: string]: { dimension: string; yes: string; no: string; producers: string[] };
+} = {
+  connection_probe: {
+    dimension: 'source_connected',
+    yes: 'connected',
+    no: 'disconnected',
+    producers: ['connector_adapter', 'builtin_adapter'],
+  },
+  health_probe: {
+    dimension: 'source_healthy',
+    yes: 'healthy',
+    no: 'unhealthy',
+    producers: ['connector_adapter', 'builtin_adapter'],
+  },
+  scope_discovery: {
+    dimension: 'scope_known',
+    yes: 'known',
+    no: 'unknown',
+    producers: ['connector_adapter', 'builtin_adapter'],
+  },
+  access_probe: {
+    dimension: 'scope_accessible',
+    yes: 'accessible',
+    no: 'denied',
+    producers: ['connector_adapter', 'builtin_adapter'],
+  },
+  retention_discovery: {
+    dimension: 'retention_known',
+    yes: 'known',
+    no: 'unknown',
+    producers: ['connector_adapter', 'builtin_adapter'],
+  },
+  index_checkpoint: {
+    dimension: 'index_current',
+    yes: 'current',
+    no: 'stale',
+    producers: ['vault_indexer'],
+  },
+  retrieval_execution: {
+    dimension: 'retrieval_attempted',
+    yes: '',
+    no: '',
+    producers: ['retrieval_engine'],
+  },
+  retrieval_window_closed_without_attempt: {
+    dimension: 'retrieval_attempted',
+    yes: '',
+    no: '',
+    producers: ['retrieval_engine'],
+  },
+};
+
+/** A runtime failure may affect processing; it never speaks for the source. */
+const RUNTIME_AFFECTABLE = ['scope_accessible', 'index_current', 'retrieval_attempted'];
+
+function canonScopeObject(v: Json | undefined): JsonObject {
+  const scope = asObject(v, 'scope');
+  return {
+    stage:
+      scope.stage === null || scope.stage === undefined
+        ? null
+        : oneOf(scope.stage, STAGES, 'stage'),
+    revision: asStringOrNull(scope.revision, 'scope.revision'),
+    environment: asStringOrNull(scope.environment, 'scope.environment'),
+    geography: asStringOrNull(scope.geography, 'scope.geography'),
+  };
+}
+
+function canonCoverageSubject(v: Json | undefined): JsonObject {
+  const subject = asObject(v, 'subject');
+  return {
+    entity_id: asStringOrNull(subject.entity_id, 'entity_id'),
+    predicate_class: asStringOrNull(subject.predicate_class, 'predicate_class'),
+    scope: canonScopeObject(subject.scope),
+  };
+}
+
+function canonRetrievalReceipt(v: Json | undefined): JsonObject {
+  const r = asObject(v, 'retrieval_receipt');
+  return {
+    strategy_version: asString(r.strategy_version, 'strategy_version'),
+    query_strategy: asString(r.query_strategy, 'query_strategy'),
+    query_fingerprint: asString(r.query_fingerprint, 'query_fingerprint'),
+    attempted_at: asString(r.attempted_at, 'attempted_at'),
+    searched_domain: asString(r.searched_domain, 'searched_domain'),
+    search_scope: asString(r.search_scope, 'search_scope'),
+    observation_window: asString(r.observation_window, 'observation_window'),
+    searched_aliases: asArray(r.searched_aliases, 'searched_aliases').map((a) =>
+      asString(a, 'alias'),
+    ),
+    searched_scopes: asArray(r.searched_scopes, 'searched_scopes').map(canonScopeObject),
+  };
+}
+
+function canonFact(v: Json | undefined): JsonObject {
+  const f = asObject(v, 'fact');
+  const kind = oneOf(f.kind, Object.keys(FACT_VARIANTS), 'fact kind');
+  switch (kind) {
+    case 'connection_probe':
+      return { kind, result: oneOf(f.result, ['connected', 'disconnected'], 'result') };
+    case 'health_probe':
+      return { kind, result: oneOf(f.result, ['healthy', 'unhealthy'], 'result') };
+    case 'scope_discovery':
+      return {
+        kind,
+        scope_digest: asString(f.scope_digest, 'scope_digest'),
+        result: oneOf(f.result, ['known', 'unknown'], 'result'),
+      };
+    case 'access_probe':
+      return {
+        kind,
+        scope_digest: asString(f.scope_digest, 'scope_digest'),
+        result: oneOf(f.result, ['accessible', 'denied'], 'result'),
+      };
+    case 'retention_discovery':
+      return {
+        kind,
+        result: oneOf(f.result, ['known', 'unknown'], 'result'),
+        retention_seconds:
+          f.retention_seconds === null ? null : asU64(f.retention_seconds, 'retention_seconds'),
+      };
+    case 'index_checkpoint':
+      return {
+        kind,
+        index_head: asString(f.index_head, 'index_head'),
+        source_revision: asString(f.source_revision, 'source_revision'),
+        result: oneOf(f.result, ['current', 'stale'], 'result'),
+      };
+    case 'retrieval_execution':
+      return { kind, retrieval_receipt: canonRetrievalReceipt(f.retrieval_receipt) };
+    default:
+      return {
+        kind,
+        window_start: asString(f.window_start, 'window_start'),
+        window_end: asString(f.window_end, 'window_end'),
+      };
+  }
+}
+
+function canonDimension(v: Json | undefined, what: string): JsonObject {
+  const d = asObject(v, what);
+  return {
+    state: oneOf(d.state, DIMENSION_STATES, `${what}.state`),
+    basis_event_ids: asArray(d.basis_event_ids, `${what}.basis`).map((id) =>
+      asString(id, 'basis id'),
+    ),
+    as_of: asString(d.as_of, `${what}.as_of`),
+  };
+}
+
+function canonDimensions(v: Json | undefined): JsonObject {
+  const d = asObject(v, 'dimensions');
+  const out: JsonObject = {};
+  for (const name of COVERAGE_DIMENSIONS) out[name] = canonDimension(d[name], name);
+  return out;
+}
+
 type Canonicalizer = (obj: JsonObject) => JsonObject;
 
 const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
@@ -1089,6 +1269,75 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
       asString(id, 'forward event id'),
     ),
     resulting_versions: canonTargetVersions(obj.resulting_versions),
+  }),
+  'coverage.fact_recorded': (obj) => ({
+    ...canonCommon(obj),
+    fact_id: asString(obj.fact_id, 'fact_id'),
+    source_id: asString(obj.source_id, 'source_id'),
+    source_registration_event_id: asString(obj.source_registration_event_id, 'registration pin'),
+    subject: canonCoverageSubject(obj.subject),
+    dimension: oneOf(obj.dimension, COVERAGE_DIMENSIONS, 'dimension'),
+    state: oneOf(obj.state, DIMENSION_STATES, 'state'),
+    as_of: asString(obj.as_of, 'as_of'),
+    producer: (() => {
+      const p = asObject(obj.producer, 'producer');
+      return {
+        kind: oneOf(p.kind, PRODUCER_KINDS, 'producer kind'),
+        producer_version: asString(p.producer_version, 'producer_version'),
+      };
+    })(),
+    fact: canonFact(obj.fact),
+  }),
+  'coverage.assessed': (obj) => ({
+    ...canonCommon(obj),
+    assessment_id: asString(obj.assessment_id, 'assessment_id'),
+    subject: canonCoverageSubject(obj.subject),
+    source_id: asString(obj.source_id, 'source_id'),
+    dimensions: canonDimensions(obj.dimensions),
+    retrieval_receipt:
+      obj.retrieval_receipt === null ? null : canonRetrievalReceipt(obj.retrieval_receipt),
+    limitations: asArray(obj.limitations, 'limitations').map((l) => {
+      const limitation = asObject(l, 'limitation');
+      return {
+        dimension: oneOf(limitation.dimension, COVERAGE_DIMENSIONS, 'limitation dimension'),
+        reason: asString(limitation.reason, 'limitation reason'),
+      };
+    }),
+    supersedes_assessment_id: asStringOrNull(obj.supersedes_assessment_id, 'supersedes'),
+  }),
+  'coverage.gap': (obj) => ({
+    ...canonCommon(obj),
+    gap_id: asString(obj.gap_id, 'gap_id'),
+    subject: canonCoverageSubject(obj.subject),
+    source_id: asStringOrNull(obj.source_id, 'source_id'),
+    responsibility_id: asStringOrNull(obj.responsibility_id, 'responsibility_id'),
+    contract_version:
+      obj.contract_version === null ? null : asU64(obj.contract_version, 'contract_version'),
+    contract_digest: asStringOrNull(obj.contract_digest, 'contract_digest'),
+    cause: (() => {
+      const cause = asObject(obj.cause, 'cause');
+      return {
+        kind: oneOf(cause.kind, ['source', 'reasoning_runtime'], 'cause kind'),
+        component: asStringOrNull(cause.component, 'component'),
+      };
+    })(),
+    opened_at: asString(obj.opened_at, 'opened_at'),
+    assessment_id: asStringOrNull(obj.assessment_id, 'assessment_id'),
+    affected_dimensions: asArray(obj.affected_dimensions, 'affected').map((d) =>
+      oneOf(d, COVERAGE_DIMENSIONS, 'affected dimension'),
+    ),
+    pending_count_at_open: asU64(obj.pending_count_at_open, 'pending_count_at_open'),
+    reason: asString(obj.reason, 'reason'),
+  }),
+  'coverage.restored': (obj) => ({
+    ...canonCommon(obj),
+    gap_id: asString(obj.gap_id, 'gap_id'),
+    restored_at: asString(obj.restored_at, 'restored_at'),
+    assessment_id: asStringOrNull(obj.assessment_id, 'assessment_id'),
+    restored_dimensions: asArray(obj.restored_dimensions, 'restored').map((d) =>
+      oneOf(d, COVERAGE_DIMENSIONS, 'restored dimension'),
+    ),
+    reason: asString(obj.reason, 'reason'),
   }),
   // M25.3 — the portable processing receipt. Field order IS the canonical
   // byte order, so this list mirrors `IngestAssessed`'s declaration exactly.
@@ -2142,6 +2391,217 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       }
       break;
     }
+    case 'coverage.fact_recorded': {
+      for (const [name, id] of [
+        ['fact_id', body.fact_id],
+        ['source_id', body.source_id],
+        ['source_registration_event_id', body.source_registration_event_id],
+      ] as [string, Json][]) {
+        if (!isId128(id)) throw new RefusedError(`${name} must be a 128-bit hex id`);
+      }
+      if (!isRfc3339(body.as_of as string)) throw new RefusedError('as_of must be RFC3339');
+      const producer = body.producer as JsonObject;
+      if ((producer.producer_version as string) === '') {
+        throw new RefusedError('producer_version must be non-empty');
+      }
+      const fact = body.fact as JsonObject;
+      const variant = FACT_VARIANTS[fact.kind as string];
+      if (variant.dimension !== body.dimension) {
+        throw new RefusedError(
+          `a ${fact.kind} fact establishes ${variant.dimension}, not ${body.dimension}`,
+        );
+      }
+      const yes =
+        fact.kind === 'retrieval_execution'
+          ? true
+          : fact.kind === 'retrieval_window_closed_without_attempt'
+            ? false
+            : fact.result === variant.yes;
+      const state = yes ? 'yes' : 'no';
+      if (body.state !== state) {
+        throw new RefusedError(`this fact's result is ${state}, and the body says ${body.state}`);
+      }
+      if (!variant.producers.includes(producer.kind as string)) {
+        throw new RefusedError(`a ${fact.kind} fact is not stamped by ${producer.kind}`);
+      }
+      const actorId = (body.actor as JsonObject).id;
+      if (producer.kind === 'vault_indexer' && actorId !== ACTOR_VAULT_INDEXER) {
+        throw new RefusedError(`an index fact is appended only by ${ACTOR_VAULT_INDEXER}`);
+      }
+      if (producer.kind === 'retrieval_engine' && actorId !== ACTOR_RETRIEVAL_ENGINE) {
+        throw new RefusedError(`a retrieval fact is appended only by ${ACTOR_RETRIEVAL_ENGINE}`);
+      }
+      if (fact.kind === 'scope_discovery' || fact.kind === 'access_probe') {
+        if (!isSha256(fact.scope_digest)) {
+          throw new RefusedError('scope_digest must be a lowercase SHA-256');
+        }
+      }
+      if (fact.kind === 'retention_discovery') {
+        const known = fact.result === 'known';
+        if (known && fact.retention_seconds === null) {
+          throw new RefusedError('a known retention fact carries its value');
+        }
+        if (!known && fact.retention_seconds !== null) {
+          throw new RefusedError('an unknown retention fact carries no value');
+        }
+      }
+      if (fact.kind === 'index_checkpoint') {
+        if ((fact.index_head as string) === '' || (fact.source_revision as string) === '') {
+          throw new RefusedError('an index checkpoint names its head and the source revision');
+        }
+      }
+      if (fact.kind === 'retrieval_execution') {
+        validateRetrievalReceipt(fact.retrieval_receipt as JsonObject);
+      }
+      if (fact.kind === 'retrieval_window_closed_without_attempt') {
+        for (const [name, value] of [
+          ['window_start', fact.window_start],
+          ['window_end', fact.window_end],
+        ] as [string, string][]) {
+          if (!isRfc3339(value)) throw new RefusedError(`${name} must be RFC3339`);
+        }
+        if ((fact.window_end as string) <= (fact.window_start as string)) {
+          throw new RefusedError('a closed window ends after it starts');
+        }
+      }
+      break;
+    }
+    case 'coverage.assessed': {
+      if (!isId128(body.assessment_id) || !isId128(body.source_id)) {
+        throw new RefusedError('an assessment pins its id and its source by id');
+      }
+      const supersedes = body.supersedes_assessment_id as string | null;
+      if (supersedes !== null) {
+        if (!isId128(supersedes)) {
+          throw new RefusedError('supersedes_assessment_id must be a 128-bit hex id');
+        }
+        if (supersedes === body.assessment_id) {
+          throw new RefusedError('an assessment cannot supersede itself');
+        }
+      }
+      const limitations = body.limitations as JsonObject[];
+      const limited = new Set(limitations.map((l) => l.dimension as string));
+      if (limited.size !== limitations.length) {
+        throw new RefusedError('one limitation per dimension, at most');
+      }
+      for (const limitation of limitations) {
+        if ((limitation.reason as string) === '') {
+          throw new RefusedError('a limitation without a reason explains nothing');
+        }
+      }
+      const dimensions = body.dimensions as JsonObject;
+      for (const name of COVERAGE_DIMENSIONS) {
+        const d = dimensions[name] as JsonObject;
+        if (!isRfc3339(d.as_of as string)) {
+          throw new RefusedError(`${name}: as_of must be RFC3339`);
+        }
+        const basis = d.basis_event_ids as string[];
+        sortedUniqueIds(basis, `${name}: basis_event_ids`);
+        if (basis.includes(body.assessment_id as string)) {
+          throw new RefusedError(
+            `${name}: an assessment id is never a basis id — no assessment bootstraps itself`,
+          );
+        }
+        const needsBasis = d.state === 'yes' || d.state === 'no';
+        if (needsBasis) {
+          if (basis.length === 0) {
+            throw new RefusedError(
+              `${name}: a ${d.state} needs at least one committed fact behind it`,
+            );
+          }
+          if (limited.has(name)) {
+            throw new RefusedError(
+              `${name}: a dimension carried by facts does not also carry a limitation`,
+            );
+          }
+        } else {
+          if (basis.length > 0) {
+            throw new RefusedError(
+              `${name}: ${d.state} cites nothing — a basis would contradict it`,
+            );
+          }
+          if (!limited.has(name)) {
+            throw new RefusedError(`${name}: ${d.state} requires a limitation saying why`);
+          }
+        }
+      }
+      const attempted = (dimensions.retrieval_attempted as JsonObject).state;
+      const receipt = body.retrieval_receipt as JsonObject | null;
+      if (attempted === 'yes') {
+        if (receipt === null)
+          throw new RefusedError('a claimed retrieval attempt carries its receipt');
+        validateRetrievalReceipt(receipt);
+      } else if (receipt !== null) {
+        throw new RefusedError('only a retrieval that happened carries a retrieval receipt');
+      }
+      break;
+    }
+    case 'coverage.gap': {
+      if (!isId128(body.gap_id)) throw new RefusedError('gap_id must be a 128-bit hex id');
+      if (!isRfc3339(body.opened_at as string)) {
+        throw new RefusedError('opened_at must be RFC3339');
+      }
+      if ((body.reason as string) === '') {
+        throw new RefusedError('a gap without a reason explains nothing');
+      }
+      sortedUniqueDimensions(body.affected_dimensions as string[], 'affected_dimensions');
+      const cause = body.cause as JsonObject;
+      if (cause.kind === 'source') {
+        if (body.source_id === null) throw new RefusedError('a source-caused gap names its source');
+        if (!isId128(body.source_id)) throw new RefusedError('source_id must be a 128-bit hex id');
+        if (cause.component !== null) {
+          throw new RefusedError('a source-caused gap names a source, not a component');
+        }
+        if (body.assessment_id === null) {
+          throw new RefusedError('a source-caused gap cites the assessment that established it');
+        }
+        if (!isId128(body.assessment_id)) {
+          throw new RefusedError('assessment_id must be a 128-bit hex id');
+        }
+      } else {
+        if (body.source_id !== null) {
+          throw new RefusedError('a runtime-caused gap carries no source');
+        }
+        if (cause.component === null || cause.component === '') {
+          throw new RefusedError('a runtime-caused gap names the component that failed');
+        }
+        for (const dimension of body.affected_dimensions as string[]) {
+          if (!RUNTIME_AFFECTABLE.includes(dimension)) {
+            throw new RefusedError(
+              `the reasoning runtime cannot affect ${dimension} — that is a claim about the source, and a runtime failure has no standing to make it`,
+            );
+          }
+        }
+      }
+      const pinned = [
+        body.responsibility_id !== null,
+        body.contract_version !== null,
+        body.contract_digest !== null,
+      ];
+      if (pinned.some(Boolean) && !pinned.every(Boolean)) {
+        throw new RefusedError(
+          'a declared responsibility is pinned by id, version, AND digest, or not at all',
+        );
+      }
+      if (body.contract_digest !== null && !isSha256(body.contract_digest)) {
+        throw new RefusedError('contract_digest must be a lowercase SHA-256');
+      }
+      break;
+    }
+    case 'coverage.restored': {
+      if (!isId128(body.gap_id)) throw new RefusedError('gap_id must be a 128-bit hex id');
+      if (!isRfc3339(body.restored_at as string)) {
+        throw new RefusedError('restored_at must be RFC3339');
+      }
+      if ((body.reason as string) === '') {
+        throw new RefusedError('a restoration without a reason demonstrates nothing');
+      }
+      if (body.assessment_id !== null && !isId128(body.assessment_id)) {
+        throw new RefusedError('assessment_id must be a 128-bit hex id');
+      }
+      sortedUniqueDimensions(body.restored_dimensions as string[], 'restored_dimensions');
+      break;
+    }
     default:
       throw new SchemaError(`unhandled kind ${decoded.kind}`);
   }
@@ -2167,6 +2627,46 @@ function uniqueIds(ids: string[], what: string): void {
 }
 
 /** Sorted, unique, all event ids — the shape every plural id list has. */
+
+/** Non-empty, sorted, duplicate-free dimensions in DECLARATION order. */
+function sortedUniqueDimensions(dimensions: string[], what: string): void {
+  if (dimensions.length === 0) {
+    throw new RefusedError(`${what} must name at least one dimension`);
+  }
+  const order = (d: string) => COVERAGE_DIMENSIONS.indexOf(d);
+  for (let i = 1; i < dimensions.length; i += 1) {
+    if (order(dimensions[i - 1]) >= order(dimensions[i])) {
+      throw new RefusedError(`${what} must be sorted and duplicate-free`);
+    }
+  }
+}
+
+const isRfc3339 = (v: Json): boolean => typeof v === 'string' && RFC3339.test(v);
+
+function validateRetrievalReceipt(receipt: JsonObject): void {
+  for (const name of [
+    'strategy_version',
+    'query_strategy',
+    'attempted_at',
+    'searched_domain',
+    'search_scope',
+    'observation_window',
+  ]) {
+    if ((receipt[name] as string) === '') {
+      throw new RefusedError(`retrieval receipt ${name} must be non-empty`);
+    }
+  }
+  if (!isSha256(receipt.query_fingerprint)) {
+    throw new RefusedError('query_fingerprint must be a lowercase SHA-256');
+  }
+  if (!isRfc3339(receipt.attempted_at as string)) {
+    throw new RefusedError('retrieval receipt attempted_at must be RFC3339');
+  }
+  for (const alias of receipt.searched_aliases as string[]) {
+    if (alias === '') throw new RefusedError('a searched alias cannot be empty');
+  }
+}
+
 function sortedUniqueIds(ids: string[], what: string): void {
   const seen = new Set<string>();
   for (const id of ids) {

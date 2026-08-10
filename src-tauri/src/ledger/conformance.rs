@@ -3228,6 +3228,387 @@ fn scenario_entity_merge() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// M25.4 — the coverage record, uncollapsed.
+///
+/// Seven dimensions carried by committed facts or by explicit limitations; a
+/// runtime gap that cannot touch source health; a partial restoration that
+/// narrows a gap without closing it; and every bootstrap refusal — a basis
+/// staged beside the claim, a basis that is not a fact, a fact about a
+/// different subject, and an assessment citing itself.
+fn scenario_coverage() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let connector = direct_registration("conn-1", "domain-a");
+    let connector_reg = b.push_body(KIND_SOURCE_REGISTERED, &connector);
+    let source_id = connector.source_id.clone();
+    // An entity to scope the subject to.
+    let entity_obs = b.push_body(
+        KIND_OBSERVATION_RECORDED,
+        &observation_body(
+            ObservationKind::SourceSnapshot,
+            &connector,
+            &connector_reg,
+            "connector:conn-1",
+            SubjectRef::Resolved {
+                entity_id: ENTITY.into(),
+                aliases: vec![],
+            },
+            vec![],
+            snapshot_payload(),
+        ),
+    );
+    let _ = &entity_obs;
+
+    let subject = || CoverageSubject {
+        entity_id: Some(ENTITY.into()),
+        predicate_class: Some("status".into()),
+        scope: Scope::empty(),
+    };
+    let receipt = || RetrievalReceipt {
+        strategy_version: "retrieval-v1".into(),
+        query_strategy: "alias-expansion".into(),
+        query_fingerprint: "a".repeat(64),
+        attempted_at: "2026-08-09T10:00:00Z".into(),
+        searched_domain: "the vault".into(),
+        search_scope: "records/".into(),
+        observation_window: "2026-08-01/2026-08-09".into(),
+        searched_aliases: vec!["Ada".into()],
+        searched_scopes: vec![Scope::empty()],
+    };
+    let fact = |id: &str, variant: Fact, producer: ProducerKind, actor: &str| {
+        let (schema, batch_id, idempotency_key, actor) = common(actor);
+        CoverageFactRecorded {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            fact_id: id.to_string(),
+            source_id: source_id.clone(),
+            source_registration_event_id: connector_reg.clone(),
+            subject: subject(),
+            dimension: variant.dimension(),
+            state: variant.state(),
+            as_of: "2026-08-09T10:00:00Z".into(),
+            producer: Producer {
+                kind: producer,
+                producer_version: "1".into(),
+            },
+            fact: variant,
+        }
+    };
+
+    let facts = [
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001",
+            Fact::ConnectionProbe {
+                result: ConnectionResult::Connected,
+            },
+            ProducerKind::ConnectorAdapter,
+            "connector:conn-1",
+        ),
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002",
+            Fact::HealthProbe {
+                result: HealthResult::Healthy,
+            },
+            ProducerKind::ConnectorAdapter,
+            "connector:conn-1",
+        ),
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003",
+            Fact::ScopeDiscovery {
+                scope_digest: "b".repeat(64),
+                result: KnownResult::Known,
+            },
+            ProducerKind::ConnectorAdapter,
+            "connector:conn-1",
+        ),
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004",
+            Fact::AccessProbe {
+                scope_digest: "b".repeat(64),
+                result: AccessResult::Accessible,
+            },
+            ProducerKind::ConnectorAdapter,
+            "connector:conn-1",
+        ),
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005",
+            Fact::RetentionDiscovery {
+                result: KnownResult::Known,
+                retention_seconds: Some(2_592_000),
+            },
+            ProducerKind::ConnectorAdapter,
+            "connector:conn-1",
+        ),
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006",
+            Fact::IndexCheckpoint {
+                index_head: "head-1".into(),
+                source_revision: "rev-9".into(),
+                result: CurrentResult::Current,
+            },
+            ProducerKind::VaultIndexer,
+            ACTOR_VAULT_INDEXER,
+        ),
+        (
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007",
+            Fact::RetrievalExecution {
+                retrieval_receipt: receipt(),
+            },
+            ProducerKind::RetrievalEngine,
+            ACTOR_RETRIEVAL_ENGINE,
+        ),
+    ];
+    for (id, variant, producer, actor) in facts.clone() {
+        b.push_body(
+            KIND_COVERAGE_FACT_RECORDED,
+            &fact(id, variant, producer, actor),
+        );
+    }
+    // A connector stamping an index checkpoint: refused. If it could, it
+    // would be declaring its own index current.
+    b.push_body(
+        KIND_COVERAGE_FACT_RECORDED,
+        &fact(
+            "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f008",
+            Fact::IndexCheckpoint {
+                index_head: "head-2".into(),
+                source_revision: "rev-9".into(),
+                result: CurrentResult::Current,
+            },
+            ProducerKind::VaultIndexer,
+            "connector:conn-1",
+        ),
+    );
+
+    let yes = |id: &str| DimensionAssessment {
+        state: DimensionState::Yes,
+        basis_event_ids: vec![id.to_string()],
+        as_of: "2026-08-09T10:00:00Z".into(),
+    };
+    let assessed = |id: &str,
+                    dimensions: Dimensions,
+                    limitations: Vec<Limitation>,
+                    retrieval: Option<RetrievalReceipt>,
+                    supersedes: Option<String>| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:coverage");
+        CoverageAssessed {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            assessment_id: id.to_string(),
+            subject: subject(),
+            source_id: source_id.clone(),
+            dimensions,
+            retrieval_receipt: retrieval,
+            limitations,
+            supersedes_assessment_id: supersedes,
+        }
+    };
+    let all_yes = || Dimensions {
+        source_connected: yes(facts[0].0),
+        source_healthy: yes(facts[1].0),
+        scope_known: yes(facts[2].0),
+        scope_accessible: yes(facts[3].0),
+        retention_known: yes(facts[4].0),
+        index_current: yes(facts[5].0),
+        retrieval_attempted: yes(facts[6].0),
+    };
+    b.push_body(
+        KIND_COVERAGE_ASSESSED,
+        &assessed(
+            "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501",
+            all_yes(),
+            vec![],
+            Some(receipt()),
+            None,
+        ),
+    );
+    // A basis that is not a committed fact.
+    let mut forged = all_yes();
+    forged.scope_known.basis_event_ids = vec!["c".repeat(32)];
+    b.push_body(
+        KIND_COVERAGE_ASSESSED,
+        &assessed(
+            "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a502",
+            forged,
+            vec![],
+            Some(receipt()),
+            None,
+        ),
+    );
+    // A basis that establishes a DIFFERENT dimension.
+    let mut crossed = all_yes();
+    crossed.scope_known.basis_event_ids = vec![facts[1].0.to_string()];
+    b.push_body(
+        KIND_COVERAGE_ASSESSED,
+        &assessed(
+            "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a503",
+            crossed,
+            vec![],
+            Some(receipt()),
+            None,
+        ),
+    );
+
+    // A later assessment supersedes the first, with retention unknown and a
+    // limitation saying why.
+    let mut narrowed = all_yes();
+    narrowed.retention_known = DimensionAssessment {
+        state: DimensionState::Unknown,
+        basis_event_ids: vec![],
+        as_of: "2026-08-09T10:00:00Z".into(),
+    };
+    b.push_body(
+        KIND_COVERAGE_ASSESSED,
+        &assessed(
+            "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504",
+            narrowed,
+            vec![Limitation {
+                dimension: Dimension::RetentionKnown,
+                reason: "the connector stopped reporting a retention policy".into(),
+            }],
+            Some(receipt()),
+            Some("a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501".into()),
+        ),
+    );
+
+    // A SOURCE gap over two dimensions, then a partial restoration that
+    // narrows it, then the one that closes it.
+    let gap = |id: &str, cause: GapCauseKind, dimensions: Vec<Dimension>| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:coverage");
+        CoverageGap {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            gap_id: id.to_string(),
+            subject: subject(),
+            source_id: match cause {
+                GapCauseKind::Source => Some(source_id.clone()),
+                GapCauseKind::ReasoningRuntime => None,
+            },
+            responsibility_id: None,
+            contract_version: None,
+            contract_digest: None,
+            cause: GapCause {
+                kind: cause,
+                component: match cause {
+                    GapCauseKind::Source => None,
+                    GapCauseKind::ReasoningRuntime => Some("claude-cli".into()),
+                },
+            },
+            opened_at: "2026-08-09T11:00:00Z".into(),
+            assessment_id: match cause {
+                GapCauseKind::Source => Some("a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504".into()),
+                GapCauseKind::ReasoningRuntime => None,
+            },
+            affected_dimensions: dimensions,
+            pending_count_at_open: 12,
+            reason: "blind past the threshold".into(),
+        }
+    };
+    b.push_body(
+        KIND_COVERAGE_GAP,
+        &gap(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+            GapCauseKind::Source,
+            vec![Dimension::SourceHealthy, Dimension::RetentionKnown],
+        ),
+    );
+    // A runtime gap, and one that tries to claim the source is unhealthy.
+    b.push_body(
+        KIND_COVERAGE_GAP,
+        &gap(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a02",
+            GapCauseKind::ReasoningRuntime,
+            vec![Dimension::IndexCurrent],
+        ),
+    );
+    b.push_body(
+        KIND_COVERAGE_GAP,
+        &gap(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a03",
+            GapCauseKind::ReasoningRuntime,
+            vec![Dimension::SourceHealthy],
+        ),
+    );
+
+    let restored = |gap_id: &str, dimensions: Vec<Dimension>, assessment: Option<&str>| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:coverage");
+        CoverageRestored {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            gap_id: gap_id.to_string(),
+            restored_at: "2026-08-09T12:00:00Z".into(),
+            assessment_id: assessment.map(str::to_string),
+            restored_dimensions: dimensions,
+            reason: "demonstrated recovery".into(),
+        }
+    };
+    // Partial: source health is back, retention is not — the gap stays open.
+    b.push_body(
+        KIND_COVERAGE_RESTORED,
+        &restored(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+            vec![Dimension::SourceHealthy],
+            Some("a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504"),
+        ),
+    );
+    // Restoring something the gap no longer affects.
+    b.push_body(
+        KIND_COVERAGE_RESTORED,
+        &restored(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+            vec![Dimension::SourceHealthy],
+            Some("a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504"),
+        ),
+    );
+    // Claiming recovery the cited assessment does not show (retention is
+    // `unknown` there, not `yes`).
+    b.push_body(
+        KIND_COVERAGE_RESTORED,
+        &restored(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+            vec![Dimension::RetentionKnown],
+            Some("a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504"),
+        ),
+    );
+    // The runtime gap closes without an assessment: nothing about the source
+    // changed, so there is nothing to demonstrate about it.
+    b.push_body(
+        KIND_COVERAGE_RESTORED,
+        &restored(
+            "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a02",
+            vec![Dimension::IndexCurrent],
+            None,
+        ),
+    );
+
+    (
+        "coverage",
+        "seven dimensions carried by committed facts or explicit limitations; a runtime gap \
+         that cannot touch source health; partial restoration that narrows without closing; \
+         and every bootstrap refusal",
+        b.frames,
+    )
+}
+
 fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
     vec![
         scenario_sources(),
@@ -3252,6 +3633,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_proposals(),
         scenario_entity_merge(),
         scenario_ingest(),
+        scenario_coverage(),
     ]
 }
 
@@ -3447,6 +3829,10 @@ fn the_vector_suite_covers_every_kind() {
         KIND_PROPOSAL_REJECTED,
         // M25.
         KIND_INGEST_ASSESSED,
+        KIND_COVERAGE_FACT_RECORDED,
+        KIND_COVERAGE_ASSESSED,
+        KIND_COVERAGE_GAP,
+        KIND_COVERAGE_RESTORED,
     ] {
         assert!(kinds.contains(kind), "no vector exercises {kind}");
     }
@@ -3491,7 +3877,7 @@ fn every_kind_is_either_covered_or_a_named_gap() {
 }
 
 /// The whole decodable vocabulary, in declaration order.
-const ALL_KINDS: [&str; 27] = [
+const ALL_KINDS: [&str; 31] = [
     KIND_BATCH_COMMITTED,
     KIND_SOURCE_REGISTERED,
     KIND_OBSERVATION_RECORDED,
@@ -3519,4 +3905,8 @@ const ALL_KINDS: [&str; 27] = [
     KIND_PROPOSAL_REJECTED,
     KIND_PROPOSAL_REVERTED,
     KIND_INGEST_ASSESSED,
+    KIND_COVERAGE_FACT_RECORDED,
+    KIND_COVERAGE_ASSESSED,
+    KIND_COVERAGE_GAP,
+    KIND_COVERAGE_RESTORED,
 ];

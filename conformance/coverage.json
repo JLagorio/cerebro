@@ -1,0 +1,1441 @@
+{
+  "name": "coverage",
+  "description": "seven dimensions carried by committed facts or explicit limitations; a runtime gap that cannot touch source health; partial restoration that narrows without closing; and every bootstrap refusal",
+  "store_id": "feedfacefeedfacefeedfacefeedface",
+  "events": [
+    {
+      "v": 0,
+      "seq": 1,
+      "event_id": "00000000000000000000000000000001",
+      "prev": "feedfacefeedfacefeedfacefeedface",
+      "hash": "1a37147821b49694cdca821f1f9ffb7fd50b56f536cddcc20c9d7dbcfaac558d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "source.registered",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:source-registry"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "registration": {
+          "kind": "connector",
+          "source_key": "connector:ccf7cf50d49202c9100d89404fb944f06a5fb420ad8f794f9c924603cddae9ef",
+          "connector_instance_id": "conn-1",
+          "logical_scope_id": "scope",
+          "authority_capability": "direct_system_artifact",
+          "independence_domain_id": "domain-a"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 2,
+      "event_id": "00000000000000000000000000000002",
+      "prev": "1a37147821b49694cdca821f1f9ffb7fd50b56f536cddcc20c9d7dbcfaac558d",
+      "hash": "5cfabbf5b5841c8693096e4ffff4e81e9718317b658b22e42f2f1a87463bd91f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "observation.recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "observation_kind": "source_snapshot",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "resolution": "resolved",
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "aliases": []
+        },
+        "lineage": [],
+        "provenance": {
+          "source_system": null,
+          "source_location": null,
+          "source_record_id": null,
+          "source_revision": null,
+          "source_author": null,
+          "source_workflow_state": null
+        },
+        "payload": {
+          "source_artifact_hash": null,
+          "raw_pointer": "docs/a.md"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 3,
+      "event_id": "00000000000000000000000000000003",
+      "prev": "5cfabbf5b5841c8693096e4ffff4e81e9718317b658b22e42f2f1a87463bd91f",
+      "hash": "8c8a34882dfa26faf938f90b39a2ff44950395e721e74f78c9d4d1e0fd8dc3ba",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "source_connected",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "connector_adapter",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "connection_probe",
+          "result": "connected"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 4,
+      "event_id": "00000000000000000000000000000004",
+      "prev": "8c8a34882dfa26faf938f90b39a2ff44950395e721e74f78c9d4d1e0fd8dc3ba",
+      "hash": "6aca484b727b3d6f5b47392fcb780ab64f145870a7de2a2df929cf6c1c86d4af",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "source_healthy",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "connector_adapter",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "health_probe",
+          "result": "healthy"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 5,
+      "event_id": "00000000000000000000000000000005",
+      "prev": "6aca484b727b3d6f5b47392fcb780ab64f145870a7de2a2df929cf6c1c86d4af",
+      "hash": "1f2af529bd6cf92715b9425dbe1faa1a133d3a308a3f5886d3903d94725a9b64",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "scope_known",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "connector_adapter",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "scope_discovery",
+          "scope_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "result": "known"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 6,
+      "event_id": "00000000000000000000000000000006",
+      "prev": "1f2af529bd6cf92715b9425dbe1faa1a133d3a308a3f5886d3903d94725a9b64",
+      "hash": "96ad485fe03a2a8d03d9dc5db7a7584a83907c69bb9133a1dd76b4fc0d7a3409",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "scope_accessible",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "connector_adapter",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "access_probe",
+          "scope_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "result": "accessible"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "96ad485fe03a2a8d03d9dc5db7a7584a83907c69bb9133a1dd76b4fc0d7a3409",
+      "hash": "6396c17853206cf0293b3af85d96c70e1ed7ed4f8e94c2054547574dfeb33420",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "retention_known",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "connector_adapter",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "retention_discovery",
+          "result": "known",
+          "retention_seconds": 2592000
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "6396c17853206cf0293b3af85d96c70e1ed7ed4f8e94c2054547574dfeb33420",
+      "hash": "412ad4eeab83835af3bb835519ffcb34fff7b1ba3d5f6868ded41653eddf356b",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:vault-indexer"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "index_current",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "vault_indexer",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "index_checkpoint",
+          "index_head": "head-1",
+          "source_revision": "rev-9",
+          "result": "current"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "412ad4eeab83835af3bb835519ffcb34fff7b1ba3d5f6868ded41653eddf356b",
+      "hash": "b8ba56d111e730c71c23e8986f891365fceb4abf2f45df42255e04551592c795",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:retrieval-engine"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "retrieval_attempted",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "retrieval_engine",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "retrieval_execution",
+          "retrieval_receipt": {
+            "strategy_version": "retrieval-v1",
+            "query_strategy": "alias-expansion",
+            "query_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "attempted_at": "2026-08-09T10:00:00Z",
+            "searched_domain": "the vault",
+            "search_scope": "records/",
+            "observation_window": "2026-08-01/2026-08-09",
+            "searched_aliases": [
+              "Ada"
+            ],
+            "searched_scopes": [
+              {
+                "stage": null,
+                "revision": null,
+                "environment": null,
+                "geography": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "b8ba56d111e730c71c23e8986f891365fceb4abf2f45df42255e04551592c795",
+      "hash": "d510e7a2740234859b00f5ab039f2445f5e9d048f2b582576d00f958ee857ef2",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.fact_recorded",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "connector:conn-1"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "fact_id": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f008",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "source_registration_event_id": "00000000000000000000000000000001",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "dimension": "index_current",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z",
+        "producer": {
+          "kind": "vault_indexer",
+          "producer_version": "1"
+        },
+        "fact": {
+          "kind": "index_checkpoint",
+          "index_head": "head-2",
+          "source_revision": "rev-9",
+          "result": "current"
+        }
+      }
+    },
+    {
+      "v": 0,
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "d510e7a2740234859b00f5ab039f2445f5e9d048f2b582576d00f958ee857ef2",
+      "hash": "dc2cef6ea4ce121530653c1a4a060819774341f9d8e50378ef4a77084ae4c850",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "dimensions": {
+          "source_connected": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "source_healthy": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_accessible": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retention_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "index_current": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retrieval_attempted": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          }
+        },
+        "retrieval_receipt": {
+          "strategy_version": "retrieval-v1",
+          "query_strategy": "alias-expansion",
+          "query_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "attempted_at": "2026-08-09T10:00:00Z",
+          "searched_domain": "the vault",
+          "search_scope": "records/",
+          "observation_window": "2026-08-01/2026-08-09",
+          "searched_aliases": [
+            "Ada"
+          ],
+          "searched_scopes": [
+            {
+              "stage": null,
+              "revision": null,
+              "environment": null,
+              "geography": null
+            }
+          ]
+        },
+        "limitations": [],
+        "supersedes_assessment_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "dc2cef6ea4ce121530653c1a4a060819774341f9d8e50378ef4a77084ae4c850",
+      "hash": "33919058edafa77b3df8748e1ca6dc21398253bbd84ab394571c81aa40995408",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a502",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "dimensions": {
+          "source_connected": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "source_healthy": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "cccccccccccccccccccccccccccccccc"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_accessible": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retention_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "index_current": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retrieval_attempted": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          }
+        },
+        "retrieval_receipt": {
+          "strategy_version": "retrieval-v1",
+          "query_strategy": "alias-expansion",
+          "query_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "attempted_at": "2026-08-09T10:00:00Z",
+          "searched_domain": "the vault",
+          "search_scope": "records/",
+          "observation_window": "2026-08-01/2026-08-09",
+          "searched_aliases": [
+            "Ada"
+          ],
+          "searched_scopes": [
+            {
+              "stage": null,
+              "revision": null,
+              "environment": null,
+              "geography": null
+            }
+          ]
+        },
+        "limitations": [],
+        "supersedes_assessment_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "prev": "33919058edafa77b3df8748e1ca6dc21398253bbd84ab394571c81aa40995408",
+      "hash": "a8d4e712a7081c00ba731527304361610effb884fd6b7f30b90216582d1844e7",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a503",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "dimensions": {
+          "source_connected": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "source_healthy": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_accessible": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retention_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "index_current": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retrieval_attempted": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          }
+        },
+        "retrieval_receipt": {
+          "strategy_version": "retrieval-v1",
+          "query_strategy": "alias-expansion",
+          "query_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "attempted_at": "2026-08-09T10:00:00Z",
+          "searched_domain": "the vault",
+          "search_scope": "records/",
+          "observation_window": "2026-08-01/2026-08-09",
+          "searched_aliases": [
+            "Ada"
+          ],
+          "searched_scopes": [
+            {
+              "stage": null,
+              "revision": null,
+              "environment": null,
+              "geography": null
+            }
+          ]
+        },
+        "limitations": [],
+        "supersedes_assessment_id": null
+      }
+    },
+    {
+      "v": 0,
+      "seq": 14,
+      "event_id": "0000000000000000000000000000000e",
+      "prev": "a8d4e712a7081c00ba731527304361610effb884fd6b7f30b90216582d1844e7",
+      "hash": "537d0abdec0f613adc03e2203bf0a16ca47b846e4eeaa357284f1695cde85466",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "dimensions": {
+          "source_connected": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "source_healthy": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_accessible": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retention_known": {
+            "state": "unknown",
+            "basis_event_ids": [],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "index_current": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retrieval_attempted": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          }
+        },
+        "retrieval_receipt": {
+          "strategy_version": "retrieval-v1",
+          "query_strategy": "alias-expansion",
+          "query_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "attempted_at": "2026-08-09T10:00:00Z",
+          "searched_domain": "the vault",
+          "search_scope": "records/",
+          "observation_window": "2026-08-01/2026-08-09",
+          "searched_aliases": [
+            "Ada"
+          ],
+          "searched_scopes": [
+            {
+              "stage": null,
+              "revision": null,
+              "environment": null,
+              "geography": null
+            }
+          ]
+        },
+        "limitations": [
+          {
+            "dimension": "retention_known",
+            "reason": "the connector stopped reporting a retention policy"
+          }
+        ],
+        "supersedes_assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 15,
+      "event_id": "0000000000000000000000000000000f",
+      "prev": "537d0abdec0f613adc03e2203bf0a16ca47b846e4eeaa357284f1695cde85466",
+      "hash": "bc4448b7977612bebc402c343db7fe009492d6bfb73eea08e560cd569eb8229d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.gap",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "responsibility_id": null,
+        "contract_version": null,
+        "contract_digest": null,
+        "cause": {
+          "kind": "source",
+          "component": null
+        },
+        "opened_at": "2026-08-09T11:00:00Z",
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504",
+        "affected_dimensions": [
+          "source_healthy",
+          "retention_known"
+        ],
+        "pending_count_at_open": 12,
+        "reason": "blind past the threshold"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 16,
+      "event_id": "00000000000000000000000000000010",
+      "prev": "bc4448b7977612bebc402c343db7fe009492d6bfb73eea08e560cd569eb8229d",
+      "hash": "75ddcf8005f01a7f41f9937a26e142183e2b21c385bb346f91bde0c994eb4390",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.gap",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a02",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": null,
+        "responsibility_id": null,
+        "contract_version": null,
+        "contract_digest": null,
+        "cause": {
+          "kind": "reasoning_runtime",
+          "component": "claude-cli"
+        },
+        "opened_at": "2026-08-09T11:00:00Z",
+        "assessment_id": null,
+        "affected_dimensions": [
+          "index_current"
+        ],
+        "pending_count_at_open": 12,
+        "reason": "blind past the threshold"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "prev": "75ddcf8005f01a7f41f9937a26e142183e2b21c385bb346f91bde0c994eb4390",
+      "hash": "b32f38339455ce5ae2e495f4d3a3f140ae61f6dc19a43860db72a53638be32ce",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.gap",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a03",
+        "subject": {
+          "entity_id": "cccccccccccccccccccccccccccccccc",
+          "predicate_class": "status",
+          "scope": {
+            "stage": null,
+            "revision": null,
+            "environment": null,
+            "geography": null
+          }
+        },
+        "source_id": null,
+        "responsibility_id": null,
+        "contract_version": null,
+        "contract_digest": null,
+        "cause": {
+          "kind": "reasoning_runtime",
+          "component": "claude-cli"
+        },
+        "opened_at": "2026-08-09T11:00:00Z",
+        "assessment_id": null,
+        "affected_dimensions": [
+          "source_healthy"
+        ],
+        "pending_count_at_open": 12,
+        "reason": "blind past the threshold"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 18,
+      "event_id": "00000000000000000000000000000012",
+      "prev": "b32f38339455ce5ae2e495f4d3a3f140ae61f6dc19a43860db72a53638be32ce",
+      "hash": "63e2ce450c4236e86609921b55959823a908f8198f6ebce6a930511b8dc0a8e4",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.restored",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+        "restored_at": "2026-08-09T12:00:00Z",
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504",
+        "restored_dimensions": [
+          "source_healthy"
+        ],
+        "reason": "demonstrated recovery"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "prev": "63e2ce450c4236e86609921b55959823a908f8198f6ebce6a930511b8dc0a8e4",
+      "hash": "d3ba95e3dbf7a2ef0d61feb1286bca4a1d90893e3ffd4373f552038d86548b04",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.restored",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+        "restored_at": "2026-08-09T12:00:00Z",
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504",
+        "restored_dimensions": [
+          "source_healthy"
+        ],
+        "reason": "demonstrated recovery"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 20,
+      "event_id": "00000000000000000000000000000014",
+      "prev": "d3ba95e3dbf7a2ef0d61feb1286bca4a1d90893e3ffd4373f552038d86548b04",
+      "hash": "5a96a2e5ef99ad19483a94b53f90d219eb832dd42222d087184b6e45fa04b713",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.restored",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01",
+        "restored_at": "2026-08-09T12:00:00Z",
+        "assessment_id": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504",
+        "restored_dimensions": [
+          "retention_known"
+        ],
+        "reason": "demonstrated recovery"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 21,
+      "event_id": "00000000000000000000000000000015",
+      "prev": "5a96a2e5ef99ad19483a94b53f90d219eb832dd42222d087184b6e45fa04b713",
+      "hash": "9c32117710dd29194cacb4bde35bb995418b72638fc052feb51f501cf07f6c1f",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "coverage.restored",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "system:coverage"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "gap_id": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a02",
+        "restored_at": "2026-08-09T12:00:00Z",
+        "assessment_id": null,
+        "restored_dimensions": [
+          "index_current"
+        ],
+        "reason": "demonstrated recovery"
+      }
+    }
+  ],
+  "expected_state": {
+    "sources": {
+      "d89318cdd73ee2a9db48ab151c0445eb": {
+        "source_key": "connector:ccf7cf50d49202c9100d89404fb944f06a5fb420ad8f794f9c924603cddae9ef",
+        "kind": "connector",
+        "capability": "direct_system_artifact",
+        "independence_domain_id": "domain-a",
+        "registration_event_id": "00000000000000000000000000000001"
+      }
+    },
+    "entities": {
+      "cccccccccccccccccccccccccccccccc": "00000000000000000000000000000002"
+    },
+    "aliases": {},
+    "observations": {
+      "00000000000000000000000000000002": {
+        "seq": 2,
+        "kind": "source_snapshot",
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject": [
+          "resolved",
+          "cccccccccccccccccccccccccccccccc"
+        ],
+        "effective_entity": "cccccccccccccccccccccccccccccccc",
+        "effective_resolution_event": null,
+        "authority": null,
+        "lineage": []
+      }
+    },
+    "beliefs": {},
+    "relations": {},
+    "resolutions": [],
+    "independence": [],
+    "derived_belief_sources": [],
+    "versions": {
+      "coverage_assessment:a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501": 2,
+      "coverage_assessment:a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006": 1,
+      "coverage_fact:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007": 1,
+      "coverage_gap:9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01": 2,
+      "coverage_gap:9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a02": 2,
+      "entity:cccccccccccccccccccccccccccccccc": 1,
+      "observation:00000000000000000000000000000002": 1,
+      "source:d89318cdd73ee2a9db48ab151c0445eb": 9
+    },
+    "batches": [],
+    "proposals": {},
+    "coverage_facts": {
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "source_connected",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      },
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "source_healthy",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      },
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "scope_known",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      },
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "scope_accessible",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      },
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "retention_known",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      },
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "index_current",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      },
+      "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimension": "retrieval_attempted",
+        "state": "yes",
+        "as_of": "2026-08-09T10:00:00Z"
+      }
+    },
+    "coverage_assessments": {
+      "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a501": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimensions": {
+          "source_connected": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "source_healthy": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_accessible": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retention_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f005"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "index_current": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retrieval_attempted": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          }
+        },
+        "has_retrieval_receipt": true,
+        "superseded": true
+      },
+      "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a504": {
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "subject_id": "cccccccccccccccccccccccccccccccc",
+        "predicate_class": "status",
+        "dimensions": {
+          "source_connected": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f001"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "source_healthy": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_known": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f003"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "scope_accessible": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f004"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retention_known": {
+            "state": "unknown",
+            "basis_event_ids": [],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "index_current": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f006"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          },
+          "retrieval_attempted": {
+            "state": "yes",
+            "basis_event_ids": [
+              "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f007"
+            ],
+            "as_of": "2026-08-09T10:00:00Z"
+          }
+        },
+        "has_retrieval_receipt": true,
+        "superseded": false
+      }
+    },
+    "coverage_gaps": {
+      "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a01": {
+        "cause": "source",
+        "component": null,
+        "source_id": "d89318cdd73ee2a9db48ab151c0445eb",
+        "remaining": [
+          "retention_known"
+        ],
+        "closed": false
+      },
+      "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a02": {
+        "cause": "reasoning_runtime",
+        "component": "claude-cli",
+        "source_id": null,
+        "remaining": [],
+        "closed": true
+      }
+    },
+    "ingest_receipts": {},
+    "reconciliation": {
+      "open": false,
+      "divergences": {},
+      "resolutions": []
+    }
+  },
+  "expected_refusals": [
+    {
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "an index fact is appended only by system:vault-indexer"
+    },
+    {
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "scope_known: basis cccccccccccccccccccccccccccccccc is not a committed coverage fact"
+    },
+    {
+      "seq": 13,
+      "event_id": "0000000000000000000000000000000d",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "scope_known: basis f0f0f0f0f0f0f0f0f0f0f0f0f0f0f002 establishes source_healthy, not this dimension"
+    },
+    {
+      "seq": 17,
+      "event_id": "00000000000000000000000000000011",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "the reasoning runtime cannot affect source_healthy — that is a claim about the source, and a runtime failure has no standing to make it"
+    },
+    {
+      "seq": 19,
+      "event_id": "00000000000000000000000000000013",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "restoration names source_healthy, which this gap does not still affect"
+    },
+    {
+      "seq": 20,
+      "event_id": "00000000000000000000000000000014",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "restoration claims retention_known recovered and the cited assessment says unknown"
+    }
+  ]
+}

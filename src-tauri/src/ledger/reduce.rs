@@ -77,27 +77,64 @@ pub struct ObservationState {
     pub lineage_parents: Vec<(schema::LineageKind, String)>,
 }
 
-/// One M25 `coverage.assessed` record, reduced.
+/// One `coverage.assessed` record, reduced (M25.4).
 ///
-/// Declared before anything emits one: M24.8's high-stakes and absence rules
-/// are written against this shape, which is what makes "no coverage" a
-/// resolvable question rather than a `todo!()`. The map stays empty for the
-/// whole of M24 — deliberately, and a test says so — so every high-stakes
-/// proposal queues for a human until M25 gives the rule something to find.
+/// M24 declared this shape before anything could emit one, so its high-stakes
+/// and absence rules were written and tested against a real record rather
+/// than a `todo!()`. M25.4 fills it in — IN PLACE, because no producer ever
+/// wrote the old shape and a v2 beside it would double every reader for
+/// nothing.
+///
+/// The seven dimensions are separate fields with separate states, bases, and
+/// as-of times. A "partial" summary is a projection a surface may compute; it
+/// is never what is stored (§46).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoverageAssessment {
     pub assessment_id: String,
-    /// The Entity this assessment is about. Coverage of another subject
-    /// proves nothing about this one.
-    pub subject_id: String,
-    /// Which of the table's `required_coverage_dimensions` this establishes.
-    pub dimensions: std::collections::BTreeSet<String>,
-    pub searched_domain: String,
-    pub search_scope: String,
-    pub observation_window: String,
-    pub query_strategy: String,
+    /// The Entity this assessment is about, when it names one. Coverage of
+    /// another subject proves nothing about this one.
+    pub subject_id: Option<String>,
+    pub predicate_class: Option<String>,
+    pub scope: schema::Scope,
+    pub source_id: String,
+    pub dimensions: schema::Dimensions,
+    /// Present exactly when `retrieval_attempted` is `yes`. Carries the four
+    /// canonical strings M24's formal-absence rule compares byte-for-byte.
+    pub retrieval_receipt: Option<schema::RetrievalReceipt>,
     /// A later assessment replaced this one.
     pub superseded: bool,
+}
+
+impl CoverageAssessment {
+    /// Is this dimension established affirmatively?
+    pub fn establishes(&self, dimension: schema::Dimension) -> bool {
+        self.dimensions.get(dimension).state == schema::DimensionState::Yes
+    }
+}
+
+/// One committed `coverage.fact_recorded`, reduced. Assessments cite these;
+/// nothing else does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageFact {
+    pub fact_id: String,
+    pub source_id: String,
+    pub subject_id: Option<String>,
+    pub predicate_class: Option<String>,
+    pub dimension: schema::Dimension,
+    pub state: schema::DimensionState,
+    pub as_of: String,
+}
+
+/// One coverage gap. Open until the LAST affected dimension is restored: a
+/// partial restoration narrows it and does not close it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageGapRow {
+    pub gap_id: String,
+    pub cause: schema::GapCauseKind,
+    pub component: Option<String>,
+    pub source_id: Option<String>,
+    pub remaining: std::collections::BTreeSet<schema::Dimension>,
+    pub closed: bool,
 }
 
 /// One committed `ingest.assessed` receipt, reduced (M25.3).
@@ -517,10 +554,18 @@ pub struct EpistemicState {
     /// extracted-assertion event → its extracted_text, for the M23.7
     /// out-of-band correction carve-out.
     pub extracted_texts: BTreeMap<String, String>,
-    /// M25's coverage assessments. Empty for the whole of M24 — the rules
-    /// that read it are written and tested, and they refuse rather than
-    /// assume, which is why an unfillable map is safe to ship.
+    /// M25.4's coverage assessments, keyed by `assessment_id` — what M24's
+    /// high-stakes and absence rules resolve their `coverage_refs` against.
     pub coverage_assessments: BTreeMap<String, CoverageAssessment>,
+    /// Committed coverage facts, keyed by `fact_id`. An assessment's basis
+    /// may only name these, and only committed ones.
+    pub coverage_facts: BTreeMap<String, CoverageFact>,
+    /// Open and closed gaps, keyed by `gap_id`.
+    pub coverage_gaps: BTreeMap<String, CoverageGapRow>,
+    /// `(source_id, subject, predicate_class)` → the current assessment, so a
+    /// reader does not scan. Selected by reducer SEQUENCE, never by an
+    /// agent-supplied `as_of` — a clock is not an ordering.
+    pub coverage_current: BTreeMap<(String, String, String), String>,
     /// M25.3's portable processing receipts, keyed by `receipt_id`. Read by
     /// runtime-DB recovery to rebuild what has already been processed;
     /// structurally excluded from evidence.
@@ -822,6 +867,10 @@ fn apply(
         EventBody::ProposalRejected(b) => apply_proposal_rejected(state, frame, b),
         EventBody::ProposalReverted(b) => apply_proposal_reverted(state, frame, b),
         EventBody::IngestAssessed(b) => apply_ingest_assessed(state, frame, b, staged),
+        EventBody::CoverageFactRecorded(b) => apply_coverage_fact(state, frame, b),
+        EventBody::CoverageAssessed(b) => apply_coverage_assessed(state, frame, b, staged),
+        EventBody::CoverageGap(b) => apply_coverage_gap(state, frame, b, staged),
+        EventBody::CoverageRestored(b) => apply_coverage_restored(state, frame, b, staged),
     }
 }
 
@@ -1383,6 +1432,350 @@ fn apply_ingest_assessed(
         body.receipt_id.clone(),
     );
     state.create_version("ingest_receipt", &body.receipt_id, &frame.event_id);
+    Ok(())
+}
+
+// --- M25.4 coverage ---------------------------------------------------------
+
+/// The subject key an assessment is current for. Empty strings stand in for
+/// "unscoped", which is a real answer and must not collide with a named one —
+/// the components are joined with a separator no id can contain.
+fn coverage_key(
+    source_id: &str,
+    subject_id: Option<&str>,
+    predicate_class: Option<&str>,
+) -> (String, String, String) {
+    (
+        source_id.to_string(),
+        subject_id.unwrap_or_default().to_string(),
+        predicate_class.unwrap_or_default().to_string(),
+    )
+}
+
+/// `coverage.fact_recorded` — a trusted, server-stamped observation about one
+/// dimension. Everything checkable from the body alone is checked in the
+/// schema layer; here we check it against the world.
+fn apply_coverage_fact(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::CoverageFactRecorded,
+) -> Result<(), Refusal> {
+    if state.coverage_facts.contains_key(&body.fact_id) {
+        return Err(refused(format!(
+            "coverage fact {} is already recorded — one fact per id, append once",
+            body.fact_id
+        )));
+    }
+    let Some(source) = state.sources.get(&body.source_id) else {
+        return Err(refused(format!(
+            "coverage fact names source {} which has no committed registration",
+            body.source_id
+        )));
+    };
+    if source.registration_event_id != body.source_registration_event_id {
+        return Err(refused(format!(
+            "coverage fact pins registration {} and source {} was registered by {}",
+            body.source_registration_event_id, body.source_id, source.registration_event_id
+        )));
+    }
+    if let Some(entity_id) = &body.subject.entity_id {
+        if !state.entities.contains_key(entity_id) {
+            return Err(refused(format!(
+                "coverage fact names entity {entity_id}, which this store does not know"
+            )));
+        }
+    }
+    state.coverage_facts.insert(
+        body.fact_id.clone(),
+        CoverageFact {
+            fact_id: body.fact_id.clone(),
+            source_id: body.source_id.clone(),
+            subject_id: body.subject.entity_id.clone(),
+            predicate_class: body.subject.predicate_class.clone(),
+            dimension: body.dimension,
+            state: body.state,
+            as_of: body.as_of.clone(),
+        },
+    );
+    state.create_version("coverage_fact", &body.fact_id, &frame.event_id);
+    // A fact is an observation ABOUT a source, so the source's version moves
+    // with it — which is what lets a CAS-guarded caller notice that the
+    // ground under its assessment shifted.
+    state.bump_version("source", &body.source_id, &frame.event_id);
+    Ok(())
+}
+
+/// `coverage.assessed` — the seven dimensions, each carried by committed
+/// facts or by an explicit limitation.
+fn apply_coverage_assessed(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::CoverageAssessed,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if state.coverage_assessments.contains_key(&body.assessment_id) {
+        return Err(refused(format!(
+            "assessment {} is already recorded — append once",
+            body.assessment_id
+        )));
+    }
+    if !state.sources.contains_key(&body.source_id) {
+        return Err(refused(format!(
+            "assessment names source {} which has no committed registration",
+            body.source_id
+        )));
+    }
+    if let Some(entity_id) = &body.subject.entity_id {
+        if !state.entities.contains_key(entity_id) {
+            return Err(refused(format!(
+                "assessment names entity {entity_id}, which this store does not know"
+            )));
+        }
+    }
+
+    for (dimension, assessment) in body.dimensions.each() {
+        for fact_id in &assessment.basis_event_ids {
+            // COMMITTED only. A basis staged in this very batch would let an
+            // assessment and the fact that supports it be written by the same
+            // caller in the same breath, which is the bootstrap the whole
+            // design refuses.
+            if staged.contains(fact_id) {
+                return Err(refused(format!(
+                    "{}: basis {fact_id} is a member of this batch — a basis is committed \
+                     history, not a promise made alongside the claim",
+                    dimension.as_str()
+                )));
+            }
+            let Some(fact) = state.coverage_facts.get(fact_id) else {
+                return Err(refused(format!(
+                    "{}: basis {fact_id} is not a committed coverage fact",
+                    dimension.as_str()
+                )));
+            };
+            if fact.dimension != dimension {
+                return Err(refused(format!(
+                    "{}: basis {fact_id} establishes {}, not this dimension",
+                    dimension.as_str(),
+                    fact.dimension.as_str()
+                )));
+            }
+            if fact.state != assessment.state {
+                return Err(refused(format!(
+                    "{}: basis {fact_id} says {}, and the assessment says {}",
+                    dimension.as_str(),
+                    fact.state.as_str(),
+                    assessment.state.as_str()
+                )));
+            }
+            if fact.source_id != body.source_id {
+                return Err(refused(format!(
+                    "{}: basis {fact_id} is about a different source",
+                    dimension.as_str()
+                )));
+            }
+            if fact.subject_id != body.subject.entity_id
+                || fact.predicate_class != body.subject.predicate_class
+            {
+                return Err(refused(format!(
+                    "{}: basis {fact_id} is about a different subject",
+                    dimension.as_str()
+                )));
+            }
+        }
+        // `as_of` is the greatest basis fact's, so it cannot claim to be
+        // fresher than the evidence behind it.
+        if !assessment.basis_event_ids.is_empty() {
+            let newest = assessment
+                .basis_event_ids
+                .iter()
+                .filter_map(|id| state.coverage_facts.get(id))
+                .map(|fact| fact.as_of.as_str())
+                .max()
+                .unwrap_or_default();
+            if assessment.as_of != newest {
+                return Err(refused(format!(
+                    "{}: as_of is {} and its newest basis fact is {newest}",
+                    dimension.as_str(),
+                    assessment.as_of
+                )));
+            }
+        }
+    }
+
+    if let Some(prior_id) = &body.supersedes_assessment_id {
+        let Some(prior) = state.coverage_assessments.get(prior_id) else {
+            return Err(refused(format!(
+                "assessment supersedes {prior_id}, which is not a committed assessment"
+            )));
+        };
+        if prior.superseded {
+            return Err(refused(format!(
+                "assessment {prior_id} is already superseded"
+            )));
+        }
+        if prior.source_id != body.source_id
+            || prior.subject_id != body.subject.entity_id
+            || prior.predicate_class != body.subject.predicate_class
+        {
+            return Err(refused(
+                "an assessment supersedes one about the same source and subject".to_string(),
+            ));
+        }
+    }
+
+    if let Some(prior_id) = &body.supersedes_assessment_id {
+        if let Some(prior) = state.coverage_assessments.get_mut(prior_id) {
+            prior.superseded = true;
+        }
+        state.bump_version("coverage_assessment", prior_id, &frame.event_id);
+    }
+    state.coverage_assessments.insert(
+        body.assessment_id.clone(),
+        CoverageAssessment {
+            assessment_id: body.assessment_id.clone(),
+            subject_id: body.subject.entity_id.clone(),
+            predicate_class: body.subject.predicate_class.clone(),
+            scope: body.subject.scope.clone(),
+            source_id: body.source_id.clone(),
+            dimensions: body.dimensions.clone(),
+            retrieval_receipt: body.retrieval_receipt.clone(),
+            superseded: false,
+        },
+    );
+    state.coverage_current.insert(
+        coverage_key(
+            &body.source_id,
+            body.subject.entity_id.as_deref(),
+            body.subject.predicate_class.as_deref(),
+        ),
+        body.assessment_id.clone(),
+    );
+    state.create_version("coverage_assessment", &body.assessment_id, &frame.event_id);
+    Ok(())
+}
+
+fn apply_coverage_gap(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::CoverageGap,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    if state.coverage_gaps.contains_key(&body.gap_id) {
+        return Err(refused(format!(
+            "gap {} is already open — append once, so a retry cannot duplicate an episode",
+            body.gap_id
+        )));
+    }
+    if let Some(source_id) = &body.source_id {
+        if !state.sources.contains_key(source_id) {
+            return Err(refused(format!(
+                "gap names source {source_id} which has no committed registration"
+            )));
+        }
+    }
+    if let Some(assessment_id) = &body.assessment_id {
+        if staged.contains(assessment_id) {
+            return Err(refused(
+                "a gap cites a COMMITTED assessment, not one staged beside it".to_string(),
+            ));
+        }
+        let Some(assessment) = state.coverage_assessments.get(assessment_id) else {
+            return Err(refused(format!(
+                "gap cites assessment {assessment_id}, which is not committed"
+            )));
+        };
+        if assessment.superseded {
+            return Err(refused(format!(
+                "gap cites assessment {assessment_id}, which a later one replaced"
+            )));
+        }
+        if body.source_id.as_deref() != Some(assessment.source_id.as_str()) {
+            return Err(refused(
+                "a gap and the assessment it cites are about the same source".to_string(),
+            ));
+        }
+    }
+    state.coverage_gaps.insert(
+        body.gap_id.clone(),
+        CoverageGapRow {
+            gap_id: body.gap_id.clone(),
+            cause: body.cause.kind,
+            component: body.cause.component.clone(),
+            source_id: body.source_id.clone(),
+            remaining: body.affected_dimensions.iter().copied().collect(),
+            closed: false,
+        },
+    );
+    state.create_version("coverage_gap", &body.gap_id, &frame.event_id);
+    Ok(())
+}
+
+/// `coverage.restored` — partial or final. Only the restoration that closes
+/// the LAST remaining dimension closes the episode; anything else narrows it
+/// and leaves it open, because coverage that is half back is not back.
+fn apply_coverage_restored(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::CoverageRestored,
+    staged: &Staged,
+) -> Result<(), Refusal> {
+    let Some(gap) = state.coverage_gaps.get(&body.gap_id) else {
+        return Err(refused(format!(
+            "restoration names gap {}, which was never opened",
+            body.gap_id
+        )));
+    };
+    if gap.closed {
+        return Err(refused(format!(
+            "gap {} is already closed — a closed episode cannot be closed twice",
+            body.gap_id
+        )));
+    }
+    for dimension in &body.restored_dimensions {
+        if !gap.remaining.contains(dimension) {
+            return Err(refused(format!(
+                "restoration names {}, which this gap does not still affect",
+                dimension.as_str()
+            )));
+        }
+    }
+    // A SOURCE gap comes back only with a newer assessment demonstrating it.
+    // A runtime gap needs no assessment: nothing about the source changed.
+    if gap.cause == schema::GapCauseKind::Source {
+        let Some(assessment_id) = &body.assessment_id else {
+            return Err(refused(
+                "a source gap is restored by a newer assessment, not by an assertion".to_string(),
+            ));
+        };
+        if staged.contains(assessment_id) {
+            return Err(refused(
+                "a restoration cites a COMMITTED assessment".to_string(),
+            ));
+        }
+        let Some(assessment) = state.coverage_assessments.get(assessment_id) else {
+            return Err(refused(format!(
+                "restoration cites assessment {assessment_id}, which is not committed"
+            )));
+        };
+        for dimension in &body.restored_dimensions {
+            if assessment.dimensions.get(*dimension).state != schema::DimensionState::Yes {
+                return Err(refused(format!(
+                    "restoration claims {} recovered and the cited assessment says {}",
+                    dimension.as_str(),
+                    assessment.dimensions.get(*dimension).state.as_str()
+                )));
+            }
+        }
+    }
+    let gap = state
+        .coverage_gaps
+        .get_mut(&body.gap_id)
+        .expect("checked above");
+    for dimension in &body.restored_dimensions {
+        gap.remaining.remove(dimension);
+    }
+    gap.closed = gap.remaining.is_empty();
+    state.bump_version("coverage_gap", &body.gap_id, &frame.event_id);
     Ok(())
 }
 
@@ -3028,6 +3421,76 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                     ])),
                     "applied_event_id": p.applied_event_id,
                     "has_revert_plan": p.revert_plan.is_some(),
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M25.4: the coverage record, uncollapsed. In the vector contract
+        // because M24's policy rules resolve `coverage_refs` against it, and
+        // a Rust/TS disagreement about a dimension's state is a
+        // disagreement about whether a high-stakes change may auto-apply.
+        //
+        // `coverage_current` is NOT here: it is derivable from these rows,
+        // and a second sorted key is a second chance to disagree.
+        "coverage_facts": state
+            .coverage_facts
+            .values()
+            .map(|f| (
+                f.fact_id.clone(),
+                serde_json::json!({
+                    "source_id": f.source_id,
+                    "subject_id": f.subject_id,
+                    "predicate_class": f.predicate_class,
+                    "dimension": f.dimension.as_str(),
+                    "state": f.state.as_str(),
+                    "as_of": f.as_of,
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "coverage_assessments": state
+            .coverage_assessments
+            .values()
+            .map(|a| (
+                a.assessment_id.clone(),
+                serde_json::json!({
+                    "source_id": a.source_id,
+                    "subject_id": a.subject_id,
+                    "predicate_class": a.predicate_class,
+                    "dimensions": a
+                        .dimensions
+                        .each()
+                        .iter()
+                        .map(|(dimension, value)| (
+                            dimension.as_str().to_string(),
+                            serde_json::json!({
+                                "state": value.state.as_str(),
+                                "basis_event_ids": value.basis_event_ids,
+                                "as_of": value.as_of,
+                            }),
+                        ))
+                        .collect::<serde_json::Map<String, serde_json::Value>>(),
+                    "has_retrieval_receipt": a.retrieval_receipt.is_some(),
+                    "superseded": a.superseded,
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "coverage_gaps": state
+            .coverage_gaps
+            .values()
+            .map(|g| (
+                g.gap_id.clone(),
+                serde_json::json!({
+                    "cause": match g.cause {
+                        schema::GapCauseKind::Source => "source",
+                        schema::GapCauseKind::ReasoningRuntime => "reasoning_runtime",
+                    },
+                    "component": g.component,
+                    "source_id": g.source_id,
+                    "remaining": g
+                        .remaining
+                        .iter()
+                        .map(|d| d.as_str())
+                        .collect::<Vec<_>>(),
+                    "closed": g.closed,
                 }),
             ))
             .collect::<serde_json::Map<String, serde_json::Value>>(),

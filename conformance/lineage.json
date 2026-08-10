@@ -553,6 +553,9 @@
     },
     "batches": [],
     "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
     "ingest_receipts": {},
     "reconciliation": {
       "open": false,

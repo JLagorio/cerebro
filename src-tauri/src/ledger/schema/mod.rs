@@ -23,6 +23,7 @@
 
 pub mod batch;
 pub mod belief;
+pub mod coverage;
 pub mod entity_merge;
 pub mod independence;
 pub mod ingest;
@@ -47,6 +48,13 @@ pub use batch::BatchCommitted;
 pub use belief::{
     derive_relation_id, BasisLink, BasisRole, BeliefAttested, BeliefBasis, BeliefCreated,
     BeliefRelation, BeliefRevised, EntityAliasAdded, PatchOp, RelationAction, RelationKind,
+};
+pub use coverage::{
+    AccessResult, ConnectionResult, CoverageAssessed, CoverageFactRecorded, CoverageGap,
+    CoverageRestored, CoverageSubject, CurrentResult, Dimension, DimensionAssessment,
+    DimensionState, Dimensions, Fact, GapCause, GapCauseKind, HealthResult, KnownResult,
+    Limitation, Producer, ProducerKind, RetrievalReceipt, ACTOR_RETRIEVAL_ENGINE,
+    ACTOR_VAULT_INDEXER,
 };
 pub use entity_merge::{derive_plan_id, EntityMerged, EntityReassignmentPlan, LiveAlias};
 pub use independence::{IndependenceProof, IndependenceRecorded};
@@ -140,6 +148,10 @@ pub const KIND_PROPOSAL_REVERTED: &str = "proposal.reverted";
 // lineage and Support (see `ingest.rs`). The coverage vocabulary follows in
 // M25.4.
 pub const KIND_INGEST_ASSESSED: &str = "ingest.assessed";
+pub const KIND_COVERAGE_FACT_RECORDED: &str = "coverage.fact_recorded";
+pub const KIND_COVERAGE_ASSESSED: &str = "coverage.assessed";
+pub const KIND_COVERAGE_GAP: &str = "coverage.gap";
+pub const KIND_COVERAGE_RESTORED: &str = "coverage.restored";
 
 /// Reserved vocabulary: names fixed so nothing else ever claims them, with
 /// bodies deliberately undefined — a schema-v1 body under one of these is
@@ -312,6 +324,10 @@ pub enum EventBody {
     ProposalRejected(Box<ProposalRejected>),
     ProposalReverted(Box<ProposalReverted>),
     IngestAssessed(Box<IngestAssessed>),
+    CoverageFactRecorded(Box<CoverageFactRecorded>),
+    CoverageAssessed(Box<CoverageAssessed>),
+    CoverageGap(Box<CoverageGap>),
+    CoverageRestored(Box<CoverageRestored>),
 }
 
 impl EventBody {
@@ -344,6 +360,10 @@ impl EventBody {
             EventBody::ProposalRejected(_) => KIND_PROPOSAL_REJECTED,
             EventBody::ProposalReverted(_) => KIND_PROPOSAL_REVERTED,
             EventBody::IngestAssessed(_) => KIND_INGEST_ASSESSED,
+            EventBody::CoverageFactRecorded(_) => KIND_COVERAGE_FACT_RECORDED,
+            EventBody::CoverageAssessed(_) => KIND_COVERAGE_ASSESSED,
+            EventBody::CoverageGap(_) => KIND_COVERAGE_GAP,
+            EventBody::CoverageRestored(_) => KIND_COVERAGE_RESTORED,
         }
     }
 
@@ -376,6 +396,10 @@ impl EventBody {
             EventBody::ProposalRejected(b) => b.batch_id.as_deref(),
             EventBody::ProposalReverted(b) => b.batch_id.as_deref(),
             EventBody::IngestAssessed(b) => b.batch_id.as_deref(),
+            EventBody::CoverageFactRecorded(b) => b.batch_id.as_deref(),
+            EventBody::CoverageAssessed(b) => b.batch_id.as_deref(),
+            EventBody::CoverageGap(b) => b.batch_id.as_deref(),
+            EventBody::CoverageRestored(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -408,6 +432,10 @@ impl EventBody {
             EventBody::ProposalRejected(b) => b.idempotency_key.as_deref(),
             EventBody::ProposalReverted(b) => b.idempotency_key.as_deref(),
             EventBody::IngestAssessed(b) => b.idempotency_key.as_deref(),
+            EventBody::CoverageFactRecorded(b) => b.idempotency_key.as_deref(),
+            EventBody::CoverageAssessed(b) => b.idempotency_key.as_deref(),
+            EventBody::CoverageGap(b) => b.idempotency_key.as_deref(),
+            EventBody::CoverageRestored(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -444,6 +472,10 @@ impl EventBody {
             EventBody::ProposalRejected(b) => b.validate(),
             EventBody::ProposalReverted(b) => b.validate(),
             EventBody::IngestAssessed(b) => b.validate(),
+            EventBody::CoverageFactRecorded(b) => b.validate(),
+            EventBody::CoverageAssessed(b) => b.validate(),
+            EventBody::CoverageGap(b) => b.validate(),
+            EventBody::CoverageRestored(b) => b.validate(),
         }
     }
 
@@ -477,6 +509,10 @@ impl EventBody {
             EventBody::ProposalRejected(b) => serde_json::to_value(b),
             EventBody::ProposalReverted(b) => serde_json::to_value(b),
             EventBody::IngestAssessed(b) => serde_json::to_value(b),
+            EventBody::CoverageFactRecorded(b) => serde_json::to_value(b),
+            EventBody::CoverageAssessed(b) => serde_json::to_value(b),
+            EventBody::CoverageGap(b) => serde_json::to_value(b),
+            EventBody::CoverageRestored(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -557,6 +593,10 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_PROPOSAL_REJECTED => EventBody::ProposalRejected(Box::new(gate(kind, body)?)),
         KIND_PROPOSAL_REVERTED => EventBody::ProposalReverted(Box::new(gate(kind, body)?)),
         KIND_INGEST_ASSESSED => EventBody::IngestAssessed(Box::new(gate(kind, body)?)),
+        KIND_COVERAGE_FACT_RECORDED => EventBody::CoverageFactRecorded(Box::new(gate(kind, body)?)),
+        KIND_COVERAGE_ASSESSED => EventBody::CoverageAssessed(Box::new(gate(kind, body)?)),
+        KIND_COVERAGE_GAP => EventBody::CoverageGap(Box::new(gate(kind, body)?)),
+        KIND_COVERAGE_RESTORED => EventBody::CoverageRestored(Box::new(gate(kind, body)?)),
         other => {
             return Err(format!(
                 "kind {other} carries a schema-v1 body but is not in this build's vocabulary"

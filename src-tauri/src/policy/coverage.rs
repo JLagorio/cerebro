@@ -43,12 +43,20 @@ use super::table::PolicyTable;
 impl CoverageAssessment {
     /// Field lookup BY THE TABLE'S NAME, so adding a fifth match field is a
     /// table edit rather than a new branch in two comparison functions.
+    ///
+    /// M25.4 moved these four strings onto the RETRIEVAL RECEIPT, where they
+    /// belong: they describe a search that actually ran, and an assessment
+    /// with no attempted retrieval has no search to describe. An assessment
+    /// without a receipt therefore supplies none of them — which the join
+    /// below reads as disagreement, not as a match, because two silences are
+    /// not agreement.
     pub fn match_field(&self, name: &str) -> Option<&str> {
+        let receipt = self.retrieval_receipt.as_ref()?;
         match name {
-            "searched_domain" => Some(&self.searched_domain),
-            "search_scope" => Some(&self.search_scope),
-            "observation_window" => Some(&self.observation_window),
-            "query_strategy" => Some(&self.query_strategy),
+            "searched_domain" => Some(&receipt.searched_domain),
+            "search_scope" => Some(&receipt.search_scope),
+            "observation_window" => Some(&receipt.observation_window),
+            "query_strategy" => Some(&receipt.query_strategy),
             _ => None,
         }
     }
@@ -287,12 +295,17 @@ pub fn high_stakes(
                     ));
                 }
                 if let Some(subject) = &subject {
-                    if assessment.subject_id != *subject {
+                    // An assessment with no named subject covers nothing in
+                    // particular, and coverage of a DIFFERENT subject proves
+                    // nothing about this one. Both are the same refusal.
+                    if assessment.subject_id.as_deref() != Some(subject.as_str()) {
                         return HighStakes::Refuse(failure(
                             malformed,
                             HIGH_STAKES_RULE,
                             TypedValue::string(subject),
-                            TypedValue::string(&assessment.subject_id),
+                            TypedValue::string(
+                                assessment.subject_id.as_deref().unwrap_or("(unscoped)"),
+                            ),
                         ));
                     }
                 }
@@ -425,8 +438,13 @@ pub fn absence_complete(
                 TypedValue::string(reference),
             ));
         }
-        for dimension in &assessment.dimensions {
-            established.insert(dimension.as_str());
+        // M25.4: a dimension counts as established only when it says YES.
+        // `unknown` and `not_applicable` are answers, and neither of them is
+        // "we checked and it holds".
+        for (dimension, _) in assessment.dimensions.each() {
+            if assessment.establishes(dimension) {
+                established.insert(dimension.as_str());
+            }
         }
         assessments.push(assessment);
     }
@@ -487,6 +505,7 @@ mod tests {
     const BELIEF: &str = "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1";
     const ENTITY: &str = "e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2";
     const ASSESSMENT: &str = "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3";
+    const SOURCE: &str = "50505050505050505050505050505050";
 
     fn table() -> PolicyTable {
         PolicyTable::load().unwrap()
@@ -514,20 +533,42 @@ mod tests {
         p
     }
 
+    fn dimension_yes() -> crate::ledger::schema::DimensionAssessment {
+        crate::ledger::schema::DimensionAssessment {
+            state: crate::ledger::schema::DimensionState::Yes,
+            basis_event_ids: vec![ASSESSMENT.into()],
+            as_of: "2026-08-09T10:00:00Z".into(),
+        }
+    }
+
     fn assessment() -> CoverageAssessment {
+        use crate::ledger::schema::{Dimensions, RetrievalReceipt, Scope};
         CoverageAssessment {
             assessment_id: ASSESSMENT.into(),
-            subject_id: ENTITY.into(),
-            dimensions: table()
-                .absence
-                .required_coverage_dimensions
-                .iter()
-                .cloned()
-                .collect(),
-            searched_domain: "the vault".into(),
-            search_scope: "knowledge/".into(),
-            observation_window: "2026-01-01/2026-08-09".into(),
-            query_strategy: "exact and alias".into(),
+            subject_id: Some(ENTITY.into()),
+            predicate_class: None,
+            scope: Scope::empty(),
+            source_id: SOURCE.into(),
+            dimensions: Dimensions {
+                source_connected: dimension_yes(),
+                source_healthy: dimension_yes(),
+                scope_known: dimension_yes(),
+                scope_accessible: dimension_yes(),
+                retention_known: dimension_yes(),
+                index_current: dimension_yes(),
+                retrieval_attempted: dimension_yes(),
+            },
+            retrieval_receipt: Some(RetrievalReceipt {
+                strategy_version: "retrieval-v1".into(),
+                query_strategy: "exact and alias".into(),
+                query_fingerprint: "a".repeat(64),
+                attempted_at: "2026-08-09T10:00:00Z".into(),
+                searched_domain: "the vault".into(),
+                search_scope: "knowledge/".into(),
+                observation_window: "2026-01-01/2026-08-09".into(),
+                searched_aliases: vec![],
+                searched_scopes: vec![],
+            }),
             superseded: false,
         }
     }
@@ -603,7 +644,7 @@ mod tests {
     fn coverage_of_another_subject_proves_nothing_about_this_one() {
         let mut state = EpistemicState::default();
         let mut record = assessment();
-        record.subject_id = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4".into();
+        record.subject_id = Some("f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4".into());
         state
             .coverage_assessments
             .insert(ASSESSMENT.to_string(), record);
@@ -671,9 +712,34 @@ mod tests {
     #[test]
     fn an_assessment_missing_one_dimension_names_the_one_it_is_missing() {
         let table = table();
+        // "Missing" now means a dimension that does not say YES — M25.4's
+        // shape has all seven always present, and `unknown` is an ANSWER
+        // rather than an absence. Either way the rule names the one that
+        // failed.
         let missing = table.absence.required_coverage_dimensions[0].clone();
         let mut record = assessment();
-        record.dimensions.remove(&missing);
+        let dimension = crate::ledger::schema::Dimension::parse(&missing).expect("a real name");
+        let slot = match dimension {
+            crate::ledger::schema::Dimension::SourceConnected => {
+                &mut record.dimensions.source_connected
+            }
+            crate::ledger::schema::Dimension::SourceHealthy => {
+                &mut record.dimensions.source_healthy
+            }
+            crate::ledger::schema::Dimension::ScopeKnown => &mut record.dimensions.scope_known,
+            crate::ledger::schema::Dimension::ScopeAccessible => {
+                &mut record.dimensions.scope_accessible
+            }
+            crate::ledger::schema::Dimension::RetentionKnown => {
+                &mut record.dimensions.retention_known
+            }
+            crate::ledger::schema::Dimension::IndexCurrent => &mut record.dimensions.index_current,
+            crate::ledger::schema::Dimension::RetrievalAttempted => {
+                &mut record.dimensions.retrieval_attempted
+            }
+        };
+        slot.state = crate::ledger::schema::DimensionState::Unknown;
+        slot.basis_event_ids.clear();
         let mut state = EpistemicState::default();
         state
             .coverage_assessments

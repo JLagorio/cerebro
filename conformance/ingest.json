@@ -499,6 +499,9 @@
       ]
     ],
     "proposals": {},
+    "coverage_facts": {},
+    "coverage_assessments": {},
+    "coverage_gaps": {},
     "ingest_receipts": {
       "07bfdce451fde0a4355b4723ec843c11": {
         "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
