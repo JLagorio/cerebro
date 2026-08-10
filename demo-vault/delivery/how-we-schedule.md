@@ -25,6 +25,6 @@ draws none — so `dependencyField` has to be stated on the List.
 ## Nesting is grouping
 
 There is no hierarchy view. A relation level in a List's grouping chain nests its
-records, so any of the six views can show a hierarchy: group the delivery table
+records, so any record layout can show a hierarchy: group the delivery table
 by `status`, then descend `blocked_by`, and you get bands of status each holding
 its own dependency tree.

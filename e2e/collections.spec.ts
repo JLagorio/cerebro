@@ -176,7 +176,7 @@ test('collections: creating one writes a folder marker and opens its empty page'
     .toContain('name: Field ops');
 });
 
-test('views: all six are reachable, and the date views place records on an axis', async ({
+test('views: every kind is offered, and the date views place records on an axis', async ({
   page,
 }) => {
   await boot(page);
@@ -187,10 +187,24 @@ test('views: all six are reachable, and the date views place records on an axis'
     .getByRole('button', { name: 'Delivery schedule', exact: true })
     .click();
 
-  // The six, and only the six: the retired kinds are offered nowhere. M11
-  // moved the picker into the open tab's menu.
+  // Every kind in the catalog is offered — this roster is the e2e twin of
+  // viewKinds.test's registration contract — and the retired kinds are offered
+  // nowhere. M11 moved the picker into the open tab's menu. (This said "the
+  // six" for four milestones while the app grew to ten, which is why the
+  // roster is spelled out and never counted.)
   await openLayoutPicker(page);
-  for (const kind of ['table', 'list', 'board', 'calendar', 'gantt', 'timeline']) {
+  for (const kind of [
+    'table',
+    'list',
+    'board',
+    'calendar',
+    'gantt',
+    'timeline',
+    'gallery',
+    'chart',
+    'dashboard',
+    'whiteboard',
+  ]) {
     await expect(page.getByTestId(`view-switch-${kind}`)).toBeVisible();
   }
   await expect(page.getByTestId('view-switch-tree')).toHaveCount(0);

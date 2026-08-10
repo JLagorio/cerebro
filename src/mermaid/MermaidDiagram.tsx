@@ -49,6 +49,11 @@ export function MermaidDiagram({
    * restoring the `href`s M29.38 strips, since that effect is keyed on the svg
    * string too and would not re-run either. Memoized on the string, the
    * subtree is rebuilt only when it genuinely changes.
+   *
+   * Re-measured on react-dom 19.2.8 and now PINNED, because this claim has
+   * been doubted twice: MermaidDiagram.test.tsx renders a bare fresh-object
+   * sink beside a memoized one and shows only the fresh one loses imperative
+   * DOM writes. If React ever changes the rule, that test says so.
    */
   const html = useMemo(() => ({ __html: renderedSvg ?? '' }), [renderedSvg]);
 

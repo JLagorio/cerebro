@@ -273,8 +273,10 @@ export interface ColumnSpec {
 }
 
 /**
- * The record views (M10, extended M16.22/.27/.28). Mutually exclusive — a
- * collection shows one at a time, chosen from the open tab's layout picker.
+ * The view kinds (M10, extended M16.22/.27/.28, M29.45). Mutually exclusive —
+ * a collection shows one at a time, chosen from the open tab's layout picker.
+ *
+ * The kinds that draw RECORDS — the same rows, drawn differently:
  *
  * - `table`     — spreadsheet grid with inline-editable cells (M3.4)
  * - `list`      — banded rows
@@ -285,6 +287,17 @@ export interface ColumnSpec {
  * - `gallery`   — a card grid, cards optionally covered by a files property
  * - `chart`     — bar/line/donut over an aggregation of the same rows
  * - `dashboard` — a grid of blocks: saved views and single numbers
+ *
+ * And the kind that draws a FILE — `canvas: true` in viewKinds.ts, which is
+ * what gates it everywhere rather than its name:
+ *
+ * - `whiteboard` — a `.mmd` the tab owns, edited through the shared diagram
+ *   editor. Its records are not laid out FOR the user; they appear where the
+ *   user puts them, as nodes bound by a mermaid `click` line (M29.45, D8).
+ *
+ * The roster is deliberately grouped rather than counted: this docstring said
+ * "the six views" in three other files for four milestones while the catalog
+ * grew to ten, so prose here names the split, never the number.
  *
  * Two kinds were REMOVED here, and both for the same reason — they were views
  * whose only job was something another axis already does:

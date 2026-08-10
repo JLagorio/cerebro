@@ -72,7 +72,8 @@ function ListRow({
   // M9.3: the same in-place rule the table and hierarchy use. This row
   // already called openDetail directly, which was the correct BEHAVIOUR but
   // a second implementation of it — switching a view from List to Table
-  // silently changed what clicking a row did. One hook, four layouts.
+  // silently changed what clicking a row did. One hook, every surface that
+  // opens a record — counting them here only dated the comment (M29.49).
   const openPath = useOpenPath('in-place');
   const key = typeof entry.properties.key === 'string' ? entry.properties.key : '';
 

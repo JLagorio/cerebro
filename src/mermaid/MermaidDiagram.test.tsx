@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -272,5 +273,53 @@ describe('MermaidDiagram applies the code that produced the svg (M29.42)', () =>
     } finally {
       renderMock.mockReset();
     }
+  });
+
+  /**
+   * The CONTROL for the test above, and the end of an argument (M29.49).
+   *
+   * Two readers have now disagreed about whether the `useMemo` in
+   * MermaidDiagram is load-bearing, one of them after probing react-dom and
+   * concluding it was not. It is: measured here on react-dom 19.2.8, a fresh
+   * `{ __html }` literal with a BYTE-IDENTICAL string re-applies the markup and
+   * destroys imperative DOM work, while the memoized prop does not. React
+   * compares the prop by IDENTITY and never looks at the string.
+   *
+   * This uses a bare sink rather than MermaidDiagram because it is a claim
+   * about react-dom, not about us — if a future React changes the rule, this
+   * fails and the memo's comment is wrong, which is the whole point.
+   */
+  it('MEASURES react-dom: a fresh raw-html prop object rebuilds, a memoized one does not', () => {
+    const HTML = '<svg><a href="notes/a.md"><g /></a></svg>';
+    const hrefOf = (id: string): string | null =>
+      screen.getByTestId(id).querySelector('a')!.getAttribute('href');
+
+    function Sinks() {
+      const [n, bump] = useState(0);
+      const stable = useMemo(() => ({ __html: HTML }), []);
+      return (
+        <>
+          <button data-testid="bump" onClick={() => bump(n + 1)}>
+            {n}
+          </button>
+          <div data-testid="fresh-sink" dangerouslySetInnerHTML={{ __html: HTML }} />
+          <div data-testid="memo-sink" dangerouslySetInnerHTML={stable} />
+        </>
+      );
+    }
+
+    render(<Sinks />);
+    for (const id of ['fresh-sink', 'memo-sink']) {
+      screen.getByTestId(id).querySelector('a')!.removeAttribute('href');
+    }
+    expect(hrefOf('fresh-sink')).toBeNull();
+    expect(hrefOf('memo-sink')).toBeNull();
+
+    act(() => {
+      screen.getByTestId('bump').click();
+    });
+
+    expect(hrefOf('fresh-sink')).toBe('notes/a.md');
+    expect(hrefOf('memo-sink')).toBeNull();
   });
 });

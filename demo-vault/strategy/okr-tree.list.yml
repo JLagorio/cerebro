@@ -16,7 +16,7 @@ filters: null
 presentation:
   # M10: a TABLE that nests. There is no hierarchy view kind any more — nesting
   # is what a relation level of the grouping chain does, so the view that used
-  # to be the only place you could see this is now just one of six layouts.
+  # to be the only place you could see this is now just one layout among many.
   type: table
   # M9.7: ONE chain. A level names a property (records band by its value) or
   # a relation (records nest under what they link to). Level 0 inverts the
