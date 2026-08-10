@@ -4,6 +4,7 @@ import { ViewCanvas } from '@/views/ViewCanvas';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation, ViewType } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 
 /**
  * The canvas forwards `filtered` to every layout that has an empty state
@@ -153,5 +154,46 @@ describe('ViewCanvas whiteboard faces (M29.49)', () => {
     // arm would produce is a whiteboard tab quietly drawing a table.
     expect(screen.queryByTestId('table-view')).toBeNull();
     expect(screen.queryByTestId('list-view')).toBeNull();
+  });
+});
+
+/**
+ * The detail panel's siblings are "the records on screen" (M16.11), and a
+ * canvas is the second kind for which that has no honest answer (M29.46
+ * review). A dashboard was excluded at M16.28 because each block shows a
+ * different set; a whiteboard must be excluded because what it DRAWS is
+ * decided by its .mmd's click lines, while `entries` is only the pool
+ * "Add record" may offer. Registering the pool made a chip click announce
+ * "3 of 45" and stepped next/prev through records not on the canvas.
+ */
+describe('a canvas registers no detail siblings (M29.46)', () => {
+  const RECORDS = [
+    makeEntry({ path: 'delivery/a.md', title: 'A', type: 'Campaign' }),
+    makeEntry({ path: 'delivery/b.md', title: 'B', type: 'Campaign' }),
+  ];
+
+  function renderKind(type: ViewType) {
+    useUiStore.setState({ detailSiblings: [] });
+    render(
+      <ViewCanvas
+        entries={RECORDS}
+        allEntries={[TYPE_DOC, ...RECORDS]}
+        presentation={{ type, group: [], sort: [], columns: [] }}
+        schema={schema}
+        fields={[]}
+        scope={`siblings:${type}`}
+        filtered={false}
+      />,
+    );
+  }
+
+  it('registers the rows it draws for a record layout', () => {
+    renderKind('list');
+    expect(useUiStore.getState().detailSiblings).toEqual(['delivery/a.md', 'delivery/b.md']);
+  });
+
+  it('registers none for a whiteboard, whose canvas decides what is on it', () => {
+    renderKind('whiteboard');
+    expect(useUiStore.getState().detailSiblings).toEqual([]);
   });
 });

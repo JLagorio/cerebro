@@ -90,21 +90,52 @@ export function WhiteboardView({
   // defensive only: every host that passes `host` also passes this.
   const canPersist = onPresentationChange !== undefined;
 
-  // Read at FIRE time, not effect-arm time: keying the effect on the
-  // presentation object would re-arm it on every unrelated view setting.
+  // Held in a ref so the effect can read the persist channel WITHOUT keying
+  // on it: `presentation` is a new object on every unrelated view setting and
+  // `onPresentationChange` a new closure on every host render, so either in
+  // the dep array re-arms creation constantly.
   const latest = useRef({ presentation, onPresentationChange });
   latest.current = { presentation, onPresentationChange };
 
-  // One creation per mount, held across the async gap. Without this, the
-  // effect re-fires while writeTextFile is on the wire (the rescan re-renders)
-  // and the stem dedupe turns one canvas into launch-map.mmd + -2 + -3.
-  const creating = useRef(false);
+  /**
+   * The creation targets with a write IN FLIGHT right now.
+   *
+   * Keyed on the TARGET, not on the mount, because `ViewCanvas` renders this
+   * view UNKEYED: one instance serves every tab on the page. A plain
+   * `creating` boolean — set on the way in, cleared only on failure — starved
+   * every whiteboard tab after the first, so the second one a user ever
+   * opened sat on "Preparing canvas…" forever (M29.46 review).
+   *
+   * A SET, because two tabs can be mid-creation at once. Cleared when the
+   * attempt SETTLES, not held for the life of the mount: a durable "already
+   * attempted" record is the same latch one level up, and it would kill the
+   * tombstone's "Start a new canvas" for any canvas this mount had created.
+   * Nothing needs it to be durable — once the pointer is persisted, `file`
+   * is non-null and the effect returns on its own.
+   *
+   * A ref rather than nothing at all, because StrictMode's dev double-invoke
+   * (main.tsx) re-fires this effect synchronously with identical deps, inside
+   * the window, and must still make exactly one file.
+   */
+  const inFlight = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (file !== null || folder === null || viewName === null) return;
-    if (vaultPath === null || !canPersist || creating.current) return;
-    creating.current = true;
+    if (vaultPath === null || !canPersist) return;
+    const target = `${folder}\0${viewName}`;
+    if (inFlight.current.has(target)) return;
+    inFlight.current.add(target);
+    // PINNED at fire time, not read at resolve time. `ListPage`'s
+    // changePresentation writes to whichever tab is active when it is CALLED,
+    // so a tab switch during the write handed this canvas to the wrong view:
+    // tab B adopted tab A's file and A was left pointerless (M29.46 review).
+    // The cost of pinning is the mirror case — an unrelated setting changed
+    // on THIS tab inside the window is overwritten by the pinned copy — which
+    // is a last-write-wins on one tab instead of corruption across two, and
+    // is the same shape every other presentation writer here already has.
+    const pinned = latest.current;
     void (async () => {
+      let written = false;
       try {
         // <host folder>/whiteboards/<view-name-slug>.mmd. `folder` is '' for a
         // root-level List — no collection folder — so the canvas lands in a
@@ -112,20 +143,26 @@ export function WhiteboardView({
         const stem = slugify(viewName) || 'whiteboard';
         const rel = `${folder === '' ? '' : `${folder}/`}whiteboards/${stem}.mmd`;
         const actual = await writeTextFile(vaultPath, rel, WHITEBOARD_SEED);
+        written = true;
         // The mock backend has no watcher and Tauri's arrives late; the tree
         // and the entry list should know about the canvas before the tab does.
         await rescan();
         // The pointer is presentation state, so it persists through the same
         // channel every view setting does — one write to the List's YAML.
-        latest.current.onPresentationChange?.({
-          ...latest.current.presentation,
+        pinned.onPresentationChange?.({
+          ...pinned.presentation,
           whiteboard: { file: actual },
         });
+        inFlight.current.delete(target);
       } catch (err) {
-        // Store-layer discipline (AGENTS.md): the failure is caught, named,
-        // and left recoverable — `creating` re-opens so the next render (or
-        // the user's next visit) tries again rather than stranding the tab.
-        creating.current = false;
+        // Store-layer discipline (AGENTS.md): caught, named, and left
+        // recoverable. The target is released ONLY if the write never landed.
+        // A failure AFTER it — rescan, or the persist channel, both store
+        // actions bound by the never-throw invariant — keeps the target held,
+        // because retrying would write a second file through the stem dedupe
+        // and orphan the first: the very litter `canPersist` exists to
+        // prevent, one step later.
+        if (!written) inFlight.current.delete(target);
         toast(`Couldn't create whiteboard: ${err instanceof Error ? err.message : String(err)}`);
       }
     })();

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
 import type { Entry, Presentation, Schema } from '@/engine/types';
@@ -96,6 +97,58 @@ const entries = [makeEntry({ path: 'delivery/launch.md', title: 'Launch', type: 
 
 /** A record the "Add record" tests place on the canvas. */
 const shipV2 = makeEntry({ path: 'delivery/ship-v2.md', title: 'Ship v2', type: 'Task' });
+
+/**
+ * A faithful stand-in for `ListPage` hosting two whiteboard tabs.
+ *
+ * The two things it reproduces are the two that made the M29.46 review's
+ * defects invisible to a plain `rerender`: the view is mounted UNKEYED, so
+ * one instance serves both tabs, and `onPresentationChange` closes over the
+ * ACTIVE tab at render time exactly as `ListPage.changePresentation` closes
+ * over `activeId` — so a pointer that resolves late lands on whichever tab is
+ * open then, not on the one that asked.
+ */
+function TwoWhiteboardTabs() {
+  const [tab, setTab] = useState<'a' | 'b'>('a');
+  const [saved, setSaved] = useState<{ a: Presentation; b: Presentation }>({ a: base, b: base });
+  return (
+    <>
+      <button type="button" data-testid="to-tab-a" onClick={() => setTab('a')} />
+      <button type="button" data-testid="to-tab-b" onClick={() => setTab('b')} />
+      <WhiteboardView
+        entries={entries}
+        presentation={saved[tab]}
+        schema={schema}
+        host={{ folder: 'work', viewName: tab === 'a' ? 'Sketch' : 'Plan B' }}
+        onPresentationChange={(next) => setSaved((s) => ({ ...s, [tab]: next }))}
+      />
+    </>
+  );
+}
+/**
+ * One tab whose host persists the pointer, plus the button the tombstone's
+ * "Start a new canvas" effectively presses: clear the pointer back to null.
+ */
+function OneWhiteboardTab() {
+  const [saved, setSaved] = useState<Presentation>(base);
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="clear-pointer"
+        onClick={() => setSaved((p) => ({ ...p, whiteboard: { file: null } }))}
+      />
+      <WhiteboardView
+        entries={entries}
+        presentation={saved}
+        schema={schema}
+        host={{ folder: 'work', viewName: 'Sketch' }}
+        onPresentationChange={setSaved}
+      />
+    </>
+  );
+}
+
 const MAP = 'delivery/whiteboards/map.mmd';
 const host = { folder: 'delivery', viewName: 'Map' };
 const onMap: Presentation = { ...base, whiteboard: { file: MAP } };
@@ -161,24 +214,123 @@ describe('WhiteboardView', () => {
     );
   });
 
-  it('creates exactly once, even across re-renders', async () => {
+  /**
+   * The guard is scoped to the creation TARGET, and this test re-fires the
+   * effect for real (`viewName` is a dep) rather than re-rendering with the
+   * same primitives, which does not re-run it at all. The previous version of
+   * this test asserted the guard by re-rendering an identical element: it
+   * passed with the guard deleted entirely, because nothing ever re-fired.
+   *
+   * Round-tripping the name inside the create window is the shape that
+   * defeats a "last target" ref: it would see `Other` and re-attempt `Map`,
+   * and the stem dedupe would answer with map-2.mmd.
+   */
+  it('attempts a given canvas once, however often the effect re-fires', async () => {
     const onPresentationChange = vi.fn();
-    const view = (
+    const at = (viewName: string) => (
       <WhiteboardView
         entries={entries}
         presentation={base}
         schema={schema}
-        // A fresh object literal per render, like ListPage's: the guard has to
-        // be a ref, not effect deps.
-        host={{ folder: 'delivery', viewName: 'Map' }}
+        host={{ folder: 'delivery', viewName }}
         onPresentationChange={onPresentationChange}
       />
     );
-    const { rerender } = render(view);
-    rerender(view);
-    await waitFor(() => expect(onPresentationChange).toHaveBeenCalled());
-    expect(onPresentationChange).toHaveBeenCalledTimes(1);
-    expect([...fs().keys()].filter((k) => k.startsWith('delivery/whiteboards/'))).toHaveLength(1);
+    const { rerender } = render(at('Map'));
+    rerender(at('Other'));
+    rerender(at('Map'));
+    await waitFor(() =>
+      expect(onPresentationChange).toHaveBeenCalledWith({
+        ...base,
+        whiteboard: { file: 'delivery/whiteboards/other.mmd' },
+      }),
+    );
+    expect([...fs().keys()].filter((k) => k.startsWith('delivery/whiteboards/map'))).toEqual([
+      'delivery/whiteboards/map.mmd',
+    ]);
+  });
+
+  /**
+   * The guard releases its target once the attempt SETTLES, so clearing the
+   * pointer re-arms creation even for a canvas this same mount already made.
+   * That is the tombstone's "Start a new canvas" (it clears the pointer to
+   * null), and a durable "already attempted" record — the first fix drafted
+   * for the defect below — would have left it dead for the rest of the mount.
+   */
+  it('clearing the pointer re-arms creation, even for a canvas this mount made', async () => {
+    render(<OneWhiteboardTab />);
+    await waitFor(() => expect(fs().get('work/whiteboards/sketch.mmd')).toBeTruthy());
+    await screen.findByTestId('whiteboard-view');
+
+    // What "Start a new canvas" does: drop the pointer and expect a new file.
+    fireEvent.click(screen.getByTestId('clear-pointer'));
+    await waitFor(() => expect(fs().get('work/whiteboards/sketch-2.mmd')).toBeTruthy());
+    await screen.findByTestId('whiteboard-view');
+  });
+
+  /**
+   * M29.46 review, HIGH: the guard used to be a bare `creating` boolean set
+   * on the way in and cleared only in the `catch`, so one success disabled
+   * creation for the life of the mount — and `ViewCanvas` renders this view
+   * UNKEYED, so one mount survives every tab switch on a page. The second
+   * whiteboard tab a user ever opens sat on "Preparing canvas…" forever.
+   */
+  it('a second whiteboard tab on the same mounted view gets its own canvas', async () => {
+    render(<TwoWhiteboardTabs />);
+    await waitFor(() => expect(fs().get('work/whiteboards/sketch.mmd')).toBeTruthy());
+    // Tab A settled onto its canvas rather than sitting on the creating face.
+    await screen.findByTestId('whiteboard-view');
+
+    fireEvent.click(screen.getByTestId('to-tab-b'));
+    await waitFor(() => expect(fs().get('work/whiteboards/plan-b.mmd')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByTestId('whiteboard-creating')).toBeNull());
+    expect(screen.getByTestId('whiteboard-view')).toBeTruthy();
+
+    // And back: each tab kept its OWN pointer through the round trip.
+    fireEvent.click(screen.getByTestId('to-tab-a'));
+    await waitFor(() => expect(editorProps.mock.calls.at(-1)![0].title).toBe('Sketch'));
+    expect([...fs().keys()].filter((k) => k.startsWith('work/whiteboards/')).sort()).toEqual([
+      'work/whiteboards/plan-b.mmd',
+      'work/whiteboards/sketch.mmd',
+    ]);
+  });
+
+  /**
+   * M29.46 review, MEDIUM-HIGH: the pointer used to be read at RESOLVE time,
+   * after the write and a full vault rescan. `ListPage.changePresentation`
+   * writes to whichever tab is active when it is CALLED, so a tab switch
+   * inside that window handed tab A's canvas to tab B — B adopted a file it
+   * never made, and A was left pointerless.
+   */
+  it('hands the new canvas to the tab that asked for it, not the one now open', async () => {
+    const onA = vi.fn();
+    const onB = vi.fn();
+    const { rerender } = render(
+      <WhiteboardView
+        entries={entries}
+        presentation={base}
+        schema={schema}
+        host={{ folder: 'delivery', viewName: 'Tab A' }}
+        onPresentationChange={onA}
+      />,
+    );
+    // Switch tabs inside the create window — before any await has resolved.
+    rerender(
+      <WhiteboardView
+        entries={entries}
+        presentation={base}
+        schema={schema}
+        host={{ folder: 'delivery', viewName: 'Tab B' }}
+        onPresentationChange={onB}
+      />,
+    );
+    const A = 'delivery/whiteboards/tab-a.mmd';
+    const B = 'delivery/whiteboards/tab-b.mmd';
+    await waitFor(() => expect(onA).toHaveBeenCalledWith({ ...base, whiteboard: { file: A } }));
+    await waitFor(() => expect(onB).toHaveBeenCalledWith({ ...base, whiteboard: { file: B } }));
+    // Neither tab is ever told to adopt the other's file.
+    expect(onB.mock.calls.every(([p]) => p.whiteboard.file !== A)).toBe(true);
+    expect(onA.mock.calls.every(([p]) => p.whiteboard.file !== B)).toBe(true);
   });
 
   it('creates nothing when the surface cannot persist the pointer', async () => {

@@ -13,7 +13,7 @@ import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
 import { WhiteboardView, type WhiteboardHost } from '@/views/WhiteboardView';
 import { buildRows, entryRows } from '@/engine/rows';
-import { hasBlocks } from '@/views/viewKinds';
+import { hasBlocks, isCanvas } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
@@ -122,7 +122,13 @@ export function ViewCanvas({
   // A dashboard shows no records of ITS OWN — each block shows a different
   // set — so "the records on screen" has no single answer and the panel gets
   // none rather than a plausible wrong one (M16.28).
-  const composed = hasBlocks(presentation.type);
+  //
+  // A canvas is the same claim for a different reason (M29.46 review): the
+  // rows the page computed are the pool "Add record" OFFERS, not what is
+  // drawn. Registering them made a chip click read "3 of 45" and stepped
+  // next/prev through records that are nowhere on the canvas. What IS drawn
+  // is decided by the .mmd's click lines, which this component cannot see.
+  const composed = hasBlocks(presentation.type) || isCanvas(presentation.type);
   useEffect(() => {
     if (embedded) return;
     setDetailSiblings(key === '' || composed ? [] : key.split('\n'));

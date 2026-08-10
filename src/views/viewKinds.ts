@@ -314,6 +314,13 @@ const KEY_NEEDS = {
   dependencyField: 'dependencies',
   chart: 'charted',
   dashboard: 'blocks',
+  // Declared but never CONSULTED: `carryOver` checks NEVER_SEEDED first and
+  // the pointer is on that list, so this pairing is unreachable and changing
+  // it to a wrong capability breaks no test (M29.46 review). It stays because
+  // `satisfies` below demands an entry for every non-shared key — the table's
+  // whole job is that a new Presentation key cannot be added without stating
+  // what it needs — and it is the right answer the day the pointer stops
+  // being never-seeded.
   whiteboard: 'canvas',
 } satisfies Record<Exclude<keyof Presentation, SharedKey>, Capability>;
 

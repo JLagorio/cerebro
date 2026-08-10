@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VIEW_TYPES, type Presentation } from '@/engine/types';
+import { layoutLabel } from '@/engine/views';
 import {
   VIEW_KINDS,
   VIEW_SEGMENTS,
@@ -319,5 +320,21 @@ describe('carrying a presentation to a new kind (M16.29)', () => {
     };
     expect(carryOver(board, 'whiteboard').whiteboard).toBeUndefined();
     expect(carryOver(board, 'table').whiteboard).toBeUndefined();
+  });
+});
+
+/**
+ * `layoutLabel` (engine/views.ts) is a SECOND label table, and the two are
+ * read side by side: the picker tile shows `ViewKind.label` while the tab it
+ * creates is NAMED by `layoutLabel` (ViewTabs.tsx:512), and the delete
+ * confirmation quotes it back. Nothing asserted they agreed, so a kind could
+ * be offered as "Whiteboard" and create a tab called something else — and
+ * both tables are hand-maintained, so the tenth kind had to be added twice.
+ */
+describe('the two label tables agree (M29.46)', () => {
+  it('names every kind the same way in the picker and on the tab it creates', () => {
+    for (const kind of VIEW_KINDS) {
+      expect(layoutLabel(kind.value)).toBe(kind.label);
+    }
   });
 });
