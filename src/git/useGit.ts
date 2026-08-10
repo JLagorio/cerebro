@@ -326,6 +326,43 @@ export async function withLedgerTrailer(vaultPath: string, message: string): Pro
   }
 }
 
+/**
+ * Commit everything one applied logical batch wrote, as ONE commit (M25.8).
+ *
+ * The unit of review is the batch, not the file and not the turn. An M22
+ * logical batch is atomic in the ledger — its members commit together or not
+ * at all — and a checkpoint that split it across commits would offer a revert
+ * that could leave the working tree describing half of an event that the
+ * ledger only ever holds whole.
+ *
+ * The batch id rides beside the chain head, so a commit can be joined back to
+ * the exact event that produced it.
+ */
+export function useBatchCheckpoint(
+  refresh: () => void,
+): (batchId: string, summary: string) => void {
+  const vaultPath = useVaultStore((s) => s.vaultPath);
+  const toast = useUiStore((s) => s.toast);
+
+  return useCallback(
+    (batchId: string, summary: string) => {
+      if (vaultPath === null) return;
+      void (async () => {
+        try {
+          const base = await withLedgerTrailer(vaultPath, `applied: ${summary}`);
+          const hash = await git.gitCommit(vaultPath, `${base}\nCerebro-Batch: ${batchId}`);
+          if (hash !== null) refresh();
+        } catch (err) {
+          // A failed checkpoint never fails the application it describes:
+          // the ledger already holds the batch, and git is the cross-attest.
+          toast(`Couldn't checkpoint the applied change: ${String(err)}`);
+        }
+      })();
+    },
+    [vaultPath, refresh, toast],
+  );
+}
+
 /** A message that says what changed, not just that something did. */
 export function checkpointMessage(files: ModifiedFile[]): string {
   if (files.length === 1) {

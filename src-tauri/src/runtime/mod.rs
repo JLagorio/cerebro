@@ -49,6 +49,8 @@ pub mod schema;
 pub mod scope;
 pub mod settings;
 pub mod sink;
+#[cfg(test)]
+mod soak;
 pub mod status;
 pub mod surface;
 
