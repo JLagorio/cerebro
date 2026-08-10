@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import mermaid from 'mermaid';
 import { parseFlowchart, serialize, subgraphs, type SubgraphEntry } from './model';
-import { createSubgraph, dissolveSubgraph, renameSubgraph, setSubgraphDirection } from './ops';
+import {
+  canCreateSubgraph,
+  canDissolveSubgraph,
+  createSubgraph,
+  dissolveSubgraph,
+  renameSubgraph,
+  setSubgraphDirection,
+} from './ops';
 
 /**
  * Conformance, not unit testing (M29.37). Everything here is a CLAIM ABOUT THE
@@ -32,6 +39,28 @@ import { createSubgraph, dissolveSubgraph, renameSubgraph, setSubgraphDirection 
  *   hazard the plan built a decision on does not exist on 11.16.0.
  * - `end;` closes a block, and `subgraph s1[T] ` (one trailing space) does not
  *   open one.
+ *
+ * The M29.37 REVIEW added a second layer of measurement, and it found that the
+ * first one had trusted `quoteLabel` outside the lexer state it was measured
+ * in:
+ *
+ * - a BARE subgraph title is not a bracket label. Unquoted, `Build --> Ship`,
+ *   `a -- b`, `a o--o b`, `Design, Build, Ship`, `Latency < 200ms`,
+ *   `Ops > Eng`, `env = prod`, `a ~ b`, `a | b`, `a (p) b`, `a @ b`,
+ *   `a [b] c` and `a {b} c` all KILL the diagram, and three more change it
+ *   silently — `Q1 ; Q2` mints a phantom node, `Start end` and `a click b`
+ *   make the block's node vanish. Quoted, every one of them renders, and the
+ *   effective-id rule is untouched. Hence `bareSubgraphTitle` quotes always.
+ * - `direction <DIR>` is fatal or destructive on ANY line in ANY form, and
+ *   quoting does NOT rescue it — but `click A "a direction LR b.md"` and
+ *   `A@{ label: "a direction LR b" }` are immune, so the defusal belongs to
+ *   the bracket-state emitters and not to `flattenForLine`.
+ * - a LEADING `%%` makes a direction line a comment mermaid ignores; the same
+ *   phrase after other content on the line does NOT.
+ * - generated ids are close-order ordinals, so grouping above a block or
+ *   dissolving before it silently re-keys it. Hence the pins.
+ * - a foreign direction line inside a NESTED block re-directs its PARENT once
+ *   the block is dissolved; at top level the same orphan is inert.
  */
 
 const TIMEOUT = 60_000;
@@ -115,7 +144,11 @@ async function expectAgrees(code: string, where: string): Promise<void> {
     expect([where, sub.id, sub.title, sub.direction ?? null, claimed]).toEqual([
       where,
       sub.id,
-      theirs.title,
+      // `sanitizeText` HTML-escapes `<` on the way into the stored title
+      // (measured: only `<` — `>` and `&` come back verbatim). That is a
+      // display escape applied after parsing, not a disagreement about what
+      // the title IS, so it is undone rather than mirrored into our model.
+      theirs.title.replaceAll('&lt;', '<'),
       theirs.dir ?? null,
       [...new Set(theirs.nodes)].sort(),
     ]);
@@ -136,6 +169,47 @@ function addedLines(before: string[], after: string[]): string[] | null {
   for (const line of before) {
     const left = pool.get(line) ?? 0;
     if (left === 0) return null;
+    pool.set(line, left - 1);
+  }
+  return [...pool].flatMap(([line, n]) => Array<string>(n).fill(line));
+}
+
+/**
+ * The rename titles the sweep drives. The first two are ordinary; the rest are
+ * the ones that killed or silently changed the diagram through the BARE form
+ * before the review — renaming only to `Re named`/`Solo` is exactly what let a
+ * diagram-killer through a 42-document instrument.
+ */
+const RENAME_TITLES = [
+  'Re named',
+  'Solo',
+  'Build --> Ship',
+  'Q1 ; Q2',
+  'Start end',
+  'a click b',
+  'Design, Build, Ship',
+  'Latency < 200ms',
+  'env = prod',
+  'a (p) b',
+  'a direction LR b',
+];
+
+const notDirection = (l: string): boolean => !/^\s*direction\s/.test(l);
+const notOpener = (l: string): boolean => !/^\s*subgraph\b/.test(l);
+
+/**
+ * The lines a dissolve REMOVED, or null when it changed a surviving line's
+ * bytes or invented one. The most destructive op had only "it still parses"
+ * behind it: deleting an arbitrary body line passed the whole sweep. Openers
+ * are filtered out by the caller — a PIN rewrites one on purpose, and the
+ * before/after id comparison is what holds that honest.
+ */
+function dissolveLoss(before: string[], after: string[]): string[] | null {
+  const pool = new Map<string, number>();
+  for (const line of before) pool.set(line, (pool.get(line) ?? 0) + 1);
+  for (const line of after) {
+    const left = pool.get(line) ?? 0;
+    if (left === 0) return null; // a line appeared, or one changed its bytes
     pool.set(line, left - 1);
   }
   return [...pool].flatMap(([line, n]) => Array<string>(n).fill(line));
@@ -206,6 +280,35 @@ const DOCS: [string, string][] = [
     '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  subgraph s1[T]\n    A --> B\n  end',
   ],
   ['no-subgraphs', 'flowchart TD\n  A[Start] --> B{Choice}\n  click A "a.md"'],
+  ['end-x', 'flowchart TD\n  subgraph s1[T]\n    A\n  end x\n  B'],
+  ['commented-direction', 'flowchart TD\n  subgraph s1[T]\n    %% direction LR\n    A\n  end'],
+  [
+    'shadowed-direction',
+    'flowchart TD\n  subgraph s1[T]\n    direction LR\n    A\n    %% direction BT\n  end',
+  ],
+  [
+    'midline-comment-direction',
+    'flowchart TD\n  subgraph s1[T]\n    B[x] %% direction LR\n    A\n  end',
+  ],
+  [
+    'nested-foreign-direction',
+    'flowchart TD\n  subgraph o[O]\n    direction TB\n    subgraph i[I]\n      direction LR %% note\n      A\n    end\n  end',
+  ],
+  [
+    'generated-neighbour-below',
+    'flowchart TD\n  A\n  B\n  A --> B\n  subgraph Two Words\n    X\n  end',
+  ],
+  [
+    'generated-neighbour-above',
+    'flowchart TD\n  subgraph Two Words\n    X\n  end\n  A\n  B\n  A --> B',
+  ],
+  [
+    'generated-pair',
+    'flowchart TD\n  subgraph One Two\n    P\n  end\n  subgraph Three Four\n    Q\n  end\n  A\n  A --> B',
+  ],
+  ['scruffy-spacing', 'flowchart TD\n  A[ Start ]\n  %% c\n  B\n  A    -->    B\n  C[Odd]   '],
+  ['scruffy-arrows', 'flowchart TD\n  A ----> B\n  C -.-> D\n  E ==> F'],
+  ['scruffy-inside', 'flowchart TD\n  subgraph s1[T]\n     A[ pad ]  \n\t\tB\n  end'],
   ['free-scattered', 'flowchart TD\n  A[Start]\n  %% c\n  B[Mid]\n  A --> C\n  A --> B'],
   ['free-with-meta', 'flowchart TD\n  A@{ shape: cyl }\n  B\n  A --> B\n  click A "a.md"'],
   ['free-beside-block', 'flowchart TD\n  subgraph s1[T]\n    X\n  end\n  A --> B\n  C'],
@@ -278,11 +381,14 @@ describe('subgraph conformance (M29.37)', () => {
         const before = parseFlowchart(src)!;
         const beforeLines = src.split('\n');
         const entries: SubgraphEntry[] = subgraphs(before);
+        const idsBefore = entries.map((s) => s.id).sort();
 
         for (const entry of entries) {
           const ops: [string, string][] = [
-            ['rename', serialize(renameSubgraph(parseFlowchart(src)!, entry.index, 'Re named'))],
-            ['rename-solo', serialize(renameSubgraph(parseFlowchart(src)!, entry.index, 'Solo'))],
+            ...RENAME_TITLES.map((t): [string, string] => [
+              `rename:${t}`,
+              serialize(renameSubgraph(parseFlowchart(src)!, entry.index, t)),
+            ]),
             ['dissolve', serialize(dissolveSubgraph(parseFlowchart(src)!, entry.index))],
             ['dir-lr', serialize(setSubgraphDirection(parseFlowchart(src)!, entry.index, 'LR'))],
             ['dir-off', serialize(setSubgraphDirection(parseFlowchart(src)!, entry.index, null))],
@@ -291,9 +397,35 @@ describe('subgraph conformance (M29.37)', () => {
             const where = `${name}#${entry.index} ${op}`;
             expect([where, await parses(out)]).toEqual([where, true]);
             await expectAgrees(out, where);
+            // The check the first sweep could not make, because it only ever
+            // compared the OUTPUT against itself: an op must not re-key a
+            // block. Generated ids are close-order ordinals, so an edit
+            // anywhere can move one — `dissolve` drops exactly the block it
+            // was given and every other id survives.
+            const idsAfter = subgraphs(parseFlowchart(out)!)
+              .map((s) => s.id)
+              .sort();
+            // A dissolve drops exactly the block it was given — unless it
+            // DECLINED, in which case nothing moved and the refusal has to
+            // name itself.
+            const declined = out === src;
+            if (declined && op === 'dissolve') {
+              expect([where, canDissolveSubgraph(parseFlowchart(src)!, entry.index)]).not.toEqual([
+                where,
+                null,
+              ]);
+            }
+            const expected =
+              op === 'dissolve' && !declined
+                ? idsBefore.filter((_, i) => i !== idsBefore.indexOf(entry.id)).sort()
+                : idsBefore;
+            expect([where, idsAfter]).toEqual([where, expected]);
             checked += 1;
           }
           // A rename is one line: every other line comes back byte-identical.
+          // (A PIN may rewrite one more — a neighbouring opener whose
+          // generated id the edit would otherwise have moved — so openers are
+          // compared by the id check above, not byte-wise.)
           const renamed = serialize(
             renameSubgraph(parseFlowchart(src)!, entry.index, 'Re named'),
           ).split('\n');
@@ -307,17 +439,31 @@ describe('subgraph conformance (M29.37)', () => {
           const turned = serialize(
             setSubgraphDirection(parseFlowchart(src)!, entry.index, 'LR'),
           ).split('\n');
-          const survivors = turned.filter((l) => !/^\s*direction\s/.test(l));
-          expect([name, survivors]).toEqual([
+          expect([name, turned.filter(notDirection)]).toEqual([
             name,
-            beforeLines.filter((l) => !/^\s*direction\s/.test(l)),
+            beforeLines.filter(notDirection),
           ]);
+          // A dissolve is the most destructive op here and had the weakest
+          // assertion: it may drop ONLY its two markers and its own owned
+          // direction lines, and everything else survives byte for byte.
+          const gone = dissolveLoss(
+            beforeLines.filter(notOpener),
+            serialize(dissolveSubgraph(parseFlowchart(src)!, entry.index))
+              .split('\n')
+              .filter(notOpener),
+          );
+          expect([name, entry.index, gone]).not.toEqual([name, entry.index, null]);
+          expect([
+            name,
+            entry.index,
+            gone?.every((l) => /^\s*(end\b|direction\s)/.test(l)),
+          ]).toEqual([name, entry.index, true]);
         }
 
         // …and grouping. FREE nodes (claimed by no block) are the ones a group
         // can actually take; the claimed and mixed picks are here to keep the
         // refusal paths exercised rather than assumed.
-        const claimed = [...new Set(subgraphs(before).flatMap((s) => s.memberIds))];
+        const claimed = [...new Set(entries.flatMap((s) => s.memberIds))];
         const free = [...(await db(src)).getVertices().keys()].filter((k) => !claimed.includes(k));
         const picks = [
           free.slice(0, 1),
@@ -335,6 +481,9 @@ describe('subgraph conformance (M29.37)', () => {
           if (id === null) {
             refused += 1;
             expect([where, text]).toEqual([where, src]);
+            expect([where, canCreateSubgraph(parseFlowchart(src)!, pick, 'New Group')]).not.toEqual(
+              [where, null],
+            );
             continue;
           }
           grouped += 1;
@@ -343,21 +492,29 @@ describe('subgraph conformance (M29.37)', () => {
           // The point of the op: mermaid really does put those nodes in it.
           const made = (await db(text)).getSubGraphs().find((s) => s.id === id)!;
           expect([where, pick.every((p) => made.nodes.includes(p))]).toEqual([where, true]);
-          // Nothing appeared or vanished, and every surviving line kept its bytes.
+          // Nothing appeared or vanished, and no existing block was re-keyed.
           expect([where, [...(await db(text)).getVertices().keys()].sort()]).toEqual([
             where,
             [...(await db(src)).getVertices().keys()].sort(),
           ]);
-          // Every original line survives byte-for-byte AND in its original
-          // relative order — the only new lines are the two markers and any
+          const idsAfter = subgraphs(parseFlowchart(text)!).map((s) => s.id);
+          for (const was of idsBefore) {
+            expect([where, was, idsAfter.includes(was)]).toEqual([where, was, true]);
+          }
+          // Every original line survives byte-for-byte — openers excepted,
+          // since a pin rewrites one on purpose and the id check above is what
+          // holds that honest. The only new lines are the two markers and any
           // minted membership reference.
-          const added = addedLines(beforeLines, text.split('\n'));
+          const added = addedLines(
+            beforeLines.filter(notOpener),
+            text.split('\n').filter(notOpener),
+          );
           expect([where, added]).not.toEqual([where, null]);
           expect([
             where,
-            added?.every((l) => /^\s*(subgraph \S|end$)/.test(l) || pick.includes(l.trim())),
+            added?.every((l) => /^\s*end\b/.test(l) || pick.includes(l.trim())),
           ]).toEqual([where, true]);
-          expect([where, (added?.length ?? 99) <= 2 + pick.length]).toEqual([where, true]);
+          expect([where, (added?.length ?? 99) <= 1 + pick.length]).toEqual([where, true]);
           checked += 1;
         }
       }
@@ -365,8 +522,8 @@ describe('subgraph conformance (M29.37)', () => {
       // asserts almost nothing, so the count of groups that actually LANDED is
       // pinned too — as is the count that refused, so the refusal paths stay
       // exercised rather than assumed.
-      expect(checked).toBeGreaterThan(250);
-      expect(grouped).toBeGreaterThan(50);
+      expect(checked).toBeGreaterThan(400);
+      expect(grouped).toBeGreaterThan(60);
       expect(refused).toBeGreaterThan(50);
     },
     TIMEOUT,

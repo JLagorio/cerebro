@@ -65,6 +65,39 @@ function flattenForLine(text: string): string {
 }
 
 /**
+ * The one PHRASE no quoting can rescue, in every bracket-ish lexer state at
+ * once. Mermaid's direction rule is `.*direction\s+<DIR>[^\n]*` — it claims
+ * the WHOLE LINE from anywhere on it, and it outranks the label states. All
+ * MEASURED on 11.16.0, and the damage is total rather than cosmetic:
+ *
+ * - `A[a direction LR b] --> B` renders NEITHER node — `getVertices()` comes
+ *   back EMPTY, the line having been eaten as a direction statement;
+ * - `A -->|direction LR| B` does the same to both endpoints;
+ * - `subgraph ops[a direction LR b]` is a PARSE ERROR that kills the diagram;
+ * - **quoting does not help.** `A["a direction LR b"]` and
+ *   `subgraph ops["a direction LR b"]` are just as fatal, which is what makes
+ *   this different from every other hazard the emitters answer to.
+ *
+ * So the phrase is broken the way `flattenForLine` breaks a line terminator:
+ * substituted at the last boundary before the file, visibly, rather than
+ * dropped. The whitespace between the keyword and the direction token becomes
+ * `_` — measured, `A[a direction_LR b]` renders both nodes, and so does
+ * `a directions LR b` or `a direction lr b`, because the trigger is exactly
+ * `direction` + whitespace + an UPPERCASE direction token. There is no word
+ * boundary after that token upstream (`direction TBX` is fatal too), which is
+ * why the pattern has none either.
+ *
+ * NOT called from `clickTarget` or `emitMetaValue`, and that is measured, not
+ * an oversight: `click A "a direction LR b.md"` and
+ * `A@{ label: "a direction LR b" }` both render fine — the click and `@{`
+ * lexer states win there — so defusing them would corrupt a legitimate vault
+ * path or label for nothing.
+ */
+function defuseDirection(text: string): string {
+  return text.replace(/direction[^\S\r\n]+(TB|BT|RL|LR|TD)/g, 'direction_$1');
+}
+
+/**
  * Bracket labels: quote whatever mermaid's `text` lexer state cannot take
  * bare. Measured char by char against 11.16.0 — `"()@[]{|}` are parse errors
  * unquoted and every one of them but `"` itself is fine inside quotes, so
@@ -74,7 +107,7 @@ function flattenForLine(text: string): string {
  * any label carrying an `@` (an email, a handle) a render-stopper.
  */
 function quoteLabel(rawLabel: string): string {
-  const label = flattenForLine(rawLabel);
+  const label = defuseDirection(flattenForLine(rawLabel));
   return /[|()[\]{}&"@]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
 }
 
@@ -91,7 +124,7 @@ function quoteLabel(rawLabel: string): string {
  * scar, kept on purpose. Everything else is preserved, never dropped.
  */
 function quoteEdgeLabel(rawLabel: string): string {
-  const label = flattenForLine(rawLabel);
+  const label = defuseDirection(flattenForLine(rawLabel));
   return /[()[\]{}"@]/.test(label) ? `"${label.replaceAll('"', "'")}"` : label;
 }
 
@@ -151,20 +184,52 @@ export function clickTarget(target: string): string | null {
 }
 
 /**
- * A subgraph title that can sit inside `subgraph id[…]` without taking the
- * diagram down with it, or null when there is no title to write. MEASURED on
- * 11.16.0: `subgraph s1[]` and `subgraph s1[""]` are PARSE ERRORS while
- * `subgraph s1[ ]` renders with an empty label, and an unquoted `(` `@` in the
- * title is fatal exactly as it is in a node label — so the same `quoteLabel`
- * rules apply, over the same `flattenForLine` boundary.
- *
- * Null means "the caller must not write this line", the same contract
- * `clickTarget` holds: `renameSubgraph` refuses a blank title rather than
- * emit a bracket pair that cannot parse.
+ * A subgraph title reduced to the text mermaid would store: line terminators
+ * flattened, the `direction <DIR>` phrase defused, then trimmed the way
+ * `addSubGraph` trims it. Null means "there is no title to write" — the
+ * contract `clickTarget` holds, and the reason `renameSubgraph` refuses a
+ * blank rather than emit `subgraph s1[]`, which is a PARSE ERROR that kills
+ * the whole diagram (MEASURED; `subgraph s1[ ]` renders, `subgraph s1[""]`
+ * does not).
  */
+export function subgraphTitleText(title: string): string | null {
+  const flat = defuseDirection(flattenForLine(title)).trim();
+  return flat === '' ? null : flat;
+}
+
+/** The bracketed `id[Title]` form's title — the same lexer state as a node label. */
 export function subgraphTitle(title: string): string | null {
-  const flat = flattenForLine(title).trim();
-  return flat === '' ? null : quoteLabel(flat);
+  const text = subgraphTitleText(title);
+  return text === null ? null : quoteLabel(text);
+}
+
+/**
+ * The BARE form's title, ALWAYS quoted — and that is the whole point.
+ *
+ * A bare title is not lexed in the bracket `text` state `quoteLabel` was
+ * measured against; it is far narrower, and using `quoteLabel`'s rules here
+ * was a defect that shipped diagram-killers through `renameSubgraph`. MEASURED
+ * on 11.16.0, `subgraph <title>` unquoted is FATAL for `Build --> Ship`,
+ * `a -- b`, `a o--o b`, `Design, Build, Ship`, `Latency < 200ms`, `Ops > Eng`,
+ * `env = prod`, `a ~ b`, `a | b`, `a (p) b`, `a @ b`, `a [b] c`, `a {b} c` —
+ * and SILENTLY WRONG for three more, which is worse:
+ *
+ * - `Q1 ; Q2` truncates the title at the `;` and mints a phantom node `Q2`
+ *   into the block;
+ * - `Start end` lets the trailing `end` close the block early, and the node
+ *   inside VANISHES from the diagram;
+ * - `a click b` does the same.
+ *
+ * Every one of those renders correctly quoted, and quoting costs nothing that
+ * matters: the lexer strips the quotes before `addSubGraph` sees the text, so
+ * the effective id rule is untouched (`subgraph "Solo"` is still the id
+ * `Solo`, `subgraph "Two Words"` is still generated). So the bare form is
+ * quoted unconditionally rather than by a character set we would have to keep
+ * in sync with a lexer state we cannot see.
+ */
+export function bareSubgraphTitle(title: string): string | null {
+  const text = subgraphTitleText(title);
+  return text === null ? null : `"${text.replaceAll('"', "'")}"`;
 }
 
 export function emitNodeRef(ref: NodeRef): string {
@@ -174,7 +239,10 @@ export function emitNodeRef(ref: NodeRef): string {
 }
 
 function emitLine(line: ModelLine): string {
-  const indent = line.raw.match(/^\s*/)?.[0] ?? '';
+  // `[^\S\r\n]` rather than `\s`: on a CRLF document a synthesized raw is
+  // `'  \r'`, and a `\s*` indent would swallow the terminator into the middle
+  // of the emitted line.
+  const indent = line.raw.match(/^[^\S\r\n]*/)?.[0] ?? '';
   const p = line.parsed;
   switch (p.kind) {
     case 'header':
@@ -216,9 +284,11 @@ function emitLine(line: ModelLine): string {
     // that kills the whole diagram (MEASURED), and a title flattened to
     // nothing would emit exactly that. Such a line keeps its original bytes.
     case 'subgraph-start': {
-      const title = subgraphTitle(p.title);
-      if (p.id === null) return title === null ? line.raw : `${indent}subgraph ${title}`;
-      return `${indent}subgraph ${p.id}[${title ?? ' '}]`;
+      if (p.id === null) {
+        const bare = bareSubgraphTitle(p.title);
+        return bare === null ? line.raw : `${indent}subgraph ${bare}`;
+      }
+      return `${indent}subgraph ${p.id}[${subgraphTitle(p.title) ?? ' '}]`;
     }
     case 'subgraph-end':
       return `${indent}end`;
@@ -227,6 +297,20 @@ function emitLine(line: ModelLine): string {
   }
 }
 
+/**
+ * A rewritten line keeps its own line ENDING. The model splits on `\n`, so on a
+ * CRLF document every `raw` ends with a `\r` that a re-emitted line would
+ * otherwise drop — an unclaimed byte change in a repo that pinned
+ * `.gitattributes` after two line-ending incidents. The guard matters because
+ * two `emitLine` branches hand back `line.raw` itself when the value is
+ * unemittable, and those already carry it.
+ */
 export function serialize(model: FlowchartModel): string {
-  return model.lines.map((l) => (l.dirty ? emitLine(l) : l.raw)).join('\n');
+  return model.lines
+    .map((l) => {
+      if (!l.dirty) return l.raw;
+      const out = emitLine(l);
+      return l.raw.endsWith('\r') && !out.endsWith('\r') ? `${out}\r` : out;
+    })
+    .join('\n');
 }

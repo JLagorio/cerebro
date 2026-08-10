@@ -16,6 +16,7 @@ import {
   OWNED_DIRECTION_LINE,
   bareSubgraphIdText,
   clickTarget,
+  directionText,
   edgeMetaLinesFor,
   edges,
   emitArrow,
@@ -23,7 +24,7 @@ import {
   nodeMeta,
   nodes,
   styleDecl,
-  subgraphTitle,
+  subgraphTitleText,
   subgraphs,
   withEntry,
   withMetaEntry,
@@ -1110,6 +1111,30 @@ export function setLayoutEngine(model: FlowchartModel, engine: 'dagre' | 'elk'):
 }
 
 /**
+ * Why a subgraph op declined. `canCreateSubgraph` and friends answer this
+ * BEFORE the op runs, so a surface can disable a control and say why instead
+ * of firing an op that silently returns the model unchanged — the dead-button
+ * defect class this wave has already closed three times. Following
+ * `canAnimateEdge`, the ops themselves still return a bare model: this is a
+ * question you ask, not a result type every call site has to unwrap.
+ */
+export type SubgraphRefusal =
+  | 'empty-selection'
+  | 'unknown-node'
+  | 'blank-title'
+  | 'unbalanced-document'
+  | 'already-grouped'
+  | 'line-inside-subgraph'
+  | 'no-such-block'
+  | 'unpinnable-id'
+  | 'foreign-direction-would-leak';
+
+/** The document's line ending, read off the lines themselves. */
+function lineEnding(model: FlowchartModel): string {
+  return model.lines.some((l) => l.raw.endsWith('\r')) ? '\r' : '';
+}
+
+/**
  * The body lines at a block's OWN depth — nested blocks skipped whole, the
  * two markers excluded. Every subgraph op needs it, and deriving it once here
  * is what keeps `dissolveSubgraph` from deleting a nested block's direction.
@@ -1125,8 +1150,44 @@ function ownDepthLines(model: FlowchartModel, entry: SubgraphEntry): number[] {
   return out;
 }
 
+/**
+ * Freeze a generated `subGraph<k>` id into the explicit form, so an edit that
+ * shifts CLOSE-ORDER ordinals elsewhere in the document cannot re-key it.
+ *
+ * MEASURED both ways on 11.16.0, and both are silent: grouping nodes that sit
+ * ABOVE a `subgraph Two Words` block moves that untouched block from
+ * `subGraph0` to `subGraph1`, and dissolving a block that closes BEFORE it
+ * moves it the other way. Any hand-written `style subGraph0 …` / `class
+ * subGraph0 …` line then binds to the wrong block or to nothing, and M29.38's
+ * cluster binding is an exact id match.
+ *
+ * Pinning touches a line the user did not name, which is the cost. It is the
+ * lesser evil: a re-key is invisible in the diff and a pin is not, and it is
+ * the same move `renameSubgraph` already makes to protect the same handle.
+ * Measured safe — a pinned `subgraph subGraph0[Two Words]` keeps its id AND
+ * still consumes its ordinal, so no later generated id collides with it.
+ */
+function pinGeneratedIds(
+  next: FlowchartModel,
+  closesAfter: (entry: SubgraphEntry) => boolean,
+): void {
+  for (const entry of subgraphs(next)) {
+    if (entry.explicitId || !closesAfter(entry)) continue;
+    const line = next.lines[entry.startLine];
+    if (line.parsed.kind !== 'subgraph-start' || line.parsed.id !== null) continue;
+    // Only GENERATED ids move with the ordinals: a whitespace-free bare title
+    // is its own id and is unaffected by anything happening elsewhere.
+    if (!/\s/.test(bareSubgraphIdText(line.raw) ?? '')) continue;
+    if (!EXPLICIT_ID.test(entry.id)) continue; // unreachable: `subGraph<k>` always matches
+    line.parsed.id = entry.id;
+    line.dirty = true;
+  }
+}
+
 /** Sanitize a title into an id, unique among node ids and subgraph ids. */
 function subgraphIdFromTitle(model: FlowchartModel, title: string): string {
+  // `sg` catches a title that sanitizes away entirely — `!!!`, an emoji, CJK —
+  // because an empty id would emit `subgraph [Title]`, which does not parse.
   const base =
     title
       .trim()
@@ -1138,6 +1199,47 @@ function subgraphIdFromTitle(model: FlowchartModel, title: string): string {
   let n = 2;
   while (taken.has(`${base}_${n}`.toLowerCase())) n += 1;
   return `${base}_${n}`;
+}
+
+/** The lines `createSubgraph` may relocate into the new block. */
+function movableLines(model: FlowchartModel, ids: Set<string>): number[] {
+  const out: number[] = [];
+  model.lines.forEach((line, i) => {
+    const p = line.parsed;
+    const owned =
+      (p.kind === 'node' && ids.has(p.node.id)) ||
+      (p.kind === 'node-meta' && ids.has(p.id)) ||
+      (p.kind === 'edges' &&
+        p.segments.every((seg) => [...seg.from, ...seg.to].every((r) => ids.has(r.id))));
+    if (owned) out.push(i);
+  });
+  return out;
+}
+
+/**
+ * Why `createSubgraph` would decline, or null when it would act. Every branch
+ * is a thing mermaid cannot express rather than a thing we chose not to do.
+ */
+export function canCreateSubgraph(
+  model: FlowchartModel,
+  nodeIds: string[],
+  title: string,
+): SubgraphRefusal | null {
+  const ids = new Set(nodeIds);
+  if (ids.size === 0) return 'empty-selection';
+  if (subgraphTitleText(title) === null) return 'blank-title';
+  const known = nodes(model);
+  for (const id of ids) if (!known.has(id)) return 'unknown-node';
+  const subs = subgraphs(model);
+  // Zero blocks in a document that plainly has markers means `subgraphs()`
+  // refused to read it: mermaid refuses it too, and we cannot tell what is
+  // inside what.
+  if (subs.length === 0 && model.lines.some(isBlockMarker)) return 'unbalanced-document';
+  const spokenFor = new Set(subs.flatMap((s) => s.memberIds));
+  for (const id of ids) if (spokenFor.has(id)) return 'already-grouped';
+  const inside = (i: number): boolean => subs.some((s) => i > s.startLine && i < s.endLine);
+  if (movableLines(model, ids).some(inside)) return 'line-inside-subgraph';
+  return null;
 }
 
 /**
@@ -1154,10 +1256,8 @@ function subgraphIdFromTitle(model: FlowchartModel, title: string): string {
  * above its node's first declaration, where `setLink` never runs and the link
  * silently dies. `style` lines are out for the first half of the same reason.
  *
- * Refuses (id: null, model unchanged) rather than guess: an empty selection,
- * an unknown id, a title that flattens to nothing (`subgraph x[]` is a parse
- * error), a movable line already inside another subgraph, or a document whose
- * block markers do not balance — there we cannot tell what is inside what.
+ * Refusals are `canCreateSubgraph`'s list; here they all mean `id: null` and
+ * a model returned untouched.
  */
 export function createSubgraph(
   model: FlowchartModel,
@@ -1165,32 +1265,9 @@ export function createSubgraph(
   title: string,
 ): { model: FlowchartModel; id: string | null } {
   const next = clone(model);
+  if (canCreateSubgraph(next, nodeIds, title) !== null) return { model: next, id: null };
   const ids = new Set(nodeIds);
-  if (ids.size === 0 || subgraphTitle(title) === null) return { model: next, id: null };
-  const known = nodes(next);
-  for (const id of ids) if (!known.has(id)) return { model: next, id: null };
-
-  const subs = subgraphs(next);
-  if (subs.length === 0 && next.lines.some(isBlockMarker)) return { model: next, id: null };
-  const insideExisting = (i: number): boolean => subs.some((s) => i > s.startLine && i < s.endLine);
-  // A node cannot belong to two blocks: `makeUniq` gives it to whichever
-  // closed FIRST (measured — two siblings claiming the same id leave the
-  // second one empty), so grouping an already-claimed node would produce a
-  // block mermaid renders without it. Refuse rather than draw nothing.
-  const spokenFor = new Set(subs.flatMap((s) => s.memberIds));
-  for (const id of ids) if (spokenFor.has(id)) return { model: next, id: null };
-
-  const movable: number[] = [];
-  next.lines.forEach((line, i) => {
-    const p = line.parsed;
-    const owned =
-      (p.kind === 'node' && ids.has(p.node.id)) ||
-      (p.kind === 'node-meta' && ids.has(p.id)) ||
-      (p.kind === 'edges' &&
-        p.segments.every((seg) => [...seg.from, ...seg.to].every((r) => ids.has(r.id))));
-    if (owned) movable.push(i);
-  });
-  if (movable.some(insideExisting)) return { model: next, id: null };
+  const movable = movableLines(next, ids);
 
   // Which ids do the movable lines already claim? The rest need minting —
   // and "claim" here means what MERMAID counts as membership, which is why a
@@ -1205,6 +1282,10 @@ export function createSubgraph(
 
   const id = subgraphIdFromTitle(next, title);
   const anchor = movable.length > 0 ? movable[0] : next.lines.length;
+  // The new block's `end` lands at the anchor, so every block that closes
+  // after it gains an ordinal. Freeze the generated ones first — while the
+  // line indices still mean what `subgraphs()` said they meant.
+  pinGeneratedIds(next, (s) => s.endLine >= anchor);
 
   // Pull the movable lines out (reverse order keeps indices valid), then
   // reinsert the whole block at the anchor.
@@ -1212,18 +1293,44 @@ export function createSubgraph(
   for (let k = movable.length - 1; k >= 0; k -= 1) {
     moved.unshift(next.lines.splice(movable[k], 1)[0]);
   }
+  const eol = lineEnding(next);
   const block: ModelLine[] = [
-    { raw: '  ', parsed: { kind: 'subgraph-start', id, title }, dirty: true },
+    {
+      raw: `  ${eol}`,
+      // The DISPLAY title, as `types.ts` declares it: trimmed and defused, so
+      // a caller reading `parsed.title` back before the round-trip sees what
+      // it will see after one.
+      parsed: { kind: 'subgraph-start', id, title: subgraphTitleText(title) ?? title },
+      dirty: true,
+    },
     ...minted.map((nid): ModelLine => ({
-      raw: '  ',
+      raw: `  ${eol}`,
       parsed: { kind: 'node', node: { id: nid, label: null, shape: null } },
       dirty: true,
     })),
     ...moved,
-    { raw: '  ', parsed: { kind: 'subgraph-end' }, dirty: true },
+    { raw: `  ${eol}`, parsed: { kind: 'subgraph-end' }, dirty: true },
   ];
   next.lines.splice(anchor, 0, ...block);
   return { model: next, id };
+}
+
+/** Why `renameSubgraph` would decline, or null when it would act. */
+export function canRenameSubgraph(
+  model: FlowchartModel,
+  index: number,
+  title: string,
+): SubgraphRefusal | null {
+  const entry = subgraphs(model)[index];
+  if (entry === undefined) return 'no-such-block';
+  const text = subgraphTitleText(title);
+  if (text === null) return 'blank-title';
+  const line = model.lines[entry.startLine];
+  if (line.parsed.kind !== 'subgraph-start') return 'no-such-block';
+  if (line.parsed.id !== null) return null;
+  const generated = /\s/.test(bareSubgraphIdText(line.raw) ?? '');
+  const keepsId = /\s/.test(text) ? generated : text === entry.id;
+  return keepsId || EXPLICIT_ID.test(entry.id) ? null : 'unpinnable-id';
 }
 
 /**
@@ -1244,6 +1351,10 @@ export function createSubgraph(
  * (`subgraph a/b` — MEASURED, that really is the id `a/b`) cannot be pinned,
  * and a blank title cannot be emitted at all (`subgraph x[]` is a parse
  * error), so both refuse rather than corrupt.
+ *
+ * The kept bare form is emitted QUOTED by `bareSubgraphTitle`, which is what
+ * makes keeping it safe at all — see that function for the eight titles that
+ * killed the diagram and the three that silently changed it.
  */
 export function renameSubgraph(
   model: FlowchartModel,
@@ -1251,30 +1362,45 @@ export function renameSubgraph(
   title: string,
 ): FlowchartModel {
   const next = clone(model);
+  if (canRenameSubgraph(next, index, title) !== null) return next;
   const entry = subgraphs(next)[index];
-  if (entry === undefined) return next;
   const line = next.lines[entry.startLine];
-  if (line.parsed.kind !== 'subgraph-start') return next;
-  const emitted = subgraphTitle(title);
-  if (emitted === null) return next;
+  if (line.parsed.kind !== 'subgraph-start') return next; // unreachable; narrows the type
+  const text = subgraphTitleText(title) ?? '';
 
   if (line.parsed.id === null) {
-    // What the bare form would re-derive: the emitted text with its quotes
-    // taken back off, which is exactly what the lexer hands addSubGraph.
-    const bare = emitted.startsWith('"') ? emitted.slice(1, -1) : emitted;
     // Asked of the id TEXT, not the display title: `subgraph Alpha ` reads as
     // `Alpha` but its one trailing space already generated the id, and a
     // block that is generated stays generated under any whitespaced title.
     const generated = /\s/.test(bareSubgraphIdText(line.raw) ?? '');
-    const keepsId = /\s/.test(bare) ? generated : bare === entry.id;
-    if (!keepsId) {
-      if (!EXPLICIT_ID.test(entry.id)) return next;
-      line.parsed.id = entry.id;
-    }
+    const keepsId = /\s/.test(text) ? generated : text === entry.id;
+    if (!keepsId) line.parsed.id = entry.id;
   }
-  line.parsed.title = title;
+  line.parsed.title = text;
   line.dirty = true;
   return next;
+}
+
+/** Why `dissolveSubgraph` would decline, or null when it would act. */
+export function canDissolveSubgraph(model: FlowchartModel, index: number): SubgraphRefusal | null {
+  const entry = subgraphs(model)[index];
+  if (entry === undefined) return 'no-such-block';
+  // A direction site we cannot rewrite (`direction LR %% note`, or a node
+  // label carrying the phrase) survives the dissolve. At TOP level that is
+  // harmless — measured, an orphaned direction statement is inert. One level
+  // down it is not: the line lands at the PARENT's own depth and re-directs a
+  // block this op was never asked to touch. Deleting it would destroy a
+  // comment the user wrote, so the op declines instead.
+  const nested = subgraphs(model).some(
+    (s) => s.startLine < entry.startLine && s.endLine > entry.endLine,
+  );
+  if (!nested) return null;
+  const leaks = ownDepthLines(model, entry).some(
+    (i) =>
+      DIRECTION_SITE.test(directionText(model.lines[i])) &&
+      !OWNED_DIRECTION_LINE.test(model.lines[i].raw),
+  );
+  return leaks ? 'foreign-direction-would-leak' : null;
 }
 
 /**
@@ -1290,8 +1416,11 @@ export function renameSubgraph(
  */
 export function dissolveSubgraph(model: FlowchartModel, index: number): FlowchartModel {
   const next = clone(model);
+  if (canDissolveSubgraph(next, index) !== null) return next;
   const entry = subgraphs(next)[index];
-  if (entry === undefined) return next;
+  // This block's `end` disappears, so every block that closed after it loses
+  // an ordinal. Freeze the generated ones before the lines move.
+  pinGeneratedIds(next, (s) => s.endLine > entry.endLine);
 
   const doomed = [entry.startLine, entry.endLine];
   for (const i of ownDepthLines(next, entry)) {
@@ -1300,6 +1429,14 @@ export function dissolveSubgraph(model: FlowchartModel, index: number): Flowchar
   doomed.sort((a, b) => b - a);
   for (const i of doomed) next.lines.splice(i, 1);
   return next;
+}
+
+/** Why `setSubgraphDirection` would decline, or null when it would act. */
+export function canSetSubgraphDirection(
+  model: FlowchartModel,
+  index: number,
+): SubgraphRefusal | null {
+  return subgraphs(model)[index] === undefined ? 'no-such-block' : null;
 }
 
 /**
@@ -1311,11 +1448,12 @@ export function dissolveSubgraph(model: FlowchartModel, index: number): Flowchar
  * The LAST own-depth direction site is the one that renders (MEASURED:
  * `direction LR` above `direction BT` renders BT), so a set leaves exactly
  * one line behind and puts it below every site — including sites we do not
- * own, such as `direction LR %% note` or a node label carrying the phrase,
- * which mermaid's `.*direction\s+<DIR>[^\n]*` rule swallows whole. Only lines
- * that are NOTHING but the statement are rewritten or removed; a clear that
- * leaves a foreign site behind has not fully cleared, the same shape of
- * honest half-measure `nodeLinks.contested` reports.
+ * own, such as `direction LR %% note`, which mermaid's
+ * `.*direction\s+<DIR>[^\n]*` rule swallows whole. Only lines that are
+ * NOTHING but the statement are rewritten or removed; a clear that leaves a
+ * foreign site behind has not fully cleared, the same shape of honest
+ * half-measure `nodeLinks.contested` reports — deleting a line the user wrote
+ * for another reason is the worse trade.
  */
 export function setSubgraphDirection(
   model: FlowchartModel,
@@ -1323,11 +1461,11 @@ export function setSubgraphDirection(
   dir: Direction | null,
 ): FlowchartModel {
   const next = clone(model);
+  if (canSetSubgraphDirection(next, index) !== null) return next;
   const entry = subgraphs(next)[index];
-  if (entry === undefined) return next;
   const body = ownDepthLines(next, entry);
   const ours = body.filter((i) => OWNED_DIRECTION_LINE.test(next.lines[i].raw));
-  const every = body.filter((i) => DIRECTION_SITE.test(next.lines[i].raw.trim()));
+  const every = body.filter((i) => DIRECTION_SITE.test(directionText(next.lines[i])));
   const last = every.length > 0 ? every[every.length - 1] : -1;
 
   if (dir === null) {
@@ -1336,7 +1474,7 @@ export function setSubgraphDirection(
   }
   if (last !== -1 && ours.includes(last)) {
     const indent = next.lines[last].raw.match(/^\s*/)?.[0] ?? '    ';
-    next.lines[last].raw = `${indent}direction ${dir}`;
+    next.lines[last].raw = `${indent}direction ${dir}${lineEnding(next)}`;
     for (const i of [...ours].reverse()) if (i !== last) next.lines.splice(i, 1);
     return next;
   }
@@ -1353,7 +1491,7 @@ export function setSubgraphDirection(
   });
   const indent = next.lines[entry.startLine].raw.match(/^\s*/)?.[0] ?? '  ';
   kept.splice(at, 0, {
-    raw: `${indent}  direction ${dir}`,
+    raw: `${indent}  direction ${dir}${lineEnding(next)}`,
     parsed: { kind: 'opaque' },
     dirty: false,
   });

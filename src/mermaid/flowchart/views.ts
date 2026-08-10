@@ -4,7 +4,15 @@
  */
 
 import { bareSubgraphIdText } from './parse';
-import type { Direction, EdgeArrow, FlowchartModel, NodeMeta, NodeRef, Shape } from './types';
+import type {
+  Direction,
+  EdgeArrow,
+  FlowchartModel,
+  ModelLine,
+  NodeMeta,
+  NodeRef,
+  Shape,
+} from './types';
 import { withEntry, withMetaEntry } from './types';
 
 /**
@@ -356,6 +364,29 @@ export interface SubgraphEntry {
 export const DIRECTION_SITE = /direction[^\S\r\n]+(TB|BT|RL|LR|TD)/;
 
 /**
+ * The text of a line that could carry a direction statement — empty for a
+ * line that cannot. Only the COMMENT case is filtered, and only when the `%%`
+ * opens the line, because that is exactly where mermaid's own rule order puts
+ * the boundary. All MEASURED on 11.16.0:
+ *
+ * - `%% direction LR` (at any indent, with or without a space after the
+ *   marker) sets NOTHING — the comment rule and the direction rule both match
+ *   the whole line, and the comment rule is listed first;
+ * - `A[x] %% direction LR` DOES set the direction — the comment rule cannot
+ *   match at position 0, so the direction rule wins on length, and the node
+ *   on that line vanishes with it.
+ *
+ * Commenting a direction line out is the most natural way to disable one, so
+ * reading it as live made `subgraphs()` disagree with the renderer on an
+ * ordinary document — and made a cleared direction impossible to read back as
+ * cleared, since a clear only removes lines it owns.
+ */
+export function directionText(line: ModelLine): string {
+  const trimmed = line.raw.trim();
+  return trimmed.startsWith('%%') ? '' : trimmed;
+}
+
+/**
  * The lines a direction WRITE may touch: nothing but the statement itself,
  * plus the `;` separator. Everything else `DIRECTION_SITE` matches is a line
  * carrying other content too — a comment, a node declaration — and rewriting
@@ -459,7 +490,7 @@ export function subgraphs(model: FlowchartModel): SubgraphEntry[] {
     // Own-depth only, and the LAST one wins — measured, `direction LR` above
     // `direction BT` renders BT. Reading the first would aim every control at
     // a declaration the renderer ignores.
-    const dir = trimmed.match(DIRECTION_SITE);
+    const dir = directionText(line).match(DIRECTION_SITE);
     if (dir !== null) top.direction = dir[1] as Direction;
     // Membership: first appearance wins, so the order is the document's.
     const add = (id: string): void => {
