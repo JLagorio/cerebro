@@ -313,6 +313,7 @@ export const VIEW_TYPES = [
   'gallery',
   'chart',
   'dashboard',
+  'whiteboard',
 ] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
@@ -527,6 +528,15 @@ export interface Presentation {
   chart?: ChartSpec;
   /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
   dashboard?: DashboardSpec;
+  /**
+   * The whiteboard's canvas (M29.45): a vault-relative `.mmd` path, created
+   * on first open (spec D8). `file: null` is representable in memory — the
+   * "not created yet" state the view acts on — but never written: the
+   * serializer drops it, so a fresh tab's YAML carries no key about a file
+   * that does not exist, the same stored-only-off-default rule every other
+   * layout block follows.
+   */
+  whiteboard?: { file: string | null };
   /** How much of the calendar one screen holds. Omitted = a month (M16.23). */
   calendarSpan?: 'month' | 'week';
   /** False drops Saturday and Sunday from the grid. Stored only when false. */

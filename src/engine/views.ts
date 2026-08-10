@@ -71,6 +71,7 @@ export function clonePresentation(p: Presentation): Presentation {
     ...(p.dashboard !== undefined
       ? { dashboard: { blocks: p.dashboard.blocks.map((b) => ({ ...b })) } }
       : {}),
+    ...(p.whiteboard !== undefined ? { whiteboard: { ...p.whiteboard } } : {}),
   };
 }
 
@@ -203,6 +204,7 @@ function parsePresentation(raw: unknown): Presentation {
   const cardSize = parseCardSize(obj.cardSize) ?? parseCardSize(asRecord(obj.gallery).size);
   const chart = parseChart(obj.chart);
   const dashboard = parseDashboard(obj.dashboard);
+  const whiteboard = parseWhiteboard(obj.whiteboard);
   return {
     type: parseViewType(obj.type),
     group: parseGroupChain(obj),
@@ -258,6 +260,7 @@ function parsePresentation(raw: unknown): Presentation {
     ...(gallery !== undefined ? { gallery } : {}),
     ...(chart !== undefined ? { chart } : {}),
     ...(dashboard !== undefined ? { dashboard } : {}),
+    ...(whiteboard !== undefined ? { whiteboard } : {}),
     // M16.23 grid chrome. Every one is stored only off its default, so a view
     // file that never touched them stays byte-identical.
     ...(obj.calendarSpan === 'week' ? { calendarSpan: 'week' as const } : {}),
@@ -313,6 +316,18 @@ function parseChart(raw: unknown): ChartSpec | undefined {
   if (typeof obj.value === 'string' && obj.value.trim() !== '') spec.value = obj.value.trim();
   if (obj.omitZero === true) spec.omitZero = true;
   return Object.keys(spec).length === 0 ? undefined : spec;
+}
+
+/**
+ * The whiteboard's file pointer (M29.45). Only a non-empty string is a
+ * pointer; anything else — null, blank, a number, `{}` — parses as "not
+ * created yet" (absent), so the serializer never has to remember a null.
+ */
+function parseWhiteboard(raw: unknown): Presentation['whiteboard'] | undefined {
+  const obj = asRecord(raw);
+  return typeof obj.file === 'string' && obj.file.trim() !== ''
+    ? { file: obj.file.trim() }
+    : undefined;
 }
 
 /**
@@ -617,6 +632,7 @@ const LAYOUT_LABEL: Record<ViewType, string> = {
   gallery: 'Gallery',
   chart: 'Chart',
   dashboard: 'Dashboard',
+  whiteboard: 'Whiteboard',
 };
 
 export function layoutLabel(type: ViewType): string {
@@ -803,6 +819,11 @@ function serializePresentation(p: Presentation): Record<string, unknown> {
     ...(p.gallery !== undefined ? { gallery: p.gallery } : {}),
     ...(p.chart !== undefined ? { chart: p.chart } : {}),
     ...(p.dashboard !== undefined ? { dashboard: p.dashboard } : {}),
+    // M29.45: written only once the file exists. A null pointer is the
+    // in-memory "create me" state and carries no information worth storing.
+    ...(p.whiteboard !== undefined && p.whiteboard.file !== null
+      ? { whiteboard: { file: p.whiteboard.file } }
+      : {}),
     ...(p.calendarSpan === 'week' ? { calendarSpan: p.calendarSpan } : {}),
     ...(p.showWeekends === false ? { showWeekends: false } : {}),
     ...(p.weekStart === 'monday' ? { weekStart: p.weekStart } : {}),
