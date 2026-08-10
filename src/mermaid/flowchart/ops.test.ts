@@ -2140,19 +2140,35 @@ describe('setNodePosition / clearPositions / setManualLayout (M29.41)', () => {
   // could not read back would take the WHOLE line opaque on the next parse and
   // every other node's coordinates with it.
   it('refuses a position it could not read back', () => {
-    const src = 'flowchart TD\n  %% cerebro:pos A 1,2\n  A --> B';
-    for (const bad of [
-      { id: 'A B', pos: { x: 1, y: 2 } },
-      { id: 'A\nB', pos: { x: 1, y: 2 } },
-      { id: '', pos: { x: 1, y: 2 } },
-      { id: 'A+B', pos: { x: 1, y: 2 } },
-      { id: 'A', pos: { x: Number.NaN, y: 2 } },
-      { id: 'A', pos: { x: 1, y: Number.POSITIVE_INFINITY } },
-      { id: 'A', pos: { x: 1e21, y: 2 } },
+    // BOTH paths, and the second is the one that matters: with a pos line
+    // already present the emitter's own filter masks a missing op-side guard,
+    // so a document with NO pos line is the only place the guard is load
+    // bearing — without it the op splices a whitespace-only line into the
+    // user's file.
+    for (const src of [
+      'flowchart TD\n  %% cerebro:pos A 1,2\n  A --> B',
+      'flowchart TD\n  A --> B',
+      'flowchart TD\n  %% cerebro:layout manual\n  A --> B',
     ]) {
-      const out = serialize(setNodePosition(parseFlowchart(src)!, bad.id, bad.pos));
-      expect(out, `${bad.id} ${bad.pos.x},${bad.pos.y}`).toBe(src);
-      expect(parseFlowchart(out)!.lines[1].parsed.kind).toBe('pos-comment');
+      for (const bad of [
+        { id: 'A B', pos: { x: 1, y: 2 } },
+        { id: 'A\nB', pos: { x: 1, y: 2 } },
+        { id: '', pos: { x: 1, y: 2 } },
+        { id: 'A+B', pos: { x: 1, y: 2 } },
+        { id: 'A', pos: { x: Number.NaN, y: 2 } },
+        { id: 'A', pos: { x: 1, y: Number.POSITIVE_INFINITY } },
+        { id: 'A', pos: { x: 1e21, y: 2 } },
+      ]) {
+        const model = setNodePosition(parseFlowchart(src)!, bad.id, bad.pos);
+        const why = `${src} << ${bad.id} ${bad.pos.x},${bad.pos.y}`;
+        expect(serialize(model), why).toBe(src);
+        // Not just byte-equal: no line was added at all, so nothing empty is
+        // sitting in the model waiting for the next op to fill it in.
+        expect(model.lines.length, why).toBe(parseFlowchart(src)!.lines.length);
+        // The in-memory model refused too, not just the bytes — G3 reads
+        // positions straight off a live model.
+        expect(storedPositions(model), why).toEqual(storedPositions(parseFlowchart(src)!));
+      }
     }
   });
 
@@ -2187,6 +2203,54 @@ describe('setNodePosition / clearPositions / setManualLayout (M29.41)', () => {
     const model = parseFlowchart(alone)!;
     model.lines[1].dirty = true;
     expect(serialize(model)).toBe(alone);
+  });
+
+  // The one place "editing degrades" would have become "editing UN-deletes":
+  // `emitLine` only ever runs on a DIRTY line, so the emitter's keep-the-bytes
+  // fallback means "an op just mutated this and left nothing writable" — and
+  // handing back the raw there returns the PRE-delete bytes. Regression for
+  // the stage's explicit no-zombie-coordinates exit criterion.
+  it('a delete whose only survivor is unemittable takes the whole line', () => {
+    const src =
+      'flowchart TD\n  %% cerebro:pos A 99999999999999999999999,0 B 3,4\n  A[Start] --> B';
+    const out = serialize(deleteNode(parseFlowchart(src)!, 'B'));
+    expect(out).toBe('flowchart TD\n  A[Start]');
+    expect(storedPositions(parseFlowchart(out)!).has('B')).toBe(false);
+    expect(storedPositions(parseFlowchart(out)!).size).toBe(0);
+  });
+
+  // The in-memory model is read directly now (M29.42's pipeline takes
+  // `storedPositions` off a live model, not off a re-parse), so the op has to
+  // round at the op — serializing and re-reading would hide a miss.
+  it('rounds in the model, not just on the way to the file', () => {
+    const created = setNodePosition(parseFlowchart('flowchart TD\n  A --> B')!, 'A', {
+      x: 300.4,
+      y: 199.6,
+    });
+    expect(storedPositions(created).get('A')).toEqual({ x: 300, y: 200 });
+    const patched = setNodePosition(
+      parseFlowchart('flowchart TD\n  %% cerebro:pos B 1,1\n  A --> B')!,
+      'A',
+      { x: -0.6, y: 5.5 },
+    );
+    expect(storedPositions(patched).get('A')).toEqual({ x: -1, y: 6 });
+    expect(storedPositions(patched).get('B')).toEqual({ x: 1, y: 1 });
+  });
+
+  // A stored position for an id no node claims cannot be swept by `deleteNode`
+  // — the id was never a node — so the allocator has to refuse it, or the next
+  // created node inherits a coordinate its author never chose.
+  it('newNodeId will not hand out an id some position already claims', () => {
+    expect(newNodeId(parseFlowchart('flowchart TD\n  %% cerebro:pos n1 5,5\n  A --> B')!)).toBe(
+      'n2',
+    );
+    // Shadowed lines count too: emptying the line above promotes them.
+    expect(
+      newNodeId(
+        parseFlowchart('flowchart TD\n  %% cerebro:pos n1 5,5\n  %% cerebro:pos n2 6,6\n  A')!,
+      ),
+    ).toBe('n3');
+    expect(newNodeId(parseFlowchart('flowchart TD\n  A --> B')!)).toBe('n1');
   });
 
   it('rewriting a line rounds the decimals it read', () => {
@@ -2239,6 +2303,11 @@ describe('cerebro position ops — adversarial sweep (M29.41)', () => {
       'flowchart TD\n  %% cerebro:pos dup 1,1\n  %% cerebro:pos dup 9,9 other 2,2\n  dup --> other',
     ],
     ['quirky-spacing', 'flowchart TD\n  %%  cerebro:pos  zz 10,20   aa 5,6\n  aa --> zz'],
+    // Quirky spacing AND a node the line never mentions: the only shape in
+    // which touching a pos line for an unrelated node shows up as a byte
+    // change. Every other document either has canonical spacing (so a
+    // needless rewrite is invisible) or names every node.
+    ['quirky-partial', 'flowchart TD\n  %%  cerebro:pos  zz 10,20\n  aa --> zz\n  zz --> bb'],
     ['prefix-ids', 'flowchart TD\n  %% cerebro:pos A 1,2 AB 3,4 ABC 5,6\n  A --> AB --> ABC'],
     [
       'no-markers',
@@ -2346,6 +2415,14 @@ describe('cerebro position ops — adversarial sweep (M29.41)', () => {
       }
       expect(opaqueCerebroLines(out), why).toEqual(opaqueCerebroLines(src));
       expect(serialize(parseFlowchart(out)!), why).toBe(out);
+      // A delete of a node NO pos line mentions may not rewrite one. Asserting
+      // the stored VALUES survive is not enough — a needless rewrite preserves
+      // every value while canonicalising the user's spacing, which is the
+      // surgical invariant, not a cosmetic one.
+      const mentioned = parseFlowchart(src)!.lines.some(
+        (l) => l.parsed.kind === 'pos-comment' && l.parsed.positions.has(id),
+      );
+      if (!mentioned) expect(cerebroLines(out), why).toEqual(cerebroLines(src));
     }
   });
 

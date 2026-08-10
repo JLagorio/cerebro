@@ -306,8 +306,19 @@ function emitLine(line: ModelLine): string {
     // every other node's coordinates with it. Dropping costs that one entry;
     // writing it would cost all of them. This is reachable without any hand
     // mutation — `parse` accepts `999…999,0`, whose rounded value spells
-    // itself `1e+23`. A line with nothing left to say keeps its own bytes,
-    // exactly as an unemittable `click` target does.
+    // itself `1e+23`.
+    //
+    // The `nothing to say → keep the raw bytes` fallback needs reading with
+    // care: `serialize` hands a line to `emitLine` ONLY when it is dirty, so
+    // this branch can never mean "an untouched line" — it always means "an op
+    // just mutated this line and left nothing writable behind", and returning
+    // the raw would return PRE-MUTATION bytes. That is why `deleteNode`
+    // splices such a line instead of dirtying it (see there): it would
+    // otherwise resurrect the coordinate it had just removed. With the ops
+    // that dirty a pos line both guaranteeing an emittable survivor, this
+    // fallback answers only a model mutated outside the ops layer, where
+    // keeping the bytes still beats emitting a bare `%% cerebro:pos` our own
+    // parser would disown.
     case 'pos-comment': {
       const body = [...p.positions.entries()]
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

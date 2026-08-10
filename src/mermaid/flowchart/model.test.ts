@@ -1262,6 +1262,14 @@ describe('cerebro pos/layout comments (M29.41)', () => {
       '%% cerebro:layout manual extra', // trailing junk on the marker
       '%% cerebro:pos A 1e3,2', // exponent form — not a coordinate we emit
       '%%{ cerebro:pos A 1,2 }%%', // the DIRECTIVE form is never ours
+      // The separator after the keyword is MANDATORY, and that is a namespace
+      // rule rather than a nicety: without it `cerebro:posX 1,2` would be a
+      // pos line binding an id `X`, and every future `cerebro:pos…` marker
+      // would collide with this one on its first character.
+      '%% cerebro:posX 1,2',
+      '%% cerebro:pos2 A 1,2',
+      '%% cerebro:layoutmanual',
+      '%% cerebro:layout2 manual',
     ]) {
       const m = parseFlowchart(`flowchart TD\n  ${bad}\n  A --> B`)!;
       expect(m.lines[1].parsed.kind, bad).toBe('opaque');

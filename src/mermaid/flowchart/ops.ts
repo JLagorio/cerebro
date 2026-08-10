@@ -7,6 +7,7 @@ import type {
   ModelLine,
   NodeMeta,
   NodeRef,
+  PlanePoint,
   Shape,
   SubgraphEntry,
 } from './model';
@@ -415,6 +416,15 @@ export function setNodeIcon(
 
 export function newNodeId(model: FlowchartModel): string {
   const used = new Set([...nodes(model).keys()].map((k) => k.toLowerCase()));
+  // A stored position for an id no node claims is a loaded gun: hand that id
+  // out and the new node teleports to a coordinate its author never chose.
+  // `deleteNode` cannot close this one — the id was never a node — so the
+  // allocator has to. EVERY pos line is read, not just the live one, because a
+  // shadowed line becomes live the moment the line above it is emptied.
+  for (const line of model.lines) {
+    if (line.parsed.kind !== 'pos-comment') continue;
+    for (const posId of line.parsed.positions.keys()) used.add(posId.toLowerCase());
+  }
   let n = 1;
   while (used.has(`n${n}`)) n += 1;
   return `n${n}`;
@@ -628,9 +638,22 @@ export function deleteNode(model: FlowchartModel, id: string): FlowchartModel {
       // style and click companions above. EVERY pos line is swept, not just
       // the one `storedPositions` reads: a coordinate hiding on a second line
       // becomes live the moment the first one is emptied.
+      //
+      // The splice condition is "nothing EMITTABLE survives", not "the map is
+      // empty", and the difference is a real bug rather than tidiness. A line
+      // is only ever handed to `emitLine` once it is DIRTY, so the emitter's
+      // `nothing to say → keep the raw bytes` fallback can only ever fire on a
+      // line an op just mutated — and here that fallback would hand back the
+      // PRE-DELETE bytes and resurrect the coordinate we came to remove.
+      // MEASURED: deleting B from `%% cerebro:pos A 99999…999,0 B 3,4` left
+      // both entries in the file, because the sole survivor (A) is
+      // unemittable. `[].every()` is true, so this subsumes the empty case.
       parsed.positions.delete(id);
-      if (parsed.positions.size === 0) next.lines.splice(i, 1);
-      else next.lines[i].dirty = true;
+      if ([...parsed.positions].every(([k, pt]) => posToken(k, pt) === null)) {
+        next.lines.splice(i, 1);
+      } else {
+        next.lines[i].dirty = true;
+      }
     } else if (parsed.kind === 'edges') {
       rebuildEdgeLines(next, i, (f, t) => f.id === id || t.id === id, id);
     }
@@ -655,7 +678,7 @@ export function deleteNode(model: FlowchartModel, id: string): FlowchartModel {
 export function setNodePosition(
   model: FlowchartModel,
   id: string,
-  pos: { x: number; y: number },
+  pos: PlanePoint,
 ): FlowchartModel {
   const next = clone(model);
   if (posToken(id, pos) === null) return next;
