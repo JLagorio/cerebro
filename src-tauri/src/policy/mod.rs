@@ -12,6 +12,7 @@
 //! registered as an MCP tool. Synthetic proposals exercise it through the
 //! internal typed boundary until M26 turns the surface on.
 
+pub mod ancestry;
 pub mod authority;
 pub mod candidates;
 pub mod commit;
