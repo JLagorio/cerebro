@@ -38,12 +38,12 @@ Scratch files go in the session scratchpad, **never** in the repo (a scratch
 | F3 M29.37 subgraph ops | `6fbb1b5` + `8030dc7` | DONE, 2 reviews, gates green |
 | doc: anonymous subgraph | `32c2802` | DONE |
 | refactor: EdgeEditor out | `3f5ffc1` | DONE, counts identical |
-| F4 M29.38 canvas affordances | `0f2ab4f` | committed; **review pending** |
-| F5 M29.39 | — | TODO |
+| F4 M29.38 canvas affordances | `0f2ab4f` + `3b04c2a` + `079da7c` | DONE, reviewed, gates green |
+| F5 M29.39 insert palette + e2e | `80ad6b1` | DONE, **STAGE F COMPLETE**; review in flight |
 | G1–G5 M29.40–.44 | — | TODO, **G1 is a GATE** |
 | H1–H6 M29.45–.50 | — | TODO |
 
-**Baseline now: 177 files / 2765 passed / 2 skipped.** Lint, typecheck, format, build clean.
+**Baseline now: 180 files / 2796 passed / 2 skipped.** Lint, typecheck, format, build clean.
 (Wave started at 172 / 2584.)
 
 ## 3. Two structural decisions already taken (do not re-litigate)
@@ -58,13 +58,21 @@ Scratch files go in the session scratchpad, **never** in the repo (a scratch
 ## 4. THE RULE THAT HAS DECIDED EVERY TASK
 
 **Measure, don't reason.** The plan's account of mermaid behavior has now measured
-FALSE **19 times** (F1:1, F2:5, F3:6, F4:7). Several would have shipped silent
+FALSE **24 times** (F1:1, F2:5, F3:6, F4:7 [one later retracted], F5:5). Several would have shipped silent
 document corruption. Brief every implementer to treat plan claims about mermaid as
 hypotheses. The app bundles **11.16.0**; the vendored source in the MAIN checkout
 (`docs/examples/mermaid-develop/`) is **11.16.1** — verify version-sensitive claims
 against the bundled build. Only `*.mermaid.test.ts` may `import mermaid`.
 
 Corrections already written back into the F plan: lines 18, 23, 25, ~890, ~1740, ~2050.
+
+**Measure the INTEGRATION, not just the unit.** M29.39's e2e caught that M29.35's icon
+control was a one-way trapdoor: mermaid draws an icon node as `g.icon-shape`, not
+`g.node`, so `bindFlowchartSvg` lost the node entirely — toolbar, rename, delete,
+connect and link badge all gone, including the only control that removes the icon.
+**Two thorough M29.35 reviews missed it**, both of which measured real mermaid: they
+checked the model bytes and the render, but never the binding AFTER the op. When a task
+adds a way to change what mermaid emits, test what the NEXT layer does with it.
 
 **Breadth is not coverage.** A 500-input and a 140-input sweep both missed a real bug
 because every document in both corpora linked the same node id. A 42-document sweep
@@ -86,8 +94,12 @@ at the gate is an **expected, reportable outcome — not a failure.**
 
 ## 6. Open follow-ups (carried, not yet done)
 
-- **LIVE BUG, not yet fixed — the anchor strip is missing from three read-only svg
-  sinks.** `MermaidDiagram.tsx:80`, `MermaidBlockView.tsx:391`,
+- ~~LIVE BUG: anchor strip missing from read-only svg sinks~~ **FIXED in `3b04c2a`**
+  (`src/mermaid/svgLinks.ts`, applied at FOUR sinks). Two things that fix found:
+  **stateDiagram-v2 emits `xlink:href`**, which an `a[href]` selector does not match
+  at all; and `pointer-events-none` is NOT sufficient (it blocks a mouse, but an SVG
+  anchor is keyboard-focusable and activates on Enter). Historical note follows.
+- (historical) the three sinks were: `MermaidDiagram.tsx:80`, `MermaidBlockView.tsx:391`,
   `MermaidLightbox.tsx:139` all inject mermaid output via the React raw-HTML sink with
   no `pointer-events-none`. A doc containing a hand-authored `click A "notes/x.md"`
   navigates the Tauri webview **off the SPA on one click, losing unsaved editor state**.
