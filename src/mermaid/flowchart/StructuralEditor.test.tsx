@@ -735,11 +735,58 @@ describe('StructuralEditor', () => {
     expect(screen.getByTestId('mermaid-icon-picker')).toBeTruthy();
   });
 
+  // Item 3 of M29.39's review: deleting the reset left every test green. It is
+  // belt-and-braces — the palette holds no line indices and onPick closes it —
+  // but an EXTERNAL edit (undo, code mode, another surface) redraws the diagram
+  // under a surface that is still floating over it, and every other popover
+  // here goes on a code change. Now it is a guarantee rather than a habit.
+  it('an external code change closes the insert palette', async () => {
+    const { rerender } = render(
+      <StructuralEditor code={'flowchart TD\n  A[Start]'} onChangeCode={() => {}} />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
+    rerender(<StructuralEditor code={'flowchart TD\n  A[Renamed]'} onChangeCode={() => {}} />);
+    await waitFor(() => expect(screen.queryByTestId('shape-palette')).toBeNull());
+  });
+
+  // Item 2 of the same review: the drag-drop half of the icon-binding fix
+  // shipped with nothing proving it. Reverting that one `closest()` selector
+  // left all 69 tests green, while the failure it prevents is silent and
+  // destructive — the drop misses the node it landed on and mints a stray
+  // "New step" plus an edge to it, instead of connecting the two nodes.
+  it('dropping an edge onto an ICON node connects it, and does not mint a stray node', async () => {
+    mockSvg(ICON_SVG);
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start]\n  B[End]\n  A@{ icon: "lucide:rocket" }'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-B-1')).not.toBeNull());
+    const b = document.getElementById('flowchart-B-1')!;
+    fireEvent.pointerDown(b, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 60, pointerId: 1 });
+    // The drop lands on A — which mermaid drew as `g.icon-shape`, not `g.node`.
+    const a = document.getElementById('flowchart-A-0');
+    document.elementFromPoint = () => a;
+    fireEvent.pointerUp(window, { clientX: 60, clientY: 60, pointerId: 1 });
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  A[Start]\n  B[End]\n  A@{ icon: "lucide:rocket" }\n  B --> A',
+    );
+  });
+
   it('opening the insert palette and closing it again is a TRUE no-op', async () => {
     const onChangeCode = vi.fn();
     render(<StructuralEditor code={'flowchart TD\n  A[Start]'} onChangeCode={onChangeCode} />);
     await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
     await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    // Asserted BEFORE the Escape: without this the test passes just as well
+    // when `+ Shape` has stopped opening anything at all, which is the one
+    // regression it would most want to catch.
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
     await userEvent.keyboard('{Escape}');
     expect(screen.queryByTestId('shape-palette')).toBeNull();
     expect(onChangeCode).not.toHaveBeenCalled();
