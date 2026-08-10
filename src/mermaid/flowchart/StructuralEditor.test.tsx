@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
 import { StructuralEditor } from './StructuralEditor';
 
@@ -1358,6 +1358,264 @@ describe('StructuralEditor honours stored manual positions (M29.42)', () => {
       );
     } finally {
       restore();
+    }
+  });
+});
+
+/**
+ * The gestures manual mode CHANGES (M29.43): a node drag MOVES instead of
+ * connecting, connecting moves to a hover handle, and the toolbar toggle flips
+ * the marker while the positions stay put. Auto mode is described by every
+ * test above and not one of them moved for this — the last test here asserts
+ * that from the inside, so a mode branch that leaked into auto is a failure
+ * here rather than a surprise in the app.
+ */
+describe('manual-mode gestures (M29.43)', () => {
+  // Same shape as the M29.42 fixture: mermaid's own translate on each node
+  // group (nodes.ts:97), one bindable edge carrying its marker attribute.
+  const MANUAL_SVG = [
+    '<svg viewBox="0 0 200 100" width="100%" style="max-width: 200px;">',
+    '<g class="node" id="flowchart-A-0" transform="translate(30, 20)"><rect/></g>',
+    '<g class="node" id="flowchart-B-1" transform="translate(130, 70)"><rect/></g>',
+    '<path class="flowchart-link" id="L_A_B_0" data-id="L_A_B_0"',
+    ' d="M30,25C60,40 90,50 120,65" marker-end="url(#e)"/>',
+    '</svg>',
+  ].join('');
+
+  const MANUAL_CODE = 'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]';
+
+  // The component measures inside its own async bind pass, before a test can
+  // reach any element, so the stub has to be on the prototype and keyed by id;
+  // a leak here poisons every later test, hence the paired restore.
+  let restoreRects: () => void;
+  beforeEach(() => {
+    mockSvg(MANUAL_SVG);
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      svg: { left: 0, top: 0, width: 200, height: 100 },
+      'flowchart-A-0': { left: 20, top: 10, width: 20, height: 20 },
+      'flowchart-B-1': { left: 120, top: 60, width: 20, height: 20 },
+    };
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const key = this.tagName.toLowerCase() === 'svg' ? 'svg' : this.id;
+      const r = rects[key] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        ...r,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        x: r.left,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    restoreRects = () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  });
+  afterEach(() => {
+    restoreRects();
+  });
+
+  /**
+   * jsdom 26 has no PointerEvent constructor, so testing-library's
+   * `fireEvent.pointerDown(el, { clientX })` falls back to plain `Event` and
+   * silently DROPS the coordinates (the Stage C ghost NaN guards exist for
+   * exactly this). A MouseEvent dispatched under a pointer-event type name
+   * carries them and reaches `addEventListener('pointerdown', …)` just fine.
+   *
+   * It goes through `fireEvent`'s two-argument form rather than a bare
+   * `dispatchEvent` so the connect branch's setState still lands inside act();
+   * the move branch needs no such thing (it writes transforms and `d`, never
+   * React state) but one helper that is correct for both beats two.
+   */
+  function firePointer(
+    target: Window | Element,
+    type: 'pointerdown' | 'pointermove' | 'pointerup',
+    coords: { clientX: number; clientY: number },
+  ): void {
+    fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, ...coords }));
+  }
+
+  it('drag moves the node live and writes ONE position on release', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const a = document.getElementById('flowchart-A-0')!;
+
+    firePointer(a, 'pointerdown', { clientX: 30, clientY: 20 }); // grab dead-centre
+    firePointer(window, 'pointermove', { clientX: 80, clientY: 20 });
+    // Mid-drag: transform-only. The DOM moved, the file did not.
+    expect(a.getAttribute('transform')).toBe('translate(30, 20) translate(50, 0)');
+    expect(onChangeCode).not.toHaveBeenCalled();
+
+    firePointer(window, 'pointerup', { clientX: 80, clientY: 20 });
+    // ONE call for the whole gesture: one edit, one undo step.
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 80,20\n  A[Start] --> B[End]',
+    );
+  });
+
+  it('a sub-3px wiggle is a click, not a move', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const a = document.getElementById('flowchart-A-0')!;
+    firePointer(a, 'pointerdown', { clientX: 30, clientY: 20 });
+    firePointer(window, 'pointermove', { clientX: 31, clientY: 21 });
+    firePointer(window, 'pointerup', { clientX: 31, clientY: 21 });
+    expect(onChangeCode).not.toHaveBeenCalled();
+    expect(a.getAttribute('transform')).toBe('translate(30, 20)');
+    // …and the click that rode along still selects, which is the whole reason
+    // for the threshold.
+    await userEvent.click(a);
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+  });
+
+  it('a drag that ends where it started costs no undo step', async () => {
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 30,20\n  A --> B'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const a = document.getElementById('flowchart-A-0')!;
+    firePointer(a, 'pointerdown', { clientX: 30, clientY: 20 });
+    firePointer(window, 'pointermove', { clientX: 80, clientY: 20 });
+    // Asserted mid-gesture so this cannot pass by never having moved at all.
+    expect(a.getAttribute('transform')).toBe('translate(30, 20) translate(50, 0)');
+    firePointer(window, 'pointermove', { clientX: 30, clientY: 20 });
+    firePointer(window, 'pointerup', { clientX: 30, clientY: 20 });
+    expect(a.getAttribute('transform')).toBe('translate(30, 20) translate(0, 0)');
+    expect(onChangeCode).not.toHaveBeenCalled();
+  });
+
+  it('the connect handle appears on hover and drags a new edge', async () => {
+    const onChangeCode = vi.fn();
+    const originalFromPoint = document.elementFromPoint;
+    try {
+      render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      const a = document.getElementById('flowchart-A-0')!;
+      expect(a.querySelector('.cerebro-connect-handle')).toBeNull();
+      fireEvent.mouseEnter(a);
+      const handle = a.querySelector('.cerebro-connect-handle');
+      expect(handle).toBeTruthy();
+
+      firePointer(handle!, 'pointerdown', { clientX: 40, clientY: 20 });
+      const b = document.getElementById('flowchart-B-1');
+      document.elementFromPoint = () => b;
+      firePointer(window, 'pointerup', { clientX: 130, clientY: 70 });
+      expect(onChangeCode).toHaveBeenCalledTimes(1);
+      expect(onChangeCode).toHaveBeenCalledWith(`${MANUAL_CODE}\n  A --> B`);
+
+      fireEvent.mouseLeave(a);
+      expect(a.querySelector('.cerebro-connect-handle')).toBeNull();
+    } finally {
+      document.elementFromPoint = originalFromPoint;
+    }
+  });
+
+  it('a connect dropped on empty canvas mints its node AT the drop point', async () => {
+    const onChangeCode = vi.fn();
+    const originalFromPoint = document.elementFromPoint;
+    try {
+      render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      const a = document.getElementById('flowchart-A-0')!;
+      fireEvent.mouseEnter(a);
+      firePointer(a.querySelector('.cerebro-connect-handle')!, 'pointerdown', {
+        clientX: 40,
+        clientY: 20,
+      });
+      // Empty canvas = inside the host but on no node group.
+      document.elementFromPoint = () => screen.getByTestId('structural-host');
+      firePointer(window, 'pointerup', { clientX: 150, clientY: 90 });
+      expect(onChangeCode).toHaveBeenCalledTimes(1);
+      // Under the identity plane map, the drop point IS the plane point — the
+      // node lands where the pointer let go, not at some viewport centre.
+      expect(onChangeCode.mock.calls[0][0]).toContain('%% cerebro:pos n1 150,90');
+    } finally {
+      document.elementFromPoint = originalFromPoint;
+    }
+  });
+
+  it('a press on the connect handle never starts a move', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const a = document.getElementById('flowchart-A-0')!;
+    fireEvent.mouseEnter(a);
+    const handle = a.querySelector('.cerebro-connect-handle')!;
+    firePointer(handle, 'pointerdown', { clientX: 40, clientY: 20 });
+    firePointer(window, 'pointermove', { clientX: 90, clientY: 20 });
+    // The node stayed exactly where mermaid drew it: the press never reached
+    // the group's own move handler.
+    expect(a.getAttribute('transform')).toBe('translate(30, 20)');
+  });
+
+  it('the toggle writes the marker on, removes only the marker off', async () => {
+    const onChangeCode = vi.fn();
+    const { rerender } = render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Auto-layout: On' }));
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]',
+    );
+
+    onChangeCode.mockClear();
+    rerender(
+      <StructuralEditor
+        code={
+          'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 80,20\n  A[Start] --> B[End]'
+        }
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Auto-layout: Off' }));
+    expect(onChangeCode).toHaveBeenCalledWith(
+      // Positions survive the way back: spec D7 remembers them, it just stops
+      // applying them.
+      'flowchart TD\n  %% cerebro:pos A 80,20\n  A[Start] --> B[End]',
+    );
+  });
+
+  it('a new node in manual mode gets a position', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={MANUAL_CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: '+ Node' }));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    const out = onChangeCode.mock.calls[0][0] as string;
+    expect(out).toContain('n1[New step]');
+    // The host rect is zeros under the stub, so the viewport centre degenerates
+    // to the plane origin. The invariant under test is that a position exists
+    // AT ALL by the time the line is emitted — a node positioned one render
+    // later teleports.
+    expect(out).toMatch(/%% cerebro:pos .*n1 -?\d+,-?\d+/);
+  });
+
+  it('auto mode still connects on drag and grows no handle', async () => {
+    const onChangeCode = vi.fn();
+    const originalFromPoint = document.elementFromPoint;
+    try {
+      render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+      await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+      const a = document.getElementById('flowchart-A-0')!;
+      fireEvent.mouseEnter(a);
+      expect(a.querySelector('.cerebro-connect-handle')).toBeNull();
+
+      firePointer(a, 'pointerdown', { clientX: 30, clientY: 20 });
+      firePointer(window, 'pointermove', { clientX: 130, clientY: 70 });
+      // Auto mode never moves a node: the transform is mermaid's, untouched.
+      expect(a.getAttribute('transform')).toBe('translate(30, 20)');
+      const b = document.getElementById('flowchart-B-1');
+      document.elementFromPoint = () => b;
+      firePointer(window, 'pointerup', { clientX: 130, clientY: 70 });
+      expect(onChangeCode).toHaveBeenCalledWith(`${CODE}\n  A --> B`);
+    } finally {
+      document.elementFromPoint = originalFromPoint;
     }
   });
 });

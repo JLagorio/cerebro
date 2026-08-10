@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import type { Entry } from '@/engine/types';
 import { useCanvasTransformRef } from '../CanvasViewport';
@@ -9,7 +9,14 @@ import { GroupBar } from './GroupBar';
 import { IconPicker } from './IconPicker';
 import { LinkBadges, type LinkBadge } from './LinkBadges';
 import { LinkPopover } from './LinkPopover';
-import { applyManualLayout, beginManualLayout, type ManualLayoutSession } from './manualLayout';
+import {
+  applyManualLayout,
+  beginManualLayout,
+  clientDeltaToPlane,
+  clientToPlane,
+  moveNode,
+  type ManualLayoutSession,
+} from './manualLayout';
 import {
   isManualLayout,
   linkWriterLines,
@@ -22,6 +29,7 @@ import {
   storedPositions,
   subgraphs,
   type EdgeEntry,
+  type FlowchartModel,
 } from './model';
 import { NodeStyleMenu } from './NodeStyleMenu';
 import {
@@ -31,8 +39,10 @@ import {
   renameNode,
   setDirection,
   setLayoutEngine,
+  setManualLayout,
   setNodeIcon,
   setNodeLink,
+  setNodePosition,
   setNodeShape,
   setNodeStyle,
 } from './ops';
@@ -42,6 +52,13 @@ import { BRACKET_SHAPE_TO_REGISTRY, SHORT_NAME_FOR } from './shapes';
 import { bindFlowchartSvg, NODE_GROUP_SELECTOR, type FlowchartSvgBinding } from './svgBinding';
 
 const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
+
+/**
+ * How far a press has to travel before it stops being a click and becomes a
+ * manual-mode move. Client pixels, deliberately not plane units: this is about
+ * the human hand, which does not zoom.
+ */
+const MOVE_THRESHOLD_PX = 3;
 
 /** True when the source's YAML frontmatter pins mermaid's ELK layout engine. */
 function isElk(code: string): boolean {
@@ -114,6 +131,21 @@ export function StructuralEditor({
     null,
   );
   const dragFrom = useRef<string | null>(null);
+  /**
+   * The live manual-mode MOVE gesture, or null. A ref and not state: every
+   * frame of it writes transforms and `d` attributes straight onto mermaid's
+   * DOM, and a re-render per frame would both cost the 60fps budget and
+   * re-run the bind effect's measurement out from under the gesture.
+   */
+  const moveGesture = useRef<{
+    id: string;
+    /** The node centre when the press landed — the origin every delta adds to. */
+    from: { x: number; y: number };
+    /** The pointer position when the press landed, in client px. */
+    startClient: { x: number; y: number };
+    /** Set once the pointer has travelled far enough to stop being a click. */
+    moved: boolean;
+  } | null>(null);
 
   // Inside a CanvasViewport the host is scaled, and getBoundingClientRect
   // deltas are SCREEN px — dividing by the plane scale converts them to the
@@ -144,6 +176,12 @@ export function StructuralEditor({
   const validSelected =
     selected !== null && model !== null && nodes(model).has(selected) ? selected : null;
 
+  // Manual layout (M29.42–.43) is a property of the SOURCE, not a mode this
+  // component holds: the marker line is the only state there is, so a code
+  // change from anywhere — undo, code mode, another surface — flips the
+  // gestures with it and nothing here can drift out of sync with the file.
+  const manual = model !== null && isManualLayout(model);
+
   // The block list every cluster control resolves against. Memoized on the
   // model because subgraphs() walks every line and three surfaces read it.
   const subs = useMemo(() => (model === null ? [] : subgraphs(model)), [model]);
@@ -167,6 +205,103 @@ export function StructuralEditor({
     // check below — history churn is a real cost, not a cosmetic one.
     if (out === code) return;
     onChangeCode(out);
+  };
+
+  /**
+   * Starts the ghost-line connect gesture. Lifted verbatim out of the node
+   * pointerdown body so manual mode's connect handle can run the same flow —
+   * connecting did not change, it only changed which pixels start it.
+   *
+   * useCallback, and not for performance: the bind effect calls this, and an
+   * identity that changed per render would put the effect's dependency on it
+   * — which would re-render the whole diagram through mermaid on every
+   * selection click. Everything it closes over is a ref or a setState, so the
+   * empty-ish dep list is the truth, not a suppression.
+   */
+  const beginConnect = useCallback(
+    (id: string, e: PointerEvent) => {
+      const host = hostRef.current;
+      if (host === null) return;
+      const hostBox = host.getBoundingClientRect();
+      const s = transformRef.current.scale;
+      dragFrom.current = id;
+      setGhost({
+        x1: (e.clientX - hostBox.left) / s,
+        y1: (e.clientY - hostBox.top) / s,
+        x2: (e.clientX - hostBox.left) / s,
+        y2: (e.clientY - hostBox.top) / s,
+      });
+    },
+    [transformRef],
+  );
+
+  /**
+   * Starts a manual-mode MOVE. Both origins — the node's centre and the
+   * pointer's position — are captured here and never re-read, because the
+   * gesture runs on DELTAS: `moveNode` grows the svg's viewBox, which moves the
+   * plane origin under a stationary cursor, so a frame that re-derived an
+   * ABSOLUTE plane point would feed its own growth (grow left, the cursor's
+   * plane x drops, the node moves further left, grow again). manualLayout's
+   * docstring states the rule; this is the caller that has to keep it.
+   *
+   * No session means no measurement, and a move with nothing to measure
+   * against would be a guess: the press does nothing rather than falling
+   * through to connect, so the mode a diagram is in never depends on whether
+   * its host happened to be measurable. A press carrying no coordinates is
+   * refused for the same reason — a delta gesture with no origin would read
+   * the first real move as a jump from (0, 0) and fling the node across the
+   * plane.
+   */
+  const beginMove = useCallback((id: string, e: PointerEvent) => {
+    const session = manualRef.current;
+    if (session === null) return;
+    if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    const box = session.boxes.get(id);
+    if (box === undefined) return;
+    moveGesture.current = {
+      id,
+      from: { x: box.cx, y: box.cy },
+      startClient: { x: e.clientX, y: e.clientY },
+      moved: false,
+    };
+  }, []);
+
+  /**
+   * `addNode`, plus a position when manual mode is on — composed into the SAME
+   * model so the whole insertion serializes once and costs one undo step, and
+   * so the node carries a position from the moment it exists. Positioning it
+   * after a measure pass instead would draw it at mermaid's auto spot for one
+   * render and teleport it on the next.
+   *
+   * `at` is where the user put it, in client px — the drop point of a connect
+   * gesture that landed on empty canvas. Without one (a toolbar button, which
+   * points at nowhere in particular) the node goes to the centre of what the
+   * user can actually see: the host's box clipped to the window, so a node
+   * minted while the canvas is scrolled or zoomed lands in view rather than at
+   * some remembered origin. An unmeasurable host (jsdom, a hidden panel)
+   * degenerates to the plane origin — a position like any other, and still
+   * better than none.
+   */
+  const addNodeForMode = (
+    base: FlowchartModel,
+    at?: { x: number; y: number },
+  ): { model: FlowchartModel; id: string } => {
+    const added = addNode(base, 'New step');
+    const session = manualRef.current;
+    const host = hostRef.current;
+    if (!manual || session === null || host === null) return added;
+    let client = at;
+    if (client === undefined || !Number.isFinite(client.x) || !Number.isFinite(client.y)) {
+      const rect = host.getBoundingClientRect();
+      const left = Math.max(rect.left, 0);
+      const top = Math.max(rect.top, 0);
+      client = {
+        x: left + Math.min(rect.width, Math.max(window.innerWidth - left, 0)) / 2,
+        y: top + Math.min(rect.height, Math.max(window.innerHeight - top, 0)) / 2,
+      };
+    }
+    const pos = clientToPlane(session, client);
+    return { model: setNodePosition(added.model, added.id, pos), id: added.id };
   };
 
   // Every popover keys off line/segment indices captured from a PAST render
@@ -230,7 +365,7 @@ export function StructuralEditor({
       const binding = bindFlowchartSvg(hostRef.current, model);
       bindingRef.current = binding;
       for (const [id, el] of binding.nodeEls) {
-        el.style.cursor = 'pointer';
+        el.style.cursor = manual ? 'move' : 'pointer';
         el.onclick = (e) => {
           e.stopPropagation();
           // Shift-click builds a MULTI-selection (M29.38) and must not open the
@@ -282,18 +417,48 @@ export function StructuralEditor({
         // "pointerdown" dispatches, so an assignment there silently never
         // fires under test even though it works in a real browser.
         el.addEventListener('pointerdown', (e: PointerEvent) => {
-          const host = hostRef.current;
-          if (host === null) return;
-          const hostBox = host.getBoundingClientRect();
-          const s = transformRef.current.scale;
-          dragFrom.current = id;
-          setGhost({
-            x1: (e.clientX - hostBox.left) / s,
-            y1: (e.clientY - hostBox.top) / s,
-            x2: (e.clientX - hostBox.left) / s,
-            y2: (e.clientY - hostBox.top) / s,
-          });
+          // The one gesture manual mode re-purposes. Auto mode reaches
+          // beginConnect exactly as it has since M29.18 — byte for byte the
+          // same body, one function call further away.
+          if (manual) {
+            beginMove(id, e);
+            return;
+          }
+          beginConnect(id, e);
         });
+
+        if (manual) {
+          // Connecting needs its own pixels once dragging means moving, so it
+          // gets a handle: a dot on the node's right border, drawn on hover and
+          // removed on leave. Node shapes are drawn centred on the group's own
+          // origin (nodes.ts:97), so node-local (halfW, 0) IS that border's
+          // midpoint — and because it is a child of the group, it rides along
+          // with every translate a drag appends instead of needing its own
+          // bookkeeping.
+          el.addEventListener('mouseenter', () => {
+            const session = manualRef.current;
+            if (session === null || el.querySelector('.cerebro-connect-handle') !== null) return;
+            const box = session.boxes.get(id);
+            if (box === undefined) return;
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('class', 'cerebro-connect-handle');
+            dot.setAttribute('cx', String(Math.round(box.halfW)));
+            dot.setAttribute('cy', '0');
+            dot.setAttribute('r', '5');
+            dot.setAttribute('fill', 'var(--cortex-500)');
+            dot.style.cursor = 'crosshair';
+            dot.addEventListener('pointerdown', (de: PointerEvent) => {
+              // Without this the press bubbles to the group's own handler and
+              // the connect gesture starts a move underneath itself.
+              de.stopPropagation();
+              beginConnect(id, de);
+            });
+            el.appendChild(dot);
+          });
+          el.addEventListener('mouseleave', () => {
+            el.querySelector('.cerebro-connect-handle')?.remove();
+          });
+        }
       }
 
       // Clusters (M29.38). A click on a node inside a block cannot reach this
@@ -399,7 +564,10 @@ export function StructuralEditor({
     // identity never changes (that is the entire point of the ref context), so
     // this effect still re-binds only on an actual diagram change — and if a
     // host ever DID swap providers, re-binding would be the correct answer.
-  }, [code, model, transformRef]);
+    // `manual` and the two gesture starters are the same kind of dependency:
+    // the first is derived from `model`, the other two are useCallback'd on
+    // stable inputs, so none of them can widen when this effect re-runs.
+  }, [code, model, transformRef, manual, beginConnect, beginMove]);
 
   // Window-level drag-to-connect: pointerdown on a node (above) starts it,
   // these two finish it. Registered once per model (i.e. per actual diagram
@@ -409,6 +577,34 @@ export function StructuralEditor({
     if (model === null) return;
 
     const onPointerMove = (e: PointerEvent) => {
+      const gesture = moveGesture.current;
+      if (gesture !== null) {
+        const session = manualRef.current;
+        const binding = bindingRef.current;
+        if (session === null || binding === null) return;
+        // A non-finite coordinate reads as "the pointer did not move", never
+        // as "the pointer jumped to the origin" — the latter would fling the
+        // node across the plane on the first malformed event.
+        const cx = Number.isFinite(e.clientX) ? e.clientX : gesture.startClient.x;
+        const cy = Number.isFinite(e.clientY) ? e.clientY : gesture.startClient.y;
+        const dx = cx - gesture.startClient.x;
+        const dy = cy - gesture.startClient.y;
+        if (!gesture.moved) {
+          // Under the threshold this is still a CLICK: select and double-click
+          // rename have to survive the hand tremor of a real press, so nothing
+          // moves and no position is written until the pointer commits.
+          if (Math.hypot(dx, dy) < MOVE_THRESHOLD_PX) return;
+          gesture.moved = true;
+        }
+        const delta = clientDeltaToPlane(session, { x: dx, y: dy });
+        // Transform + incident-edge writes only: no React state, no model
+        // churn, nothing that could re-render this component mid-gesture.
+        moveNode(session, binding, gesture.id, {
+          x: gesture.from.x + delta.x,
+          y: gesture.from.y + delta.y,
+        });
+        return;
+      }
       if (dragFrom.current === null) return;
       const host = hostRef.current;
       if (host === null) return;
@@ -422,6 +618,27 @@ export function StructuralEditor({
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      const gesture = moveGesture.current;
+      if (gesture !== null) {
+        moveGesture.current = null;
+        // Never moved: the press was a click and the click handler already
+        // dealt with it. No edit, therefore no undo step for a still hand.
+        if (!gesture.moved) return;
+        const session = manualRef.current;
+        const box = session === null ? undefined : session.boxes.get(gesture.id);
+        // THE one model write of the entire drag — one onChangeCode, one undo
+        // step — taken from the box the frames have been mutating, i.e. from
+        // where the node actually is on screen rather than from where the last
+        // event said the cursor was. The re-render it triggers re-runs the
+        // pipeline off the stored position and converges on the same picture.
+        //
+        // `apply` is also the only honest way to notice a refusal: setNodePosition
+        // clones unconditionally, so a caller can tell nothing from the model it
+        // hands back — but bytes identical to `code` mean nothing was stored, and
+        // apply already declines to spend an undo step on those.
+        if (box !== undefined) apply(setNodePosition(model, gesture.id, { x: box.cx, y: box.cy }));
+        return;
+      }
       const from = dragFrom.current;
       dragFrom.current = null;
       setGhost(null);
@@ -465,8 +682,10 @@ export function StructuralEditor({
       const host = hostRef.current;
       if (host !== null && target !== null && host.contains(target)) {
         // Dropped on empty canvas: spin up a fresh node and wire it in one
-        // motion, same as the toolbar's "Add connected node".
-        const added = addNode(model, 'New step');
+        // motion, same as the toolbar's "Add connected node" — but in manual
+        // mode it lands where the pointer let go, because the user just said
+        // where it goes and the viewport centre would be us overruling them.
+        const added = addNodeForMode(model, { x: e.clientX, y: e.clientY });
         apply(addEdge(added.model, from, added.id));
       }
     };
@@ -493,7 +712,11 @@ export function StructuralEditor({
     const outlined = new Set(validMulti);
     if (validSelected !== null) outlined.add(validSelected);
     for (const [id, el] of binding.nodeEls) {
-      for (const shapeEl of el.querySelectorAll<SVGElement>('rect, circle, polygon, path')) {
+      // The connect handle is a `circle` inside the group and would otherwise
+      // wear the selection outline too — a 2.5px cortex ring on a 5px dot.
+      for (const shapeEl of el.querySelectorAll<SVGElement>(
+        'rect:not(.cerebro-connect-handle), circle:not(.cerebro-connect-handle), polygon, path',
+      )) {
         if (outlined.has(id)) {
           shapeEl.style.stroke = 'var(--cortex-500)';
           shapeEl.style.strokeWidth = '2.5px';
@@ -566,7 +789,7 @@ export function StructuralEditor({
         >
           <button
             type="button"
-            onClick={() => apply(addNode(model, 'New step').model)}
+            onClick={() => apply(addNodeForMode(model).model)}
             className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
           >
             + Node
@@ -606,7 +829,9 @@ export function StructuralEditor({
                   // step (spec D10): the intermediate rectangle from `addNode`
                   // is never emitted, so Cmd+Z takes the whole insertion back
                   // instead of leaving a stray node of the wrong shape behind.
-                  const added = addNode(model, 'New step');
+                  // The position manual mode adds rides in the same model, so
+                  // the count stays one however many ops compose.
+                  const added = addNodeForMode(model);
                   apply(setNodeShape(added.model, added.id, name));
                 }}
                 onClose={() => setInsertOpen(false)}
@@ -633,6 +858,24 @@ export function StructuralEditor({
             className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
           >
             {isElk(code) ? 'Layout: ELK' : 'Layout: Dagre'}
+          </button>
+          <span className="mx-0.5 h-4 w-px bg-n-100" />
+          {/*
+            Shows the CURRENT state and flips it on click — the house pattern
+            `Layout: Dagre` set next door, not a checkbox that reads as a
+            command. Turning it OFF is deliberately undramatic: only the marker
+            goes, the stored positions stay in the file for the next time
+            (spec D7). Turning it ON with nothing stored moves nothing either —
+            every delta is zero — it just straightens the edges and starts
+            recording where drags put things.
+          */}
+          <button
+            type="button"
+            aria-label={manual ? 'Auto-layout: Off' : 'Auto-layout: On'}
+            onClick={() => apply(setManualLayout(model, !manual))}
+            className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+          >
+            {manual ? 'Auto-layout: Off' : 'Auto-layout: On'}
           </button>
         </div>
       )}
@@ -826,7 +1069,7 @@ export function StructuralEditor({
               aria-label="Add connected node"
               onClick={() => {
                 if (validSelected === null) return;
-                const added = addNode(model, 'New step');
+                const added = addNodeForMode(model);
                 apply(addEdge(added.model, validSelected, added.id));
               }}
               className="rounded border-0 bg-transparent p-1 hover:bg-n-50"

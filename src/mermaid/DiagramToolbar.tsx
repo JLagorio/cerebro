@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { MenuItem, MenuSurface } from '@/components/ui/Menu';
+import { MenuItem, MenuSeparator, MenuSurface } from '@/components/ui/Menu';
 import { Popover } from '@/components/ui/Popover';
 import { useUiStore } from '@/stores/uiStore';
-import { parseFlowchart, serialize, type FlowchartModel } from './flowchart/model';
-import { addNode, setDirection, setLayoutEngine, setNodeShape } from './flowchart/ops';
+import { isManualLayout, parseFlowchart, serialize, type FlowchartModel } from './flowchart/model';
+import {
+  addNode,
+  setDirection,
+  setLayoutEngine,
+  setManualLayout,
+  setNodeShape,
+} from './flowchart/ops';
 import { ShapePalette } from './flowchart/ShapePalette';
 import { copyPng, copySvg, savePng } from './export';
 import { renderMermaid } from './render';
@@ -22,9 +28,9 @@ const TEXT_BTN =
  * The structural cluster (add node, direction, layout engine) only exists
  * over the structural editor — a read-only canvas has no model to operate on.
  * The zoom cluster is NOT here on purpose: CanvasViewport owns zoom state, so
- * it draws its own controls (spec D2). Stage G grows the layout menu (ELK
- * variants, Auto-layout OFF); this stage names the two engines the ops already
- * speak.
+ * it draws its own controls (spec D2). The layout menu names the two engines
+ * the ops speak and, below a separator, whether an engine lays the diagram out
+ * at all (M29.43). ELK's placement variants are still unspoken.
  *
  * Export renders through the cached service at click time — the canvas just
  * rendered this exact code, so it is a cache hit, never a second layout.
@@ -193,6 +199,24 @@ export function DiagramToolbar({
                   checked={isElk(code)}
                   onSelect={() => {
                     apply(setLayoutEngine(model, 'elk'));
+                    setLayoutOpen(false);
+                  }}
+                />
+                <MenuSeparator />
+                {/*
+                  Below the separator because it is a different question: the
+                  two above pick WHICH engine lays the diagram out, this one
+                  says whether an engine gets to. Checked means auto-layout is
+                  on; unchecking it hands geometry to the stored positions and
+                  to dragging (M29.43, spec D7/D9). Unchecking never discards
+                  them — toggling back on leaves every `%% cerebro:pos` line in
+                  the file for the next time.
+                */}
+                <MenuItem
+                  label="Auto-layout"
+                  checked={!isManualLayout(model)}
+                  onSelect={() => {
+                    apply(setManualLayout(model, !isManualLayout(model)));
                     setLayoutOpen(false);
                   }}
                 />

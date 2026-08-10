@@ -52,6 +52,37 @@ describe('DiagramToolbar', () => {
     );
   });
 
+  // MenuItem's `checked` is a rendered check glyph and nothing else — the
+  // convention Dagre/ELK already keep — so "is it checked" is measured the only
+  // way the DOM offers: the item carries an icon when it is, and none when it
+  // is not (it declares no `icon` of its own).
+  const checkGlyphs = (item: Element) => item.querySelectorAll('svg').length;
+
+  it('the layout menu turns auto-layout off, showing the state it is in', async () => {
+    const onChangeCode = mount();
+    await userEvent.click(screen.getByRole('button', { name: 'Layout engine' }));
+    const item = screen.getByRole('menuitem', { name: 'Auto-layout' });
+    expect(checkGlyphs(item)).toBe(1); // this source auto-lays out
+    await userEvent.click(item);
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  %% cerebro:layout manual\n  A[Start] --> B[End]',
+    );
+  });
+
+  it('the layout menu turns auto-layout back on without losing the positions', async () => {
+    const onChangeCode = mount({
+      code: 'flowchart TD\n  %% cerebro:layout manual\n  %% cerebro:pos A 80,20\n  A[Start] --> B[End]',
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Layout engine' }));
+    const item = screen.getByRole('menuitem', { name: 'Auto-layout' });
+    expect(checkGlyphs(item)).toBe(0);
+    await userEvent.click(item);
+    // Only the marker goes; the positions wait for the next time (spec D7).
+    expect(onChangeCode).toHaveBeenCalledWith(
+      'flowchart TD\n  %% cerebro:pos A 80,20\n  A[Start] --> B[End]',
+    );
+  });
+
   it('+ Node appends a fresh node line', async () => {
     const onChangeCode = mount();
     await userEvent.click(screen.getByRole('button', { name: 'Add node' }));
