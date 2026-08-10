@@ -5,7 +5,8 @@ import { useCanvasTransformRef } from '@/mermaid/CanvasViewport';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { bindFlowchartSvg } from '@/mermaid/flowchart/svgBinding';
 import { FieldChip } from '@/views/FieldChip';
-import { recordBindings } from '@/views/whiteboardBindings';
+import type { RecordBinding } from '@/views/whiteboardBindings';
+import { modelRecordBindings } from '@/views/whiteboardBindings';
 
 /** A node's box in PLANE units — screen pixels with the origin and zoom taken out. */
 interface NodeRect {
@@ -16,6 +17,7 @@ interface NodeRect {
 }
 
 const NO_RECTS: ReadonlyMap<string, NodeRect> = new Map();
+const NO_BINDINGS: ReadonlyMap<string, RecordBinding> = new Map();
 
 function sameRects(a: ReadonlyMap<string, NodeRect>, b: ReadonlyMap<string, NodeRect>): boolean {
   if (a.size !== b.size) return false;
@@ -88,13 +90,21 @@ export function RecordChipOverlay({
   const rootRef = useRef<HTMLDivElement>(null);
   const [rects, setRects] = useState<ReadonlyMap<string, NodeRect>>(NO_RECTS);
 
-  const bound = useMemo(() => recordBindings(code, entries), [code, entries]);
+  // ONE parse per code change, shared by the bindings and the measurement.
+  // `measure` re-runs on every plane mutation — which includes the structural
+  // editor's own toolbar mounting on a node selection — and re-parsing the
+  // source there would be work done per click for an answer that only ever
+  // changes per edit.
+  const model = useMemo(() => parseFlowchart(code), [code]);
+  const bound = useMemo(
+    () => (model === null ? NO_BINDINGS : modelRecordBindings(model, entries)),
+    [model, entries],
+  );
 
   const measure = useCallback(() => {
     const root = rootRef.current;
     const plane = root?.parentElement ?? null;
-    const model = bound.size === 0 ? null : parseFlowchart(code);
-    if (root === null || plane === null || model === null) {
+    if (root === null || plane === null || model === null || bound.size === 0) {
       setRects((prev) => (prev.size === 0 ? prev : NO_RECTS));
       return;
     }
@@ -120,7 +130,7 @@ export function RecordChipOverlay({
     // and the chips are IN the plane — publishing a fresh Map every pass would
     // re-render, mutate, and call the observer straight back.
     setRects((prev) => (sameRects(prev, next) ? prev : next));
-  }, [code, bound, transformRef]);
+  }, [model, bound, transformRef]);
 
   useEffect(() => {
     measure();

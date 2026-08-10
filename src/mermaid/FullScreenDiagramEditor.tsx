@@ -55,8 +55,9 @@ export function FullScreenDiagramEditor({
   onOpenPath?: (path: string) => void;
   /** Stage-H forward contract (spec D1): fill the given container, assume no page chrome. */
   embedded?: boolean;
-  /** Stage-H forward contract (spec D1): rendered INSIDE the CanvasViewport plane, so hosts
-   *  can position overlays against useCanvasTransform. Pass-through this stage. */
+  /** Spec D1: rendered INSIDE the CanvasViewport plane, so an overlay pans and zooms with
+   *  the diagram and can measure in plane units (`useCanvasTransformRef`). The whiteboard's
+   *  record chips are the one host using it (M29.47); pure pass-through here. */
   overlay?: React.ReactNode;
 }) {
   const flowchartCapable = useMemo(() => parseFlowchart(code) !== null, [code]);

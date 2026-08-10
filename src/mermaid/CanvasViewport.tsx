@@ -24,11 +24,23 @@ const CanvasTransformContext = createContext<CanvasTransform>({
  * The same transform, published through a STABLE ref (M29.26).
  *
  * The value context above hands out a fresh object on every `setT`, which is
- * exactly right for an overlay that renders against the live transform (Stage
- * H's record chips) and exactly wrong for a consumer that only reads the scale
- * inside an event handler: subscribing re-rendered it once per pan frame for a
- * value it never read at render time. This ref's identity never changes, so
- * reading it costs nothing per frame.
+ * right only for a consumer whose RENDER depends on the live value, and wrong
+ * for one that reads the scale inside a handler or a measurement: subscribing
+ * re-renders it once per pan frame for a number it never read at render time.
+ * This ref's identity never changes, so reading it costs nothing per frame.
+ *
+ * **Both in-tree overlays read the REF, and this comment used to promise
+ * otherwise** — it named Stage H's record chips as the value context's client
+ * (M29.26 anticipated them subscribing). They do not, and neither does the
+ * structural editor. Every overlay here positions in PLANE units computed as
+ * `(elementRect − layerRect) / scale`, and both operands are measured under
+ * the same transform, so the quotient is invariant under pan AND zoom: a
+ * re-measure on a transform change is arithmetic that cannot come out
+ * differently. Measured in Chromium (M29.47 review): a chip sat at
+ * dx +4.00 / dy −10.00 at scale 1, at exactly ×1.21 of that after zooming to
+ * 1.21, and bit-identically after a 140px pan. The value context stays
+ * exported and tested as the seam for an overlay that one day genuinely
+ * renders against the live transform; nothing in the tree needs it today.
  *
  * Identity default, same contract as the value context: a consumer outside any
  * viewport reads scale 1 and its divide is a no-op.

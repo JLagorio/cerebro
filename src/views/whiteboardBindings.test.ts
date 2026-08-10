@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import type { Entry } from '@/engine/types';
+import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { makeEntry } from '@/test/factories';
-import { insertRecordNode, recordBindings, resolveBinding } from './whiteboardBindings';
+import {
+  insertRecordNode,
+  modelRecordBindings,
+  recordBindings,
+  resolveBinding,
+} from './whiteboardBindings';
 
 const ENTRIES = [
   makeEntry({ path: 'delivery/ship-v2.md', title: 'Ship v2', type: 'Work item' }),
@@ -46,6 +53,13 @@ describe('recordBindings', () => {
     expect(recordBindings('sequenceDiagram\n  A->>B: x', ENTRIES).size).toBe(0);
   });
 
+  it('the model form answers identically — it is the same reader, minus a parse', () => {
+    const code = 'flowchart TD\n  a[Ship v2]\n  click a "delivery/ship-v2.md"\n';
+    expect(modelRecordBindings(parseFlowchart(code)!, ENTRIES)).toEqual(
+      recordBindings(code, ENTRIES),
+    );
+  });
+
   it('the last owned click line wins, exactly as mermaid resolves it', () => {
     const code = [
       'flowchart TD',
@@ -81,10 +95,16 @@ describe('recordBindings', () => {
   });
 });
 
+/** The inserted source, or a failure the assertion names. */
+const inserted = (code: string, target: Entry): string => {
+  const result = insertRecordNode(code, target);
+  if (!result.ok) throw new Error(`expected an insertion, got refusal: ${result.reason}`);
+  return result.code;
+};
+
 describe('insertRecordNode', () => {
   it('adds a titled node and its click binding in ONE new source', () => {
-    const next = insertRecordNode('flowchart TD\n', ENTRIES[0]);
-    expect(next).not.toBeNull();
+    const next = inserted('flowchart TD\n', ENTRIES[0]);
     // One string carries both halves — that is what makes the insertion one
     // onChangeCode and therefore one undo step (spec D10). There is no
     // intermediate source in which the node exists unbound.
@@ -92,7 +112,7 @@ describe('insertRecordNode', () => {
     expect(next).toContain('click');
     expect(next).toContain('delivery/ship-v2.md');
     // The result re-parses and the binding resolves — the round trip is the contract.
-    const bound = [...recordBindings(next as string, ENTRIES).values()];
+    const bound = [...recordBindings(next, ENTRIES).values()];
     expect(bound).toHaveLength(1);
     expect(bound[0].entry.path).toBe('delivery/ship-v2.md');
     expect(bound[0].contested).toBe(false);
@@ -105,9 +125,10 @@ describe('insertRecordNode', () => {
   });
 
   it('a second record lands beside the first with its own id', () => {
-    const once = insertRecordNode('flowchart TD\n', ENTRIES[0]);
-    const twice = insertRecordNode(once as string, ENTRIES[1]);
-    const bound = recordBindings(twice as string, ENTRIES);
+    const bound = recordBindings(
+      inserted(inserted('flowchart TD\n', ENTRIES[0]), ENTRIES[1]),
+      ENTRIES,
+    );
     expect(bound.size).toBe(2);
     expect([...bound.values()].map((b) => b.entry.path).sort()).toEqual([
       'delivery/beta.md',
@@ -119,21 +140,39 @@ describe('insertRecordNode', () => {
     // `@` and `"` are parse errors unquoted (emit.ts quoteLabel); a record
     // titled with either must not be able to kill the canvas it is dropped on.
     const awkward = makeEntry({ path: 'delivery/at.md', title: 'Ship @ 5pm "hard"' });
-    const next = insertRecordNode('flowchart TD\n', awkward);
-    const bound = [...recordBindings(next as string, [awkward]).values()];
+    const bound = [...recordBindings(inserted('flowchart TD\n', awkward), [awkward]).values()];
     expect(bound[0]?.entry.path).toBe('delivery/at.md');
   });
 
-  it('opaque source (not a flowchart) inserts nothing', () => {
-    expect(insertRecordNode('gantt\n  title x', ENTRIES[0])).toBeNull();
+  it('opaque source (not a flowchart) refuses, and says which refusal it is', () => {
+    expect(insertRecordNode('gantt\n  title x', ENTRIES[0])).toEqual({
+      ok: false,
+      reason: 'opaque',
+    });
   });
 
-  it('a target no click line can carry inserts nothing at all', () => {
+  it('a target no click line can carry refuses SEPARATELY — the canvas is fine', () => {
     // `setNodeLink` RETURNS A MODEL EVEN WHEN IT REFUSES — a blank target is
     // not a link, so it writes no line. Serializing that would leave an
     // unbound node named after a record: a half-insert nobody asked for. The
-    // op reads its own result back and refuses the whole thing instead.
+    // op reads its own result back and refuses the whole thing instead — and
+    // as `unbindable`, not `opaque`, because the flowchart is perfectly fine
+    // and only THIS record cannot go on it.
     const blank = makeEntry({ path: ' ', title: 'Nowhere' });
-    expect(insertRecordNode('flowchart TD\n', blank)).toBeNull();
+    expect(insertRecordNode('flowchart TD\n', blank)).toEqual({
+      ok: false,
+      reason: 'unbindable',
+    });
+  });
+
+  it('a file whose NAME carries a double quote is unbindable, not silently mis-bound', () => {
+    // `clickTarget` substitutes `"` (a quoted target has no escape for it), so
+    // the emitted line names a path that does not exist. Legal filename on
+    // macOS, so this arm is reachable rather than theoretical.
+    const quoted = makeEntry({ path: 'delivery/say-"hi".md', title: 'Say hi' });
+    expect(insertRecordNode('flowchart TD\n', quoted)).toEqual({
+      ok: false,
+      reason: 'unbindable',
+    });
   });
 });

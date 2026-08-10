@@ -520,6 +520,55 @@ describe('WhiteboardView', () => {
       expect(options[0].textContent).toContain('Beta program');
     });
 
+    it('a record KEY finds it, exactly as ⌘K does', async () => {
+      // QuickOpen scores max(title, key) and every work item in the vault has
+      // a key — so scoring the title alone made `lnc-3` a hit in ⌘K and a
+      // dead end here (M29.47 review).
+      fs().set(MAP, 'flowchart TD\n');
+      const keyed = makeEntry({
+        path: 'delivery/checkout.md',
+        title: 'Land the new checkout',
+        type: 'Task',
+        properties: { key: 'LNC-3' },
+      });
+      mount([shipV2, keyed]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.type(screen.getByLabelText('Find a record'), 'lnc-3');
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options).toHaveLength(1);
+      expect(options[0].textContent).toContain('Land the new checkout');
+      // …and the row says WHY it matched.
+      expect(options[0].textContent).toContain('LNC-3');
+    });
+
+    it('Enter takes the top offer once something is typed, and nothing before', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount([shipV2, makeEntry({ path: 'delivery/beta.md', title: 'Beta program' })]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      const box = screen.getByLabelText('Find a record');
+
+      // Empty box: every record is "first", so Enter must place none of them
+      // (LinkPopover's rule, same reason).
+      fireEvent.keyDown(box, { key: 'Enter' });
+      expect(changes).not.toHaveBeenCalled();
+      expect(screen.getByTestId('whiteboard-record-picker')).toBeTruthy();
+
+      // `fireEvent.keyDown`, not `userEvent.type('…{Enter}')`, and the reason
+      // is a harness artifact worth naming: picking closes the Popover, whose
+      // `useFocusRestore` puts focus back on the "Add record" TRIGGER inside
+      // the same keydown — and user-event's Enter plugin then reads the
+      // now-active element, finds a <button>, and synthesises a click that
+      // reopens the picker. A real browser decides Enter's default action from
+      // the event TARGET (this input, in no form), so it never happens there.
+      await userEvent.type(box, 'beta');
+      fireEvent.keyDown(box, { key: 'Enter' });
+      expect(changes).toHaveBeenCalledTimes(1);
+      expect(changes.mock.calls[0][0]).toContain('Beta program');
+      expect(screen.queryByTestId('whiteboard-record-picker')).toBeNull();
+    });
+
     it('the picker offers the view’s records; the chips resolve against the whole vault', async () => {
       fs().set(MAP, 'flowchart TD\n');
       mount();
@@ -553,6 +602,24 @@ describe('WhiteboardView', () => {
       // for the autosave to write.
       expect(changes).not.toHaveBeenCalled();
       expect(fs().get(MAP)).toBe('gantt\n  title Roadmap\n');
+    });
+
+    it('a record that cannot be written as a link blames the RECORD, not the canvas', async () => {
+      // The other refusal (`unbindable`): the flowchart is fine and every
+      // other record would go on it, so "this canvas isn't a flowchart" would
+      // send the user to fix the wrong thing.
+      fs().set(MAP, 'flowchart TD\n');
+      mount([makeEntry({ path: 'delivery/say-"hi".md', title: 'Say hi', type: 'Task' })]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.click(screen.getByTestId('whiteboard-add-option'));
+      const said = useUiStore
+        .getState()
+        .toasts.map((t) => t.message)
+        .join(' ');
+      expect(said).toContain('Say hi');
+      expect(said).not.toContain('flowchart');
+      expect(changes).not.toHaveBeenCalled();
     });
   });
 });

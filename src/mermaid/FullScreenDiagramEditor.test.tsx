@@ -93,9 +93,9 @@ describe('FullScreenDiagramEditor', () => {
   });
 
   it('renders a host overlay inside the plane, not outside it', () => {
-    // INSIDE canvas-plane is the whole contract (spec D1): a Stage-H host
-    // positions its overlay against useCanvasTransform, which only means
-    // anything for a node that scales and translates with the plane.
+    // INSIDE canvas-plane is the whole contract (spec D1): a host positions
+    // its overlay in plane units, which only means anything for a node that
+    // scales and translates with the plane.
     render(
       <FullScreenDiagramEditor
         code={FLOW}

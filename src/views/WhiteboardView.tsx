@@ -278,12 +278,20 @@ function WhiteboardCanvas({
   const addRecord = (entry: Entry) => {
     setAdding(false);
     if (code === null) return;
-    const next = insertRecordNode(code, entry);
-    if (next === null) {
-      toast("This canvas isn't a flowchart, so records can't be placed on it");
+    const result = insertRecordNode(code, entry);
+    if (!result.ok) {
+      // Two refusals, two pieces of news. "Not a flowchart" is about the
+      // canvas and true of every record; "unbindable" is about THIS record
+      // and true of no other, so one message for both would send the user to
+      // fix the wrong thing.
+      toast(
+        result.reason === 'opaque'
+          ? "This canvas isn't a flowchart, so records can't be placed on it"
+          : `Couldn't place ${entry.title} — its file path can't be written as a link`,
+      );
       return;
     }
-    handleChange(next);
+    handleChange(result.code);
   };
 
   if (loadFailed) {
@@ -324,11 +332,15 @@ function WhiteboardCanvas({
       {/* The whiteboard's own bar — NOT part of FullScreenDiagramEditor.
           "Add record" lists the VIEW's entries (spec D8), and the shared
           editor must not learn what a record is. */}
-      <div className="relative flex h-9 flex-none items-center gap-1.5 border-b border-n-200 px-3">
+      {/* No `relative`: the picker anchors through `anchorRef` and portals to
+          the body, so a positioned bar would only be an unused containing
+          block for nothing. */}
+      <div className="flex h-9 flex-none items-center gap-1.5 border-b border-n-200 px-3">
         <button
           ref={addRef}
           type="button"
           data-testid="whiteboard-add-record"
+          aria-haspopup="dialog"
           aria-expanded={adding}
           onClick={() => setAdding((v) => !v)}
           className="rounded-md border border-n-200 bg-transparent px-2 py-0.5 text-xs text-n-700 hover:bg-n-50"
@@ -378,14 +390,23 @@ function WhiteboardCanvas({
   );
 }
 
+/** The record's key (`FLD-7`), or ''. The alias QuickOpen scores against. */
+function recordKey(entry: Entry): string {
+  return typeof entry.properties.key === 'string' ? entry.properties.key : '';
+}
+
 /**
  * The picker behind "Add record" (M29.47).
  *
- * `quickOpenScore` is the app's one fuzzy matcher, so a record is found here
- * by the same typing that finds it in ⌘K. Built on the `Popover` primitive
- * rather than a hand-rolled scrim: dismissal, the Escape layer stack and the
- * portal all come with it, and this surface sits on a bar that other layers
- * open over.
+ * `quickOpenScore` over TITLE AND KEY, `Math.max` of the two — the same pair
+ * ⌘K scores (QuickOpen.tsx:84,203), so the typing that finds a record there
+ * finds it here. Title alone was a false claim in this very docstring: every
+ * work item in the demo vault carries a key, so `lnc-3` found the record in
+ * ⌘K and nothing at all on the whiteboard.
+ *
+ * Built on the `Popover` primitive rather than a hand-rolled scrim: dismissal,
+ * the Escape layer stack and the portal all come with it, and this surface
+ * sits on a bar that other layers open over.
  */
 function AddRecordPopover({
   anchorRef,
@@ -407,7 +428,10 @@ function AddRecordPopover({
   const results = useMemo(() => {
     if (q === '') return entries.slice(0, MAX_OFFERED);
     return entries
-      .map((e) => ({ e, score: quickOpenScore(q, e.title) }))
+      .map((e) => ({
+        e,
+        score: Math.max(quickOpenScore(q, e.title), quickOpenScore(q, recordKey(e))),
+      }))
       .filter((r) => r.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_OFFERED)
@@ -439,6 +463,15 @@ function AddRecordPopover({
           placeholder="Find a record…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter takes the top offer — but only once something has been
+            // typed. With the box empty every record is "first", and placing
+            // whichever one that is would be an edit nobody asked for
+            // (LinkPopover's rule, same reason).
+            if (e.key !== 'Enter' || q === '') return;
+            const first = results[0];
+            if (first !== undefined) onPick(first);
+          }}
           width="100%"
         />
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -452,7 +485,10 @@ function AddRecordPopover({
               className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-700 hover:bg-n-50"
             >
               <span className="min-w-0 flex-1 truncate">{e.title}</span>
-              <span className="flex-none text-2xs text-n-400">{e.folder}</span>
+              {/* The key when the record has one, since that is what a key
+                  search matched on and it identifies the record outright;
+                  the folder otherwise, to tell two same-titled rows apart. */}
+              <span className="flex-none text-2xs text-n-400">{recordKey(e) || e.folder}</span>
             </button>
           ))}
           {results.length === 0 && (

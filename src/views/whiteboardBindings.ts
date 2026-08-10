@@ -1,6 +1,7 @@
 import type { Entry } from '@/engine/types';
 import { resolveTarget } from '@/engine/wikilink';
 import { isVaultPath } from '@/mermaid/flowchart/linkTargets';
+import type { FlowchartModel } from '@/mermaid/flowchart/model';
 import { nodeLinks, parseFlowchart, serialize } from '@/mermaid/flowchart/model';
 import { addNode, setNodeLink } from '@/mermaid/flowchart/ops';
 
@@ -46,7 +47,10 @@ export function resolveBinding(target: string, entries: Entry[]): Entry | null {
 }
 
 /**
- * Every bound node in `code`: node id → the record its click line names.
+ * Every bound node in a PARSED model: node id → the record its click line
+ * names. The form for a caller that already holds a model — the overlay
+ * measures from the DOM on every plane mutation and must not re-parse the
+ * source to answer a question it answered when the source last changed.
  *
  * Built on `nodeLinks`, not on a private walk of `model.lines`, and that is
  * load-bearing twice over. It is the one reader that knows which owned line
@@ -58,10 +62,11 @@ export function resolveBinding(target: string, entries: Entry[]): Entry | null {
  * record" offer list does, deliberately) has to be able to live with a
  * duplicate rather than with a wrong claim.
  */
-export function recordBindings(code: string, entries: Entry[]): Map<string, RecordBinding> {
+export function modelRecordBindings(
+  model: FlowchartModel,
+  entries: Entry[],
+): Map<string, RecordBinding> {
   const out = new Map<string, RecordBinding>();
-  const model = parseFlowchart(code);
-  if (model === null) return out;
   for (const [id, link] of nodeLinks(model)) {
     const entry = resolveBinding(link.target, entries);
     if (entry !== null) out.set(id, { entry, target: link.target, contested: link.contested });
@@ -69,31 +74,50 @@ export function recordBindings(code: string, entries: Entry[]): Map<string, Reco
   return out;
 }
 
+/** The same map from source text; empty when the source is not a flowchart. */
+export function recordBindings(code: string, entries: Entry[]): Map<string, RecordBinding> {
+  const model = parseFlowchart(code);
+  return model === null ? new Map() : modelRecordBindings(model, entries);
+}
+
+/**
+ * Why an insertion did not happen. TWO causes, and they are not the same news
+ * to tell a user, which is the whole reason this is not a `null`:
+ *
+ * - `opaque` — the source is not an editable flowchart (the opacity rule every
+ *   structural op obeys). Nothing can be placed here at all.
+ * - `unbindable` — the flowchart is fine, but a click line cannot carry THIS
+ *   record's path. Reachable: `clickTarget` refuses a blank target and
+ *   substitutes `"` (which has no escape inside a quoted target), so a file
+ *   whose name contains a double quote — legal on macOS — serializes to a
+ *   target that no longer names it.
+ */
+export type InsertRefusal = 'opaque' | 'unbindable';
+
+export type InsertRecordResult = { ok: true; code: string } | { ok: false; reason: InsertRefusal };
+
 /**
  * "Add record": a node labeled with the record's title plus the click line
  * binding it — TWO model ops, ONE serialize, so the whole insertion reaches
  * the host as a single `onChangeCode` and costs one undo step (spec D10).
  *
- * Null means NOTHING WAS INSERTED, and it covers two different refusals:
- *
- * - the source is not an editable flowchart (the opacity rule every structural
- *   op obeys);
- * - the binding did not take. `setNodeLink` returns a model even when it
- *   refuses — a blank target is not a link, so it writes no line — and
- *   serializing that would leave a node named after a record and bound to
- *   nothing. The op reads its own result back through `recordBindings` and
- *   discards the whole insertion instead, so a refusal is a TRUE no-op: no
- *   code change, no undo entry, half a record never on the canvas.
+ * The `unbindable` arm exists because `setNodeLink` RETURNS A MODEL EVEN WHEN
+ * IT REFUSES: serializing that would leave a node named after a record and
+ * bound to nothing. So the op reads its own result back through the bindings
+ * reader and discards the whole insertion, which makes a refusal a TRUE no-op
+ * — no code change, no undo entry, half a record never on the canvas.
  */
-export function insertRecordNode(code: string, target: Entry): string | null {
+export function insertRecordNode(code: string, target: Entry): InsertRecordResult {
   const model = parseFlowchart(code);
-  if (model === null) return null;
+  if (model === null) return { ok: false, reason: 'opaque' };
   // An empty label emits `id[]`, which is not a node anyone can see or click.
   // The filename is the scanner's own fallback for a title, so it is the
   // honest one here too.
   const label = target.title.trim() === '' ? target.filename : target.title;
   const added = addNode(model, label);
   const next = serialize(setNodeLink(added.model, added.id, target.path));
-  if (recordBindings(next, [target]).get(added.id)?.entry !== target) return null;
-  return next;
+  if (recordBindings(next, [target]).get(added.id)?.entry !== target) {
+    return { ok: false, reason: 'unbindable' };
+  }
+  return { ok: true, code: next };
 }
