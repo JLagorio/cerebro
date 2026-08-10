@@ -297,3 +297,102 @@ export function resolveReconciliation(vault: string, action: string): Promise<vo
 export function ledgerStatus(vault: string): Promise<LedgerStatus> {
   return inTauri() ? invokeTauri('ledger_status', { vault }) : mock.ledgerStatus(vault);
 }
+
+// --- The review surface (M24.9) --------------------------------------------
+
+/** One target's expected-versus-current version, as a card shows it. */
+export interface CardTarget {
+  target_class: string;
+  target_id: string;
+  expected_version: number | null;
+  current_version: number | null;
+  /** The world moved under this card: approving it will refuse. */
+  stale: boolean;
+}
+
+/** What a reviewer is being asked about. Mirrors policy/review.rs — every
+ * field is typed, and `reason` is display text with no policy effect. */
+export interface ReviewCard {
+  proposal_id: string;
+  commit_set_id: string;
+  run_id: string;
+  actor: string;
+  op: string;
+  effective_risk: string;
+  /** The risk rung's review mode — `diff` on the CRITICAL rung. */
+  review: string | null;
+  /** Codes holding this beyond the risk ladder (M24.8). */
+  queued_for: string[];
+  intended_use_kind: string;
+  intended_use_stakes: string;
+  transition_cause: string;
+  evidence_refs: string[];
+  coverage_refs: string[];
+  authority_refs: string[];
+  targets: CardTarget[];
+  reason: string;
+  set_members: string[];
+  set_ready: boolean;
+}
+
+/** An applied change a human may still undo. */
+export interface RevertableApplication {
+  proposal_id: string;
+  op: string;
+  applied_event_id: string;
+  reason: string;
+}
+
+/** Cards awaiting a human. Rebuilt from the ledger on every call — nothing
+ * is cached, so a wiped app-data directory cannot lose one. */
+export function reviewQueue(vault: string): Promise<ReviewCard[]> {
+  return inTauri() ? invokeTauri('review_queue', { vault }) : mock.reviewQueue(vault);
+}
+
+export function revertableApplications(vault: string): Promise<RevertableApplication[]> {
+  return inTauri()
+    ? invokeTauri('revertable_applications', { vault })
+    : mock.revertableApplications(vault);
+}
+
+/** Approve or reject one card. A rejection REQUIRES a reason — the server
+ * refuses without one, and the caller is expected to read the result rather
+ * than fire and forget (the proposal-channel carve-out in AGENTS.md).
+ * Resolves to the set's transition code once its last member is decided,
+ * or null while the set is still waiting on its peers. */
+export function decideProposal(
+  vault: string,
+  proposalId: string,
+  approve: boolean,
+  reviewer: string,
+  reason: string | null,
+): Promise<string | null> {
+  return inTauri()
+    ? invokeTauri('decide_proposal', {
+        vault,
+        proposalId,
+        approve,
+        reviewer,
+        reason,
+      })
+    : mock.decideProposal(vault, proposalId, approve, reviewer, reason);
+}
+
+/** Undo an applied change by appending a NEW forward mutation. The applied
+ * event ids are the ones the card showed: handing back anything else is
+ * `revert_not_current`. History is never rewound. */
+export function revertApplication(
+  vault: string,
+  proposalId: string,
+  appliedEventIds: string[],
+  reviewer: string,
+): Promise<string> {
+  return inTauri()
+    ? invokeTauri('revert_application', {
+        vault,
+        proposalId,
+        appliedEventIds,
+        reviewer,
+      })
+    : mock.revertApplication(vault, proposalId, appliedEventIds, reviewer);
+}

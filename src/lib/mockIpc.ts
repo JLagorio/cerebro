@@ -703,3 +703,69 @@ export async function exportPng(defaultName: string, bytes: Uint8Array): Promise
   URL.revokeObjectURL(url);
   return defaultName;
 }
+
+// --- The review surface (M24.9) --------------------------------------------
+// The browser mock has no ledger, so it has no proposals, no policy, and
+// nothing to review. It holds FIXTURE cards a UI test can drive — data, not
+// rules: no verdict is computed here and no refusal is decided here, because
+// mirroring the interpreter would be exactly the twin-implementation defect
+// the policy table exists to prevent. A Playwright spec seeds these; a real
+// vault never touches them.
+
+import type { ReviewCard, RevertableApplication } from './ipc';
+
+interface ReviewFixture {
+  cards: ReviewCard[];
+  applications: RevertableApplication[];
+}
+
+const review: ReviewFixture = { cards: [], applications: [] };
+
+/** Test-only seam, mirroring `window.__cerebroMockFs`: a spec stages the
+ * cards it wants to see and the surface renders them. */
+export function __seedReview(fixture: Partial<ReviewFixture>): void {
+  review.cards = fixture.cards ?? [];
+  review.applications = fixture.applications ?? [];
+}
+
+export async function reviewQueue(_vault: string): Promise<ReviewCard[]> {
+  return review.cards;
+}
+
+export async function revertableApplications(_vault: string): Promise<RevertableApplication[]> {
+  return review.applications;
+}
+
+export async function decideProposal(
+  _vault: string,
+  proposalId: string,
+  approve: boolean,
+  _reviewer: string,
+  reason: string | null,
+): Promise<string | null> {
+  // The ONE rule mirrored, because it is a precondition of the call rather
+  // than a policy decision: a rejection with no reason is refused before
+  // anything is written, on both sides.
+  if (!approve && (reason ?? '').trim() === '') {
+    throw new Error('a rejection needs a reason');
+  }
+  const card = review.cards.find((c) => c.proposal_id === proposalId);
+  if (card === undefined) throw new Error(`no queued proposal ${proposalId}`);
+  review.cards = review.cards.filter((c) => !card.set_members.includes(c.proposal_id));
+  return approve ? 'apply' : 'human_reject';
+}
+
+export async function revertApplication(
+  _vault: string,
+  proposalId: string,
+  appliedEventIds: string[],
+  _reviewer: string,
+): Promise<string> {
+  const application = review.applications.find((a) => a.proposal_id === proposalId);
+  if (application === undefined) throw new Error(`no applied proposal ${proposalId}`);
+  if (appliedEventIds.length !== 1 || appliedEventIds[0] !== application.applied_event_id) {
+    throw new Error('revert_not_current: this is not the application on record');
+  }
+  review.applications = review.applications.filter((a) => a.proposal_id !== proposalId);
+  return 'apply';
+}
