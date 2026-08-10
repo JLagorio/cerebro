@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildSchema } from '@/engine/schema';
-import type { Entry, Presentation } from '@/engine/types';
+import type { Entry, Presentation, Schema } from '@/engine/types';
 import { resetMockFs } from '@/lib/mockIpc';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { isManualLayout } from '@/mermaid/flowchart/views';
@@ -26,16 +27,58 @@ vi.mock('@/mermaid/FullScreenDiagramEditor', () => ({
     embedded?: boolean;
     entries?: Entry[];
     onOpenPath?: (path: string) => void;
+    overlay?: React.ReactNode;
   }) => {
     editorProps(props);
     return (
-      <textarea
-        data-testid="fake-editor"
-        aria-label="Canvas source"
-        value={props.code}
-        onChange={(e) => props.onChangeCode(e.target.value)}
-      />
+      <div>
+        <textarea
+          data-testid="fake-editor"
+          aria-label="Canvas source"
+          value={props.code}
+          onChange={(e) => props.onChangeCode(e.target.value)}
+        />
+        {props.overlay}
+      </div>
     );
+  },
+}));
+
+/**
+ * The canvas's WRITE CHANNEL, counted.
+ *
+ * Rendered `code` cannot answer "how many commits was that": React batches
+ * synchronous state updates, so two `handleChange` calls in one handler
+ * collapse into a single render and a two-step insertion would look exactly
+ * like a one-step one (measured — the naive version of the test below passed
+ * against a deliberately two-step implementation). The real hook is kept and
+ * only its one write function is wrapped, so the counting instrument changes
+ * no behaviour.
+ */
+const changes = vi.fn();
+vi.mock('@/mermaid/useDiagramFile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/mermaid/useDiagramFile')>();
+  return {
+    ...actual,
+    useDiagramFile: (path: string) => {
+      const file = actual.useDiagramFile(path);
+      return {
+        ...file,
+        handleChange: (next: string) => {
+          changes(next);
+          file.handleChange(next);
+        },
+      };
+    },
+  };
+});
+
+/** The chips have their own suite; here only WHAT THEY ARE GIVEN matters. */
+const overlayProps = vi.fn();
+vi.mock('@/views/RecordChipOverlay', () => ({
+  RecordChipOverlay: (props: { code: string; entries: Entry[]; schema: Schema }) => {
+    overlayProps(props);
+    return <div data-testid="fake-overlay" />;
   },
 }));
 
@@ -51,10 +94,18 @@ const base: Presentation = {
 const schema = buildSchema([]);
 const entries = [makeEntry({ path: 'delivery/launch.md', title: 'Launch', type: 'Task' })];
 
+/** A record the "Add record" tests place on the canvas. */
+const shipV2 = makeEntry({ path: 'delivery/ship-v2.md', title: 'Ship v2', type: 'Task' });
+const MAP = 'delivery/whiteboards/map.mmd';
+const host = { folder: 'delivery', viewName: 'Map' };
+const onMap: Presentation = { ...base, whiteboard: { file: MAP } };
+
 describe('WhiteboardView', () => {
   beforeEach(async () => {
     resetMockFs();
     editorProps.mockClear();
+    overlayProps.mockClear();
+    changes.mockClear();
     useUiStore.setState({ toasts: [] });
     await useVaultStore.getState().openVault('/demo-vault');
   });
@@ -245,6 +296,111 @@ describe('WhiteboardView', () => {
     expect(onPresentationChange).toHaveBeenCalledWith({
       ...base,
       whiteboard: { file: null },
+    });
+  });
+
+  describe('record cards (M29.47)', () => {
+    const mount = (viewEntries: Entry[] = [shipV2]) =>
+      render(
+        <WhiteboardView entries={viewEntries} presentation={onMap} schema={schema} host={host} />,
+      );
+
+    it('Add record inserts a titled node and its click binding, and it reaches the file', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount();
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.click(screen.getByTestId('whiteboard-add-option'));
+      await waitFor(
+        () => {
+          const file = fs().get(MAP) ?? '';
+          expect(file).toContain('Ship v2');
+          expect(file).toContain('click');
+          expect(file).toContain('delivery/ship-v2.md');
+        },
+        { timeout: 3000 },
+      );
+    });
+
+    it('the insertion is ONE commit — no step where the node exists unbound', async () => {
+      // Spec D10, and the reason `insertRecordNode` serializes once: two model
+      // ops, one source, one onChangeCode, one undo step. Two commits would
+      // leave an undo that strips the binding and keeps a node named after a
+      // record.
+      fs().set(MAP, 'flowchart TD\n');
+      mount();
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.click(screen.getByTestId('whiteboard-add-option'));
+      expect(changes).toHaveBeenCalledTimes(1);
+      const written = changes.mock.calls[0][0] as string;
+      expect(written).toContain('Ship v2');
+      expect(written).toContain('click');
+      expect(written).toContain('delivery/ship-v2.md');
+    });
+
+    it('a record already on the canvas is not offered again', async () => {
+      fs().set(MAP, 'flowchart TD\n  a[Ship v2]\n  click a "delivery/ship-v2.md"\n');
+      mount();
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      expect(screen.queryByTestId('whiteboard-add-option')).toBeNull();
+      expect(screen.getByText('Every record is already on the canvas')).toBeTruthy();
+    });
+
+    it('an empty view says so rather than claiming the canvas holds everything', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount([]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      expect(screen.getByText('This view has no records yet')).toBeTruthy();
+    });
+
+    it('typing narrows the offer through the app’s own fuzzy matcher', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount([shipV2, makeEntry({ path: 'delivery/beta.md', title: 'Beta program' })]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      expect(screen.getAllByTestId('whiteboard-add-option')).toHaveLength(2);
+      await userEvent.type(screen.getByLabelText('Find a record'), 'beta');
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options).toHaveLength(1);
+      expect(options[0].textContent).toContain('Beta program');
+    });
+
+    it('the picker offers the view’s records; the chips resolve against the whole vault', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount();
+      await screen.findByTestId('fake-overlay');
+      // A node can name a record this tab's filter excludes — the chip still
+      // has to resolve it, the same reasoning the link popover's vault-wide
+      // corpus rests on (M29.38).
+      const props = overlayProps.mock.calls.at(-1)![0] as { entries: Entry[] };
+      expect(props.entries.some((e) => e.path === 'delivery/how-we-schedule.md')).toBe(true);
+      // The OFFER, though, is exactly this view's rows — already filtered,
+      // sorted and limited by the page that built them.
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options).toHaveLength(1);
+      expect(options[0].textContent).toContain('Ship v2');
+    });
+
+    it('a canvas that is not a flowchart says so, and changes nothing', async () => {
+      fs().set(MAP, 'gantt\n  title Roadmap\n');
+      mount();
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.click(screen.getByTestId('whiteboard-add-option'));
+      expect(
+        useUiStore
+          .getState()
+          .toasts.map((t) => t.message)
+          .join(' '),
+      ).toContain('flowchart');
+      // A refusal is a TRUE no-op: no commit, so nothing to undo and nothing
+      // for the autosave to write.
+      expect(changes).not.toHaveBeenCalled();
+      expect(fs().get(MAP)).toBe('gantt\n  title Roadmap\n');
     });
   });
 });

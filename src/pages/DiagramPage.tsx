@@ -1,26 +1,16 @@
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Icon } from '@/components/ui/Icon';
-import type { SaveState } from '@/editor/NoteBodyEditor';
 import type { Selection } from '@/engine/types';
 import { humanize } from '@/lib/mockParse';
 import { detectDiagramType } from '@/mermaid/detect';
 import { FullScreenDiagramEditor } from '@/mermaid/FullScreenDiagramEditor';
-import { useDiagramFile } from '@/mermaid/useDiagramFile';
+import { SAVE_LABEL, useDiagramFile } from '@/mermaid/useDiagramFile';
 import { useOpenPath } from '@/app/useOpenPath';
 import { useNavStore } from '@/stores/navStore';
 import { useEntry, useVaultStore } from '@/stores/vaultStore';
 
 export type DiagramSelection = Extract<Selection, { kind: 'diagram' }>;
-
-/** Same trust signal DocPage shows; `idle` stays quiet on purpose. */
-const SAVE_LABEL: Record<SaveState, string | null> = {
-  idle: null,
-  dirty: 'Unsaved',
-  saving: 'Saving…',
-  saved: 'Saved',
-  failed: "Couldn't save",
-};
 
 /**
  * Full-page editor for a standalone `.mmd` file (M29.21).

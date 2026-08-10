@@ -7,6 +7,21 @@ import { useVaultStore } from '@/stores/vaultStore';
 /** How long a pause in editing waits before the source flushes to disk. */
 const SAVE_DEBOUNCE_MS = 500;
 
+/**
+ * The trust signal beside a diagram's title; `idle` stays quiet on purpose.
+ *
+ * It lives with the hook that produces `saveState` rather than with either
+ * host, because both the diagram page and the whiteboard tab show it and a
+ * second copy of the table is a second place for the wording to drift.
+ */
+export const SAVE_LABEL: Record<SaveState, string | null> = {
+  idle: null,
+  dirty: 'Unsaved',
+  saving: 'Saving…',
+  saved: 'Saved',
+  failed: "Couldn't save",
+};
+
 export interface DiagramFile {
   /** null while loading; hosts only mount editors on real content. */
   code: string | null;
