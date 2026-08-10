@@ -71,6 +71,28 @@ function counterForOccurrence(occurrenceIndex: number): number {
   return occurrenceIndex === 0 ? 0 : occurrenceIndex + 1;
 }
 
+/**
+ * Every group mermaid draws a NODE as. Three classes, not one — MEASURED on
+ * the bundled 11.16.0 (M29.39), and cited: all four icon handlers pass
+ * `'icon-shape default'` to labelHelper (rendering-elements/shapes/icon.ts:22,
+ * iconSquare.ts:26, iconCircle.ts:22, iconRounded.ts:26) and imageSquare.ts:46
+ * passes `'image-shape default'`. Every shape in our own registry was rendered
+ * and checked; all of them still say `node`, so these five handlers are the
+ * whole exception list.
+ *
+ * Matching `g.node` alone made an icon node UNREACHABLE from the canvas the
+ * moment M29.35's icon control was used on it: no toolbar, no rename, no
+ * delete, no drag-to-connect, no link badge — and no way to take the icon back
+ * off, because the only control that removes it lives behind the very
+ * selection it had just destroyed. Found by M29.39's end-to-end journey.
+ *
+ * The id filter still does the real work — the id scheme is what this module
+ * contracts on, and it is identical for icon nodes. It is also what keeps an
+ * icon's inner `g.icon-shape2` decoration out: that group carries no id.
+ */
+export const NODE_GROUP_SELECTOR =
+  'g.node[id*="flowchart-"], g.icon-shape[id*="flowchart-"], g.image-shape[id*="flowchart-"]';
+
 /** Groups edges(model) by exact (from, to), preserving each pair's own encounter order. */
 function groupByPair(pairs: EdgeEntry[]): Map<string, EdgeEntry[]> {
   const byPair = new Map<string, EdgeEntry[]>();
@@ -102,7 +124,7 @@ export function bindFlowchartSvg(
   const knownNodes = [...nodes(model).keys()].sort((a, b) => b.length - a.length);
   const nodeEls = new Map<string, SVGGElement>();
 
-  for (const el of container.querySelectorAll<SVGGElement>('g.node[id*="flowchart-"]')) {
+  for (const el of container.querySelectorAll<SVGGElement>(NODE_GROUP_SELECTOR)) {
     const domId = stripRenderId(el.id);
     if (!domId.startsWith('flowchart-')) continue;
     const match = knownNodes.find(

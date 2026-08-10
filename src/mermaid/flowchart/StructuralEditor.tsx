@@ -36,7 +36,7 @@ import {
 import { ShapePalette } from './ShapePalette';
 import { SubgraphToolbar } from './SubgraphToolbar';
 import { BRACKET_SHAPE_TO_REGISTRY, SHORT_NAME_FOR } from './shapes';
-import { bindFlowchartSvg, type FlowchartSvgBinding } from './svgBinding';
+import { bindFlowchartSvg, NODE_GROUP_SELECTOR, type FlowchartSvgBinding } from './svgBinding';
 
 const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
 
@@ -86,6 +86,12 @@ export function StructuralEditor({
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [edgeEditor, setEdgeEditor] = useState<{ edge: EdgeEntry; value: string } | null>(null);
   const [shapeOpen, setShapeOpen] = useState(false);
+  // The INSERT palette (M29.39), on the structural toolbar rather than the node
+  // mini-toolbar — it mints a node instead of editing one, so it is deliberately
+  // not part of that toolbar's mutual-close set. It does not need to be: it
+  // anchors to its own trigger, so a press on any node-toolbar button is an
+  // outside press by Popover's own reckoning and dismisses it (and vice versa).
+  const [insertOpen, setInsertOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -172,6 +178,7 @@ export function StructuralEditor({
     setSelected(null);
     setToolbarPos(null);
     setShapeOpen(false);
+    setInsertOpen(false);
     setStyleOpen(false);
     setIconOpen(false);
     setLinkOpen(false);
@@ -403,11 +410,16 @@ export function StructuralEditor({
       // pair, so this must degrade to a no-op rather than throw when the
       // method isn't there at all.
       const target = document.elementFromPoint?.(e.clientX, e.clientY) ?? null;
-      // `id*=`, not `id^=`: in a real browser mermaid namespaces the group id
+      // The binding's own selector, shared rather than re-spelled: `id*=` and
+      // not `id^=` because in a real browser mermaid namespaces the group id
       // with the render id (`cerebro-mermaid-3-flowchart-…` — see
-      // svgBinding.ts), so a prefix match finds nothing live. The id is only
-      // a coarse filter here; the binding resolves it by element identity.
-      const hitGroup = (target?.closest('g.node[id*="flowchart-"]') as SVGGElement | null) ?? null;
+      // svgBinding.ts), so a prefix match finds nothing live; and all three
+      // classes because an ICON node is not a `g.node` (measured, M29.39).
+      // A second spelling here is how dropping an edge ONTO an icon node
+      // would silently mint a stray "New step" instead of connecting to it.
+      // The id is only a coarse filter — the binding resolves the element by
+      // identity below.
+      const hitGroup = (target?.closest(NODE_GROUP_SELECTOR) as SVGGElement | null) ?? null;
 
       if (hitGroup !== null) {
         // Landed inside a node group — resolve it back to a model id and
@@ -537,6 +549,48 @@ export function StructuralEditor({
           >
             + Node
           </button>
+          {/*
+            Its own wrapper, and that is what anchors the palette: Popover with
+            no anchorRef measures the nearest positioned ancestor of where it
+            was written, i.e. this span's parent — so writing the palette
+            straight into the toolbar row would open it at the row's left edge,
+            under `+ Node`, instead of under the button that opened it.
+          */}
+          <span className="relative">
+            <button
+              type="button"
+              title="Insert a node with a shape"
+              aria-haspopup="dialog"
+              aria-expanded={insertOpen}
+              // A toggle, unlike the node toolbar's four triggers: those close
+              // each other and share one anchor, so re-pressing one is a
+              // deliberate no-op. This one is alone, and Popover's click-away
+              // counts a press on the anchor as inside — so without the toggle
+              // the button could open the palette but never close it.
+              onClick={() => setInsertOpen((open) => !open)}
+              className="rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50"
+            >
+              + Shape
+            </button>
+            {insertOpen && (
+              <ShapePalette
+                // Nothing is current: this palette describes a node that does
+                // not exist yet, so lighting up Rectangle (what `addNode`
+                // happens to mint) would claim a choice nobody has made.
+                current={null}
+                onPick={(name) => {
+                  setInsertOpen(false);
+                  // ONE apply, therefore one onChangeCode, therefore one undo
+                  // step (spec D10): the intermediate rectangle from `addNode`
+                  // is never emitted, so Cmd+Z takes the whole insertion back
+                  // instead of leaving a stray node of the wrong shape behind.
+                  const added = addNode(model, 'New step');
+                  apply(setNodeShape(added.model, added.id, name));
+                }}
+                onClose={() => setInsertOpen(false)}
+              />
+            )}
+          </span>
           <span className="mx-0.5 h-4 w-px bg-n-100" />
           {DIRECTIONS.map((d) => (
             <button

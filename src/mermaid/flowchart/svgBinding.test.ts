@@ -24,6 +24,37 @@ describe('bindFlowchartSvg', () => {
     expect(binding.edgeEls[1]).toMatchObject({ from: 'B', to: 'my-node' });
   });
 
+  // MEASURED on the bundled 11.16.0 (and cited: rendering-elements/shapes/
+  // icon.ts:22, iconSquare.ts:26, iconCircle.ts:22, iconRounded.ts:26 pass
+  // 'icon-shape default' to labelHelper; imageSquare.ts:46 passes
+  // 'image-shape default'). Those five handlers are the ONLY ones that do not
+  // produce `class="node"` — every shape in our own registry was rendered and
+  // checked, and every one of them still does. The id scheme is untouched,
+  // which is what this binding actually contracts on, so the class list is the
+  // only thing that had to widen.
+  //
+  // Found by M29.39's e2e: setting an icon made the node unreachable from the
+  // canvas — no toolbar, no rename, no delete, no link badge, and no way to
+  // take the icon back off. A one-way trapdoor for the control M29.35 shipped.
+  it('binds icon and image nodes, which mermaid does NOT draw as g.node', () => {
+    const model = parseFlowchart('flowchart TD\n  A[One] --> B[Two]\n  B --> C[Three]')!;
+    const host = document.createElement('div');
+    // Test fixture: fixed literal SVG markup, not user-supplied content.
+    host.innerHTML = [
+      '<svg viewBox="0 0 100 100">',
+      '  <g class="icon-shape default" id="flowchart-A-0"><rect/></g>',
+      '  <g class="icon-shape2"><path/></g>',
+      '  <g class="image-shape default" id="flowchart-B-1"><rect/></g>',
+      '  <g class="node default" id="flowchart-C-2"><rect/></g>',
+      '</svg>',
+    ].join('\n');
+    const binding = bindFlowchartSvg(host, model);
+    expect([...binding.nodeEls.keys()].sort()).toEqual(['A', 'B', 'C']);
+    // The icon's inner `icon-shape2` group carries no id at all, so the id
+    // filter keeps it out rather than binding a node to its own decoration.
+    expect(binding.nodeEls.get('A')?.getAttribute('class')).toBe('icon-shape default');
+  });
+
   it('ignores svg elements that match nothing in the model', () => {
     const model = parseFlowchart('flowchart TD\n  A[One] --> B[Two]')!;
     const host = document.createElement('div');

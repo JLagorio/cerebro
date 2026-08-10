@@ -109,11 +109,19 @@ describe('CanvasViewport', () => {
       <CanvasViewport>
         <svg>
           <g className="node" data-testid="n" />
+          {/* An ICON node is not a `g.node` — mermaid draws it as
+              `icon-shape default` and an image node as `image-shape default`
+              (MEASURED on the bundled 11.16.0, M29.39; asserted in
+              flowchart/icons.mermaid.test.ts). Left out of NO_PAN, a
+              connect-drag from an icon node panned the canvas underneath
+              itself, which is the exact failure this test was written for. */}
+          <g className="icon-shape default" data-testid="icon" />
+          <g className="image-shape default" data-testid="image" />
         </svg>
         <div data-no-pan data-testid="island" />
       </CanvasViewport>,
     );
-    for (const id of ['n', 'island']) {
+    for (const id of ['n', 'icon', 'image', 'island']) {
       fireEvent.pointerDown(screen.getByTestId(id), { button: 0, clientX: 0, clientY: 0 });
       fireEvent.pointerMove(screen.getByTestId('canvas-viewport'), { clientX: 40, clientY: 40 });
       expect(plane().style.transform).toBe('translate(0px, 0px) scale(1)');

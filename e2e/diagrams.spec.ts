@@ -579,3 +579,144 @@ test('shapes, colors, and edge animation round-trip as surgical mermaid', async 
   expect(raw).toContain('Idea@{ shape: cloud }');
   expect(raw).toContain('style Idea fill:#eef1fe');
 });
+
+// M29.35–.39: Stage F end to end — a shift-click selection becomes a real
+// subgraph, a node takes a lucide icon that real mermaid draws, and a node
+// bound to a vault record grows a badge that opens that record's panel. Every
+// step is checked twice: the canvas re-rendered (so mermaid ACCEPTED the
+// edit), and the source says what we meant to write.
+test('stage F: group, icon, and record link, end to end', async ({ page }) => {
+  // 120s rather than the file's 90s: this journey runs four op → re-render →
+  // code → back-to-visual laps, one more than any other test here, and a cold
+  // mermaid chunk plus the lazy lucide icon pack would otherwise surface as an
+  // outer timeout instead of the assertion that actually stalled.
+  test.setTimeout(120_000);
+
+  // -- Boot (same as above) ---------------------------------------------
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) {
+    await demoButton.click();
+  }
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  // -- Open the corpus doc through quick open ---------------------------
+  await page.keyboard.press('ControlOrMeta+k');
+  const quickOpenInput = page.getByTestId('quick-open-input');
+  await expect(quickOpenInput).toBeVisible();
+  await quickOpenInput.fill('Systems map');
+  const result = page.getByTestId('quick-open-result').filter({ hasText: 'Systems map' }).first();
+  await expect(result).toBeVisible();
+  await result.click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 20_000 });
+
+  // -- Enter visual editing on the first (flowchart) block ---------------
+  const block = page.getByTestId('mermaid-block').first();
+  await block.getByRole('button', { name: 'Edit', exact: true }).click();
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+  // The same proof-of-acceptance device the shapes/colors journey above
+  // documents: the host svg's id is a function of the SOURCE, and the editor
+  // only writes a new svg on a successful render — so a changed id means real
+  // mermaid parsed and drew the edited text.
+  const hostSvgId = () => host.locator('svg[id^="cerebro-mermaid-"]').getAttribute('id');
+  const source = page.getByLabel('Mermaid source');
+
+  // -- Shift-click two nodes, group them into a subgraph -----------------
+  // Pinned by node id, never by `g.node` nth: DOM order is mermaid's business,
+  // not a contract. Review and Done are joined by exactly one edge line, so the
+  // wrap is contiguous and `createSubgraph` moves nothing.
+  const beforeGroup = await hostSvgId();
+  await host
+    .locator('[id*="flowchart-Review-"]')
+    .first()
+    .click({ modifiers: ['Shift'] });
+  await host
+    .locator('[id*="flowchart-Done-"]')
+    .first()
+    .click({ modifiers: ['Shift'] });
+  await page.getByLabel('New subgraph title').fill('Grouped');
+  await page.getByRole('button', { name: 'Group into subgraph' }).click();
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeGroup);
+
+  await page.getByRole('button', { name: 'Show code' }).click();
+  // toHaveValue, not toContainText: the source pane is a <textarea>, whose
+  // textContent is its DEFAULT value — an assertion on it would pass or fail
+  // for reasons unrelated to what the user is looking at.
+  await expect(source).toHaveValue(/subgraph Grouped\[Grouped\]/);
+  await expect(source).toHaveValue(/\n\s*end\b/);
+  await expect(
+    page.getByTestId('mermaid-live-preview').locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('mermaid-edit-error')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show diagram' }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Insert a node with a shape, in one gesture ------------------------
+  const beforeInsert = await hostSvgId();
+  await page.getByRole('button', { name: '+ Shape' }).click();
+  await page.getByLabel('Search shapes').fill('hexagon');
+  await page.getByRole('button', { name: 'Shape: Hexagon' }).click();
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeInsert);
+  await page.getByRole('button', { name: 'Show code' }).click();
+  await expect(source).toHaveValue(/n1\{\{New step\}\}/);
+  await page.getByRole('button', { name: 'Show diagram' }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Put a lucide icon on Idea -----------------------------------------
+  const beforeIcon = await hostSvgId();
+  await host.locator('[id*="flowchart-Idea-"]').first().click();
+  await page.getByRole('button', { name: 'Node icon' }).click();
+  await page.getByLabel('Search icons').fill('rocket');
+  await page.getByRole('button', { name: 'Icon rocket' }).click();
+  // The render changed, so mermaid accepted `@{ icon: … }`. Whether the glyph
+  // itself won its race with the lazy pack fetch is not this test's business —
+  // an unresolved icon draws mermaid's own placeholder box, which is still a
+  // successful render (measured, icons.mermaid.test.ts).
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeIcon);
+  await page.getByRole('button', { name: 'Show code' }).click();
+  await expect(source).toHaveValue(/Idea@\{ icon: "lucide:rocket"/);
+  await expect(
+    page.getByTestId('mermaid-live-preview').locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('mermaid-edit-error')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show diagram' }).click();
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 15_000 });
+
+  // -- Bind Idea to a vault record, and follow the badge ------------------
+  // 'Ana Rios' is a Person record in the demo corpus (people/ana-rios.md), and
+  // a Person is a record, so `useOpenPath('in-place')` opens the detail panel
+  // rather than the doc canvas. The full title, not a stem: 'ana' is also a
+  // substring of 'Dana Fox'.
+  const beforeLink = await hostSvgId();
+  await host.locator('[id*="flowchart-Idea-"]').first().click();
+  await page.getByRole('button', { name: 'Node link' }).click();
+  await page.getByLabel('Link target').fill('Ana Rios');
+  await page.getByRole('button', { name: 'Link to Ana Rios' }).click();
+  await expect.poll(hostSvgId, { timeout: 15_000 }).not.toBe(beforeLink);
+
+  const badge = page.getByTestId('mermaid-link-badge').first();
+  await expect(badge).toBeVisible({ timeout: 15_000 });
+  await badge.click();
+  await expect(page.getByTestId('detail-panel')).toBeVisible();
+
+  // -- All four edits reached the (mock) disk through the doc's autosave --
+  await expect
+    .poll(() => page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md')), {
+      timeout: 15_000,
+    })
+    .toContain('click Idea "people/ana-rios.md"');
+  const raw2 = await page.evaluate(() => window.__cerebroMockFs.get('strategy/systems-map.md'));
+  expect(raw2).toContain('subgraph Grouped[Grouped]');
+  expect(raw2).toContain('n1{{New step}}');
+  expect(raw2).toContain('Idea@{ icon: "lucide:rocket"');
+});

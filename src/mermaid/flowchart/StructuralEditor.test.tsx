@@ -8,36 +8,50 @@ import { StructuralEditor } from './StructuralEditor';
 // module's own top-level consts would otherwise initialize — so the fixture
 // has to be declared through vi.hoisted() to exist by the time the factory
 // (which eagerly evaluates mockResolvedValue's argument) runs.
-const { FIXTURE_SVG, ANIMATED_SVG, CLUSTERED_SVG, NESTED_SVG, SLASH_SVG, BARE_SVG, override } =
-  vi.hoisted(() => {
-    const nodeEls = [
-      '<g class="node" id="flowchart-A-0"><rect width="10" height="10"/></g>',
-      '<g class="node" id="flowchart-B-1"><rect width="10" height="10"/></g>',
-      '<g class="node" id="flowchart-C-2"><rect width="10" height="10"/></g>',
-    ].join('');
-    // Cluster shape MEASURED on the bundled 11.16.0 (subgraphs.mermaid.test.ts):
-    // `<g class="cluster" id="<renderId>-<subgraphId>">`, holding its own rect,
-    // with node groups in a SIBLING layer rather than inside it.
-    const cluster = (id: string): string =>
-      `<g class="cluster" id="${id}"><rect width="120" height="80"/></g>`;
-    return {
-      FIXTURE_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
-      // A user-authored edge id renders VERBATIM as the path's own DOM id and
-      // the `L_<from>_<to>_<n>` path is not emitted at all (getEdgeId,
-      // utils.ts:946 — see svgBinding.ts). Carrying both here would let the
-      // animate toggle "prove" two-way behavior against a binding real mermaid
-      // never produces.
-      ANIMATED_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="e1"/></svg>`,
-      CLUSTERED_SVG: `<svg viewBox="0 0 300 150">${cluster('ops')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
-      NESTED_SVG: `<svg viewBox="0 0 300 150">${cluster('outer')}${cluster('inner')}${nodeEls}</svg>`,
-      SLASH_SVG: `<svg viewBox="0 0 300 150">${cluster('a/b')}${nodeEls}</svg>`,
-      // A BARE opener's effective id is its own title text — so the cluster's
-      // DOM id is `Operations`, not a generated ordinal.
-      BARE_SVG: `<svg viewBox="0 0 300 150">${cluster('Operations')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
-      /** Which svg the mocked renderer hands back next, when a test pins one. */
-      override: { svg: null as string | null },
-    };
-  });
+const {
+  FIXTURE_SVG,
+  ANIMATED_SVG,
+  CLUSTERED_SVG,
+  NESTED_SVG,
+  SLASH_SVG,
+  BARE_SVG,
+  ICON_SVG,
+  override,
+} = vi.hoisted(() => {
+  const nodeEls = [
+    '<g class="node" id="flowchart-A-0"><rect width="10" height="10"/></g>',
+    '<g class="node" id="flowchart-B-1"><rect width="10" height="10"/></g>',
+    '<g class="node" id="flowchart-C-2"><rect width="10" height="10"/></g>',
+  ].join('');
+  // Cluster shape MEASURED on the bundled 11.16.0 (subgraphs.mermaid.test.ts):
+  // `<g class="cluster" id="<renderId>-<subgraphId>">`, holding its own rect,
+  // with node groups in a SIBLING layer rather than inside it.
+  const cluster = (id: string): string =>
+    `<g class="cluster" id="${id}"><rect width="120" height="80"/></g>`;
+  return {
+    FIXTURE_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
+    // A user-authored edge id renders VERBATIM as the path's own DOM id and
+    // the `L_<from>_<to>_<n>` path is not emitted at all (getEdgeId,
+    // utils.ts:946 — see svgBinding.ts). Carrying both here would let the
+    // animate toggle "prove" two-way behavior against a binding real mermaid
+    // never produces.
+    ANIMATED_SVG: `<svg viewBox="0 0 200 100">${nodeEls}<path class="flowchart-link" id="e1"/></svg>`,
+    CLUSTERED_SVG: `<svg viewBox="0 0 300 150">${cluster('ops')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
+    NESTED_SVG: `<svg viewBox="0 0 300 150">${cluster('outer')}${cluster('inner')}${nodeEls}</svg>`,
+    SLASH_SVG: `<svg viewBox="0 0 300 150">${cluster('a/b')}${nodeEls}</svg>`,
+    // A BARE opener's effective id is its own title text — so the cluster's
+    // DOM id is `Operations`, not a generated ordinal.
+    BARE_SVG: `<svg viewBox="0 0 300 150">${cluster('Operations')}${nodeEls}<path class="flowchart-link" id="L_A_B_0"/></svg>`,
+    // How mermaid REALLY draws a node carrying an icon (MEASURED on the
+    // bundled 11.16.0, asserted in icons.mermaid.test.ts): the group's class
+    // is `icon-shape default`, not `node`, and its glyph hangs off an inner
+    // `icon-shape2` group with no id of its own. A's affordances have to
+    // survive that, because the control that removes the icon is one of them.
+    ICON_SVG: `<svg viewBox="0 0 200 100"><g class="icon-shape default" id="flowchart-A-0"><rect width="10" height="10"/><g class="icon-shape2"><path/></g></g><g class="node" id="flowchart-B-1"><rect width="10" height="10"/></g><path class="flowchart-link" id="L_A_B_0"/></svg>`,
+    /** Which svg the mocked renderer hands back next, when a test pins one. */
+    override: { svg: null as string | null },
+  };
+});
 
 vi.mock('../render', () => ({
   renderMermaid: vi.fn((code: string) =>
@@ -647,6 +661,88 @@ describe('StructuralEditor', () => {
     );
     expect(screen.queryByTestId('structural-toolbar')).toBeNull();
     expect(screen.getByTestId('structural-host')).toBeTruthy();
+  });
+
+  // M29.39: insert-with-a-shape. `+ Node` mints a rectangle; this mints
+  // whatever the palette was pointed at, and the two ops travel together.
+  it('+ Shape inserts a node of the chosen shape in ONE undo step', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={'flowchart TD\n  A[Start]'} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Shape: Hexagon' }));
+    // addNode + setNodeShape composed into a single apply: one emission is one
+    // BlockNote history entry, so one Cmd+Z takes the whole insertion back
+    // rather than leaving a stray rectangle behind (spec D10).
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    const out = onChangeCode.mock.calls[0][0] as string;
+    // The brackets, rewritten in place on the line addNode just minted — not a
+    // second `@{ shape: hex }` line for a node whose definition we own.
+    expect(out).toBe('flowchart TD\n  A[Start]\n  n1{{New step}}');
+  });
+
+  // The defect M29.39's e2e found in M29.35's icon control: an icon node is
+  // not a `g.node`, so binding on that class alone left the node with no
+  // toolbar, no rename, no delete, no badge — and no way back, since "Remove
+  // icon" lives behind the selection the icon had just destroyed.
+  it('a node mermaid drew as an icon shape is still selectable, and un-iconable', async () => {
+    mockSvg(ICON_SVG);
+    const onChangeCode = vi.fn();
+    render(
+      <StructuralEditor
+        code={'flowchart TD\n  A[Start] --> B[End]\n  A@{ icon: "lucide:rocket" }'}
+        onChangeCode={onChangeCode}
+      />,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    expect(screen.getByTestId('mermaid-node-toolbar')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove icon' }));
+    expect(onChangeCode).toHaveBeenCalledTimes(1);
+    expect(onChangeCode.mock.calls[0][0] as string).not.toContain('icon');
+  });
+
+  it('the insert trigger announces the popover it owns, and toggles it shut', async () => {
+    render(<StructuralEditor code={'flowchart TD\n  A[Start]'} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    const trigger = screen.getByRole('button', { name: '+ Shape' });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await userEvent.click(trigger);
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+ Shape' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    // The palette's own click-away treats its anchor as inside, so without a
+    // toggle here a second press on the trigger would re-open what it just
+    // closed and the surface could never be dismissed from the button.
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    expect(screen.queryByTestId('shape-palette')).toBeNull();
+  });
+
+  it('opening the insert palette closes a node popover, and vice versa', async () => {
+    render(<StructuralEditor code={'flowchart TD\n  A[Start]'} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    expect(screen.getByTestId('mermaid-icon-picker')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    expect(screen.queryByTestId('mermaid-icon-picker')).toBeNull();
+    expect(screen.getByTestId('shape-palette')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Node icon' }));
+    expect(screen.queryByTestId('shape-palette')).toBeNull();
+    expect(screen.getByTestId('mermaid-icon-picker')).toBeTruthy();
+  });
+
+  it('opening the insert palette and closing it again is a TRUE no-op', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={'flowchart TD\n  A[Start]'} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: '+ Shape' }));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByTestId('shape-palette')).toBeNull();
+    expect(onChangeCode).not.toHaveBeenCalled();
   });
 });
 

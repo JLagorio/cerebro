@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import mermaid from 'mermaid';
 import { parseFlowchart, serialize } from './model';
 import { setNodeIcon } from './ops';
+import { NODE_GROUP_SELECTOR } from './svgBinding';
 
 /**
  * Conformance, not unit testing (M29.35) — the icon twin of
@@ -221,6 +222,40 @@ describe('icon conformance (M29.35)', () => {
       ]);
       const registered = await renderOk(CODE);
       for (const d of paths) expect(registered.includes(d), `registered lost ${d}`).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  /**
+   * The claim M29.35 never made and M29.39 had to pay for: an icon node is
+   * still a node the EDITOR can reach.
+   *
+   * Mermaid draws it as `<g class="icon-shape default">`, never `g.node` — all
+   * four icon handlers pass that literal to labelHelper (icon.ts:22,
+   * iconSquare.ts:26, iconCircle.ts:22, iconRounded.ts:26). `svgBinding`
+   * matched `g.node` alone, so putting an icon on a node deleted every canvas
+   * affordance it had, the one that removes the icon included. The id scheme is
+   * unchanged, which is why the fix is a selector and not a new contract; this
+   * asserts the selector against real output so a version that renames the
+   * class fails here rather than in the app.
+   */
+  it(
+    'an icon node is still bindable — mermaid draws it as g.icon-shape, not g.node',
+    async () => {
+      init();
+      for (const form of ['square', 'circle', 'rounded']) {
+        const svg = await renderOk(
+          `flowchart TD\n  A[Start] --> B\n  A@{ icon: "lucide:rocket", form: ${form} }`,
+        );
+        const host = document.createElement('div');
+        // Test fixture: mermaid's own sanitized output, rendered above.
+        host.innerHTML = svg;
+        const group = [...host.querySelectorAll('g[id]')].find((g) =>
+          (g.getAttribute('id') ?? '').includes('flowchart-A-'),
+        );
+        expect(group?.getAttribute('class'), form).toBe('icon-shape default');
+        expect(host.querySelectorAll(NODE_GROUP_SELECTOR).length, form).toBe(2);
+      }
     },
     TIMEOUT,
   );
