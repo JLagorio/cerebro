@@ -97,59 +97,44 @@ impl RunResult {
 }
 
 /// The batch a closing window commits, in commit order.
+///
+/// Ids are the WRITER's to mint. The outcome is member 0 and every successor
+/// names it with `writer::member_ref(0)`, which `append_batch` substitutes
+/// after preallocation and before validation. An earlier draft of this module
+/// derived its own outcome event id; the writer would have ignored it, the
+/// successors would have named an event that does not exist, and the whole
+/// closure would have been refused at commit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
-    pub batch_id: String,
-    /// Preallocated, because the successors have to NAME it and the writer
-    /// only mints an id at append time. Derived from the assessment id, so
-    /// rebuilding this closure lands on the same event rather than a second
-    /// one — which is what makes a retry of an uncertain commit safe.
-    pub outcome_event_id: String,
-    /// Commit FIRST.
+    /// Commit FIRST — its ordinal (0) is what the successors reference.
     pub outcome: IngestSemanticAssessed,
     /// Commit after the outcome, one per input receipt.
     pub successors: Vec<IngestAssessed>,
+    /// The `append_batch` operation key: same window, same key, so a retry of
+    /// an uncertain commit replays rather than appending a second closure.
+    pub operation_key: String,
 }
 
 impl Closure {
-    /// Members in the order they must be appended, each with the event id the
-    /// writer must use (`None` = mint one).
-    pub fn members(&self) -> Vec<(&'static str, serde_json::Value, Option<String>)> {
+    /// Members in the order `append_batch` must receive them.
+    pub fn members(&self) -> Vec<(String, serde_json::Value)> {
         let mut out = vec![(
-            schema::KIND_INGEST_SEMANTIC_ASSESSED,
+            schema::KIND_INGEST_SEMANTIC_ASSESSED.to_string(),
             serde_json::to_value(&self.outcome).expect("schema body serializes"),
-            Some(self.outcome_event_id.clone()),
         )];
         for successor in &self.successors {
             out.push((
-                schema::KIND_INGEST_ASSESSED,
+                schema::KIND_INGEST_ASSESSED.to_string(),
                 serde_json::to_value(successor).expect("schema body serializes"),
-                None,
             ));
         }
         out
     }
 }
 
-/// `sha256_first128("m26-outcome-event-v1" | assessment id)`.
-fn outcome_event_id_for(assessment_id: &str) -> String {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"m26-outcome-event-v1");
-    bytes.push(0);
-    bytes.extend_from_slice(assessment_id.as_bytes());
-    schema::sha256_first128(&bytes)
-}
-
-/// `sha256_first128("m26-close-batch-v1" | assessment id)` — one batch per
-/// window, derived so a retry of the same closure reuses the same marker
-/// rather than opening a second one.
-fn batch_id_for(assessment_id: &str) -> String {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(b"m26-close-batch-v1");
-    bytes.push(0);
-    bytes.extend_from_slice(assessment_id.as_bytes());
-    schema::sha256_first128(&bytes)
-}
+/// The ordinal the outcome occupies. Named because the successors reference
+/// it and a bare `0` in three places is three chances to drift.
+pub const OUTCOME_ORDINAL: usize = 0;
 
 /// Build the closure for one window.
 ///
@@ -185,9 +170,7 @@ pub fn close(
     }
 
     let outcome_kind = result.outcome();
-    let batch_id = batch_id_for(&window.assessment_id);
-    let outcome_event_id = outcome_event_id_for(&window.assessment_id);
-    let outcome = build_outcome(window, &batch_id, actor, result)?;
+    let outcome = build_outcome(window, actor, result)?;
     outcome.validate().map_err(|e| format!("outcome: {e}"))?;
 
     // Sorted, so the batch's member order is a function of the window and not
@@ -198,25 +181,19 @@ pub fn close(
     let route = result.successor_route();
     let mut successors = Vec::with_capacity(ordered.len());
     for item in ordered {
-        let receipt = build_successor(
-            store_id,
-            item,
-            window,
-            &batch_id,
-            &outcome_event_id,
-            chain_head,
-            actor,
-            route,
-        );
-        receipt
+        let receipt = build_successor(store_id, item, window, chain_head, actor, route);
+        // Validated with the member ref standing in for the id the writer
+        // will substitute: the shape is checkable now, the id is not.
+        let mut shape = receipt.clone();
+        shape.m26_outcome_event_id = Some("0".repeat(32));
+        shape
             .validate()
             .map_err(|e| format!("successor for {}: {e}", item.receipt_id))?;
         successors.push(receipt);
     }
     debug_assert_eq!(outcome_kind, outcome.outcome);
     Ok(Closure {
-        batch_id,
-        outcome_event_id,
+        operation_key: format!("m26-close-v1:{}", window.assessment_id),
         outcome,
         successors,
     })
@@ -224,7 +201,6 @@ pub fn close(
 
 fn build_outcome(
     window: &Window,
-    batch_id: &str,
     actor: &str,
     result: &RunResult,
 ) -> Result<IngestSemanticAssessed, String> {
@@ -266,7 +242,8 @@ fn build_outcome(
     let outcome = result.outcome();
     let mut body = IngestSemanticAssessed {
         schema: schema::BODY_SCHEMA,
-        batch_id: Some(batch_id.to_string()),
+        // The writer stamps the batch id it minted.
+        batch_id: None,
         idempotency_key: None,
         actor: Actor {
             id: actor.to_string(),
@@ -297,15 +274,10 @@ fn build_outcome(
     Ok(body)
 }
 
-#[allow(clippy::too_many_arguments)] // Every one is a distinct fact a
-                                     // successor receipt has to restate; bundling them into a struct would move
-                                     // the argument list rather than shorten it.
 fn build_successor(
     store_id: &str,
     item: &QueuedItem,
     window: &Window,
-    batch_id: &str,
-    outcome_event_id: &str,
     chain_head: &str,
     actor: &str,
     route: Route,
@@ -315,7 +287,7 @@ fn build_successor(
     observations.dedup();
     let mut body = IngestAssessed {
         schema: schema::BODY_SCHEMA,
-        batch_id: Some(batch_id.to_string()),
+        batch_id: None,
         idempotency_key: None,
         actor: Actor {
             id: actor.to_string(),
@@ -354,7 +326,7 @@ fn build_successor(
         observation_event_ids: observations,
         proposal_ids: Vec::new(),
         m26_batch_key: Some(window.batch_key.clone()),
-        m26_outcome_event_id: Some(outcome_event_id.to_string()),
+        m26_outcome_event_id: Some(crate::ledger::writer::member_ref(OUTCOME_ORDINAL)),
         supersedes_receipt_id: Some(item.receipt_id.clone()),
     };
     body.idempotency_key = Some(body.idempotency());
@@ -492,18 +464,17 @@ mod tests {
         .unwrap();
         let members = closure.members();
         assert_eq!(members[0].0, schema::KIND_INGEST_SEMANTIC_ASSESSED);
-        assert_eq!(
-            members[0].2.as_deref(),
-            Some(closure.outcome_event_id.as_str())
-        );
         assert!(members[1..]
             .iter()
-            .all(|(kind, _, id)| *kind == schema::KIND_INGEST_ASSESSED && id.is_none()));
-        // Every successor names the outcome that precedes it.
+            .all(|(kind, _)| kind == schema::KIND_INGEST_ASSESSED));
+        // Every successor names the outcome by ORDINAL. The writer mints the
+        // ids and substitutes the refs; a closure that carried its own would
+        // point at an event nothing ever writes.
+        let expected = crate::ledger::writer::member_ref(OUTCOME_ORDINAL);
         assert!(closure
             .successors
             .iter()
-            .all(|s| s.m26_outcome_event_id.as_deref() == Some(closure.outcome_event_id.as_str())));
+            .all(|s| s.m26_outcome_event_id.as_deref() == Some(expected.as_str())));
     }
 
     #[test]
@@ -623,29 +594,26 @@ mod tests {
             let closure =
                 close(STORE, &plan.window.unwrap(), &items, HEAD, ACTOR, &result).unwrap();
             closure.outcome.validate().unwrap();
-            assert_eq!(
-                closure.outcome.batch_id.as_deref(),
-                Some(closure.batch_id.as_str())
-            );
+            // Batch ids are the writer's. A closure that pre-stamped one
+            // would simply be overwritten at `append_batch`.
+            assert_eq!(closure.outcome.batch_id, None);
             for successor in &closure.successors {
-                successor.validate().unwrap();
-                assert_eq!(
-                    successor.batch_id.as_deref(),
-                    Some(closure.batch_id.as_str())
-                );
+                assert_eq!(successor.batch_id, None);
             }
         }
     }
 
     #[test]
-    fn closing_the_same_window_twice_builds_the_same_batch_marker() {
-        // A retry of a closure that may or may not have committed must reuse
-        // the marker rather than opening a second one.
+    fn closing_the_same_window_twice_builds_the_same_operation_key() {
+        // A retry of a closure that may or may not have committed must REPLAY
+        // through `append_batch`'s operation key rather than appending a
+        // second closure for the same window.
         let (plan, items) = fixture(2);
         let window = plan.window.unwrap();
         let first = close(STORE, &window, &items, HEAD, ACTOR, &material()).unwrap();
         let second = close(STORE, &window, &items, HEAD, ACTOR, &material()).unwrap();
-        assert_eq!(first.batch_id, second.batch_id);
+        assert_eq!(first.operation_key, second.operation_key);
+        assert!(first.operation_key.contains(&window.assessment_id));
         assert_eq!(first, second);
     }
 

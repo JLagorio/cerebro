@@ -4935,4 +4935,228 @@ mod tests {
         let second = reduce(&read.frames, &rig.store_id);
         assert_eq!(first, second);
     }
+
+    /// The round trip M26.4d's unit tests cannot reach: a closure built by
+    /// `ingest::outcome` goes through the REAL writer and the REAL reducer.
+    ///
+    /// This is the test that catches an id the writer would have overwritten.
+    /// An earlier draft derived its own outcome event id; every unit test
+    /// passed, `append_batch` minted different ids, and the successors would
+    /// have named an event nothing ever wrote. Here that is a refusal.
+    #[test]
+    fn a_window_closure_commits_through_the_writer_and_reduces() {
+        use crate::ingest::outcome::{self, QueuedItem, RunResult};
+        use crate::ingest::window::{self, Assessed};
+
+        let mut rig = Rig::new("m26-closure-roundtrip");
+        let source = rig.human_source("human:josef");
+        let store = rig.store_id.clone();
+
+        // A changed item commits its Observation and its queued receipt as
+        // ONE batch — M25.3's association guarantee.
+        let item_id = schema::derive_item_id(&store, &source.0, "records/a.md");
+        let queued_receipt_id = schema::derive_receipt_id(
+            &store,
+            &source.0,
+            &item_id,
+            &"a".repeat(64),
+            "vault-entry-v1",
+            0,
+            schema::Route::M26Queued,
+        );
+        let observation = observation(
+            ObservationKind::HumanAssertion,
+            &source,
+            "human:josef",
+            SubjectRef::Unresolved {
+                raw_ref: "Alpha".into(),
+                aliases: vec!["alpha".into()],
+            },
+            vec![],
+            human_payload(AssertionBasis::Firsthand),
+        );
+        let queued = schema::IngestAssessed {
+            schema: BODY_SCHEMA,
+            batch_id: None,
+            idempotency_key: None,
+            actor: Actor {
+                id: "system:prefilter".into(),
+            },
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            receipt_id: queued_receipt_id.clone(),
+            item_id: item_id.clone(),
+            source_id: source.0.clone(),
+            source_record_id: None,
+            artifact_hash: "a".repeat(64),
+            normalized_snapshot_hash: "b".repeat(64),
+            normalizer_version: "vault-entry-v1".into(),
+            processing_epoch: 0,
+            assessed_against_chain_head: "c".repeat(64),
+            prefilter_verdict: schema::PrefilterVerdict::NeedsSemanticJudgment,
+            material_dimensions: vec![],
+            independence: schema::Independence::IndependenceUnknown,
+            route: schema::Route::M26Queued,
+            observation_event_ids: vec![member_ref(0)],
+            proposal_ids: vec![],
+            m26_batch_key: None,
+            m26_outcome_event_id: None,
+            supersedes_receipt_id: None,
+        };
+        // The window key the planner will mint, stamped on the receipt.
+        let batch_key =
+            schema::derive_m26_batch_key(&store, std::slice::from_ref(&queued_receipt_id));
+        let mut queued = queued;
+        queued.m26_batch_key = Some(batch_key.clone());
+        rig.writer
+            .append_batch(
+                vec![
+                    (
+                        schema::KIND_OBSERVATION_RECORDED.to_string(),
+                        serde_json::to_value(&observation).unwrap(),
+                    ),
+                    (
+                        schema::KIND_INGEST_ASSESSED.to_string(),
+                        serde_json::to_value(&queued).unwrap(),
+                    ),
+                ],
+                None,
+            )
+            .unwrap();
+
+        let observation_event_id = rig
+            .state()
+            .observations
+            .keys()
+            .next()
+            .expect("the observation committed")
+            .clone();
+
+        // Plan the window from the assessment, exactly as the driver will.
+        let plan = window::plan(
+            &store,
+            &[Assessed {
+                receipt_id: queued_receipt_id.clone(),
+                item_id: item_id.clone(),
+                route: schema::Route::M26Queued,
+            }],
+        )
+        .unwrap();
+        let planned = plan.window.expect("one item needs a model");
+        assert_eq!(planned.batch_key, batch_key);
+
+        let closure = outcome::close(
+            &store,
+            &planned,
+            &[QueuedItem {
+                receipt_id: queued_receipt_id.clone(),
+                item_id,
+                source_id: source.0.clone(),
+                source_record_id: None,
+                artifact_hash: "a".repeat(64),
+                normalized_snapshot_hash: "b".repeat(64),
+                normalizer_version: "vault-entry-v1".into(),
+                processing_epoch: 0,
+                prefilter_verdict: schema::PrefilterVerdict::NeedsSemanticJudgment,
+                independence: schema::Independence::IndependenceUnknown,
+                observation_event_ids: vec![observation_event_id],
+            }],
+            &"c".repeat(64),
+            "agent:m26-ingest",
+            &RunResult::NonMaterial {
+                evaluated_dimensions: vec![schema::MaterialDimension::WorldState],
+                explanation: "a heading was renamed".into(),
+            },
+        )
+        .unwrap();
+
+        rig.writer
+            .append_batch(closure.members(), Some(&closure.operation_key))
+            .expect("the closure commits");
+
+        let state = rig.state();
+        assert!(state.anomalies.is_empty(), "{:?}", state.anomalies);
+        let assessment = state
+            .semantic_assessments
+            .get(&planned.assessment_id)
+            .expect("the outcome reduced");
+        assert_eq!(assessment.outcome, schema::SemanticOutcome::NonMaterial);
+        assert_eq!(
+            assessment.input_receipt_ids,
+            vec![queued_receipt_id.clone()]
+        );
+        assert!(
+            state.ingest_receipts[&queued_receipt_id].superseded,
+            "the parked item is closed out"
+        );
+        // And nothing about the assessment is a versioned target.
+        assert!(state
+            .versions
+            .keys()
+            .all(|(class, _)| class != "semantic_assessment"));
+    }
+
+    /// The same closure appended twice REPLAYS rather than committing a
+    /// second one — a retry after an uncertain commit must not double-close.
+    #[test]
+    fn re_appending_a_closure_replays_on_its_operation_key() {
+        use crate::ingest::outcome::{self, QueuedItem, RunResult};
+
+        let mut rig = Rig::new("m26-closure-replay");
+        let source = rig.human_source("human:josef");
+        let store = rig.store_id.clone();
+        let item_id = schema::derive_item_id(&store, &source.0, "records/a.md");
+        let receipt_id = schema::derive_receipt_id(
+            &store,
+            &source.0,
+            &item_id,
+            &"a".repeat(64),
+            "vault-entry-v1",
+            0,
+            schema::Route::M26Queued,
+        );
+        let batch_key = schema::derive_m26_batch_key(&store, std::slice::from_ref(&receipt_id));
+        let window = crate::ingest::window::Window {
+            batch_key: batch_key.clone(),
+            assessment_id: schema::derive_semantic_assessment_id(&store, &batch_key),
+            input_receipt_ids: vec![receipt_id.clone()],
+        };
+        let closure = outcome::close(
+            &store,
+            &window,
+            &[QueuedItem {
+                receipt_id,
+                item_id,
+                source_id: source.0.clone(),
+                source_record_id: None,
+                artifact_hash: "a".repeat(64),
+                normalized_snapshot_hash: "b".repeat(64),
+                normalizer_version: "vault-entry-v1".into(),
+                processing_epoch: 0,
+                prefilter_verdict: schema::PrefilterVerdict::NeedsSemanticJudgment,
+                independence: schema::Independence::IndependenceUnknown,
+                observation_event_ids: vec!["e".repeat(32)],
+            }],
+            &"c".repeat(64),
+            "agent:m26-ingest",
+            &RunResult::Blocked {
+                reason: schema::BlockedReason::RuntimeUnavailable,
+                evaluated_dimensions: vec![],
+                explanation: "the session did not start".into(),
+            },
+        )
+        .unwrap();
+
+        let first = rig
+            .writer
+            .append_batch(closure.members(), Some(&closure.operation_key))
+            .unwrap();
+        let second = rig
+            .writer
+            .append_batch(closure.members(), Some(&closure.operation_key))
+            .unwrap();
+        assert!(!first.replayed);
+        assert!(second.replayed, "the same window does not close twice");
+    }
 }
