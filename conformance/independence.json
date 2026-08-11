@@ -1077,6 +1077,7 @@
     "coverage_assessments": {},
     "coverage_gaps": {},
     "ingest_receipts": {},
+    "semantic_assessments": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

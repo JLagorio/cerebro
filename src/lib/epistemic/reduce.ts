@@ -212,6 +212,16 @@ export interface IngestReceiptRow {
   processingEpoch: number;
   route: string;
   superseded: boolean;
+  m26BatchKey: string | null;
+}
+
+/** One committed `ingest.semantic_assessed` outcome (M26.4). */
+export interface SemanticAssessmentRow {
+  semanticAssessmentId: string;
+  m26BatchKey: string;
+  inputReceiptIds: string[];
+  outcome: string;
+  proposalIds: string[];
 }
 
 export interface EpistemicState {
@@ -237,6 +247,14 @@ export interface EpistemicState {
    * parent, or a derived-content source.
    */
   ingestReceipts: Map<string, IngestReceiptRow>;
+  /**
+   * M26.4's semantic dispositions, keyed by assessment id — one per settled
+   * window. Holding an id IS the "already assessed, do not spend again" fact,
+   * because the id is derived from the window.
+   */
+  semanticAssessments: Map<string, SemanticAssessmentRow>;
+  /** Event id → assessment id: a successor receipt names the EVENT. */
+  semanticByEvent: Map<string, string>;
   /** M25.4's coverage record — facts, assessments, and gaps, uncollapsed. */
   coverageFacts: Map<string, CoverageFactRow>;
   coverageAssessments: Map<string, CoverageAssessmentRow>;
@@ -272,6 +290,8 @@ function emptyState(): EpistemicState {
     relationAddEvents: new Map(),
     proposals: new Map(),
     ingestReceipts: new Map(),
+    semanticAssessments: new Map(),
+    semanticByEvent: new Map(),
     coverageFacts: new Map(),
     coverageAssessments: new Map(),
     coverageGaps: new Map(),
@@ -519,6 +539,8 @@ function apply(
       return applyProposalReverted(state, frame, body);
     case 'ingest.assessed':
       return applyIngestAssessed(state, frame, body, staged);
+    case 'ingest.semantic_assessed':
+      return applyIngestSemanticAssessed(state, frame, body);
     case 'coverage.fact_recorded':
       return applyCoverageFact(state, frame, body);
     case 'coverage.assessed':
@@ -604,6 +626,7 @@ function applyIngestAssessed(
       throw new RefusedError('a successor receipt must describe the same source item');
     }
   }
+  checkReceiptAgainstOutcome(state, body);
   if (body.independence === 'known_independent' && state.independence.size === 0) {
     throw new RefusedError(
       'a receipt claims known_independent and this store holds no independence record',
@@ -624,8 +647,112 @@ function applyIngestAssessed(
     processingEpoch: body.processing_epoch as number,
     route,
     superseded: false,
+    m26BatchKey: body.m26_batch_key as string | null,
   });
   createVersion(state, 'ingest_receipt', receiptId, frame.event_id);
+}
+
+/**
+ * The successor half of the receipt (M26.4): an `m26_completed` or
+ * `failed_visible` receipt names the semantic outcome that closed it, and the
+ * two have to agree about what happened. The twin of
+ * `check_receipt_against_outcome` in `ledger/reduce.rs`.
+ */
+function checkReceiptAgainstOutcome(state: EpistemicState, body: JsonObject): void {
+  const eventId = body.m26_outcome_event_id as string | null;
+  if (eventId === null) return;
+  const assessmentId = state.semanticByEvent.get(eventId);
+  if (assessmentId === undefined) {
+    throw new RefusedError(
+      `receipt names outcome event ${eventId}, which is not a committed semantic assessment — ` +
+        'an outcome is applied before the receipts it closes, including inside its own batch',
+    );
+  }
+  const outcome = state.semanticAssessments.get(assessmentId) as SemanticAssessmentRow;
+  const routeExpectsBlock = body.route === 'failed_visible';
+  if (routeExpectsBlock !== (outcome.outcome === 'undetermined')) {
+    throw new RefusedError(
+      `route ${String(body.route)} cannot close on outcome ${outcome.outcome} — a blocked ` +
+        'window closes as failed_visible and a decided one as m26_completed',
+    );
+  }
+  if (body.m26_batch_key !== outcome.m26BatchKey) {
+    throw new RefusedError(
+      `receipt is on window ${JSON.stringify(body.m26_batch_key)} and the outcome it names ` +
+        `decided window ${JSON.stringify(outcome.m26BatchKey)}`,
+    );
+  }
+  const supersedes = body.supersedes_receipt_id as string | null;
+  if (supersedes !== null && !outcome.inputReceiptIds.includes(supersedes)) {
+    throw new RefusedError(
+      `receipt supersedes ${supersedes}, which was not an input to the outcome it names — ` +
+        'a window closes only the items it read',
+    );
+  }
+  const extra = (body.proposal_ids as string[]).find((id) => !outcome.proposalIds.includes(id));
+  if (extra !== undefined) {
+    throw new RefusedError(
+      `receipt claims proposal ${extra}, which its semantic outcome did not submit`,
+    );
+  }
+}
+
+/**
+ * `ingest.semantic_assessed` (M26.4) — what one semantic run concluded about
+ * one settled window.
+ *
+ * Association only, exactly like the receipt it succeeds. Note what is NOT
+ * here: no version is created or bumped. `semantic_assessment_id` is an
+ * idempotent history key, not a CAS target, and being mentioned by history is
+ * not a state change.
+ */
+function applyIngestSemanticAssessed(
+  state: EpistemicState,
+  frame: VectorFrame,
+  body: JsonObject,
+): void {
+  const assessmentId = body.semantic_assessment_id as string;
+  const window = body.m26_batch_key as string;
+  if (state.semanticAssessments.has(assessmentId)) {
+    throw new RefusedError(
+      `window ${window} has already been assessed — one semantic run per settled window, and ` +
+        'the assessment id is derived from the window so a second run cannot pretend otherwise',
+    );
+  }
+  for (const id of body.input_receipt_ids as string[]) {
+    const receipt = state.ingestReceipts.get(id);
+    if (receipt === undefined) {
+      throw new RefusedError(`outcome names input receipt ${id}, which was never committed`);
+    }
+    if (receipt.route !== 'm26_queued') {
+      throw new RefusedError(
+        `input receipt ${id} is ${receipt.route}, and only a queued receipt is waiting on a ` +
+          'semantic run',
+      );
+    }
+    if (receipt.superseded) {
+      throw new RefusedError(`input receipt ${id} was already closed out by an earlier successor`);
+    }
+    if (receipt.m26BatchKey !== window) {
+      throw new RefusedError(
+        `input receipt ${id} is parked on window ${JSON.stringify(receipt.m26BatchKey)}, not ` +
+          `on ${window}`,
+      );
+    }
+  }
+  for (const id of body.proposal_ids as string[]) {
+    if (!state.proposals.has(id)) {
+      throw new RefusedError(`outcome names proposal ${id}, which was never submitted`);
+    }
+  }
+  state.semanticAssessments.set(assessmentId, {
+    semanticAssessmentId: assessmentId,
+    m26BatchKey: window,
+    inputReceiptIds: body.input_receipt_ids as string[],
+    outcome: body.outcome as string,
+    proposalIds: body.proposal_ids as string[],
+  });
+  state.semanticByEvent.set(frame.event_id, assessmentId);
 }
 
 // --- M25.4 coverage ---------------------------------------------------------
@@ -2202,6 +2329,19 @@ export function vectorState(state: EpistemicState): Json {
           processing_epoch: r.processingEpoch,
           route: r.route,
           superseded: r.superseded,
+          m26_batch_key: r.m26BatchKey,
+        };
+      }
+      return out;
+    })(),
+    semantic_assessments: (() => {
+      const out: JsonObject = {};
+      for (const [, a] of sorted([...state.semanticAssessments.entries()])) {
+        out[a.semanticAssessmentId] = {
+          m26_batch_key: a.m26BatchKey,
+          input_receipt_ids: a.inputReceiptIds,
+          outcome: a.outcome,
+          proposal_ids: a.proposalIds,
         };
       }
       return out;

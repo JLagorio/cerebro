@@ -155,6 +155,22 @@ pub struct IngestReceiptState {
     /// A later receipt superseded this one (an M26 completion or a visible
     /// failure closing out a queued row).
     pub superseded: bool,
+    /// The window this receipt was parked on, for the `m26_queued` route.
+    pub m26_batch_key: Option<String>,
+}
+
+/// One committed `ingest.semantic_assessed` outcome, reduced (M26.4).
+///
+/// Processing history and nothing else. It is indexed so a later receipt can
+/// be checked against it and so recovery can tell a closed window from an
+/// abandoned one — never so anything can read it as evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticAssessmentRow {
+    pub semantic_assessment_id: String,
+    pub m26_batch_key: String,
+    pub input_receipt_ids: Vec<String>,
+    pub outcome: schema::SemanticOutcome,
+    pub proposal_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -573,6 +589,13 @@ pub struct EpistemicState {
     /// `(source_id, item_id)` → the latest receipt for that item, so recovery
     /// does not have to scan every receipt in the store.
     pub ingest_latest: BTreeMap<(String, String), String>,
+    /// M26.4's semantic dispositions, keyed by `semantic_assessment_id`. One
+    /// per settled window, and the key is derived from the window — so this
+    /// map holding an id IS the "already assessed, do not spend again" fact.
+    pub semantic_assessments: BTreeMap<String, SemanticAssessmentRow>,
+    /// Event id → assessment id. A successor receipt names the EVENT, and
+    /// has to be checked against what that event concluded.
+    pub semantic_by_event: BTreeMap<String, String>,
 }
 
 impl EpistemicState {
@@ -867,6 +890,7 @@ fn apply(
         EventBody::ProposalRejected(b) => apply_proposal_rejected(state, frame, b),
         EventBody::ProposalReverted(b) => apply_proposal_reverted(state, frame, b),
         EventBody::IngestAssessed(b) => apply_ingest_assessed(state, frame, b, staged),
+        EventBody::IngestSemanticAssessed(b) => apply_ingest_semantic_assessed(state, frame, b),
         EventBody::CoverageFactRecorded(b) => apply_coverage_fact(state, frame, b),
         EventBody::CoverageAssessed(b) => apply_coverage_assessed(state, frame, b, staged),
         EventBody::CoverageGap(b) => apply_coverage_gap(state, frame, b, staged),
@@ -1397,6 +1421,7 @@ fn apply_ingest_assessed(
             ));
         }
     }
+    check_receipt_against_outcome(state, body)?;
     // Corroboration needs a POSITIVE recorded independence edge somewhere in
     // this store; the schema layer already refuses the unknown case, and this
     // is the state-dependent half.
@@ -1425,6 +1450,7 @@ fn apply_ingest_assessed(
             processing_epoch: body.processing_epoch,
             route: body.route,
             superseded: false,
+            m26_batch_key: body.m26_batch_key.clone(),
         },
     );
     state.ingest_latest.insert(
@@ -1432,6 +1458,153 @@ fn apply_ingest_assessed(
         body.receipt_id.clone(),
     );
     state.create_version("ingest_receipt", &body.receipt_id, &frame.event_id);
+    Ok(())
+}
+
+/// The successor half of the receipt: an `m26_completed` or `failed_visible`
+/// receipt names the semantic outcome that closed it, and the two have to
+/// agree about what happened (M26.4).
+///
+/// The schema layer already made the field mandatory for those two routes.
+/// What it cannot see is whether the event exists, whether it concluded what
+/// the route claims, whether it was even about this window, and whether the
+/// run ever looked at the item being closed. All four are checked here, and
+/// each one is a way a real window could be closed out by an outcome that
+/// says something else.
+fn check_receipt_against_outcome(
+    state: &EpistemicState,
+    body: &schema::IngestAssessed,
+) -> Result<(), Refusal> {
+    let Some(event_id) = &body.m26_outcome_event_id else {
+        return Ok(());
+    };
+    let Some(assessment_id) = state.semantic_by_event.get(event_id) else {
+        return Err(refused(format!(
+            "receipt names outcome event {event_id}, which is not a committed semantic \
+             assessment — an outcome is applied before the receipts it closes, including \
+             inside its own batch"
+        )));
+    };
+    let outcome = state
+        .semantic_assessments
+        .get(assessment_id)
+        .expect("indexed by event id above");
+
+    let route_expects_block = body.route == schema::Route::FailedVisible;
+    let outcome_blocked = outcome.outcome == schema::SemanticOutcome::Undetermined;
+    if route_expects_block != outcome_blocked {
+        return Err(refused(format!(
+            "route {} cannot close on outcome {} — a blocked window closes as failed_visible \
+             and a decided one as m26_completed",
+            body.route.as_str(),
+            outcome.outcome.as_str()
+        )));
+    }
+    if body.m26_batch_key.as_deref() != Some(outcome.m26_batch_key.as_str()) {
+        return Err(refused(format!(
+            "receipt is on window {:?} and the outcome it names decided window {:?}",
+            body.m26_batch_key, outcome.m26_batch_key
+        )));
+    }
+    // The receipt supersedes a queued row; that row has to be one the run
+    // actually consumed. Otherwise a window's outcome could close out an item
+    // nobody looked at, which is the quiet version of losing work.
+    if let Some(prior_id) = &body.supersedes_receipt_id {
+        if !outcome.input_receipt_ids.contains(prior_id) {
+            return Err(refused(format!(
+                "receipt supersedes {prior_id}, which was not an input to the outcome it \
+                 names — a window closes only the items it read"
+            )));
+        }
+    }
+    if let Some(extra) = body
+        .proposal_ids
+        .iter()
+        .find(|id| !outcome.proposal_ids.contains(id))
+    {
+        return Err(refused(format!(
+            "receipt claims proposal {extra}, which its semantic outcome did not submit"
+        )));
+    }
+    Ok(())
+}
+
+/// `ingest.semantic_assessed` (M26.4) — what one semantic run concluded about
+/// one settled window.
+///
+/// Every check here is about ASSOCIATION, exactly like the receipt it
+/// succeeds: do these inputs exist, were they really parked for this window,
+/// and were the proposals it claims really submitted. Nothing here reads as a
+/// statement about the world, and nothing here advances a version — see the
+/// closing comment, which is load-bearing.
+fn apply_ingest_semantic_assessed(
+    state: &mut EpistemicState,
+    frame: &Frame,
+    body: &schema::IngestSemanticAssessed,
+) -> Result<(), Refusal> {
+    if state
+        .semantic_assessments
+        .contains_key(&body.semantic_assessment_id)
+    {
+        return Err(refused(format!(
+            "window {} has already been assessed — one semantic run per settled window, and \
+             the assessment id is derived from the window so a second run cannot pretend \
+             otherwise",
+            body.m26_batch_key
+        )));
+    }
+    for id in &body.input_receipt_ids {
+        let Some(receipt) = state.ingest_receipts.get(id) else {
+            return Err(refused(format!(
+                "outcome names input receipt {id}, which was never committed"
+            )));
+        };
+        if receipt.route != schema::Route::M26Queued {
+            return Err(refused(format!(
+                "input receipt {id} is {}, and only a queued receipt is waiting on a semantic \
+                 run",
+                receipt.route.as_str()
+            )));
+        }
+        if receipt.superseded {
+            return Err(refused(format!(
+                "input receipt {id} was already closed out by an earlier successor"
+            )));
+        }
+        if receipt.m26_batch_key.as_deref() != Some(body.m26_batch_key.as_str()) {
+            return Err(refused(format!(
+                "input receipt {id} is parked on window {:?}, not on {}",
+                receipt.m26_batch_key, body.m26_batch_key
+            )));
+        }
+    }
+    for id in &body.proposal_ids {
+        if !state.proposals.contains_key(id) {
+            return Err(refused(format!(
+                "outcome names proposal {id}, which was never submitted"
+            )));
+        }
+    }
+
+    state.semantic_assessments.insert(
+        body.semantic_assessment_id.clone(),
+        SemanticAssessmentRow {
+            semantic_assessment_id: body.semantic_assessment_id.clone(),
+            m26_batch_key: body.m26_batch_key.clone(),
+            input_receipt_ids: body.input_receipt_ids.clone(),
+            outcome: body.outcome,
+            proposal_ids: body.proposal_ids.clone(),
+        },
+    );
+    state
+        .semantic_by_event
+        .insert(frame.event_id.clone(), body.semantic_assessment_id.clone());
+    // NO version effect, and that absence is the design (§ "no registered
+    // target"). `semantic_assessment_id` is an idempotent history key, not a
+    // CAS target: nothing proposes against a past assessment, so giving it a
+    // version would invent a concurrency question that has no answer. Neither
+    // the receipts it read nor the proposals it carries advance either —
+    // being mentioned by history is not a state change.
     Ok(())
 }
 
@@ -3511,6 +3684,28 @@ pub fn vector_state(state: &EpistemicState) -> serde_json::Value {
                     "processing_epoch": r.processing_epoch,
                     "route": r.route.as_str(),
                     "superseded": r.superseded,
+                    "m26_batch_key": r.m26_batch_key,
+                }),
+            ))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        // M26.4: what each settled window's one semantic run concluded. In
+        // the vector contract for the same reason the receipts are — this is
+        // the other half of "already processed, do not spend again", and a
+        // Rust/TS disagreement here is a disagreement about whether a window
+        // gets a second run.
+        //
+        // `semantic_by_event` is NOT here: it is an index into these rows,
+        // and a second sorted key is a second chance to disagree.
+        "semantic_assessments": state
+            .semantic_assessments
+            .values()
+            .map(|a| (
+                a.semantic_assessment_id.clone(),
+                serde_json::json!({
+                    "m26_batch_key": a.m26_batch_key,
+                    "input_receipt_ids": a.input_receipt_ids,
+                    "outcome": a.outcome.as_str(),
+                    "proposal_ids": a.proposal_ids,
                 }),
             ))
             .collect::<serde_json::Map<String, serde_json::Value>>(),

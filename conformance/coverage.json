@@ -1388,6 +1388,7 @@
       }
     },
     "ingest_receipts": {},
+    "semantic_assessments": {},
     "reconciliation": {
       "open": false,
       "divergences": {},

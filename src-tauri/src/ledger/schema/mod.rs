@@ -38,6 +38,7 @@ pub mod proposal_events;
 pub mod reconciliation;
 pub mod resolution;
 pub mod risk;
+pub mod semantic;
 pub mod source;
 pub mod subject;
 pub mod value;
@@ -101,6 +102,10 @@ pub use reconciliation::{
 };
 pub use resolution::{ResolutionChange, ResolverTier, SubjectResolved};
 pub use risk::Risk;
+pub use semantic::{
+    derive_m26_batch_key, derive_semantic_assessment_id, BlockedReason, ContentLabel,
+    IngestSemanticAssessed, SemanticDisposition, SemanticOutcome,
+};
 pub use source::{
     derive_source_id, derive_source_key, AuthorityCapability, SourceRegistered, SourceRegistration,
 };
@@ -152,6 +157,12 @@ pub const KIND_COVERAGE_FACT_RECORDED: &str = "coverage.fact_recorded";
 pub const KIND_COVERAGE_ASSESSED: &str = "coverage.assessed";
 pub const KIND_COVERAGE_GAP: &str = "coverage.gap";
 pub const KIND_COVERAGE_RESTORED: &str = "coverage.restored";
+
+// The M26 addition. `ingest.semantic_assessed` is the successor half of
+// `ingest.assessed`: the receipt says an item was PARKED for a semantic
+// run, and this says what that run concluded. Processing history on both
+// sides of the seam — neither is evidence (see `semantic.rs`).
+pub const KIND_INGEST_SEMANTIC_ASSESSED: &str = "ingest.semantic_assessed";
 
 /// Reserved vocabulary: names fixed so nothing else ever claims them, with
 /// bodies deliberately undefined — a schema-v1 body under one of these is
@@ -328,6 +339,7 @@ pub enum EventBody {
     CoverageAssessed(Box<CoverageAssessed>),
     CoverageGap(Box<CoverageGap>),
     CoverageRestored(Box<CoverageRestored>),
+    IngestSemanticAssessed(Box<IngestSemanticAssessed>),
 }
 
 impl EventBody {
@@ -364,6 +376,7 @@ impl EventBody {
             EventBody::CoverageAssessed(_) => KIND_COVERAGE_ASSESSED,
             EventBody::CoverageGap(_) => KIND_COVERAGE_GAP,
             EventBody::CoverageRestored(_) => KIND_COVERAGE_RESTORED,
+            EventBody::IngestSemanticAssessed(_) => KIND_INGEST_SEMANTIC_ASSESSED,
         }
     }
 
@@ -400,6 +413,7 @@ impl EventBody {
             EventBody::CoverageAssessed(b) => b.batch_id.as_deref(),
             EventBody::CoverageGap(b) => b.batch_id.as_deref(),
             EventBody::CoverageRestored(b) => b.batch_id.as_deref(),
+            EventBody::IngestSemanticAssessed(b) => b.batch_id.as_deref(),
         }
     }
 
@@ -436,6 +450,7 @@ impl EventBody {
             EventBody::CoverageAssessed(b) => b.idempotency_key.as_deref(),
             EventBody::CoverageGap(b) => b.idempotency_key.as_deref(),
             EventBody::CoverageRestored(b) => b.idempotency_key.as_deref(),
+            EventBody::IngestSemanticAssessed(b) => b.idempotency_key.as_deref(),
         }
     }
 
@@ -476,6 +491,7 @@ impl EventBody {
             EventBody::CoverageAssessed(b) => b.validate(),
             EventBody::CoverageGap(b) => b.validate(),
             EventBody::CoverageRestored(b) => b.validate(),
+            EventBody::IngestSemanticAssessed(b) => b.validate(),
         }
     }
 
@@ -513,6 +529,7 @@ impl EventBody {
             EventBody::CoverageAssessed(b) => serde_json::to_value(b),
             EventBody::CoverageGap(b) => serde_json::to_value(b),
             EventBody::CoverageRestored(b) => serde_json::to_value(b),
+            EventBody::IngestSemanticAssessed(b) => serde_json::to_value(b),
         };
         value.map_err(|e| e.to_string())
     }
@@ -597,6 +614,9 @@ pub fn decode_body(kind: &str, body: &serde_json::Value) -> Result<Option<EventB
         KIND_COVERAGE_ASSESSED => EventBody::CoverageAssessed(Box::new(gate(kind, body)?)),
         KIND_COVERAGE_GAP => EventBody::CoverageGap(Box::new(gate(kind, body)?)),
         KIND_COVERAGE_RESTORED => EventBody::CoverageRestored(Box::new(gate(kind, body)?)),
+        KIND_INGEST_SEMANTIC_ASSESSED => {
+            EventBody::IngestSemanticAssessed(Box::new(gate(kind, body)?))
+        }
         other => {
             return Err(format!(
                 "kind {other} carries a schema-v1 body but is not in this build's vocabulary"

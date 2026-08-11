@@ -209,7 +209,41 @@
       "seq": 6,
       "event_id": "00000000000000000000000000000006",
       "prev": "b3d2872c5c58e52590c61a84ce3394c8c66a58e094b43d0b38d45ae671fd2fa2",
-      "hash": "52c7dd7b9eb165961e0bb4a0f86dee2d4b34597a4585d2d4b0a72e3c48df13b2",
+      "hash": "932400ade37a131e0168bdb6acf0d306f366650f698de71f4d1cc53f8aa7ef4d",
+      "ingested_at": "2026-08-07T12:00:00.000Z",
+      "wall_clock_anomaly": false,
+      "kind": "ingest.semantic_assessed",
+      "body": {
+        "schema": 1,
+        "batch_id": null,
+        "idempotency_key": null,
+        "actor": {
+          "id": "agent:m26-ingest"
+        },
+        "occurred_at": null,
+        "valid_from": null,
+        "valid_to": null,
+        "semantic_assessment_id": "9ad266c65a8c5859b1db4c59570b0058",
+        "m26_batch_key": "batch-2026-08-09",
+        "input_receipt_ids": [
+          "07bfdce451fde0a4355b4723ec843c11"
+        ],
+        "outcome": "undetermined",
+        "disposition": "blocked_visible",
+        "evaluated_dimensions": [],
+        "material_dimensions": [],
+        "proposal_ids": [],
+        "blocked_reason": "runtime_unavailable",
+        "explanation": "the run's own words about this window",
+        "content_label": "agent_supplied"
+      }
+    },
+    {
+      "v": 0,
+      "seq": 7,
+      "event_id": "00000000000000000000000000000007",
+      "prev": "932400ade37a131e0168bdb6acf0d306f366650f698de71f4d1cc53f8aa7ef4d",
+      "hash": "6c87138080190384cbc9dff17976f7511a284c39d6ff4e05e08c04edbaded87a",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "ingest.assessed",
@@ -241,16 +275,16 @@
         ],
         "proposal_ids": [],
         "m26_batch_key": "batch-2026-08-09",
-        "m26_outcome_event_id": "cccccccccccccccccccccccccccccccc",
+        "m26_outcome_event_id": "00000000000000000000000000000006",
         "supersedes_receipt_id": "07bfdce451fde0a4355b4723ec843c11"
       }
     },
     {
       "v": 0,
-      "seq": 7,
-      "event_id": "00000000000000000000000000000007",
-      "prev": "52c7dd7b9eb165961e0bb4a0f86dee2d4b34597a4585d2d4b0a72e3c48df13b2",
-      "hash": "9bc2ebfdac3e4bc683e964dee660abba1a26276ac8930418237a2abc040729ea",
+      "seq": 8,
+      "event_id": "00000000000000000000000000000008",
+      "prev": "6c87138080190384cbc9dff17976f7511a284c39d6ff4e05e08c04edbaded87a",
+      "hash": "cba594751674a6d325d0b64bce9c547673fae8828cfd8c7219425f59902e9b25",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "ingest.assessed",
@@ -288,10 +322,10 @@
     },
     {
       "v": 0,
-      "seq": 8,
-      "event_id": "00000000000000000000000000000008",
-      "prev": "9bc2ebfdac3e4bc683e964dee660abba1a26276ac8930418237a2abc040729ea",
-      "hash": "fa91f9ddb19f9d5cd6f187a70432ae746f18206de956e58e47155412c076895f",
+      "seq": 9,
+      "event_id": "00000000000000000000000000000009",
+      "prev": "cba594751674a6d325d0b64bce9c547673fae8828cfd8c7219425f59902e9b25",
+      "hash": "59d03441d93fbac70950fa3d99591c3390a139223ad2e3e92bc803e48ebeca80",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "ingest.assessed",
@@ -327,10 +361,10 @@
     },
     {
       "v": 0,
-      "seq": 9,
-      "event_id": "00000000000000000000000000000009",
-      "prev": "fa91f9ddb19f9d5cd6f187a70432ae746f18206de956e58e47155412c076895f",
-      "hash": "fd48930e21c6c52e3e74f096f37a7baf32e92b4ef7e652dd04636c7aff0f02f5",
+      "seq": 10,
+      "event_id": "0000000000000000000000000000000a",
+      "prev": "59d03441d93fbac70950fa3d99591c3390a139223ad2e3e92bc803e48ebeca80",
+      "hash": "852e832ef051a6b7d85c9f99962a7af3d084f6014119b17d1283f83e35e90cde",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "ingest.assessed",
@@ -368,10 +402,10 @@
     },
     {
       "v": 0,
-      "seq": 10,
-      "event_id": "0000000000000000000000000000000a",
-      "prev": "fd48930e21c6c52e3e74f096f37a7baf32e92b4ef7e652dd04636c7aff0f02f5",
-      "hash": "e8b9949519be50c75fd91e6aa36361063644dab90a9fa7c1b33f367e3290af70",
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
+      "prev": "852e832ef051a6b7d85c9f99962a7af3d084f6014119b17d1283f83e35e90cde",
+      "hash": "191efac5bc9d569ab2e80a9f5d8298ab89d6a68d1583dcb4d7aa03ce13444d43",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "ingest.assessed",
@@ -409,10 +443,10 @@
     },
     {
       "v": 0,
-      "seq": 11,
-      "event_id": "0000000000000000000000000000000b",
-      "prev": "e8b9949519be50c75fd91e6aa36361063644dab90a9fa7c1b33f367e3290af70",
-      "hash": "b39604adac2fb775eaa2558388158d6918c17eb08e73735b25f1d4230b94d390",
+      "seq": 12,
+      "event_id": "0000000000000000000000000000000c",
+      "prev": "191efac5bc9d569ab2e80a9f5d8298ab89d6a68d1583dcb4d7aa03ce13444d43",
+      "hash": "8df74ad64d5d490de7a932822531e9808b0d96b07241f58c450053595d061c85",
       "ingested_at": "2026-08-07T12:00:00.000Z",
       "wall_clock_anomaly": false,
       "kind": "ingest.assessed",
@@ -510,7 +544,8 @@
         "normalizer_version": "vault-entry-v1",
         "processing_epoch": 0,
         "route": "m26_queued",
-        "superseded": true
+        "superseded": true,
+        "m26_batch_key": "batch-2026-08-09"
       },
       "577a33c6afcc784609cb5c6d03f10799": {
         "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
@@ -519,7 +554,8 @@
         "normalizer_version": "vault-entry-v1",
         "processing_epoch": 1,
         "route": "closed_no_change",
-        "superseded": false
+        "superseded": false,
+        "m26_batch_key": null
       },
       "dbb510e1e041ba7ebb3f466895b27ed5": {
         "item_id": "c4be9e4c010e865c6ed4b6547aac992a",
@@ -528,7 +564,18 @@
         "normalizer_version": "vault-entry-v1",
         "processing_epoch": 0,
         "route": "failed_visible",
-        "superseded": false
+        "superseded": false,
+        "m26_batch_key": "batch-2026-08-09"
+      }
+    },
+    "semantic_assessments": {
+      "9ad266c65a8c5859b1db4c59570b0058": {
+        "m26_batch_key": "batch-2026-08-09",
+        "input_receipt_ids": [
+          "07bfdce451fde0a4355b4723ec843c11"
+        ],
+        "outcome": "undetermined",
+        "proposal_ids": []
       }
     },
     "reconciliation": {
@@ -546,29 +593,29 @@
       "detail": "receipt 07bfdce451fde0a4355b4723ec843c11 is already recorded — identical bytes append once, never twice"
     },
     {
-      "seq": 7,
-      "event_id": "00000000000000000000000000000007",
-      "batch_id": null,
-      "code": "refused",
-      "detail": "receipt 07bfdce451fde0a4355b4723ec843c11 is already superseded — one successor, not a chain of them"
-    },
-    {
       "seq": 8,
       "event_id": "00000000000000000000000000000008",
       "batch_id": null,
       "code": "refused",
-      "detail": "receipt names source ffffffffffffffffffffffffffffffff which has no committed registration — a source reference is held or refused, never inferred"
+      "detail": "receipt 07bfdce451fde0a4355b4723ec843c11 is already superseded — one successor, not a chain of them"
     },
     {
       "seq": 9,
       "event_id": "00000000000000000000000000000009",
       "batch_id": null,
       "code": "refused",
-      "detail": "receipt names Observation eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee which is neither committed nor a member of this batch"
+      "detail": "receipt names source ffffffffffffffffffffffffffffffff which has no committed registration — a source reference is held or refused, never inferred"
     },
     {
       "seq": 10,
       "event_id": "0000000000000000000000000000000a",
+      "batch_id": null,
+      "code": "refused",
+      "detail": "receipt names Observation eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee which is neither committed nor a member of this batch"
+    },
+    {
+      "seq": 11,
+      "event_id": "0000000000000000000000000000000b",
       "batch_id": null,
       "code": "refused",
       "detail": "receipt supersedes dddddddddddddddddddddddddddddddd, which is not a committed receipt"

@@ -22,6 +22,8 @@ const ENTITY: &str = "cccccccccccccccccccccccccccccccc";
 const ENTITY_B: &str = "dddddddddddddddddddddddddddddddd";
 const BELIEF: &str = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 const BELIEF_B: &str = "ffffffffffffffffffffffffffffffff";
+/// A proposal id nothing ever submits — for the vectors that name one.
+const UNSUBMITTED_PROPOSAL: &str = "abababababababababababababababab";
 
 /// Deterministic frame builder: sequential ids, fixed clock, real chain.
 struct Builder {
@@ -2759,6 +2761,52 @@ fn scenario_governance() -> (&'static str, &'static str, Vec<Frame>) {
     )
 }
 
+/// One HIGH-risk `archive_belief` submission — the shape both the proposal
+/// lifecycle vector and the semantic vector need a real proposal for.
+fn archive_submission(id: &str) -> schema::ProposalSubmitted {
+    let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
+    schema::ProposalSubmitted {
+        schema: schema_v,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        proposal: Box::new(schema::ProposalV1 {
+            schema: schema::PROPOSAL_SCHEMA,
+            proposal_id: id.into(),
+            run_id: "4444444444444444444444444444444a".into(),
+            targets: vec![schema::ProposalTarget {
+                target_id: BELIEF.into(),
+                target_class: schema::TargetClass::Belief,
+                expected_version: Some(1),
+            }],
+            op: schema::ProposalOp::ArchiveBelief {
+                belief_id: BELIEF.into(),
+                replacement_id: None,
+            },
+            intended_use: schema::IntendedUse {
+                kind: schema::IntendedUseKind::ReversibleWork,
+                stakes: schema::Risk::Low,
+                predicate_class: None,
+            },
+            basis: schema::ProposalBasis {
+                transition_cause: schema::TransitionCause::Maintenance,
+                evidence_refs: vec![],
+                coverage_refs: vec![],
+                authority_refs: vec![],
+                authority_route_refs: vec![],
+                addressed_contradictions: vec![],
+                absence_claim: false,
+            },
+            declared_risk: schema::Risk::High,
+            reason: "retire the stale record".into(),
+            candidate_search_receipt: None,
+        }),
+    }
+}
+
 /// The durable proposal lifecycle and its closed version effects.
 fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
@@ -2767,53 +2815,19 @@ fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
     let commit_set = "5e75e75e75e75e75e75e75e75e75e75e";
     let decision_id = "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0";
 
-    let submit = |id: &str| {
-        let (schema_v, batch_id, idempotency_key, actor) = common("agent:run-1");
-        schema::ProposalSubmitted {
-            schema: schema_v,
-            batch_id,
-            idempotency_key,
-            actor,
-            occurred_at: None,
-            valid_from: None,
-            valid_to: None,
-            proposal: Box::new(schema::ProposalV1 {
-                schema: schema::PROPOSAL_SCHEMA,
-                proposal_id: id.into(),
-                run_id: "4444444444444444444444444444444a".into(),
-                targets: vec![schema::ProposalTarget {
-                    target_id: BELIEF.into(),
-                    target_class: schema::TargetClass::Belief,
-                    expected_version: Some(1),
-                }],
-                op: schema::ProposalOp::ArchiveBelief {
-                    belief_id: BELIEF.into(),
-                    replacement_id: None,
-                },
-                intended_use: schema::IntendedUse {
-                    kind: schema::IntendedUseKind::ReversibleWork,
-                    stakes: schema::Risk::Low,
-                    predicate_class: None,
-                },
-                basis: schema::ProposalBasis {
-                    transition_cause: schema::TransitionCause::Maintenance,
-                    evidence_refs: vec![],
-                    coverage_refs: vec![],
-                    authority_refs: vec![],
-                    authority_route_refs: vec![],
-                    addressed_contradictions: vec![],
-                    absence_claim: false,
-                },
-                declared_risk: schema::Risk::High,
-                reason: "retire the stale record".into(),
-                candidate_search_receipt: None,
-            }),
-        }
-    };
-    b.push_body(schema::KIND_PROPOSAL_SUBMITTED, &submit(proposal_a));
-    b.push_body(schema::KIND_PROPOSAL_SUBMITTED, &submit(proposal_b));
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &archive_submission(proposal_a),
+    );
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &archive_submission(proposal_b),
+    );
     // A second submission of the same proposal is refused.
-    b.push_body(schema::KIND_PROPOSAL_SUBMITTED, &submit(proposal_a));
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &archive_submission(proposal_a),
+    );
 
     let queue = |id: &str| {
         let (schema_v, batch_id, idempotency_key, actor) = common("system:ledger");
@@ -2959,6 +2973,77 @@ fn scenario_proposals() -> (&'static str, &'static str, Vec<Frame>) {
 /// refusal: an unknown source, an Observation that does not exist, a
 /// proposal whose state contradicts the route, and a successor superseding
 /// something that was never queued.
+/// The window `scenario_ingest` and `scenario_semantic` both park items on.
+const WINDOW: &str = "batch-2026-08-09";
+
+/// One `ingest.semantic_assessed` body on [`WINDOW`].
+///
+/// Dimensions follow the outcome, which is the whole shape of the event: a
+/// decided window says what it looked at, a blocked one is not asked to.
+fn semantic_outcome(
+    outcome: SemanticOutcome,
+    input_receipt_ids: Vec<String>,
+    proposal_ids: Vec<String>,
+    blocked_reason: Option<BlockedReason>,
+) -> IngestSemanticAssessed {
+    semantic_outcome_on(
+        WINDOW,
+        outcome,
+        input_receipt_ids,
+        proposal_ids,
+        blocked_reason,
+    )
+}
+
+fn semantic_outcome_on(
+    window: &str,
+    outcome: SemanticOutcome,
+    mut input_receipt_ids: Vec<String>,
+    proposal_ids: Vec<String>,
+    blocked_reason: Option<BlockedReason>,
+) -> IngestSemanticAssessed {
+    let (schema, batch_id, idempotency_key, actor) = common("agent:m26-ingest");
+    input_receipt_ids.sort();
+    IngestSemanticAssessed {
+        schema,
+        batch_id,
+        idempotency_key,
+        actor,
+        occurred_at: None,
+        valid_from: None,
+        valid_to: None,
+        semantic_assessment_id: derive_semantic_assessment_id(STORE, window),
+        m26_batch_key: window.to_string(),
+        input_receipt_ids,
+        outcome,
+        disposition: match outcome {
+            SemanticOutcome::Material => SemanticDisposition::ProposalsSubmitted,
+            SemanticOutcome::NonMaterial => SemanticDisposition::ClosedNonMaterial,
+            SemanticOutcome::Undetermined => SemanticDisposition::BlockedVisible,
+        },
+        evaluated_dimensions: match outcome {
+            // A run that never started evaluated nothing, and says so rather
+            // than claiming a look it did not take.
+            SemanticOutcome::Undetermined => vec![],
+            _ => vec![
+                MaterialDimension::EvidenceState,
+                MaterialDimension::WorldState,
+            ],
+        },
+        material_dimensions: match outcome {
+            // Corroboration only: zero fields moved and a second independent
+            // source arrived. Material on evidence-state, which is the case
+            // "no field changed → discard" would have thrown away.
+            SemanticOutcome::Material => vec![MaterialDimension::EvidenceState],
+            _ => vec![],
+        },
+        proposal_ids,
+        blocked_reason,
+        explanation: "the run's own words about this window".into(),
+        content_label: ContentLabel::AgentSupplied,
+    }
+}
+
 fn scenario_ingest() -> (&'static str, &'static str, Vec<Frame>) {
     let mut b = Builder::new();
     let josef = human_registration("human:josef");
@@ -3014,7 +3099,7 @@ fn scenario_ingest() -> (&'static str, &'static str, Vec<Frame>) {
             proposal_ids: vec![],
             m26_batch_key: match route {
                 Route::M26Queued | Route::M26Completed | Route::FailedVisible => {
-                    Some("batch-2026-08-09".into())
+                    Some(WINDOW.into())
                 }
                 _ => None,
             },
@@ -3081,19 +3166,30 @@ fn scenario_ingest() -> (&'static str, &'static str, Vec<Frame>) {
         ),
     );
 
-    // A visible failure closes the queued row out. Recovery restores it HELD.
-    b.push_body(
-        KIND_INGEST_ASSESSED,
-        &receipt(
-            Route::FailedVisible,
-            PrefilterVerdict::NeedsSemanticJudgment,
-            vec![observation_id.clone()],
-            0,
-            Some(queued_receipt_id.clone()),
-            &source_id,
-            &item,
-        ),
+    // M26.4: a successor receipt can only close on an outcome that exists and
+    // agrees with it, so the window's semantic run is committed FIRST. This
+    // vector used to name a fabricated outcome event id and apply anyway —
+    // the seam M26.4a closed.
+    let blocked = semantic_outcome(
+        SemanticOutcome::Undetermined,
+        vec![queued_receipt_id.clone()],
+        vec![],
+        Some(BlockedReason::RuntimeUnavailable),
     );
+    let blocked_event = b.push_body(KIND_INGEST_SEMANTIC_ASSESSED, &blocked);
+
+    // A visible failure closes the queued row out. Recovery restores it HELD.
+    let mut failed = receipt(
+        Route::FailedVisible,
+        PrefilterVerdict::NeedsSemanticJudgment,
+        vec![observation_id.clone()],
+        0,
+        Some(queued_receipt_id.clone()),
+        &source_id,
+        &item,
+    );
+    failed.m26_outcome_event_id = Some(blocked_event);
+    b.push_body(KIND_INGEST_ASSESSED, &failed);
     // A second successor for the same queued receipt: refused.
     b.push_body(
         KIND_INGEST_ASSESSED,
@@ -3168,6 +3264,294 @@ fn scenario_ingest() -> (&'static str, &'static str, Vec<Frame>) {
         "portable processing receipts: the closed route matrix, the atomic \
          Observation+receipt batch, append-once bytes, supersession, and every \
          association refusal",
+        b.frames,
+    )
+}
+
+/// `ingest.semantic_assessed` — one semantic run per settled window (M26.4).
+///
+/// The receipt vector proves an item can be PARKED for a semantic run; this
+/// proves what closing one out costs. A window is its inputs, so the second
+/// run over the same window mints the same id and is refused — the "at most
+/// one semantic run per settled window" rule as arithmetic rather than as a
+/// note in a plan. The rest is association: inputs that exist, are queued,
+/// are unclosed, and are on THIS window; proposals that were really
+/// submitted; and a successor receipt whose route agrees with what the run
+/// actually concluded.
+///
+/// The no-effect vector is the quiet one. An assessment advances nothing —
+/// not its inputs, not its proposals, not itself — so a rebuild that replays
+/// it lands on the same versions as one that has never seen it.
+fn scenario_semantic() -> (&'static str, &'static str, Vec<Frame>) {
+    let mut b = Builder::new();
+    let josef = human_registration("human:josef");
+    let josef_reg = b.push_body(KIND_SOURCE_REGISTERED, &josef);
+    let source_id = josef.source_id.clone();
+    let item = derive_item_id(STORE, &source_id, "records/a.md");
+    let subject = SubjectRef::Resolved {
+        entity_id: ENTITY.into(),
+        aliases: vec![],
+    };
+
+    let queued_id = derive_receipt_id(
+        STORE,
+        &source_id,
+        &item,
+        &"a".repeat(64),
+        "vault-entry-v1",
+        0,
+        Route::M26Queued,
+    );
+    let observation = observation_body(
+        ObservationKind::HumanAssertion,
+        &josef,
+        &josef_reg,
+        "human:josef",
+        subject,
+        vec![],
+        human_payload(AssertionBasis::Firsthand),
+    );
+    let observation_id = format!("{:032x}", b.frames.len() as u64 + 1);
+    let queued = {
+        let (schema, batch_id, idempotency_key, actor) = common("system:prefilter");
+        IngestAssessed {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            receipt_id: queued_id.clone(),
+            item_id: item.clone(),
+            source_id: source_id.clone(),
+            source_record_id: None,
+            artifact_hash: "a".repeat(64),
+            normalized_snapshot_hash: "b".repeat(64),
+            normalizer_version: "vault-entry-v1".into(),
+            processing_epoch: 0,
+            assessed_against_chain_head: "c".repeat(64),
+            prefilter_verdict: PrefilterVerdict::NeedsSemanticJudgment,
+            material_dimensions: vec![],
+            independence: Independence::IndependenceUnknown,
+            route: Route::M26Queued,
+            observation_event_ids: vec![observation_id.clone()],
+            proposal_ids: vec![],
+            m26_batch_key: Some(WINDOW.into()),
+            m26_outcome_event_id: None,
+            supersedes_receipt_id: None,
+        }
+    };
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0026",
+        vec![
+            (
+                KIND_OBSERVATION_RECORDED.to_string(),
+                serde_json::to_value(&observation).unwrap(),
+            ),
+            (
+                KIND_INGEST_ASSESSED.to_string(),
+                serde_json::to_value(&queued).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    // An input that was never committed.
+    b.push_body(
+        KIND_INGEST_SEMANTIC_ASSESSED,
+        &semantic_outcome(
+            SemanticOutcome::NonMaterial,
+            vec!["e".repeat(32)],
+            vec![],
+            None,
+        ),
+    );
+    // An input parked on a DIFFERENT window: a run closes what it read.
+    b.push_body(
+        KIND_INGEST_SEMANTIC_ASSESSED,
+        &semantic_outcome_on(
+            "batch-2026-08-10",
+            SemanticOutcome::NonMaterial,
+            vec![queued_id.clone()],
+            vec![],
+            None,
+        ),
+    );
+    // A proposal nobody submitted.
+    b.push_body(
+        KIND_INGEST_SEMANTIC_ASSESSED,
+        &semantic_outcome(
+            SemanticOutcome::Material,
+            vec![queued_id.clone()],
+            vec![UNSUBMITTED_PROPOSAL.into()],
+            None,
+        ),
+    );
+
+    // The window closes NON-MATERIAL. Nothing changed that is worth
+    // recording, and that is a verdict the pass is allowed to reach — it
+    // still had to say which dimensions it evaluated to get there.
+    let decided = semantic_outcome(
+        SemanticOutcome::NonMaterial,
+        vec![queued_id.clone()],
+        vec![],
+        None,
+    );
+    let decided_event = b.push_body(KIND_INGEST_SEMANTIC_ASSESSED, &decided);
+
+    // A second run over the same settled window, reaching a DIFFERENT
+    // conclusion: still refused. The id is derived from the window and not
+    // from what the run decided, so a second opinion cannot append itself
+    // beside the first — which is the point, since the second opinion is the
+    // one that cost money nobody authorised.
+    b.push_body(
+        KIND_INGEST_SEMANTIC_ASSESSED,
+        &semantic_outcome(
+            SemanticOutcome::Undetermined,
+            vec![queued_id.clone()],
+            vec![],
+            Some(BlockedReason::SemanticValidationFailed),
+        ),
+    );
+
+    let successor = |route: Route, outcome_event: Option<String>| {
+        let (schema, batch_id, idempotency_key, actor) = common("system:prefilter");
+        IngestAssessed {
+            schema,
+            batch_id,
+            idempotency_key,
+            actor,
+            occurred_at: None,
+            valid_from: None,
+            valid_to: None,
+            receipt_id: derive_receipt_id(
+                STORE,
+                &source_id,
+                &item,
+                &"a".repeat(64),
+                "vault-entry-v1",
+                0,
+                route,
+            ),
+            item_id: item.clone(),
+            source_id: source_id.clone(),
+            source_record_id: None,
+            artifact_hash: "a".repeat(64),
+            normalized_snapshot_hash: "b".repeat(64),
+            normalizer_version: "vault-entry-v1".into(),
+            processing_epoch: 0,
+            assessed_against_chain_head: "c".repeat(64),
+            prefilter_verdict: PrefilterVerdict::NeedsSemanticJudgment,
+            material_dimensions: vec![],
+            independence: Independence::IndependenceUnknown,
+            route,
+            observation_event_ids: vec![observation_id.clone()],
+            proposal_ids: vec![],
+            m26_batch_key: Some(WINDOW.into()),
+            m26_outcome_event_id: outcome_event,
+            supersedes_receipt_id: Some(queued_id.clone()),
+        }
+    };
+
+    // A decided window cannot be closed as a visible failure: the route and
+    // the outcome are two statements about the same event and must agree.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &successor(Route::FailedVisible, Some(decided_event.clone())),
+    );
+    // An outcome event that is not an outcome at all.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &successor(Route::M26Completed, Some(observation_id.clone())),
+    );
+    // The honest close.
+    b.push_body(
+        KIND_INGEST_ASSESSED,
+        &successor(Route::M26Completed, Some(decided_event)),
+    );
+
+    // --- A second window, closed the way the runtime actually closes one ---
+    //
+    // The outcome and every successor receipt commit under ONE marker, so a
+    // crash exposes either the queued rows or the whole terminal
+    // association, and never a window whose outcome exists with nothing
+    // pointing at it. Inside the batch the outcome comes FIRST: a successor
+    // is checked against what its outcome concluded, and there is nothing to
+    // check against until the outcome has been applied.
+    b.push_body(
+        KIND_BELIEF_CREATED,
+        &belief_body(BELIEF, ENTITY, unsupported()),
+    );
+    let proposal_id = "5555555555555555555555555555555a";
+    b.push_body(
+        schema::KIND_PROPOSAL_SUBMITTED,
+        &archive_submission(proposal_id),
+    );
+
+    let item_b = derive_item_id(STORE, &source_id, "records/b.md");
+    let window_b = "batch-2026-08-11";
+    let queued_b_id = derive_receipt_id(
+        STORE,
+        &source_id,
+        &item_b,
+        &"a".repeat(64),
+        "vault-entry-v1",
+        0,
+        Route::M26Queued,
+    );
+    let mut queued_b = queued.clone();
+    queued_b.receipt_id = queued_b_id.clone();
+    queued_b.item_id = item_b.clone();
+    queued_b.m26_batch_key = Some(window_b.into());
+    b.push_body(KIND_INGEST_ASSESSED, &queued_b);
+
+    let mut completion = successor(Route::M26Completed, None);
+    completion.item_id = item_b;
+    completion.m26_batch_key = Some(window_b.into());
+    completion.supersedes_receipt_id = Some(queued_b_id.clone());
+    completion.proposal_ids = vec![proposal_id.into()];
+    completion.receipt_id = derive_receipt_id(
+        STORE,
+        &source_id,
+        &completion.item_id,
+        &"a".repeat(64),
+        "vault-entry-v1",
+        0,
+        Route::M26Completed,
+    );
+    // The outcome's event id, precomputed the way the writer preallocates it.
+    completion.m26_outcome_event_id = Some(format!("{:032x}", b.frames.len() as u64 + 1));
+    b.push_batch(
+        "beefbeefbeefbeefbeefbeefbeef0027",
+        vec![
+            (
+                KIND_INGEST_SEMANTIC_ASSESSED.to_string(),
+                serde_json::to_value(semantic_outcome_on(
+                    window_b,
+                    SemanticOutcome::Material,
+                    vec![queued_b_id],
+                    vec![proposal_id.into()],
+                    None,
+                ))
+                .unwrap(),
+            ),
+            (
+                KIND_INGEST_ASSESSED.to_string(),
+                serde_json::to_value(&completion).unwrap(),
+            ),
+        ],
+        true,
+        None,
+    );
+
+    (
+        "semantic",
+        "one semantic run per settled window: the derived assessment id that \
+         refuses a second opinion, input association, a successor receipt that \
+         has to agree with what the run concluded, and the terminal close \
+         committed as one batch",
         b.frames,
     )
 }
@@ -3633,6 +4017,7 @@ fn scenarios() -> Vec<(&'static str, &'static str, Vec<Frame>)> {
         scenario_proposals(),
         scenario_entity_merge(),
         scenario_ingest(),
+        scenario_semantic(),
         scenario_coverage(),
     ]
 }
@@ -3833,6 +4218,8 @@ fn the_vector_suite_covers_every_kind() {
         KIND_COVERAGE_ASSESSED,
         KIND_COVERAGE_GAP,
         KIND_COVERAGE_RESTORED,
+        // M26.
+        KIND_INGEST_SEMANTIC_ASSESSED,
     ] {
         assert!(kinds.contains(kind), "no vector exercises {kind}");
     }
@@ -3870,14 +4257,20 @@ fn every_kind_is_either_covered_or_a_named_gap() {
     }
     for kind in ALL_KINDS {
         assert!(
-            covered.contains(kind) || KINDS_WITHOUT_VECTORS.contains(&kind),
+            covered.contains(*kind) || KINDS_WITHOUT_VECTORS.contains(kind),
             "{kind} has no vector and is not a declared gap"
         );
     }
 }
 
 /// The whole decodable vocabulary, in declaration order.
-const ALL_KINDS: [&str; 31] = [
+///
+/// Hand-maintained, and that is the one gap this pair of tests cannot close:
+/// a new kind added to `decode_body` and omitted HERE is invisible to both
+/// assertions. Adding to this list is therefore part of adding a kind, not a
+/// follow-up — the length is implicit so at least the count cannot drift out
+/// of step with the entries.
+const ALL_KINDS: &[&str] = &[
     KIND_BATCH_COMMITTED,
     KIND_SOURCE_REGISTERED,
     KIND_OBSERVATION_RECORDED,
@@ -3909,4 +4302,5 @@ const ALL_KINDS: [&str; 31] = [
     KIND_COVERAGE_ASSESSED,
     KIND_COVERAGE_GAP,
     KIND_COVERAGE_RESTORED,
+    KIND_INGEST_SEMANTIC_ASSESSED,
 ];

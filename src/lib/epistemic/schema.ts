@@ -734,6 +734,73 @@ const ROUTE_RULES: {
   },
 };
 
+// --- M26.4 the semantic disposition -----------------------------------------
+
+const SEMANTIC_OUTCOMES = ['material', 'non_material', 'undetermined'];
+const SEMANTIC_DISPOSITIONS = ['proposals_submitted', 'closed_non_material', 'blocked_visible'];
+const BLOCKED_REASONS = [
+  'batch_input_incomplete',
+  'policy_dependency_unavailable',
+  'runtime_unavailable',
+  'semantic_validation_failed',
+  'source_access_lost',
+];
+const CONTENT_LABELS = ['agent_supplied'];
+
+/// The ceiling on agent prose in the vault ledger. The twin of
+/// `MAX_EXPLANATION_BYTES` in `ledger/schema/semantic.rs`.
+const MAX_EXPLANATION_BYTES = 2000;
+
+/// Bytes, not UTF-16 code units. Rust bounds `explanation.len()`, which is a
+/// byte count — measuring characters here would let an emoji-heavy
+/// explanation pass on one side and refuse on the other.
+function utf8Length(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+/// What each outcome pins. The twin of `SemanticOutcome::disposition` and its
+/// sibling methods in `ledger/schema/semantic.rs`, proven equal by the shared
+/// vectors. One disposition per outcome is the closed table: six of the nine
+/// pairings do not exist.
+const OUTCOME_RULES: {
+  [outcome: string]: {
+    disposition: string;
+    evaluated: 'required' | 'free';
+    material: 'required' | 'forbidden';
+    proposals: 'required' | 'forbidden';
+    blocked: 'required' | 'forbidden';
+  };
+} = {
+  material: {
+    disposition: 'proposals_submitted',
+    evaluated: 'required',
+    material: 'required',
+    proposals: 'required',
+    blocked: 'forbidden',
+  },
+  non_material: {
+    disposition: 'closed_non_material',
+    evaluated: 'required',
+    material: 'forbidden',
+    proposals: 'forbidden',
+    blocked: 'forbidden',
+  },
+  undetermined: {
+    disposition: 'blocked_visible',
+    evaluated: 'free',
+    material: 'forbidden',
+    proposals: 'forbidden',
+    blocked: 'required',
+  },
+};
+
+/// Where M25 puts a window's items once this outcome closed it.
+export const OUTCOME_SCHEDULER_STATE: { [outcome: string]: string } = {
+  material: 'consumed',
+  non_material: 'consumed',
+  undetermined: 'recovery_held',
+};
+
 /// Where recovery puts an item whose latest receipt took this route.
 export const ROUTE_SCHEDULER_STATE: { [route: string]: string } = {
   closed_no_change: 'consumed',
@@ -1368,6 +1435,31 @@ const CANONICALIZERS: { [kind: string]: Canonicalizer } = {
     m26_batch_key: asStringOrNull(obj.m26_batch_key, 'm26_batch_key'),
     m26_outcome_event_id: asStringOrNull(obj.m26_outcome_event_id, 'm26_outcome_event_id'),
     supersedes_receipt_id: asStringOrNull(obj.supersedes_receipt_id, 'supersedes_receipt_id'),
+  }),
+  // M26.4 — the semantic disposition. Field order IS the canonical byte
+  // order, so this list mirrors `IngestSemanticAssessed`'s declaration.
+  'ingest.semantic_assessed': (obj) => ({
+    ...canonCommon(obj),
+    semantic_assessment_id: asString(obj.semantic_assessment_id, 'semantic_assessment_id'),
+    m26_batch_key: asString(obj.m26_batch_key, 'm26_batch_key'),
+    input_receipt_ids: asArray(obj.input_receipt_ids, 'input_receipt_ids').map((id) =>
+      asString(id, 'input receipt id'),
+    ),
+    outcome: oneOf(obj.outcome, SEMANTIC_OUTCOMES, 'outcome'),
+    disposition: oneOf(obj.disposition, SEMANTIC_DISPOSITIONS, 'disposition'),
+    evaluated_dimensions: asArray(obj.evaluated_dimensions, 'evaluated_dimensions').map((d) =>
+      oneOf(d, MATERIAL_DIMENSIONS, 'evaluated dimension'),
+    ),
+    material_dimensions: asArray(obj.material_dimensions, 'material_dimensions').map((d) =>
+      oneOf(d, MATERIAL_DIMENSIONS, 'material dimension'),
+    ),
+    proposal_ids: asArray(obj.proposal_ids, 'proposals').map((id) => asString(id, 'proposal id')),
+    blocked_reason:
+      obj.blocked_reason === null
+        ? null
+        : oneOf(obj.blocked_reason, BLOCKED_REASONS, 'blocked_reason'),
+    explanation: asString(obj.explanation, 'explanation'),
+    content_label: oneOf(obj.content_label, CONTENT_LABELS, 'content_label'),
   }),
 };
 
@@ -2386,8 +2478,88 @@ export function validateBody(decoded: Decoded, storeUuid: string): void {
       if (body.m26_batch_key === '') {
         throw new RefusedError('m26_batch_key is null or a value, never empty');
       }
-      if (route === 'failed_visible' && (body.proposal_ids as string[]).length > 0) {
-        throw new RefusedError('failed_visible carries no proposal refs');
+      // NOTE: "failed_visible carries no proposal refs" is deliberately NOT a
+      // separate check here either. It is `proposals: 'forbidden'` in
+      // ROUTE_RULES, enforced by listRule above — and a second copy is a
+      // second chance for the table and the special case to disagree. This
+      // one existed until M26.4a; the Rust side never had it.
+      break;
+    }
+    case 'ingest.semantic_assessed': {
+      if (!isId128(body.semantic_assessment_id)) {
+        throw new RefusedError('semantic_assessment_id must be a 128-bit hex id');
+      }
+      if ((body.m26_batch_key as string) === '') {
+        throw new RefusedError('m26_batch_key must be non-empty');
+      }
+      const explanation = body.explanation as string;
+      if (explanation === '') {
+        throw new RefusedError('explanation must be non-empty — a disposition states its reason');
+      }
+      if (utf8Length(explanation) > MAX_EXPLANATION_BYTES) {
+        throw new RefusedError(`explanation is bounded at ${MAX_EXPLANATION_BYTES} bytes`);
+      }
+      const outcome = body.outcome as string;
+      const rules = OUTCOME_RULES[outcome];
+      if (body.disposition !== rules.disposition) {
+        throw new RefusedError(
+          `outcome ${outcome} carries disposition ${rules.disposition}, never ` +
+            `${String(body.disposition)} — the table is closed`,
+        );
+      }
+      for (const [name, dims] of [
+        ['evaluated_dimensions', body.evaluated_dimensions],
+        ['material_dimensions', body.material_dimensions],
+      ] as [string, string[]][]) {
+        const sorted = [...dims].sort();
+        if (sorted.join('\0') !== dims.join('\0') || new Set(dims).size !== dims.length) {
+          throw new RefusedError(`${name} must be sorted and duplicate-free`);
+        }
+      }
+      const evaluated = body.evaluated_dimensions as string[];
+      const material = body.material_dimensions as string[];
+      const dimensionRule = (rule: string, dims: string[], name: string) => {
+        if (rule === 'required' && dims.length === 0) {
+          throw new RefusedError(`outcome ${outcome} requires at least one ${name}`);
+        }
+        if (rule === 'forbidden' && dims.length > 0) {
+          throw new RefusedError(`outcome ${outcome} names no ${name}`);
+        }
+      };
+      dimensionRule(rules.evaluated, evaluated, 'evaluated_dimensions');
+      dimensionRule(rules.material, material, 'material_dimensions');
+      const unevaluated = material.find((d) => !evaluated.includes(d));
+      if (unevaluated !== undefined) {
+        throw new RefusedError(
+          `material dimension ${unevaluated} was never evaluated — materiality is a subset ` +
+            'of what the run looked at',
+        );
+      }
+      for (const [name, ids] of [
+        ['input_receipt_ids', body.input_receipt_ids],
+        ['proposal_ids', body.proposal_ids],
+      ] as [string, string[]][]) {
+        sortedUniqueIds(ids, name);
+      }
+      if ((body.input_receipt_ids as string[]).length === 0) {
+        throw new RefusedError(
+          'input_receipt_ids must be non-empty — a run with no inputs assessed nothing',
+        );
+      }
+      const proposals = body.proposal_ids as string[];
+      if (rules.proposals === 'required' && proposals.length === 0) {
+        throw new RefusedError(`outcome ${outcome} requires at least one proposal_ids entry`);
+      }
+      if (rules.proposals === 'forbidden' && proposals.length > 0) {
+        throw new RefusedError(`outcome ${outcome} carries no proposal_ids`);
+      }
+      if (rules.blocked === 'required' && body.blocked_reason === null) {
+        throw new RefusedError(`outcome ${outcome} names one blocked reason`);
+      }
+      if (rules.blocked === 'forbidden' && body.blocked_reason !== null) {
+        throw new RefusedError(
+          `outcome ${outcome} is not blocked, and names ${String(body.blocked_reason)}`,
+        );
       }
       break;
     }
