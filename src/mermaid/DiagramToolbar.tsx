@@ -47,9 +47,16 @@ export function DiagramToolbar({
   onToggleShowCode,
   onEditVisually,
   history,
+  lastGoodSvg,
 }: {
   code: string;
   onChangeCode: (code: string) => void;
+  /**
+   * The svg the host is still SHOWING when `code` no longer renders — the
+   * last-good hold every diagram face in this module keeps. Export falls back
+   * to it rather than refusing while a valid picture is on the canvas (M29.53).
+   */
+  lastGoodSvg?: string | null;
   /**
    * The visual editor's manual-layout placement, when one is mounted beside
    * this toolbar and manual mode is on (M29.42 review). `+ Node` and `+ Shape`
@@ -105,7 +112,16 @@ export function DiagramToolbar({
   const act = (success: string, failure: string, run: (svg: string) => Promise<unknown>) => {
     void renderMermaid(code)
       .then((r) => {
-        if (!r.ok) throw new Error(r.message);
+        // A broken source mid-edit does not mean there is nothing to export:
+        // the canvas beside this toolbar is still showing its last good render
+        // by design, and refusing while a perfectly good diagram is on screen
+        // reads as the button being broken (M29.53). Export what the user can
+        // see; refuse only when there has never been anything to see.
+        if (!r.ok) {
+          const fallback = lastGoodSvg ?? null;
+          if (fallback === null) throw new Error(r.message);
+          return run(fallback);
+        }
         return run(r.svg);
       })
       .then((result) => {

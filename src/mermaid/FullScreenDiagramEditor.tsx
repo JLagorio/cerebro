@@ -145,6 +145,7 @@ export function FullScreenDiagramEditor({
         showCode={showCode}
         onToggleShowCode={() => setShowCode((s) => !s)}
         onEditVisually={flowchartCapable && mode === 'code' ? () => setMode('visual') : null}
+        lastGoodSvg={view.svg}
       />
       <div className="relative min-h-0 flex-1">
         {/* 340px of panel plus its 12px inset on each side — what Fit must

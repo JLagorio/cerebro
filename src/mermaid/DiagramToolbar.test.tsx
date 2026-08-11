@@ -15,6 +15,8 @@ vi.mock('./export', () => ({
   savePng: vi.fn().mockResolvedValue('/tmp/x.png'),
 }));
 import { copySvg, savePng } from './export';
+import { renderMermaid } from './render';
+const renderMock = vi.mocked(renderMermaid);
 
 const FLOW = 'flowchart TD\n  A[Start] --> B[End]';
 
@@ -194,6 +196,26 @@ describe('DiagramToolbar', () => {
     );
     await waitFor(() => expect(useUiStore.getState().toasts.length).toBe(1));
     expect(useUiStore.getState().toasts[0].message).toBe('SVG copied');
+  });
+
+  it('exports the picture on screen when the source being typed is broken', async () => {
+    renderMock.mockResolvedValueOnce({ ok: false, message: 'Parse error on line 3:', line: 3 });
+    mount({ lastGoodSvg: '<svg data-fake="last-good"></svg>' });
+    await userEvent.click(screen.getByRole('button', { name: 'Copy SVG' }));
+    // MEASURED: with a valid pie chart visibly on the canvas and a syntax error
+    // typed at the end of the source, Copy SVG toasted "Copy SVG failed" and
+    // put nothing on the clipboard — a refusal the user could see was wrong.
+    await vi.waitFor(() =>
+      expect(vi.mocked(copySvg)).toHaveBeenCalledWith('<svg data-fake="last-good"></svg>'),
+    );
+    await waitFor(() => expect(useUiStore.getState().toasts[0].message).toBe('SVG copied'));
+  });
+
+  it('still refuses when there has never been a picture to export', async () => {
+    renderMock.mockResolvedValueOnce({ ok: false, message: 'Parse error on line 1:', line: 1 });
+    mount({ lastGoodSvg: null });
+    await userEvent.click(screen.getByRole('button', { name: 'Copy SVG' }));
+    await waitFor(() => expect(useUiStore.getState().toasts[0].message).toBe('Copy SVG failed'));
   });
 
   it('toasts a specific failure when copy SVG rejects', async () => {

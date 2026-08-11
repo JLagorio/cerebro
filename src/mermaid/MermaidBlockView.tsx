@@ -215,7 +215,11 @@ export function MermaidBlockView({
       contentEditable={false}
       className="my-1 w-full rounded-lg border border-n-200 bg-n-0"
     >
-      <div className="flex items-center gap-1.5 border-b border-n-100 px-2.5 py-1">
+      {/* select-none: the header is chrome, not content. A drag-select across
+          the block used to paint its buttons in selection blue and carry their
+          labels into the DOM selection (M29.53); what actually reaches the
+          clipboard is the fence, via the block spec's toExternalHTML. */}
+      <div className="flex select-none items-center gap-1.5 border-b border-n-100 px-2.5 py-1">
         <Icon name="waypoints" size={13} color="var(--n-500)" />
         <span className="text-xs font-medium uppercase tracking-[0.05em] text-n-500">
           {detectDiagramType(editing ? liveSource : code)}

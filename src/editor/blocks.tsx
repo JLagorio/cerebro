@@ -133,6 +133,22 @@ export const MermaidBlock = createReactBlockSpec(
         onRedo={() => props.editor.redo()}
       />
     ),
+    /**
+     * What leaves the app when a selection crosses this block (M29.53).
+     *
+     * BlockNote derives text/plain from this same serializer pass, and with no
+     * toExternalHTML it fell back to the block's RENDERED text: MEASURED, a
+     * drag-select across the first diagram of Systems map put
+     * "FlowchartOpen full screenSave as file…Edit" on the clipboard and the
+     * diagram source nowhere in it. The fence is what markdown.ts already
+     * demotes this block to for the disk, and the neighbouring inline specs
+     * declare their plain-text form the same way (chips.tsx).
+     */
+    toExternalHTML: (props) => (
+      <pre>
+        <code>{`\`\`\`mermaid\n${props.block.props.code as string}\n\`\`\``}</code>
+      </pre>
+    ),
   },
 );
 
