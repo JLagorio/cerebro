@@ -182,6 +182,21 @@ test('augment: knowledge surfaces beside the PRD, and only when asked', async ({
 test('augment: Home volunteers at most a few unconfirmed things, and forgets what you dismiss', async ({
   page,
 }) => {
+  /**
+   * The corpus has an era, and this card only looks 14 days back.
+   *
+   * `recentlyLearned` (okf.ts) filters concepts stamped within `days = 14` of
+   * NOW, and the newest `generated.at` in demo-vault/knowledge is
+   * 2026-07-28T09:26:00Z — so this test quietly stopped being true at
+   * 2026-08-11T09:26Z and would have failed every run from then on, with
+   * nothing in the diff to blame. MEASURED: green at 2026-08-10, red the next
+   * morning, red with every source change stashed.
+   *
+   * Pinning the clock inside the corpus's own era is the fix that keeps the
+   * assertion honest — the alternative, widening the window, would be bending
+   * a product rule to suit a fixture.
+   */
+  await page.clock.setFixedTime(new Date('2026-07-29T12:00:00Z'));
   await boot(page);
 
   const card = page.getByTestId('learned-card');

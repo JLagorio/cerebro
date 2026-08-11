@@ -87,6 +87,23 @@ export function MermaidBlockView({
   const openPath = useOpenPath('in-place');
   /** This block's outermost element — see the key listener below. */
   const blockRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * The button the full-screen dialog was opened from, so focus can go back to
+   * it (M29.53).
+   *
+   * `useFocusRestore` already tries, and correctly declines here: it restores
+   * only from `<body>`, on the documented reading that anything already
+   * holding focus took it deliberately and outranks a going-away surface's
+   * memory. But ProseMirror does not take focus deliberately — it reclaims its
+   * root because the closing click landed inside a contenteditable — and
+   * MEASURED, that is exactly where focus was after closing this dialog: a DIV
+   * whose text begins "Systems mapHow the demo produc…", with the four "Open
+   * full screen" buttons on the page all unfocused and the next keystrokes
+   * going nowhere. The block knows its own trigger, so it restores it itself
+   * rather than widening a rule that is right for every other caller.
+   */
+  const fullScreenTrigger = useRef<HTMLButtonElement | null>(null);
+  const wasFullScreen = useRef(false);
   const [editing, setEditing] = useState(false);
   // `draft` only matters in code mode: visual mode renders `code` directly
   // (see the visual pane below) and every op commits through onChangeCode as
@@ -208,6 +225,18 @@ export function MermaidBlockView({
     return () => document.removeEventListener('keydown', onKey, true);
   }, [editing]);
 
+  // A layout effect, so the restore lands in the same commit the dialog left
+  // in rather than a paint later, with the caret visibly elsewhere in between.
+  useLayoutEffect(() => {
+    if (fullScreen) {
+      wasFullScreen.current = true;
+      return;
+    }
+    if (!wasFullScreen.current) return;
+    wasFullScreen.current = false;
+    fullScreenTrigger.current?.focus();
+  }, [fullScreen]);
+
   return (
     <div
       ref={blockRef}
@@ -256,6 +285,7 @@ export function MermaidBlockView({
         {code.trim() !== '' && (
           <button
             type="button"
+            ref={fullScreenTrigger}
             onClick={() => setFullScreen(true)}
             className="rounded-md border-0 bg-transparent px-1.5 py-0.5 text-xs text-n-500 hover:bg-n-50 hover:text-n-800"
           >

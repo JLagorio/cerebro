@@ -212,3 +212,47 @@ test('whiteboard: reopening the tab finds the same canvas, not a second file', a
   await page.waitForTimeout(1_000);
   expect(await canvasFiles(page)).toEqual([mmdPath]);
 });
+
+/**
+ * M29.53 — the picker says which row Enter will take.
+ *
+ * MEASURED on the shipped build: 25 options, ArrowDown moved nothing,
+ * aria-activedescendant null, every row's computed background rgba(0,0,0,0) —
+ * while Enter DID place a record. The cause was one layer down: `autoFocus` is
+ * applied when React inserts the element, and a Popover is `visibility: hidden`
+ * until it has measured itself, so the search box never received focus at all.
+ * jsdom ignores visibility when it decides what is focusable, which is why the
+ * unit tests said otherwise.
+ */
+test('whiteboard: the record picker marks the row Enter will take', async ({ page }) => {
+  test.setTimeout(120_000);
+  await boot(page);
+  await openDeliverySchedule(page);
+  await addWhiteboardTab(page);
+  await expect(page.getByTestId('whiteboard-view')).toBeVisible({ timeout: 15_000 });
+  await page
+    .getByTestId('structural-host')
+    .locator('svg[id^="cerebro-mermaid-"]')
+    .waitFor({ timeout: 30_000 });
+  await page.getByTestId('whiteboard-add-record').click();
+  await expect(page.getByTestId('whiteboard-record-picker')).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  const state = await page.evaluate(() => {
+    const active = document.activeElement as HTMLElement | null;
+    const opts = [...document.querySelectorAll('[data-testid="whiteboard-add-option"]')];
+    return {
+      activeDescendant: active?.getAttribute('aria-activedescendant'),
+      options: opts.length,
+      marked: opts.filter((o) => o.getAttribute('aria-selected') === 'true').length,
+      painted: opts.filter((o) => getComputedStyle(o).backgroundColor !== 'rgba(0, 0, 0, 0)')
+        .length,
+      markedIsSecond: opts[1]?.getAttribute('aria-selected') === 'true',
+    };
+  });
+  console.log('V2', JSON.stringify(state));
+  expect(state.marked).toBe(1);
+  expect(state.painted).toBe(1);
+  expect(state.markedIsSecond).toBe(true);
+  expect(state.activeDescendant).toBeTruthy();
+});

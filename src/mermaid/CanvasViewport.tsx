@@ -1,5 +1,14 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { IconButton } from '@/components/ui/IconButton';
+import { ANCHOR_MOVED_EVENT } from '@/components/ui/Popover';
 
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 4;
@@ -367,6 +376,25 @@ export function CanvasViewport({
     ro.observe(plane);
     return () => ro.disconnect();
   }, [initialFit]);
+
+  /**
+   * Tell anything anchored INSIDE the plane that its anchor just moved
+   * (M29.53).
+   *
+   * The plane's pan and zoom are a CSS transform, so an overlay measured
+   * against an element in here goes stale without a `resize` and without a
+   * `scroll` — the two signals `Popover` was listening for. MEASURED: five
+   * wheel steps to 161% moved a node by (-358, -214) and left its shape
+   * palette exactly where it was, still open, over an unrelated part of the
+   * diagram. The editor's own overlays ride the plane and need nothing; this
+   * is for the portalled ones, which cannot.
+   *
+   * A layout effect, so the re-measure happens in the same frame the transform
+   * was painted in rather than one behind it.
+   */
+  useLayoutEffect(() => {
+    window.dispatchEvent(new Event(ANCHOR_MOVED_EVENT));
+  }, [t]);
 
   // The dot grid, re-derived from the live transform (M29.52). Painted as this
   // element's own background rather than as a child, so it costs no node, takes

@@ -25,6 +25,16 @@ import { isInsideLayerAbove, isTopLayer, ownsEscape, useLayer } from '@/componen
  *   that ran off the screen and clamped into the trigger.
  */
 
+/**
+ * "Anything anchored to a moving element should re-measure now."
+ *
+ * Dispatched on `window` by a host whose layout it moves WITHOUT a resize and
+ * without a scroll — a canvas writing a CSS transform on the plane every pan
+ * frame and every wheel tick, which is invisible to both signals this file
+ * used to listen for.
+ */
+export const ANCHOR_MOVED_EVENT = 'cerebro:anchor-moved';
+
 const GAP = 4;
 const EDGE = 8;
 
@@ -260,7 +270,19 @@ export function Popover({
   useEffect(() => {
     const onResize = () => measure();
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    // …and whenever a host says its anchors have moved under it (M29.53). A
+    // pan or a wheel-zoom on a canvas moves the anchor by writing a CSS
+    // transform on an ancestor, which fires neither `resize` nor the panel's
+    // own ResizeObserver — MEASURED on the diagram page: five wheel steps to
+    // 161% moved the node by (-358, -214) and left the shape palette at
+    // (0, +2.4), still open, hanging over an unrelated part of the diagram.
+    // A plain DOM event rather than a context, because this component belongs
+    // to the design system and the canvas does not.
+    window.addEventListener(ANCHOR_MOVED_EVENT, onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener(ANCHOR_MOVED_EVENT, onResize);
+    };
   }, [measure]);
 
   const layerId = useDismiss({ onClose, surfaceRef: panelRef, anchorEl, onEscape });
@@ -303,6 +325,31 @@ export function Popover({
       document.removeEventListener('scroll', onScroll, true);
     };
   }, [closeOnScroll, layerId]);
+
+  /**
+   * A trapped popover hands focus to its first control ONCE IT IS PLACED
+   * (M29.53).
+   *
+   * `autoFocus` is applied when React inserts the element — and at that moment
+   * this panel is still `visibility: hidden`, because `place` is null until the
+   * measure below runs. A hidden element cannot take focus, so in a real
+   * browser the search box that asked for it never got it: MEASURED on the
+   * whiteboard's record picker, `document.activeElement` after opening was the
+   * trigger BUTTON, and two ArrowDown presses therefore did nothing at all.
+   * jsdom ignores visibility when it decides what is focusable, which is why
+   * three unit tests have been asserting the opposite for months.
+   *
+   * Scoped to `trapFocus`, which is this file's marker for "a surface that
+   * expects to own the keyboard" — a bare menu keeps the behaviour it had.
+   */
+  const placed = place !== null;
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!trapFocus || !placed || panel === null) return;
+    if (panel.contains(document.activeElement)) return;
+    const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+    (first ?? panel).focus();
+  }, [trapFocus, placed]);
 
   useEffect(() => {
     if (!trapFocus) return;

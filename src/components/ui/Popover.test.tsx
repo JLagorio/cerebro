@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Dialog } from '@/components/ui/Dialog';
-import { Popover } from '@/components/ui/Popover';
+import { ANCHOR_MOVED_EVENT, Popover } from '@/components/ui/Popover';
 import { hasLayers, resetLayers } from '@/components/ui/layers';
 
 /**
@@ -356,5 +356,63 @@ describe('Popover inside a Dialog (M29.27)', () => {
     const scrimZ = Number(window.getComputedStyle(scrim as Element).zIndex);
     expect(scrimZ).toBe(1000);
     expect(Number(declared?.[1])).toBeGreaterThan(scrimZ);
+  });
+});
+
+/**
+ * A canvas moves its anchors with a CSS transform (M29.53).
+ *
+ * MEASURED on the diagram page: five wheel steps to 161% moved a node by
+ * (-358, -214) and left its shape palette at (0, +2.4) — still open, now over
+ * an unrelated part of the diagram. Neither `resize` nor the panel's own
+ * ResizeObserver fires for a transform on an ancestor, so a host that moves
+ * its own contents has to say so.
+ */
+describe('Popover re-measures when a host says its anchors moved', () => {
+  function Anchored() {
+    const ref = useRef<HTMLButtonElement>(null);
+    return (
+      <div>
+        <button type="button" ref={ref} data-testid="anchor">
+          anchor
+        </button>
+        <Popover anchorRef={ref} onClose={() => {}} ariaLabel="Panel">
+          <span>body</span>
+        </Popover>
+      </div>
+    );
+  }
+
+  it('places itself again on ANCHOR_MOVED_EVENT', () => {
+    let top = 100;
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const isAnchor = this.getAttribute('data-testid') === 'anchor';
+      const box = isAnchor
+        ? { left: 40, top, width: 20, height: 10 }
+        : { left: 0, top: 0, width: 120, height: 60 };
+      return {
+        ...box,
+        right: box.left + box.width,
+        bottom: box.top + box.height,
+        x: box.left,
+        y: box.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    try {
+      render(<Anchored />);
+      // The POSITIONED element is the outer fixed wrapper; the labelled one
+      // inside it carries the animation and the width.
+      const panel = screen.getByLabelText('Panel').parentElement!;
+      const before = parseFloat(panel.style.top);
+      // The anchor moves the way a zoom moves it: no resize, no scroll.
+      top = 300;
+      fireEvent(window, new Event(ANCHOR_MOVED_EVENT));
+      // It tracked the anchor's own 200px, whatever the gap happens to be.
+      expect(parseFloat(panel.style.top) - before).toBe(200);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
   });
 });

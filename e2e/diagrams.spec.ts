@@ -1078,3 +1078,145 @@ test('M29.51: the editor chrome survives a zoom, and a rename keeps the diagram'
   await page.mouse.click(spot.x, spot.y);
   await expect(editor).toHaveCount(0);
 });
+
+/**
+ * M29.53 — three fixes that jsdom cannot see, driven where they live.
+ *
+ * Each replaces a measurement taken against the shipped build: a shape palette
+ * that stayed put while its node travelled (-358, -214) under a wheel zoom;
+ * focus landing on ProseMirror's root instead of the button the dialog was
+ * opened from; and an export naming 'Instrument Sans' in nine places while
+ * carrying zero @font-face rules, so every rasterised label was set in the
+ * fallback face against box geometry computed for another one.
+ */
+async function bootVault(page: import('@playwright/test').Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) await demoButton.click();
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+}
+
+async function openPipelinePage(page: import('@playwright/test').Page): Promise<void> {
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('Pipeline');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first().click();
+  await expect(page.getByTestId('diagram-page')).toBeVisible();
+  await page
+    .getByTestId('structural-host')
+    .locator('svg[id^="cerebro-mermaid-"]')
+    .waitFor({ timeout: 30_000 });
+}
+
+test('M29.53: a popover tracks its node through a wheel zoom', async ({ page }) => {
+  test.setTimeout(90_000);
+  await bootVault(page);
+  await openPipelinePage(page);
+  const node = page.locator('g.node').first();
+  await node.click();
+  await page.getByRole('button', { name: 'Change shape' }).click();
+  const palette = page.getByTestId('shape-palette');
+  await expect(palette).toBeVisible();
+  const n0 = await node.boundingBox();
+  const p0 = await palette.boundingBox();
+  // The palette's ANCHOR is the node toolbar it was opened from, not the node
+  // — Popover with no anchorRef measures the trigger's own wrapper. So the
+  // property is "the gap to the toolbar survives the zoom".
+  const t0 = await page.getByTestId('mermaid-node-toolbar').boundingBox();
+  const vp = await page.getByTestId('canvas-viewport').boundingBox();
+  await page.mouse.move(
+    (vp?.x ?? 0) + (vp?.width ?? 0) - 80,
+    (vp?.y ?? 0) + (vp?.height ?? 0) - 80,
+  );
+  for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
+  await page.waitForTimeout(500);
+  const open = (await palette.count()) > 0;
+  const n1 = await node.boundingBox();
+  const p1 = open ? await palette.boundingBox() : null;
+  const nd = { x: (n1?.x ?? 0) - (n0?.x ?? 0), y: (n1?.y ?? 0) - (n0?.y ?? 0) };
+  const pd = p1 === null ? null : { x: p1.x - (p0?.x ?? 0), y: p1.y - (p0?.y ?? 0) };
+  const t1 = await page.getByTestId('mermaid-node-toolbar').boundingBox();
+  // "Adjacent to its anchor on one side or the other": the panel is free to
+  // flip above/below and to clamp against the viewport edge — both are correct
+  // re-placements — and the finding is about it not MOVING AT ALL.
+  const adjacency = (t: typeof t0, pa: typeof p0): number | null =>
+    t === null || pa === null
+      ? null
+      : Math.round(Math.min(Math.abs(pa.y - (t.y + t.height)), Math.abs(t.y - (pa.y + pa.height))));
+  const g0 = adjacency(t0, p0);
+  const g1 = adjacency(t1, p1);
+  console.log(
+    'V1 node moved',
+    JSON.stringify(nd),
+    '| palette moved',
+    JSON.stringify(pd),
+    '| open:',
+    open,
+    '| gap to its anchor:',
+    g0,
+    '->',
+    g1,
+  );
+  expect(Math.abs(nd.x) + Math.abs(nd.y)).toBeGreaterThan(10);
+  expect(p1).not.toBeNull();
+  expect(Math.abs((pd?.x ?? 0) - nd.x)).toBeLessThan(8);
+  // Before M29.53 the palette did not move at all while its anchor travelled
+  // (-358, -214), so this number was the whole 214px of it.
+  expect(g1 ?? 999).toBeLessThan(16);
+});
+
+test('M29.53: closing the full-screen dialog hands focus back to its trigger', async ({ page }) => {
+  test.setTimeout(90_000);
+  await bootVault(page);
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('Systems map');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'Systems map' }).first().click();
+  await expect(page.getByTestId('doc-title')).toHaveText('Systems map');
+  await expect(
+    page.getByTestId('mermaid-diagram').first().locator('svg[id^="cerebro-mermaid-"]'),
+  ).toBeVisible({ timeout: 30_000 });
+  const trigger = page.getByRole('button', { name: 'Open full screen' }).first();
+  await trigger.click();
+  const dialog = page.getByTestId('fullscreen-diagram-editor');
+  await expect(dialog).toBeVisible();
+  await dialog.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toHaveCount(0);
+  const onTrigger = await trigger.evaluate((el) => el === document.activeElement);
+  const what = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    return `${el?.tagName}:${el?.textContent?.slice(0, 24)}`;
+  });
+  console.log('V3 activeElement:', what, '| is the trigger:', onTrigger);
+  expect(onTrigger).toBe(true);
+  // …and Escape, the other exit, lands the same way.
+  await trigger.click();
+  await expect(page.getByTestId('fullscreen-diagram-editor')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('fullscreen-diagram-editor')).toHaveCount(0);
+  console.log(
+    'V3 after Escape, is the trigger:',
+    await trigger.evaluate((el) => el === document.activeElement),
+  );
+});
+
+test('M29.53: an exported svg carries the font it names', async ({ page, context }) => {
+  test.setTimeout(90_000);
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await bootVault(page);
+  await openPipelinePage(page);
+  await page.getByRole('button', { name: 'Copy SVG' }).click();
+  await page.waitForTimeout(1500);
+  const svg = await page.evaluate(() => navigator.clipboard.readText());
+  const faces = (svg.match(/@font-face/g) ?? []).length;
+  const dataUri = /url\(data:font\/ttf;base64,([A-Za-z0-9+/=]{40})/.exec(svg)?.[1] ?? null;
+  console.log('V4 svg', svg.length, 'chars | @font-face:', faces, '| data URI head:', dataUri);
+  expect(faces).toBe(1);
+  expect(dataUri).toBeTruthy();
+  expect(svg).toContain("font-family:'Instrument Sans'");
+});

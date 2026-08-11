@@ -520,6 +520,55 @@ describe('WhiteboardView', () => {
       expect(options[0].textContent).toContain('Beta program');
     });
 
+    /**
+     * The picker says which row Enter will take (M29.53).
+     *
+     * MEASURED before this: 25 options, ArrowDown moved nothing,
+     * aria-activedescendant null, and every row's computed background was
+     * rgba(0, 0, 0, 0) — while Enter DID place a record. ⌘K, whose scorer this
+     * reuses, has always highlighted its rows.
+     */
+    it('the arrows mark a row, and Enter takes the marked one', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      const beta = makeEntry({ path: 'delivery/beta.md', title: 'Beta program' });
+      mount([shipV2, beta]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      const box = screen.getByLabelText('Find a record');
+      expect(box.getAttribute('aria-activedescendant')).toBeNull();
+
+      await userEvent.keyboard('{ArrowDown}{ArrowDown}');
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options[1].getAttribute('aria-selected')).toBe('true');
+      expect(options[0].getAttribute('aria-selected')).toBe('false');
+      expect(box.getAttribute('aria-activedescendant')).toBe(options[1].id);
+
+      await userEvent.keyboard('{Enter}');
+      await waitFor(() => expect(fs().get(MAP)).toContain('delivery/beta.md'));
+    });
+
+    it('wraps at the ends rather than stopping dead', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount([shipV2, makeEntry({ path: 'delivery/beta.md', title: 'Beta program' })]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      await userEvent.keyboard('{ArrowUp}');
+      const options = screen.getAllByTestId('whiteboard-add-option');
+      expect(options[options.length - 1].getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('an untouched picker still refuses to place the row it never marked', async () => {
+      fs().set(MAP, 'flowchart TD\n');
+      mount([shipV2]);
+      await screen.findByTestId('fake-editor');
+      await userEvent.click(screen.getByTestId('whiteboard-add-record'));
+      const before = fs().get(MAP);
+      // Nothing typed and nothing marked: every record is "first", and placing
+      // whichever one that is would be an edit nobody asked for.
+      await userEvent.keyboard('{Enter}');
+      expect(fs().get(MAP)).toBe(before);
+    });
+
     it('a record KEY finds it, exactly as ⌘K does', async () => {
       // QuickOpen scores max(title, key) and every work item in the vault has
       // a key — so scoring the title alone made `lnc-3` a hit in ⌘K and a

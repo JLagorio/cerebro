@@ -430,6 +430,10 @@ function recordKey(entry: Entry): string {
  * the Escape layer stack and the portal all come with it, and this surface
  * sits on a bar that other layers open over.
  */
+/** The listbox and its rows, named so the input can point at the marked one. */
+const LIST_ID = 'whiteboard-add-listbox';
+const optionId = (i: number): string => `whiteboard-add-option-${i}`;
+
 function AddRecordPopover({
   anchorRef,
   entries,
@@ -446,6 +450,15 @@ function AddRecordPopover({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
+  /**
+   * Which row Enter will take, or null for "the top one, once you have typed".
+   *
+   * Null rather than 0 at rest, deliberately: an empty box offers 25 records in
+   * whatever order they came, and marking one of them would be the picker
+   * claiming a choice nobody has made — the same rule the Enter branch below
+   * has always held, now visible.
+   */
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const q = query.trim();
   const results = useMemo(() => {
     if (q === '') return entries.slice(0, MAX_OFFERED);
@@ -459,6 +472,9 @@ function AddRecordPopover({
       .slice(0, MAX_OFFERED)
       .map((r) => r.e);
   }, [entries, q]);
+  // A mark that outlived the list it pointed into would move Enter's target
+  // silently as the user typed.
+  const active = activeIndex === null || activeIndex >= results.length ? null : activeIndex;
 
   return (
     <Popover
@@ -485,26 +501,52 @@ function AddRecordPopover({
           placeholder="Find a record…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          // The row Enter will take, said out loud (M29.53). MEASURED before
+          // this: 25 options with an empty query, ArrowDown moved nothing,
+          // every row's background was rgba(0,0,0,0) and there was no
+          // aria-activedescendant — so Enter DID place a record and nothing on
+          // screen had said which one it would be. ⌘K, whose scorer this
+          // reuses, has always highlighted its rows; this is that pattern.
+          ariaActivedescendant={active === null ? undefined : optionId(active)}
+          ariaControls={LIST_ID}
           onKeyDown={(e) => {
-            // Enter takes the top offer — but only once something has been
-            // typed. With the box empty every record is "first", and placing
-            // whichever one that is would be an edit nobody asked for
-            // (LinkPopover's rule, same reason).
-            if (e.key !== 'Enter' || q === '') return;
-            const first = results[0];
-            if (first !== undefined) onPick(first);
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              const step = e.key === 'ArrowDown' ? 1 : -1;
+              setActiveIndex((i) => {
+                const next = (i ?? -1) + step;
+                if (next < 0) return results.length - 1;
+                if (next >= results.length) return 0;
+                return next;
+              });
+              return;
+            }
+            // Enter takes the marked offer, or the top one — but only once
+            // something has been typed OR something has been picked out with
+            // the arrows. With the box empty and nothing marked every record
+            // is "first", and placing whichever one that is would be an edit
+            // nobody asked for (LinkPopover's rule, same reason).
+            if (e.key !== 'Enter') return;
+            if (q === '' && active === null) return;
+            const chosen = results[active ?? 0];
+            if (chosen !== undefined) onPick(chosen);
           }}
           width="100%"
         />
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {results.map((e) => (
+        <div className="min-h-0 flex-1 overflow-y-auto" id={LIST_ID} role="listbox">
+          {results.map((e, i) => (
             <button
               key={e.path}
               type="button"
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === active}
               data-testid="whiteboard-add-option"
               title={e.path}
               onClick={() => onPick(e)}
-              className="flex w-full items-center gap-2 rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-sm text-n-700 hover:bg-n-50"
+              onMouseEnter={() => setActiveIndex(i)}
+              style={{ background: i === active ? 'var(--n-50)' : 'transparent' }}
+              className="flex w-full items-center gap-2 rounded-md border-0 px-2 py-1.5 text-left text-sm text-n-700 hover:bg-n-50"
             >
               <span className="min-w-0 flex-1 truncate">{e.title}</span>
               {/* The key when the record has one, since that is what a key

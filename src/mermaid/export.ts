@@ -130,9 +130,91 @@ function exportBackground(): string {
   return buildThemeVariables().background;
 }
 
+/** Anything past this stays unembedded rather than bloating every export. */
+const MAX_FONT_BYTES = 2_000_000;
+
+/**
+ * The app's UI font, inlined as a data URI (M29.53).
+ *
+ * MEASURED: a 14,890-character exported svg named `'Instrument Sans'` in nine
+ * places and carried zero `@font-face` rules. Inside the app the face is a
+ * bundled .ttf that nothing outside can resolve — and the `<img>` the raster
+ * path draws through is an isolated document that will not load it either — so
+ * every export was set in the fallback stack while mermaid's box geometry had
+ * been computed against the real one: the string "Authorization Microservice"
+ * measures 197.58px in Instrument Sans and 187.63px in the fallback, 5.3%
+ * narrower, in every label of every export.
+ *
+ * Read out of the app's OWN stylesheet rather than from a hard-coded path, so
+ * it cannot drift from what the app is actually rendering with, and memoized
+ * because it is a ~194KB file that never changes within a session. Every
+ * failure — a cross-origin sheet, a missing rule, a fetch that will not
+ * resolve — degrades to what shipped before: no rule, and the fallback face.
+ */
+let fontFaceCss: string | null | undefined;
+
+function base64(bytes: Uint8Array): string {
+  // Chunked: `String.fromCharCode(...bytes)` on 194KB overflows the argument
+  // limit and throws.
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return btoa(out);
+}
+
+export async function embeddedFontCss(): Promise<string | null> {
+  if (fontFaceCss !== undefined) return fontFaceCss;
+  fontFaceCss = null;
+  const family = buildThemeVariables().fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+  if (family === '') return fontFaceCss;
+  try {
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue; // a cross-origin sheet cannot be read, and is not ours
+      }
+      for (const rule of Array.from(rules)) {
+        if (rule.constructor.name !== 'CSSFontFaceRule') continue;
+        const style = (rule as CSSFontFaceRule).style;
+        if (style.getPropertyValue('font-family').replace(/['"]/g, '').trim() !== family) continue;
+        // Mermaid never emits italic, and a second face would double the bytes.
+        if (style.getPropertyValue('font-style').trim() === 'italic') continue;
+        const url = /url\(["']?([^"')]+)["']?\)/.exec(style.getPropertyValue('src'))?.[1];
+        if (url === undefined) continue;
+        const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+        if (bytes.byteLength === 0 || bytes.byteLength > MAX_FONT_BYTES) continue;
+        const weight = style.getPropertyValue('font-weight').trim() || 'normal';
+        fontFaceCss =
+          `@font-face{font-family:'${family}';` +
+          `src:url(data:font/ttf;base64,${base64(bytes)}) format('truetype-variations');` +
+          `font-weight:${weight};font-style:normal;}`;
+        return fontFaceCss;
+      }
+    }
+  } catch {
+    // Degrade to the unembedded export, which is what shipped before.
+  }
+  return fontFaceCss;
+}
+
+/** Puts the face inside the svg, where a consumer of the file can reach it. */
+export function withFontFace(svg: string, css: string | null): string {
+  if (css === null) return svg;
+  const open = svg.match(/<svg\b[^>]*>/);
+  if (open === null) return svg;
+  const at = (open.index ?? 0) + open[0].length;
+  return `${svg.slice(0, at)}<style>${css}</style>${svg.slice(at)}`;
+}
+
 export async function svgToPngBytes(svg: string, scale = 2): Promise<Uint8Array> {
   const { width, height } = viewBoxSize(svg);
-  const printable = withBackground(inlineForeignObjects(svg), exportBackground());
+  const printable = withFontFace(
+    withBackground(inlineForeignObjects(svg), exportBackground()),
+    await embeddedFontCss(),
+  );
   const url = URL.createObjectURL(new Blob([printable], { type: 'image/svg+xml;charset=utf-8' }));
   try {
     const img = new Image();
@@ -162,9 +244,11 @@ export async function svgToPngBytes(svg: string, scale = 2): Promise<Uint8Array>
 // error, not a generic one raised from inside this module.
 
 export async function copySvg(svg: string): Promise<void> {
-  // Background, but no label inlining: this copy is the lossless one, and
-  // every SVG consumer that matters renders foreignObject.
-  await navigator.clipboard.writeText(withBackground(svg, exportBackground()));
+  // Background and the font face, but no label inlining: this copy is the
+  // lossless one, and every SVG consumer that matters renders foreignObject.
+  await navigator.clipboard.writeText(
+    withFontFace(withBackground(svg, exportBackground()), await embeddedFontCss()),
+  );
 }
 
 export async function copyPng(svg: string): Promise<void> {
