@@ -220,12 +220,42 @@ export function bindFlowchartSvg(
   // flowDb's close-order ordinals). Node groups are NOT descendants of the
   // cluster — they sit in a sibling `g.nodes` layer — so a cluster's own box
   // is the only thing a click on it can land on.
+  //
+  // …on DAGRE. The bundled ELK renderer writes the group's DOM id from an
+  // object rather than from the subgraph id, so `el.id` is literally the string
+  // "[object Object]" — MEASURED on demo-vault/diagrams/pipeline.mmd, which
+  // ships `layout: elk`: the cluster's id was "[object Object]", its
+  // `style.cursor` was never set, its `onclick` was null, and a 21x21 grid of
+  // elementFromPoint probes found 217 of 441 points landing on its own rect, so
+  // it was perfectly hittable with nothing listening. Every subgraph control —
+  // rename, per-block direction, ungroup — was unreachable under that engine,
+  // with no other route to any of them.
+  //
+  // The fallback is DOCUMENT ORDER. mermaid emits one `g.cluster` per subgraph,
+  // and `subgraphs()` lists them in close order, which is the same order — so
+  // when the id says nothing, the k-th cluster is the k-th block. It only ever
+  // runs for clusters whose id resolved to nothing, so a diagram whose ids DO
+  // resolve is bound exactly as before.
   const clusterEls = new Map<string, SVGGElement>();
   const knownSubs = subgraphs(model);
+  const unresolved: SVGGElement[] = [];
   for (const el of container.querySelectorAll<SVGGElement>('g.cluster')) {
     const domId = stripRenderId(el.id);
     const hit = knownSubs.find((s) => s.id === domId);
-    if (hit !== undefined && !clusterEls.has(hit.id)) clusterEls.set(hit.id, el);
+    if (hit === undefined) {
+      unresolved.push(el);
+      continue;
+    }
+    if (!clusterEls.has(hit.id)) clusterEls.set(hit.id, el);
+  }
+  if (unresolved.length > 0) {
+    const spare = knownSubs.filter((s) => !clusterEls.has(s.id));
+    // Positional, and only when the counts agree: a partial match means the
+    // rendered picture and the model disagree about how many blocks there are,
+    // and binding a toolbar to the wrong block is worse than binding none.
+    if (spare.length === unresolved.length) {
+      spare.forEach((s, i) => clusterEls.set(s.id, unresolved[i]));
+    }
   }
 
   // Neutralize mermaid's own anchors (M29.38). At `securityLevel: 'strict'`

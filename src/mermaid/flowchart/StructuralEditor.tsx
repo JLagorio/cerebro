@@ -1115,7 +1115,11 @@ export function StructuralEditor({
         'rect:not(.cerebro-connect-handle), circle:not(.cerebro-connect-handle), polygon, path',
       )) {
         if (outlined.has(id)) {
-          shapeEl.style.stroke = 'var(--cortex-500)';
+          // Its own token, not the same one theme.ts hands mermaid for the
+          // RESTING border: in dark those were identical, so a selected node
+          // differed from an unselected one by 1.5px of width and nothing else
+          // (M29.53).
+          shapeEl.style.stroke = 'var(--diagram-selection-ring)';
           // Divided by the live scale, so the ring is 2.5 SCREEN px wherever
           // the zoom is (M29.53). Written in PLANE units it measured 0.96px at
           // 39% — thinner than the node's own 1px border, i.e. no selection cue
@@ -1195,7 +1199,17 @@ export function StructuralEditor({
       {toolbar && (
         <div
           data-testid="structural-toolbar"
-          className="mb-1.5 flex items-center gap-1"
+          // `flex-wrap` (M29.53): this row is 370px of controls with no wrap
+          // and no overflow handling, and the block it lives in is 310px wide
+          // at a 1000px window with the outline panel open — the app's own
+          // minimum window is 900. MEASURED there: "Auto-layout: On" rendered
+          // 147px past the card's rounded border, entirely underneath the
+          // outline panel, and elementFromPoint at its centre returned the
+          // panel: three real clicks at those pixels did nothing at all, so at
+          // the narrowest supported width the control was not merely ugly but
+          // inoperable. (Playwright's locator.click scrolls and retries, which
+          // is exactly why no e2e caught it.)
+          className="mb-1.5 flex flex-wrap items-center gap-1"
           onClick={(e) => e.stopPropagation()}
         >
           <button

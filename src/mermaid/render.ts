@@ -1,4 +1,4 @@
-import { buildThemeVariables, themeSignature } from './theme';
+import { buildThemeVariables, DIAGRAM_FONT_CONFIG, themeSignature } from './theme';
 
 /**
  * The one mermaid entry point (M29.2). Everything that renders a diagram —
@@ -154,6 +154,9 @@ async function renderUncached(
         securityLevel: 'strict',
         theme: 'base',
         themeVariables: vars,
+        // Sequence and gantt read their text size from here rather than from
+        // the theme's `fontSize` — see DIAGRAM_FONT_CONFIG.
+        ...DIAGRAM_FONT_CONFIG,
       });
       const { svg } = await mermaid.render(`cerebro-mermaid-${++seq}`, code);
       return { ok: true, svg };

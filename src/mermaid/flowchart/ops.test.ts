@@ -82,9 +82,54 @@ describe('addNode / addEdge / newNodeId', () => {
     expect(out.endsWith('  n1[Fresh]\n  C --> n1')).toBe(true);
   });
 
+  it("keeps the file's trailing newline, and adds no blank line before itself", () => {
+    // Every file this app writes ends in a newline, which parses to a trailing
+    // EMPTY line — and pushing past that one inserted a blank line AND ate the
+    // terminator. MEASURED on diagrams/pipeline.mmd: one "Add connected node"
+    // took endsWith('\n') from true to false, and every later edit inherited it
+    // as a "\ No newline at end of file" in the status bar's git diff.
+    const src = 'flowchart TD\n  A[Capture] --> B[Distill]\n';
+    const { model: m2, id } = addNode(parseFlowchart(src)!, 'New step');
+    const out = serialize(addEdge(m2, 'A', id));
+    expect(out).toBe('flowchart TD\n  A[Capture] --> B[Distill]\n  n1[New step]\n  A --> n1\n');
+    expect(out.endsWith('\n')).toBe(true);
+  });
+
+  it('appends at the end when the file has no trailing newline to keep', () => {
+    const src = 'flowchart TD\n  A[Capture] --> B[Distill]';
+    const { model: m2, id } = addNode(parseFlowchart(src)!, 'New step');
+    expect(serialize(m2)).toBe('flowchart TD\n  A[Capture] --> B[Distill]\n  n1[New step]');
+    expect(id).toBe('n1');
+  });
+
   it('never reuses an existing id', () => {
     const m = parseFlowchart('flowchart TD\n  n1[X] --> n3[Y]')!;
     expect(newNodeId(m)).toBe('n2');
+  });
+});
+
+describe('setLayoutEngine leaves no debris (M29.53)', () => {
+  it('takes the config mapping and its fences with the last child', () => {
+    // MEASURED: switching Pipeline from ELK to Dagre left `---\nconfig:\n---`
+    // — a key with nothing under it, wrapped in fences around nothing.
+    const src = '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n';
+    expect(serialize(setLayoutEngine(parseFlowchart(src)!, 'dagre'))).toBe(
+      'flowchart TD\n  A --> B\n',
+    );
+  });
+
+  it('leaves frontmatter that still holds something of its own', () => {
+    const src = '---\ntitle: Pipeline\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n';
+    expect(serialize(setLayoutEngine(parseFlowchart(src)!, 'dagre'))).toBe(
+      '---\ntitle: Pipeline\n---\nflowchart TD\n  A --> B\n',
+    );
+  });
+
+  it('leaves a config mapping that still holds another key', () => {
+    const src = '---\nconfig:\n  layout: elk\n  theme: dark\n---\nflowchart TD\n  A --> B\n';
+    expect(serialize(setLayoutEngine(parseFlowchart(src)!, 'dagre'))).toBe(
+      '---\nconfig:\n  theme: dark\n---\nflowchart TD\n  A --> B\n',
+    );
   });
 });
 

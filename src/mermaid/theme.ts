@@ -36,6 +36,22 @@ export function buildThemeVariables(): Record<string, string> {
   };
 }
 
+/**
+ * Per-diagram font sizes (M29.53).
+ *
+ * `fontSize: '13px'` is a theme VARIABLE, and only some renderers read it:
+ * MEASURED in one 638px document column, the flowchart's smallest text was
+ * 13px, the sequence diagram's 16px and the gantt's 10px — three sizes for one
+ * document. Sequence and gantt take theirs from their own config blocks
+ * instead, which is what this sets. Kept beside the palette because it is the
+ * same decision ("what a diagram looks like in this app") reached by a
+ * different lever.
+ */
+export const DIAGRAM_FONT_CONFIG = {
+  sequence: { actorFontSize: 13, messageFontSize: 13, noteFontSize: 13 },
+  gantt: { fontSize: 13, sectionFontSize: 13 },
+} as const;
+
 /** Cache key component: same code under a different palette must not reuse an SVG. */
 export function themeSignature(vars: Record<string, string>): string {
   return Object.values(vars).join('|');

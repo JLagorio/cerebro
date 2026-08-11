@@ -1849,7 +1849,9 @@ describe('manual layout: the orderings the comments claim (M29.42)', () => {
       await userEvent.click(a);
       // The node's own shape wears the selection outline; the handle keeps its
       // own colours — it is an affordance sitting on the node, not part of it.
-      expect(a.querySelector<SVGElement>('rect')!.style.stroke).toBe('var(--cortex-500)');
+      expect(a.querySelector<SVGElement>('rect')!.style.stroke).toBe(
+        'var(--diagram-selection-ring)',
+      );
       expect(handle.style.stroke).toBe('');
       expect(handle.getAttribute('fill')).toBe('var(--cortex-500)');
     } finally {

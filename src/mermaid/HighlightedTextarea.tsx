@@ -59,7 +59,7 @@ export function HighlightedTextarea({
     '[font-family:var(--font-mono)] text-sm leading-[1.5] whitespace-pre-wrap break-words';
 
   return (
-    <div className="relative min-w-[260px] flex-1 basis-[280px] bg-n-25">
+    <div className="relative min-w-0 flex-1 basis-[280px] bg-n-25">
       {highlighter !== null && (
         <div
           ref={layerRef}

@@ -430,13 +430,34 @@ export function newNodeId(model: FlowchartModel): string {
   return `n${n}`;
 }
 
+/**
+ * Where an appended line belongs (M29.53).
+ *
+ * A source that ends in a newline — every file this app writes — parses to a
+ * trailing EMPTY line, because that is what splitting on '\n' produces. Pushing
+ * past it inserted a blank line AND ate the terminator: MEASURED, one "Add
+ * connected node" took `…C --> D[Publish]\n` to `…C --> D[Publish]\n\n
+ * n1[New step]\n  A --> n1` with endsWith('\n') going true -> false, and every
+ * later edit inherited the missing newline. In a files-first app with git in
+ * the status bar that is a "\ No newline at end of file" on every diagram the
+ * user touches.
+ */
+function appendAt(model: FlowchartModel): number {
+  const last = model.lines[model.lines.length - 1];
+  // `!dirty` matters: a line THIS session appended carries a stub raw of two
+  // spaces and emits its real text later, so a raw-only test reads the node we
+  // just added as the file's terminator and inserts the next one above it.
+  const terminator = last !== undefined && !last.dirty && last.raw.trim() === '';
+  return terminator ? model.lines.length - 1 : model.lines.length;
+}
+
 export function addNode(
   model: FlowchartModel,
   label: string,
 ): { model: FlowchartModel; id: string } {
   const next = clone(model);
   const id = newNodeId(next);
-  next.lines.push({
+  next.lines.splice(appendAt(next), 0, {
     raw: '  ',
     parsed: { kind: 'node', node: { id, label, shape: 'rect' } },
     dirty: true,
@@ -446,7 +467,7 @@ export function addNode(
 
 export function addEdge(model: FlowchartModel, from: string, to: string): FlowchartModel {
   const next = clone(model);
-  next.lines.push({
+  next.lines.splice(appendAt(next), 0, {
     raw: '  ',
     parsed: {
       kind: 'edges',
@@ -1183,8 +1204,25 @@ export function setLayoutEngine(model: FlowchartModel, engine: 'dagre' | 'elk'):
   if (engine === 'dagre') {
     if (layoutIdx !== -1) {
       next.lines.splice(layoutIdx, 1);
-      // A now-empty `config:` is left as-is: harmless, and removing more than
-      // asked would violate the surgical rule.
+      // …and the mapping it emptied, and the fences that then wrap nothing
+      // (M29.53). Leaving `---\nconfig:\n---` behind was the surgical reading
+      // of "remove the override", but a key with nothing under it is not a
+      // line the user wrote either — it is debris from ours, and the honest
+      // surgical result of removing the only child of a mapping is that the
+      // mapping goes too.
+      const closeNow = next.lines.findIndex((l, i) => i > 0 && l.raw.trim() === '---');
+      const configIdx = next.lines.findIndex(
+        (l, i) => i > 0 && i < closeNow && l.raw.match(/^\s*config:\s*$/) !== null,
+      );
+      const childless =
+        configIdx !== -1 &&
+        next.lines
+          .slice(configIdx + 1, closeNow)
+          .every((l) => l.raw.trim() === '' || l.raw.match(/^\s*\S/) === null);
+      if (childless) next.lines.splice(configIdx, closeNow - configIdx);
+      // An empty frontmatter block is two fences around nothing.
+      const reclose = next.lines.findIndex((l, i) => i > 0 && l.raw.trim() === '---');
+      if (reclose === 1) next.lines.splice(0, 2);
     }
     return next;
   }

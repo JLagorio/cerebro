@@ -21,8 +21,18 @@ const DIRECTIONS = ['TD', 'LR', 'BT', 'RL'] as const;
 
 const isElk = (code: string): boolean => code.match(/^\s*layout:\s*elk\s*$/m) !== null;
 
+/**
+ * `whitespace-nowrap shrink-0` and a focus ring (M29.53).
+ *
+ * MEASURED at a 760px window: `+ Node`, `+ Shape`, `Layout: ELK` and
+ * `Show code` each rendered 46px tall inside an `h-10` bar — their labels had
+ * wrapped to two lines and the buttons spilled 6px below the row's own border
+ * into the canvas. And these hand-rolled buttons declared no focus-visible
+ * ring while the DS `Button`/`IconButton` beside them do, so Tab through one
+ * toolbar strip crossed two different ring vocabularies eight controls in.
+ */
 const TEXT_BTN =
-  'rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50';
+  'shrink-0 whitespace-nowrap rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-600 hover:bg-n-50 focus-visible:outline-none focus-visible:ring';
 
 /**
  * The full-screen editor's control strip (M29.26, spec D1/D9-partial).
@@ -133,10 +143,18 @@ export function DiagramToolbar({
   return (
     <div
       data-testid="diagram-toolbar"
-      className="flex h-10 flex-none items-center gap-1 border-b border-n-200 bg-n-0 px-2"
+      // `overflow-x-auto` + `shrink-0` children (M29.53). MEASURED at 800x600
+      // with a whiteboard's title in the row: 664px of content in a 564px bar,
+      // computed overflow-x `visible` and no wrap, so it neither scrolled nor
+      // wrapped — "Save PNG…" sat at x=805 against a document 800px wide, past
+      // the edge of the page with no scrollbar anywhere to reach it, and the
+      // view title measured clientWidth 0 against scrollWidth 73, truncated
+      // away without even an ellipsis. A scrolling strip keeps every control
+      // reachable at every width; the title keeps its own min-w-0 truncation.
+      className="flex h-10 flex-none items-center gap-1 overflow-x-auto border-b border-n-200 bg-n-0 px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {title !== undefined && (
-        <span className="mr-1 truncate text-sm font-medium text-n-900">{title}</span>
+        <span className="mr-1 min-w-0 shrink truncate text-sm font-medium text-n-900">{title}</span>
       )}
       {history !== undefined && (
         <>

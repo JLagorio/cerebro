@@ -340,3 +340,37 @@ describe('bindFlowchartSvg neutralizes mermaid anchors (M29.38)', () => {
     expect(host.querySelectorAll('a[href]')).toHaveLength(0);
   });
 });
+
+/**
+ * The ELK renderer names its cluster groups from an object (M29.53).
+ *
+ * MEASURED on demo-vault/diagrams/pipeline.mmd, which ships `layout: elk`: the
+ * `g.cluster` id was the string "[object Object]", so the exact-equality lookup
+ * never hit, no handler was attached, and every subgraph control — rename,
+ * per-block direction, ungroup — was unreachable under that engine. The same
+ * document under Dagre bound and worked.
+ */
+describe('cluster binding when the DOM id says nothing', () => {
+  const CODE = 'flowchart TD\n  subgraph Front_half\n    A --> B\n  end\n  B --> C';
+
+  it('falls back to document order', () => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<svg><g class="cluster" id="[object Object]"><rect/></g>' +
+      '<g class="node" id="flowchart-A-0"/><g class="node" id="flowchart-B-1"/>' +
+      '<g class="node" id="flowchart-C-2"/></svg>';
+    const binding = bindFlowchartSvg(host, parseFlowchart(CODE)!);
+    expect(binding.clusterEls.get('Front_half')).toBe(host.querySelector('g.cluster'));
+  });
+
+  it('refuses when the picture and the model disagree about how many blocks there are', () => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<svg><g class="cluster" id="[object Object]"><rect/></g>' +
+      '<g class="cluster" id="[object Object]"><rect/></g>' +
+      '<g class="node" id="flowchart-A-0"/></svg>';
+    // One subgraph in the model, two unresolved clusters on screen: binding a
+    // toolbar to the wrong block is worse than binding none.
+    expect(bindFlowchartSvg(host, parseFlowchart(CODE)!).clusterEls.size).toBe(0);
+  });
+});

@@ -492,7 +492,7 @@ function LivePreview({ code }: { code: string }) {
   }, [debounced]);
 
   return (
-    <div className="min-w-[260px] flex-1 basis-[280px] border-l border-n-100 px-3 py-2">
+    <div className="min-w-0 flex-1 basis-[280px] border-l border-n-100 px-3 py-2">
       {error !== null && (
         <div
           data-testid="mermaid-edit-error"

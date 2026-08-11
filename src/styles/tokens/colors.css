@@ -177,6 +177,13 @@
   --border-subtle: var(--n-200);
   --border-strong: var(--n-300);
   --border-focus: var(--cortex-500);
+  /* A selected diagram node's ring. Its own token because it is drawn ON the
+     node, whose fill is --cortex-50 — in dark that fill becomes #1b2547 while
+     --cortex-500 deliberately does not move, so the ring and its ground close
+     to 2.67:1, under the 3:1 non-text floor, and the only remaining cue is
+     1.5px of extra stroke width against an identically-coloured border
+     (MEASURED, M29.53). */
+  --diagram-selection-ring: var(--cortex-500);
   --accent: var(--cortex-500);
   --accent-hover: var(--cortex-600);
   --accent-press: var(--cortex-700);
@@ -314,6 +321,10 @@
   --border-subtle: var(--n-200);
   --border-strong: var(--n-300);
   --border-focus: var(--cortex-400);
+  /* --cortex-300 on --cortex-50 (#1b2547 in dark) is 6.0:1, against 2.67:1 for
+     --cortex-500, and it is plainly a different colour from the resting node
+     border rather than the same one 1.5px thicker. */
+  --diagram-selection-ring: var(--cortex-300);
   --accent: var(--cortex-500);
   --accent-hover: var(--cortex-400);
   --accent-press: var(--cortex-300);
