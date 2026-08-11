@@ -295,14 +295,29 @@ pub fn commit_proposals(
     let catalog = qualification::Catalog::new(vault, writer.store_id());
     let mut verdicts = Vec::with_capacity(members.len());
     let mut failure: Option<(usize, Box<PreconditionFailure>)> = None;
+    // The target-binding predicate expands each member to learn what it
+    // WRITES, so it needs the same staged sets the real expansion gets —
+    // accumulated in member order, after each member's own turn, so a create
+    // does not see itself staged.
+    let mut staged_beliefs: std::collections::BTreeSet<String> = Default::default();
+    let mut staged_entities: std::collections::BTreeSet<String> = Default::default();
     for (index, proposal) in members.iter().enumerate() {
         let facts = facts_at(table, &state, proposal)?;
         let verdict = table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?;
         if verdict.rejection().is_none() && failure.is_none() {
-            if let Err(precondition) = preconditions::check(table, &state, &catalog, proposal) {
+            let binding = preconditions::TargetBinding {
+                actor: &actors[index],
+                staged_beliefs: &staged_beliefs,
+                staged_entities: &staged_entities,
+                decision_event_id: None,
+            };
+            if let Err(precondition) =
+                preconditions::check(table, &state, &catalog, proposal, &binding)
+            {
                 failure = Some((index, precondition));
             }
         }
+        stage_created(&proposal.op, &mut staged_beliefs, &mut staged_entities);
         verdicts.push(verdict);
     }
     if let Some((culprit, precondition)) = failure {
@@ -591,11 +606,30 @@ pub fn resolve_commit_set(
     // rose is `policy_precondition_stale`.
     let mut stale_code: Option<&'static str> = None;
     let catalog = qualification::Catalog::new(vault, writer.store_id());
+    let mut staged_beliefs: std::collections::BTreeSet<String> = Default::default();
+    let mut staged_entities: std::collections::BTreeSet<String> = Default::default();
     for (index, proposal) in members.iter().enumerate() {
         let facts = facts_at(table, &state, proposal)?;
         let verdict = table_verdict(table, &facts).map_err(|e| internal(format!("{e:?}")))?;
+        let binding = preconditions::TargetBinding {
+            actor: &actors[index],
+            staged_beliefs: &staged_beliefs,
+            staged_entities: &staged_entities,
+            // THE PASS THAT MATTERS for an op whose expansion needs an
+            // approval: at set-decision time there is none, so it binds
+            // here, immediately before the batch appends.
+            decision_event_id: approvals.get(index).cloned().flatten(),
+        };
+        let bound = if stale_reason.is_none() {
+            preconditions::check(table, &state, &catalog, proposal, &binding)
+        } else {
+            Ok(())
+        };
+        // AFTER this member's own check, for the same reason the expansion
+        // loop stages after its own expansion.
+        stage_created(&proposal.op, &mut staged_beliefs, &mut staged_entities);
         if stale_reason.is_none() {
-            if let Err(precondition) = preconditions::check(table, &state, &catalog, proposal) {
+            if let Err(precondition) = bound {
                 // The window target-id CAS alone cannot see: a duplicate
                 // created while the card waited, evidence that stopped
                 // resolving, a version that moved after approval.
@@ -1032,25 +1066,7 @@ fn apply_with_decisions(
         let expansion = expand(&proposal.op, &ctx).map_err(|e| expand_error(table, e))?;
         // AFTER its own expansion: a create must not see itself staged, or
         // it would refuse as a duplicate of the thing it is creating.
-        match &proposal.op {
-            schema::ProposalOp::CreateBelief {
-                belief_id, subject, ..
-            } => {
-                staged_beliefs.insert(belief_id.clone());
-                if let schema::SubjectRef::Resolved { entity_id, .. } = subject {
-                    staged_entities.insert(entity_id.clone());
-                }
-            }
-            schema::ProposalOp::SplitBelief { outputs, .. } => {
-                for output in outputs {
-                    staged_beliefs.insert(output.belief_id.clone());
-                    if let schema::SubjectRef::Resolved { entity_id, .. } = &output.subject {
-                        staged_entities.insert(entity_id.clone());
-                    }
-                }
-            }
-            _ => {}
-        }
+        stage_created(&proposal.op, &mut staged_beliefs, &mut staged_entities);
         if expansion.members.is_empty() {
             return Err(internal(format!(
                 "{} expanded to nothing — an application that changes nothing is not one",
@@ -1232,6 +1248,39 @@ fn project_applied(writer: &LedgerWriter, vault: &Path) -> Result<(), SubmitErro
 /// A LEDGER-destined expansion refusal is a defect at this point — policy
 /// already accepted the proposal — so it surfaces loudly instead of being
 /// written into history as if it had been foreseen.
+/// What a member CREATES, staged for the members after it.
+///
+/// Shared by the real expansion loop and the target-binding predicate, so the
+/// world the binding check expands against is the world the application will
+/// expand against. Two copies of this accumulation would disagree exactly
+/// when a set creates a Belief and then links it — the case atomic sets
+/// exist for.
+fn stage_created(
+    op: &schema::ProposalOp,
+    beliefs: &mut std::collections::BTreeSet<String>,
+    entities: &mut std::collections::BTreeSet<String>,
+) {
+    match op {
+        schema::ProposalOp::CreateBelief {
+            belief_id, subject, ..
+        } => {
+            beliefs.insert(belief_id.clone());
+            if let schema::SubjectRef::Resolved { entity_id, .. } = subject {
+                entities.insert(entity_id.clone());
+            }
+        }
+        schema::ProposalOp::SplitBelief { outputs, .. } => {
+            for output in outputs {
+                beliefs.insert(output.belief_id.clone());
+                if let schema::SubjectRef::Resolved { entity_id, .. } = &output.subject {
+                    entities.insert(entity_id.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn expand_error(table: &PolicyTable, error: ExpandError) -> SubmitError {
     match table.destiny(error.code) {
         Some(Destiny::Operational) | None => SubmitError {

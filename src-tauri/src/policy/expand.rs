@@ -516,6 +516,25 @@ impl<'a> Plan<'a> {
 }
 
 /// Expand one op into its closed plan.
+/// The write set alone, for the M26.3d target-binding predicate.
+///
+/// **It calls `expand`.** It does not re-match on `ProposalOp`, because a
+/// second twenty-arm match over the same union is exactly the hand-maintained
+/// second inventory this milestone forbids — and the two copies would diverge
+/// on the arms that are conditional (`merge_beliefs_exact` revises the
+/// survivor only when the basis differs) or state-derived (`revert_proposal`
+/// reads its steps out of the stored plan). One function, one answer.
+///
+/// The cost is expanding twice per commit — once to bind, once to apply.
+/// That is real and it is the cheap side of the trade: the alternative is a
+/// predicate that is allowed to disagree with what actually gets written.
+pub fn write_targets_of(
+    op: &ProposalOp,
+    ctx: &ExpansionContext,
+) -> Result<Vec<(TargetClass, String)>, ExpandError> {
+    Ok(expand(op, ctx)?.write_targets)
+}
+
 pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, ExpandError> {
     let mut plan = Plan::new(ctx);
     match op {
@@ -524,7 +543,11 @@ pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, Expa
             let mut body = (**observation).clone();
             body.batch_id = None;
             body.idempotency_key = None;
+            let source_id = body.source_id.clone();
             plan.push(schema::KIND_OBSERVATION_RECORDED, &body)?;
+            // As in `cache_source`: the Source advances, the Observation is
+            // its own event id and so is not a CAS target.
+            plan.touches(TargetClass::Source, &source_id);
             // The recorded Observation's identity IS its event id: a
             // creation with no prior version, deliberately absent from the
             // CAS set.
@@ -566,6 +589,14 @@ pub fn expand(op: &ProposalOp, ctx: &ExpansionContext) -> Result<Expansion, Expa
                     .map_err(|e| refuse("schema_invalid", e.to_string()))?,
                 },
             )?;
+            // The SOURCE advances (reduce.rs bumps it on every recorded
+            // observation), and until M26.3d it was the one write this plan
+            // did not declare — so a binding rule over the write set would
+            // have exempted `cache_source` entirely by matching against an
+            // empty set. The Observation is deliberately NOT here: its
+            // identity is its own event id, so it is a creation with no
+            // prior version to compare against.
+            plan.touches(TargetClass::Source, source_id);
         }
         ProposalOp::CorrectObservationSubject {
             observation_event_id,

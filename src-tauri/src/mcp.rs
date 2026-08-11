@@ -753,9 +753,12 @@ fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
 /// The vault path a write tool is aimed at, for the scope check (M17.13).
 ///
 /// Centralised here rather than inside each tool so that adding a write tool
-/// cannot accidentally add an unscoped one: a name this does not recognise
-/// falls through to the read/UI arm, and any future WRITE must be listed or it
-/// will be caught by `no_write_tool_escapes_the_scope_check`.
+/// cannot accidentally add an unscoped one. A name this does not recognise
+/// falls through to `None`, which means UNSCOPED — so the claim that a future
+/// write "will be caught" is only as true as the tripwire, and until M26.3d
+/// the tripwire named three tools and never looked at the catalog. It now
+/// partitions the whole served catalog into scoped and
+/// explicitly-exempt-with-a-reason, so a new tool in neither half fails.
 fn write_target(name: &str, args: &Map<String, Value>) -> Option<String> {
     match name {
         // create_note names a folder and a title; the file lands inside the
@@ -1881,15 +1884,49 @@ mod tests {
                 "{tool} must be scope-checked"
             );
         }
-        // Exempt on purpose, and the exemption is the documented one: these
-        // two have their own guards, and recording what an agent found is not
-        // the same permission as editing the user's records.
-        for tool in ["write_concept", "cache_source"] {
-            assert!(write_target(tool, &args).is_none());
-        }
-        // Reads and UI actions change nothing.
-        for tool in ["search_notes", "get_note", "open_note", "navigate"] {
-            assert!(write_target(tool, &args).is_none());
+        // EVERY EXEMPTION IS DECLARED, and the partition is TOTAL over the
+        // served catalog — including the generated proposal surface, which
+        // did not exist when this test named three tools and called itself a
+        // tripwire.
+        let exempt: std::collections::BTreeMap<&str, &str> = [
+            (
+                "write_concept",
+                "knowledge/ has its own guard (knowledge.rs)",
+            ),
+            (
+                "cache_source",
+                "sources/ is the agent's own corpus, not the user's records",
+            ),
+            ("get_vault_context", "reads"),
+            ("search_notes", "reads"),
+            ("get_note", "reads"),
+            ("list_inbox", "reads"),
+            ("open_note", "moves the UI, changes nothing on disk"),
+            ("navigate", "moves the UI, changes nothing on disk"),
+            ("propose_organize", "shows a card; the user decides"),
+        ]
+        .into_iter()
+        .collect();
+        for tool in tool_catalog(true) {
+            let name = tool["name"].as_str().unwrap();
+            if write_target(name, &args).is_some() {
+                continue;
+            }
+            // The proposal surface writes through the LEDGER, not to a path.
+            // `RunGrant.scope` is a folder primitive by deliberate design
+            // (it is checkable without knowing the vault's schema), and
+            // "which Beliefs may this run change" is not a folder — so a
+            // folder scope cannot express it and pretending otherwise would
+            // be a rule that looks like protection. Governing WHICH
+            // mutations a run may propose belongs to the policy table,
+            // which already does it per op and per risk.
+            if name.starts_with(PROPOSAL_PREFIX) || name == COMMIT_TOOL {
+                continue;
+            }
+            assert!(
+                exempt.contains_key(name),
+                "{name} is served, is not scope-checked, and declares no exemption"
+            );
         }
     }
 

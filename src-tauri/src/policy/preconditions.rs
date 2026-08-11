@@ -65,10 +65,123 @@ pub const PREDICATE_OWNERS: &[(&str, Option<&str>)] = &[
     ("revert_current_and_invertible", Some("M24.4")), // expand: revert_not_*
     ("silence_transition_allowed", Some("M24.1")),    // the table's silence stage
     ("subject_correction_current", Some("M24.4")),    // expand: subject_resolution_*
-    ("target_set_exact", Some("M24.1")),              // the table's target-class stage
+    ("target_set_exact", Some("M26.3")), // classes: the table stage; ids: target_set_bound
     ("trusted_observation_provenance", Some("M24.3")), // AgentObservationDraft
     ("versions_current", Some("M24.5")),
 ];
+
+/// What the binding predicate needs that a proposal does not carry: the
+/// world its expansion would run against.
+///
+/// The staged sets matter. A commit set that creates a Belief and then links
+/// it is the most ordinary thing an agent proposes, and without them the
+/// second member's expansion would refuse `invalid_reference` against a
+/// snapshot taken before its own set ran — the case atomic sets exist for.
+/// They accumulate in member order, exactly as `commit.rs` accumulates them
+/// for the real expansion.
+pub struct TargetBinding<'a> {
+    pub actor: &'a crate::ledger::schema::Actor,
+    pub staged_beliefs: &'a std::collections::BTreeSet<String>,
+    pub staged_entities: &'a std::collections::BTreeSet<String>,
+    /// The approving decision, at the pre-append run. `None` at set-decision
+    /// time, which is why an op whose expansion needs one binds on the
+    /// second pass rather than the first.
+    pub decision_event_id: Option<String>,
+}
+
+/// Every 128-bit hex id the op's payload NAMES, as a caller typed it.
+///
+/// The distinction this draws is the whole reason the rule is satisfiable.
+/// Some write targets are SERVER-DERIVED — a relation id is
+/// `sha256("cerebro-relation-v1\0" ++ canonical_json([from, to, kind]))`, and
+/// no tool hands a caller a way to compute one. Requiring those in `targets`
+/// would make `supersede_belief`, `split_belief`, and both merges
+/// unproposable by anything except code that already imports the hasher.
+///
+/// A derived id is also not an attack surface: it is a pure function of ids
+/// the payload already names, so a caller cannot aim it somewhere else
+/// without changing the ids it is aimed from — which this rule does check.
+fn ids_the_payload_names(op: &ProposalOp) -> std::collections::BTreeSet<String> {
+    fn walk(value: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+        match value {
+            serde_json::Value::String(text) if crate::ledger::schema::is_id128(text) => {
+                out.insert(text.clone());
+            }
+            serde_json::Value::Array(items) => items.iter().for_each(|item| walk(item, out)),
+            serde_json::Value::Object(map) => map.values().for_each(|item| walk(item, out)),
+            _ => {}
+        }
+    }
+    let mut found = std::collections::BTreeSet::new();
+    if let Ok(value) = serde_json::to_value(op) {
+        walk(&value, &mut found);
+    }
+    found
+}
+
+/// **The target-binding rule (M26.3d).** Every `(class, id)` the op's own
+/// expansion would ADVANCE, whose id the payload names, must appear in
+/// `targets`.
+///
+/// This is the predicate whose name has promised id-level protection since
+/// M24.1 while only classes were ever checked. What it stops: a caller
+/// declaring a harmless target — a fresh id with `expected_version: null`,
+/// which reads as a creation and so passes CAS — while the payload revises
+/// something else entirely. Both risk escalators and the CAS read `targets`;
+/// the mutation comes from `op`. Unbound, an agent could revise a
+/// human-ATTESTED Belief and never trip `target_has_attestation`, so a HIGH
+/// card would auto-apply at MEDIUM.
+///
+/// CONTAINMENT, not equality. Extra declared targets stay legal: a target an
+/// op only reads keeps its version, and `commit.rs` is built to make a read
+/// legible as a read. Extra targets can only widen CAS and turn MORE
+/// escalators on, never fewer — they cost the caller, they do not buy it
+/// anything.
+fn target_set_bound(
+    state: &EpistemicState,
+    proposal: &ProposalV1,
+    binding: &TargetBinding,
+) -> PreconditionResult {
+    let ctx = super::expand::ExpansionContext {
+        actor: binding.actor.clone(),
+        state,
+        // Only shifts symbolic same-batch member references, never the
+        // write set.
+        base_ordinal: 0,
+        decision_event_id: binding.decision_event_id.clone(),
+        proposal_id: proposal.proposal_id.clone(),
+        staged_beliefs: binding.staged_beliefs.clone(),
+        staged_entities: binding.staged_entities.clone(),
+    };
+    // A plan that cannot be built writes nothing, so there is nothing to
+    // bind. The refusal stays owned by the layer where expansion is
+    // authoritative, which keeps one code coming from one place.
+    let Ok(writes) = super::expand::write_targets_of(&proposal.op, &ctx) else {
+        return Ok(());
+    };
+
+    let named = ids_the_payload_names(&proposal.op);
+    let declared: std::collections::BTreeSet<(&str, &str)> = proposal
+        .targets
+        .iter()
+        .map(|target| (target.target_class.as_str(), target.target_id.as_str()))
+        .collect();
+
+    for (class, id) in &writes {
+        if !named.contains(id) {
+            continue; // server-derived: the caller could not have aimed it
+        }
+        if !declared.contains(&(class.as_str(), id.as_str())) {
+            return Err(Box::new(PreconditionFailure {
+                code: "target_set_mismatch",
+                rule: "target_set_exact",
+                expected: TypedValue::string(&format!("{}/{id} among the targets", class.as_str())),
+                actual: TypedValue::string("a target set that does not name what this op changes"),
+            }));
+        }
+    }
+    Ok(())
+}
 
 fn version_token(class: &str, id: &str, version: Option<u64>) -> TypedValue {
     match version {
@@ -345,6 +458,7 @@ pub fn check(
     state: &EpistemicState,
     catalog: &super::qualification::Catalog,
     proposal: &ProposalV1,
+    binding: &TargetBinding,
 ) -> PreconditionResult {
     let Some(rule) = table.op(proposal.op.kind()) else {
         return Ok(()); // the tripwire already proves this cannot happen
@@ -357,6 +471,11 @@ pub fn check(
             // auto-applying update is exactly where a self-supporting loop
             // would never be seen (M26.3).
             "no_self_ancestry" => super::ancestry::no_self_ancestry(state, proposal)?,
+            // Sorted `requires` puts this ahead of `versions_current`, so a
+            // card says "you did not name what you are changing" before it
+            // says "your version is stale" — binding first, CAS second, and
+            // the order is the artifact's rather than this file's.
+            "target_set_exact" => target_set_bound(state, proposal, binding)?,
             "candidate_receipt_current" => candidate_receipt_current(state, proposal)?,
             "qualification_roles_present" => {
                 super::qualification::roles_present(catalog, state, proposal)?
@@ -441,6 +560,187 @@ mod tests {
                 .insert(("belief".into(), A.into()), (version, B.into()));
         }
         state
+    }
+
+    /// A world holding one committed Belief about one Entity, so an
+    /// `update_belief` against it can actually expand.
+    fn world_with_belief(attested: bool) -> EpistemicState {
+        use crate::ledger::reduce::{BeliefState, RevisionState};
+        let mut state = at_version(Some(1));
+        let mut belief = BeliefState {
+            belief_id: A.to_string(),
+            entity_id: "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1".to_string(),
+            created_event_id: "1".repeat(32),
+            revisions: vec![RevisionState {
+                revision: 1,
+                event_id: "1".repeat(32),
+                content: String::new(),
+                fields: serde_json::json!({}),
+                basis: crate::ledger::schema::BeliefBasis::Unsupported {
+                    reason: "fixture".into(),
+                },
+            }],
+            attested: None,
+            attestation_events: vec![],
+            path: None,
+            overrides: vec![],
+            override_head_event: None,
+            projection_head_event: "1".repeat(32),
+            qualification: crate::ledger::schema::Qualification::Draft,
+            lifecycle: crate::ledger::schema::Lifecycle::Active,
+            tombstoned_by: None,
+            open_contest_event: None,
+            qualification_head_event: None,
+            lifecycle_head_event: None,
+            contest_head_event: None,
+            entity_merge_event_ids: vec![],
+        };
+        if attested {
+            // (attesting event, attested revision event)
+            belief.attested = Some(("1".repeat(32), "1".repeat(32)));
+        }
+        state.beliefs.insert(A.to_string(), belief);
+        state
+    }
+
+    fn unbound() -> (
+        crate::ledger::schema::Actor,
+        std::collections::BTreeSet<String>,
+    ) {
+        (
+            crate::ledger::schema::Actor {
+                id: "agent:claude".into(),
+            },
+            Default::default(),
+        )
+    }
+
+    fn bound(
+        state: &EpistemicState,
+        proposal: &ProposalV1,
+    ) -> Result<(), Box<PreconditionFailure>> {
+        let (actor, staged) = unbound();
+        target_set_bound(
+            state,
+            proposal,
+            &TargetBinding {
+                actor: &actor,
+                staged_beliefs: &staged,
+                staged_entities: &staged,
+                decision_event_id: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_target_set_aimed_away_from_the_payload_is_refused() {
+        // **THE ATTACK** (M26.3d). The payload revises Belief A; the targets
+        // name a fresh id with `expected_version: null`, which reads as a
+        // creation and so sails through CAS. Every consumer that could have
+        // noticed — the expected-version check and BOTH risk escalators —
+        // reads `targets`, while the mutation comes from `op`. Before this
+        // predicate the two were never compared.
+        let decoy = "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4";
+        let proposal = with_targets(vec![target(TargetClass::Belief, decoy, None)]);
+        let failure = bound(&world_with_belief(false), &proposal).unwrap_err();
+        assert_eq!(failure.code, "target_set_mismatch");
+        assert_eq!(failure.rule, "target_set_exact");
+        assert_eq!(
+            failure.expected,
+            TypedValue::string(&format!("belief/{A} among the targets"))
+        );
+    }
+
+    #[test]
+    fn the_attack_is_what_would_have_let_an_attested_belief_slip_a_card() {
+        // WHY IT MATTERS, stated as the harm rather than the mechanism.
+        // `target_has_attestation` floors risk at HIGH so a human-verified
+        // Belief cannot be revised without a card. The escalator reads
+        // TARGETS. Aim them elsewhere and a MEDIUM revision of an attested
+        // Belief auto-applies — the exact protection `knowledge/` is
+        // agent-written-human-verified for.
+        let state = world_with_belief(true);
+        assert!(state.beliefs[A].attested.is_some());
+        let decoy = "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4";
+        assert!(bound(
+            &state,
+            &with_targets(vec![target(TargetClass::Belief, decoy, None)])
+        )
+        .is_err());
+        // Named honestly, it binds — and the escalator can then see it.
+        assert!(bound(
+            &state,
+            &with_targets(vec![target(TargetClass::Belief, A, Some(1))])
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn naming_what_the_op_changes_passes_and_extra_targets_stay_legal() {
+        // CONTAINMENT, not equality. A target an op only READS keeps its
+        // version, and that is what makes a read legible as a read. Extra
+        // targets can only widen CAS and turn MORE escalators on — they cost
+        // the caller and buy it nothing, so there is no reason to refuse
+        // them and one good reason not to: the shipped goldens declare reads.
+        let state = world_with_belief(false);
+        assert!(bound(
+            &state,
+            &with_targets(vec![target(TargetClass::Belief, A, Some(1))])
+        )
+        .is_ok());
+        assert!(bound(
+            &state,
+            &with_targets(vec![
+                target(TargetClass::Belief, A, Some(1)),
+                target(
+                    TargetClass::Entity,
+                    "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+                    Some(1)
+                ),
+            ])
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_server_derived_id_is_not_required_of_a_caller() {
+        // The rule covers only ids the PAYLOAD names. A relation id is
+        // `sha256("cerebro-relation-v1\0" ++ canonical_json([from,to,kind]))`
+        // and no tool hands a caller a way to compute one — requiring it
+        // would make supersede, split, and both merges unproposable by
+        // anything that does not already import the hasher. It is also not
+        // an attack surface: it is a pure function of ids the payload names,
+        // which this rule does check.
+        let mut state = world_with_belief(false);
+        let successor = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
+        let mut peer = state.beliefs[A].clone();
+        peer.belief_id = successor.to_string();
+        state.beliefs.insert(successor.to_string(), peer);
+        state
+            .versions
+            .insert(("belief".into(), successor.into()), (1, B.into()));
+
+        let mut proposal = with_targets(vec![
+            target(TargetClass::Belief, A, Some(1)),
+            target(TargetClass::Belief, successor, Some(1)),
+        ]);
+        proposal.op = ProposalOp::SupersedeBelief {
+            belief_id: A.into(),
+            successor_id: successor.into(),
+        };
+        // The expansion writes a derived `supersedes` Relation that appears
+        // in no target list here, and the proposal is still bound.
+        assert!(bound(&state, &proposal).is_ok());
+    }
+
+    #[test]
+    fn a_plan_that_cannot_be_built_binds_nothing_rather_than_guessing() {
+        // An op whose expansion refuses writes nothing, so there is nothing
+        // to bind — and the refusal stays owned by the layer where expansion
+        // is authoritative, which keeps one code coming from one place.
+        let empty = EpistemicState::default();
+        let proposal = with_targets(vec![target(TargetClass::Belief, A, Some(1))]);
+        assert!(bound(&empty, &proposal).is_ok());
     }
 
     #[test]
