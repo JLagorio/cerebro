@@ -2100,3 +2100,72 @@ describe('StructuralEditor keyboard, delivered where the browser delivers it', (
     expect(onChangeCode).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The editor a keyboard can reach (M29.53).
+ *
+ * MEASURED before this: the .mmd page's full tab ring was 29 stops and not one
+ * of them was inside the drawing — every `g.node` carried tabindex=null,
+ * role=null and aria-label=null, the editor root is tabIndex={-1} so it is not
+ * a stop either, and every control in the visual editor is gated on a selection
+ * only a mouse could set. Enter, Space, the arrows, Home and Delete all left
+ * the file byte-identical and raised no toolbar.
+ */
+describe('StructuralEditor without a mouse', () => {
+  const CODE = 'flowchart TD\n  A[Start] --> B[End]\n  B --> C[Ship]';
+
+  async function open() {
+    render(<StructuralEditor code={CODE} onChangeCode={() => {}} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+  }
+
+  it('gives every node a name and a role, and the diagram one entry point', async () => {
+    await open();
+    const a = document.getElementById('flowchart-A-0')!;
+    const b = document.getElementById('flowchart-B-1')!;
+    expect(a.getAttribute('role')).toBe('button');
+    expect(a.getAttribute('aria-label')).toBe('Start');
+    expect(b.getAttribute('aria-label')).toBe('End');
+    // Roving, so a forty-node diagram is one tab stop rather than forty.
+    expect(a.getAttribute('tabindex')).toBe('0');
+    expect(b.getAttribute('tabindex')).toBe('-1');
+    expect(document.querySelector('svg')?.getAttribute('aria-label')).toBe(
+      'Editable diagram, 3 nodes',
+    );
+  });
+
+  it('focusing a node selects it, so the same toolbar appears', async () => {
+    await open();
+    fireEvent.focus(document.getElementById('flowchart-A-0')!);
+    expect(await screen.findByTestId('mermaid-node-toolbar')).toBeTruthy();
+  });
+
+  it('the arrows walk the nodes and carry the tab stop along', async () => {
+    await open();
+    const a = document.getElementById('flowchart-A-0')!;
+    const b = document.getElementById('flowchart-B-1')!;
+    fireEvent.focus(a);
+    fireEvent.keyDown(a, { key: 'ArrowRight' });
+    expect(b.getAttribute('tabindex')).toBe('0');
+    expect(a.getAttribute('tabindex')).toBe('-1');
+    fireEvent.keyDown(b, { key: 'ArrowLeft' });
+    expect(a.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('Enter renames, which is what double-click does with a mouse', async () => {
+    await open();
+    const a = document.getElementById('flowchart-A-0')!;
+    fireEvent.focus(a);
+    fireEvent.keyDown(a, { key: 'Enter' });
+    expect((screen.getByLabelText('Node label') as HTMLInputElement).value).toBe('Start');
+  });
+
+  it('and Delete then removes the node the keyboard selected', async () => {
+    const onChangeCode = vi.fn();
+    render(<StructuralEditor code={CODE} onChangeCode={onChangeCode} />);
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    fireEvent.focus(document.getElementById('flowchart-A-0')!);
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    expect(onChangeCode).toHaveBeenCalledWith('flowchart TD\n  B[End]\n  B --> C[Ship]');
+  });
+});

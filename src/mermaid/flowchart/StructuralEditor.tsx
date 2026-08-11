@@ -574,6 +574,86 @@ export function StructuralEditor({
       if (model === null) return;
       const binding = bindFlowchartSvg(hostRef.current, model);
       bindingRef.current = binding;
+
+      /**
+       * Puts the node toolbar under a node and makes it the selection —
+       * shared by the click handler and the keyboard entry point below, which
+       * have to agree about what "selected" looks like.
+       */
+      const selectNode = (id: string, el: SVGGElement): void => {
+        setMulti([]);
+        setSelectedSub(null);
+        setSubToolbarPos(null);
+        setSelected(id);
+        setEdgeEditor(null);
+        const host = hostRef.current;
+        if (host === null) return;
+        const hostBox = host.getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        const s = transformRef.current.scale;
+        const fitsAbove = box.top - hostBox.top - TOOLBAR_H >= 0;
+        setToolbarPos({
+          x: (box.left - hostBox.left) / s,
+          y: ((fitsAbove ? box.top : box.bottom) - hostBox.top) / s,
+          dy: fitsAbove ? -TOOLBAR_H : TOOLBAR_GAP,
+        });
+      };
+
+      /**
+       * A keyboard can reach the diagram (M29.53).
+       *
+       * MEASURED: the full tab ring of the .mmd page was 29 stops and not one
+       * of them was inside the drawing. Every `g.node` carried tabindex=null,
+       * role=null and aria-label=null; the editor's root is tabIndex={-1}, so
+       * it is not a stop either; and the delete handler is gated on a selection
+       * only a mouse click could ever set. That put the ENTIRE visual editor —
+       * shape, colour, icon, link, rename, delete, grouping, all of it behind
+       * selection — out of reach without a mouse, and gave a screen reader an
+       * unnamed graphic.
+       *
+       * Roving tabindex, so a forty-node diagram is one stop rather than forty:
+       * the first node is the entry point, the arrows walk the rest, and
+       * focusing a node selects it — which is the same thing clicking it does,
+       * so the toolbar a keyboard user reaches is the toolbar everyone else
+       * gets rather than a second, thinner surface.
+       */
+      const order = [...binding.nodeEls.entries()];
+      const rove = (from: number, step: number): void => {
+        const next = order[from + step];
+        if (next === undefined) return;
+        for (const [, other] of order) other.setAttribute('tabindex', '-1');
+        next[1].setAttribute('tabindex', '0');
+        next[1].focus?.();
+      };
+      const svgEl = hostRef.current.querySelector('svg');
+      if (svgEl !== null) {
+        svgEl.setAttribute(
+          'aria-label',
+          `Editable diagram, ${order.length} node${order.length === 1 ? '' : 's'}`,
+        );
+      }
+
+      for (const [index, [id, el]] of order.entries()) {
+        el.setAttribute('role', 'button');
+        el.setAttribute('aria-label', nodes(model).get(id)?.label ?? id);
+        // One entry point into the diagram; the arrows do the rest.
+        el.setAttribute('tabindex', index === 0 ? '0' : '-1');
+        el.onfocus = () => selectNode(id, el);
+        el.onkeydown = (e) => {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            rove(index, 1);
+          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            rove(index, -1);
+          } else if (e.key === 'Enter') {
+            // The keyboard's spelling of double-click.
+            e.preventDefault();
+            setRenaming({ id, value: nodes(model).get(id)?.label ?? id });
+          }
+        };
+      }
+
       for (const [id, el] of binding.nodeEls) {
         el.style.cursor = manual ? 'move' : 'pointer';
         el.onclick = (e) => {
@@ -592,38 +672,14 @@ export function StructuralEditor({
             return;
           }
           // A plain click is a fresh, single selection: it drops any pending
-          // multi-selection and any cluster the toolbar was pointing at.
-          setMulti([]);
-          setSelectedSub(null);
-          setSubToolbarPos(null);
-          setSelected(id);
-          // The mirror of the edge handler below, which has always cleared the
-          // selection. Without it the two surfaces sat open at once — and the
-          // edge editor's controls then had a live node selection to delete
-          // when a keystroke leaked out of them (M29.33 review).
-          setEdgeEditor(null);
-          const host = hostRef.current;
-          if (host !== null) {
-            const hostBox = host.getBoundingClientRect();
-            const box = el.getBoundingClientRect();
-            // Prefer floating above the node; when a top-row node leaves no
-            // headroom, drop BELOW it instead. The old Math.max(0, y) clamp
-            // parked the toolbar directly ON such a node — covering its
-            // center, so the second click of a double-click rename landed on
-            // toolbar buttons instead of the node (observed live, M29.19).
-            // Headroom is asked in SCREEN pixels, because that is what the
-            // counter-scaled toolbar is 34 of (M29.51). What gets STORED is
-            // the node's own corner and nothing else: the gap itself is
-            // re-applied at render time, so a later zoom cannot re-multiply it
-            // (M29.53).
-            const s = transformRef.current.scale;
-            const fitsAbove = box.top - hostBox.top - TOOLBAR_H >= 0;
-            setToolbarPos({
-              x: (box.left - hostBox.left) / s,
-              y: ((fitsAbove ? box.top : box.bottom) - hostBox.top) / s,
-              dy: fitsAbove ? -TOOLBAR_H : TOOLBAR_GAP,
-            });
-          }
+          // multi-selection and any cluster the toolbar was pointing at — and
+          // it clears the edge editor, the mirror of the edge handler below.
+          // Without that the two surfaces sat open at once, and the edge
+          // editor's controls then had a live node selection to delete when a
+          // keystroke leaked out of them (M29.33 review). All of it, plus the
+          // toolbar placement, is `selectNode` — shared with the keyboard
+          // entry point so both spell "selected" the same way.
+          selectNode(id, el);
         };
         el.ondblclick = (e) => {
           e.stopPropagation();
