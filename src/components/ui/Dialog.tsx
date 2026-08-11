@@ -14,7 +14,10 @@ const css = `
 .cb-dlg-ft{display:flex;align-items:center;gap:8px;padding:14px 24px;border-top:1px solid var(--n-100)}
 .cb-dlg-ft .cb-dlg-note{font-size:var(--fs-xs);color:var(--text-muted);margin-right:auto}
 @keyframes cbFade{from{opacity:0}to{opacity:1}}
-@keyframes cbUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}`;
+@keyframes cbUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.cb-dlg-scrim-full{padding:0}
+.cb-dlg-full{height:100vh;max-height:100vh;border-radius:0}
+.cb-dlg-full>.cb-dlg-bd{display:flex;flex:1;min-height:0;padding:0;overflow:hidden}`;
 if (typeof document !== 'undefined' && !document.getElementById('cb-dlg-css')) {
   const t = document.createElement('style');
   t.id = 'cb-dlg-css';
@@ -44,6 +47,15 @@ export interface DialogProps {
   /** muted left-aligned footer text */
   footerNote?: string;
   style?: React.CSSProperties;
+  /**
+   * Fill the viewport: no scrim padding, full-height card, radius 0, and the
+   * body becomes an unpadded flex column (M29.27) — for surfaces that ARE a
+   * page, like the block's full-screen diagram editor. Everything else
+   * (layers, Escape, Tab trap, focus restore, the titled header with its
+   * Close button) is unchanged — which is exactly why this is a Dialog
+   * variant and not a new overlay primitive.
+   */
+  fullscreen?: boolean;
 }
 
 export function Dialog(props: DialogProps) {
@@ -63,6 +75,7 @@ function DialogCard({
   secondaryAction,
   footerNote,
   style,
+  fullscreen = false,
 }: DialogProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -146,19 +159,19 @@ function DialogCard({
 
   return (
     <div
-      className="cb-dlg-scrim"
+      className={`cb-dlg-scrim ${fullscreen ? 'cb-dlg-scrim-full' : ''}`}
       onMouseDown={(e: React.MouseEvent) => {
         if (e.target === e.currentTarget && onClose) onClose();
       }}
     >
       <div
         ref={cardRef}
-        className="cb-dlg"
+        className={`cb-dlg ${fullscreen ? 'cb-dlg-full' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        style={{ maxWidth: width, ...style }}
+        style={{ maxWidth: fullscreen ? 'none' : width, ...style }}
       >
         <div className="cb-dlg-hd">
           <h2 id={titleId}>{title}</h2>

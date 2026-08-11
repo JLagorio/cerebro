@@ -81,7 +81,7 @@ function buildTree(
     if (!e.path.startsWith(prefix) || hide(e.path)) continue;
     attach({
       path: e.path,
-      name: e.filename.replace(/\.md$/, ''),
+      name: e.filename.replace(/\.(md|mmd)$/, ''),
       label: e.title,
       kind: 'file',
       children: [],
@@ -432,7 +432,11 @@ export function FileTree({
       }
       const { node } = dialog;
       const slug = slugify(trimmed) || node.name;
-      const to = join(parentDir(node.path), `${slug}${node.kind === 'file' ? '.md' : ''}`);
+      // Preserve the node's REAL extension (M29.21): a rename must not turn
+      // pipeline.mmd into pipeline.md — the file would stop being a diagram.
+      const dot = node.path.lastIndexOf('.');
+      const fileExt = node.kind === 'file' && dot !== -1 ? node.path.slice(dot) : '.md';
+      const to = join(parentDir(node.path), `${slug}${node.kind === 'file' ? fileExt : ''}`);
       if (to !== node.path) {
         await renameNote(vaultPath, node.path, to);
         // Repair history as well as the canvas: the old path is still in the
@@ -447,9 +451,17 @@ export function FileTree({
       }
       // A row's label is the note's H1, never its filename — renaming only
       // the file left the visible name unchanged in the tree, breadcrumb,
-      // recents and Quick Open ("the rename did nothing").
+      // recents and Quick Open ("the rename did nothing"). A .mmd has no H1
+      // to rewrite — its title IS its filename stem, and splicing `# title`
+      // into raw mermaid source would corrupt the diagram (M29.21).
       const titleTarget =
-        node.kind === 'file' ? to : node.kind === 'doc' ? `${to}/${slug}.md` : null;
+        node.kind === 'file'
+          ? to.endsWith('.mmd')
+            ? null
+            : to
+          : node.kind === 'doc'
+            ? `${to}/${slug}.md`
+            : null;
       if (titleTarget !== null) await setNoteTitle(vaultPath, titleTarget, trimmed);
       await rescan();
       // Follow the file: renaming the page you are reading must not strand

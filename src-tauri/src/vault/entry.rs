@@ -54,6 +54,29 @@ impl Entry {
     }
 }
 
+/// First meaningful line of a mermaid source: skips a leading `---` config
+/// block and blank/`%%` comment lines, capped at 160 chars. Parity with
+/// `firstMeaningfulLine` in src/mermaid/detect.ts (plus the snippet cap).
+fn mermaid_snippet(content: &str) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+    if lines.first().map(|l| l.trim()) == Some("---") {
+        i = 1;
+        while i < lines.len() && lines[i].trim() != "---" {
+            i += 1;
+        }
+        i += 1;
+    }
+    while i < lines.len() {
+        let line = lines[i].trim();
+        if !line.is_empty() && !line.starts_with("%%") {
+            return line.chars().take(160).collect();
+        }
+        i += 1;
+    }
+    String::new()
+}
+
 /// Build an Entry from a vault-relative path (forward slashes) and raw file
 /// content. Timestamps are passed in by the scanner (ISO 8601 strings).
 pub fn build_entry(
@@ -68,6 +91,28 @@ pub fn build_entry(
         .map(|(d, _)| d)
         .unwrap_or("")
         .to_string();
+    // M29.20: a `.mmd` file is RAW mermaid source, end to end. Mermaid's own
+    // `---\ntitle:…\nconfig:…\n---` header is valid diagram syntax, so it
+    // must NEVER go through the note frontmatter split — the title comes from
+    // the filename stem and the snippet from the first meaningful line.
+    if let Some(stem) = filename.strip_suffix(".mmd") {
+        let title = parse::humanize_stem(stem);
+        return Entry {
+            path: rel_path.to_string(),
+            filename,
+            folder,
+            project: None,
+            title,
+            entry_type: None,
+            properties: serde_json::Map::new(),
+            relationships: BTreeMap::new(),
+            outgoing_links: Vec::new(),
+            snippet: mermaid_snippet(content),
+            created_at,
+            modified_at,
+            parse_error: None,
+        };
+    }
     let stem = filename
         .strip_suffix(".md")
         .unwrap_or(&filename)
@@ -229,6 +274,21 @@ mod tests {
         assert_eq!(e.properties["status"], "todo");
         assert_eq!(e.title, "CRLF title");
         assert_eq!(e.outgoing_links, vec!["atlas"]);
+        assert!(e.parse_error.is_none());
+    }
+
+    // M29.20: mermaid's own `---` header would parse as note frontmatter and
+    // be stripped/reserialized — the exact corruption the raw branch forbids.
+    #[test]
+    fn mmd_content_is_never_frontmatter_parsed() {
+        let content = "---\ntitle: Flow\nconfig:\n  layout: elk\n---\n%% a comment\nflowchart TD\n  A[Start] --> B[[Done]]\n";
+        let e = build("diagrams/build-flow.mmd", content);
+        assert_eq!(e.title, "Build flow");
+        assert_eq!(e.entry_type, None);
+        assert!(e.properties.is_empty());
+        assert!(e.relationships.is_empty());
+        assert!(e.outgoing_links.is_empty());
+        assert_eq!(e.snippet, "flowchart TD");
         assert!(e.parse_error.is_none());
     }
 

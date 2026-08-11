@@ -1,12 +1,23 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ListFile, Presentation, ViewDefinition } from '@/engine/types';
+import { resetMockFs } from '@/lib/mockIpc';
 import { ListPage } from '@/pages/ListPage';
 import { useNavStore } from '@/stores/navStore';
 import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { fixtureVault } from '@/test/factories';
+
+/**
+ * jsdom cannot render mermaid, and this file is about WHERE a whiteboard tab's
+ * canvas lands rather than what it draws. The stand-in keeps the shared
+ * editor's contract and nothing else (the same substitution
+ * `WhiteboardView.test.tsx` makes, for the same reason).
+ */
+vi.mock('@/mermaid/FullScreenDiagramEditor', () => ({
+  FullScreenDiagramEditor: () => <div data-testid="fake-editor" />,
+}));
 
 const presentation = (type: Presentation['type']): Presentation => ({
   type,
@@ -174,5 +185,97 @@ describe('ListPage header count (M16.31)', () => {
   it('still counts what the view’s filters left', () => {
     setup(TWO_VIEWS, 'risk');
     expect(screen.getByTestId('view-count').textContent).toBe('1');
+  });
+});
+
+/**
+ * The tenth kind's host (M29.48).
+ *
+ * A whiteboard tab's canvas lives beside the LIST'S OWN FILE — the collection
+ * folder for a List inside a Collection, the vault root for a root-level one
+ * (spec D8). The page is the only thing that knows where its file is, which is
+ * why the host is wired here rather than derived inside the view.
+ *
+ * Measured on the mock disk, not on a captured prop: the created path IS the
+ * contract, and `folder` has no other observable.
+ */
+describe('ListPage hosts a whiteboard tab (M29.48)', () => {
+  const fs = () => (window as unknown as { __cerebroMockFs: Map<string, string> }).__cerebroMockFs;
+  // Captured before anything overrides it — the stub below is per-test state,
+  // not a permanent amputation of the store for whatever runs after.
+  const realRescan = useVaultStore.getState().rescan;
+
+  function setupBoard(
+    path: string,
+    collection: string | null,
+    views: ViewDefinition[],
+    open: string,
+  ) {
+    resetMockFs();
+    useVaultStore.setState({
+      vaultPath: '/demo-vault',
+      entries: fixtureVault(),
+      views: [{ ...mkList(views), collection, path }],
+      collections: [],
+      status: 'ready',
+      error: null,
+      // Create-on-open rescans so the file tree sees the new canvas (M29.46).
+      // Against this fixture a REAL rescan reloads `views` from the demo
+      // corpus and deletes the list mid-test — so the store's own action is
+      // stubbed, and the assertions are made on the disk it wrote to.
+      rescan: vi.fn(async () => {}),
+    });
+    const selection = { kind: 'list' as const, id: 'delivery', collection, view: open };
+    useNavStore.setState({ selection, history: [selection], historyIndex: 0 });
+    useUiStore.setState({ collapsed: {} });
+    render(<ListPage selection={selection} />);
+  }
+
+  // Unmount FIRST: putting the real action back is a store notification, and a
+  // still-mounted WhiteboardView subscribes to `rescan` — restoring it over a
+  // live tree re-renders outside act(). Vitest runs afterEach hooks
+  // last-registered-first, so this one precedes the file-level `cleanup`.
+  afterEach(() => {
+    cleanup();
+    useVaultStore.setState({ rescan: realRescan });
+  });
+
+  // Settled first, asserted second: create-on-open ends by persisting the
+  // pointer and opening the editor on it, and waiting for that lets every
+  // state update land inside act() instead of after the test.
+  const opened = () => screen.findByTestId('fake-editor');
+
+  it('creates the canvas in the collection folder the List itself lives in', async () => {
+    setupBoard(
+      'work/delivery.list.yml',
+      'work',
+      [view('sketch', 'Sketch', 'whiteboard')],
+      'sketch',
+    );
+    await opened();
+    expect(fs().get('work/whiteboards/sketch.mmd')).toContain('flowchart TD');
+  });
+
+  it('a root-level List gets a top-level whiteboards/, with no leading slash', async () => {
+    setupBoard('delivery.list.yml', null, [view('sketch', 'Sketch', 'whiteboard')], 'sketch');
+    await opened();
+    expect(fs().get('whiteboards/sketch.mmd')).toBeTruthy();
+  });
+
+  /**
+   * The OPEN TAB names the file, not the List. Two whiteboard tabs on one list
+   * are two canvases; naming them after the list would collide them into one
+   * and both tabs would edit the same drawing.
+   */
+  it('names the canvas after the open tab', async () => {
+    setupBoard(
+      'work/delivery.list.yml',
+      'work',
+      [view('sketch', 'Sketch', 'whiteboard'), view('plan', 'Plan B', 'whiteboard')],
+      'plan',
+    );
+    await opened();
+    expect(fs().get('work/whiteboards/plan-b.mmd')).toBeTruthy();
+    expect(fs().has('work/whiteboards/sketch.mmd')).toBe(false);
   });
 });

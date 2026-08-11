@@ -130,3 +130,49 @@ describe('seedView filters', () => {
     expect(seedView('V', 'table', [], DEFAULT_PRESENTATION).filters).toBeNull();
   });
 });
+
+/**
+ * The tenth kind at the app-layer seam (M29.48).
+ *
+ * `whiteboard.file` names a RESOURCE the tab owns, not a preference about how
+ * to draw: two tabs sharing one pointer is two tabs editing one canvas, and a
+ * layout switch that carried the pointer away and back would resurrect a file
+ * the user thought they had left behind. `NEVER_SEEDED` and `KEY_NEEDS` (H1)
+ * already decide this; these pin it where `seedView` is actually called from,
+ * so a refactor of either half is caught on this side too.
+ */
+describe('seedView and the whiteboard (M29.48)', () => {
+  const board: Presentation = {
+    type: 'whiteboard',
+    group: [{ field: 'status' }],
+    sort: [{ field: 'modifiedAt', dir: 'desc' }],
+    columns: [{ field: 'status' }],
+    whiteboard: { file: 'delivery/whiteboards/map.mmd' },
+  };
+
+  it('a new whiteboard tab gets no file pointer and no layout-specific keys', () => {
+    // Seeded from a fully-configured gantt: the query travels (that is what
+    // "another view of this data" means), the gantt's layout keys do not, and
+    // no pointer appears from nowhere.
+    const seeded = seedView('Map', 'whiteboard', [], gantt);
+    expect(seeded.presentation.type).toBe('whiteboard');
+    expect(seeded.presentation.whiteboard).toBeUndefined();
+    expect(seeded.presentation.dateField).toBeUndefined();
+    expect(seeded.presentation.zoom).toBeUndefined();
+    expect(seeded.presentation.dependencyField).toBeUndefined();
+    // SharedKeys travel BY DESIGN (they are the query, not the layout):
+    // nothing on a whiteboard reads them, nothing is harmed by them, and a
+    // later switch back to a record layout finds the query intact.
+    expect(seeded.presentation.group).toEqual(gantt.group);
+    expect(seeded.presentation.columns).toEqual(gantt.columns);
+  });
+
+  it('a whiteboard seeded from a whiteboard gets its OWN canvas', () => {
+    expect(seedView('Map 2', 'whiteboard', ['map'], board).presentation.whiteboard).toBeUndefined();
+  });
+
+  it('a table seeded from a whiteboard carries no pointer into its YAML', () => {
+    const yaml = yamlFor(seedView('Grid', 'table', [], board));
+    expect(yaml).not.toContain('whiteboard');
+  });
+});

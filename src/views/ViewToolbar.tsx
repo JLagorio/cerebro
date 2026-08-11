@@ -242,9 +242,10 @@ export function ViewToolbar({
     // row. At a narrow window the old row simply ran off the right edge, so
     // "Properties" became unreachable instead of moving to the next line.
     <div className="flex flex-none flex-wrap items-center gap-2 border-b border-n-200 px-5 py-2">
-      {/* M10: the six views, one selected at a time. "Hierarchy" is gone —
-          any of these nests when the grouping chain has a relation level, so
-          a whole view kind for it was a control that duplicated another. */}
+      {/* M10: one layout selected at a time, offered from VIEW_SEGMENTS so the
+          roster can never drift from the catalog. "Hierarchy" stayed retired —
+          any layout nests when its grouping chain descends a relation, so a
+          whole kind for it was a control that duplicated another. */}
       {showLayout && (
         <SegmentedControl
           size="sm"

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FILTER_OPS, VIEW_TYPES } from '@/engine/types';
 import {
+  clonePresentation,
   layoutLabel,
   moveSortKey,
   moveView,
@@ -385,6 +386,66 @@ describe('views', () => {
     expect(on.views[0].presentation.frozenColumns).toBeUndefined();
     // Written back in the new spelling only, so a file converges on one shape.
     expect(serializeList(def)).not.toContain('titleFrozen');
+  });
+
+  it('round-trips the whiteboard file pointer (M29.45)', () => {
+    const yaml = [
+      'name: Ops',
+      'views:',
+      '  - id: canvas',
+      '    name: Canvas',
+      '    presentation:',
+      '      type: whiteboard',
+      '      whiteboard:',
+      '        file: delivery/whiteboards/canvas.mmd',
+    ].join('\n');
+    const list = parseListYaml('ops', yaml);
+    const view = list.definition.views[0];
+    expect(view.presentation.type).toBe('whiteboard');
+    expect(view.presentation.whiteboard).toEqual({ file: 'delivery/whiteboards/canvas.mmd' });
+
+    // The serializer is an ALLOWLIST — this line is the proof the key was
+    // added to it, which is the failure mode that loses user data silently.
+    const out = parseListYaml('ops', serializeList(list.definition));
+    expect(out.definition.views[0].presentation.whiteboard).toEqual({
+      file: 'delivery/whiteboards/canvas.mmd',
+    });
+  });
+
+  it('drops a blank or malformed whiteboard pointer rather than storing it', () => {
+    for (const bad of ['whiteboard: 7', 'whiteboard:\n        file: ""', 'whiteboard: {}']) {
+      const yaml = `views:\n  - presentation:\n      type: whiteboard\n      ${bad}\n`;
+      const list = parseListYaml('t', yaml);
+      expect(list.definition.views[0].presentation.whiteboard).toBeUndefined();
+    }
+  });
+
+  it('a null file pointer is never written to YAML', () => {
+    const def = parseListYaml(
+      't',
+      'views:\n  - presentation:\n      type: whiteboard\n',
+    ).definition;
+    const view = def.views[0];
+    const withNull = {
+      ...def,
+      views: [{ ...view, presentation: { ...view.presentation, whiteboard: { file: null } } }],
+    };
+    // Key-anchored, not a bare substring: `type: whiteboard` is on every one of
+    // this tab's serializations and says nothing about the pointer.
+    expect(serializeList(withNull)).not.toMatch(/^\s+whiteboard:/m);
+  });
+
+  it('clonePresentation deep-copies the whiteboard pointer', () => {
+    const p: Presentation = {
+      type: 'whiteboard',
+      group: [],
+      sort: [{ field: 'modifiedAt', dir: 'desc' }],
+      columns: [],
+      whiteboard: { file: 'a.mmd' },
+    };
+    const copy = clonePresentation(p);
+    expect(copy.whiteboard).toEqual(p.whiteboard);
+    expect(copy.whiteboard).not.toBe(p.whiteboard);
   });
 
   it('drops a nonsense frozen count rather than pinning by a fraction', () => {

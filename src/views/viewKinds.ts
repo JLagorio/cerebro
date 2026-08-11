@@ -71,6 +71,17 @@ export interface ViewKind {
   /** Composed of blocks rather than records, so it gets the Blocks page
    * (M16.28). It renders other views, so it cannot itself be one of them. */
   blocks?: boolean;
+  /**
+   * Draws a free-form CANVAS rather than records (M29.45): the tab's content
+   * is a `.mmd` file it owns, so it gets no record-layout pages and exactly
+   * one presentation key — `whiteboard`, the file pointer.
+   *
+   * Optional like every flag above it — the file's style is that absence IS
+   * false, and only the kind that has a capability says so. The `satisfies`
+   * on CAPABILITIES therefore demands nothing new from the existing nine
+   * records: they stay byte-identical, and `isCanvas` reads `=== true`.
+   */
+  canvas?: boolean;
 }
 
 /**
@@ -146,6 +157,18 @@ const CAPABILITIES = {
     // brings its own view with its own grouping. A Group control here would
     // be a control that changes nothing — the calendar's bug (M16.3).
     blocks: true,
+  },
+  whiteboard: {
+    label: 'Whiteboard',
+    // 'presentation' — the easel — verified present in lucide-react (as is
+    // 'frame', the runner-up). NOT 'waypoints': the diagram surfaces claimed
+    // that one (M29.21 page header, block header), and the distinct-icon
+    // test below only defends uniqueness against other VIEW KINDS, not
+    // against the rest of the app's iconography.
+    icon: 'presentation',
+    // Deliberately nothing else. Every record-layout capability would be a
+    // control that changes nothing on a canvas — the calendar's M16.3 bug.
+    canvas: true,
   },
 } satisfies Record<ViewType, Omit<ViewKind, 'value'>>;
 
@@ -232,6 +255,11 @@ export function hasBlocks(type: ViewType): boolean {
   return viewKind(type).blocks === true;
 }
 
+/** True for the layouts that draw a free-form canvas, not records (M29.45). */
+export function isCanvas(type: ViewType): boolean {
+  return viewKind(type).canvas === true;
+}
+
 /**
  * Which view-control axes a layout actually consumes.
  *
@@ -286,7 +314,32 @@ const KEY_NEEDS = {
   dependencyField: 'dependencies',
   chart: 'charted',
   dashboard: 'blocks',
+  // Declared but never CONSULTED: `carryOver` checks NEVER_SEEDED first and
+  // the pointer is on that list, so this pairing is unreachable and changing
+  // it to a wrong capability breaks no test (M29.46 review). It stays because
+  // `satisfies` below demands an entry for every non-shared key — the table's
+  // whole job is that a new Presentation key cannot be added without stating
+  // what it needs — and it is the right answer the day the pointer stops
+  // being never-seeded.
+  whiteboard: 'canvas',
 } satisfies Record<Exclude<keyof Presentation, SharedKey>, Capability>;
+
+/**
+ * Keys `carryOver` never copies, even to a kind that can read them (M29.45).
+ *
+ * `whiteboard.file` names a resource the TAB owns, not a preference about
+ * drawing. Seeding it into a new tab would aim two tabs at one `.mmd`, so
+ * "add a whiteboard" while standing on one would silently create a second
+ * door to the same canvas instead of a new canvas. The new tab starts with
+ * no pointer and creates its own file on first open.
+ *
+ * (Duplicate keeps the pointer on purpose — `duplicateView` copies the whole
+ * view, and a copy that shows the same canvas is what "duplicate" says.
+ * Layout-switching a tab away and back also keeps it: `onChangeLayout` swaps
+ * only `type`, so a whiteboard demoted to a table and restored finds its
+ * canvas where it left it.)
+ */
+const NEVER_SEEDED: ReadonlySet<string> = new Set(['whiteboard']);
 
 /**
  * The part of a presentation a NEW view of another kind may inherit (M16.29).
@@ -310,6 +363,7 @@ export function carryOver(base: Presentation, type: ViewType): Presentation {
   const kind = viewKind(type);
   const kept = Object.fromEntries(
     Object.entries(base).filter(([key]) => {
+      if (NEVER_SEEDED.has(key)) return false;
       const needs = KEY_NEEDS[key as keyof typeof KEY_NEEDS];
       return needs === undefined || kind[needs] === true;
     }),

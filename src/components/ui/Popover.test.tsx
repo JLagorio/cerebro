@@ -2,7 +2,8 @@ import { StrictMode, useRef, useState } from 'react';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Popover } from '@/components/ui/Popover';
+import { Dialog } from '@/components/ui/Dialog';
+import { ANCHOR_MOVED_EVENT, Popover } from '@/components/ui/Popover';
 import { hasLayers, resetLayers } from '@/components/ui/layers';
 
 /**
@@ -174,15 +175,25 @@ describe('Popover dismissal contract', () => {
     // OPENING the popover arrived after it had mounted and dismissed it
     // instantly. On screen that reads as a button that does nothing, and it
     // got worse the further down a long form you went.
-    const user = userEvent.setup();
     const onClose = vi.fn();
     render(<Harness onClose={onClose} />);
-    await user.click(screen.getByTestId('trigger'));
+    // Synchronous on purpose (M29.54). This case asserts that ZERO frames have
+    // passed, and `await user.click()` cannot promise that: it yields to the
+    // macrotask queue, and jsdom drives requestAnimationFrame off a timer, so
+    // on a loaded machine — coverage instrumentation, 200 files across workers
+    // — a frame fires inside the await, arms the guard, and the scroll below
+    // dismisses a popover the test is about NOT dismissing. fireEvent flushes
+    // the effect that attaches the listener without ever yielding, which makes
+    // "no frame has passed" structural rather than a race the machine usually
+    // wins.
+    fireEvent.click(screen.getByTestId('trigger'));
 
     // Same turn as the click, before any frame has passed.
     document.dispatchEvent(new Event('scroll', { bubbles: false }));
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).toBeTruthy();
+    // That the listener is attached at all — so this is the guard holding and
+    // not an effect that never ran — is the case directly above.
   });
 });
 
@@ -317,5 +328,101 @@ describe('Popover stacking', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('menu')).toBeNull();
     expect(hasLayers()).toBe(false);
+  });
+});
+
+describe('Popover inside a Dialog (M29.27)', () => {
+  beforeEach(() => resetLayers());
+
+  /**
+   * A menu opened from inside a Dialog portals to document.body, so it stops
+   * being a descendant of the card and competes with the SCRIM in the root
+   * stacking context. At `z-50` it lost to the scrim's 1000: the panel was
+   * invisible and unclickable, yet still held a dismiss layer — so the next
+   * Escape closed the popover nobody could see instead of the dialog, and the
+   * click after that was swallowed as its outside-press. Found on M29.27's
+   * full-screen block editor, whose toolbar carries the layout menu.
+   *
+   * Tailwind is not loaded in jsdom, so the panel's z-index is read from its
+   * class; the scrim's comes from Dialog's own injected stylesheet. Comparing
+   * the two — rather than pinning a literal — fails if either side moves alone.
+   */
+  it('portals above the scrim of the dialog it was opened from', async () => {
+    const user = userEvent.setup();
+    render(
+      <Dialog open fullscreen title="Full screen">
+        <Harness />
+      </Dialog>,
+    );
+    await user.click(screen.getByTestId('trigger'));
+
+    const panel = screen.getByRole('menu').parentElement;
+    // Both spellings, so reverting to the bare `z-50` fails on the COMPARISON
+    // (50 is not > 1000) rather than on a regex that quietly matched nothing.
+    const declared = (panel?.className ?? '').match(/\bz-\[?(\d+)\]?/);
+    expect(declared).toBeTruthy();
+
+    const scrim = document.querySelector('.cb-dlg-scrim');
+    const scrimZ = Number(window.getComputedStyle(scrim as Element).zIndex);
+    expect(scrimZ).toBe(1000);
+    expect(Number(declared?.[1])).toBeGreaterThan(scrimZ);
+  });
+});
+
+/**
+ * A canvas moves its anchors with a CSS transform (M29.53).
+ *
+ * MEASURED on the diagram page: five wheel steps to 161% moved a node by
+ * (-358, -214) and left its shape palette at (0, +2.4) — still open, now over
+ * an unrelated part of the diagram. Neither `resize` nor the panel's own
+ * ResizeObserver fires for a transform on an ancestor, so a host that moves
+ * its own contents has to say so.
+ */
+describe('Popover re-measures when a host says its anchors moved', () => {
+  function Anchored() {
+    const ref = useRef<HTMLButtonElement>(null);
+    return (
+      <div>
+        <button type="button" ref={ref} data-testid="anchor">
+          anchor
+        </button>
+        <Popover anchorRef={ref} onClose={() => {}} ariaLabel="Panel">
+          <span>body</span>
+        </Popover>
+      </div>
+    );
+  }
+
+  it('places itself again on ANCHOR_MOVED_EVENT', () => {
+    let top = 100;
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const isAnchor = this.getAttribute('data-testid') === 'anchor';
+      const box = isAnchor
+        ? { left: 40, top, width: 20, height: 10 }
+        : { left: 0, top: 0, width: 120, height: 60 };
+      return {
+        ...box,
+        right: box.left + box.width,
+        bottom: box.top + box.height,
+        x: box.left,
+        y: box.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    try {
+      render(<Anchored />);
+      // The POSITIONED element is the outer fixed wrapper; the labelled one
+      // inside it carries the animation and the width.
+      const panel = screen.getByLabelText('Panel').parentElement!;
+      const before = parseFloat(panel.style.top);
+      // The anchor moves the way a zoom moves it: no resize, no scroll.
+      top = 300;
+      fireEvent(window, new Event(ANCHOR_MOVED_EVENT));
+      // It tracked the anchor's own 200px, whatever the gap happens to be.
+      expect(parseFloat(panel.style.top) - before).toBe(200);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
   });
 });

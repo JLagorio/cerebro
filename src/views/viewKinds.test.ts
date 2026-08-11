@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { VIEW_TYPES, type Presentation } from '@/engine/types';
+import { layoutLabel } from '@/engine/views';
 import {
   VIEW_KINDS,
   VIEW_SEGMENTS,
@@ -8,6 +9,7 @@ import {
   hasBlocks,
   hasDependencies,
   hasGroupColumns,
+  isCanvas,
   isCharted,
   isDayGrid,
   isTabular,
@@ -75,6 +77,7 @@ describe('view kind registration', () => {
       expect(hasGroupColumns(kind.value)).toBe(kind.groupColumns === true);
       expect(isDayGrid(kind.value)).toBe(kind.dayGrid === true);
       expect(isTabular(kind.value)).toBe(kind.tabular === true);
+      expect(isCanvas(kind.value)).toBe(kind.canvas === true);
     }
   });
 
@@ -146,6 +149,34 @@ describe('view kind registration', () => {
   it('falls back to the first kind for an unknown type', () => {
     expect(viewKind('nope' as never)).toBe(VIEW_KINDS[0]);
   });
+
+  // --- M29.45: the tenth kind -----------------------------------------------
+
+  it('whiteboard is registered, labeled, and offered', () => {
+    const wb = viewKind('whiteboard');
+    expect(wb.value).toBe('whiteboard');
+    expect(wb.label).toBe('Whiteboard');
+    expect(isCanvas('whiteboard')).toBe(true);
+    expect(VIEW_SEGMENTS.some((s) => s.testId === 'view-switch-whiteboard')).toBe(true);
+  });
+
+  /**
+   * A canvas kind draws a file, not records. Every record-layout capability
+   * would be a control that changes nothing on its canvas — the calendar's
+   * M16.3 bug, avoided by declaring nothing.
+   */
+  it('a canvas kind declares no record-layout capability', () => {
+    for (const kind of VIEW_KINDS) {
+      if (kind.canvas !== true) continue;
+      expect(kind.groupable).toBeUndefined();
+      expect(kind.dated).toBeUndefined();
+      expect(kind.cards).toBeUndefined();
+      expect(kind.charted).toBeUndefined();
+      expect(kind.blocks).toBeUndefined();
+      expect(kind.tabular).toBeUndefined();
+      expect(kind.chips).toBeUndefined();
+    }
+  });
 });
 
 /**
@@ -186,6 +217,7 @@ describe('carrying a presentation to a new kind (M16.29)', () => {
     calendarSpan: 'week',
     showWeekends: false,
     weekStart: 'monday',
+    whiteboard: { file: 'delivery/whiteboards/map.mmd' },
   };
 
   it('keeps the query — the reason you asked for another view of this data', () => {
@@ -244,6 +276,9 @@ describe('carrying a presentation to a new kind (M16.29)', () => {
         ['dependencyField', kind.dependencies === true],
         ['chart', kind.charted === true],
         ['dashboard', kind.blocks === true],
+        // NEVER carried — not even whiteboard→whiteboard. The file is the
+        // tab's identity (M29.45); see NEVER_SEEDED in viewKinds.ts.
+        ['whiteboard', false],
       ];
       for (const [key, allowed] of forbidden) {
         // `^\s+key:` and not a bare substring — `chart` is also a `type:`
@@ -265,5 +300,41 @@ describe('carrying a presentation to a new kind (M16.29)', () => {
 
   it('a table born on the gallery inherits no colorColumns', () => {
     expect(carryOver(everything, 'table').colorColumns).toBeUndefined();
+  });
+
+  /**
+   * The file pointer never seeds a new tab (M29.45). A whiteboard born from a
+   * whiteboard must get its OWN canvas: carrying the pointer would aim two
+   * tabs at one .mmd, and "new whiteboard" would silently mean "second door
+   * to the first one". (Duplicate is different on purpose — it copies the
+   * whole view, pointer included, the way a duplicated dashboard keeps its
+   * blocks.)
+   */
+  it('never carries the whiteboard file pointer, even whiteboard-to-whiteboard', () => {
+    const board: Presentation = {
+      type: 'whiteboard',
+      group: [],
+      sort: [{ field: 'modifiedAt', dir: 'desc' }],
+      columns: [],
+      whiteboard: { file: 'delivery/whiteboards/map.mmd' },
+    };
+    expect(carryOver(board, 'whiteboard').whiteboard).toBeUndefined();
+    expect(carryOver(board, 'table').whiteboard).toBeUndefined();
+  });
+});
+
+/**
+ * `layoutLabel` (engine/views.ts) is a SECOND label table, and the two are
+ * read side by side: the picker tile shows `ViewKind.label` while the tab it
+ * creates is NAMED by `layoutLabel` (ViewTabs.tsx:512), and the delete
+ * confirmation quotes it back. Nothing asserted they agreed, so a kind could
+ * be offered as "Whiteboard" and create a tab called something else — and
+ * both tables are hand-maintained, so the tenth kind had to be added twice.
+ */
+describe('the two label tables agree (M29.46)', () => {
+  it('names every kind the same way in the picker and on the tab it creates', () => {
+    for (const kind of VIEW_KINDS) {
+      expect(layoutLabel(kind.value)).toBe(kind.label);
+    }
   });
 });

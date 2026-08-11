@@ -34,7 +34,7 @@ function defaultPresentation(): Presentation {
   return clonePresentation(DEFAULT_PRESENTATION);
 }
 
-const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.md$/, '');
+const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.(md|mmd)$/, '');
 
 function isEmptyValue(v: unknown): boolean {
   return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -246,6 +246,9 @@ export function resolveSurface(
       };
     case 'doc':
       // Docs render in the editor surface (DocPage); they have no item canvas.
+      return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
+    case 'diagram':
+      // A standalone .mmd renders in DiagramPage (M29.21); no item canvas.
       return { title: stem(sel.path), entries: [], presentation: defaultPresentation() };
     case 'docs':
       return { title: 'Docs', entries: [], presentation: defaultPresentation() };

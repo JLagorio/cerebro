@@ -63,6 +63,7 @@ import {
   axesFor,
   hasDependencies,
   hasGroupColumns,
+  isCanvas,
   isDayGrid,
   isTabular,
   isZoomable,
@@ -283,12 +284,21 @@ export function ViewSettingsPanel({
               value={layoutName}
               onClick={() => setPage('layout')}
             />
-            <Row
-              icon="eye"
-              label="Properties"
-              value={String(visible)}
-              onClick={() => setPage('properties')}
-            />
+            {/* M29.46: absent on a canvas. Visible columns is the one row up
+                here that draws NOTHING on a whiteboard — the canvas is a .mmd
+                file, not a record layout, so every column toggle would be a
+                control that changes nothing (the calendar's M16.3 bug, this
+                time arriving through an ungated row rather than a wrong
+                capability). Filter, Sort and Load limit stay: they decide
+                which records the canvas can place (M29.47). */}
+            {!isCanvas(p.type) && (
+              <Row
+                icon="eye"
+                label="Properties"
+                value={String(visible)}
+                onClick={() => setPage('properties')}
+              />
+            )}
             <Row
               icon="list-filter"
               label="Filter"

@@ -146,4 +146,33 @@ describe('Dialog', () => {
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Create' }));
   });
+
+  it('fullscreen fills the viewport: unpadded scrim, full-height unpadded flex body', () => {
+    render(
+      <Dialog open fullscreen title="Full" onClose={() => {}}>
+        <div data-testid="body-child" />
+      </Dialog>,
+    );
+    const card = screen.getByRole('dialog');
+    expect(card.className).toContain('cb-dlg-full');
+    expect(card.style.maxWidth).toBe('none');
+
+    // The one that guards the css template's ORDER: `.cb-dlg-full` and
+    // `.cb-dlg` have equal specificity, so the full-height rule wins only
+    // while it sits later in the string. Move it up and the full-screen
+    // editor silently gets `calc(100vh - 128px)` back, 128px short.
+    expect(window.getComputedStyle(card).maxHeight).toBe('100vh');
+
+    const scrim = document.querySelector('.cb-dlg-scrim');
+    expect(window.getComputedStyle(scrim as Element).padding).toBe('0px');
+
+    // The body IS the editor's box: an unpadded flex column that clips rather
+    // than scrolls, since the canvas inside owns panning.
+    const body = screen.getByTestId('body-child').parentElement as HTMLElement;
+    expect(body.className).toBe('cb-dlg-bd');
+    const bd = window.getComputedStyle(body);
+    expect(bd.display).toBe('flex');
+    expect(bd.padding).toBe('0px');
+    expect(bd.overflow).toBe('hidden');
+  });
 });

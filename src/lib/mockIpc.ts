@@ -25,6 +25,12 @@ const seededYaml = import.meta.glob('/demo-vault/**/*.yml', {
   import: 'default',
   eager: true,
 }) as Record<string, string>;
+// Standalone mermaid files (M29.20) — raw diagram source, scanned as entries.
+const seededDiagrams = import.meta.glob('/demo-vault/**/*.mmd', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
 
 const files = new Map<string, string>();
 // Connector config (M13.3) — config, not a note; scan never sees it.
@@ -40,7 +46,11 @@ export function resetMockFs(): void {
   times.clear();
   folders.clear();
   connectorsJson = '';
-  for (const [absPath, raw] of Object.entries({ ...seededNotes, ...seededYaml })) {
+  for (const [absPath, raw] of Object.entries({
+    ...seededNotes,
+    ...seededYaml,
+    ...seededDiagrams,
+  })) {
     const rel = absPath.replace(/^\/demo-vault\//, '');
     files.set(rel, raw);
     times.set(rel, { createdAt: SEED_TIME, modifiedAt: SEED_TIME });
@@ -100,7 +110,9 @@ export async function scanVault(_vault: string): Promise<Entry[]> {
   // Parity with scan.rs: views/ and attachments/ and dot-dirs are skipped at
   // any depth (v2 project folders carry their own views/).
   const skipped = /(^|\/)(views|attachments|\.[^/]*)\//;
-  const paths = [...files.keys()].filter((p) => p.endsWith('.md') && !skipped.test(p)).sort();
+  const paths = [...files.keys()]
+    .filter((p) => (p.endsWith('.md') || p.endsWith('.mmd')) && !skipped.test(p))
+    .sort();
   const entries = paths.map((p) => {
     const t = times.get(p) ?? { createdAt: SEED_TIME, modifiedAt: SEED_TIME };
     return parseNote(p, files.get(p) ?? '', t.createdAt, t.modifiedAt);
@@ -109,6 +121,9 @@ export async function scanVault(_vault: string): Promise<Entry[]> {
 }
 
 export async function readNote(_vault: string, path: string): Promise<string> {
+  // .mmd is RAW (M29.20): mermaid's own `---` header is diagram syntax, so
+  // it must never be stripped as frontmatter (parity with read_note).
+  if (path.endsWith('.mmd')) return mustGet(path);
   return splitFrontmatter(mustGet(path)).body.replace(/^\n+/, '');
 }
 
@@ -127,6 +142,15 @@ function guardHumanWrite(path: string): void {
 
 export async function saveNote(_vault: string, path: string, body: string): Promise<void> {
   guardHumanWrite(path);
+  // .mmd is RAW (M29.20): the body IS the whole file — no frontmatter
+  // compose (parity with save_note in write.rs). mustGet keeps the .md
+  // contract: save only overwrites an existing file.
+  if (path.endsWith('.mmd')) {
+    mustGet(path);
+    files.set(path, body);
+    touch(path);
+    return;
+  }
   const { yaml } = splitFrontmatter(mustGet(path));
   files.set(path, yaml !== null ? `---\n${yaml}\n---\n\n${body}` : body);
   touch(path);
@@ -138,6 +162,12 @@ export async function updateFrontmatter(
   patch: Record<string, unknown>,
 ): Promise<void> {
   guardHumanWrite(path);
+  // Parity with update_frontmatter in write.rs (M29.23): mermaid's config
+  // header IS valid YAML, so patching a .mmd would merge into the diagram's
+  // own header and reserialize it. There is no frontmatter here to update.
+  if (path.endsWith('.mmd')) {
+    throw new Error(`${path}: a .mmd is raw diagram source and has no frontmatter to update`);
+  }
   return writeFrontmatter(path, patch);
 }
 
@@ -474,6 +504,34 @@ export async function importAttachment(_vault: string, source: string): Promise<
   }
 }
 
+/**
+ * Mirror of `vault::write::write_text_file` (M29.22): same knowledge guard,
+ * same `.mmd`-only extension allowlist, same stem dedupe, and the same
+ * vault containment `safe_join` enforces (no absolute paths, no `..`, no
+ * empty path). Returns the vault-relative path actually written.
+ */
+export async function writeTextFile(
+  _vault: string,
+  path: string,
+  content: string,
+): Promise<string> {
+  guardHumanWrite(path);
+  if (path === '' || path.startsWith('/') || path.split('/').includes('..')) {
+    throw new Error(`path escapes the vault: ${path}`);
+  }
+  const dot = path.lastIndexOf('.');
+  if (dot === -1) throw new Error(`write_text_file requires an extension: ${path}`);
+  const [stem, ext] = [path.slice(0, dot), path.slice(dot + 1)];
+  if (ext !== 'mmd') {
+    throw new Error(`write_text_file only writes ["mmd"] files: ${path}`);
+  }
+  let actual = path;
+  for (let n = 2; files.has(actual); n += 1) actual = `${stem}-${n}.${ext}`;
+  files.set(actual, content);
+  touch(actual);
+  return actual;
+}
+
 /** All directories in the vault (derived from file paths + explicit folders). */
 export async function listFolders(_vault: string): Promise<string[]> {
   const skipped = /(^|\/)(views|attachments|\.[^/]*)(\/|$)/;
@@ -485,4 +543,17 @@ export async function listFolders(_vault: string): Promise<string[]> {
     }
   }
   return [...dirs].filter((d) => !skipped.test(d)).sort();
+}
+
+// --- Mermaid diagram export (M29.4) -----------------------------------------
+
+/** Browser stand-in for the native PNG save: a plain download. */
+export async function exportPng(defaultName: string, bytes: Uint8Array): Promise<string | null> {
+  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return defaultName;
 }

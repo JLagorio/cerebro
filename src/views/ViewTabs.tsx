@@ -15,9 +15,9 @@ import { VIEW_KINDS, viewKind } from '@/views/viewKinds';
  * A List's view tabs (M11).
  *
  * This replaces the segmented layout pills that used to sit in the toolbar.
- * They were the same six buttons on every surface, and pressing one REPLACED
- * the view you had configured — so "look at this as a board" cost you the
- * table's columns, and there was no way to keep both.
+ * They were the same buttons on every surface, and pressing one REPLACED the
+ * view you had configured — so "look at this as a board" cost you the table's
+ * columns, and there was no way to keep both.
  *
  * A tab is a saved way of looking: it owns its layout, filters, sort, grouping
  * and columns. Which layout a tab uses is therefore chosen once, when the tab is
@@ -175,6 +175,19 @@ export function ViewTabs({
             This removes the tab and everything it holds — its{' '}
             {layoutLabel(deleting.presentation.type).toLowerCase()} layout, filters, sort, grouping
             and column arrangement. The records stay where they are.
+            {deleting.presentation.type === 'whiteboard' && (
+              <>
+                {' '}
+                {/* The one thing the sentence above got wrong (M29.53): a
+                    whiteboard's drawing lives in its own `.mmd` file, and
+                    deleting the tab drops the pointer to it without touching
+                    the file — MEASURED, the orphan was still on disk with both
+                    record nodes in it, and re-creating a view of the same name
+                    minted a second file beside it. Keeping the drawing is the
+                    right call; saying so is the missing half. */}
+                Its drawing stays too, as a file under this list&rsquo;s whiteboards folder.
+              </>
+            )}
           </p>
         </Dialog>
       )}
@@ -374,7 +387,7 @@ function RenameTab({
   );
 }
 
-/** Anchored popover listing the six layouts. */
+/** Anchored popover listing every layout in the catalog (VIEW_KINDS). */
 function LayoutPicker({
   current,
   onPick,
@@ -536,7 +549,7 @@ function NewViewForm({
         <div
           ref={ref}
           data-testid="new-view-form"
-          className="z-50 w-[268px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
+          className="z-50 w-[320px] rounded-lg border border-n-200 bg-n-0 p-2.5 shadow-[var(--shadow-lg)]"
         >
           <div className="mb-1 text-2xs font-semibold uppercase tracking-[0.06em] text-n-400">
             New view
@@ -556,7 +569,13 @@ function NewViewForm({
             }}
             width="100%"
           />
-          <div className="mt-2 grid grid-cols-3 gap-1">
+          {/* 4-up since the catalog passed nine kinds (M29.49): ten tiles in
+              three columns stranded a lone tile on a fourth row. 4/4/2 reads
+              as a grid. The popover widened to 320px with it, MEASURED rather
+              than guessed — at 300px the longest label ("Whiteboard", 61px)
+              still fit on one line but ate the tile's whole 4px of padding,
+              which is a wrap on any font stack a shade wider than this one. */}
+          <div className="mt-2 grid grid-cols-4 gap-1">
             {VIEW_KINDS.map((k) => (
               <button
                 key={k.value}

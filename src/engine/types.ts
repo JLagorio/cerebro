@@ -182,6 +182,10 @@ export type Selection =
   // M12.5: `project` retired — a project is a folder, and a folder with
   // things in it is a Collection. Legacy project.md files open as records.
   | { kind: 'doc'; path: string } // full-page markdown document (M2 Task 10)
+  // M29.21 — a standalone .mmd file. Raw diagram source has no frontmatter
+  // and no record shape, so it gets its own full-page editor surface rather
+  // than being forced through the doc canvas.
+  | { kind: 'diagram'; path: string }
   | { kind: 'docs' } // all-docs rail surface (M2 Task 11)
   // M10 — a Collection is a container (a folder holding collection.yml); a List
   // is a database inside one. These were a single `view` kind that was both.
@@ -269,8 +273,10 @@ export interface ColumnSpec {
 }
 
 /**
- * The record views (M10, extended M16.22/.27/.28). Mutually exclusive — a
- * collection shows one at a time, chosen from the open tab's layout picker.
+ * The view kinds (M10, extended M16.22/.27/.28, M29.45). Mutually exclusive —
+ * a collection shows one at a time, chosen from the open tab's layout picker.
+ *
+ * The kinds that draw RECORDS — the same rows, drawn differently:
  *
  * - `table`     — spreadsheet grid with inline-editable cells (M3.4)
  * - `list`      — banded rows
@@ -281,6 +287,17 @@ export interface ColumnSpec {
  * - `gallery`   — a card grid, cards optionally covered by a files property
  * - `chart`     — bar/line/donut over an aggregation of the same rows
  * - `dashboard` — a grid of blocks: saved views and single numbers
+ *
+ * And the kind that draws a FILE — `canvas: true` in viewKinds.ts, which is
+ * what gates it everywhere rather than its name:
+ *
+ * - `whiteboard` — a `.mmd` the tab owns, edited through the shared diagram
+ *   editor. Its records are not laid out FOR the user; they appear where the
+ *   user puts them, as nodes bound by a mermaid `click` line (M29.45, D8).
+ *
+ * The roster is deliberately grouped rather than counted: this docstring said
+ * "the six views" in three other files for four milestones while the catalog
+ * grew to ten, so prose here names the split, never the number.
  *
  * Two kinds were REMOVED here, and both for the same reason — they were views
  * whose only job was something another axis already does:
@@ -309,6 +326,7 @@ export const VIEW_TYPES = [
   'gallery',
   'chart',
   'dashboard',
+  'whiteboard',
 ] as const;
 
 export type ViewType = (typeof VIEW_TYPES)[number];
@@ -523,6 +541,15 @@ export interface Presentation {
   chart?: ChartSpec;
   /** Dashboard blocks (M16.28). Absent = an empty dashboard. */
   dashboard?: DashboardSpec;
+  /**
+   * The whiteboard's canvas (M29.45): a vault-relative `.mmd` path, created
+   * on first open (spec D8). `file: null` is representable in memory — the
+   * "not created yet" state the view acts on — but never written: the
+   * serializer drops it, so a fresh tab's YAML carries no key about a file
+   * that does not exist, the same stored-only-off-default rule every other
+   * layout block follows.
+   */
+  whiteboard?: { file: string | null };
   /** How much of the calendar one screen holds. Omitted = a month (M16.23). */
   calendarSpan?: 'month' | 'week';
   /** False drops Saturday and Sunday from the grid. Stored only when false. */

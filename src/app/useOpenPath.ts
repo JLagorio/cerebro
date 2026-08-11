@@ -43,6 +43,14 @@ export function useOpenPath(mode: OpenMode = 'navigate'): (path: string) => void
     // the record, fails the lookup, and misroutes a typed record to Docs.
     const entries = useVaultStore.getState().entries;
     const selection = useNavStore.getState().selection;
+    // M29.21: a .mmd is raw diagram source — no frontmatter, no record shape —
+    // so it has exactly one surface, the full-page diagram editor. Decided on
+    // the extension, before the entry lookup: even a not-yet-scanned .mmd must
+    // never fall through to the doc canvas, which would edit it as markdown.
+    if (path.endsWith('.mmd')) {
+      navigate({ kind: 'diagram', path });
+      return;
+    }
     const entry = entries.find((e) => e.path === path);
     if (entry === undefined) {
       navigate({ kind: 'doc', path });

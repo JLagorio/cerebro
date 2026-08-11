@@ -10,6 +10,7 @@
 // asserted by both implementations — keep them in sync.
 import YAML from 'yaml';
 import type { Entry, Scalar } from '@/engine/types';
+import { firstMeaningfulLine } from '@/mermaid/detect';
 
 /** Frontmatter blocks larger than this are rejected without parsing (parity
  * with MAX_FRONTMATTER_LEN in parse.rs). */
@@ -249,6 +250,26 @@ function makeSnippet(body: string): string {
 
 export function parseNote(path: string, raw: string, createdAt: string, modifiedAt: string): Entry {
   const filename = path.split('/').pop() ?? path;
+  // M29.20: a .mmd file is RAW mermaid source — its `---` header is diagram
+  // syntax, never note frontmatter (parity with the .mmd branch in entry.rs).
+  // Title from the filename stem, snippet from the first meaningful line.
+  if (path.endsWith('.mmd')) {
+    return {
+      path,
+      filename,
+      folder: path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '',
+      project: null,
+      title: humanize(filename.replace(/\.mmd$/, '')),
+      type: null,
+      properties: {},
+      relationships: {},
+      outgoingLinks: [],
+      snippet: [...firstMeaningfulLine(raw)].slice(0, 160).join(''),
+      createdAt,
+      modifiedAt,
+      parseError: null,
+    };
+  }
   const stem = filename.replace(/\.md$/, '');
   const { yaml, body } = splitFrontmatter(raw);
   const { mapping, error: parseError } =

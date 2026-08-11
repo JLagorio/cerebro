@@ -212,3 +212,35 @@ export function importAttachment(vault: string, source: string): Promise<string>
     ? invokeTauri('import_attachment', { vault, source })
     : mock.importAttachment(vault, source);
 }
+
+/**
+ * Write a raw text file (`.mmd` only) into the vault, deduping the stem
+ * (`-2`, `-3`, …) when the path is taken; returns the vault-relative path
+ * actually written (M29.22). Both backends enforce the extension allowlist
+ * and refuse `knowledge/` — this is the door a mermaid block uses to move
+ * its source out into a standalone diagram file, not a general writer.
+ */
+export function writeTextFile(vault: string, path: string, content: string): Promise<string> {
+  return inTauri()
+    ? invokeTauri('write_text_file', { vault, path, content })
+    : mock.writeTextFile(vault, path, content);
+}
+
+// --- Mermaid diagram export (M29.4) -----------------------------------------
+
+/**
+ * Save PNG bytes via the native save dialog (M29.4). Base64 because Tauri's
+ * JSON invoke channel has no efficient raw-bytes lane for commands; diagrams
+ * are small enough that this does not matter. Returns the chosen absolute
+ * path, or null when the user cancels.
+ */
+export function exportPng(defaultName: string, bytes: Uint8Array): Promise<string | null> {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  const bytesBase64 = btoa(binary);
+  return inTauri()
+    ? invokeTauri('export_png', { defaultName, bytesBase64 })
+    : mock.exportPng(defaultName, bytes);
+}

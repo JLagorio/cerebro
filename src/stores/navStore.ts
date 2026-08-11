@@ -37,7 +37,7 @@ function remapSelection(sel: Selection, from: string, to: string): Selection {
     if (p.startsWith(`${from}/`)) return `${to}${p.slice(from.length)}`;
     return null;
   };
-  if (sel.kind === 'doc') {
+  if (sel.kind === 'doc' || sel.kind === 'diagram') {
     const next = swap(sel.path);
     return next === null ? sel : { ...sel, path: next };
   }

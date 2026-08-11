@@ -395,6 +395,111 @@ describe('mockIpc', () => {
     });
   });
 
+  /**
+   * Parity with the .mmd branches in entry.rs / write.rs (M29.20): a .mmd is
+   * RAW mermaid source — its `---` header is diagram syntax, and stripping it
+   * as frontmatter destroys the file.
+   */
+  describe('.mmd raw round-trip (M29.20)', () => {
+    const MMD = '---\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n';
+
+    it('scans a seeded .mmd as a raw untyped entry', async () => {
+      const entries = await mock.scanVault('/demo-vault');
+      const mmd = entries.find((e) => e.path === 'diagrams/pipeline.mmd');
+      expect(mmd).toBeDefined();
+      expect(mmd!.title).toBe('Pipeline');
+      expect(mmd!.type).toBeNull();
+      expect(mmd!.properties).toEqual({});
+      expect(mmd!.relationships).toEqual({});
+      expect(mmd!.snippet).toBe('flowchart TD');
+      expect(mmd!.parseError).toBeNull();
+    });
+
+    it('readNote and saveNote pass .mmd content through verbatim', async () => {
+      await mock.writeTextFile('/demo-vault', 'diagrams/raw.mmd', MMD);
+      expect(await mock.readNote('/demo-vault', 'diagrams/raw.mmd')).toBe(MMD);
+      const edited = `${MMD}  B --> C\n`;
+      await mock.saveNote('/demo-vault', 'diagrams/raw.mmd', edited);
+      expect(await mock.readNote('/demo-vault', 'diagrams/raw.mmd')).toBe(edited);
+      // The header never grew a note-frontmatter wrapper.
+      expect((await mock.readNote('/demo-vault', 'diagrams/raw.mmd')).startsWith('---\n')).toBe(
+        true,
+      );
+    });
+
+    it('saveNote still refuses a .mmd that does not exist', async () => {
+      await expect(mock.saveNote('/demo-vault', 'diagrams/nope.mmd', 'x\n')).rejects.toThrow(
+        /not found/i,
+      );
+    });
+
+    // M29.23: mermaid's config header IS valid YAML — updateFrontmatter on a
+    // .mmd would merge the patch into the diagram's own header (the agent's
+    // MCP door included) and reserialize it. Parity with write.rs.
+    it('updateFrontmatter refuses a .mmd and leaves the bytes alone', async () => {
+      const before = await mock.readNote('/demo-vault', 'diagrams/pipeline.mmd');
+      await expect(
+        mock.updateFrontmatter('/demo-vault', 'diagrams/pipeline.mmd', { status: 'done' }),
+      ).rejects.toThrow(/no frontmatter/);
+      expect(await mock.readNote('/demo-vault', 'diagrams/pipeline.mmd')).toBe(before);
+    });
+  });
+
+  /** Parity with `vault::write::write_text_file` (M29.22). */
+  describe('writeTextFile', () => {
+    it('writes the file and returns its path', async () => {
+      expect(await mock.writeTextFile('/demo-vault', 'diagrams/flow.mmd', 'graph TD\n')).toBe(
+        'diagrams/flow.mmd',
+      );
+      expect(await mock.readNote('/demo-vault', 'diagrams/flow.mmd')).toBe('graph TD\n');
+    });
+
+    it('dedupes the stem when the path is taken', async () => {
+      await mock.writeTextFile('/demo-vault', 'diagrams/flow.mmd', 'first\n');
+      expect(await mock.writeTextFile('/demo-vault', 'diagrams/flow.mmd', 'second\n')).toBe(
+        'diagrams/flow-2.mmd',
+      );
+      // Neither clobbered the other.
+      expect(await mock.readNote('/demo-vault', 'diagrams/flow.mmd')).toBe('first\n');
+      expect(await mock.readNote('/demo-vault', 'diagrams/flow-2.mmd')).toBe('second\n');
+    });
+
+    it('refuses every extension outside the allowlist', async () => {
+      await expect(mock.writeTextFile('/demo-vault', 'notes/evil.md', '# hi\n')).rejects.toThrow(
+        /only writes/,
+      );
+      await expect(mock.writeTextFile('/demo-vault', 'notes/evil.sh', 'rm\n')).rejects.toThrow(
+        /only writes/,
+      );
+      await expect(mock.writeTextFile('/demo-vault', 'no-extension', 'x\n')).rejects.toThrow(
+        /extension/,
+      );
+    });
+
+    it('refuses knowledge/, the same as every human write door', async () => {
+      await expect(
+        mock.writeTextFile('/demo-vault', 'knowledge/concept.mmd', 'graph TD\n'),
+      ).rejects.toThrow(/read-only/);
+    });
+
+    // Parity with safe_join in write.rs (M29.23): the mock must refuse the
+    // same escapes the backend does, or containment "works" only in dev.
+    it('refuses paths that escape the vault', async () => {
+      await expect(mock.writeTextFile('/demo-vault', '/tmp/abs.mmd', 'x\n')).rejects.toThrow(
+        /escapes the vault/,
+      );
+      await expect(mock.writeTextFile('/demo-vault', '../outside.mmd', 'x\n')).rejects.toThrow(
+        /escapes the vault/,
+      );
+      await expect(
+        mock.writeTextFile('/demo-vault', 'diagrams/../../sneaky.mmd', 'x\n'),
+      ).rejects.toThrow(/escapes the vault/);
+      await expect(mock.writeTextFile('/demo-vault', '', 'x\n')).rejects.toThrow(
+        /escapes the vault/,
+      );
+    });
+  });
+
   it('listFolders derives dirs from paths, includes explicit empty folders, skips views', async () => {
     await mock.createFolder('/demo-vault', 'projects/empty-folder');
     await mock.saveView('/demo-vault', 'v', 'name: V\n');

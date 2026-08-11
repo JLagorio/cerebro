@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { ViewCanvas } from '@/views/ViewCanvas';
 import { buildSchema } from '@/engine/schema';
 import { makeEntry } from '@/test/factories';
 import type { Entry, Presentation, ViewType } from '@/engine/types';
+import { useUiStore } from '@/stores/uiStore';
 
 /**
  * The canvas forwards `filtered` to every layout that has an empty state
@@ -20,6 +21,15 @@ import type { Entry, Presentation, ViewType } from '@/engine/types';
  * next omission before this test would. These cases are the second line: they
  * prove the wiring reaches the copy a user actually reads.
  */
+/**
+ * jsdom cannot render mermaid, and the real editor drags in the whole render
+ * chain. Neither whiteboard case below reaches it — both faces precede it —
+ * but the stand-in is here so a future face change cannot hang this suite.
+ */
+vi.mock('@/mermaid/FullScreenDiagramEditor', () => ({
+  FullScreenDiagramEditor: () => <div data-testid="fake-editor" />,
+}));
+
 const TYPE_DOC = makeEntry({
   path: 'types/campaign.md',
   title: 'Campaign',
@@ -98,5 +108,92 @@ describe('ViewCanvas empty states say WHY they are empty (M16.35)', () => {
   ])('tells a filtered %s the filters matched nothing', (type, copy) => {
     renderEmpty(type, true);
     expect(screen.getByText(copy)).toBeTruthy();
+  });
+});
+
+/**
+ * The tenth kind through the REAL switch (M29.49).
+ *
+ * `whiteboard` is the first kind whose arm depends on something other than the
+ * records — it needs a host to know where its `.mmd` lives — so the switch can
+ * route it two ways, and both are user-visible copy rather than a layout. The
+ * arm is exhaustiveness-checked by the return type, but nothing proved which
+ * face a caller gets, and a dashboard block reaching a whiteboard is exactly
+ * the case with no page host.
+ */
+describe('ViewCanvas whiteboard faces (M29.49)', () => {
+  /** No vault is opened in this suite, so creation cannot run either way. */
+  function renderWhiteboard(host?: { folder: string; viewName: string }) {
+    render(
+      <ViewCanvas
+        entries={[]}
+        allEntries={[TYPE_DOC]}
+        presentation={presentation('whiteboard')}
+        schema={schema}
+        fields={[]}
+        scope="test:whiteboard"
+        filtered={false}
+        whiteboardHost={host}
+      />,
+    );
+  }
+
+  it('without a host — a dashboard block — it declines and says where to go', () => {
+    renderWhiteboard();
+    expect(screen.getByTestId('whiteboard-unavailable')).toBeTruthy();
+    // The copy, not just the test id: the point of the face is the directions.
+    expect(screen.getByText(/live on their list/i)).toBeTruthy();
+    expect(screen.queryByTestId('whiteboard-creating')).toBeNull();
+  });
+
+  it('with a host and no file yet it routes to the canvas, not a record layout', () => {
+    renderWhiteboard({ folder: 'delivery', viewName: 'Map' });
+    expect(screen.getByTestId('whiteboard-creating')).toBeTruthy();
+    expect(screen.queryByTestId('whiteboard-unavailable')).toBeNull();
+    // It must not fall through to a rows layout — the bug an unchecked switch
+    // arm would produce is a whiteboard tab quietly drawing a table.
+    expect(screen.queryByTestId('table-view')).toBeNull();
+    expect(screen.queryByTestId('list-view')).toBeNull();
+  });
+});
+
+/**
+ * The detail panel's siblings are "the records on screen" (M16.11), and a
+ * canvas is the second kind for which that has no honest answer (M29.46
+ * review). A dashboard was excluded at M16.28 because each block shows a
+ * different set; a whiteboard must be excluded because what it DRAWS is
+ * decided by its .mmd's click lines, while `entries` is only the pool
+ * "Add record" may offer. Registering the pool made a chip click announce
+ * "3 of 45" and stepped next/prev through records not on the canvas.
+ */
+describe('a canvas registers no detail siblings (M29.46)', () => {
+  const RECORDS = [
+    makeEntry({ path: 'delivery/a.md', title: 'A', type: 'Campaign' }),
+    makeEntry({ path: 'delivery/b.md', title: 'B', type: 'Campaign' }),
+  ];
+
+  function renderKind(type: ViewType) {
+    useUiStore.setState({ detailSiblings: [] });
+    render(
+      <ViewCanvas
+        entries={RECORDS}
+        allEntries={[TYPE_DOC, ...RECORDS]}
+        presentation={{ type, group: [], sort: [], columns: [] }}
+        schema={schema}
+        fields={[]}
+        scope={`siblings:${type}`}
+        filtered={false}
+      />,
+    );
+  }
+
+  it('registers the rows it draws for a record layout', () => {
+    renderKind('list');
+    expect(useUiStore.getState().detailSiblings).toEqual(['delivery/a.md', 'delivery/b.md']);
+  });
+
+  it('registers none for a whiteboard, whose canvas decides what is on it', () => {
+    renderKind('whiteboard');
+    expect(useUiStore.getState().detailSiblings).toEqual([]);
   });
 });

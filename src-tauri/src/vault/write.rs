@@ -153,6 +153,16 @@ pub fn update_frontmatter(
     rel: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
+    // A .mmd has NO frontmatter to patch (M29.23): its leading `---` block is
+    // mermaid config — valid YAML, so without this guard a patch (including
+    // the agent's MCP update_frontmatter) would merge into the diagram's
+    // config header and reserialize it. Refused at the mechanism, not the
+    // callers, same as vault containment.
+    if rel.ends_with(".mmd") {
+        return Err(format!(
+            "{rel}: a .mmd is raw diagram source and has no frontmatter to update"
+        ));
+    }
     let content = read_file(vault, rel)?;
     let (block, body) = parse::split_frontmatter(&content);
     let mut mapping = match block {
@@ -176,7 +186,14 @@ pub fn update_frontmatter(
 }
 
 /// Replace the note body, preserving the frontmatter block byte-for-byte.
+///
+/// `.mmd` files are RAW (M29.20): mermaid's own `---` config header is
+/// diagram syntax, so the body IS the whole file — no frontmatter compose.
 pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
+    if rel.ends_with(".mmd") {
+        read_file(vault, rel)?; // same contract as .md: save only overwrites
+        return write_file(&safe_join(vault, rel)?, body);
+    }
     let content = read_file(vault, rel)?;
     let (block, _) = parse::split_frontmatter(&content);
     write_file(&safe_join(vault, rel)?, &compose(block, body))
@@ -187,6 +204,11 @@ pub fn save_note(vault: &Path, rel: &str, body: &str) -> Result<(), String> {
 /// vault's schema (M13.5). Malformed frontmatter reads as untyped, which is
 /// also how scan.rs reads it: a doc the scanner does not type is not schema.
 pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
+    // A .mmd is always untyped: its `---` header is mermaid config, and a
+    // stray `type:` key in there is diagram data, not vault schema (M29.23).
+    if rel.ends_with(".mmd") {
+        return None;
+    }
     let content = read_file(vault, rel).ok()?;
     let (block, _) = parse::split_frontmatter(&content);
     let mapping = parse::parse_frontmatter(block?).ok()?;
@@ -197,9 +219,13 @@ pub fn note_type(vault: &Path, rel: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Return the note body only (frontmatter stripped).
+/// Return the note body only (frontmatter stripped). `.mmd` files pass
+/// through verbatim — their `---` header is mermaid config, not frontmatter.
 pub fn read_note(vault: &Path, rel: &str) -> Result<String, String> {
     let content = read_file(vault, rel)?;
+    if rel.ends_with(".mmd") {
+        return Ok(content);
+    }
     let (_, body) = parse::split_frontmatter(&content);
     Ok(body.to_string())
 }
@@ -223,6 +249,45 @@ fn unique_rel_path(vault: &Path, folder: &str, slug: &str) -> String {
         }
         n += 1;
     }
+}
+
+/// Extensions `write_text_file` may create. `.mmd` only for now: the command
+/// exists so a mermaid block can move its source out into a standalone
+/// diagram file (M29.22) — it is not a general file-writing door.
+const TEXT_FILE_EXTENSIONS: [&str; 1] = ["mmd"];
+
+/// Write a raw text file at `rel`, deduping the STEM (`-2`, `-3`, …) when the
+/// path is taken. Returns the vault-relative path actually written.
+///
+/// The extension allowlist and the knowledge guard live HERE, beside the
+/// dedupe, rather than in the lib.rs command: a raw-bytes writer that could
+/// be pointed at `knowledge/` or at a `.md` would bypass every invariant the
+/// note pipeline enforces, so the policy sits with the mechanism.
+pub fn write_text_file(vault: &Path, rel: &str, content: &str) -> Result<String, String> {
+    crate::knowledge::guard_human_write(rel)?;
+    let Some((stem, ext)) = rel.rsplit_once('.') else {
+        return Err(format!("write_text_file requires an extension: {rel}"));
+    };
+    if !TEXT_FILE_EXTENSIONS.contains(&ext) {
+        return Err(format!(
+            "write_text_file only writes {TEXT_FILE_EXTENSIONS:?} files: {rel}"
+        ));
+    }
+    safe_join(vault, rel)?;
+    let mut n = 1;
+    let actual = loop {
+        let candidate = if n == 1 {
+            rel.to_string()
+        } else {
+            format!("{stem}-{n}.{ext}")
+        };
+        if !vault.join(&candidate).exists() {
+            break candidate;
+        }
+        n += 1;
+    };
+    write_file(&safe_join(vault, &actual)?, content)?;
+    Ok(actual)
 }
 
 /// The one folder attachments live in.
@@ -773,6 +838,80 @@ mod tests {
             read_note(&vault, "items/atl-1.md").unwrap(),
             "\n# Ship the scanner\n\nBody stays.\n"
         );
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // M29.20: the raw round-trip. A .mmd whose first bytes are mermaid's own
+    // `---` config header must survive read→save byte-identically — the note
+    // pipeline would strip that header as frontmatter and destroy the file.
+    #[test]
+    fn mmd_round_trips_raw_through_read_and_save() {
+        const MMD: &str =
+            "---\ntitle: Pipeline\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n";
+        let vault = testutil::temp_vault("wfm-mmd-raw");
+        testutil::write(&vault, "diagrams/pipeline.mmd", MMD);
+        let read_back = read_note(&vault, "diagrams/pipeline.mmd").unwrap();
+        assert_eq!(read_back, MMD);
+        save_note(&vault, "diagrams/pipeline.mmd", &read_back).unwrap();
+        assert_eq!(read(&vault, "diagrams/pipeline.mmd"), MMD);
+        // Saving edited source writes exactly those bytes, header included.
+        let edited = format!("{MMD}  B --> C\n");
+        save_note(&vault, "diagrams/pipeline.mmd", &edited).unwrap();
+        assert_eq!(read(&vault, "diagrams/pipeline.mmd"), edited);
+        // Same contract as .md: save only overwrites an existing file.
+        assert!(save_note(&vault, "diagrams/nope.mmd", "flowchart TD\n").is_err());
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // The other doors stay shut too (M29.23): mermaid's config header IS
+    // valid YAML, so without these guards a frontmatter patch — including the
+    // agent's MCP update_frontmatter — would merge into it and reserialize.
+    #[test]
+    fn mmd_refuses_frontmatter_updates_and_reads_as_untyped() {
+        const MMD: &str = "---\ntype: Should never surface\nconfig:\n  layout: elk\n---\nflowchart TD\n  A --> B\n";
+        let vault = testutil::temp_vault("wfm-mmd-doors");
+        testutil::write(&vault, "diagrams/pipeline.mmd", MMD);
+        let err = update_frontmatter(
+            &vault,
+            "diagrams/pipeline.mmd",
+            &patch(&[("status", serde_json::json!("done"))]),
+        )
+        .unwrap_err();
+        assert!(err.contains("no frontmatter"), "{err}");
+        // The file is byte-identical — the refusal happened before any write.
+        assert_eq!(read(&vault, "diagrams/pipeline.mmd"), MMD);
+        // The header's `type:` key is diagram data, never vault schema.
+        assert_eq!(note_type(&vault, "diagrams/pipeline.mmd"), None);
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    // --- write_text_file (M29.22) -------------------------------------------
+
+    #[test]
+    fn write_text_file_writes_mmd_and_dedupes_the_stem() {
+        let vault = testutil::temp_vault("wfm-textfile");
+        let first = write_text_file(&vault, "diagrams/flowchart.mmd", "flowchart TD\n").unwrap();
+        let second = write_text_file(&vault, "diagrams/flowchart.mmd", "graph LR\n").unwrap();
+        assert_eq!(first, "diagrams/flowchart.mmd");
+        assert_eq!(second, "diagrams/flowchart-2.mmd");
+        // Neither clobbered the other, and the bytes are verbatim.
+        assert_eq!(read(&vault, "diagrams/flowchart.mmd"), "flowchart TD\n");
+        assert_eq!(read(&vault, "diagrams/flowchart-2.mmd"), "graph LR\n");
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn write_text_file_rejects_disallowed_extensions_knowledge_and_escapes() {
+        let vault = testutil::temp_vault("wfm-textfile-guard");
+        // A raw writer aimed at .md would bypass the whole note pipeline.
+        assert!(write_text_file(&vault, "notes/evil.md", "# hi\n").is_err());
+        assert!(write_text_file(&vault, "notes/evil.sh", "rm -rf\n").is_err());
+        assert!(write_text_file(&vault, "notes/no-extension", "x\n").is_err());
+        // The bundle is the agent's to write — same guard as every human door.
+        assert!(write_text_file(&vault, "knowledge/concept.mmd", "graph TD\n").is_err());
+        // Containment, same as every other write.
+        assert!(write_text_file(&vault, "../outside.mmd", "graph TD\n").is_err());
+        assert!(write_text_file(&vault, "/tmp/abs.mmd", "graph TD\n").is_err());
         let _ = std::fs::remove_dir_all(&vault);
     }
 

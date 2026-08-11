@@ -27,6 +27,15 @@ export interface InputProps {
   onBlur?: React.FocusEventHandler<HTMLInputElement>;
   /** aria-label for the inner <input> (M2 Task 16 property rows) */
   ariaLabel?: string;
+  /**
+   * The combobox pair, for an input that drives a list it does not contain
+   * (M29.53): which option is currently marked, and where that list lives.
+   * Without them a keyboard user is told nothing about what Enter will take —
+   * measured on the whiteboard's record picker, which had 25 rows and no way
+   * to say which one was next.
+   */
+  ariaActivedescendant?: string;
+  ariaControls?: string;
   /** right-side node, e.g. <kbd>⌘K</kbd> */
   suffix?: React.ReactNode;
   /** "sm" 28 | "md" 32 (default) | "lg" 38 */
@@ -49,6 +58,8 @@ export function Input({
   onKeyDown,
   onBlur,
   ariaLabel,
+  ariaActivedescendant,
+  ariaControls,
   suffix,
   size = 'md',
   disabled,
@@ -73,6 +84,8 @@ export function Input({
       <input
         data-testid={testId}
         aria-label={ariaLabel}
+        aria-activedescendant={ariaActivedescendant}
+        aria-controls={ariaControls}
         placeholder={placeholder}
         value={value}
         onChange={onChange}

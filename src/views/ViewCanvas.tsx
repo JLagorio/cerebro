@@ -11,8 +11,9 @@ import { GanttView } from '@/views/GanttView';
 import { ListView } from '@/views/ListView';
 import { TableView } from '@/views/TableView';
 import { TimelineView } from '@/views/TimelineView';
+import { WhiteboardView, type WhiteboardHost } from '@/views/WhiteboardView';
 import { buildRows, entryRows } from '@/engine/rows';
-import { hasBlocks } from '@/views/viewKinds';
+import { hasBlocks, isCanvas } from '@/views/viewKinds';
 import { useUiStore } from '@/stores/uiStore';
 
 /**
@@ -73,6 +74,12 @@ export interface ViewCanvasProps {
    * keeps owning that; a block renders its rows and stays quiet.
    */
   embedded?: boolean;
+  /**
+   * Where a whiteboard tab creates and finds its canvas file (M29.45). Only
+   * the page-level hosts pass it (M29.48); a dashboard block does not, and
+   * the whiteboard arm renders its "lives on a list" face instead.
+   */
+  whiteboardHost?: WhiteboardHost;
 }
 
 export function ViewCanvas({
@@ -94,6 +101,7 @@ export function ViewCanvas({
   onFilterField,
   today,
   embedded = false,
+  whiteboardHost,
 }: ViewCanvasProps): React.ReactElement {
   // M16.11: the detail panel steps through the records THIS canvas is
   // showing, in the order it shows them. One registration for every kind.
@@ -114,7 +122,13 @@ export function ViewCanvas({
   // A dashboard shows no records of ITS OWN — each block shows a different
   // set — so "the records on screen" has no single answer and the panel gets
   // none rather than a plausible wrong one (M16.28).
-  const composed = hasBlocks(presentation.type);
+  //
+  // A canvas is the same claim for a different reason (M29.46 review): the
+  // rows the page computed are the pool "Add record" OFFERS, not what is
+  // drawn. Registering them made a chip click read "3 of 45" and stepped
+  // next/prev through records that are nowhere on the canvas. What IS drawn
+  // is decided by the .mmd's click lines, which this component cannot see.
+  const composed = hasBlocks(presentation.type) || isCanvas(presentation.type);
   useEffect(() => {
     if (embedded) return;
     setDetailSiblings(key === '' || composed ? [] : key.split('\n'));
@@ -234,6 +248,16 @@ export function ViewCanvas({
           // site passes, so a List-layout tab could not create at all.
           onCreate={onCreate}
           filtered={filtered}
+        />
+      );
+    case 'whiteboard':
+      return (
+        <WhiteboardView
+          entries={entries}
+          presentation={presentation}
+          schema={schema}
+          host={whiteboardHost ?? null}
+          onPresentationChange={onPresentationChange}
         />
       );
   }

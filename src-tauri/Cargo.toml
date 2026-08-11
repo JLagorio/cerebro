@@ -29,3 +29,5 @@ rand = "0.8"
 # stdio connector approval keys (PR #5 security review): the ledger stores
 # SHA-256 digests of the env-bearing fingerprints, never the strings.
 sha2 = "0.10"
+# Decodes PNG bytes sent over the JSON invoke channel for export_png (M29.4).
+base64 = "0.22"
