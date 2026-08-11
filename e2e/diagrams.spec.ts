@@ -69,7 +69,16 @@ test('mermaid renders in docs, and the lightbox zooms', async ({ page }) => {
   await page.getByRole('button', { name: 'Zoom in' }).click();
   await expect
     .poll(async () => Number((await readout.textContent())?.replace('%', '')))
-    .toBe(Math.round(before * 1.1));
+    .toBeGreaterThan(before);
+  // Within one, and the slack is arithmetic rather than timing (M29.54). The
+  // readout is `Math.round(scale * 100)` over a CONTINUOUS fit, so `before`
+  // has already dropped the fraction the real 1.1x multiply keeps: at a fit
+  // of 0.914 the button moves 91.4% -> 100.5%, which prints 101, while
+  // round(91 * 1.1) predicts 100. Neither rounding can be off by more than
+  // half a percent, so two integers derived this way differ by at most one —
+  // this is a bound, not a tolerance for flake.
+  const after = Number((await readout.textContent())?.replace('%', ''));
+  expect(Math.abs(after - Math.round(before * 1.1))).toBeLessThanOrEqual(1);
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('lightbox-canvas')).toHaveCount(0);
 });
