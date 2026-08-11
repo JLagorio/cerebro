@@ -175,15 +175,25 @@ describe('Popover dismissal contract', () => {
     // OPENING the popover arrived after it had mounted and dismissed it
     // instantly. On screen that reads as a button that does nothing, and it
     // got worse the further down a long form you went.
-    const user = userEvent.setup();
     const onClose = vi.fn();
     render(<Harness onClose={onClose} />);
-    await user.click(screen.getByTestId('trigger'));
+    // Synchronous on purpose (M29.54). This case asserts that ZERO frames have
+    // passed, and `await user.click()` cannot promise that: it yields to the
+    // macrotask queue, and jsdom drives requestAnimationFrame off a timer, so
+    // on a loaded machine — coverage instrumentation, 200 files across workers
+    // — a frame fires inside the await, arms the guard, and the scroll below
+    // dismisses a popover the test is about NOT dismissing. fireEvent flushes
+    // the effect that attaches the listener without ever yielding, which makes
+    // "no frame has passed" structural rather than a race the machine usually
+    // wins.
+    fireEvent.click(screen.getByTestId('trigger'));
 
     // Same turn as the click, before any frame has passed.
     document.dispatchEvent(new Event('scroll', { bubbles: false }));
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.queryByRole('menu')).toBeTruthy();
+    // That the listener is attached at all — so this is the guard holding and
+    // not an effect that never ran — is the case directly above.
   });
 });
 
