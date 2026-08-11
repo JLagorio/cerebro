@@ -387,14 +387,18 @@ describe('MermaidBlockView full screen (M29.27)', () => {
     expect(screen.queryByTestId('fullscreen-diagram-editor')).toBeNull();
   });
 
-  it('hides Open full screen while editing and on an empty block', async () => {
+  it('hides Open full screen on an empty block, and KEEPS it while editing', async () => {
     renderMock.mockResolvedValue({ ok: true, svg: '<svg></svg>' });
     render(<MermaidBlockView code="" onChangeCode={() => {}} />);
     expect(screen.queryByRole('button', { name: 'Open full screen' })).toBeNull();
     cleanup();
     render(<MermaidBlockView code={'flowchart TD\n  A --> B'} onChangeCode={() => {}} />);
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(screen.queryByRole('button', { name: 'Open full screen' })).toBeNull();
+    // It used to go away exactly when it was most wanted (M29.53): the button
+    // that says "give me more room" was hidden the moment the user was working
+    // in a 310px-wide block, and the only route was Done, then Open full
+    // screen, then Edit again.
+    expect(screen.getByRole('button', { name: 'Open full screen' })).toBeTruthy();
   });
 
   /**

@@ -138,6 +138,15 @@ export function CodeOverlay({
       // apply. React's synthetic stopPropagation stops the native event too.
       onKeyDown={(e) => {
         if (claimedByHostEditor(e)) e.stopPropagation();
+        // …and Escape closes THIS, not the dialog three layers up (M29.53).
+        // MEASURED: Escape with focus in the source box did nothing at all,
+        // while the same key one pixel away on the canvas destroyed the whole
+        // full-screen editor — so the panel both swallowed the key and offered
+        // nothing of its own. Every other dismissable surface here answers it.
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClose();
+        }
       }}
       onPointerDown={(e) => e.stopPropagation()}
     >

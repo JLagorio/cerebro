@@ -250,7 +250,10 @@ export function MermaidBlockView({
           </button>
         )}
         <span className="flex-1" />
-        {!editing && code.trim() !== '' && (
+        {/* Not gated on `!editing` (M29.53): the button that says "give me
+            more room" has to be there exactly when the user has run out of it,
+            and the block's 310px-wide editor is where that happens. */}
+        {code.trim() !== '' && (
           <button
             type="button"
             onClick={() => setFullScreen(true)}

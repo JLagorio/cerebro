@@ -18,6 +18,7 @@ import {
   useCanvasTransformRef,
 } from '../CanvasViewport';
 import { renderMermaid } from '../render';
+import { claimedByHostEditor } from '../keys';
 import { useThemeEpoch } from '../useThemeEpoch';
 import { neutralizeDiagramLinks } from '../svgLinks';
 import { EdgeEditor } from './EdgeEditor';
@@ -1618,7 +1619,10 @@ export function StructuralEditor({
               onBlur={commitRename}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
-                e.stopPropagation();
+                // Only what the canvas would claim: a blanket stop also killed
+                // the app's ⌘K, because React's synthetic stopPropagation stops
+                // the native event the window listener is waiting for (M29.53).
+                if (claimedByHostEditor(e)) e.stopPropagation();
                 if (e.key === 'Enter') commitRename();
                 if (e.key === 'Escape') setRenaming(null);
               }}

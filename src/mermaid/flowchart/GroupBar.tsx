@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { FlowchartModel } from './model';
 import { canCreateSubgraph, createSubgraph, SUBGRAPH_REFUSAL_TEXT } from './ops';
+import { claimedByHostEditor } from '../keys';
 
 /** The title a group takes when the box is left empty. */
 const DEFAULT_TITLE = 'Group';
@@ -62,8 +63,12 @@ export function GroupBar({
       className="absolute left-1/2 top-2 z-10 flex max-w-[22rem] -translate-x-1/2 flex-col gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
       onClick={(e) => e.stopPropagation()}
       // Backspace on any control in here would otherwise reach the editor's own
-      // onKeyDown and delete the selected node (the M29.33 leak).
-      onKeyDown={(e) => e.stopPropagation()}
+      // key handler and delete the selected node (the M29.33 leak) — but only
+      // the keys the canvas claims, since React's synthetic stopPropagation
+      // also kills the native event the app's ⌘K listens for (M29.53).
+      onKeyDown={(e) => {
+        if (claimedByHostEditor(e)) e.stopPropagation();
+      }}
     >
       <div className="flex items-center gap-1">
         <span className="text-xs text-n-500">{ids.length} selected</span>
@@ -74,7 +79,7 @@ export function GroupBar({
           placeholder={DEFAULT_TITLE}
           onChange={(e) => onChangeTitle(e.target.value)}
           onKeyDown={(e) => {
-            e.stopPropagation();
+            if (claimedByHostEditor(e)) e.stopPropagation();
             if (e.key === 'Enter') group();
           }}
           className="w-28 rounded border border-n-200 bg-n-0 px-1.5 py-0.5 text-xs text-n-800 outline-none"

@@ -245,7 +245,18 @@ export function QuickOpen() {
             setActiveIndex((i) => Math.max(i - 1, 0));
           }
           if (e.key === 'Enter' && results[activeIndex]) results[activeIndex].target.run();
-          if (e.key === 'Escape') close();
+          if (e.key === 'Escape') {
+            // stopPropagation, or this closes TWO layers (M29.53). React
+            // flushes a discrete-event state update synchronously, so this
+            // Dialog unmounts and pops its layer BEFORE the same native
+            // keydown reaches the document-level listeners — by which point
+            // `ownsEscape` answers true for whatever was underneath, and a
+            // full-screen diagram editor closed along with the palette that
+            // was covering it. MEASURED 3/3 runs: scrims 2 -> 0 on one press,
+            // while dismissing with the mouse correctly left one standing.
+            e.stopPropagation();
+            close();
+          }
         }}
         width="100%"
       />

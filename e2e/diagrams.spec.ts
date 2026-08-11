@@ -112,11 +112,19 @@ test('authoring: template, live preview, error banner, commit', async ({ page })
   ).toBeVisible({ timeout: 20_000 });
 
   // -- Insert a fresh mermaid block via the slash menu ------------------
-  // The doc's last CONTENT block is a mermaid fence (contentEditable=false),
-  // but BlockNote's trailing-block plugin keeps an empty paragraph after it —
-  // click that to get a caret at the end of the doc. (Keyboard journeys like
-  // End/⌘End don't move the caret in mac Chromium contenteditable, so a
-  // click is the portable way to place it.)
+  // This comment used to claim BlockNote's trailing-block plugin keeps an empty
+  // paragraph after the doc's last (mermaid) block, so that `.last()` was the
+  // caret at the end of the document. MEASURED, and false: on a fresh load the
+  // plugin has not fired — its `apply` gates on `docChanged` and the mount-time
+  // replaceBlocks is the one transaction it misses — so paragraphCount is 1 and
+  // `.last()` resolves to the INTRO paragraph at block index 1 of 9. This spec
+  // therefore inserts its new block in the MIDDLE of the document, not at the
+  // end (M29.53). Left as it is deliberately: the journey it exercises is
+  // insert-a-block-and-edit-it, which is just as true mid-document, and the
+  // rewrite belongs with whoever owns the trailing-block question. What is
+  // fixed here is the comment, which was documenting a mechanism that does not
+  // exist. (Keyboard journeys like End/⌘End don't move the caret in mac
+  // Chromium contenteditable, so a click is the portable way to place it.)
   await page.locator('.bn-editor [data-content-type="paragraph"]').last().click();
   await page.keyboard.type('/mermaid');
   // 'Mermaid diagram' is the slash item's title in MarkdownEditor.tsx.
