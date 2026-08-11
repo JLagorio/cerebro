@@ -21,8 +21,9 @@
 //! subject to the knowledge/ guard" and treat that as the design — it was the
 //! hole that let a model stamp the user's own review onto its own output.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use rand::Rng;
 use serde_json::{json, Map, Value};
@@ -146,7 +147,55 @@ pub fn run_token_window() -> usize {
 fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunGrant) {
     runs.push((token, grant));
     let excess = runs.len().saturating_sub(RUN_TOKEN_WINDOW);
-    runs.drain(..excess);
+    // A run whose token is gone can never propose again, so its attempt
+    // counters go with it. Bounding the counters by the same window that
+    // bounds the tokens is what stops this map growing for the life of the
+    // process.
+    for (_, dropped) in runs.drain(..excess) {
+        forget_attempts(&dropped.run_id);
+    }
+}
+
+/// What one run has already tried for one piece of work (M26.4g).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Attempt {
+    /// Including the first. `in_session_retry.max_attempts` bounds this.
+    count: u32,
+    /// The typed code the last attempt was refused with.
+    code: String,
+    /// What the last attempt actually said, so an unchanged resubmission is
+    /// distinguishable from an adjusted one.
+    digest: String,
+}
+
+/// `(run_id, work_key)` → what that run has tried.
+///
+/// Process-global rather than per-connection because a run is a bearer token,
+/// not a socket: an agent that reconnects is the same run and must not get a
+/// fresh allowance by doing so.
+fn attempts() -> &'static Mutex<BTreeMap<(String, String), Attempt>> {
+    static ATTEMPTS: OnceLock<Mutex<BTreeMap<(String, String), Attempt>>> = OnceLock::new();
+    ATTEMPTS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn forget_attempts(run_id: &str) {
+    if let Ok(mut map) = attempts().lock() {
+        map.retain(|(run, _), _| run != run_id);
+    }
+}
+
+/// What identifies "the same piece of work" across an adjustment.
+///
+/// The op and its targets, NOT the payload — because a legitimate retry
+/// changes the payload. An agent that refetches a moved version and
+/// resubmits is doing the same work on the same targets, and that is exactly
+/// what the attempt count is counting.
+fn work_key(op_kind: &str, targets: &[crate::ledger::schema::ProposalTarget]) -> String {
+    let mut ids: Vec<&str> = targets.iter().map(|t| t.target_id.as_str()).collect();
+    ids.sort_unstable();
+    crate::ledger::schema::sha256_first128(
+        format!("cerebro-mcp-attempt-v1\0{op_kind}\0{}", ids.join("\0")).as_bytes(),
+    )
 }
 
 /// What a presented bearer resolves to: the endpoint's own token (from
@@ -965,6 +1014,62 @@ fn tool_propose(
         );
     }
 
+    // The in-session retry bound (M26.4g). The policy table says which
+    // refusals may be resubmitted and how many times; this is where the
+    // count lives, because the count is per RUN and the run is the bearer.
+    //
+    // Checked BEFORE submitting: a resubmission the table forbids should not
+    // cost another policy evaluation, and more to the point, an agent that
+    // keeps asking should be told to stop rather than quietly re-refused
+    // until it gives up.
+    let key = (grant.run_id.clone(), work_key(op_kind, &targets));
+    let digest = crate::ledger::schema::sha256_first128(
+        format!(
+            "{}\0{}\0{}\0{}\0{}\0{reason}",
+            serde_json::to_string(&op).unwrap_or_default(),
+            serde_json::to_string(&targets).unwrap_or_default(),
+            serde_json::to_string(&declared_risk).unwrap_or_default(),
+            serde_json::to_string(&intended_use).unwrap_or_default(),
+            serde_json::to_string(&basis).unwrap_or_default(),
+        )
+        .as_bytes(),
+    );
+    if let Some(prior) = attempts().lock().ok().and_then(|m| m.get(&key).cloned()) {
+        if prior.digest == digest {
+            return typed_result(json!({
+                "outcome": "refused",
+                "code": "retry_unchanged",
+                "detail": format!(
+                    "this is byte-for-byte the proposal that was refused with {}. A refusal is                      an answer — read it and change something, or say the window is blocked.",
+                    prior.code
+                ),
+            }));
+        }
+        match table.retry_verdict(&prior.code, prior.count) {
+            crate::policy::table::RetryVerdict::Retry => {}
+            crate::policy::table::RetryVerdict::Exhausted => {
+                return typed_result(json!({
+                    "outcome": "refused",
+                    "code": "retry_exhausted",
+                    "detail": format!(
+                        "{} attempts on this work have been refused with {}. The window is                          blocked; say so rather than trying again.",
+                        prior.count, prior.code
+                    ),
+                }));
+            }
+            crate::policy::table::RetryVerdict::NotRetryable => {
+                return typed_result(json!({
+                    "outcome": "refused",
+                    "code": "retry_not_permitted",
+                    "detail": format!(
+                        "{} is a refusal about what this change IS, not about the state of the                          request. Resubmitting it is not an adjustment.",
+                        prior.code
+                    ),
+                }));
+            }
+        }
+    }
+
     let actor = crate::ledger::schema::Actor {
         id: grant.actor.clone(),
     };
@@ -1028,15 +1133,37 @@ fn tool_propose(
             candidate_search_receipt,
         };
         match crate::policy::commit::submit_proposal(&table, writer, &actor, &proposal) {
-            Ok(id) => Ok(json!({ "outcome": "submitted", "proposal_id": id })),
+            Ok(id) => {
+                // The work landed, so the run's allowance for it is spent
+                // and irrelevant. Clearing rather than keeping means a LATER
+                // piece of work on the same targets starts fresh, which is
+                // right: the count bounds retries of a refusal, not the
+                // number of times a run may touch a belief.
+                if let Ok(mut map) = attempts().lock() {
+                    map.remove(&key);
+                }
+                Ok(json!({ "outcome": "submitted", "proposal_id": id }))
+            }
             // A typed refusal is an ANSWER, not a transport failure: it names
             // the rule and what it expected, which is what the model needs in
             // order to do something different.
-            Err(error) => Ok(json!({
-                "outcome": "refused",
-                "code": error.code,
-                "detail": error.detail,
-            })),
+            Err(error) => {
+                if let Ok(mut map) = attempts().lock() {
+                    let entry = map.entry(key.clone()).or_insert(Attempt {
+                        count: 0,
+                        code: String::new(),
+                        digest: String::new(),
+                    });
+                    entry.count += 1;
+                    entry.code = error.code.to_string();
+                    entry.digest = digest.clone();
+                }
+                Ok(json!({
+                    "outcome": "refused",
+                    "code": error.code,
+                    "detail": error.detail,
+                }))
+            }
         }
     })
     .ok_or_else(|| {
@@ -1715,6 +1842,148 @@ mod tests {
 
     fn grant(actor: &str) -> RunGrant {
         RunGrant::unrestricted(actor)
+    }
+
+    // --- The in-session retry bound (M26.4g) ---------------------------
+    //
+    // The counter is process-global, so these tests use distinct run ids
+    // rather than a shared lock: a run is a bearer token, and two tests are
+    // two runs.
+
+    fn target(id: &str) -> crate::ledger::schema::ProposalTarget {
+        crate::ledger::schema::ProposalTarget {
+            target_id: id.to_string(),
+            target_class: crate::ledger::schema::TargetClass::Belief,
+            expected_version: Some(1),
+        }
+    }
+
+    /// Record one refusal the way `tool_propose` does.
+    fn refuse(run: &str, key: &str, code: &str, digest: &str) {
+        let mut map = attempts().lock().unwrap();
+        let entry = map
+            .entry((run.to_string(), key.to_string()))
+            .or_insert(Attempt {
+                count: 0,
+                code: String::new(),
+                digest: String::new(),
+            });
+        entry.count += 1;
+        entry.code = code.to_string();
+        entry.digest = digest.to_string();
+    }
+
+    fn attempt(run: &str, key: &str) -> Option<Attempt> {
+        attempts()
+            .lock()
+            .unwrap()
+            .get(&(run.into(), key.into()))
+            .cloned()
+    }
+
+    #[test]
+    fn the_work_key_survives_the_adjustment_a_retry_is_supposed_to_make() {
+        // A `stale_target_version` retry refetches and resubmits with a new
+        // expected version. That is the SAME work, and a key that changed
+        // would give every retry a fresh allowance — the bound would count
+        // to one, forever.
+        let a = work_key("update_belief", &[target("b1")]);
+        let mut moved = target("b1");
+        moved.expected_version = Some(7);
+        assert_eq!(a, work_key("update_belief", &[moved]));
+        // Order does not matter; the targets and the op do.
+        assert_eq!(
+            work_key("update_belief", &[target("b1"), target("b2")]),
+            work_key("update_belief", &[target("b2"), target("b1")])
+        );
+        // Different work is different work.
+        assert_ne!(a, work_key("update_belief", &[target("b2")]));
+        assert_ne!(a, work_key("tombstone_belief", &[target("b1")]));
+    }
+
+    #[test]
+    fn the_bound_counts_attempts_and_the_table_says_how_many() {
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        let run = "retry-run-bounded";
+        let key = work_key("update_belief", &[target("b1")]);
+        // Nothing recorded: the first attempt is never gated.
+        assert!(attempt(run, &key).is_none());
+
+        refuse(run, &key, "stale_target_version", "digest-1");
+        assert_eq!(
+            table.retry_verdict("stale_target_version", attempt(run, &key).unwrap().count),
+            crate::policy::table::RetryVerdict::Retry
+        );
+        refuse(run, &key, "stale_target_version", "digest-2");
+        refuse(run, &key, "stale_target_version", "digest-3");
+        assert_eq!(
+            table.retry_verdict("stale_target_version", attempt(run, &key).unwrap().count),
+            crate::policy::table::RetryVerdict::Exhausted,
+            "three attempts is the table's bound"
+        );
+        forget_attempts(run);
+    }
+
+    #[test]
+    fn a_refusal_about_substance_is_not_retryable_at_any_count() {
+        let table = crate::policy::table::PolicyTable::load().unwrap();
+        let run = "retry-run-substance";
+        let key = work_key("create_belief", &[target("b9")]);
+        refuse(run, &key, "self_ancestry", "digest-1");
+        assert_eq!(
+            table.retry_verdict("self_ancestry", attempt(run, &key).unwrap().count),
+            crate::policy::table::RetryVerdict::NotRetryable
+        );
+        forget_attempts(run);
+    }
+
+    #[test]
+    fn an_unchanged_resubmission_is_recognised_by_its_digest() {
+        // The loop the prompt forbids, made structural: the same bytes back
+        // again is not an adjustment, whatever the code allows.
+        let run = "retry-run-unchanged";
+        let key = work_key("update_belief", &[target("b1")]);
+        refuse(run, &key, "stale_target_version", "same-digest");
+        assert_eq!(attempt(run, &key).unwrap().digest, "same-digest");
+        forget_attempts(run);
+    }
+
+    #[test]
+    fn a_runs_attempts_die_with_its_token() {
+        // Otherwise the map grows for the life of the process, and a run
+        // whose token is gone can never propose again anyway.
+        let run = "retry-run-evicted";
+        let key = work_key("update_belief", &[target("b1")]);
+        refuse(run, &key, "stale_target_version", "digest-1");
+        assert!(attempt(run, &key).is_some());
+        forget_attempts(run);
+        assert!(attempt(run, &key).is_none());
+    }
+
+    #[test]
+    fn evicting_a_run_token_forgets_that_runs_attempts_and_no_others() {
+        let mut runs: Vec<(String, RunGrant)> = Vec::new();
+        let evicted = format!("evicted-{}", RUN_TOKEN_WINDOW);
+        let mut first = RunGrant::unrestricted("agent:a");
+        first.run_id = evicted.clone();
+        push_run_token(&mut runs, "token-0".into(), first);
+
+        let key = work_key("update_belief", &[target("b1")]);
+        refuse(&evicted, &key, "stale_target_version", "digest-1");
+        refuse("survivor-run", &key, "stale_target_version", "digest-1");
+
+        // Fill the window so the first grant is dropped.
+        for n in 1..=RUN_TOKEN_WINDOW {
+            let mut grant = RunGrant::unrestricted("agent:a");
+            grant.run_id = format!("later-{n}");
+            push_run_token(&mut runs, format!("token-{n}"), grant);
+        }
+        assert!(attempt(&evicted, &key).is_none(), "evicted with its token");
+        assert!(
+            attempt("survivor-run", &key).is_some(),
+            "and only that run's"
+        );
+        forget_attempts("survivor-run");
     }
 
     fn actor_of(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<String> {
