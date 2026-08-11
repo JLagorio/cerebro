@@ -22,5 +22,7 @@
 
 pub mod independence;
 pub mod prefilter;
+pub mod prompt;
 pub mod resolver;
+pub mod taint;
 pub mod window;
