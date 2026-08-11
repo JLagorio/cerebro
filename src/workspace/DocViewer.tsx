@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { useTheme } from '@/hooks/useTheme';
 import { useRootsStore } from '@/stores/rootsStore';
 import { classifyHref, resolveRelative } from './docLinks';
+import { useGroupId } from './groupContext';
 import { highlight } from './highlighter';
 
 /** The `language-xxx` class react-markdown puts on a fenced block. */
@@ -52,6 +53,7 @@ export function DocViewer({
   content: string;
 }) {
   const openFile = useRootsStore((s) => s.openFile);
+  const groupId = useGroupId();
 
   return (
     // The SCROLLER is the pane; the article is only the measure. With the two
@@ -80,7 +82,8 @@ export function DocViewer({
                     className="text-cortex-600 underline underline-offset-2"
                     onClick={(e) => {
                       e.preventDefault();
-                      openFile(rootId, resolveRelative(path, target));
+                      // Into THIS pane, not whichever one holds focus.
+                      openFile(rootId, resolveRelative(path, target), groupId);
                     }}
                   >
                     {children}

@@ -119,6 +119,40 @@ describe('EditorGroups', () => {
     });
   });
 
+  /**
+   * With a mouse this works by accident — a pane focuses itself on
+   * pointer-down, before the click — so the assertion drives the click ALONE,
+   * the way a keyboard would, where the accident does not save it.
+   */
+  it('a link opens in the pane it was clicked in, not the focused one', async () => {
+    const root = seedRoot({ path: '/repos/alpha', label: 'alpha' });
+    seedFile('/repos/alpha', 'README.md', '# Alpha\n\nSee [the design](./docs/design.md).');
+    seedFile('/repos/alpha', 'docs/design.md', '# Design');
+    useRootsStore.setState({ roots: [root] });
+    useRootsStore.getState().openFile(root.id, 'README.md');
+
+    render(<EditorGroups />);
+    fireEvent.click(await screen.findByTestId('split-editor'));
+    await waitFor(() => expect(screen.getAllByTestId('editor-pane')).toHaveLength(2));
+
+    // The RIGHT pane holds focus after a split; the link is in the left one.
+    const [left, right] = screen.getAllByTestId('editor-pane') as HTMLElement[];
+    expect(right?.getAttribute('data-focused')).toBe('true');
+
+    const link = await waitFor(() => {
+      const found = left?.querySelector('[data-testid="doc-internal-link"]');
+      if (!found) throw new Error('no link yet');
+      return found;
+    });
+    fireEvent.click(link);
+
+    await waitFor(() => {
+      const { layout } = useRootsStore.getState();
+      expect(layout.groups[0]?.active?.path).toBe('docs/design.md');
+      expect(layout.groups[1]?.active?.path).toBe('README.md');
+    });
+  });
+
   it('an empty pane says how to fill it', () => {
     seedRoot({ path: '/repos/alpha', label: 'alpha' });
     render(<EditorGroups />);

@@ -4,6 +4,7 @@ import type { EditorGroup } from '@/engine/editorGroups';
 import { useRootsStore } from '@/stores/rootsStore';
 import { Breadcrumb } from './Breadcrumb';
 import { FileViewer } from './FileViewer';
+import { GroupContext } from './groupContext';
 import { TabBar } from './TabBar';
 import { currentTabDrag, endTabDrag } from './tabDrag';
 
@@ -150,23 +151,28 @@ function Pane({
         endTabDrag();
       }}
     >
-      <TabBar group={group} focused={focused} />
-      {group.active === null ? (
-        <EmptyState
-          icon="file-text"
-          title="Nothing open"
-          description="Pick a file from the tree."
-        />
-      ) : (
-        <>
-          <Breadcrumb tab={group.active} />
-          <FileViewer
-            key={`${group.active.rootId}/${group.active.path}`}
-            rootId={group.active.rootId}
-            path={group.active.path}
+      {/* Everything inside a pane opens into THAT pane. Without this a link
+          followed from the keyboard lands in whichever pane happens to hold
+          focus, which is not the one you were reading. */}
+      <GroupContext.Provider value={group.id}>
+        <TabBar group={group} focused={focused} />
+        {group.active === null ? (
+          <EmptyState
+            icon="file-text"
+            title="Nothing open"
+            description="Pick a file from the tree."
           />
-        </>
-      )}
+        ) : (
+          <>
+            <Breadcrumb tab={group.active} />
+            <FileViewer
+              key={`${group.active.rootId}/${group.active.path}`}
+              rootId={group.active.rootId}
+              path={group.active.path}
+            />
+          </>
+        )}
+      </GroupContext.Provider>
     </section>
   );
 }
