@@ -14,7 +14,7 @@ import { FullScreenDiagramEditor } from './FullScreenDiagramEditor';
 import { HighlightedTextarea } from './HighlightedTextarea';
 import { MermaidDiagram } from './MermaidDiagram';
 import { MermaidLightbox } from './MermaidLightbox';
-import { renderMermaid } from './render';
+import { renderMermaid, summarizeRenderError } from './render';
 import { useLegibleWidth } from './legibleWidth';
 import { useInertDiagramLinks } from './svgLinks';
 import { TEMPLATES } from './templates';
@@ -495,7 +495,7 @@ function LivePreview({ code }: { code: string }) {
           className="mb-1.5 rounded-md bg-danger-50 px-2 py-1 text-xs text-danger-700"
         >
           {error.line !== null ? `Line ${error.line}: ` : ''}
-          {error.message.split('\n')[0]}
+          {summarizeRenderError(error.message, error.line)}
         </div>
       )}
       {svg !== null && (

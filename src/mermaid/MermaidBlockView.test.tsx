@@ -7,7 +7,13 @@ import { useUiStore } from '@/stores/uiStore';
 import { useVaultStore } from '@/stores/vaultStore';
 import { MermaidBlockView } from './MermaidBlockView';
 
-vi.mock('./render', () => ({ renderMermaid: vi.fn() }));
+// Only the RENDERER is mocked: summarizeRenderError is pure string work the
+// error banner's text depends on, and a whole-module factory would hand back
+// undefined for it.
+vi.mock('./render', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./render')>()),
+  renderMermaid: vi.fn(),
+}));
 import { renderMermaid } from './render';
 const renderMock = vi.mocked(renderMermaid);
 

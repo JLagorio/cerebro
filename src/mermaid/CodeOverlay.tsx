@@ -87,8 +87,17 @@ export function CodeOverlay({
   // A pending debounce must not die with the panel — DiagramPage's M29.23
   // discipline extended one level down. Keystrokes younger than 250ms at
   // close/navigation time flow out here; the host's own unmount flush (or
-  // BlockNote's history) takes it from there. Auto-Update OFF keeps its
-  // contract: only Apply commits, closing discards.
+  // BlockNote's history) takes it from there.
+  //
+  // Auto-Update OFF flushes too, since M29.53. It used to be gated on the
+  // switch, on the reading that "only Apply commits" — but that contract is
+  // about when the CANVAS re-lays-out under a half-typed line, not about
+  // whether the user's text survives. MEASURED: with the switch off, typing a
+  // line and pressing the X — labelled "Hide code", not "Discard" — took the
+  // bytes off the panel AND out of memory, with the page's save chip reading
+  // "Saved" throughout and the switch silently back ON when the panel was
+  // reopened. Escape on the surrounding dialog did the same with a dirty dot
+  // visibly on screen. Committing is one undo step away; that was not.
   //
   // useLayoutEffect, NOT useEffect, and the distinction is data loss. React
   // runs passive cleanups PARENT-FIRST (measured: parent-layout, child-layout,
@@ -103,7 +112,7 @@ export function CodeOverlay({
   // when it looks. Pinned by "the flush beats a host's passive-cleanup save".
   useLayoutEffect(() => {
     return () => {
-      if (autoRef.current && draftRef.current !== codeRef.current) {
+      if (draftRef.current !== codeRef.current) {
         changeRef.current(draftRef.current);
       }
     };
@@ -113,7 +122,15 @@ export function CodeOverlay({
     <div
       data-testid="code-overlay"
       data-no-pan
-      className="absolute left-3 top-3 z-20 flex max-h-[calc(100%-24px)] w-[340px] flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
+      // `100% - 62px`, not `100% - 24px` (M29.53): 12px of top inset, then the
+      // 30px zoom cluster CanvasViewport draws at `bottom-3 left-3`, its own
+      // 12px of inset, and 8px of gap. Both live in the same corner column and
+      // this panel is z-20 over the cluster's z-10, so past ~31 source lines at
+      // 1440x900 (20 at 1024x700, 15 at 800x600) the panel simply covered it:
+      // MEASURED, elementFromPoint at all four button centres returned this
+      // textarea, and a real click at Fit's own pixels left the zoom at 100%
+      // and put the caret in the source.
+      className="absolute left-3 top-3 z-20 flex max-h-[calc(100%-62px)] w-[340px] flex-col overflow-hidden rounded-lg border border-n-200 bg-n-0 shadow-[var(--shadow-lg)]"
       // Only the keys the surrounding editor would claim (M29.53). The blanket
       // stop this used to be also killed the app's own window-level shortcuts —
       // MEASURED: ⌘K and ⌘J were dead in this panel on the .mmd canvas, where

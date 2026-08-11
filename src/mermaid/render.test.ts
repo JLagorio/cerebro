@@ -120,3 +120,65 @@ describe('extractErrorLine', () => {
     expect(extractErrorLine('Error: something else entirely')).toBeNull();
   });
 });
+
+/**
+ * The banner's whole text, on the three shapes mermaid actually produces
+ * (M29.53). Every one of these was MEASURED live before it was written down:
+ * the sequence case dropped 720 characters, the gantt case dropped 30 that
+ * would have fitted, and all three rendered the byte-identical useless string.
+ */
+describe('summarizeRenderError', () => {
+  it('keeps the expectation clause when it fits, instead of the line number twice', async () => {
+    const { summarizeRenderError } = await freshModule();
+    const gantt = [
+      'Parse error on line 2:',
+      'gantt\n  @@@ not a gantt',
+      '-----^',
+      "Expecting 'taskData', got 'NL'",
+    ].join('\n');
+    expect(summarizeRenderError(gantt, 2)).toBe("Expecting 'taskData', got 'NL'");
+  });
+
+  it('condenses an expectation clause that runs to hundreds of characters', async () => {
+    const { summarizeRenderError } = await freshModule();
+    const tokens = Array.from({ length: 40 }, (_, i) => `'TOKEN_${i}'`).join(', ');
+    const sequence = [
+      'Parse error on line 2:',
+      'x',
+      '--^',
+      `Expecting ${tokens}, got 'NEWLINE'`,
+    ].join('\n');
+    // 670 characters of grammar is not a banner. The token that broke is.
+    expect(summarizeRenderError(sequence, 2)).toBe('Unexpected NEWLINE');
+  });
+
+  it('drops the caret ruler and the line number the banner already prints', async () => {
+    const { summarizeRenderError } = await freshModule();
+    const lexer = [
+      'Parse error on line 3:',
+      '  pie titl',
+      '---------^',
+      'Parsing failed: Lexer error on line 3, column 3: unexpected character',
+    ].join('\n');
+    expect(summarizeRenderError(lexer, 3)).toBe(
+      'Parsing failed: Lexer error on line 3, column 3: unexpected character',
+    );
+  });
+
+  it('says what an empty or type-less source needs, not what the library says', async () => {
+    const { summarizeRenderError } = await freshModule();
+    // Verbatim from an emptied .mmd: a sentence that trails off into the empty
+    // string it was handed, shown to the user as the page's only red banner.
+    expect(
+      summarizeRenderError(
+        'No diagram type detected matching given configuration for text: ',
+        null,
+      ),
+    ).toBe('No diagram type on the first line — try `flowchart TD`.');
+  });
+
+  it('never returns nothing', async () => {
+    const { summarizeRenderError } = await freshModule();
+    expect(summarizeRenderError('', null)).toBe('The diagram could not be rendered.');
+  });
+});

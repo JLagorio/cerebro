@@ -17,6 +17,57 @@ export function extractErrorLine(message: string): number | null {
   return m === null ? null : Number(m[1]);
 }
 
+/** A caret ruler under the offending column — `------^`, no information of its own. */
+const CARET_RULE = /^-*\^$/;
+/** The banner's readable width, in characters. Past this only the broken token survives. */
+const SUMMARY_MAX = 80;
+
+/**
+ * Mermaid's parse error as one line a person can act on (M29.53).
+ *
+ * The banners used to print `Line N: ` + `message.split('\n')[0]`, and the
+ * first line of every jison parse error mermaid raises is `Parse error on line
+ * N:` — so the banner said the line number twice, ended in a dangling colon,
+ * and carried zero diagnostic bytes. MEASURED across three diagram types with
+ * three different underlying errors: byte-identical output all three times,
+ * while 720, 30 and 195 characters respectively went in the bin, including the
+ * one clause that says what is wrong.
+ *
+ * The useful clause is `Expecting …, got 'X'`. Its expected-token list is
+ * sometimes 670 characters of grammar (the sequence-diagram case), which is
+ * why this is a summary and not just "print more": past a readable width only
+ * the token that actually broke survives.
+ */
+export function summarizeRenderError(message: string, line: number | null): string {
+  const lines = message
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '');
+  if (lines.length === 0) return 'The diagram could not be rendered.';
+  // Not a parse error at all: mermaid could not tell what KIND of diagram this
+  // is. Its own wording quotes the source back — with an empty source that is
+  // a sentence ending in a colon and nothing else.
+  if (/^No diagram type detected/i.test(lines[0])) {
+    return 'No diagram type on the first line — try `flowchart TD`.';
+  }
+  const expecting = lines.find((l) => /^Expecting .*got '.+'$/.test(l));
+  if (expecting !== undefined) {
+    if (expecting.length <= SUMMARY_MAX) return expecting;
+    const got = expecting.match(/got '(.+)'$/)?.[1];
+    return got === undefined ? expecting.slice(0, SUMMARY_MAX) : `Unexpected ${got}`;
+  }
+  // No expectation clause (a lexer error, a layout failure). Jison prints
+  // header / source excerpt / caret / diagnosis, so drop the caret, the line it
+  // points into, and the line number the banner is already printing — then take
+  // the LAST survivor, because the diagnosis is what comes after the caret.
+  const caret = lines.findIndex((l) => CARET_RULE.test(l));
+  const rest = lines.filter((l, i) => {
+    if (caret !== -1 && (i === caret || i === caret - 1)) return false;
+    return !(line !== null && /^parse error on line \d+:?$/i.test(l));
+  });
+  return rest[rest.length - 1] ?? lines[0];
+}
+
 let mermaidPromise: Promise<typeof import('mermaid').default> | null = null;
 
 async function loadMermaid(): Promise<typeof import('mermaid').default> {

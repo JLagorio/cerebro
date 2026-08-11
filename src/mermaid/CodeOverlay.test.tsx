@@ -67,7 +67,7 @@ describe('CodeOverlay', () => {
     expect(onChangeCode).toHaveBeenCalledWith('graph TD\n  A --> E');
   });
 
-  it('keydown never escapes the panel (host shortcuts must not fire while typing)', () => {
+  it('stops the keys the canvas and the editor claim, and only those', () => {
     const onKeyDown = vi.fn();
     render(
       <div onKeyDown={onKeyDown}>
@@ -77,6 +77,10 @@ describe('CodeOverlay', () => {
     fireEvent.keyDown(source(), { key: 'a' });
     fireEvent.keyDown(source(), { key: 'Backspace' });
     expect(onKeyDown).not.toHaveBeenCalled();
+    // ⌘K belongs to the app, and a blanket stop killed it on a canvas where
+    // BlockNote is not even mounted — the guard's own stated reason (M29.53).
+    fireEvent.keyDown(source(), { key: 'k', metaKey: true });
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
   });
 
   it('the close button calls onClose', async () => {
@@ -86,15 +90,19 @@ describe('CodeOverlay', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('Auto-update OFF discards a pending draft on unmount — closing must not commit', async () => {
+  it('Auto-update OFF still flushes on unmount — the switch is not a shredder (M29.53)', async () => {
     const onChangeCode = vi.fn();
     const { unmount } = render(
       <CodeOverlay code="graph TD" onChangeCode={onChangeCode} onClose={() => {}} />,
     );
     await userEvent.click(screen.getByText('Auto-update'));
     fireEvent.change(source(), { target: { value: 'graph TD\n  A --> G' } });
+    // The switch governs when the CANVAS re-lays-out, not whether the typing
+    // survives. MEASURED: pressing the X — labelled "Hide code", not "Discard"
+    // — took the bytes off the panel and out of memory, with the page's save
+    // chip reading "Saved" the whole time.
     unmount();
-    expect(onChangeCode).not.toHaveBeenCalled();
+    expect(onChangeCode).toHaveBeenCalledWith('graph TD\n  A --> G');
   });
 
   it('a dirty draft wins over an external code change — unsent keystrokes survive', () => {

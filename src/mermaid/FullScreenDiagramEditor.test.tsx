@@ -3,7 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { FullScreenDiagramEditor } from './FullScreenDiagramEditor';
 
-vi.mock('./render', () => ({
+// Only the RENDERER is mocked: summarizeRenderError is pure string work this
+// banner's text depends on, and a whole-module factory would hand back
+// undefined for it.
+vi.mock('./render', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./render')>()),
   renderMermaid: vi.fn().mockResolvedValue({ ok: true, svg: '<svg data-fake="f"></svg>' }),
 }));
 vi.mock('./export', () => ({
@@ -150,5 +154,43 @@ describe('FullScreenDiagramEditor read-only face cannot navigate the app away (M
       ).toBe('2'),
     );
     expect(liveTargets(screen.getByTestId('fullscreen-readonly-diagram'))).toEqual([]);
+  });
+
+  it('surfaces a render failure made in VISUAL mode, instead of painting a stale diagram', async () => {
+    renderMock.mockResolvedValue({ ok: true, svg: '<svg data-fake="good"></svg>' });
+    const { rerender } = render(<FullScreenDiagramEditor code={FLOW} onChangeCode={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('structural-host')).toBeTruthy());
+    // A source that still PARSES as a flowchart but fails to render keeps the
+    // visual pane — and StructuralEditor holds its last good svg by design, so
+    // before M29.53 the canvas went on drawing a diagram the file no longer
+    // described, through a direction change and a + Node, with no banner, no
+    // toast and no marker of any kind.
+    renderMock.mockResolvedValue({
+      ok: false,
+      message: "Parse error on line 2:\n  A[Capture --> B[Distill\n--^\nExpecting 'SQE', got 'EOF'",
+      line: 2,
+    });
+    rerender(
+      <FullScreenDiagramEditor
+        code={`${FLOW}\n  A[Capture --> B[Distill`}
+        onChangeCode={() => {}}
+      />,
+    );
+    const banner = await screen.findByTestId('fullscreen-render-error');
+    expect(banner.textContent).toContain('Line 2:');
+    expect(banner.textContent).toContain("Expecting 'SQE', got 'EOF'");
+  });
+
+  it("an empty diagram gets an empty state, not the library's own diagnostic", async () => {
+    renderMock.mockResolvedValue({
+      ok: false,
+      // Verbatim from an emptied .mmd — a sentence quoting back the empty
+      // string it was handed, shown as the page's only red banner.
+      message: 'No diagram type detected matching given configuration for text: ',
+      line: null,
+    });
+    render(<FullScreenDiagramEditor code="" onChangeCode={() => {}} />);
+    expect(await screen.findByTestId('fullscreen-empty-diagram')).toBeTruthy();
+    expect(screen.queryByTestId('fullscreen-render-error')).toBeNull();
   });
 });

@@ -6,7 +6,7 @@ import { DiagramToolbar } from './DiagramToolbar';
 import type { NodePlacer } from './flowchart/StructuralEditor';
 import { StructuralEditor } from './flowchart/StructuralEditor';
 import { parseFlowchart } from './flowchart/model';
-import { renderMermaid } from './render';
+import { renderMermaid, summarizeRenderError } from './render';
 import { useInertDiagramLinks } from './svgLinks';
 import { useThemeEpoch } from './useThemeEpoch';
 
@@ -99,8 +99,15 @@ export function FullScreenDiagramEditor({
     svg: string | null;
     error: { message: string; line: number | null } | null;
   }>({ svg: null, error: null });
+  // Deliberately NOT gated on `mode` (M29.53). It was, and a syntax error made
+  // in VISUAL mode then had nowhere to surface: StructuralEditor holds its last
+  // good svg by design and returns early on a failed render, so the canvas went
+  // on painting a diagram the file no longer described — MEASURED, a file
+  // holding two malformed nodes drew the four-node diagram that preceded it,
+  // and kept drawing it through a direction change and a + Node. The renderer
+  // caches on (theme, code) and the editor beside us has just asked for the
+  // same pair, so this costs a map lookup rather than a second render.
   useEffect(() => {
-    if (mode !== 'code') return;
     let stale = false;
     void renderMermaid(code).then((r) => {
       if (stale) return;
@@ -110,7 +117,7 @@ export function FullScreenDiagramEditor({
     return () => {
       stale = true;
     };
-  }, [code, mode, themeEpoch]);
+  }, [code, themeEpoch]);
   // A rendered diagram must not be able to navigate the app away (M29.38).
   // The read-only face is only mounted in code mode, so the ref is null the
   // rest of the time — StructuralEditor strips its own svg during binding.
@@ -140,7 +147,9 @@ export function FullScreenDiagramEditor({
         onEditVisually={flowchartCapable && mode === 'code' ? () => setMode('visual') : null}
       />
       <div className="relative min-h-0 flex-1">
-        <CanvasViewport initialFit dots={dots}>
+        {/* 340px of panel plus its 12px inset on each side — what Fit must
+            not centre the diagram underneath (M29.53). */}
+        <CanvasViewport initialFit dots={dots} fitInsetLeft={showCode ? 364 : 0}>
           {/*
             `&& flowchartCapable`, matching DiagramPage.tsx:232. Demotion below
             is a PASSIVE effect, so a source that stops parsing as a flowchart
@@ -184,13 +193,21 @@ export function FullScreenDiagramEditor({
           {/* Stage-H forward contract (spec D1): host overlays live in the plane. */}
           {overlay}
         </CanvasViewport>
-        {mode === 'code' && view.error !== null && (
+        {view.error !== null && code.trim() !== '' && (
           <div
             data-testid="fullscreen-render-error"
             className="absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-md bg-danger-50 px-2.5 py-1 text-xs text-danger-700 shadow-sm"
           >
             {view.error.line !== null ? `Line ${view.error.line}: ` : ''}
-            {view.error.message.split('\n')[0]}
+            {summarizeRenderError(view.error.message, view.error.line)}
+          </div>
+        )}
+        {code.trim() === '' && (
+          <div
+            data-testid="fullscreen-empty-diagram"
+            className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-md bg-n-50 px-2.5 py-1 text-xs text-n-500 shadow-sm"
+          >
+            Nothing here yet — the first line names the diagram, e.g. `flowchart TD`.
           </div>
         )}
         {showCode && (

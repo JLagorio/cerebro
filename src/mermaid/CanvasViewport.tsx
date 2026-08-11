@@ -161,9 +161,18 @@ export function CanvasViewport({
   children,
   initialFit = false,
   dots = false,
+  fitInsetLeft = 0,
 }: {
   children: React.ReactNode;
   initialFit?: boolean;
+  /**
+   * Screen pixels along the left edge that a host's own overlay is covering
+   * (M29.53). Fit measured the whole viewport and centred in it, so with the
+   * code panel open a quarter of a wide diagram landed underneath the panel —
+   * MEASURED at 336px of a 1352px diagram, stages 0 through 3 invisible,
+   * immediately after the user asked for it to be fitted.
+   */
+  fitInsetLeft?: number;
   /**
    * Paint the infinite-canvas dot grid (M29.52). On for the whiteboard, which
    * is a place to arrange things; off for a diagram FILE, which is a document
@@ -249,11 +258,17 @@ export function CanvasViewport({
       const dx = (cb.left - pb.left) / prev.scale; // content offset inside the plane (editor padding)
       const dy = (cb.top - pb.top) / prev.scale;
       const PAD = 32;
-      const scale = Math.min(max, clamp(Math.min((vb.width - PAD) / w, (vb.height - PAD) / h)));
+      // The free width is what the host has not covered — and the centring
+      // starts at the inset, not at zero, so "fit" means "fit into what you
+      // can see". Clamped at a quarter of the viewport so a host that reports
+      // an absurd inset cannot squeeze the diagram to nothing.
+      const inset = Math.max(0, Math.min(fitInsetLeft, vb.width / 2));
+      const free = Math.max(vb.width - inset, vb.width / 4);
+      const scale = Math.min(max, clamp(Math.min((free - PAD) / w, (vb.height - PAD) / h)));
       return {
         scale,
         offset: {
-          x: (vb.width - w * scale) / 2 - dx * scale,
+          x: vb.width - free + (free - w * scale) / 2 - dx * scale,
           y: (vb.height - h * scale) / 2 - dy * scale,
         },
       };
@@ -426,8 +441,14 @@ export function CanvasViewport({
                 <button
                   type="button"
                   aria-label="Reset zoom"
-                  className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50"
-                  onClick={() => setT({ scale: 1, offset: { x: 0, y: 0 } })}
+                  className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50 focus-visible:outline-none focus-visible:ring"
+                  // 100% about the CURRENT view centre — what a percentage chip
+                  // means in Figma and in Lucidchart. It used to throw the pan
+                  // away with the zoom: MEASURED, a diagram centred at
+                  // translate(617.7, 187) jumped to translate(0, 0), i.e. into
+                  // the viewport's top-left corner, 680px left and 187px above
+                  // where the user was looking (M29.53).
+                  onClick={() => zoomBy(1 / t.scale)}
                 >
                   {Math.round(t.scale * 100)}%
                 </button>

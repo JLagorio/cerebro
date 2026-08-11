@@ -13,6 +13,7 @@ import { Icon } from '@/components/ui/Icon';
 import type { Entry } from '@/engine/types';
 import { useCanvasOverlayHost, useCanvasScale, useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
+import { useThemeEpoch } from '../useThemeEpoch';
 import { neutralizeDiagramLinks } from '../svgLinks';
 import { EdgeEditor } from './EdgeEditor';
 import { GroupBar } from './GroupBar';
@@ -176,6 +177,16 @@ export function StructuralEditor({
   placerRef?: MutableRefObject<NodePlacer | null>;
 }) {
   const model = useMemo(() => parseFlowchart(code), [code]);
+  /**
+   * A theme flip has to reach the picture, not just the chrome around it
+   * (M29.53). MEASURED on the standalone canvas: at dusk the toolbar, the
+   * canvas and the status bar all went dark and the four nodes stayed light
+   * blue with near-black labels on a near-black ground — for as long as the
+   * source went untouched, because the bind effect below only re-runs on
+   * `code`. The read-only face and every document block already carried this;
+   * the visual editor was the one host that did not.
+   */
+  const themeEpoch = useThemeEpoch();
   const hostRef = useRef<HTMLDivElement | null>(null);
   /** This editor's outermost element — see the window key listener below. */
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -789,7 +800,7 @@ export function StructuralEditor({
     // `manual` and the two gesture starters are the same kind of dependency:
     // the first is derived from `model`, the other two are useCallback'd on
     // stable inputs, so none of them can widen when this effect re-runs.
-  }, [code, model, transformRef, manual, beginConnect, beginMove]);
+  }, [code, model, themeEpoch, transformRef, manual, beginConnect, beginMove]);
 
   // Window-level drag-to-connect: pointerdown on a node (above) starts it,
   // these two finish it. Registered once per model (i.e. per actual diagram

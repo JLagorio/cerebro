@@ -280,4 +280,93 @@ describe('CanvasViewport', () => {
     expect(viewport.scrollLeft).toBe(0);
     expect(viewport.scrollTop).toBe(0);
   });
+
+  /**
+   * Geometry, with rects a browser would have given us (M29.53). jsdom reports
+   * 0x0 for everything, which is why `Fit is a safe no-op when nothing is
+   * measurable` is the only fit case that existed — and why the two defects
+   * below shipped: neither arithmetic path could be reached by a test.
+   */
+  describe('with measurable rects', () => {
+    function measure(): () => void {
+      const original = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        const box =
+          this.getAttribute('data-testid') === 'canvas-viewport' ||
+          this.getAttribute('data-testid') === 'canvas-plane'
+            ? { left: 0, top: 0, width: 1000, height: 600 }
+            : this.tagName.toLowerCase() === 'svg'
+              ? { left: 0, top: 0, width: 200, height: 100 }
+              : { left: 0, top: 0, width: 0, height: 0 };
+        return {
+          ...box,
+          right: box.left + box.width,
+          bottom: box.top + box.height,
+          x: box.left,
+          y: box.top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+      return () => {
+        Element.prototype.getBoundingClientRect = original;
+      };
+    }
+
+    const content = <svg id="cerebro-mermaid-1" />;
+
+    it('Fit centres in the whole viewport when nothing covers it', async () => {
+      const restore = measure();
+      try {
+        render(<CanvasViewport>{content}</CanvasViewport>);
+        await userEvent.click(screen.getByRole('button', { name: 'Fit diagram' }));
+        // 200x100 of content in 1000x600 with a 32px pad clamps at MAX_SCALE 4,
+        // centred: (1000 - 800)/2, (600 - 400)/2.
+        expect(plane().style.transform).toBe('translate(100px, 100px) scale(4)');
+      } finally {
+        restore();
+      }
+    });
+
+    it('Fit stays out from under a host overlay it is told about', async () => {
+      const restore = measure();
+      try {
+        render(<CanvasViewport fitInsetLeft={364}>{content}</CanvasViewport>);
+        await userEvent.click(screen.getByRole('button', { name: 'Fit diagram' }));
+        // MEASURED before this existed: with the code panel open, 336px of a
+        // 1352px-wide diagram — stages 0 through 3 — landed underneath it, in
+        // the same gesture that asked for the diagram to be made visible.
+        // 1000 - 364 = 636 free, so (636 - 32)/200 = 3.02, centred in the free
+        // strip: 364 + (636 - 604)/2.
+        expect(plane().style.transform).toBe('translate(380px, 149px) scale(3.02)');
+      } finally {
+        restore();
+      }
+    });
+
+    it('the percentage chip restores 100% about the view centre, keeping the pan', () => {
+      const restore = measure();
+      try {
+        render(<CanvasViewport>{content}</CanvasViewport>);
+        const vp = screen.getByTestId('canvas-viewport');
+        fireEvent.pointerDown(vp, { button: 0, clientX: 500, clientY: 300 });
+        fireEvent.pointerMove(vp, { clientX: 400, clientY: 250 });
+        fireEvent.pointerUp(vp);
+        expect(plane().style.transform).toBe('translate(-100px, -50px) scale(1)');
+        fireEvent.wheel(vp, { deltaY: -1, clientX: 500, clientY: 300 });
+        // MEASURED before this: the chip wrote {scale: 1, offset: 0,0} and the
+        // diagram jumped into the viewport's top-left corner — 680px left and
+        // 187px above where the user was looking.
+        fireEvent.click(readout());
+        // Floating point: the pan comes back through a multiply and a divide.
+        const [, x, y, scale] = /translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)/.exec(
+          plane().style.transform,
+        ) as unknown as [string, string, string, string];
+        expect(Number(x)).toBeCloseTo(-100, 6);
+        expect(Number(y)).toBeCloseTo(-50, 6);
+        expect(Number(scale)).toBeCloseTo(1, 6);
+      } finally {
+        restore();
+      }
+    });
+  });
 });
