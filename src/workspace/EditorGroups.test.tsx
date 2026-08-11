@@ -83,6 +83,109 @@ describe('EditorGroups', () => {
     });
   });
 
+  /**
+   * jsdom measures every element as a zero-width box at the origin, which
+   * `zoneFor` reads as "the middle" — so a pane under test is given a real
+   * rectangle before any edge can be aimed at.
+   */
+  const withWidth = (el: HTMLElement, left: number, width: number): void => {
+    el.getBoundingClientRect = () =>
+      ({
+        left,
+        width,
+        right: left + width,
+        top: 0,
+        bottom: 0,
+        height: 400,
+        x: left,
+        y: 0,
+      }) as DOMRect;
+  };
+
+  /** A drag event carrying a pointer coordinate jsdom would otherwise drop. */
+  const dragAt = (el: HTMLElement, type: 'dragover' | 'drop', clientX: number): void => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { setData: () => {}, dropEffect: '', effectAllowed: '' },
+    });
+    fireEvent(el, event);
+  };
+
+  it('dropping a tab on a pane EDGE splits, and moves rather than copies', async () => {
+    const rootId = seed('a.md', 'b.md');
+    render(<EditorGroups />);
+    await screen.findByTestId('doc-viewer');
+
+    const pane = screen.getByTestId('editor-pane');
+    withWidth(pane, 0, 400);
+
+    beginTabDrag({ tab: { rootId, path: 'a.md' }, fromGroupId: 'g1' });
+    dragAt(pane, 'dragover', 380);
+    // The preview shows the shape the drop would produce.
+    await waitFor(() =>
+      expect(screen.getByTestId('drop-preview').getAttribute('data-zone')).toBe('right'),
+    );
+    dragAt(pane, 'drop', 380);
+
+    await waitFor(() => {
+      const { layout } = useRootsStore.getState();
+      expect(layout.groups.map((g) => g.tabs.map((t) => t.path))).toEqual([['b.md'], ['a.md']]);
+    });
+  });
+
+  it('dropping on the LEFT edge puts the new pane before the target', async () => {
+    const rootId = seed('a.md', 'b.md');
+    render(<EditorGroups />);
+    await screen.findByTestId('doc-viewer');
+
+    const pane = screen.getByTestId('editor-pane');
+    withWidth(pane, 0, 400);
+
+    beginTabDrag({ tab: { rootId, path: 'a.md' }, fromGroupId: 'g1' });
+    dragAt(pane, 'drop', 10);
+
+    await waitFor(() => {
+      const { layout } = useRootsStore.getState();
+      expect(layout.groups.map((g) => g.tabs.map((t) => t.path))).toEqual([['a.md'], ['b.md']]);
+    });
+  });
+
+  it('dropping in the MIDDLE moves into that pane without splitting', async () => {
+    const rootId = seed('a.md', 'b.md');
+    render(<EditorGroups />);
+    await screen.findByTestId('doc-viewer');
+    fireEvent.click(screen.getAllByTestId('split-editor')[0] as HTMLElement);
+    await waitFor(() => expect(screen.getAllByTestId('editor-pane')).toHaveLength(2));
+
+    const [left, right] = screen.getAllByTestId('editor-pane') as HTMLElement[];
+    withWidth(right as HTMLElement, 400, 400);
+    const leftId = left?.getAttribute('data-group') ?? '';
+
+    beginTabDrag({ tab: { rootId, path: 'a.md' }, fromGroupId: leftId });
+    dragAt(right as HTMLElement, 'drop', 600);
+
+    await waitFor(() => {
+      const { layout } = useRootsStore.getState();
+      expect(layout.groups).toHaveLength(2);
+      expect(layout.groups[1]?.tabs.map((t) => t.path).sort()).toEqual(['a.md', 'b.md']);
+    });
+  });
+
+  it('the drop preview disappears when the drag leaves the pane', async () => {
+    const rootId = seed('a.md', 'b.md');
+    render(<EditorGroups />);
+    await screen.findByTestId('doc-viewer');
+
+    const pane = screen.getByTestId('editor-pane');
+    withWidth(pane, 0, 400);
+    beginTabDrag({ tab: { rootId, path: 'a.md' }, fromGroupId: 'g1' });
+    dragAt(pane, 'dragover', 380);
+    await waitFor(() => expect(screen.getByTestId('drop-preview')).toBeTruthy());
+
+    fireEvent.dragLeave(pane);
+    await waitFor(() => expect(screen.queryByTestId('drop-preview')).toBeNull());
+  });
+
   it('the pane splitter is a keyboard-operable separator', async () => {
     seed('a.md');
     render(<EditorGroups />);

@@ -97,26 +97,3 @@ describe('listDir', () => {
     expect((await mock.listDir(alpha.id, '')).map((e) => e.name)).toEqual(['a.md']);
   });
 });
-
-describe('indexRootMarkdown', () => {
-  it('returns markdown only, READMEs first', async () => {
-    const root = mock.seedRoot({ path: '/repos/alpha', label: 'alpha' });
-    mock.seedFile('/repos/alpha', 'docs/guide.md', '# Guide');
-    mock.seedFile('/repos/alpha', 'README.md', '# Alpha');
-    mock.seedFile('/repos/alpha', 'src/main.rs', 'fn main() {}');
-
-    const docs = await mock.indexRootMarkdown(root.id);
-    expect(docs.map((d) => d.path)).toEqual(['README.md', 'docs/guide.md']);
-  });
-
-  it('derives the title from the first H1 and falls back to the stem', async () => {
-    const root = mock.seedRoot({ path: '/repos/alpha', label: 'alpha' });
-    mock.seedFile('/repos/alpha', 'titled.md', '# Real Title\n\nbody');
-    mock.seedFile('/repos/alpha', 'untitled.md', 'no heading here');
-
-    const docs = await mock.indexRootMarkdown(root.id);
-    const byPath = Object.fromEntries(docs.map((d) => [d.path, d.title]));
-    expect(byPath['titled.md']).toBe('Real Title');
-    expect(byPath['untitled.md']).toBe('untitled');
-  });
-});

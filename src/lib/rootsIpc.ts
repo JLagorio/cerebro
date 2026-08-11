@@ -1,7 +1,7 @@
 // IPC facade for mounted roots (M30). Same shape as ipc.ts: inside Tauri these
 // invoke the Rust commands; in the browser, vitest and Playwright they delegate
 // to the in-memory mock.
-import type { DirEntry, FileText, IndexedDoc, MountRefusal, Root } from '@/engine/roots';
+import type { DirEntry, FileText, MountRefusal, Root } from '@/engine/roots';
 import * as mock from './mockRoots';
 
 function inTauri(): boolean {
@@ -44,10 +44,4 @@ export function readFileText(rootId: string, path: string): Promise<FileText> {
   return inTauri()
     ? invokeTauri('read_file_text', { rootId, path })
     : mock.readFileText(rootId, path);
-}
-
-export function indexRootMarkdown(rootId: string): Promise<IndexedDoc[]> {
-  return inTauri()
-    ? invokeTauri('index_root_markdown', { rootId })
-    : mock.indexRootMarkdown(rootId);
 }

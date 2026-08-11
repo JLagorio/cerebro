@@ -6,7 +6,7 @@
  * traversal the Rust side refuses would make the Playwright suite prove the
  * opposite of the invariant. Every guard in `roots/read.rs` is mirrored below.
  */
-import type { DirEntry, FileText, IndexedDoc, MountRefusal, Root } from '@/engine/roots';
+import type { DirEntry, FileText, MountRefusal, Root } from '@/engine/roots';
 
 export const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -157,41 +157,6 @@ export async function readFileText(rootId: string, path: string): Promise<FileTe
   }
   if (content.includes(NUL)) return { kind: 'binary' };
   return { kind: 'text', content };
-}
-
-/** First H1, mirroring `parse::extract_h1_title`. */
-function firstH1(content: string): string | null {
-  const match = content.match(/^#\s+(.+)$/m);
-  return match === null ? null : match[1].trim();
-}
-
-export async function indexRootMarkdown(rootId: string): Promise<IndexedDoc[]> {
-  const rootPath = rootPathFor(rootId);
-  if (rootPath === null) return [];
-
-  const docs: IndexedDoc[] = [];
-  for (const [rel, content] of filesIn(rootPath)) {
-    const lower = rel.toLowerCase();
-    if (!lower.endsWith('.md') && !lower.endsWith('.markdown')) continue;
-
-    const filename = rel.split('/').pop() ?? rel;
-    docs.push({
-      root: rootId,
-      path: rel,
-      title: firstH1(content) ?? filename.replace(/\.[^.]+$/, ''),
-      snippet: content.replace(/^#.*$/m, '').trim().slice(0, 160),
-      modifiedAt: '2026-08-09T00:00:00Z',
-      depth: rel.split('/').length - 1,
-      isReadme: filename.toLowerCase().startsWith('readme.'),
-    });
-  }
-
-  docs.sort((a, b) => {
-    if (a.isReadme !== b.isReadme) return a.isReadme ? -1 : 1;
-    if (a.depth !== b.depth) return a.depth - b.depth;
-    return a.title.toLowerCase().localeCompare(b.title.toLowerCase());
-  });
-  return docs;
 }
 
 // Exposed so Playwright can seed roots and files, mirroring how mockIpc.ts

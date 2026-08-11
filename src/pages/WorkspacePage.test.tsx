@@ -32,16 +32,6 @@ describe('WorkspacePage', () => {
     expect(viewer.getAttribute('data-path')).toBe('README.md');
   });
 
-  it('switches to the docs tab', async () => {
-    seedRoot({ path: '/repos/alpha', label: 'alpha' });
-    seedFile('/repos/alpha', 'README.md', '# Alpha');
-    render(<WorkspacePage selection={{ kind: 'workspace' }} />);
-
-    fireEvent.click(await screen.findByTestId('workspace-tab-docs'));
-
-    expect(await screen.findByTestId('docs-tab')).toBeTruthy();
-  });
-
   it('opens the mount dialog from the sidebar', async () => {
     render(<WorkspacePage selection={{ kind: 'workspace' }} />);
     fireEvent.click(await screen.findByTestId('mount-root'));

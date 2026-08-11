@@ -98,17 +98,3 @@ describe('unmount', () => {
     });
   });
 });
-
-describe('loadDocs', () => {
-  it('collects the index across every mounted root', async () => {
-    seedRoot({ path: '/repos/alpha', label: 'alpha' });
-    seedRoot({ path: '/repos/beta', label: 'beta' });
-    seedFile('/repos/alpha', 'README.md', '# Alpha');
-    seedFile('/repos/beta', 'README.md', '# Beta');
-    await useRootsStore.getState().loadRoots();
-
-    await useRootsStore.getState().loadDocs();
-
-    expect(useRootsStore.getState().docs).toHaveLength(2);
-  });
-});

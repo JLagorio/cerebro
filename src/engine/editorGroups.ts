@@ -199,6 +199,53 @@ export function splitGroup(layout: Layout, tab?: OpenTab, groupId?: string): Lay
 }
 
 /**
+ * Drop a tab on the LEFT or RIGHT edge of a pane: it moves into a new group on
+ * that side.
+ *
+ * The difference from `splitGroup` is move versus copy, and it follows from
+ * where the gesture starts. Pressing "split" asks for a second view of what you
+ * are reading, so the file stays put as well. Dragging a tab out of a strip and
+ * letting go somewhere else is a request to PUT IT THERE, and leaving a copy
+ * behind would mean every rearrangement quietly duplicated something.
+ */
+export function splitWithTab(
+  layout: Layout,
+  tab: OpenTab,
+  fromGroupId: string,
+  targetGroupId: string,
+  side: 'left' | 'right',
+): Layout {
+  const from = groupById(layout, fromGroupId);
+  if (from === null || groupById(layout, targetGroupId) === null) return layout;
+  const removedIndex = from.tabs.findIndex((t) => sameTab(t, tab));
+  if (removedIndex === -1) return layout;
+
+  // Pulling a lone tab out of its own pane and dropping it beside itself is
+  // that same pane again, one id later.
+  const sourceEmpties = from.tabs.length === 1;
+  if (sourceEmpties && fromGroupId === targetGroupId) return layout;
+  // A source that empties gives its slot back, so the count does not grow and
+  // the cap has nothing to say about it.
+  if (!sourceEmpties && layout.groups.length >= MAX_GROUPS) return layout;
+
+  const groups = layout.groups.map((g) => {
+    if (g.id !== fromGroupId) return g;
+    const tabs = g.tabs.filter((t) => !sameTab(t, tab));
+    const wasActive = g.active !== null && sameTab(g.active, tab);
+    return wasActive
+      ? { ...g, tabs, active: tabs[removedIndex - 1] ?? tabs[0] ?? null }
+      : { ...g, tabs };
+  });
+
+  const at = groups.findIndex((g) => g.id === targetGroupId);
+  const seq = layout.seq + 1;
+  const id = `g${seq}`;
+  groups.splice(side === 'left' ? at : at + 1, 0, { id, tabs: [tab], active: tab });
+
+  return repair({ groups, activeGroupId: id, seq });
+}
+
+/**
  * Focus a group by id. Unknown ids are ignored rather than clearing focus.
  *
  * Focusing the group that ALREADY has focus returns the very same layout, not

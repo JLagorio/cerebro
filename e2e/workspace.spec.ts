@@ -215,34 +215,6 @@ test.describe('workspace', () => {
     await expect(page.getByTestId('tree-row')).toHaveCount(2);
   });
 
-  test('the docs tab bubbles markdown from every mounted root', async ({ page }) => {
-    await boot(page);
-    await seedRepos(page);
-    await openWorkspace(page);
-
-    await page.getByTestId('workspace-tab-docs').click();
-
-    await expect(page.getByTestId('docs-group')).toHaveCount(2);
-    // Markdown only: main.rs is seeded but must not appear.
-    await expect(page.getByTestId('doc-card')).toHaveCount(3);
-    await expect(page.getByTestId('docs-tab')).toContainText('Guide');
-    await expect(page.getByTestId('docs-tab')).not.toContainText('main.rs');
-    // The excerpt is prose, not the markdown it came from.
-    await expect(page.getByTestId('doc-excerpt').first()).not.toContainText('#');
-  });
-
-  test('opening a doc from the docs tab shows it in the viewer', async ({ page }) => {
-    await boot(page);
-    await seedRepos(page);
-    await openWorkspace(page);
-
-    await page.getByTestId('workspace-tab-docs').click();
-    await page.getByTestId('doc-card').first().click();
-    await page.getByTestId('workspace-tab-files').click();
-
-    await expect(page.getByTestId('doc-viewer')).toBeVisible();
-  });
-
   test('the mount dialog opens and closes without mounting anything', async ({ page }) => {
     await boot(page);
     await seedRepos(page);

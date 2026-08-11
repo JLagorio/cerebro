@@ -15,6 +15,7 @@ import {
   moveTab,
   openInGroup,
   splitGroup,
+  splitWithTab,
   type Layout,
   type OpenTab,
 } from './editorGroups';
@@ -201,6 +202,63 @@ describe('moveTab', () => {
   it('ignores a tab the source group does not hold', () => {
     const l = withTabs('a.md');
     expect(moveTab(l, t('zzz.md'), 'g1', 'g1', 0)).toBe(l);
+  });
+});
+
+describe('splitWithTab', () => {
+  it('moves the tab into a new group on the chosen side', () => {
+    const l = splitWithTab(withTabs('a.md', 'b.md'), t('a.md'), 'g1', 'g1', 'right');
+    expect(l.groups.map((g) => g.tabs.map((x) => x.path))).toEqual([['b.md'], ['a.md']]);
+    expect(activeTab(l)).toEqual(t('a.md'));
+    expectInvariants(l);
+  });
+
+  it('inserts on the LEFT when asked, not always at the end', () => {
+    const l = splitWithTab(withTabs('a.md', 'b.md'), t('a.md'), 'g1', 'g1', 'left');
+    expect(l.groups.map((g) => g.tabs.map((x) => x.path))).toEqual([['a.md'], ['b.md']]);
+  });
+
+  /** Move, not copy — the difference from `splitGroup`. */
+  it('leaves no copy behind in the source group', () => {
+    const l = splitWithTab(withTabs('a.md', 'b.md'), t('a.md'), 'g1', 'g1', 'right');
+    expect(allTabs(l).filter((x) => x.path === 'a.md')).toHaveLength(1);
+  });
+
+  it('refuses to pull a lone tab out of its own pane', () => {
+    const l = withTabs('only.md');
+    expect(splitWithTab(l, t('only.md'), 'g1', 'g1', 'right')).toBe(l);
+  });
+
+  it('collapses a source pane the move emptied', () => {
+    const split = splitGroup(withTabs('a.md', 'b.md'));
+    const right = split.activeGroupId;
+    // The right pane holds only b.md; dropping it beside the left pane empties it.
+    const l = splitWithTab(split, t('b.md'), right, 'g1', 'left');
+    expect(l.groups).toHaveLength(2);
+    expect(l.groups[0]?.tabs.map((x) => x.path)).toEqual(['b.md']);
+    expectInvariants(l);
+  });
+
+  it('a move that empties its source is allowed at MAX_GROUPS', () => {
+    let l = withTabs('a.md', 'b.md');
+    while (l.groups.length < MAX_GROUPS) l = splitGroup(l);
+    expect(l.groups).toHaveLength(MAX_GROUPS);
+    const lone = l.groups[MAX_GROUPS - 1] as { id: string; tabs: OpenTab[] };
+    const moved = splitWithTab(l, lone.tabs[0] as OpenTab, lone.id, 'g1', 'left');
+    expect(moved.groups).toHaveLength(MAX_GROUPS);
+    expect(moved).not.toBe(l);
+  });
+
+  it('refuses a move that would grow past MAX_GROUPS', () => {
+    let l = withTabs('a.md', 'b.md');
+    while (l.groups.length < MAX_GROUPS) l = splitGroup(l);
+    // g1 still holds two tabs, so pulling one out does not free a slot.
+    expect(splitWithTab(l, t('a.md'), 'g1', 'g1', 'right')).toBe(l);
+  });
+
+  it('ignores a tab the source group does not hold', () => {
+    const l = withTabs('a.md');
+    expect(splitWithTab(l, t('zzz.md'), 'g1', 'g1', 'right')).toBe(l);
   });
 });
 

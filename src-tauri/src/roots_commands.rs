@@ -1,12 +1,11 @@
 //! Tauri command surface for mounted roots (M30).
 //!
 //! Commands are `(async)` so filesystem and git work runs on the thread pool
-//! rather than stalling the UI thread — listing a large directory or indexing a
-//! repository is not instant.
+//! rather than stalling the UI thread — listing a large directory or reading a
+//! file off a slow disk is not instant.
 
 use tauri::Manager;
 
-use crate::roots::index::IndexedDoc;
 use crate::roots::read::FileText;
 use crate::roots::tree::DirEntry;
 use crate::roots::{MountRefusal, Root};
@@ -60,12 +59,4 @@ pub fn read_file_text(
         &root_path(&app, &root_id)?,
         &path,
     ))
-}
-
-#[tauri::command(async)]
-pub fn index_root_markdown(
-    app: tauri::AppHandle,
-    root_id: String,
-) -> Result<Vec<IndexedDoc>, String> {
-    crate::roots::index::index_root(&root_path(&app, &root_id)?, &root_id)
 }

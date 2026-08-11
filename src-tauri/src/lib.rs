@@ -379,8 +379,7 @@ pub fn run() {
             roots_commands::mount_root,
             roots_commands::unmount_root,
             roots_commands::list_dir,
-            roots_commands::read_file_text,
-            roots_commands::index_root_markdown
+            roots_commands::read_file_text
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

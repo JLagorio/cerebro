@@ -28,9 +28,7 @@ fn rel_path(vault: &Path, path: &Path) -> Result<String, String> {
         .join("/"))
 }
 
-/// `pub(crate)` for the roots markdown index (M30.6), which needs exactly this
-/// conversion and must not grow a second, differently-rounded one.
-pub(crate) fn iso_or_now(t: Option<std::time::SystemTime>) -> String {
+fn iso_or_now(t: Option<std::time::SystemTime>) -> String {
     let t = t.unwrap_or_else(std::time::SystemTime::now);
     chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }

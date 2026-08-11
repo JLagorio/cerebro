@@ -6,7 +6,7 @@ import { Breadcrumb } from './Breadcrumb';
 import { FileViewer } from './FileViewer';
 import { GroupContext } from './groupContext';
 import { TabBar } from './TabBar';
-import { currentTabDrag, endTabDrag } from './tabDrag';
+import { currentTabDrag, endTabDrag, zoneFor, type DropZone } from './tabDrag';
 
 /** A pane narrower than this cannot show a line of code, so drags stop here. */
 const MIN_PANE = 220;
@@ -117,13 +117,15 @@ function Pane({
   onFocus: () => void;
 }) {
   const moveTab = useRootsStore((s) => s.moveTab);
-  const [over, setOver] = useState(false);
+  const splitWithTab = useRootsStore((s) => s.splitWithTab);
+  const [zone, setZone] = useState<DropZone | null>(null);
 
   return (
     <section
       data-testid="editor-pane"
       data-group={group.id}
       data-focused={focused}
+      data-drop-zone={zone ?? undefined}
       aria-label={`Editor pane ${focused ? '(focused)' : ''}`.trim()}
       style={{ flex: `${grow} 1 0px` }}
       // Capture, so clicking anywhere inside — a tab, a link, the code — moves
@@ -131,26 +133,42 @@ function Pane({
       // the eye's would drift apart after the first click.
       onPointerDownCapture={onFocus}
       onFocusCapture={onFocus}
-      className={`flex min-h-0 min-w-0 flex-col border-r border-n-100 last:border-r-0 ${
-        over ? 'bg-cortex-50/40' : ''
-      }`}
+      className="relative flex min-h-0 min-w-0 flex-col border-r border-n-100 last:border-r-0"
       onDragOver={(e) => {
         if (currentTabDrag() === null) return;
         e.preventDefault();
-        setOver(true);
+        setZone(zoneFor(e.clientX, e.currentTarget.getBoundingClientRect()));
       }}
-      onDragLeave={() => setOver(false)}
+      onDragLeave={() => setZone(null)}
       onDrop={(e) => {
         e.preventDefault();
-        setOver(false);
+        const where = zoneFor(e.clientX, e.currentTarget.getBoundingClientRect());
+        setZone(null);
         const drag = currentTabDrag();
         if (drag === null) return;
-        // Dropping on the BODY of a pane means "put it here", with no opinion
-        // about where in the strip — so it lands at the end.
-        moveTab(drag.tab, drag.fromGroupId, group.id, group.tabs.length);
+        if (where === 'center') {
+          // The middle of a pane means "put it in here", with no opinion about
+          // where in the strip — so it lands at the end.
+          moveTab(drag.tab, drag.fromGroupId, group.id, group.tabs.length);
+        } else {
+          splitWithTab(drag.tab, drag.fromGroupId, group.id, where);
+        }
         endTabDrag();
       }}
     >
+      {/* The shape the drop would produce, drawn where it would land: a half
+          for an edge, the whole pane for the middle. A drag that only tints
+          the pane leaves you guessing which of the two things it will do. */}
+      {zone !== null && (
+        <div
+          aria-hidden
+          data-testid="drop-preview"
+          data-zone={zone}
+          className={`pointer-events-none absolute inset-y-0 z-20 border-2 border-cortex-500 bg-cortex-500/15 ${
+            zone === 'left' ? 'left-0 w-1/2' : zone === 'right' ? 'right-0 w-1/2' : 'inset-x-0'
+          }`}
+        />
+      )}
       {/* Everything inside a pane opens into THAT pane. Without this a link
           followed from the keyboard lands in whichever pane happens to hold
           focus, which is not the one you were reading. */}

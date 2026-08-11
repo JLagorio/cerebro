@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import * as groups from '@/engine/editorGroups';
 import type { EditorGroup, Layout, OpenTab } from '@/engine/editorGroups';
-import type { DirEntry, IndexedDoc, MountRefusal, Root } from '@/engine/roots';
+import type { DirEntry, MountRefusal, Root } from '@/engine/roots';
 import * as ipc from '@/lib/rootsIpc';
 
 export type { EditorGroup, Layout, OpenTab };
@@ -18,7 +18,6 @@ interface RootsState {
   children: Record<string, DirEntry[]>;
   /** Editor groups, left to right. See engine/editorGroups.ts. */
   layout: Layout;
-  docs: IndexedDoc[];
 
   loadRoots(): Promise<void>;
   /** Resolves to the refusal to be RENDERED, or null on success. Never throws. */
@@ -45,8 +44,14 @@ interface RootsState {
   focusGroupAt(index: number): void;
   splitEditor(tab?: OpenTab, groupId?: string): void;
   moveTab(tab: OpenTab, fromGroupId: string, toGroupId: string, toIndex: number): void;
+  /** Drop a tab on a pane's edge: it MOVES into a new pane on that side. */
+  splitWithTab(
+    tab: OpenTab,
+    fromGroupId: string,
+    targetGroupId: string,
+    side: 'left' | 'right',
+  ): void;
   cycleTab(delta: number): void;
-  loadDocs(): Promise<void>;
 }
 
 /**
@@ -66,13 +71,12 @@ export const selectActiveTab = (s: RootsState): OpenTab | null => groups.activeT
  */
 export const initialRootsState = (): Pick<
   RootsState,
-  'roots' | 'expanded' | 'children' | 'layout' | 'docs' | 'revealSeq' | 'revealing'
+  'roots' | 'expanded' | 'children' | 'layout' | 'revealSeq' | 'revealing'
 > => ({
   roots: [],
   expanded: {},
   children: {},
   layout: groups.emptyLayout(),
-  docs: [],
   revealSeq: 0,
   revealing: null,
 });
@@ -102,7 +106,6 @@ export const useRootsStore = create<RootsState>((set, get) => ({
     set({
       roots: get().roots.filter((r) => r.id !== rootId),
       layout: groups.dropRoot(get().layout, rootId),
-      docs: get().docs.filter((d) => d.root !== rootId),
     });
   },
 
@@ -170,12 +173,11 @@ export const useRootsStore = create<RootsState>((set, get) => ({
     set({ layout: groups.moveTab(get().layout, tab, fromGroupId, toGroupId, toIndex) });
   },
 
-  cycleTab(delta) {
-    set({ layout: groups.cycleTab(get().layout, delta) });
+  splitWithTab(tab, fromGroupId, targetGroupId, side) {
+    set({ layout: groups.splitWithTab(get().layout, tab, fromGroupId, targetGroupId, side) });
   },
 
-  async loadDocs() {
-    const all = await Promise.all(get().roots.map((r) => ipc.indexRootMarkdown(r.id)));
-    set({ docs: all.flat() });
+  cycleTab(delta) {
+    set({ layout: groups.cycleTab(get().layout, delta) });
   },
 }));

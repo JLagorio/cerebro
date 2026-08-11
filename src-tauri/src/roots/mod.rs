@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub mod index;
 pub mod read;
 pub mod store;
 pub mod tree;

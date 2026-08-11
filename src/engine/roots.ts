@@ -1,10 +1,10 @@
 /**
  * Types and pure helpers for mounted roots (M30).
  *
- * `IndexedDoc` is deliberately NOT an `Entry`. Repository markdown must never
- * reach `vaultStore` — that store drives collections, types and dossiers and is
- * seeded from `scan_vault`. Keeping the index a separate shape is what makes
- * mounting a repo a zero-blast-radius change to the vault surfaces.
+ * Nothing here is an `Entry`. Repository files must never reach `vaultStore` —
+ * that store drives collections, types and dossiers and is seeded from
+ * `scan_vault`. Keeping mounted roots a separate shape is what makes mounting
+ * a repo a zero-blast-radius change to the vault surfaces.
  */
 
 export interface RootCaps {
@@ -31,16 +31,6 @@ export interface DirEntry {
   isDir: boolean;
   size: number;
   ignored: boolean;
-}
-
-export interface IndexedDoc {
-  root: string;
-  path: string;
-  title: string;
-  snippet: string;
-  modifiedAt: string;
-  depth: number;
-  isReadme: boolean;
 }
 
 /** A refusal the caller is expected to READ, not toast away. */
@@ -73,22 +63,4 @@ export function viewerKindFor(path: string): 'doc' | 'code' {
 export function parentPath(path: string): string {
   const cut = path.lastIndexOf('/');
   return cut === -1 ? '' : path.slice(0, cut);
-}
-
-export interface DocGroup {
-  root: string;
-  docs: IndexedDoc[];
-}
-
-/**
- * Group documents by root, in MOUNT order.
- *
- * Alphabetical would reorder the list every time you mount something, which
- * makes the tab's shape unstable for no benefit — the sidebar already shows
- * roots in mount order and the two must agree.
- */
-export function groupDocsByRoot(docs: IndexedDoc[], rootOrder: string[]): DocGroup[] {
-  return rootOrder
-    .map((root) => ({ root, docs: docs.filter((d) => d.root === root) }))
-    .filter((g) => g.docs.length > 0);
 }

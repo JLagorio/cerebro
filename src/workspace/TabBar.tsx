@@ -103,14 +103,18 @@ export function TabBar({ group, focused }: { group: EditorGroup; focused: boolea
       aria-label={`Open files${focused ? ' (focused pane)' : ''}`}
       className="flex flex-none items-stretch border-b border-n-100 bg-n-25"
       onDragOver={(e) => {
-        // The strip's own dead space drops at the end.
+        // The strip's own dead space drops at the end. Stopped here rather
+        // than left to bubble: over a tab strip the answer is "insert into
+        // this strip", never "split the pane below it".
         if (currentTabDrag() === null) return;
         e.preventDefault();
+        e.stopPropagation();
         setSlot(group.tabs.length);
       }}
       onDragLeave={() => setSlot(null)}
       onDrop={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         accept(group.tabs.length);
       }}
     >

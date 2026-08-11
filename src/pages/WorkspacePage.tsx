@@ -4,15 +4,11 @@ import { Icon } from '@/components/ui/Icon';
 import type { Selection } from '@/engine/types';
 import { useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
-import { DocsTab } from '@/workspace/DocsTab';
 import { EditorGroups } from '@/workspace/EditorGroups';
 import { RootMountDialog } from '@/workspace/RootMountDialog';
 import { RootTree } from '@/workspace/RootTree';
 import { useWorkspaceKeys } from '@/workspace/useWorkspaceKeys';
 import '@/workspace/workspace.css';
-
-const TABS = ['files', 'docs'] as const;
-type Tab = (typeof TABS)[number];
 
 /** One switch in the explorer's settings popover. */
 function ToggleRow({
@@ -65,12 +61,11 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
   const setWordWrap = useUiStore((s) => s.setWorkspaceWordWrap);
   const [mounting, setMounting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>('files');
 
   // The shortcuts belong to this surface, so they are bound while it is on
   // screen and released when it is not — a global binding would close a
   // workspace tab from inside the vault editor.
-  useWorkspaceKeys(tab === 'files');
+  useWorkspaceKeys(true);
 
   useEffect(() => {
     void loadRoots();
@@ -159,22 +154,7 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
       </aside>
       {mounting && <RootMountDialog onClose={() => setMounting(false)} />}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex flex-none gap-1 border-b border-n-100 px-4 pt-2">
-          {TABS.map((name) => (
-            <button
-              key={name}
-              type="button"
-              data-testid={`workspace-tab-${name}`}
-              onClick={() => setTab(name)}
-              className={`border-0 border-b-2 bg-transparent px-2 pb-1.5 text-sm capitalize ${
-                tab === name ? 'border-n-800 text-n-900' : 'border-transparent text-n-500'
-              }`}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-        {tab === 'docs' ? <DocsTab /> : <EditorGroups />}
+        <EditorGroups />
       </main>
     </div>
   );

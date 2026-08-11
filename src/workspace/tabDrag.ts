@@ -40,3 +40,24 @@ export const endTabDrag = (): void => {
 export function dropSlot(index: number, pointerX: number, box: DOMRect): number {
   return pointerX > box.left + box.width / 2 ? index + 1 : index;
 }
+
+/** Where in a pane a drop landed. The edges split; the middle just moves. */
+export type DropZone = 'left' | 'center' | 'right';
+
+/**
+ * How much of a pane's width each edge claims.
+ *
+ * A quarter is wide enough to hit without aiming and narrow enough that the
+ * middle still reads as "into this pane" — the same proportion VS Code uses,
+ * for the same reason.
+ */
+export const EDGE_RATIO = 0.25;
+
+export function zoneFor(pointerX: number, box: DOMRect): DropZone {
+  // A pane with no measurable width cannot have edges to aim at.
+  if (box.width <= 0) return 'center';
+  const across = (pointerX - box.left) / box.width;
+  if (across < EDGE_RATIO) return 'left';
+  if (across > 1 - EDGE_RATIO) return 'right';
+  return 'center';
+}
