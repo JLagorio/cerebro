@@ -1,46 +1,14 @@
-import { test, expect, type Page } from '@playwright/test';
-
-declare global {
-  interface Window {
-    __cerebroMockFs: Map<string, string>;
-  }
-}
-
-/** Read a file's full text (frontmatter + body) from the mock filesystem. */
-async function readMockFile(page: Page, path: string): Promise<string> {
-  const text = await page.evaluate((p) => window.__cerebroMockFs.get(p), path);
-  if (text === undefined) throw new Error(`mock fs has no file at ${path}`);
-  return text;
-}
+import { test, expect } from '@playwright/test';
+import { boot, readMockFile } from './boot';
 
 test('smoke: boot demo vault, list, board drag writes disk, rename, quick open', async ({
   page,
 }) => {
   // -- Boot -----------------------------------------------------------
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-
-  // With no persisted vault the first-launch chooser renders "Open demo
-  // vault"; if the mock IPC restored a last vault it boots straight to the
-  // shell. Handle both.
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) {
-    await demoButton.click();
-  }
+  await boot(page);
 
   // -- M12: records live on their type screens, and a type keeps saved
   // views like a List — layout switching goes through the active tab's menu.
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('sidebar-type').filter({ hasText: 'Work item' }).first().click();
   await expect(page.getByTestId('table-view')).toBeVisible();
 

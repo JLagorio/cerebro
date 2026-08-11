@@ -98,7 +98,17 @@ under `src/` stays pure string code or mocks `../render` with a fixture svg
 a component test that flakes under load.
 
 Playwright specs use `getByTestId`/`getByRole` against the mock backend
-(`window.__cerebroMockFs` exposes the fake disk). The background distiller is
-disabled via localStorage in `boot()` — copy an existing spec's boot. For live
-checks, chrome-devtools MCP against `pnpm dev` works; synthetic `blur` events
-don't fire React `onBlur` (call `el.blur()`).
+(`window.__cerebroMockFs` exposes the fake disk). **Import `boot` from
+`e2e/boot.ts`; never write your own.** It disables the background distiller,
+pins the theme, and pins the CLOCK to `VAULT_TODAY` — the day the demo vault
+was written to be read on. That last one is not optional: the corpus has
+absolute dates and the app has relative-time logic, so an unpinned spec has a
+shelf life. One expired in M26 and failed on every tree for days. The
+browser timezone is fixed to UTC in `playwright.config.ts` for the same
+reason. For live checks, chrome-devtools MCP against `pnpm dev` works;
+synthetic `blur` events don't fire React `onBlur` (call `el.blur()`).
+
+**Check the e2e port is FREE before running.** `reuseExistingServer` is on
+outside CI, so a port held by another worktree is silently reused and the
+suite runs against a different branch's app — producing confident, wrong
+failures. `lsof -iTCP:5173 -sTCP:LISTEN` first, then `PORT=<free> pnpm e2e`.

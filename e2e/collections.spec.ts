@@ -1,28 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-
-declare global {
-  interface Window {
-    __cerebroMockFs: Map<string, string>;
-  }
-}
-
-async function boot(page: Page): Promise<void> {
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-}
+import { boot } from './boot';
 
 /** Expand a Collection row in the sidebar tree. */
 async function expand(page: Page, name: string): Promise<void> {

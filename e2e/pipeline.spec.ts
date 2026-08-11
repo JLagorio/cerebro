@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { boot } from './boot';
 
 /**
  * The M8.2/M8.3 pipeline: ingest → distil → augment.
@@ -8,24 +9,6 @@ import { test, expect, type Page } from '@playwright/test';
  * distilled from both and anchored to the project, and a PRD in that project
  * that the concept should surface next to.
  */
-
-async function boot(page: Page): Promise<void> {
-  // The background distiller (M8.6) is off for tests that are not about it:
-  // a reader that fires four seconds in would rescan the vault mid-assertion.
-  await page.addInitScript(() => {
-    window.localStorage.setItem('cerebro.autoLearn', 'false');
-    // Pin the theme (M16.39). These specs assert on rendered UI, and an unset
-    // themeMode resolves 'system' — so a dark display would flip every colour
-    // out from under them. The app has two palettes now; the specs assume one.
-    window.localStorage.setItem('cerebro.themeMode', 'light');
-  });
-  await page.goto('/');
-  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
-  const sidebarTypes = page.getByTestId('sidebar-type');
-  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
-  if (await demoButton.isVisible()) await demoButton.click();
-  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
-}
 
 const TRANSCRIPT = 'inbox/phoenix-cutover-standup.md';
 const CONCEPT = 'knowledge/systems/pick-queue-drain.md';

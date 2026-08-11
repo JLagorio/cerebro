@@ -1,3 +1,4 @@
+import { addDays } from './dates';
 import type { Entry } from './types';
 import { resolveTarget } from './wikilink';
 
@@ -571,10 +572,16 @@ export function listConcepts(entries: Entry[], today: string): Concept[] {
  */
 export function recentlyLearned(
   concepts: Concept[],
-  now: Date,
+  today: string,
   { days = 14, limit = 3 }: { days?: number; limit?: number } = {},
 ): Concept[] {
-  const cutoff = now.getTime() - days * 86_400_000;
+  // Takes the SAME `today` string `listConcepts` does (M26.3e). It used to
+  // take a `Date` and its one caller passed a second, raw `new Date()`, so a
+  // render that straddled local midnight could stage concepts against one day
+  // and window them against another. Comparing calendar dates as strings also
+  // means the fortnight does not slide by the hour, and there is no timezone
+  // in the arithmetic to get wrong.
+  const cutoff = addDays(today, -days);
   return concepts
     .filter((c) => {
       if (c.trust === 'human-reviewed') return false;
@@ -584,8 +591,8 @@ export function recentlyLearned(
       if (c.supersededBy !== null) return false;
       const at = c.generated?.at ?? null;
       if (at === null) return false;
-      const stamped = Date.parse(at);
-      return !Number.isNaN(stamped) && stamped >= cutoff;
+      const stamped = at.slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(stamped) && stamped >= cutoff;
     })
     .sort((a, b) => (b.generated?.at ?? '').localeCompare(a.generated?.at ?? ''))
     .slice(0, limit);

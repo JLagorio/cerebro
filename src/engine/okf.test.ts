@@ -21,6 +21,7 @@ import {
   parseLog,
   parseSources,
   parseVerified,
+  recentlyLearned,
   relatedConcepts,
   resolveBundleLink,
   reviewReasons,
@@ -226,6 +227,100 @@ describe('review queue', () => {
       makeEntry({ path: 'records/r.md', filename: 'r.md' }),
     ];
     expect(listConcepts(entries, TODAY).map((c) => c.id)).toEqual(['knowledge/a', 'knowledge/b']);
+  });
+});
+
+describe('recentlyLearned', () => {
+  // The window is a CALENDAR window, not a rolling 14×86400s (M26.3e). It
+  // takes the same `today` string listConcepts does, so a caller cannot hold
+  // two disagreeing opinions about what day it is, and a test can pin it.
+  const learned = (at: string, path: string, extra: Record<string, unknown> = {}) =>
+    concept({ generated: { by: 'claude-code', at }, ...extra }, path);
+
+  const paths = (entries: ReturnType<typeof concept>[], today = TODAY, opts = {}) =>
+    recentlyLearned(listConcepts(entries, today), today, opts).map((c) => c.entry.path);
+
+  it('offers what was written inside the window and nothing older', () => {
+    const entries = [
+      learned('2026-07-27T09:00:00Z', 'knowledge/yesterday.md'),
+      learned('2026-06-01T09:00:00Z', 'knowledge/last-month.md'),
+    ];
+    expect(paths(entries)).toEqual(['knowledge/yesterday.md']);
+  });
+
+  it('counts the boundary day in and the day before it out', () => {
+    // 14 days back from 2026-07-28 is 2026-07-14. That day is IN — an
+    // exclusive edge would make the window silently 13 days long.
+    const entries = [
+      learned('2026-07-14T23:59:00Z', 'knowledge/edge-in.md'),
+      learned('2026-07-13T23:59:00Z', 'knowledge/edge-out.md'),
+    ];
+    expect(paths(entries)).toEqual(['knowledge/edge-in.md']);
+  });
+
+  it('does not slide with the hour of day', () => {
+    // The old implementation subtracted 14×86400s from the instant of the
+    // call, so a concept stamped early on the boundary day was in at 09:00
+    // and out by lunchtime. Same day in, same answer.
+    const entries = [learned('2026-07-14T00:01:00Z', 'knowledge/early.md')];
+    expect(paths(entries)).toEqual(['knowledge/early.md']);
+  });
+
+  it('never volunteers something a human already confirmed', () => {
+    const entries = [
+      learned('2026-07-27T09:00:00Z', 'knowledge/unverified.md'),
+      learned('2026-07-27T09:00:00Z', 'knowledge/reviewed.md', {
+        verified: [{ by: 'human:josef', at: '2026-07-27T10:00:00Z' }],
+      }),
+    ];
+    expect(paths(entries)).toEqual(['knowledge/unverified.md']);
+  });
+
+  it('never volunteers a claim something newer has replaced (M8.7)', () => {
+    // Supersession is declared by the REPLACEMENT and arrives bracket-stripped
+    // in `relationships`, so the retired concept still looks recent and
+    // unverified on its own frontmatter. That is exactly why it has to be
+    // filtered here rather than upstream.
+    const entries = [
+      learned('2026-07-20T09:00:00Z', 'knowledge/old.md'),
+      makeEntry({
+        path: 'knowledge/new.md',
+        filename: 'new.md',
+        type: 'Metric',
+        properties: { generated: { by: 'claude-code', at: '2026-07-27T09:00:00Z' } },
+        relationships: { supersedes: ['old'] },
+      }),
+    ];
+    expect(paths(entries)).toEqual(['knowledge/new.md']);
+  });
+
+  it('skips a concept with no generated stamp rather than guessing one', () => {
+    expect(paths([concept({}, 'knowledge/unstamped.md')])).toEqual([]);
+  });
+
+  it('skips an unparseable stamp instead of comparing it as a string', () => {
+    // 'last tuesday' sorts above any ISO date, so an unguarded string compare
+    // would put junk at the top of the one surface Home volunteers.
+    expect(paths([learned('last tuesday', 'knowledge/junk.md')])).toEqual([]);
+  });
+
+  it('shows the newest first and never more than three', () => {
+    const entries = ['22', '25', '20', '27', '24'].map((d) =>
+      learned(`2026-07-${d}T09:00:00Z`, `knowledge/d${d}.md`),
+    );
+    expect(paths(entries)).toEqual(['knowledge/d27.md', 'knowledge/d25.md', 'knowledge/d24.md']);
+  });
+
+  it('lets the caller widen the window and the slot count', () => {
+    const entries = [
+      learned('2026-07-27T09:00:00Z', 'knowledge/a.md'),
+      learned('2026-06-01T09:00:00Z', 'knowledge/b.md'),
+    ];
+    expect(paths(entries, TODAY, { days: 90, limit: 1 })).toEqual(['knowledge/a.md']);
+    expect(paths(entries, TODAY, { days: 90, limit: 5 })).toEqual([
+      'knowledge/a.md',
+      'knowledge/b.md',
+    ]);
   });
 });
 
