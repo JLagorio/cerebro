@@ -21,6 +21,7 @@
 //! exactly what a closed matrix exists to make impossible.
 
 pub mod independence;
+pub mod outcome;
 pub mod prefilter;
 pub mod prompt;
 pub mod resolver;

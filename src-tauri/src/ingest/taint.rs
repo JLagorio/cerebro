@@ -61,6 +61,20 @@ impl Signal {
         }
     }
 
+    /// The inverse of [`Signal::as_str`]. `None` for a name this build does
+    /// not know — a row written by a LATER classifier version, which is a
+    /// thing a downgrade can produce and must not panic on.
+    pub fn parse(raw: &str) -> Option<Signal> {
+        Some(match raw {
+            "assistant_addressed" => Signal::AssistantAddressed,
+            "delimiter_mimicry" => Signal::DelimiterMimicry,
+            "instruction_override" => Signal::InstructionOverride,
+            "secret_or_exfiltration" => Signal::SecretOrExfiltration,
+            "tool_invocation" => Signal::ToolInvocation,
+            _ => return None,
+        })
+    }
+
     pub const ALL: [Signal; 5] = [
         Signal::AssistantAddressed,
         Signal::DelimiterMimicry,
@@ -230,6 +244,16 @@ pub fn assess(text: &str) -> Assessment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_signal_round_trips_through_its_name() {
+        for signal in Signal::ALL {
+            assert_eq!(Signal::parse(signal.as_str()), Some(signal));
+        }
+        // A name from a later classifier is unknown, not a panic: a downgrade
+        // has to be able to read rows it did not write.
+        assert_eq!(Signal::parse("something_v2_invented"), None);
+    }
 
     #[test]
     fn ordinary_vault_prose_trips_nothing() {

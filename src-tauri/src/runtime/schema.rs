@@ -528,3 +528,37 @@ pub const LANES: [(&str, i64, bool); 7] = [
 
 /// The version string stamped on every lane M25 introduces.
 pub const LANE_INTRODUCED: &str = "M25";
+
+/// The M26.4 step — where a source-taint assessment lives.
+///
+/// **Operational, and that placement is the argument.** §92's heuristic is a
+/// guess this build makes about bytes; the ledger holds what the base
+/// believes. A classifier that wrote into the vault would make epistemic
+/// history a function of which version of a pattern list happened to be
+/// running, and re-running a newer classifier would rewrite the past. So the
+/// row lives here, keyed to the Observation event id it was assessed against,
+/// and M22's closed Observation body is never touched.
+///
+/// `classifier_version` is part of the key rather than a column that gets
+/// overwritten: "v1 saw nothing" and "v2 was never run" are different facts,
+/// and a heuristic whose history is overwritten on every upgrade cannot be
+/// audited at all.
+///
+/// `signals` is a sorted, comma-joined list of the closed vocabulary in
+/// `ingest::taint`. It is empty exactly when the assessment is clean — the
+/// `suspected` bit is DERIVED on read rather than stored, so a row can never
+/// claim suspicion while naming no reason.
+pub const SCHEMA_V4: &str = "
+    CREATE TABLE source_taint_assessments (
+        vault_id TEXT NOT NULL REFERENCES vault_registry (vault_id),
+        store_uuid TEXT NOT NULL,
+        observation_event_id TEXT NOT NULL,
+        classifier_version TEXT NOT NULL,
+        signals TEXT NOT NULL,
+        assessed_at TEXT NOT NULL CHECK (assessed_at LIKE '____-__-__T%Z'),
+        PRIMARY KEY (vault_id, store_uuid, observation_event_id, classifier_version)
+    );
+    CREATE INDEX source_taint_suspected
+        ON source_taint_assessments (vault_id, store_uuid)
+        WHERE signals <> '';
+";
