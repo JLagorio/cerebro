@@ -144,7 +144,13 @@ export function MermaidDiagram({
           type="button"
           aria-label="Expand diagram"
           onClick={() => onExpand(svg)}
-          className="absolute right-1.5 top-1.5 hidden rounded-md border border-n-200 bg-n-0 p-1 group-hover:block hover:bg-n-50"
+          // Faded rather than `hidden` (M29.53): `display: none` takes an
+          // element out of the tab order, so the viewer was mouse-only —
+          // MEASURED, twelve consecutive Tab presses cycled Open full
+          // screen / Save as file… / Edit on every block and never once
+          // reached this. Opacity keeps it focusable; pointer-events keeps an
+          // invisible button from eating clicks in that corner.
+          className="absolute right-1.5 top-1.5 rounded-md border border-n-200 bg-n-0 p-1 opacity-0 transition-opacity pointer-events-none hover:bg-n-50 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
         >
           <Icon name="maximize-2" size={13} color="var(--n-500)" />
         </button>
