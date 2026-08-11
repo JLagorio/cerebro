@@ -1,17 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetMockRoots, seedFile, seedKnowledgeDir, seedRoot } from '@/lib/mockRoots';
-import { useRootsStore } from './rootsStore';
+import { initialRootsState, selectActiveTab, useRootsStore } from './rootsStore';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({
-    roots: [],
-    expanded: {},
-    children: {},
-    open: null,
-    tabs: [],
-    docs: [],
-  });
+  useRootsStore.setState(initialRootsState());
 });
 
 describe('loadRoots', () => {
@@ -87,7 +80,7 @@ describe('unmount', () => {
 
     await useRootsStore.getState().unmount(root.id);
 
-    expect(useRootsStore.getState().open).toBeNull();
+    expect(selectActiveTab(useRootsStore.getState())).toBeNull();
     expect(useRootsStore.getState().roots).toHaveLength(0);
   });
 
@@ -99,7 +92,10 @@ describe('unmount', () => {
 
     await useRootsStore.getState().unmount(beta.id);
 
-    expect(useRootsStore.getState().open).toEqual({ rootId: alpha.id, path: 'README.md' });
+    expect(selectActiveTab(useRootsStore.getState())).toEqual({
+      rootId: alpha.id,
+      path: 'README.md',
+    });
   });
 });
 

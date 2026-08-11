@@ -47,7 +47,7 @@ function RailButton({
       aria-label={count !== undefined && count > 0 ? `${label} (${count})` : label}
       aria-current={!toggle && active ? 'page' : undefined}
       aria-pressed={toggle ? active : undefined}
-      className={`relative flex w-11 flex-col items-center gap-[3px] rounded-lg border-0 bg-transparent pb-[5px] pt-1.5 text-2xs font-medium ${tone}`}
+      className={`relative flex w-16 flex-col items-center gap-[3px] rounded-lg border-0 bg-transparent pb-[5px] pt-1.5 text-2xs font-medium ${tone}`}
     >
       {/* A 1.13:1 tint was the entire active affordance. The bar is the part
           that survives a glance, a low-contrast display, and colour blindness. */}
@@ -66,7 +66,12 @@ function RailButton({
           {count > 99 ? '99+' : count}
         </span>
       )}
-      {label}
+      {/* The rail is sized to its LONGEST label ("Workspace", 59px at 11px)
+          rather than to its icons. Before this it was 56px wide and both
+          nine-character labels overflowed their button with `overflow:
+          visible`, bleeding across the rail's border into the panel beside it.
+          Truncation is the backstop for whatever longer label arrives next. */}
+      <span className="w-full truncate leading-tight">{label}</span>
     </button>
   );
 }
@@ -103,7 +108,7 @@ export function Rail() {
       data-testid="rail"
       // --n-200 like every other structural divider in the shell; at --n-100
       // the rail read as floating inside the sidebar rather than as its peer.
-      className="flex w-14 flex-none flex-col items-center gap-1 border-r border-n-200 bg-n-0 py-3"
+      className="flex w-18 flex-none flex-col items-center gap-1 border-r border-n-200 bg-n-0 py-3"
     >
       <div className="mb-3 flex h-8 w-8 select-none items-center justify-center rounded-lg bg-cortex-500 text-lg font-bold tracking-[-0.02em] text-n-0">
         c.

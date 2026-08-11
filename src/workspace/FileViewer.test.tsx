@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { MAX_BYTES, resetMockRoots, seedFile, seedRoot } from '@/lib/mockRoots';
-import { useRootsStore } from '@/stores/rootsStore';
+import { initialRootsState, useRootsStore } from '@/stores/rootsStore';
 import { FileViewer } from './FileViewer';
 
 /** A NUL written as an escape — never a raw byte in a source file. */
@@ -9,14 +9,7 @@ const NUL = '\u0000';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({
-    roots: [],
-    expanded: {},
-    children: {},
-    open: null,
-    tabs: [],
-    docs: [],
-  });
+  useRootsStore.setState(initialRootsState());
 });
 
 describe('FileViewer', () => {

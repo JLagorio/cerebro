@@ -152,6 +152,19 @@ interface UiState {
   /** Show gitignored entries in the workspace tree (M30); persisted. */
   workspaceShowIgnored: boolean;
   setWorkspaceShowIgnored(v: boolean): void;
+
+  /** Line numbers in the code viewer (M30.24); persisted. On, as in an editor. */
+  workspaceLineNumbers: boolean;
+  setWorkspaceLineNumbers(v: boolean): void;
+
+  /**
+   * Wrap long source lines instead of scrolling them (M30.24); persisted.
+   *
+   * Off by default: wrapping reflows code whose indentation carries meaning,
+   * so an editor makes you ask for it.
+   */
+  workspaceWordWrap: boolean;
+  setWorkspaceWordWrap(v: boolean): void;
   /**
    * The open sidebar-tree context menu (M10), keyed by node id.
    *
@@ -312,6 +325,8 @@ const TASK_ASSIGNEE_KEY = 'cerebro.homeTaskAssignee';
 const TYPES_OPEN_KEY = 'cerebro.typesOpen';
 const FILE_ICONS_KEY = 'cerebro.workspaceFileIcons';
 const SHOW_IGNORED_KEY = 'cerebro.workspaceShowIgnored';
+const LINE_NUMBERS_KEY = 'cerebro.workspaceLineNumbers';
+const WORD_WRAP_KEY = 'cerebro.workspaceWordWrap';
 const INBOX_ENABLED_KEY = 'cerebro.inboxEnabled';
 const INBOX_ADVANCE_KEY = 'cerebro.inboxAutoAdvance';
 const INBOX_PERIOD_KEY = 'cerebro.inboxPeriod';
@@ -695,6 +710,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   setWorkspaceShowIgnored: (v) => {
     storeString(SHOW_IGNORED_KEY, String(v));
     set({ workspaceShowIgnored: v });
+  },
+
+  workspaceLineNumbers: loadString(LINE_NUMBERS_KEY, 'true') === 'true',
+  setWorkspaceLineNumbers: (v) => {
+    storeString(LINE_NUMBERS_KEY, String(v));
+    set({ workspaceLineNumbers: v });
+  },
+
+  workspaceWordWrap: loadString(WORD_WRAP_KEY, 'false') === 'true',
+  setWorkspaceWordWrap: (v) => {
+    storeString(WORD_WRAP_KEY, String(v));
+    set({ workspaceWordWrap: v });
   },
 
   inboxEnabled: loadString(INBOX_ENABLED_KEY, 'true') === 'true',

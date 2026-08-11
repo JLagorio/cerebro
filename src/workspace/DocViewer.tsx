@@ -54,83 +54,88 @@ export function DocViewer({
   const openFile = useRootsStore((s) => s.openFile);
 
   return (
-    <article
-      data-testid="doc-viewer"
-      data-path={path}
-      className="doc-prose mx-auto min-h-0 w-full max-w-[72ch] flex-1 overflow-y-auto px-8 py-8 text-[15px] leading-7"
-    >
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a({ href, children, ...rest }) {
-            const target = href ?? '';
-            const kind = classifyHref(target);
-            // A relative link is a place in the repo. Following it in-app is
-            // what turns a pile of markdown into browsable documentation.
-            if (kind === 'internal') {
+    // The SCROLLER is the pane; the article is only the measure. With the two
+    // collapsed into one element the scrollbar rode the 72ch column and
+    // floated in the middle of a wide pane instead of sitting on its edge.
+    <div data-testid="doc-scroll" className="min-h-0 flex-1 overflow-y-auto">
+      <article
+        data-testid="doc-viewer"
+        data-path={path}
+        className="doc-prose mx-auto w-full max-w-[72ch] px-8 py-8 text-[15px] leading-7"
+      >
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a({ href, children, ...rest }) {
+              const target = href ?? '';
+              const kind = classifyHref(target);
+              // A relative link is a place in the repo. Following it in-app is
+              // what turns a pile of markdown into browsable documentation.
+              if (kind === 'internal') {
+                return (
+                  <a
+                    {...rest}
+                    href={target}
+                    data-testid="doc-internal-link"
+                    className="text-cortex-600 underline underline-offset-2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      openFile(rootId, resolveRelative(path, target));
+                    }}
+                  >
+                    {children}
+                  </a>
+                );
+              }
               return (
                 <a
                   {...rest}
                   href={target}
-                  data-testid="doc-internal-link"
                   className="text-cortex-600 underline underline-offset-2"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    openFile(rootId, resolveRelative(path, target));
-                  }}
+                  target={kind === 'external' ? '_blank' : undefined}
+                  rel={kind === 'external' ? 'noreferrer' : undefined}
                 >
                   {children}
                 </a>
               );
-            }
-            return (
-              <a
-                {...rest}
-                href={target}
-                className="text-cortex-600 underline underline-offset-2"
-                target={kind === 'external' ? '_blank' : undefined}
-                rel={kind === 'external' ? 'noreferrer' : undefined}
-              >
-                {children}
-              </a>
-            );
-          },
-          img({ src, alt, ...rest }) {
-            const source = typeof src === 'string' ? src : '';
-            if (classifyHref(source) !== 'internal') {
-              return <img {...rest} src={source} alt={alt ?? ''} className="max-w-full" />;
-            }
-            // Relative images resolve against the file. The resolved path is
-            // recorded so the asset pipeline (and its containment guard) has
-            // one place to read it from.
-            return (
-              <img
-                {...rest}
-                data-testid="doc-image"
-                data-resolved={resolveRelative(path, source)}
-                src={source}
-                alt={alt ?? ''}
-                className="max-w-full"
-              />
-            );
-          },
-          code({ className, children, ...rest }) {
-            const match = FENCE_LANG.exec(className ?? '');
-            const text = String(children).replace(/\n$/, '');
-            // Inline code carries no language class and stays inline.
-            if (match === null && !text.includes('\n')) {
+            },
+            img({ src, alt, ...rest }) {
+              const source = typeof src === 'string' ? src : '';
+              if (classifyHref(source) !== 'internal') {
+                return <img {...rest} src={source} alt={alt ?? ''} className="max-w-full" />;
+              }
+              // Relative images resolve against the file. The resolved path is
+              // recorded so the asset pipeline (and its containment guard) has
+              // one place to read it from.
               return (
-                <code className="rounded-sm bg-n-50 px-1 py-px text-[0.9em]" {...rest}>
-                  {children}
-                </code>
+                <img
+                  {...rest}
+                  data-testid="doc-image"
+                  data-resolved={resolveRelative(path, source)}
+                  src={source}
+                  alt={alt ?? ''}
+                  className="max-w-full"
+                />
               );
-            }
-            return <Fence lang={match?.[1] ?? null} code={text} />;
-          },
-        }}
-      >
-        {content}
-      </Markdown>
-    </article>
+            },
+            code({ className, children, ...rest }) {
+              const match = FENCE_LANG.exec(className ?? '');
+              const text = String(children).replace(/\n$/, '');
+              // Inline code carries no language class and stays inline.
+              if (match === null && !text.includes('\n')) {
+                return (
+                  <code className="rounded-sm bg-n-50 px-1 py-px text-[0.9em]" {...rest}>
+                    {children}
+                  </code>
+                );
+              }
+              return <Fence lang={match?.[1] ?? null} code={text} />;
+            },
+          }}
+        >
+          {content}
+        </Markdown>
+      </article>
+    </div>
   );
 }

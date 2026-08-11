@@ -1,19 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetMockRoots, seedFile, seedRoot } from '@/lib/mockRoots';
-import { useRootsStore } from '@/stores/rootsStore';
+import { initialRootsState, selectActiveTab, useRootsStore } from '@/stores/rootsStore';
 import { DocsTab } from './DocsTab';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({
-    roots: [],
-    expanded: {},
-    children: {},
-    open: null,
-    tabs: [],
-    docs: [],
-  });
+  useRootsStore.setState(initialRootsState());
 });
 
 describe('DocsTab', () => {
@@ -51,7 +44,10 @@ describe('DocsTab', () => {
     render(<DocsTab />);
     fireEvent.click(await screen.findByTestId('doc-card'));
 
-    expect(useRootsStore.getState().open).toEqual({ rootId: root.id, path: 'README.md' });
+    expect(selectActiveTab(useRootsStore.getState())).toEqual({
+      rootId: root.id,
+      path: 'README.md',
+    });
   });
 
   it('says so when there is no markdown at all', async () => {

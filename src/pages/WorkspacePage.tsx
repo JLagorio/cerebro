@@ -5,10 +5,10 @@ import type { Selection } from '@/engine/types';
 import { useRootsStore } from '@/stores/rootsStore';
 import { useUiStore } from '@/stores/uiStore';
 import { DocsTab } from '@/workspace/DocsTab';
-import { FileViewer } from '@/workspace/FileViewer';
+import { EditorGroups } from '@/workspace/EditorGroups';
 import { RootMountDialog } from '@/workspace/RootMountDialog';
 import { RootTree } from '@/workspace/RootTree';
-import { TabBar } from '@/workspace/TabBar';
+import { useWorkspaceKeys } from '@/workspace/useWorkspaceKeys';
 import '@/workspace/workspace.css';
 
 const TABS = ['files', 'docs'] as const;
@@ -31,6 +31,8 @@ function ToggleRow({
       type="button"
       data-testid={testId}
       data-checked={checked}
+      role="menuitemcheckbox"
+      aria-checked={checked}
       onClick={() => onChange(!checked)}
       className="flex w-full items-center gap-2 border-0 bg-transparent px-2.5 py-1.5 text-left text-xs text-n-700 hover:bg-n-50"
     >
@@ -42,7 +44,8 @@ function ToggleRow({
 
 /**
  * The multi-root workspace (M30): mounted repositories, their file tree, and a
- * reading surface. Nothing on this surface writes to a mounted folder.
+ * reading surface split into as many panes as you ask for. Nothing on this
+ * surface writes to a mounted folder.
  *
  * The vault sidebar is suppressed here (see `SIDEBARLESS` in Sidebar.tsx) —
  * this surface brings its own tree, and Collections + Types say nothing about
@@ -51,15 +54,23 @@ function ToggleRow({
 export function WorkspacePage({ selection }: { selection: Selection }) {
   const roots = useRootsStore((s) => s.roots);
   const loadRoots = useRootsStore((s) => s.loadRoots);
-  const open = useRootsStore((s) => s.open);
   const openFile = useRootsStore((s) => s.openFile);
   const fileIcons = useUiStore((s) => s.workspaceFileIcons);
   const setFileIcons = useUiStore((s) => s.setWorkspaceFileIcons);
   const showIgnored = useUiStore((s) => s.workspaceShowIgnored);
   const setShowIgnored = useUiStore((s) => s.setWorkspaceShowIgnored);
+  const lineNumbers = useUiStore((s) => s.workspaceLineNumbers);
+  const setLineNumbers = useUiStore((s) => s.setWorkspaceLineNumbers);
+  const wordWrap = useUiStore((s) => s.workspaceWordWrap);
+  const setWordWrap = useUiStore((s) => s.setWorkspaceWordWrap);
   const [mounting, setMounting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('files');
+
+  // The shortcuts belong to this surface, so they are bound while it is on
+  // screen and released when it is not — a global binding would close a
+  // workspace tab from inside the vault editor.
+  useWorkspaceKeys(tab === 'files');
 
   useEffect(() => {
     void loadRoots();
@@ -83,6 +94,7 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
             type="button"
             data-testid="workspace-settings"
             onClick={() => setSettingsOpen((v) => !v)}
+            aria-expanded={settingsOpen}
             className="ml-auto border-0 bg-transparent p-0.5 text-n-500 hover:text-n-800"
             aria-label="Explorer settings"
           >
@@ -101,6 +113,7 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
         {settingsOpen && (
           <div
             data-testid="workspace-settings-menu"
+            role="menu"
             className="mx-2 mb-1 rounded-md border border-n-200 bg-n-0 py-1 shadow-sm"
           >
             <ToggleRow
@@ -114,6 +127,18 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
               label="Show ignored files"
               checked={showIgnored}
               onChange={setShowIgnored}
+            />
+            <ToggleRow
+              testId="toggle-line-numbers"
+              label="Line numbers"
+              checked={lineNumbers}
+              onChange={setLineNumbers}
+            />
+            <ToggleRow
+              testId="toggle-word-wrap"
+              label="Wrap long lines"
+              checked={wordWrap}
+              onChange={setWordWrap}
             />
           </div>
         )}
@@ -149,22 +174,7 @@ export function WorkspacePage({ selection }: { selection: Selection }) {
             </button>
           ))}
         </div>
-        {tab === 'docs' ? (
-          <DocsTab />
-        ) : (
-          <>
-            <TabBar />
-            {open === null ? (
-              <EmptyState
-                icon="file-text"
-                title="Nothing open"
-                description="Pick a file from the tree."
-              />
-            ) : (
-              <FileViewer rootId={open.rootId} path={open.path} />
-            )}
-          </>
-        )}
+        {tab === 'docs' ? <DocsTab /> : <EditorGroups />}
       </main>
     </div>
   );

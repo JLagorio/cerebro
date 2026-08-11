@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { groupDocsByRoot } from '@/engine/roots';
 import { useRootsStore } from '@/stores/rootsStore';
+import { plainExcerpt } from './plainText';
 
 /**
  * Every markdown file across every mounted root, in one place.
@@ -61,9 +62,15 @@ export function DocsTab() {
                       {doc.path}
                     </span>
                   </span>
-                  {doc.snippet !== '' && (
-                    <span className="line-clamp-2 pl-[22px] text-2xs text-n-500">
-                      {doc.snippet}
+                  {/* The snippet arrives as raw markdown. Printed verbatim a
+                      summary reads "A ledger. ## Install ```bash …" — syntax
+                      competing with the sentence it is summarising. */}
+                  {plainExcerpt(doc.snippet) !== '' && (
+                    <span
+                      data-testid="doc-excerpt"
+                      className="line-clamp-2 pl-[22px] text-2xs text-n-500"
+                    >
+                      {plainExcerpt(doc.snippet)}
                     </span>
                   )}
                 </button>

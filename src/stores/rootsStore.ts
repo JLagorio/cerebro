@@ -1,18 +1,14 @@
 import { create } from 'zustand';
+import * as groups from '@/engine/editorGroups';
+import type { EditorGroup, Layout, OpenTab } from '@/engine/editorGroups';
 import type { DirEntry, IndexedDoc, MountRefusal, Root } from '@/engine/roots';
 import * as ipc from '@/lib/rootsIpc';
 
+export type { EditorGroup, Layout, OpenTab };
+export { sameTab, tabKey } from '@/engine/editorGroups';
+
 /** Cache key for a directory within a root. */
 const nodeKey = (rootId: string, path: string): string => `${rootId} ${path}`;
-
-/** One open editor tab. */
-export interface OpenTab {
-  rootId: string;
-  path: string;
-}
-
-export const sameTab = (a: OpenTab, b: OpenTab): boolean =>
-  a.rootId === b.rootId && a.path === b.path;
 
 interface RootsState {
   roots: Root[];
@@ -20,10 +16,8 @@ interface RootsState {
   expanded: Record<string, boolean>;
   /** nodeKey → its listing, once fetched. */
   children: Record<string, DirEntry[]>;
-  /** The focused tab, or null when nothing is open. */
-  open: OpenTab | null;
-  /** Every open tab, in the order they were opened. */
-  tabs: OpenTab[];
+  /** Editor groups, left to right. See engine/editorGroups.ts. */
+  layout: Layout;
   docs: IndexedDoc[];
 
   loadRoots(): Promise<void>;
@@ -31,20 +25,60 @@ interface RootsState {
   mount(path: string): Promise<MountRefusal | null>;
   unmount(rootId: string): Promise<void>;
   toggle(rootId: string, path: string): Promise<void>;
+  /**
+   * Expand every directory above `path` and ask the tree to scroll to it.
+   *
+   * The counter is the signal, not the path: revealing the SAME file twice has
+   * to scroll twice, and a path-valued field would compare equal the second
+   * time and do nothing.
+   */
+  reveal(rootId: string, path: string): Promise<void>;
+  revealSeq: number;
+  /** The row the last reveal asked for, or null. */
+  revealing: OpenTab | null;
   /** Focus a file, opening a tab for it if one is not already open. */
-  openFile(rootId: string, path: string): void;
-  closeTab(tab: OpenTab): void;
-  closeOtherTabs(tab: OpenTab): void;
+  openFile(rootId: string, path: string, groupId?: string): void;
+  closeTab(tab: OpenTab, groupId?: string): void;
+  closeOtherTabs(tab: OpenTab, groupId?: string): void;
+  closeGroup(groupId: string): void;
+  focusGroup(groupId: string): void;
+  focusGroupAt(index: number): void;
+  splitEditor(tab?: OpenTab, groupId?: string): void;
+  moveTab(tab: OpenTab, fromGroupId: string, toGroupId: string, toIndex: number): void;
+  cycleTab(delta: number): void;
   loadDocs(): Promise<void>;
 }
 
-export const useRootsStore = create<RootsState>((set, get) => ({
+/**
+ * The focused file. A SELECTOR rather than a stored field: `layout` already
+ * knows, and a second copy would be one more thing to keep in step with it.
+ * The reference it returns is the one held in the layout, so subscribing to it
+ * does not re-render on unrelated changes.
+ */
+export const selectActiveTab = (s: RootsState): OpenTab | null => groups.activeTab(s.layout);
+
+/**
+ * The state a fresh workspace starts in.
+ *
+ * Exported because tests need to get back to it between cases, and spelling it
+ * out at each of those call sites is how one of them ends up forgetting a
+ * field and leaking a tab into the next test.
+ */
+export const initialRootsState = (): Pick<
+  RootsState,
+  'roots' | 'expanded' | 'children' | 'layout' | 'docs' | 'revealSeq' | 'revealing'
+> => ({
   roots: [],
   expanded: {},
   children: {},
-  open: null,
-  tabs: [],
+  layout: groups.emptyLayout(),
   docs: [],
+  revealSeq: 0,
+  revealing: null,
+});
+
+export const useRootsStore = create<RootsState>((set, get) => ({
+  ...initialRootsState(),
 
   async loadRoots() {
     set({ roots: await ipc.listRoots() });
@@ -65,14 +99,9 @@ export const useRootsStore = create<RootsState>((set, get) => ({
 
   async unmount(rootId) {
     await ipc.unmountRoot(rootId);
-    // Tabs belonging to the departed root go with it: a tab that cannot resolve
-    // its root would render a not-found placeholder forever.
-    const tabs = get().tabs.filter((t) => t.rootId !== rootId);
-    const open = get().open;
     set({
       roots: get().roots.filter((r) => r.id !== rootId),
-      tabs,
-      open: open === null || open.rootId === rootId ? (tabs[tabs.length - 1] ?? null) : open,
+      layout: groups.dropRoot(get().layout, rootId),
       docs: get().docs.filter((d) => d.root !== rootId),
     });
   },
@@ -91,40 +120,58 @@ export const useRootsStore = create<RootsState>((set, get) => ({
     set({ expanded: { ...get().expanded, [key]: true } });
   },
 
-  /**
-   * Focus a file, opening a tab if one is not already open.
-   *
-   * Re-opening an already-open file FOCUSES its tab rather than appending a
-   * duplicate — clicking the same README twice in the tree is one tab, which
-   * is the behaviour every editor has trained the hand for.
-   */
-  openFile(rootId, path) {
-    const tab = { rootId, path };
-    const already = get().tabs.some((t) => sameTab(t, tab));
-    set({ open: tab, tabs: already ? get().tabs : [...get().tabs, tab] });
-  },
-
-  /**
-   * Close a tab. When it was the focused one, focus its LEFT neighbour —
-   * closing the tab you are reading should land you on the one you were
-   * reading before it, not at the far end of the strip.
-   */
-  closeTab(tab) {
-    const tabs = get().tabs;
-    const index = tabs.findIndex((t) => sameTab(t, tab));
-    if (index === -1) return;
-    const remaining = tabs.filter((t) => !sameTab(t, tab));
-    const wasFocused = get().open !== null && sameTab(get().open as OpenTab, tab);
-    if (!wasFocused) {
-      set({ tabs: remaining });
-      return;
+  async reveal(rootId, path) {
+    // The root itself, then each directory above the file, outermost first —
+    // a child listing cannot be fetched before its parent has been.
+    const segments = path.split('/').slice(0, -1);
+    const ancestors = [''];
+    for (const segment of segments) {
+      ancestors.push(
+        ancestors[ancestors.length - 1] === ''
+          ? segment
+          : `${ancestors[ancestors.length - 1]}/${segment}`,
+      );
     }
-    const next = remaining[index - 1] ?? remaining[0] ?? null;
-    set({ tabs: remaining, open: next });
+    for (const dir of ancestors) {
+      if (get().expanded[nodeKey(rootId, dir)] !== true) await get().toggle(rootId, dir);
+    }
+    set({ revealSeq: get().revealSeq + 1, revealing: { rootId, path } });
   },
 
-  closeOtherTabs(tab) {
-    set({ tabs: get().tabs.filter((t) => sameTab(t, tab)), open: tab });
+  openFile(rootId, path, groupId) {
+    set({ layout: groups.openInGroup(get().layout, { rootId, path }, groupId) });
+  },
+
+  closeTab(tab, groupId) {
+    set({ layout: groups.closeInGroup(get().layout, tab, groupId) });
+  },
+
+  closeOtherTabs(tab, groupId) {
+    set({ layout: groups.closeOthersInGroup(get().layout, tab, groupId) });
+  },
+
+  closeGroup(groupId) {
+    set({ layout: groups.closeGroup(get().layout, groupId) });
+  },
+
+  focusGroup(groupId) {
+    set({ layout: groups.focusGroup(get().layout, groupId) });
+  },
+
+  focusGroupAt(index) {
+    set({ layout: groups.focusGroupAt(get().layout, index) });
+  },
+
+  splitEditor(tab, groupId) {
+    set({ layout: groups.splitGroup(get().layout, tab, groupId) });
+  },
+
+  moveTab(tab, fromGroupId, toGroupId, toIndex) {
+    set({ layout: groups.moveTab(get().layout, tab, fromGroupId, toGroupId, toIndex) });
+  },
+
+  cycleTab(delta) {
+    set({ layout: groups.cycleTab(get().layout, delta) });
   },
 
   async loadDocs() {

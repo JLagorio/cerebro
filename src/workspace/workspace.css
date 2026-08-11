@@ -31,10 +31,124 @@
   font-family: var(--font-mono);
 }
 
+/*
+ * THE per-line boxes.
+ *
+ * `code` in tokens/base.css is an INLINE CHIP — background, border, padding,
+ * a fixed 12px. Shiki's output is `<pre><code>`, and an inline box that spans
+ * many lines repaints its background and border once per VISUAL line, so a
+ * fenced block came out as a stack of little bordered strips. A block of code
+ * is a surface, not a chip: it inherits the surface it was given and the size
+ * the viewer asked for.
+ */
+.code-surface pre code,
+.doc-prose pre code {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+}
+
 /* Unhighlighted fallback: inherit the surface's text colour rather than
    whatever the browser defaults <pre> to. */
 .code-surface .shiki-plain code {
   color: var(--n-700);
+}
+
+/*
+ * One line, one box.
+ *
+ * Shiki emits `<span class="line">` separated by literal newline TEXT NODES;
+ * `highlighter.tsx` strips those separators so each line can be a block here
+ * without every line coming out double-spaced. Blocks are what make a gutter,
+ * a current-line highlight and wrapping possible at all — an inline line has
+ * no box to hang any of them on.
+ */
+.code-surface .line {
+  display: block;
+  min-height: 1.6em;
+}
+
+/*
+ * Line numbers as a COUNTER, never as elements.
+ *
+ * `::before` content is not part of the selection, so code copied out of the
+ * viewer arrives without its line numbers attached. Real number elements would
+ * have to be stripped by hand from every paste.
+ */
+.code-numbered {
+  counter-reset: cb-line;
+  /*
+   * The gutter's three parts, named once so the wrap rules below can line the
+   * code up against exactly the same total. `--cb-gutter` is set per file from
+   * its line count, so the column never widens as you scroll past line 99.
+   */
+  --cb-gutter-lead: 1rem;
+  --cb-gutter-gap: 0.75rem;
+  --cb-gutter-total: calc(var(--cb-gutter, 3ch) + var(--cb-gutter-lead) + var(--cb-gutter-gap));
+}
+
+.code-numbered .line {
+  counter-increment: cb-line;
+}
+
+.code-numbered .line::before {
+  content: counter(cb-line);
+  display: inline-block;
+  /* Sticky, so the gutter stays put while a long line scrolls sideways
+     underneath it — the whole point of a gutter. A positioned box also paints
+     above the in-flow text of its own line, which is what hides the code
+     passing behind it. */
+  position: sticky;
+  left: 0;
+  /*
+   * CONTENT-box, against Tailwind's global border-box: `width` then means the
+   * space the DIGITS get, and the lead and gap add to it rather than eating
+   * into it. Sized the other way, a two-digit number had less room than it
+   * needed and overflowed left, out of the pane.
+   *
+   * The surface carries no left padding while numbered (see CodeViewer):
+   * sticky pins to the scroll container's CONTENT box, so any left padding
+   * would be a strip the gutter cannot reach and scrolling code shows through
+   * it. `--cb-gutter-lead` is that inset, on the right side of the pin.
+   */
+  box-sizing: content-box;
+  width: var(--cb-gutter, 3ch);
+  padding-left: var(--cb-gutter-lead);
+  /* The gap is PADDING, not margin: padding is part of the pinned box and
+     survives a horizontal scroll, so code sliding underneath never touches
+     the digits. */
+  padding-right: var(--cb-gutter-gap);
+  text-align: right;
+  color: var(--n-400);
+  background: var(--n-25);
+  user-select: none;
+}
+
+/*
+ * Wrapping mode.
+ *
+ * A wrapped line has no horizontal scroll for the number to stick against, and
+ * an inline-block number would push only the FIRST visual row across. Absolute
+ * positioning plus matching padding indents every row of a wrapped line to the
+ * same column, which is what makes wrapped code still readable as code.
+ */
+.code-wrap .line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-wrap.code-numbered .line {
+  position: relative;
+  padding-left: var(--cb-gutter-total);
+}
+
+.code-wrap.code-numbered .line::before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: transparent;
 }
 
 /*

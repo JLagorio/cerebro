@@ -1,19 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetMockRoots, seedKnowledgeDir, seedRoot } from '@/lib/mockRoots';
-import { useRootsStore } from '@/stores/rootsStore';
+import { initialRootsState, useRootsStore } from '@/stores/rootsStore';
 import { RootMountDialog } from './RootMountDialog';
 
 beforeEach(() => {
   resetMockRoots();
-  useRootsStore.setState({
-    roots: [],
-    expanded: {},
-    children: {},
-    open: null,
-    tabs: [],
-    docs: [],
-  });
+  useRootsStore.setState(initialRootsState());
 });
 
 describe('RootMountDialog', () => {

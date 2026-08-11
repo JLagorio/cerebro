@@ -32,6 +32,18 @@ import { toJsxRuntime } from 'hast-util-to-jsx-runtime';
 import type { Highlighter } from 'shiki';
 import type { ResolvedTheme } from '@/hooks/useTheme';
 
+/**
+ * The slice of hast this file walks. Narrower than `hast`'s own types on
+ * purpose: everything below only reads `type`, `value` and `children`, and a
+ * structural type says that without importing a tree of definitions to
+ * describe properties nobody here touches.
+ */
+interface HastNode {
+  type: string;
+  value?: string;
+  children?: HastNode[];
+}
+
 const EXTENSIONS: Record<string, string> = {
   rs: 'rust',
   ts: 'typescript',
@@ -120,13 +132,51 @@ async function highlighter(): Promise<Highlighter> {
   return instance;
 }
 
-/** Unstyled fallback: the file's text, as text. */
+/**
+ * Unstyled fallback: the file's text, as text — but split into the same
+ * `.line` spans Shiki emits, so a plain file numbers, wraps and highlights its
+ * current row exactly like a recognised one. A viewer where `.txt` behaves
+ * differently from `.ts` is a viewer with two layouts to maintain.
+ */
 function plain(code: string): ReactNode {
+  const lines = code.split('\n');
   return (
-    <pre className="shiki-plain m-0 whitespace-pre">
-      <code>{code}</code>
+    <pre className="shiki-plain m-0">
+      <code>
+        {/* Keyed by index because a line's identity IS its position — there is
+            nothing else about it to key on, and the list is rebuilt whole
+            whenever the file changes. */}
+        {lines.map((line, i) => (
+          <span key={i} className="line">
+            {line}
+          </span>
+        ))}
+      </code>
     </pre>
   );
+}
+
+/**
+ * Shiki separates its line spans with literal "\n" TEXT NODES, which is
+ * correct for `white-space: pre` inline lines and wrong for anything else. The
+ * gutter needs each line to be a block box, and a block box plus a newline
+ * renders every line double-spaced.
+ *
+ * Dropping those separators here — rather than fighting them in CSS — is what
+ * lets `.line { display: block }` hold, which is in turn what lets line numbers
+ * be a `::before` counter (never selected, never copied) instead of real
+ * elements a copy would drag along.
+ */
+function unwrapLines<T extends HastNode>(tree: T): T {
+  for (const pre of tree.children ?? []) {
+    for (const code of pre.children ?? []) {
+      if (code.children === undefined) continue;
+      code.children = code.children.filter(
+        (child) => !(child.type === 'text' && child.value === '\n'),
+      );
+    }
+  }
+  return tree;
 }
 
 /**
@@ -151,7 +201,7 @@ export async function highlight(
       await hl.loadLanguage(lang as Parameters<typeof hl.loadLanguage>[0]);
       loadedLangs.add(lang);
     }
-    const hast = hl.codeToHast(code, { lang, theme: shikiTheme });
+    const hast = unwrapLines(hl.codeToHast(code, { lang, theme: shikiTheme }));
     return toJsxRuntime(hast, { Fragment, jsx, jsxs });
   } catch {
     return plain(code);
