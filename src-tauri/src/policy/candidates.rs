@@ -9,11 +9,14 @@
 //!
 //! The three deterministic legs are all real (M24.7): exact identity,
 //! explicit alias, and the scoped/temporal lookup — every live Belief the
-//! base already holds about this same subject. The semantic leg is
-//! explicitly `not_available` rather than quietly absent; an empty
-//! `attempted` leg would read as "searched, found nothing" when nothing was
-//! searched. M26 supplies it and makes an attempted one a precondition for
-//! registering the proposal tools at all.
+//! base already holds about this same subject. M26.2 made the fourth leg
+//! real: `completed`, naming the retriever, the head, and the query it ran.
+//! `attempted` remains spellable and is REFUSED — it is the shape a caller
+//! reaches for to claim credit for a search that did not finish.
+//!
+//! M26.3c makes a required, non-refusable receipt a precondition for
+//! registering the proposal tools at all: the registration gate refuses to
+//! build a live create surface against a table that does not demand one.
 //!
 //! The server decides what the search RETURNED; it does not decide what the
 //! results MEAN. Dispositions (`update | qualify | distinct`) and the

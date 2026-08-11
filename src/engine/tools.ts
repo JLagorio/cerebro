@@ -21,6 +21,8 @@
  * dangerous ones cannot hide in a bundle labelled after a workflow.
  */
 
+import { agentFacingOps, POLICY } from '@/lib/policy/table';
+
 export interface ToolSpec {
   name: string;
   /** One line, plain. Not the model-facing description, which is a paragraph. */
@@ -91,6 +93,53 @@ export const TOOLSETS: Toolset[] = [
     ],
   },
 ];
+
+/**
+ * The proposal toolset (M26.3c) — GENERATED from the shared policy artifact,
+ * never typed out.
+ *
+ * The Rust server builds its half from the same `ops` table, so a hand-written
+ * list here would be the second inventory the milestone's parity rules forbid:
+ * it would drift the moment an op was added or an `agent_facing: false` was
+ * set, and the drift would show up as a picker offering something the server
+ * refuses.
+ *
+ * `writes: true` on every entry, and it is the honest answer even though a
+ * proposal is not itself a mutation: LOW and MEDIUM ops AUTO-APPLY once
+ * committed (12 of the 20), so "this selection can change something on disk"
+ * is true. The picker's grouping axis is what a run can CHANGE, and a group
+ * that read as harmless here would be a lie for exactly the ops most likely
+ * to be picked.
+ */
+const PROPOSAL_TOOLS: ToolSpec[] = [
+  ...agentFacingOps(POLICY).map((op) => ({
+    name: `propose_${op}`,
+    summary: `Propose ${op.replace(/_/g, ' ')} (${POLICY.ops[op].base_risk})`,
+    writes: true,
+  })),
+  {
+    name: 'commit_proposals',
+    summary: 'Decide this run’s proposals as one atomic batch',
+    writes: true,
+  },
+];
+
+const PROPOSAL_TOOLSET: Toolset = {
+  // NOT `propose` — that id already belongs to the M17-era set holding
+  // `propose_organize`, and two sets sharing one id would make
+  // `matchedToolset` answer with whichever came first.
+  id: 'proposals',
+  label: 'Propose changes to the knowledge base',
+  hint: 'Suggests changes through the policy layer. Low- and medium-risk ones apply automatically once committed; high-risk ones wait for you on a card. Off unless the proposal surface is switched on.',
+  tools: PROPOSAL_TOOLS,
+};
+
+// PUSHED INTO `TOOLSETS`, not unioned only into `ALL_TOOLS`. The pickers
+// (AgentEditor, SkillEditor) build their checkboxes and group hints from
+// TOOLSETS alone — so a set that existed only in ALL_TOOLS would pass every
+// parity test while never appearing in the UI, and the person choosing a
+// policy would have no way to grant or withhold the proposal surface.
+TOOLSETS.push(PROPOSAL_TOOLSET);
 
 export const ALL_TOOLS: ToolSpec[] = TOOLSETS.flatMap((set) => set.tools);
 

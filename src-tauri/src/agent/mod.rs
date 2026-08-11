@@ -527,23 +527,35 @@ pub fn status() -> AgentStatus {
 /// own boundaries (write_concept refuses any path outside `knowledge/`), so the
 /// only thing left to decide is whether the agent gets a shell, which no folder
 /// rule can express.
-fn tool_policy(shell: bool) -> Vec<&'static str> {
-    let mut tools = vec![
-        "mcp__cerebro__get_vault_context",
-        "mcp__cerebro__search_notes",
-        "mcp__cerebro__get_note",
-        "mcp__cerebro__list_inbox",
-        "mcp__cerebro__open_note",
-        "mcp__cerebro__navigate",
-        "mcp__cerebro__propose_organize",
-        "mcp__cerebro__create_note",
-        "mcp__cerebro__update_frontmatter",
-        "mcp__cerebro__append_to_note",
-        "mcp__cerebro__write_concept",
-        "mcp__cerebro__cache_source",
-    ];
+/// The MCP prefix the CLI addresses cerebro's tools by.
+pub const MCP_PREFIX: &str = "mcp__cerebro__";
+
+fn tool_policy(shell: bool) -> Vec<String> {
+    // DERIVED FROM THE SERVED CATALOG (M26.3c), not typed out beside it.
+    //
+    // This was a second hand-maintained inventory: a tool served by
+    // `tool_catalog()` and missing here is served and never granted, so it
+    // fails at call time for a reason nothing explains — and nothing asserted
+    // the two agreed.
+    //
+    // Derived with the proposal surface ON, deliberately, because the grant
+    // is an UPPER BOUND and the server is the enforcement point. Granting a
+    // name the server does not serve is inert: `tools/list` never advertises
+    // it, and a model that guessed it anyway gets `unknown tool` from
+    // `call_tool`, which checks the switch a second time. Reading the switch
+    // here instead would put the same decision in two places and make the
+    // grant depend on when the args happened to be built.
+    let mut tools: Vec<String> = crate::mcp::tool_catalog(true)
+        .iter()
+        .filter_map(|tool| tool.get("name").and_then(|n| n.as_str()))
+        .map(|name| format!("{MCP_PREFIX}{name}"))
+        .collect();
     if shell {
-        tools.extend(["Bash", "Read", "Write", "Edit", "Glob", "Grep"]);
+        tools.extend(
+            ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+                .into_iter()
+                .map(str::to_string),
+        );
     }
     tools
 }
@@ -560,7 +572,7 @@ fn tool_policy(shell: bool) -> Vec<&'static str> {
 /// Names are matched with and without the `mcp__cerebro__` prefix, because a
 /// person writing `allowed-tools: search_notes` in frontmatter means the tool
 /// they see in the transcript, not its wire name.
-fn narrow(granted: Vec<&'static str>, declared: Option<&Vec<String>>) -> Vec<&'static str> {
+fn narrow(granted: Vec<String>, declared: Option<&Vec<String>>) -> Vec<String> {
     let Some(declared) = declared else {
         return granted;
     };
@@ -573,10 +585,7 @@ fn narrow(granted: Vec<&'static str>, declared: Option<&Vec<String>>) -> Vec<&'s
         .into_iter()
         .filter(|tool| {
             let full = tool.to_ascii_lowercase();
-            let short = full
-                .strip_prefix("mcp__cerebro__")
-                .unwrap_or(&full)
-                .to_string();
+            let short = full.strip_prefix(MCP_PREFIX).unwrap_or(&full).to_string();
             wanted.iter().any(|w| *w == full || *w == short)
         })
         .collect()
@@ -1293,8 +1302,33 @@ mod tests {
     fn an_absent_declaration_does_not_narrow_but_an_empty_one_does() {
         // Two different sentences, and conflating them would either make every
         // ordinary turn toolless or make "read-only please" unsayable.
-        assert_eq!(narrowed(false, None).len(), 12);
+        //
+        // The arity is the SERVED catalog's, not a number typed here: since
+        // M26.3c the grant is derived from `mcp::tool_catalog`, so this
+        // counts what the server actually offers rather than pinning a
+        // literal that would have to be edited every time a tool lands.
+        let served = crate::mcp::tool_catalog(true).len();
+        assert_eq!(narrowed(false, None).len(), served);
         assert!(narrowed(false, Some(vec![])).is_empty());
+    }
+
+    #[test]
+    fn the_grant_is_exactly_the_served_catalog() {
+        // THE THIRD INVENTORY, closed (M26.3c). `tool_policy` was a
+        // hand-maintained copy of the tool names with nothing asserting it
+        // matched `tool_catalog()` — a tool served but ungranted fails at
+        // call time for a reason nothing explains, and one granted but
+        // unserved is a name in a policy that means nothing.
+        let granted: std::collections::BTreeSet<String> = tool_policy(false)
+            .into_iter()
+            .map(|t| t.trim_start_matches(MCP_PREFIX).to_string())
+            .collect();
+        let served: std::collections::BTreeSet<String> = crate::mcp::tool_catalog(true)
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .map(str::to_string)
+            .collect();
+        assert_eq!(granted, served);
     }
 
     #[test]
@@ -1321,7 +1355,7 @@ mod tests {
         let safe = tool_policy(false);
         for tool in ["Bash", "Write", "Edit"] {
             assert!(
-                !safe.contains(&tool),
+                !safe.iter().any(|t| t == tool),
                 "a safe run must not be handed `{tool}` — it is a delete by another name"
             );
         }

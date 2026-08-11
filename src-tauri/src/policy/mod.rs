@@ -1,16 +1,24 @@
 //! The M24 policy layer: mutation governance as DATA.
 //!
-//! `shared/policy/policy.v1.json` is the one table; `authority-routes.v1.json`
-//! and its content-addressed snapshots are the one authority artifact. Rust
-//! compiles them in with `include_str!`; the TS mock imports the identical
-//! files through vite. Neither language holds a rule the other has to be
-//! trusted to have copied correctly — parity is the shared artifact plus the
-//! shared goldens in `shared/policy/goldens/`, and a rule written twice as
-//! Rust and TS code is a review-blocking defect.
+//! `shared/policy/policy.v2.json` is the one table (`format: 2` since M26.3b;
+//! `policy.v1.json` is frozen beside it as the registration gate's negative
+//! control). `authority-routes.v1.json` and its content-addressed snapshots
+//! are the one authority artifact. Rust compiles them in with `include_str!`;
+//! the TS side imports the identical files through vite. Neither language
+//! holds a rule the other has to be trusted to have copied correctly —
+//! parity is the shared artifact plus the shared goldens in
+//! `shared/policy/goldens/`, and a rule written twice as Rust and TS code is
+//! a review-blocking defect.
 //!
-//! M24 builds the whole skeleton with **agents off**: nothing here is
-//! registered as an MCP tool. Synthetic proposals exercise it through the
-//! internal typed boundary until M26 turns the surface on.
+//! **Agents are no longer off by construction (M26.3c).** M24 built this
+//! whole skeleton with nothing registered as an MCP tool, and that absence
+//! was the guarantee. The proposal tools are now GENERATED from this table's
+//! agent-facing ops and served by the live loopback server — behind a switch
+//! that defaults off, and behind a registration gate that refuses to build
+//! them unless the preventive ancestry walk is bound and the candidate
+//! receipt is required. What replaced "nothing is registered" is
+//! `submit::the_live_proposal_inventory_is_the_policy_inventory`: the served
+//! surface is exactly what this artifact authorises, in both directions.
 
 pub mod ancestry;
 pub mod authority;

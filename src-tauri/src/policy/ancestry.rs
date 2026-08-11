@@ -47,10 +47,10 @@
 //! would have been publishing the requirement and discovering the walk
 //! afterwards.
 //!
-//! Still not wired: the live MCP proposal tools. Registering them is the rest
-//! of M26.3, and [`table_binding`] is the precondition it must call — a build
-//! pointed at the frozen format-1 table refuses to register, naming the
-//! absent binding.
+//! [`table_binding`] is the precondition live registration calls (M26.3c,
+//! `mcp::registration_gate`). A build pointed at the frozen format-1 table
+//! serves no proposal tool at all and says why: the binding is absent, not
+//! the code unknown.
 
 use std::collections::BTreeSet;
 

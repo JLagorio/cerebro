@@ -89,6 +89,24 @@ export interface OpRule {
   requires: string[];
   requires_capability?: string;
   possible_rejections: string[];
+  /**
+   * May an AGENT propose this op through the live MCP surface (M26.3c)?
+   * Absent means true, so the artifact says only where the answer is NO and a
+   * new op is agent-facing unless somebody argues otherwise.
+   *
+   * `revert_proposal` is the one false today: it is MEDIUM, MEDIUM
+   * auto-applies, and an agent-facing revert would silently undo an applied
+   * mutation — including one a human had just approved on a HIGH card.
+   */
+  agent_facing?: boolean;
+}
+
+/** The ops an agent may propose, sorted — the registration inventory. */
+export function agentFacingOps(table: PolicyTable): string[] {
+  return Object.entries(table.ops)
+    .filter(([, rule]) => rule.agent_facing !== false)
+    .map(([name]) => name)
+    .sort();
 }
 
 export interface PolicyTable {

@@ -1,12 +1,16 @@
 //! The internal typed submit boundary (M24.3).
 //!
-//! **Agents stay off, mechanically.** This is the channel a proposal
-//! travels — never stdout JSON, which `agent.rs` silently skips when it
-//! cannot parse a line — and in M24 it is INTERNAL: no MCP tool is
-//! registered for it on the live server or in the mock catalog, and
-//! `no_proposal_tool_is_registered` proves that absence rather than
-//! trusting anyone to remember. M26 owns the one explicit registration
-//! phase, after semantic candidate search is live.
+//! **This is the channel a proposal travels** — never stdout JSON, which
+//! `agent.rs` silently skips when it cannot parse a line. Through M25 it was
+//! internal, and `no_proposal_tool_is_registered` proved that absence rather
+//! than trusting anyone to remember it.
+//!
+//! M26.3c registered the surface, and that test was INVERTED rather than
+//! deleted: `the_live_proposal_inventory_is_the_policy_inventory` now proves
+//! the served tools are exactly the ops the artifact marks agent-facing, plus
+//! terminal `commit_proposals`, with no synonym and no route to the human's
+//! own decisions. A deleted test would have left nobody able to say what the
+//! live surface is.
 //!
 //! The boundary returns a TYPED result, not an error string. That is the
 //! AGENTS.md re-scope in one sentence: a queued HIGH-risk mutation is not
@@ -327,33 +331,212 @@ mod tests {
         assert!(raw.contains("\"outcome\":\"rejected\""), "{raw}");
     }
 
+    /// Every tool name the live server serves, with the surface on.
+    fn served(on: bool) -> std::collections::BTreeSet<String> {
+        crate::mcp::tool_catalog(on)
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(|n| n.as_str()))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// What the ARTIFACT says the proposal surface is.
+    fn expected(table: &PolicyTable) -> std::collections::BTreeSet<String> {
+        table
+            .agent_facing_ops()
+            .into_iter()
+            .map(crate::mcp::proposal_tool_name)
+            .chain(std::iter::once(crate::mcp::COMMIT_TOOL.to_string()))
+            .collect()
+    }
+
     #[test]
-    fn no_proposal_tool_is_registered_on_the_live_server() {
-        // AGENTS STAY OFF, MECHANICALLY. The proposal boundary exists and
-        // is exercised by these tests, but nothing serves it to a model.
-        // M26 has one explicit registration phase, after semantic candidate
-        // search is live and the preventive graph guards pass their
-        // fixtures. Until then, this assertion is the guarantee — the TS
-        // catalog mirror (`src/engine/tools.test.ts`) parses the same
-        // function and holds the same absence from the other side.
-        let mcp = include_str!("../mcp.rs");
-        let start = mcp
-            .find("fn tool_catalog()")
-            .expect("mcp.rs still defines tool_catalog");
-        let catalog = &mcp[start..];
-        let end = catalog.find("\n}\n").expect("tool_catalog has an end");
-        let catalog = &catalog[..end];
+    fn the_live_proposal_inventory_is_the_policy_inventory() {
+        // **THE INVERTED ASSERTION.** Until M26.3c this test proved the
+        // proposal surface was ABSENT, and that absence was the guarantee
+        // that agents could not mutate anything. The guarantee has moved,
+        // not evaporated: what is asserted now is that the served surface is
+        // EXACTLY what the artifact authorises — no op the table withholds,
+        // no synonym the table never named, and nothing a second
+        // hand-maintained list could add.
+        //
+        // It is inverted rather than deleted on purpose. A deleted test
+        // leaves nobody able to say what the live surface is; this one still
+        // fails the moment it stops matching the table.
+        let table = PolicyTable::load().unwrap();
+        let base = served(false);
+        let all = served(true);
+
+        let generated: std::collections::BTreeSet<String> =
+            all.difference(&base).cloned().collect();
+        assert_eq!(
+            generated,
+            expected(&table),
+            "the served proposal surface and the policy artifact disagree"
+        );
+
+        // DISJOINTNESS. `cache_source` is both a hand-written write tool and
+        // a policy op; without the prefix the catalog would carry two tools
+        // of one name and the picker would show one checkbox for two things.
+        assert!(
+            base.is_disjoint(&generated),
+            "a generated proposal tool collides with a hand-written one"
+        );
+
+        // NO SYNONYMS, and no route to the human's own decisions. An agent
+        // that could call `record_decision` would approve its own cards.
         for forbidden in [
             "submit_proposal",
-            "commit_proposals",
             "propose_mutation",
-            "revert_proposal",
+            "record_decision",
+            "resolve_commit_set",
         ] {
+            assert!(!all.contains(forbidden), "{forbidden} is served");
+        }
+
+        // THE WITHHELD OPS, named so neither can be re-enabled by editing
+        // one JSON boolean without somebody reading why it is false.
+        //
+        // `revert_proposal`: MEDIUM, MEDIUM auto-applies, so an agent-facing
+        // revert would silently undo an applied mutation — including one a
+        // human just approved on a HIGH card — with no second card.
+        //
+        // `append_observation`: its payload is the SERVER-CANONICAL
+        // observation body, and `expand.rs`'s arm for it is the only one of
+        // twenty that passes the caller's `actor` through instead of
+        // stamping the run's. `reduce.rs` derives authority from that actor,
+        // so an agent could mint a `TrustedHumanCapture` observation
+        // attributed to the human. `trusted_observation_provenance` is
+        // required by the row and evaluated nowhere.
+        for withheld in ["revert_proposal", "append_observation"] {
             assert!(
-                !catalog.contains(forbidden),
-                "{forbidden} is registered on the loopback MCP server — M24 keeps the proposal \
-                 surface internal, and M26 owns turning it on"
+                !table.op(withheld).unwrap().agent_facing,
+                "{withheld} became agent-facing"
             );
+            assert!(!all.contains(&crate::mcp::proposal_tool_name(withheld)));
+        }
+    }
+
+    #[test]
+    fn the_predicate_with_no_evaluator_guards_nothing_that_is_served() {
+        // THE GAP TRIPWIRE, pointed at the live surface (M26.3c).
+        // `PREDICATE_OWNERS` already proves every table predicate is either
+        // implemented or a written-down gap. This proves the stronger thing
+        // registration needs: no op an AGENT can reach depends on a
+        // predicate that nothing evaluates. A gap is tolerable behind the
+        // internal boundary and is not tolerable in front of a model.
+        let table = PolicyTable::load().unwrap();
+        let unevaluated: std::collections::BTreeSet<&str> =
+            crate::policy::preconditions::PREDICATE_OWNERS
+                .iter()
+                .filter(|(_, owner)| owner.is_none())
+                .map(|(name, _)| *name)
+                .collect();
+        // An unevaluated predicate is tolerable in exactly one shape: its
+        // SUBJECT MATTER does not exist yet, and the table says so by
+        // declaring the capability unavailable. `open_contradictions_
+        // addressed` is that shape — its unit is an M27 contradiction edge,
+        // and `contradiction_edges` is `available: false`, so there is
+        // nothing for the predicate to find and nothing it could miss.
+        //
+        // The moment M27 makes that capability available without wiring the
+        // evaluator, this fires — which is precisely when a rule that looks
+        // like protection would start being one.
+        let excused = &table.contradiction_addressing;
+        let excused_predicate = "open_contradictions_addressed";
+        for op in table.agent_facing_ops() {
+            for predicate in &table.op(op).unwrap().requires {
+                if !unevaluated.contains(predicate.as_str()) {
+                    continue;
+                }
+                assert_eq!(
+                    predicate, excused_predicate,
+                    "{op} is served to agents and requires {predicate}, which nothing evaluates"
+                );
+                let capability = table
+                    .capabilities
+                    .get(&excused.capability)
+                    .expect("the table validated this capability exists");
+                assert!(
+                    !capability.available,
+                    "{predicate} is excused only while {} is unavailable — it is available now, \
+                     so {op} is served to agents behind a rule nothing evaluates",
+                    excused.capability
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_surface_is_off_until_it_is_switched_on() {
+        // REGISTRATION IS NOT ACTIVATION. The switch defaults off, so a
+        // fresh install serves the same twelve tools it always did, and
+        // M26.9 has something real to flip.
+        let base = served(false);
+        let table = PolicyTable::load().unwrap();
+        assert_eq!(base.len(), 12, "{base:?}");
+        assert!(base.is_disjoint(&expected(&table)));
+        assert!(!base.contains(crate::mcp::COMMIT_TOOL));
+        // `propose_organize` predates this namespace and is NOT a policy op.
+        // It stays served with the surface off, which is exactly why the
+        // name→op mapping asks the table instead of trusting the prefix.
+        assert!(base.contains("propose_organize"));
+        assert!(!table.ops.contains_key("organize"));
+    }
+
+    #[test]
+    fn registration_against_the_frozen_v1_table_refuses_and_says_why() {
+        // The negative control the whole gate rests on: a format-1 table is
+        // VALID and simply predates the ancestry binding, so registration
+        // must fail by NAMING the absent binding. Failing on an unknown code
+        // would be the right outcome for the wrong reason, and would stop
+        // being true the day somebody registered the code.
+        let v1 = PolicyTable::parse(crate::policy::table::POLICY_V1_JSON).unwrap();
+        let error = crate::mcp::proposal_tools(&v1).unwrap_err();
+        assert!(error.contains("no_self_ancestry"), "{error}");
+        assert!(!error.contains("unknown"), "{error}");
+    }
+
+    #[test]
+    fn registration_refuses_a_table_that_stopped_demanding_a_search() {
+        // The other half of the gate. A create is the one mutation with no
+        // target to compare against, so a live create surface on a table
+        // that no longer requires the candidate receipt would be the §15
+        // hole with a tool attached to it.
+        let mut raw: serde_json::Value =
+            serde_json::from_str(crate::policy::table::POLICY_JSON).unwrap();
+        raw["ops"]["create_belief"]["requires"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| p.as_str() != Some("candidate_receipt_current"));
+        // The table's own load rules already refuse a predicate no op
+        // requires, so the predicate has to leave the registry too. That
+        // makes this gate defence in DEPTH rather than the only guard — and
+        // the depth is the point: a future table could register the
+        // predicate against some other op and still leave creates unguarded.
+        raw["predicates"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|p| p.as_str() != Some("candidate_receipt_current"));
+        let table = PolicyTable::parse(&raw.to_string()).unwrap();
+        let error = crate::mcp::proposal_tools(&table).unwrap_err();
+        assert!(error.contains("candidate_receipt_current"), "{error}");
+    }
+
+    #[test]
+    fn every_served_proposal_tool_is_callable_and_described() {
+        // A catalog entry with no dispatch arm answers "unknown tool", and a
+        // description is agent-facing prompt surface reviewed like code.
+        let table = PolicyTable::load().unwrap();
+        for tool in crate::mcp::proposal_tools(&table).unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            let description = tool["description"].as_str().unwrap();
+            assert!(description.len() > 20, "{name}: {description}");
+            assert!(tool.get("inputSchema").is_some(), "{name}");
+            if name != crate::mcp::COMMIT_TOOL {
+                let op = name.strip_prefix(crate::mcp::PROPOSAL_PREFIX).unwrap();
+                assert!(table.op(op).is_some(), "{name} names no table row");
+            }
         }
     }
 }

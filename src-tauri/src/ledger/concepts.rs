@@ -216,7 +216,13 @@ fn verify_with(
     write_projection(vault, rel, &projection)
 }
 
-fn current_state(writer: &LedgerWriter, vault: &Path) -> Result<EpistemicState, String> {
+/// The reduced state at this writer's current head.
+///
+/// `pub(crate)` since M26.3c: the live proposal tools mint their candidate
+/// receipt against exactly this, and a second reducer call spelled slightly
+/// differently would let the receipt be minted against a world the validator
+/// does not re-derive.
+pub(crate) fn current_state(writer: &LedgerWriter, vault: &Path) -> Result<EpistemicState, String> {
     let read = read_ledger(&ledger_dir(vault)).map_err(|e| e.to_string())?;
     Ok(reduce(&read.frames, writer.store_id()))
 }

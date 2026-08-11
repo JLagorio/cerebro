@@ -281,6 +281,27 @@ come first in each language.
   (`semantic: completed`) claiming the same version, and telling those apart
   is the version's only job.
 
+## The live agent surface (M26.3c)
+
+- **`agent_facing` defaults to TRUE, and the artifact says only where it is
+  false.** A new op is offered to agents unless somebody argues otherwise,
+  which is the right default for a table whose whole job is governing agent
+  mutations — an op quietly excluded by omission would be a capability nobody
+  could find the reasoning for. `revert_proposal` is the one false: it is
+  MEDIUM, MEDIUM auto-applies, and an agent-facing revert would undo an
+  applied mutation including one a human just approved, with no second card.
+- **The live tool names are generated from this file.** `mcp.rs` builds one
+  `propose_<op>` per agent-facing op; nothing types the list a second time.
+  The `propose_` prefix keeps the namespace injective against the twelve
+  hand-written tools — `cache_source` is both a tool and an op — and
+  `the_live_proposal_inventory_is_the_policy_inventory` proves the served
+  surface and this artifact agree in both directions.
+- **Registration is gated on the safety machinery being BOUND here.** The
+  server refuses to build any proposal tool unless `preventive_ancestry` binds
+  the walk and `create_belief` still requires `candidate_receipt_current` and
+  declares its four receipt codes. Editing either of those out of this file
+  does not quietly widen the surface; it closes it.
+
 ## What is deliberately NOT here yet
 
 `conflict_classification` and `contradiction_edges` are declared unavailable

@@ -232,6 +232,41 @@ pub struct OpRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_capability: Option<String>,
     pub possible_rejections: Vec<String>,
+    /// May an AGENT propose this op through the live MCP surface (M26.3c)?
+    ///
+    /// Defaults to true, so the artifact says only where the answer is NO and
+    /// a new op is agent-facing unless somebody argues otherwise. That is the
+    /// right default for a table whose whole job is to govern agent
+    /// mutations: an op quietly excluded by omission would be a capability
+    /// nobody could find the reasoning for.
+    ///
+    /// Two are FALSE today, both found by attacking the surface rather than
+    /// by reading it:
+    ///
+    /// - **`revert_proposal`** is MEDIUM, and MEDIUM auto-applies — so an
+    ///   agent-facing revert would let a model silently undo an applied
+    ///   mutation, including one a human had just approved on a HIGH card,
+    ///   with no second card to notice. Revert is the human's undo; the
+    ///   server authors it from the review surface.
+    /// - **`append_observation`** carries the SERVER-CANONICAL
+    ///   `ObservationRecorded` body in its payload, and `expand.rs`'s arm for
+    ///   it is the only one of the twenty that does not stamp the run's
+    ///   actor — it passes the caller's `actor` through verbatim. Since
+    ///   `reduce.rs` derives AUTHORITY from that actor, an agent could mint
+    ///   an observation attributed to the human and carrying
+    ///   `TrustedHumanCapture`. The predicate meant to stop this,
+    ///   `trusted_observation_provenance`, is required by the row and
+    ///   evaluated NOWHERE: its declared owner is `AgentObservationDraft`,
+    ///   the impoverished wire DTO that cannot spell `human_assertion`, and
+    ///   nothing converts a draft into a recorded observation. The op is not
+    ///   ready for an agent until that conversion exists, so it is withheld
+    ///   here rather than served past a door that does not close.
+    #[serde(default = "agent_facing_default")]
+    pub agent_facing: bool,
+}
+
+fn agent_facing_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -714,6 +749,20 @@ impl PolicyTable {
 
     pub fn destiny(&self, code: &str) -> Option<Destiny> {
         self.rejection_destinies.get(code).copied()
+    }
+
+    /// The ops an agent may propose through the live MCP surface, sorted.
+    ///
+    /// THE registration inventory (M26.3c). Derived from the artifact every
+    /// time rather than cached or copied: a second list of agent-facing op
+    /// names is the hand-maintained inventory the milestone's parity rules
+    /// forbid, and it is exactly the list that would rot silently.
+    pub fn agent_facing_ops(&self) -> Vec<&str> {
+        self.ops
+            .iter()
+            .filter(|(_, rule)| rule.agent_facing)
+            .map(|(name, _)| name.as_str())
+            .collect()
     }
 
     pub fn op(&self, name: &str) -> Option<&OpRule> {

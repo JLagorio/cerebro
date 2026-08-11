@@ -58,6 +58,16 @@ fn normalize_actor(actor: Option<&str>) -> &str {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunGrant {
     pub actor: String,
+    /// The durable 128-bit id every proposal this run submits carries
+    /// (M26.3c), DERIVED FROM THE BEARER TOKEN.
+    ///
+    /// It rides the token for exactly the reason actor and scope do, and one
+    /// more: `commit_proposals` refuses members belonging to another run
+    /// (`policy/commit.rs`), so if a caller could name its own run id it
+    /// could sweep another run's queued proposals into its own commit set.
+    /// A caller only ever knows its own token, so it can only ever name its
+    /// own run.
+    pub run_id: String,
     /// Vault-relative folders this run may write inside. `None` is unrestricted
     /// — the panel's own turns, which the user is watching.
     ///
@@ -73,10 +83,20 @@ pub struct RunGrant {
     pub scope: Option<Vec<String>>,
 }
 
+/// A run's durable id, derived from its bearer token.
+///
+/// Domain-separated so a token can never be read back out of an id that
+/// travels in the ledger, and 128-bit hex because `ProposalV1::validate`
+/// requires that shape.
+pub fn run_id_of(token: &str) -> String {
+    crate::ledger::schema::sha256_first128(format!("cerebro-mcp-run-v1\0{token}").as_bytes())
+}
+
 impl RunGrant {
     fn unrestricted(actor: &str) -> Self {
         Self {
             actor: actor.to_string(),
+            run_id: run_id_of(actor),
             scope: None,
         }
     }
@@ -134,7 +154,11 @@ fn push_run_token(runs: &mut Vec<(String, RunGrant)>, token: String, grant: RunG
 /// run's grant, and anything else is unauthorized.
 fn resolve_grant(presented: &str, base: &str, runs: &[(String, RunGrant)]) -> Option<RunGrant> {
     if presented == base {
-        return Some(RunGrant::unrestricted(DEFAULT_ACTOR));
+        let mut grant = RunGrant::unrestricted(DEFAULT_ACTOR);
+        // The panel's own turns are a run too, and its id comes from the
+        // endpoint token like every other.
+        grant.run_id = run_id_of(presented);
+        return Some(grant);
     }
     runs.iter()
         .rev()
@@ -253,6 +277,7 @@ impl McpState {
             token.clone(),
             RunGrant {
                 actor: normalize_actor(actor).to_string(),
+                run_id: run_id_of(&token),
                 // An empty declaration is not "everywhere" — a record that
                 // declares `scope:` and lists nothing has scoped itself to
                 // nothing, and the only safe reading of that is no writes.
@@ -305,7 +330,7 @@ fn handle_rpc(app: &AppHandle, running: &Running, grant: &RunGrant, body: &str) 
         // Notifications carry no id and expect no response body; returning an
         // empty result is harmless and keeps the handler total.
         "notifications/initialized" => Ok(json!({})),
-        "tools/list" => Ok(json!({ "tools": tool_catalog() })),
+        "tools/list" => Ok(json!({ "tools": tool_catalog(proposals_enabled(app)) })),
         "tools/call" => {
             let params = request.get("params").cloned().unwrap_or(Value::Null);
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
@@ -342,7 +367,13 @@ fn schema(properties: Value, required: &[&str]) -> Value {
     json!({ "type": "object", "properties": properties, "required": required })
 }
 
-fn tool_catalog() -> Vec<Value> {
+/// The hand-written tools: read, note-write, and UI. Twelve, spelled out.
+///
+/// Kept as literal `json!` entries in one scrapeable function because the TS
+/// picker mirrors them by name (`src/engine/tools.ts`) and there is nothing
+/// to derive them from — unlike the proposal surface below, which has an
+/// artifact.
+fn base_tools() -> Vec<Value> {
     vec![
         json!({
             "name": "get_vault_context",
@@ -475,6 +506,243 @@ fn tool_catalog() -> Vec<Value> {
 }
 
 // ---------------------------------------------------------------------------
+// The proposal surface (M26.3c)
+// ---------------------------------------------------------------------------
+
+/// Every proposal tool's name is its op's, prefixed.
+///
+/// The prefix does two jobs. It keeps the namespace injective — `cache_source`
+/// is BOTH an existing write tool and a policy op, and `propose_cache_source`
+/// collides with neither — and it makes the surface say what it does: nothing
+/// here mutates, it proposes, and the policy table decides what happens next.
+pub const PROPOSAL_PREFIX: &str = "propose_";
+
+/// The terminal tool. Named without the prefix because it proposes nothing:
+/// it closes the run's set.
+pub const COMMIT_TOOL: &str = "commit_proposals";
+
+pub fn proposal_tool_name(op: &str) -> String {
+    format!("{PROPOSAL_PREFIX}{op}")
+}
+
+/// The op a proposal tool name refers to, or `None` for anything else.
+///
+/// **Checked against the table, not just the prefix.** `propose_organize` is
+/// a hand-written tool that predates this namespace and is not a policy op;
+/// a bare `strip_prefix` would route it to the mutation boundary, and it
+/// currently escapes only because its match arm happens to come first. Order
+/// is not a security property, so the mapping asks the artifact.
+fn proposal_op_of<'a>(tool: &'a str, table: &crate::policy::table::PolicyTable) -> Option<&'a str> {
+    let op = tool.strip_prefix(PROPOSAL_PREFIX)?;
+    table.agent_facing_ops().contains(&op).then_some(op)
+}
+
+/// **The registration gate.** Refuses to build any proposal tool unless this
+/// build's safety machinery is bound in the table it is about to serve.
+///
+/// Registration is activation. The plan is explicit that the preventive
+/// ancestry vectors and the semantic-receipt validator must be green before
+/// the tools are registered — not merely before default-on — so the check
+/// lives here, in front of the only function that can produce them, rather
+/// than in a test that a shipped binary never runs.
+fn registration_gate(table: &crate::policy::table::PolicyTable) -> Result<(), String> {
+    // 1. The preventive anti-self-ancestry walk is BOUND, not merely
+    //    implemented. Against the frozen format-1 table this names the absent
+    //    binding rather than an unknown code (M26.3b).
+    crate::policy::ancestry::table_binding(table)?;
+
+    // 2. The semantic candidate receipt is required and can be refused. A
+    //    create is the one mutation with no target to compare against, so a
+    //    live create surface without a receipt requirement would be the §15
+    //    hole with a tool attached to it.
+    let create = table
+        .op("create_belief")
+        .ok_or("the table has no create_belief row")?;
+    if !create
+        .requires
+        .iter()
+        .any(|p| p == "candidate_receipt_current")
+    {
+        return Err(
+            "create_belief does not require candidate_receipt_current — the live create surface \
+             may not be registered against a table that does not demand a search"
+                .to_string(),
+        );
+    }
+    for code in [
+        "candidate_receipt_missing",
+        "candidate_receipt_caller_authored",
+        "candidate_receipt_stale",
+        "candidate_unconsidered",
+    ] {
+        if !create.possible_rejections.iter().any(|c| c == code) {
+            return Err(format!(
+                "create_belief cannot report {code} — the receipt rule would refuse under a code \
+                 the op never declared"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The uniform envelope every proposal tool takes.
+///
+/// **`payload` is deliberately an open object.** A hand-written JSON Schema
+/// per op would be a second copy of `ProposalOp`'s twenty closed variants,
+/// free to drift from the frozen union — the twin-implementation defect this
+/// codebase treats as review-blocking. The real validator is serde plus
+/// `ProposalV1::validate`, which refuses a malformed payload as
+/// `schema_invalid` (operational, so the ledger does not fill with typos).
+/// What the schema constrains is the envelope, which is this layer's own.
+fn proposal_schema() -> Value {
+    schema(
+        json!({
+            "payload": {
+                "type": "object",
+                "description": "The op's payload, exactly as the closed ProposalOp variant for this op spells it."
+            },
+            "targets": {
+                "type": "array",
+                "description": "CAS set: [{target_id, target_class, expected_version}]. expected_version is null ONLY for something this proposal creates.",
+                "items": { "type": "object" }
+            },
+            "reason": {
+                "type": "string",
+                "description": "Why, for a human reading the card. Display text with no policy effect — no rule reads it."
+            },
+            "declared_risk": {
+                "type": "string",
+                "description": "LOW | MEDIUM | HIGH | CRITICAL. May only RAISE the table's base risk; understating it is refused as risk_lowered."
+            },
+            "intended_use": {
+                "type": "object",
+                "description": "{kind, stakes, predicate_class} — what the resulting belief is FOR. Drives the high-stakes stopping rule."
+            },
+            "basis": {
+                "type": "object",
+                "description": "{transition_cause, evidence_refs, coverage_refs, authority_refs, authority_route_refs, addressed_contradictions, absence_claim}."
+            }
+        }),
+        // `intended_use` and `basis` are REQUIRED, and that is a change of
+        // mind: they were optional with synthesized defaults until an
+        // attacker pointed out that omission was therefore the MODAL path,
+        // not an edge case. A synthesized `draft_note`/`LOW` intended use
+        // understates the stakes the high-stakes stopping rule reads, and a
+        // synthesized `new_evidence` cause asserts a reason for the change
+        // that nobody supplied. A proposal that cannot say what it is for
+        // and why is not a proposal this server will carry.
+        &["payload", "targets", "reason", "intended_use", "basis"],
+    )
+}
+
+/// One sentence per op, generated from its table row.
+///
+/// Descriptions are agent-facing prompt surface and are reviewed like code —
+/// which is the argument for deriving them from the artifact rather than
+/// writing twenty of them by hand, where one could quietly come to describe a
+/// risk the table does not assign.
+fn describe(op: &str, rule: &crate::policy::table::OpRule) -> String {
+    let applies = match rule.base_risk {
+        crate::policy::table::Risk::Low | crate::policy::table::Risk::Medium => {
+            "applies automatically if policy allows"
+        }
+        _ => "always waits for a person to approve it",
+    };
+    format!(
+        "Propose `{op}` ({}). It {applies}. Touches: {}. Nothing applies until you call \
+         `{COMMIT_TOOL}`; policy may still refuse it, and a refusal names the rule.",
+        rule.base_risk.as_str(),
+        rule.target_classes.join(", "),
+    )
+}
+
+/// Every proposal tool this build serves, GENERATED from the loaded table.
+///
+/// There is no second list. The names come from the artifact's agent-facing
+/// ops, so an op added to the table is offered the moment it lands and an op
+/// marked `agent_facing: false` is not offered at all — and the tripwire in
+/// `policy::submit` proves the served set and the artifact agree in both
+/// directions.
+pub fn proposal_tools(table: &crate::policy::table::PolicyTable) -> Result<Vec<Value>, String> {
+    registration_gate(table)?;
+    let mut tools: Vec<Value> = table
+        .agent_facing_ops()
+        .into_iter()
+        .map(|op| {
+            let rule = table.op(op).expect("agent_facing_ops names table rows");
+            json!({
+                "name": proposal_tool_name(op),
+                "description": describe(op, rule),
+                "inputSchema": proposal_schema(),
+            })
+        })
+        .collect();
+    tools.push(json!({
+        "name": COMMIT_TOOL,
+        "description": "Close this run's proposal set and decide it as one atomic batch. Nothing you proposed has been applied before this call. Returns each proposal's outcome: applied, queued for a person, or rejected with the rule that refused it.",
+        "inputSchema": schema(
+            json!({
+                "proposal_ids": {
+                    "type": "array",
+                    "description": "The proposals to commit, in order. All must belong to this run.",
+                    "items": { "type": "string" }
+                }
+            }),
+            &["proposal_ids"],
+        )
+    }));
+    Ok(tools)
+}
+
+/// Is the proposal surface switched on for this install?
+///
+/// Reads `agentProposalsEnabled` from the app config on every `tools/list`,
+/// so turning it off takes effect for the next run rather than the next
+/// launch. Every failure path — no config dir, no file, corrupt JSON —
+/// resolves to OFF.
+fn proposals_enabled(app: &AppHandle) -> bool {
+    use tauri::Manager;
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|dir| crate::app_config::load(&dir).agent_proposals_enabled)
+        .unwrap_or(false)
+}
+
+/// What `tools/list` serves.
+///
+/// The proposal half is absent unless the switch is on AND the gate passes.
+/// A gate failure is recorded operationally rather than swallowed: a server
+/// that quietly served twelve tools when it was asked for thirty-two would be
+/// indistinguishable from one that was switched off.
+pub fn tool_catalog(proposals_enabled: bool) -> Vec<Value> {
+    let mut tools = base_tools();
+    if !proposals_enabled {
+        return tools;
+    }
+    let Ok(table) = crate::policy::table::PolicyTable::load() else {
+        return tools;
+    };
+    match proposal_tools(&table) {
+        Ok(mut generated) => tools.append(&mut generated),
+        Err(detail) => {
+            if let Ok(refusal) = crate::policy::rejection::OperationalRefusal::new(
+                &table,
+                "capability_unavailable",
+                "mcp_proposal_registration",
+                &detail,
+            ) {
+                crate::runtime::sink::record(
+                    &refusal,
+                    &crate::runtime::operational::LogEntry::bare(),
+                );
+            }
+        }
+    }
+    tools
+}
+
+// ---------------------------------------------------------------------------
 // Tools
 // ---------------------------------------------------------------------------
 
@@ -573,7 +841,20 @@ fn call_tool(
         "propose_organize" => tool_propose_organize(app, args),
         "open_note" => tool_ui(app, "open_note", args),
         "navigate" => tool_ui(app, "navigate", args),
-        other => Err(format!("unknown tool: {other}")),
+        // The proposal surface. Gated twice: the switch decides whether the
+        // tools are ever LISTED, and this decides whether a name that was
+        // guessed rather than listed can be CALLED. A model that remembered
+        // `propose_update_belief` from a previous install must not reach the
+        // mutation boundary on an install where the surface is off.
+        COMMIT_TOOL if proposals_enabled(app) => tool_commit_proposals(&vault, args, grant),
+        other => match crate::policy::table::PolicyTable::load()
+            .ok()
+            .filter(|_| proposals_enabled(app))
+            .and_then(|table| proposal_op_of(other, &table).map(str::to_string))
+        {
+            Some(op) => tool_propose(&vault, args, grant, &op),
+            None => Err(format!("unknown tool: {other}")),
+        },
     };
 
     // A failing tool must reach the model as readable content, not as a
@@ -582,6 +863,228 @@ fn call_tool(
         Ok(value) => value,
         Err(message) => error_result(message),
     })
+}
+
+/// A proposal-boundary answer, as the model sees it.
+///
+/// **Never collapsed into an error.** `queued` and `rejected` are the two
+/// outcomes this whole milestone exists to produce, and `call_tool` turns
+/// every handler `Err` into `isError` content — so returning a queued HIGH
+/// card as `Err` would tell the model its proposal failed when in fact a
+/// person is about to look at it. The store-layer never-throw rule is for
+/// human UI actions; AGENTS.md exempts proposal channels by name, and this is
+/// the channel it means.
+fn typed_result(value: Value) -> Result<Value, String> {
+    Ok(text_result(
+        serde_json::to_string_pretty(&value).unwrap_or_else(|e| e.to_string()),
+    ))
+}
+
+/// One proposal, submitted. Nothing applies until `commit_proposals`.
+fn tool_propose(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+    op_kind: &str,
+) -> Result<Value, String> {
+    let table = crate::policy::table::PolicyTable::load()?;
+    // The name was generated from the table, so a call naming an op the
+    // table does not carry — or one the artifact marks not agent-facing —
+    // did not come from the catalog we served.
+    if !table.agent_facing_ops().contains(&op_kind) {
+        return Err(format!(
+            "{op_kind} is not an op an agent may propose on this build"
+        ));
+    }
+
+    // SERVER-STAMPED, never taken from arguments: the op kind comes from the
+    // tool name, the actor and run from the bearer token, and the proposal id
+    // from both. A caller that could name its own run could sweep another
+    // run's queued proposals into its commit set.
+    let op_value = json!({
+        "kind": op_kind,
+        "payload": args.get("payload").cloned().unwrap_or(Value::Null),
+    });
+    let op: crate::ledger::schema::ProposalOp = serde_json::from_value(op_value)
+        .map_err(|e| format!("the payload is not a valid {op_kind}: {e}"))?;
+
+    let targets: Vec<crate::ledger::schema::ProposalTarget> =
+        serde_json::from_value(args.get("targets").cloned().unwrap_or(json!([])))
+            .map_err(|e| format!("targets: {e}"))?;
+    let reason = arg_str(args, "reason").unwrap_or_default();
+    let declared_risk: crate::policy::table::Risk = match args.get("declared_risk") {
+        Some(value) => {
+            serde_json::from_value(value.clone()).map_err(|e| format!("declared_risk: {e}"))?
+        }
+        // Absent means "the table's own base risk" — the honest default. A
+        // caller cannot LOWER it (that is `risk_lowered`), so defaulting can
+        // only ever be as strict as the table.
+        None => {
+            table
+                .op(op_kind)
+                .ok_or_else(|| format!("{op_kind} is not in the policy table"))?
+                .base_risk
+        }
+    };
+    // NO DEFAULTS. Synthesizing these would have the server assert, on the
+    // caller's behalf, both what the change is FOR (which the high-stakes
+    // stopping rule reads) and WHY it is happening (which the silence rules
+    // read). Absent means the caller did not say, and the honest answer to
+    // that is a refusal the caller can act on.
+    let intended_use: crate::ledger::schema::IntendedUse = serde_json::from_value(
+        args.get("intended_use")
+            .cloned()
+            .ok_or("intended_use is required: say what this change is for")?,
+    )
+    .map_err(|e| format!("intended_use: {e}"))?;
+    let basis: crate::ledger::schema::ProposalBasis = serde_json::from_value(
+        args.get("basis")
+            .cloned()
+            .ok_or("basis is required: say why this change is happening")?,
+    )
+    .map_err(|e| format!("basis: {e}"))?;
+
+    // THE HUMAN'S OWN STAMP IS NOT AN AGENT FIELD. `knowledge/` is
+    // agent-written and human-VERIFIED, and `write_concept` has refused a
+    // `verified` field since M23 — but that guard sits on the note-writing
+    // tools, and this is a fourth door into the same subtree that never
+    // passes it. An agent that could patch `/fields/verified` would be
+    // signing the review it exists to be checked by.
+    //
+    // Checked on the serialized op so it catches the field wherever a payload
+    // spells it — a patch path, a fields object, a split output.
+    let serialized = serde_json::to_string(&op).unwrap_or_default();
+    if serialized.contains("verified") {
+        return Err(
+            "`verified` is the user's stamp on a concept and is never yours to set — it is \
+             recorded by verify_concept, which is the human's own act"
+                .to_string(),
+        );
+    }
+
+    let actor = crate::ledger::schema::Actor {
+        id: grant.actor.clone(),
+    };
+    let run_id = grant.run_id.clone();
+
+    crate::ledger::shadow::with_writer(vault, |writer| {
+        let head = writer.head();
+        // The proposal's id is derived from the run and the op, so a retry
+        // after a lost acknowledgement replays instead of duplicating.
+        let proposal_id = crate::ledger::schema::sha256_first128(
+            format!(
+                "cerebro-mcp-proposal-v1\0{run_id}\0{op_kind}\0{}",
+                serde_json::to_string(&op).unwrap_or_default()
+            )
+            .as_bytes(),
+        );
+
+        // THE RECEIPT IS MINTED HERE, never accepted from the caller. A
+        // create is the one mutation with no target to compare against, and
+        // the whole value of the receipt is that the SERVER ran the lookups.
+        let candidate_search_receipt = match &op {
+            crate::ledger::schema::ProposalOp::CreateBelief {
+                subject,
+                content,
+                fields,
+                ..
+            } => {
+                let crate::ledger::schema::SubjectRef::Resolved { entity_id, aliases } = subject
+                else {
+                    return Err("a created belief's subject must be resolved".to_string());
+                };
+                let mut queries = aliases.clone();
+                if let Some(more) = fields.get("aliases").and_then(Value::as_array) {
+                    queries.extend(more.iter().filter_map(|a| a.as_str().map(str::to_string)));
+                }
+                queries.sort();
+                queries.dedup();
+                let index_head = crate::policy::candidates::index_head_of(head.as_ref());
+                Some(crate::policy::candidates::mint(
+                    &crate::ledger::concepts::current_state(writer, vault)?,
+                    &index_head,
+                    entity_id,
+                    queries.first().map(String::as_str).unwrap_or_default(),
+                    &queries,
+                    content,
+                )?)
+            }
+            _ => None,
+        };
+
+        let proposal = crate::ledger::schema::ProposalV1 {
+            schema: crate::ledger::schema::PROPOSAL_SCHEMA,
+            proposal_id,
+            run_id: run_id.clone(),
+            targets,
+            op,
+            intended_use,
+            basis,
+            declared_risk,
+            reason,
+            candidate_search_receipt,
+        };
+        match crate::policy::commit::submit_proposal(&table, writer, &actor, &proposal) {
+            Ok(id) => Ok(json!({ "outcome": "submitted", "proposal_id": id })),
+            // A typed refusal is an ANSWER, not a transport failure: it names
+            // the rule and what it expected, which is what the model needs in
+            // order to do something different.
+            Err(error) => Ok(json!({
+                "outcome": "refused",
+                "code": error.code,
+                "detail": error.detail,
+            })),
+        }
+    })
+    .ok_or_else(|| {
+        "this vault has no active ledger writer, so nothing can be proposed against it".to_string()
+    })?
+    .and_then(typed_result_value)
+}
+
+fn typed_result_value(value: Value) -> Result<Value, String> {
+    typed_result(value)
+}
+
+/// Close the run's set and decide it atomically.
+fn tool_commit_proposals(
+    vault: &Path,
+    args: &Map<String, Value>,
+    grant: &RunGrant,
+) -> Result<Value, String> {
+    let table = crate::policy::table::PolicyTable::load()?;
+    let ids: Vec<String> =
+        serde_json::from_value(args.get("proposal_ids").cloned().unwrap_or(json!([])))
+            .map_err(|e| format!("proposal_ids: {e}"))?;
+    if ids.is_empty() {
+        return Err("a commit set with no members is not a set".to_string());
+    }
+    // The RUN comes from the bearer token. `commit_proposals` refuses members
+    // belonging to another run, and this is what makes that check meaningful:
+    // a caller cannot name a run it does not hold the token for.
+    let run_id = grant.run_id.clone();
+    crate::ledger::shadow::with_writer(
+        vault,
+        |writer| match crate::policy::commit::commit_proposals(&table, writer, vault, &run_id, &ids)
+        {
+            Ok(outcome) => Ok(json!({
+                "commit_set_id": outcome.commit_set_id,
+                "transition": outcome.transition.as_str(),
+                "results": outcome.results,
+                "batch_id": outcome.batch_id,
+                "replayed": outcome.replayed,
+            })),
+            Err(error) => Ok(json!({
+                "outcome": "refused",
+                "code": error.code,
+                "detail": error.detail,
+            })),
+        },
+    )
+    .ok_or_else(|| {
+        "this vault has no active ledger writer, so nothing can be committed against it".to_string()
+    })?
+    .and_then(typed_result_value)
 }
 
 /// Writes go straight to disk, so the UI must be told to rescan — the
@@ -1157,7 +1660,9 @@ mod tests {
 
     #[test]
     fn every_catalog_tool_has_a_name_description_and_schema() {
-        for tool in tool_catalog() {
+        // WITH the proposal surface on, so the generated entries are held to
+        // the same bar as the hand-written twelve.
+        for tool in tool_catalog(true) {
             assert!(tool.get("name").and_then(Value::as_str).is_some());
             let description = tool
                 .get("description")
@@ -1271,6 +1776,7 @@ mod tests {
     fn scoped(folders: &[&str]) -> RunGrant {
         RunGrant {
             actor: "process:scout".into(),
+            run_id: run_id_of("process:scout"),
             scope: Some(folders.iter().map(|f| f.to_string()).collect()),
         }
     }
@@ -1520,7 +2026,10 @@ mod tests {
         // append; removing something a person may not have finished with is
         // not a capability the catalog offers, and the absence is the design
         // rather than an omission — assert it so nobody adds one casually.
-        for tool in tool_catalog() {
+        // Checked with the surface ON: a generated name is still a name, and
+        // an op called `delete_*` must not become a tool by being added to
+        // the table.
+        for tool in tool_catalog(true) {
             let name = tool["name"].as_str().unwrap_or_default().to_string();
             assert!(
                 !name.contains("delete") && !name.contains("remove") && !name.contains("trash"),
@@ -1531,7 +2040,7 @@ mod tests {
 
     #[test]
     fn write_concept_is_not_offered_a_verified_field() {
-        let concept = tool_catalog()
+        let concept = tool_catalog(false)
             .into_iter()
             .find(|t| t["name"] == "write_concept")
             .expect("write_concept is in the catalog");

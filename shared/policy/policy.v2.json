@@ -1,6 +1,6 @@
 {
   "format": 2,
-  "artifact_version": 3,
+  "artifact_version": 5,
   "target_classes": [
     "belief",
     "comparison",
@@ -267,6 +267,7 @@
         "source"
       ],
       "base_risk": "LOW",
+      "agent_facing": false,
       "revert": "none",
       "allowed_transitions": [
         "append"
@@ -754,6 +755,7 @@
         "relation"
       ],
       "base_risk": "MEDIUM",
+      "agent_facing": false,
       "revert": "none",
       "allowed_transitions": [
         "forward_revert"
