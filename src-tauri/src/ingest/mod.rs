@@ -22,6 +22,7 @@
 
 pub mod independence;
 pub mod outcome;
+pub mod pass;
 pub mod prefilter;
 pub mod prompt;
 pub mod resolver;
