@@ -19,8 +19,9 @@ export interface LinkBadge {
  * the whole reason `bindFlowchartSvg` strips mermaid's own `<a href>` off the
  * rendered picture. So the affordance has to exist somewhere visible, and this
  * is it: one small button pinned to each linked node's top-right corner, in
- * the same plane coordinates every other overlay uses (so it scales with a
- * CanvasViewport zoom instead of drifting off its node).
+ * the same plane coordinates every other overlay uses (so it rides a
+ * CanvasViewport pan and zoom instead of drifting off its node) and
+ * counter-scaled, so it stays a 14px dot rather than growing into a 56px one.
  *
  * Only `http(s)` ever reaches `window.open`, and never with an opener to
  * hijack. A scheme-less target is a vault path handed to the host's own router
@@ -43,9 +44,15 @@ function badgeTitle(b: LinkBadge): string {
 export function LinkBadges({
   badges,
   onOpenPath,
+  unzoom,
 }: {
   badges: LinkBadge[];
   onOpenPath?: (path: string) => void;
+  /**
+   * The counter-scale that keeps a 14px badge 14px at every zoom (M29.51).
+   * `undefined` off a viewport, where the scale is already 1.
+   */
+  unzoom?: { transform: string; transformOrigin: string };
 }) {
   return (
     <>
@@ -58,7 +65,7 @@ export function LinkBadges({
           disabled={!isWebUrl(b.target) && !isVaultPath(b.target)}
           title={badgeTitle(b)}
           className="absolute z-10 flex h-4 w-4 items-center justify-center rounded-full border border-n-200 bg-n-0 shadow-sm hover:bg-n-50 disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ left: b.x, top: b.y }}
+          style={{ left: b.x, top: b.y, ...unzoom }}
           onClick={(e) => {
             e.stopPropagation();
             if (isWebUrl(b.target)) {

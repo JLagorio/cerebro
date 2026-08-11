@@ -31,6 +31,7 @@ export function SubgraphToolbar({
   model,
   index,
   pos,
+  unzoom,
   title,
   onChangeTitle,
   apply,
@@ -41,6 +42,11 @@ export function SubgraphToolbar({
   index: number;
   /** Host-relative plane coordinates, already divided by the canvas scale. */
   pos: { x: number; y: number };
+  /**
+   * The counter-scale that keeps this toolbar its true size at every zoom
+   * (M29.51). `undefined` off a viewport, where the scale is already 1.
+   */
+  unzoom?: { transform: string; transformOrigin: string };
   /** The in-flight title being typed. */
   title: string;
   onChangeTitle: (title: string) => void;
@@ -99,8 +105,9 @@ export function SubgraphToolbar({
   return (
     <div
       data-testid="mermaid-subgraph-toolbar"
+      data-no-pan
       className="absolute z-10 flex flex-col gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
-      style={{ left: pos.x, top: pos.y }}
+      style={{ left: pos.x, top: pos.y, ...unzoom }}
       onClick={(e) => e.stopPropagation()}
       // Backspace on any control in here would otherwise reach the editor's own
       // onKeyDown and delete the SELECTED NODE — the leak M29.33 measured on

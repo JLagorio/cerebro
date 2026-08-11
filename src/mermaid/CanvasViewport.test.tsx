@@ -1,7 +1,13 @@
+import { useEffect } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { CanvasViewport, useCanvasTransform } from './CanvasViewport';
+import {
+  CanvasViewport,
+  useCanvasOverlayHost,
+  useCanvasScale,
+  useCanvasTransform,
+} from './CanvasViewport';
 
 // jsdom implements no PointerEvent, so testing-library falls back to plain
 // `Event` (`window[EventType] || window.Event`) and silently DROPS `button`,
@@ -32,6 +38,28 @@ function Probe() {
       {Math.round(t.scale * 100)}:{t.offset.x},{t.offset.y}
     </span>
   );
+}
+
+/**
+ * Reads the SCALE channel and counts its own renders — the point of that
+ * channel being a bare number is that a pan, which moves only the offset,
+ * must not re-render a consumer that asked for the scale.
+ */
+let scaleProbeRenders = 0;
+function ScaleProbe() {
+  const scale = useCanvasScale();
+  // Counted in an effect, not during render: a render is not the place for a
+  // side effect, and an undepended effect fires after every one of them.
+  useEffect(() => {
+    scaleProbeRenders += 1;
+  });
+  return <span data-testid="scale-probe">{scale}</span>;
+}
+
+/** Reads the portal target the screen-anchored overlays render into. */
+function HostProbe() {
+  const host = useCanvasOverlayHost();
+  return <span data-testid="host-probe">{host?.dataset.testid ?? 'none'}</span>;
 }
 
 const readout = () => screen.getByRole('button', { name: 'Reset zoom' });
@@ -84,6 +112,32 @@ describe('CanvasViewport', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
     }
     expect(readout().textContent).toContain('10%');
+  });
+
+  it('takes no pointer capture until a press has actually moved', () => {
+    const captured: number[] = [];
+    render(<CanvasViewport>x</CanvasViewport>);
+    const viewport = screen.getByTestId('canvas-viewport');
+    // jsdom implements no setPointerCapture at all, which is why the component
+    // calls it optionally — so the spy has to be installed, not observed.
+    (viewport as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture = (
+      id: number,
+    ) => captured.push(id);
+
+    // A CLICK — press, a 2px tremor, release. Capturing here retargeted the
+    // following `click` to this div in Chromium, so it never reached the
+    // diagram and clicking empty canvas stopped deselecting (M29.51).
+    fireEvent.pointerDown(viewport, { button: 0, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(viewport, { clientX: 51, clientY: 51 });
+    expect(captured).toEqual([]);
+    expect(plane().style.transform).toBe('translate(0px, 0px) scale(1)');
+    fireEvent.pointerUp(viewport);
+
+    // A DRAG — past 3px, so capture is taken and the pan runs.
+    fireEvent.pointerDown(viewport, { button: 0, clientX: 50, clientY: 50 });
+    fireEvent.pointerMove(viewport, { clientX: 90, clientY: 70 });
+    expect(captured).toHaveLength(1);
+    expect(plane().style.transform).toBe('translate(40px, 20px) scale(1)');
   });
 
   it('pans on a background drag with button 0, and pointercancel ends the gesture', () => {
@@ -167,5 +221,63 @@ describe('CanvasViewport', () => {
     render(<CanvasViewport initialFit>x</CanvasViewport>);
     await userEvent.click(screen.getByRole('button', { name: 'Fit diagram' }));
     expect(readout().textContent).toContain('100%');
+  });
+
+  it('publishes the scale alone, so a pan does not re-render a counter-scale', async () => {
+    render(
+      <CanvasViewport>
+        <ScaleProbe />
+      </CanvasViewport>,
+    );
+    const before = scaleProbeRenders;
+    // A pan moves the offset and NOT the scale, so a scale consumer must not
+    // re-render — the whole reason this context is a number (M29.51).
+    const viewport = screen.getByTestId('canvas-viewport');
+    fireEvent.pointerDown(viewport, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(viewport, { clientX: 90, clientY: 20 });
+    fireEvent.pointerUp(viewport);
+    expect(plane().style.transform).toContain('translate(90px, 20px)');
+    expect(scaleProbeRenders).toBe(before);
+    expect(screen.getByTestId('scale-probe').textContent).toBe('1');
+    // A zoom does move it, and then it must.
+    await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(screen.getByTestId('scale-probe').textContent).not.toBe('1');
+  });
+
+  it('hands screen-anchored overlays the VIEWPORT to portal into', () => {
+    render(
+      <CanvasViewport>
+        <HostProbe />
+      </CanvasViewport>,
+    );
+    // The plane carries the transform; anything centred on the screen has to
+    // hang off its untransformed parent instead (M29.51).
+    expect(screen.getByTestId('host-probe').textContent).toBe('canvas-viewport');
+  });
+
+  it('defaults to scale 1 and NO overlay host outside any viewport', () => {
+    render(
+      <>
+        <ScaleProbe />
+        <HostProbe />
+      </>,
+    );
+    expect(screen.getByTestId('scale-probe').textContent).toBe('1');
+    expect(screen.getByTestId('host-probe').textContent).toBe('none');
+  });
+
+  it('snaps back a scroll it did not ask for, so focus cannot lose the diagram', () => {
+    render(<CanvasViewport>x</CanvasViewport>);
+    const viewport = screen.getByTestId('canvas-viewport');
+    // `overflow-hidden` stops the user, not the browser: focusing anything the
+    // zoomed plane has pushed out of view makes Chromium scroll this element,
+    // and pan/zoom write the plane's TRANSFORM — so nothing in the UI could
+    // undo it and the diagram simply left (measured live: scrollLeft 1654 from
+    // one double-click rename, Fit and Reset both powerless). M29.51.
+    viewport.scrollLeft = 240;
+    viewport.scrollTop = 90;
+    fireEvent.scroll(viewport);
+    expect(viewport.scrollLeft).toBe(0);
+    expect(viewport.scrollTop).toBe(0);
   });
 });

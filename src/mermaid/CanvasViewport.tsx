@@ -51,9 +51,51 @@ const IDENTITY_TRANSFORM_REF: React.RefObject<CanvasTransform> = {
 const CanvasTransformRefContext =
   createContext<React.RefObject<CanvasTransform>>(IDENTITY_TRANSFORM_REF);
 
+/**
+ * The live SCALE alone, as a primitive (M29.51).
+ *
+ * Overlays that must not zoom with the diagram need the scale AT RENDER TIME,
+ * which the ref context deliberately cannot give them. Subscribing to the value
+ * context above would work and re-render them once per PAN frame for a number
+ * pan never changes; a number-valued context re-renders its consumers only when
+ * the number itself moves, so a pan costs nothing and a zoom costs one render.
+ *
+ * 1 outside any viewport, so `1 / useCanvasScale()` is the identity on the
+ * inline block host and every counter-scale below is a no-op there.
+ */
+const CanvasScaleContext = createContext(1);
+
+/**
+ * The element screen-anchored overlays portal into: the viewport itself, i.e.
+ * the plane's UNTRANSFORMED parent (M29.51).
+ *
+ * `absolute left-1/2` inside the plane centres on the PLANE, which is
+ * viewport-wide in its own units and then scaled and translated — so at 218%
+ * the edge editor, the group bar and the rename box all sat ~700px off the
+ * right-hand edge. Worse, they hold the focused control: the browser then
+ * scrolled the (overflow-hidden) viewport sideways to reveal them and took the
+ * whole diagram off screen with it, unrecoverably — Fit and Reset write the
+ * transform, not scrollLeft. Rendering them as children of the viewport instead
+ * of the plane fixes the position, the size, and the scroll in one move.
+ *
+ * null outside any viewport: the inline block host has no separate screen
+ * layer, its overlays are already in screen units, and they render in place.
+ */
+const CanvasOverlayHostContext = createContext<HTMLElement | null>(null);
+
 /** The viewport's current transform — for overlays positioning in plane coordinates. */
 export function useCanvasTransform(): CanvasTransform {
   return useContext(CanvasTransformContext);
+}
+
+/** The live scale, subscribed to at render time without re-rendering on pan. */
+export function useCanvasScale(): number {
+  return useContext(CanvasScaleContext);
+}
+
+/** Where a screen-anchored overlay portals to, or null when there is no viewport. */
+export function useCanvasOverlayHost(): HTMLElement | null {
+  return useContext(CanvasOverlayHostContext);
 }
 
 /**
@@ -109,6 +151,9 @@ export function CanvasViewport({
   initialFit?: boolean;
 }) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  // The same element as a STATE value, because a ref does not re-render the
+  // subtree that needs to portal into it. Set once, on mount.
+  const [overlayHost, setOverlayHost] = useState<HTMLDivElement | null>(null);
   const planeRef = useRef<HTMLDivElement | null>(null);
   const [t, setT] = useState<CanvasTransform>({ scale: 1, offset: { x: 0, y: 0 } });
   // The ref context's value. Assigned during render, not in an effect: a
@@ -116,9 +161,14 @@ export function CanvasViewport({
   // still read the transform that is already on screen.
   const tRef = useRef<CanvasTransform>(t);
   tRef.current = t;
-  const drag = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(
-    null,
-  );
+  const drag = useRef<{
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    /** Whether this gesture has passed the 3px mark and taken pointer capture. */
+    captured: boolean;
+  } | null>(null);
 
   const clamp = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
 
@@ -151,8 +201,16 @@ export function CanvasViewport({
     );
   };
 
-  const fitRef = useRef<() => void>(() => {});
-  fitRef.current = () => {
+  /**
+   * `max` caps how far fit is allowed to ENLARGE. The button passes none —
+   * "fit" asked for by hand means fill the viewport, at 400% if the diagram is
+   * three nodes. The initial fit passes 1: a canvas opens at its natural size
+   * unless it is too big to fit, which is what every canvas tool does and what
+   * a fresh whiteboard needs, since fitting one empty node clamped it to
+   * MAX_SCALE and the first `+ Node` arrived four times life size (M29.51).
+   */
+  const fitRef = useRef<(max?: number) => void>(() => {});
+  fitRef.current = (max = MAX_SCALE) => {
     const viewport = viewportRef.current;
     const plane = planeRef.current;
     // The mermaid svg is the content bbox — the plane itself is viewport-wide,
@@ -170,7 +228,7 @@ export function CanvasViewport({
       const dx = (cb.left - pb.left) / prev.scale; // content offset inside the plane (editor padding)
       const dy = (cb.top - pb.top) / prev.scale;
       const PAD = 32;
-      const scale = clamp(Math.min((vb.width - PAD) / w, (vb.height - PAD) / h));
+      const scale = Math.min(max, clamp(Math.min((vb.width - PAD) / w, (vb.height - PAD) / h)));
       return {
         scale,
         offset: {
@@ -213,7 +271,7 @@ export function CanvasViewport({
       const content = plane.querySelector('svg[id^="cerebro-mermaid-"]');
       if (content === null || content.getBoundingClientRect().width === 0) return;
       done = true;
-      fitRef.current();
+      fitRef.current(1);
       ro.disconnect();
     });
     ro.observe(plane);
@@ -223,79 +281,123 @@ export function CanvasViewport({
   return (
     <CanvasTransformRefContext.Provider value={tRef}>
       <CanvasTransformContext.Provider value={t}>
-        <div
-          ref={viewportRef}
-          data-testid="canvas-viewport"
-          // `touch-none select-none`: pan is this surface's primary gesture, and
-          // pointerdown never calls preventDefault, so without them a background
-          // drag across mermaid's label text drag-selects it and smears blue
-          // behind the canvas. Every other drag surface in the repo already pairs
-          // these (CalendarView.tsx:339,391 · GanttView.tsx:337 ·
-          // TimelineView.tsx:272); the resize/grip handles take touch-none alone.
-          className="relative h-full w-full touch-none select-none overflow-hidden bg-n-25 cursor-grab active:cursor-grabbing"
-          onPointerDown={(e) => {
-            if (e.button !== 0 || !startsPan(e.target)) return;
-            e.currentTarget.setPointerCapture?.(e.pointerId);
-            drag.current = {
-              startX: e.clientX,
-              startY: e.clientY,
-              baseX: t.offset.x,
-              baseY: t.offset.y,
-            };
-          }}
-          onPointerMove={(e) => {
-            if (drag.current === null) return;
-            const d = drag.current;
-            setT((prev) => ({
-              ...prev,
-              offset: { x: d.baseX + (e.clientX - d.startX), y: d.baseY + (e.clientY - d.startY) },
-            }));
-          }}
-          onPointerUp={() => {
-            drag.current = null;
-          }}
-          onPointerCancel={() => {
-            drag.current = null;
-          }}
-        >
-          <div
-            ref={planeRef}
-            data-testid="canvas-plane"
-            style={{
-              transform: `translate(${t.offset.x}px, ${t.offset.y}px) scale(${t.scale})`,
-              transformOrigin: '0 0',
-            }}
-          >
-            {children}
-          </div>
-          <div
-            data-testid="canvas-zoom-controls"
-            data-no-pan
-            className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-          >
-            <IconButton
-              icon="zoom-out"
-              label="Zoom out"
-              size="sm"
-              onClick={() => zoomBy(1 / 1.1)}
-            />
-            <button
-              type="button"
-              aria-label="Reset zoom"
-              className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50"
-              onClick={() => setT({ scale: 1, offset: { x: 0, y: 0 } })}
+        <CanvasScaleContext.Provider value={t.scale}>
+          <CanvasOverlayHostContext.Provider value={overlayHost}>
+            <div
+              ref={(el) => {
+                viewportRef.current = el;
+                setOverlayHost(el);
+              }}
+              data-testid="canvas-viewport"
+              // `touch-none select-none`: pan is this surface's primary gesture, and
+              // pointerdown never calls preventDefault, so without them a background
+              // drag across mermaid's label text drag-selects it and smears blue
+              // behind the canvas. Every other drag surface in the repo already pairs
+              // these (CalendarView.tsx:339,391 · GanttView.tsx:337 ·
+              // TimelineView.tsx:272); the resize/grip handles take touch-none alone.
+              className="relative h-full w-full touch-none select-none overflow-hidden bg-n-25 cursor-grab active:cursor-grabbing"
+              onPointerDown={(e) => {
+                if (e.button !== 0 || !startsPan(e.target)) return;
+                // NO capture yet — see onPointerMove (M29.51).
+                drag.current = {
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  baseX: t.offset.x,
+                  baseY: t.offset.y,
+                  captured: false,
+                };
+              }}
+              onPointerMove={(e) => {
+                if (drag.current === null) return;
+                const d = drag.current;
+                const dx = e.clientX - d.startX;
+                const dy = e.clientY - d.startY;
+                // Capture on the first real MOVEMENT, never on the press.
+                //
+                // Capture is what lets a fast pan keep receiving moves after the
+                // cursor leaves the viewport, and it is worth having — but while
+                // it is held Chromium retargets the following `click` to the
+                // CAPTURE ELEMENT. Taking it on pointerdown therefore rerouted
+                // every plain click on the canvas to this div, so it never
+                // travelled through the structural editor's subtree and the
+                // editor's "clear the selection" handler never ran: on all three
+                // viewport surfaces, clicking empty canvas simply did not
+                // deselect (measured live — a real click left the node toolbar
+                // up, the same click as a synthetic DOM event cleared it, which
+                // is exactly why no test could tell). Deferring past a 3px
+                // threshold — the same one the editor's own drag uses — gives
+                // both behaviours their due: a click stays a click and reaches
+                // the diagram, a drag captures and pans, and a pan deliberately
+                // does NOT deselect.
+                if (!d.captured && Math.hypot(dx, dy) > 3) {
+                  e.currentTarget.setPointerCapture?.(e.pointerId);
+                  d.captured = true;
+                }
+                if (!d.captured) return;
+                setT((prev) => ({ ...prev, offset: { x: d.baseX + dx, y: d.baseY + dy } }));
+              }}
+              onPointerUp={() => {
+                drag.current = null;
+              }}
+              onPointerCancel={() => {
+                drag.current = null;
+              }}
+              // `overflow-hidden` stops the USER scrolling; it does not stop the
+              // BROWSER. Focusing anything that sits outside the visible box —
+              // which, at any scale above 1, is most of a zoomed plane — makes
+              // Chromium scroll this element to reveal it, and pan/zoom write the
+              // plane's transform, so nothing in the UI can undo it: the diagram
+              // simply leaves and Fit will not bring it back. Snapping straight
+              // back is the whole fix (M29.51); the overlays that used to trigger
+              // it now render outside the plane entirely, so this is the guard for
+              // everything else that can take focus in there — link badges, the
+              // subgraph toolbar, the node toolbar's own buttons.
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                if (el.scrollLeft !== 0) el.scrollLeft = 0;
+                if (el.scrollTop !== 0) el.scrollTop = 0;
+              }}
             >
-              {Math.round(t.scale * 100)}%
-            </button>
-            <IconButton icon="zoom-in" label="Zoom in" size="sm" onClick={() => zoomBy(1.1)} />
-            <IconButton
-              icon="maximize"
-              label="Fit diagram"
-              size="sm"
-              onClick={() => fitRef.current()}
-            />
-          </div>
-        </div>
+              <div
+                ref={planeRef}
+                data-testid="canvas-plane"
+                style={{
+                  transform: `translate(${t.offset.x}px, ${t.offset.y}px) scale(${t.scale})`,
+                  transformOrigin: '0 0',
+                }}
+              >
+                {children}
+              </div>
+              <div
+                data-testid="canvas-zoom-controls"
+                data-no-pan
+                className="absolute bottom-3 left-3 z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
+              >
+                <IconButton
+                  icon="zoom-out"
+                  label="Zoom out"
+                  size="sm"
+                  onClick={() => zoomBy(1 / 1.1)}
+                />
+                <button
+                  type="button"
+                  aria-label="Reset zoom"
+                  className="rounded border-0 bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-n-600 hover:bg-n-50"
+                  onClick={() => setT({ scale: 1, offset: { x: 0, y: 0 } })}
+                >
+                  {Math.round(t.scale * 100)}%
+                </button>
+                <IconButton icon="zoom-in" label="Zoom in" size="sm" onClick={() => zoomBy(1.1)} />
+                <IconButton
+                  icon="maximize"
+                  label="Fit diagram"
+                  size="sm"
+                  onClick={() => fitRef.current()}
+                />
+              </div>
+            </div>
+          </CanvasOverlayHostContext.Provider>
+        </CanvasScaleContext.Provider>
       </CanvasTransformContext.Provider>
     </CanvasTransformRefContext.Provider>
   );

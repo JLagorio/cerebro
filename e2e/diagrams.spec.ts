@@ -906,3 +906,158 @@ test('manual layout: a drag writes positions, they survive a reopen, auto return
   // which is what "geometry handed back to the engine" looks like in the DOM.
   await expect(build).toHaveAttribute('transform', MERMAIDS_ALONE, { timeout: 20_000 });
 });
+
+/**
+ * The chrome on a ZOOMED canvas (M29.51) — every case here was live, and none
+ * of them was reachable from jsdom.
+ *
+ * Three defects with one cause and one that shares its blast radius:
+ *
+ * 1. The edge editor, the group bar and the rename box centre with
+ *    `absolute left-1/2`, which inside `canvas-plane` means half the PLANE's
+ *    width — then scaled and translated. At the 218% this page opened at they
+ *    all sat several hundred pixels past the right-hand edge.
+ * 2. Each of them holds an autofocused control, so the browser scrolled the
+ *    `overflow-hidden` viewport across to reveal it. Pan and zoom write the
+ *    plane's TRANSFORM, so no control could undo that scroll: one double-click
+ *    on a node and the diagram left, with Fit and Reset both powerless.
+ * 3. Everything else in the overlay layer zoomed WITH the diagram — the node
+ *    toolbar drew 74px tall with 46px buttons at 218% and 21px tall with 13px
+ *    ones at 63%.
+ * 4. The four node popovers reached `Popover` with sizing classes only. That
+ *    component contributes `cb-menu-in`, which is an animation; every other
+ *    caller in the repo brings its own panel. These four brought none, so they
+ *    rendered fully transparent over the diagram.
+ *
+ * jsdom sees none of it: `useCanvasScale()` is 1 and `useCanvasOverlayHost()`
+ * is null in every component test, `getBoundingClientRect` is all zeros, and no
+ * stylesheet is applied. Only a real browser at a real zoom can fail these.
+ */
+test('M29.51: the editor chrome survives a zoom, and a rename keeps the diagram', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem('cerebro.autoLearn', 'false');
+    window.localStorage.setItem('cerebro.themeMode', 'light');
+  });
+  await page.goto('/');
+  const demoButton = page.getByRole('button', { name: 'Open demo vault' });
+  const sidebarTypes = page.getByTestId('sidebar-type');
+  await expect(demoButton.or(sidebarTypes.first())).toBeVisible({ timeout: 10_000 });
+  if (await demoButton.isVisible()) await demoButton.click();
+  await expect(sidebarTypes.first()).toBeVisible({ timeout: 10_000 });
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByTestId('quick-open-input').fill('Pipeline');
+  await page.getByTestId('quick-open-result').filter({ hasText: 'Pipeline' }).first().click();
+  const host = page.getByTestId('structural-host');
+  await host.locator('svg[id^="cerebro-mermaid-"]').waitFor({ timeout: 30_000 });
+
+  // -- A canvas opens at its natural size, never blown up to fill -----------
+  // `fit` is allowed to enlarge only when the user asks for it by hand. The
+  // initial pass caps at 100%, which is what stopped a fresh whiteboard opening
+  // at MAX_SCALE and minting its first node four times life size.
+  await expect(page.getByRole('button', { name: 'Reset zoom' })).toHaveText('100%');
+
+  const viewport = page.getByTestId('canvas-viewport');
+  const scrollOf = () => viewport.evaluate((e) => e.scrollLeft + e.scrollTop);
+  const svgLeft = () =>
+    host.locator('svg[id^="cerebro-mermaid-"]').evaluate((s) => s.getBoundingClientRect().left);
+
+  // Zoom past 200%, where every one of these defects was live.
+  for (let i = 0; i < 8; i++) await page.getByRole('button', { name: 'Zoom in' }).click();
+  const zoomed = Number(
+    (await page.getByRole('button', { name: 'Reset zoom' }).textContent())!.replace('%', ''),
+  );
+  expect(zoomed).toBeGreaterThan(200);
+  const restingLeft = await svgLeft();
+
+  // -- Rename: the box is on screen and the diagram has not moved -----------
+  // Whichever node the zoom left CLEAR of the toolbar — at 214% a four-node
+  // chain is taller than the viewport, and which end sticks out is layout's
+  // business, not this test's. Asking for `.first()` pinned the assertion to
+  // geometry the test does not control.
+  const clearNode = async () => {
+    const boxes = await host.locator('g.node').evaluateAll((els) =>
+      els.map((e, i) => {
+        const r = e.getBoundingClientRect();
+        return { i, top: r.top, bottom: r.bottom };
+      }),
+    );
+    const vb = (await viewport.boundingBox())!;
+    const hit = boxes.find((b) => b.top > vb.y + 8 && b.bottom < vb.y + vb.height - 8);
+    if (hit === undefined) throw new Error('no node fully inside the viewport at this zoom');
+    return host.locator('g.node').nth(hit.i);
+  };
+  const node = await clearNode();
+  await node.dblclick();
+  const rename = page.getByLabel('Node label');
+  await expect(rename).toBeVisible();
+  // Inside the viewport but NOT inside the plane — the only placement that is
+  // both centred on the screen and immune to the transform.
+  expect(await viewport.locator('[aria-label="Node label"]').count()).toBe(1);
+  expect(await page.getByTestId('canvas-plane').locator('[aria-label="Node label"]').count()).toBe(
+    0,
+  );
+  expect(await scrollOf()).toBe(0);
+  expect(await svgLeft()).toBeCloseTo(restingLeft, 0);
+  await page.keyboard.press('Escape');
+
+  // -- The node toolbar is a 34px control at 200%+, not a 74px one ----------
+  await node.click();
+  const toolbar = page.getByTestId('mermaid-node-toolbar');
+  await expect(toolbar).toBeVisible();
+  const toolbarH = await toolbar.evaluate((e) => e.getBoundingClientRect().height);
+  expect(toolbarH).toBeLessThan(44);
+
+  // -- The popovers are opaque panels, not floating glyphs ------------------
+  // Fill and border together: a panel with a shadow but no background still
+  // shows the diagram straight through it, which is what shipped.
+  for (const label of ['Change shape', 'Node colors', 'Node icon', 'Node link']) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    const panel = page.locator('.cb-menu-in').last();
+    const surface = await panel.evaluate((e) => {
+      const cs = getComputedStyle(e);
+      return { bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow };
+    });
+    expect(surface.bg, `${label} has no panel background`).not.toBe('rgba(0, 0, 0, 0)');
+    expect(surface.border, `${label} has no panel border`).not.toBe('0px');
+    expect(surface.shadow, `${label} has no elevation`).not.toBe('none');
+    await page.keyboard.press('Escape');
+  }
+
+  // -- The edge editor centres on the screen, and takes nothing with it -----
+  await page.locator('[data-testid="structural-host"] path.flowchart-link').first().click({
+    // A straight edge has a zero-width box, which Playwright reads as
+    // invisible; the stroke is still a real hit target for a real click.
+    force: true,
+  });
+  const editor = page.getByTestId('mermaid-edge-editor');
+  await expect(editor).toBeVisible();
+  expect(await viewport.locator('[data-testid="mermaid-edge-editor"]').count()).toBe(1);
+  expect(
+    await page.getByTestId('canvas-plane').locator('[data-testid="mermaid-edge-editor"]').count(),
+  ).toBe(0);
+  expect(await scrollOf()).toBe(0);
+  expect(await svgLeft()).toBeCloseTo(restingLeft, 0);
+
+  // -- A background click dismisses it, like every other surface ------------
+  // A point that is genuinely BOTH on screen and over the editor's own
+  // background: at 214% the host is larger than the viewport and offset from
+  // it in both axes, so neither element's own coordinates are a place a user
+  // could click. Take the overlap and aim at its left margin, clear of the
+  // node column down the middle.
+  const spot = await page.evaluate(() => {
+    const h = document.querySelector('[data-testid="structural-host"]')!.getBoundingClientRect();
+    const v = document.querySelector('[data-testid="canvas-viewport"]')!.getBoundingClientRect();
+    const left = Math.max(h.left, v.left);
+    const top = Math.max(h.top, v.top);
+    const right = Math.min(h.right, v.right);
+    const bottom = Math.min(h.bottom, v.bottom);
+    return { x: left + (right - left) * 0.08, y: top + (bottom - top) / 2 };
+  });
+  await page.mouse.click(spot.x, spot.y);
+  await expect(editor).toHaveCount(0);
+});

@@ -117,7 +117,16 @@ export function IconPicker({
   const freeText = LUCIDE_NAME.test(q) && !CURATED_ICONS.includes(q) ? q : null;
 
   return (
-    <Popover onClose={onClose} role="dialog" ariaLabel="Icon picker" trapFocus className="w-64 p-2">
+    <Popover
+      onClose={onClose}
+      role="dialog"
+      ariaLabel="Icon picker"
+      trapFocus
+      // Popover contributes `cb-menu-in`, which is an ANIMATION and nothing
+      // else — the panel is always the caller's. See ShapePalette for the
+      // failure this quartet prevents.
+      className="w-64 rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]"
+    >
       <div
         data-testid="mermaid-icon-picker"
         // Portals bubble through the REACT tree, so without this every

@@ -32,6 +32,9 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/mermaid/CanvasViewport', () => ({
   useCanvasTransformRef: () => h.transform,
+  // Read off the SAME fake transform, so a test cannot set a scale for the
+  // measurement and leave the counter-scale reading 1.
+  useCanvasScale: () => h.transform.current.scale,
 }));
 vi.mock('@/app/useOpenPath', () => ({
   useOpenPath: (mode?: string) => {
@@ -119,10 +122,30 @@ describe('RecordChipOverlay', () => {
     const chip = await screen.findByTestId('whiteboard-record-chip');
     // node (40,20) 120x48 screen, layer origin (10,5), scale 2
     //   → plane x 15, y 7.5, w 60, h 24
-    //   → chip anchored at the node's lower edge: left x+4, top y+h-10.
-    expect(chip.style.left).toBe('19px');
-    expect(chip.style.top).toBe('21.5px');
-    expect(chip.style.maxWidth).toBe('140px');
+    //   → chip anchored at the node's lower edge: left x + 4/s, top y+h - 10/s.
+    // The nudges are SCREEN pixels and the chip counter-scales, so they enter
+    // the plane arithmetic divided (M29.51) — 4 → 2 and 10 → 5 at scale 2.
+    expect(chip.style.left).toBe('17px');
+    expect(chip.style.top).toBe('26.5px');
+    // The cap is a screen width too: the node's own 120 plus 80.
+    expect(chip.style.maxWidth).toBe('200px');
+  });
+
+  it('counter-scales, so a chip is the same size at 400% as at 100%', async () => {
+    h.transform.current = { scale: 4, offset: { x: 0, y: 0 } };
+    render(<Plane code={CODE} />);
+    const chip = await screen.findByTestId('whiteboard-record-chip');
+    // Chrome, not content: the card must not grow with the diagram. Origin at
+    // the anchor corner so the counter-scale moves it nowhere.
+    expect(chip.style.transform).toBe('scale(0.25)');
+    expect(chip.style.transformOrigin).toBe('0 0');
+  });
+
+  it('emits NO transform at scale 1 — the inline host stays untouched', async () => {
+    h.transform.current = { scale: 1, offset: { x: 0, y: 0 } };
+    render(<Plane code={CODE} />);
+    const chip = await screen.findByTestId('whiteboard-record-chip');
+    expect(chip.style.transform).toBe('');
   });
 
   it('clicking a chip opens the record in place', async () => {

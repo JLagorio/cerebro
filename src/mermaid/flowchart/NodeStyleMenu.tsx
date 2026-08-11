@@ -58,7 +58,16 @@ export function NodeStyleMenu({
   onClose: () => void;
 }) {
   return (
-    <Popover onClose={onClose} role="dialog" ariaLabel="Node colors" trapFocus className="p-2">
+    <Popover
+      onClose={onClose}
+      role="dialog"
+      ariaLabel="Node colors"
+      trapFocus
+      // Popover contributes `cb-menu-in`, which is an ANIMATION and nothing
+      // else — the panel is always the caller's. See ShapePalette for the
+      // failure this quartet prevents.
+      className="rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]"
+    >
       <div
         data-testid="node-style-menu"
         // Portals bubble through the REACT tree, so a keystroke in here reaches

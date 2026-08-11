@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '@/components/ui/Icon';
 import type { Entry } from '@/engine/types';
-import { useCanvasTransformRef } from '../CanvasViewport';
+import { useCanvasOverlayHost, useCanvasScale, useCanvasTransformRef } from '../CanvasViewport';
 import { renderMermaid } from '../render';
 import { neutralizeDiagramLinks } from '../svgLinks';
 import { EdgeEditor } from './EdgeEditor';
@@ -188,6 +197,34 @@ export function StructuralEditor({
   // mount and mis-place every overlay after a zoom — and jsdom rects are all
   // 0×0, so no unit test could ever catch that.
   const transformRef = useCanvasTransformRef();
+
+  /**
+   * Chrome does not zoom with the diagram (M29.51).
+   *
+   * Every overlay below is positioned in PLANE units, which is right — a
+   * toolbar anchored to a node has to ride the node through a pan and a zoom.
+   * But the plane is what carries the scale, so at 218% the node toolbar drew
+   * 74px tall with 46px buttons and at 63% it drew 21px tall with 13px ones,
+   * neither of which is a usable control. Counter-scaling by 1/scale about the
+   * anchor corner keeps the anchor and takes back the size. Off a viewport the
+   * scale is 1 and this is the identity — no transform is emitted at all, so
+   * the inline block host is byte-identical to before.
+   */
+  const scale = useCanvasScale();
+  const unzoom =
+    scale === 1 ? undefined : { transform: `scale(${1 / scale})`, transformOrigin: '0 0' };
+
+  /**
+   * Overlays that belong to the SCREEN, not to any node: they sit at the top
+   * centre and must be exactly as visible at 400% as at 25%. Rendered as
+   * children of the viewport rather than of the transformed plane — see
+   * CanvasOverlayHostContext for the three separate ways the old placement
+   * failed. Null host (the inline block editor) renders them in place, where
+   * `absolute left-1/2` already means what it says.
+   */
+  const overlayHost = useCanvasOverlayHost();
+  const screenLayer = (node: ReactNode): ReactNode =>
+    overlayHost === null ? node : createPortal(node, overlayHost);
 
   // A selection can outlive the node it points at — an external edit (undo,
   // another surface, a code-mode change) can delete the node between one
@@ -469,9 +506,14 @@ export function StructuralEditor({
             // parked the toolbar directly ON such a node — covering its
             // center, so the second click of a double-click rename landed on
             // toolbar buttons instead of the node (observed live, M29.19).
+            // The gaps are SCREEN pixels — subtracted before the divide, not
+            // after it (M29.51). The toolbar counter-scales now, so 34 is its
+            // real height at every zoom; leaving `- 34` on the plane side of
+            // the divide would push it 34·scale pixels clear of the node at
+            // 400% and let it overlap at 25%.
             const s = transformRef.current.scale;
-            const above = (box.top - hostBox.top) / s - 34;
-            const y = above >= 0 ? above : (box.bottom - hostBox.top) / s + 6;
+            const above = (box.top - hostBox.top - 34) / s;
+            const y = above >= 0 ? above : (box.bottom - hostBox.top + 6) / s;
             setToolbarPos({ x: (box.left - hostBox.left) / s, y });
           }
         };
@@ -554,13 +596,13 @@ export function StructuralEditor({
           if (host !== null) {
             const hostBox = host.getBoundingClientRect();
             const box = el.getBoundingClientRect();
-            // Same scale conversion and same above/below flip as the node
-            // toolbar: screen deltas become plane coordinates, and a block with
-            // no headroom gets its controls underneath rather than on top of
-            // its own title.
+            // Same scale conversion, same screen-pixel gaps and same
+            // above/below flip as the node toolbar: screen deltas become plane
+            // coordinates, and a block with no headroom gets its controls
+            // underneath rather than on top of its own title.
             const s = transformRef.current.scale;
-            const above = (box.top - hostBox.top) / s - 34;
-            const y = above >= 0 ? above : (box.bottom - hostBox.top) / s + 6;
+            const above = (box.top - hostBox.top - 34) / s;
+            const y = above >= 0 ? above : (box.bottom - hostBox.top + 6) / s;
             setSubToolbarPos({ x: (box.left - hostBox.left) / s, y });
           }
         };
@@ -585,8 +627,8 @@ export function StructuralEditor({
       // Link badges (M29.38): one per node with an OWNED click line that the
       // binding could resolve. Computed HERE because this is the only place
       // with fresh geometry, in the same plane coordinates every other overlay
-      // uses — so they scale with a CanvasViewport zoom instead of drifting off
-      // their nodes. The badge, not the node, is the navigation hit target:
+      // uses — so they ride a CanvasViewport pan and zoom instead of drifting
+      // off their nodes. The badge, not the node, is the navigation hit target:
       // clicking a node selects it, which is why bindFlowchartSvg strips
       // mermaid's own `<a href>` off the picture.
       const badgeHost = hostRef.current;
@@ -602,8 +644,11 @@ export function StructuralEditor({
             id: nid,
             target: link.target,
             contested: link.contested,
-            x: (box.right - hostBox.left) / s - 7,
-            y: (box.top - hostBox.top) / s - 7,
+            // Half the badge's 14px SCREEN size, subtracted before the divide:
+            // the badge counter-scales, so at 400% a `- 7` on the plane side
+            // would centre a 14px dot on a point 28px away from the corner.
+            x: (box.right - hostBox.left - 7) / s,
+            y: (box.top - hostBox.top - 7) / s,
           });
         }
         setBadges(next);
@@ -619,6 +664,16 @@ export function StructuralEditor({
           e.stopPropagation();
           setSelected(null);
           setToolbarPos(null);
+          // Same clear-out the node handler does, and for the same reason
+          // twice over: two surfaces open at once put a live selection behind
+          // the editor's controls for a leaked keystroke to delete (M29.33),
+          // and the group bar and this editor are BOTH the screen's top
+          // centre — they simply landed on top of each other. Invisible until
+          // M29.51 moved them out of the plane, where each was parked several
+          // hundred pixels off the right-hand edge.
+          setMulti([]);
+          setSelectedSub(null);
+          setSubToolbarPos(null);
           setEdgeEditor({ edge: bound, value: bound.label ?? '' });
         };
       }
@@ -841,6 +896,12 @@ export function StructuralEditor({
         setMulti([]);
         setSelectedSub(null);
         setSubToolbarPos(null);
+        // The edge editor was the one surface a background click did not
+        // dismiss (M29.51) — Escape and its own Close reached it, a click on
+        // empty canvas did not, so it hung over the diagram while every other
+        // selection cleared underneath it. Its own onClick stops propagation,
+        // so a press INSIDE it still cannot close it by accident.
+        setEdgeEditor(null);
       }}
       onKeyDown={(e) => {
         if (
@@ -996,8 +1057,9 @@ export function StructuralEditor({
         {validSelected !== null && toolbarPos !== null && renaming === null && (
           <div
             data-testid="mermaid-node-toolbar"
+            data-no-pan
             className="absolute z-10 flex items-center gap-0.5 rounded-md border border-n-200 bg-n-0 px-1 py-0.5 shadow-sm"
-            style={{ left: toolbarPos.x, top: toolbarPos.y }}
+            style={{ left: toolbarPos.x, top: toolbarPos.y, ...unzoom }}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -1169,30 +1231,33 @@ export function StructuralEditor({
           </div>
         )}
 
-        {renaming !== null && (
-          <input
-            autoFocus
-            aria-label="Node label"
-            value={renaming.value}
-            onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
-            onBlur={commitRename}
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') commitRename();
-              if (e.key === 'Escape') setRenaming(null);
-            }}
-            className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md border border-cortex-500 bg-n-0 px-2 py-1 text-sm text-n-800 shadow-sm outline-none"
-          />
-        )}
+        {renaming !== null &&
+          screenLayer(
+            <input
+              autoFocus
+              data-no-pan
+              aria-label="Node label"
+              value={renaming.value}
+              onChange={(e) => setRenaming({ ...renaming, value: e.target.value })}
+              onBlur={commitRename}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') commitRename();
+                if (e.key === 'Escape') setRenaming(null);
+              }}
+              className="absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-md border border-cortex-500 bg-n-0 px-2 py-1 text-sm text-n-800 shadow-sm outline-none"
+            />,
+          )}
 
-        <LinkBadges badges={badges} onOpenPath={onOpenPath} />
+        <LinkBadges badges={badges} onOpenPath={onOpenPath} unzoom={unzoom} />
 
         {validSelectedSub !== null && subToolbarPos !== null && (
           <SubgraphToolbar
             model={model}
             index={validSelectedSub}
             pos={subToolbarPos}
+            unzoom={unzoom}
             title={subTitle}
             onChangeTitle={setSubTitle}
             apply={apply}
@@ -1203,29 +1268,31 @@ export function StructuralEditor({
           />
         )}
 
-        {validMulti.length >= 2 && (
-          <GroupBar
-            model={model}
-            ids={validMulti}
-            title={groupTitle}
-            onChangeTitle={setGroupTitle}
-            apply={apply}
-            onGrouped={() => {
-              setMulti([]);
-              setGroupTitle('');
-            }}
-          />
-        )}
+        {validMulti.length >= 2 &&
+          screenLayer(
+            <GroupBar
+              model={model}
+              ids={validMulti}
+              title={groupTitle}
+              onChangeTitle={setGroupTitle}
+              apply={apply}
+              onGrouped={() => {
+                setMulti([]);
+                setGroupTitle('');
+              }}
+            />,
+          )}
 
-        {edgeEditor !== null && (
-          <EdgeEditor
-            edgeEditor={edgeEditor}
-            model={model}
-            apply={apply}
-            onChangeValue={(value) => setEdgeEditor({ ...edgeEditor, value })}
-            onClose={() => setEdgeEditor(null)}
-          />
-        )}
+        {edgeEditor !== null &&
+          screenLayer(
+            <EdgeEditor
+              edgeEditor={edgeEditor}
+              model={model}
+              apply={apply}
+              onChangeValue={(value) => setEdgeEditor({ ...edgeEditor, value })}
+              onClose={() => setEdgeEditor(null)}
+            />,
+          )}
       </div>
     </div>
   );

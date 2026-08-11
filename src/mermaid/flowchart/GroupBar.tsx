@@ -55,6 +55,10 @@ export function GroupBar({
   return (
     <div
       data-testid="mermaid-group-bar"
+      // On a CanvasViewport this bar renders as a child of the viewport, not
+      // of the transformed plane (M29.51) — so `left-1/2` centres it on the
+      // SCREEN, and a press on its own padding must not start a pan.
+      data-no-pan
       className="absolute left-1/2 top-2 z-10 flex max-w-[22rem] -translate-x-1/2 flex-col gap-1 rounded-md border border-n-200 bg-n-0 px-1.5 py-1 shadow-sm"
       onClick={(e) => e.stopPropagation()}
       // Backspace on any control in here would otherwise reach the editor's own

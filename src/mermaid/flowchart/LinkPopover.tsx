@@ -75,7 +75,10 @@ export function LinkPopover({
       role="dialog"
       ariaLabel="Link popover"
       trapFocus
-      className="w-64 p-2"
+      // Popover contributes `cb-menu-in`, which is an ANIMATION and nothing
+      // else — the panel is always the caller's. See ShapePalette for the
+      // failure this quartet prevents.
+      className="w-64 rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]"
     >
       <div
         data-testid="mermaid-link-popover"

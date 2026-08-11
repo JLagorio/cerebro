@@ -62,7 +62,13 @@ export function ShapePalette({
       role="dialog"
       ariaLabel="Shape palette"
       trapFocus
-      className="w-60 p-2"
+      // `cb-menu-in` is an ANIMATION class, not a surface: Popover applies it
+      // and nothing else, so every caller brings its own panel (Picker.tsx:159,
+      // WhiteboardView.tsx:448, ContextMenu, Dropdown, CreateMenu — all spell
+      // this same quartet). Without it the palette rendered fully transparent
+      // over the diagram, shape glyphs interleaved with node labels (found
+      // live, M29.51).
+      className="w-60 rounded-lg border border-n-200 bg-n-0 p-2 shadow-[var(--shadow-lg)]"
     >
       <div
         data-testid="shape-palette"

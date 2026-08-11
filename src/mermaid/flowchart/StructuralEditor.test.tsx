@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/engine/types';
+import { CanvasViewport } from '../CanvasViewport';
 import { StructuralEditor, type NodePlacer } from './StructuralEditor';
 
 // vi.mock factories run during static import resolution — before this
@@ -1823,5 +1824,111 @@ describe('manual layout: the orderings the comments claim (M29.42)', () => {
     } finally {
       restore();
     }
+  });
+});
+
+/**
+ * Chrome on a ZOOMED canvas (M29.51).
+ *
+ * Every case here was a live defect, and none of them could fail before: the
+ * whole suite above renders the editor bare, where `useCanvasScale()` is 1 and
+ * `useCanvasOverlayHost()` is null, so both code paths under test were the
+ * identity. Wrapping in a real CanvasViewport and zooming it is the only way
+ * the arithmetic is reachable at all — the same "a test that cannot fail is a
+ * finding" rule the wave has been run on.
+ */
+describe('StructuralEditor inside a zoomed CanvasViewport', () => {
+  /** The scale one press of Zoom in produces (CanvasViewport's own factor). */
+  const ZOOMED = 1.1;
+
+  async function renderZoomed(code = CODE, onChangeCode: (c: string) => void = () => {}) {
+    render(
+      <CanvasViewport>
+        <StructuralEditor code={code} onChangeCode={onChangeCode} />
+      </CanvasViewport>,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+  }
+
+  const viewport = () => screen.getByTestId('canvas-viewport');
+  const plane = () => screen.getByTestId('canvas-plane');
+
+  it('centres the edge editor on the SCREEN, not on the transformed plane', async () => {
+    await renderZoomed();
+    await userEvent.click(document.querySelector<SVGPathElement>('path.flowchart-link')!);
+    const editor = screen.getByTestId('mermaid-edge-editor');
+    // `absolute left-1/2` inside the plane meant half the PLANE's width, then
+    // scaled and translated — measured live at 218%, the bar landed ~700px past
+    // the right-hand edge, and the browser then scrolled the whole canvas
+    // sideways to reveal its autofocused input.
+    expect(viewport().contains(editor)).toBe(true);
+    expect(plane().contains(editor)).toBe(false);
+  });
+
+  it('centres the group bar on the screen too', async () => {
+    await renderZoomed('flowchart TD\n  A[One]\n  B[Two]');
+    // fireEvent, not userEvent: v14 has no per-click modifier option, and Shift
+    // is keyboard state the imperative onclick reads straight off the event.
+    fireEvent.click(document.getElementById('flowchart-A-0')!, { shiftKey: true });
+    fireEvent.click(document.getElementById('flowchart-B-1')!, { shiftKey: true });
+    const bar = screen.getByTestId('mermaid-group-bar');
+    expect(viewport().contains(bar)).toBe(true);
+    expect(plane().contains(bar)).toBe(false);
+  });
+
+  it('centres the rename box on the screen too', async () => {
+    await renderZoomed();
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    await userEvent.dblClick(document.getElementById('flowchart-A-0')!);
+    const input = screen.getByLabelText('Node label');
+    expect(viewport().contains(input)).toBe(true);
+    expect(plane().contains(input)).toBe(false);
+  });
+
+  it('counter-scales the node toolbar and measures its gap in SCREEN pixels', async () => {
+    const rects: Record<string, { left: number; top: number; width: number; height: number }> = {
+      'flowchart-A-0': { left: 20, top: 10, width: 20, height: 20 },
+    };
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const r = rects[this.id] ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        ...r,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        x: r.left,
+        y: r.top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    };
+    try {
+      await renderZoomed();
+      await userEvent.click(document.getElementById('flowchart-A-0')!);
+      const toolbar = screen.getByTestId('mermaid-node-toolbar');
+      // A toolbar that zooms with the diagram is 74px tall with 46px buttons at
+      // 218% and 21px tall with 13px ones at 63% — measured live, neither
+      // usable. Counter-scaled about its own anchor corner it is 34px at both.
+      expect(toolbar.style.transform).toBe(`scale(${1 / ZOOMED})`);
+      expect(toolbar.style.transformOrigin).toBe('0 0');
+      // Node top 10 leaves no headroom for a 34px SCREEN toolbar, so it flips
+      // below: (bottom 30 + 6 screen) / 1.1. The gaps are subtracted BEFORE
+      // the divide — `- 34` on the plane side would be 34·scale on screen.
+      expect(toolbar.style.top).toBe(`${(30 + 6) / ZOOMED}px`);
+      expect(toolbar.style.left).toBe(`${20 / ZOOMED}px`);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+    }
+  });
+
+  it('emits no transform at all when there is no zoom to undo', async () => {
+    render(
+      <CanvasViewport>
+        <StructuralEditor code={CODE} onChangeCode={() => {}} />
+      </CanvasViewport>,
+    );
+    await waitFor(() => expect(document.getElementById('flowchart-A-0')).not.toBeNull());
+    await userEvent.click(document.getElementById('flowchart-A-0')!);
+    expect(screen.getByTestId('mermaid-node-toolbar').style.transform).toBe('');
   });
 });

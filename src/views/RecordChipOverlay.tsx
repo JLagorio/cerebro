@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useOpenPath } from '@/app/useOpenPath';
 import type { Entry, Schema } from '@/engine/types';
-import { useCanvasTransformRef } from '@/mermaid/CanvasViewport';
+import { useCanvasScale, useCanvasTransformRef } from '@/mermaid/CanvasViewport';
 import { parseFlowchart } from '@/mermaid/flowchart/model';
 import { bindFlowchartSvg } from '@/mermaid/flowchart/svgBinding';
 import { FieldChip } from '@/views/FieldChip';
@@ -87,6 +87,13 @@ export function RecordChipOverlay({
   // standing on, so the record opens over it (M9.3).
   const open = useOpenPath('in-place');
   const transformRef = useCanvasTransformRef();
+  // The same live scale the measurement above divides out, but read at RENDER
+  // time: a chip is chrome, and chrome does not zoom with the diagram (M29.51).
+  // A whiteboard opens its first record at 400% otherwise, and the card came
+  // out 703px wide with 48px type.
+  const scale = useCanvasScale();
+  const unzoom =
+    scale === 1 ? undefined : { transform: `scale(${1 / scale})`, transformOrigin: '0 0' };
   const rootRef = useRef<HTMLDivElement>(null);
   const [rects, setRects] = useState<ReadonlyMap<string, NodeRect>>(NO_RECTS);
 
@@ -182,8 +189,16 @@ export function RecordChipOverlay({
             // the card reads as attached without covering the node's own
             // label — and clear of the link badge, which the shared editor
             // pins to the opposite (top-right) corner. Plane-local units; the
-            // parent transform does the rest.
-            style={{ left: rect.x + 4, top: rect.y + rect.h - 10, maxWidth: rect.w + 80 }}
+            // parent transform does the rest. The nudges are SCREEN pixels —
+            // divided by the scale here because the chip counter-scales, so a
+            // flat `+ 4` would be a 16px shove at 400% — and the cap is a
+            // screen width, `rect.w · scale` being the node's own.
+            style={{
+              left: rect.x + 4 / scale,
+              top: rect.y + rect.h - 10 / scale,
+              maxWidth: rect.w * scale + 80,
+              ...unzoom,
+            }}
             className="pointer-events-auto absolute flex items-center gap-1.5 rounded-md border border-n-200 bg-n-0 px-1.5 py-0.5 shadow-[var(--shadow-sm)] hover:border-cortex-500"
           >
             <span className="truncate text-xs font-medium text-n-800">{entry.title}</span>
